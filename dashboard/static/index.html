@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>FrameOS Control Panel</title>
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+</head>
+<body>
+    <h1>Frames</h1>
+    <form id="addFrameForm">
+        <input type="text" id="ip" placeholder="Enter IP">
+        <input type="text" id="port" placeholder="Enter port (default 8999)">
+        <button type="submit">Add Frame</button>
+    </form>
+    <div id="frames">
+        <!-- Frames will be appended here -->
+    </div>
+
+    <script>
+        $(document).ready(function() {
+            getFrames();
+
+            $('#addFrameForm').submit(function(e) {
+                e.preventDefault();
+                var ip = $('#ip').val();
+                var port = $('#port').val();
+                $.post('/frames', {ip: ip, port: port})
+                    .done(function(data) {
+                        getFrames();
+                    });
+            });
+        });
+
+        function getFrames() {
+            $.get('/frames', function(frames) {
+                $('#frames').empty();
+                frames.forEach(function(frame) {
+                    $('#frames').append(
+                        '<div id="frame' + frame.id + '">' +
+                        '<p>' + frame.ip + ':' + frame.port + ' - ' + frame.status + '</p>' +
+                        '<button onclick="removeFrame(' + frame.id + ')">Remove</button>' +
+                        '<button onclick="checkOnline(' + frame.id + ')">Check Online</button>' +
+                        (frame.status === 'online' ? '<button onclick="checkUpdate(' + frame.id + ')">Check Update</button>' : '') +
+                        (frame.status === 'uninitialized' ? '<button onclick="initializeFrame(' + frame.id + ')">Initialize</button>' : '') +
+                        '</div>'
+                    );
+                });
+            });
+        }
+
+        function removeFrame(id) {
+            $.ajax({
+                url: '/frames/' + id,
+                type: 'DELETE',
+                success: function(result) {
+                    getFrames();
+                }
+            });
+        }
+
+        function checkOnline(id) {
+            $.get('/frames/' + id + '/check_online', function(frame) {
+                getFrames();
+            });
+        }
+
+        function checkUpdate(id) {
+            $.get('/frames/' + id + '/check_update', function(frame) {
+                getFrames();
+            });
+        }
+
+
+        function initializeFrame(id) {
+            var ssh_user = prompt("Enter SSH username");
+            var ssh_pass = prompt("Enter SSH password", "Optional. Leave blank to use key instead.");
+            var ssh_key;
+            if (!ssh_pass) {
+                ssh_key = prompt("Enter path to SSH key", "Optional. Leave blank to use password instead.");
+            }
+
+            var data = {ssh_user: ssh_user, ssh_pass: ssh_pass, ssh_key: ssh_key};
+
+            $.post("/frames/" + id + "/initialize", data, function(data) {
+                location.reload();
+            });
+        }
+    </script>
+</body>
+</html>
