@@ -6,6 +6,8 @@
 #
 bcrypt==4.0.1
     # via paramiko
+bidict==0.22.1
+    # via python-socketio
 blinker==1.6.2
     # via flask
 certifi==2023.7.22
@@ -20,14 +22,23 @@ click==8.1.6
     # via flask
 cryptography==41.0.2
     # via paramiko
+dnspython==2.4.1
+    # via eventlet
+eventlet==0.33.3
+    # via -r requirements.in
 flask==2.3.2
     # via
     #   -r requirements.in
+    #   flask-socketio
     #   flask-sqlalchemy
+flask-socketio==5.3.5
+    # via -r requirements.in
 flask-sqlalchemy==3.0.5
     # via -r requirements.in
 greenlet==2.0.2
-    # via sqlalchemy
+    # via
+    #   eventlet
+    #   sqlalchemy
 idna==3.4
     # via requests
 importlib-metadata==6.8.0
@@ -48,10 +59,16 @@ pycparser==2.21
     # via cffi
 pynacl==1.5.0
     # via paramiko
+python-engineio==4.5.1
+    # via python-socketio
+python-socketio==5.8.0
+    # via flask-socketio
 requests==2.31.0
     # via -r requirements.in
 scp==0.14.5
     # via -r requirements.in
+six==1.16.0
+    # via eventlet
 sqlalchemy==2.0.19
     # via flask-sqlalchemy
 typing-extensions==4.7.1

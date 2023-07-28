@@ -3,6 +3,7 @@
 <head>
     <title>FrameOS Control Panel</title>
     <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
 </head>
 <body>
     <h1>Frames</h1>
@@ -17,6 +18,12 @@
 
     <script>
         $(document).ready(function() {
+            var socket = io.connect('http://localhost:8080/test');  // Connecting to the namespace
+
+            socket.on('initialize_frame_output', function(msg) {
+                console.log('Received:', msg.data);  // Logging the output
+            });
+
             getFrames();
 
             $('#addFrameForm').submit(function(e) {
@@ -71,17 +78,18 @@
 
 
         function initializeFrame(id) {
-            var ssh_user = prompt("Enter SSH username");
-            var ssh_pass = prompt("Enter SSH password", "Optional. Leave blank to use key instead.");
+            var ssh_user = prompt("Enter SSH username", "pi");
+            var ssh_pass = prompt("Enter SSH password", "raspberry");
             var ssh_key;
             if (!ssh_pass) {
-                ssh_key = prompt("Enter path to SSH key", "Optional. Leave blank to use password instead.");
+                ssh_key = prompt("Enter path to SSH key (Optional)", "");
             }
 
             var data = {ssh_user: ssh_user, ssh_pass: ssh_pass, ssh_key: ssh_key};
 
             $.post("/frames/" + id + "/initialize", data, function(data) {
-                location.reload();
+                getFrames()
+                // location.reload();
             });
         }
     </script>
