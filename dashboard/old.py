@@ -8,7 +8,7 @@ import requests
 
 LOCAL_VERSION = "1.0.0"  # You should update this constant whenever you have a new version
 
-app = Flask(__name__, static_folder='static')
+app = Flask(__name__, static_folder='templates')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/frameos.db'
 db = SQLAlchemy(app)
 socketio = SocketIO(app, cors_allowed_origins="*")  # Initializing SocketIO with the Flask app

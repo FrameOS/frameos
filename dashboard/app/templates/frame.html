@@ -1,0 +1,55 @@
+<div id="frame-{{frame.id}}" class="w-full bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700">
+    <a href="/frames/{{frame.id}}">
+        <img class="rounded-t-lg" src="https://flowbite.com/docs/images/blog/image-1.jpg" alt="" />
+    </a>
+    <div class="flex justify-between px-4 pt-4 mb-2">
+        <h5 class="text-3xl font-bold text-gray-900 dark:text-white">{{frame.ip}}</h5>
+        <button id="dropdownButton-{{frame.id}}" data-dropdown-toggle="dropdown-{{frame.id}}" class="inline-block text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 focus:ring-4 focus:outline-none focus:ring-gray-200 dark:focus:ring-gray-700 rounded-lg text-sm p-1.5" type="button">
+            <span class="sr-only">Open dropdown</span>
+            <svg class="w-5 h-5" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 3">
+                <path d="M2 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm6.041 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM14 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z"/>
+            </svg>
+        </button>
+        <div id="dropdown-{{frame.id}}" class="z-10 hidden text-base list-none bg-white divide-y divide-gray-100 rounded-lg shadow w-44 dark:bg-gray-700">
+            <ul class="py-2" aria-labelledby="dropdownButton-{{frame.id}}">
+            <li>
+                <a 
+                    href="/frames/{{frame.id}}"
+                    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 dark:text-gray-200 dark:hover:text-white">
+                    View
+                </a>
+            </li>
+            {% if frame.status == "uninitialized" %}
+            <li>
+                <a 
+                    href="#" 
+                    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 dark:text-gray-200 dark:hover:text-white">
+                    Initialize
+                </a>
+            </li>
+            {% endif %}
+            <li>
+                <a 
+                    href="#" 
+                    hx-delete="/frames/{{frame.id}}/delete"
+                    hx-swap="delete"
+                    hx-target="#frame-{{frame.id}}"
+                    hx-confirm="Are you sure? This action is irreversible."
+                    class="block px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-600 dark:text-gray-200 dark:hover:text-white">
+                    Delete
+                </a>
+            </li>
+            </ul>
+        </div>
+    </div>
+    <div class="px-4 pb-4">
+        <p class="mb-5 text-base text-gray-500 sm:text-lg dark:text-gray-400">{{frame.status}}</p>
+        {% if frame.status == "uninitialized" %}
+        <div class="items-center justify-center space-y-4 sm:flex sm:space-y-0 sm:space-x-4">
+            <a href="#" class="inline-flex items-center px-3 py-2 text-sm font-medium text-center text-white bg-blue-700 rounded-lg hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800">
+                Initialize
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>

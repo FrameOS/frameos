@@ -1,21 +1,42 @@
 <!DOCTYPE html>
-<html>
+<html class="bg-gray-600">
 <head>
     <title>FrameOS Control Panel</title>
-    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
-    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.4"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body{
+            padding: 20px;
+            font-family: arial, sans-serif;
+        }
+    </style>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/flowbite/1.8.0/flowbite.min.css" rel="stylesheet" />
 </head>
-<body>
-    <h1>Frames</h1>
-    <form id="addFrameForm">
-        <input type="text" id="ip" placeholder="Enter IP">
-        <input type="text" id="port" placeholder="Enter port (default 8999)">
-        <button type="submit">Add Frame</button>
-    </form>
-    <div id="frames">
-        <!-- Frames will be appended here -->
+<body hx-boost="true">
+    <h1 class="mb-4 text-2xl font-extrabold leading-none tracking-tight text-gray-900 md:text-3xl lg:text-4xl dark:text-white">FrameOS Control Panel</h1>
+    <div id="frames" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        {% if frames|length == 0 %}
+            <div class="w-full p-4 bg-white border border-gray-200 rounded-lg shadow sm:p-6 md:p-8 dark:bg-gray-800 dark:border-gray-700">
+                You do not have any frames set up. Add one below.
+            </div>
+        {% endif %}
+        {% for frame in frames %}
+            {% include 'frame.html' %}
+        {% endfor %}
+        <div id="add-frame" class="w-full p-4 bg-white border border-gray-200 rounded-lg shadow sm:p-6 md:p-8 dark:bg-gray-800 dark:border-gray-700">
+            <form class="space-y-6" hx-post="/frames/new" hx-swap="beforebegin" hx-target="#add-frame">
+                <h5 class="text-xl font-medium text-gray-900 dark:text-white">Add a smart frame</h5>
+                <div>
+                    <label for="ip" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">IP address</label>
+                    <input type="ip" name="ip" id="ip" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white" placeholder="127.0.0.1" required>
+                </div>
+                <button type="submit" class="w-full text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800">Add Frame</button>
+            </form>
+        </div>
     </div>
 
+    
+<!-- 
     <script>
         $(document).ready(function() {
             var socket = io.connect('http://localhost:8080/test');  // Connecting to the namespace
@@ -92,6 +113,8 @@
                 // location.reload();
             });
         }
-    </script>
+    </script> -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/1.8.0/flowbite.min.js"></script>
+
 </body>
 </html>
