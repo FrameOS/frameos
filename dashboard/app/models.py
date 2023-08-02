@@ -21,4 +21,21 @@ class Frame(db.Model):
             'ssh_pass': self.ssh_pass,
             'update_key': self.update_key
         }
-    
+
+class FrameLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, nullable=False, default=db.func.current_timestamp())
+    type = db.Column(db.String(10), nullable=False)
+    line = db.Column(db.Text, nullable=False)
+    frame_id = db.Column(db.Integer, db.ForeignKey('frame.id'), nullable=False)
+
+    frame = db.relationship('Frame', backref=db.backref('logs', lazy=True))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'timestamp': self.timestamp,
+            'type': self.type,
+            'line': self.line,
+            'frame_id': self.frame_id
+}

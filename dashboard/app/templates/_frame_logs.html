@@ -1,0 +1,10 @@
+
+<div 
+    hx-ext="ws" 
+    ws-connect="/" 
+    id="frame-logs-{{frame.id}}" 
+    class="w-full bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 p-4 text-white font-mono">
+    {% for log in frame.logs %}
+        {{log}}<br/>
+    {% endfor %}
+</div>

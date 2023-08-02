@@ -3,6 +3,7 @@
 <head>
     <title>FrameOS Control Panel</title>
     <script src="https://unpkg.com/htmx.org@1.9.4"></script>
+    <script src="https://unpkg.com/htmx.org/dist/ext/ws.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body{
@@ -13,7 +14,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/flowbite/1.8.0/flowbite.min.css" rel="stylesheet" />
 </head>
 <body hx-boost="true">
-    <h1 class="mb-4 text-2xl font-extrabold leading-none tracking-tight text-gray-900 md:text-3xl lg:text-4xl dark:text-white">FrameOS Control Panel</h1>
+    <h1 class="mb-4 text-2xl font-extrabold leading-none tracking-tight text-gray-900 md:text-3xl lg:text-4xl dark:text-white">FrameOS</h1>
     <div id="frames" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
         {% if frames|length == 0 %}
             <div class="w-full p-4 bg-white border border-gray-200 rounded-lg shadow sm:p-6 md:p-8 dark:bg-gray-800 dark:border-gray-700">
@@ -21,7 +22,7 @@
             </div>
         {% endif %}
         {% for frame in frames %}
-            {% include 'frame.html' %}
+            {% include '_frame.html' %}
         {% endfor %}
         <div id="add-frame" class="w-full p-4 bg-white border border-gray-200 rounded-lg shadow sm:p-6 md:p-8 dark:bg-gray-800 dark:border-gray-700">
             <form class="space-y-6" hx-post="/frames/new" hx-swap="beforebegin" hx-target="#add-frame">
