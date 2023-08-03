@@ -1,0 +1,6 @@
+eventlet
+flask
+flask_socketio
+huey[sqlalchemy]
+honcho
+redis
