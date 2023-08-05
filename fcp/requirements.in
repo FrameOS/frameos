@@ -1,6 +1,8 @@
 eventlet
 flask
 flask_socketio
-huey[sqlalchemy]
+flask_sqlalchemy
+sqlalchemy
+huey
 honcho
 redis

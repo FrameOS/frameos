@@ -20,13 +20,18 @@ flask==2.3.2
     # via
     #   -r requirements.in
     #   flask-socketio
+    #   flask-sqlalchemy
 flask-socketio==5.3.5
     # via -r requirements.in
+flask-sqlalchemy==3.0.5
+    # via -r requirements.in
 greenlet==2.0.2
-    # via eventlet
+    # via
+    #   eventlet
+    #   sqlalchemy
 honcho==1.1.0
     # via -r requirements.in
-huey[sqlalchemy]==2.4.5
+huey==2.4.5
     # via -r requirements.in
 importlib-metadata==6.8.0
     # via flask
@@ -46,6 +51,12 @@ redis==4.6.0
     # via -r requirements.in
 six==1.16.0
     # via eventlet
+sqlalchemy==2.0.19
+    # via
+    #   -r requirements.in
+    #   flask-sqlalchemy
+typing-extensions==4.7.1
+    # via sqlalchemy
 werkzeug==2.3.6
     # via flask
 zipp==3.16.2
