@@ -1,30 +1,32 @@
-import { actions, kea, path, reducers } from 'kea'
-import { actionToUrl, urlToAction } from 'kea-router'
+import { afterMount, kea, path } from 'kea'
 
 import type { framesLogicType } from './framesLogicType'
+import { loaders } from 'kea-loaders'
+import { FrameType } from '../types'
 
 export const framesLogic = kea<framesLogicType>([
   path(['src', 'frames', 'framesLogic']),
-  actions({
-    setCount: (count: number) => ({ count }),
-  }),
-  reducers({
-    count: [
-      0,
+  loaders({
+    frames: [
+      [] as FrameType[],
       {
-        setCount: (_, { count }) => count,
+        loadFrames: async () => {
+          try {
+            const response = await fetch('/api/frames')
+            if (!response.ok) {
+              throw new Error('Failed to fetch frames')
+            }
+            const data = await response.json()
+            return data.frames as FrameType[]
+          } catch (error) {
+            console.error(error)
+            return []
+          }
+        },
       },
     ],
   }),
-  actionToUrl({
-    setCount: ({ count }) => (count === 0 ? '/' : `/${count}`),
+  afterMount(({ actions }) => {
+    actions.loadFrames()
   }),
-  urlToAction(({ actions, values }) => ({
-    '/(:count)': ({ count }) => {
-      const newCount = parseInt(count || '0')
-      if (values.count !== newCount) {
-        actions.setCount(newCount)
-      }
-    },
-  })),
 ])
