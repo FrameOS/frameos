@@ -4,19 +4,12 @@
     <title>FCP</title>
     <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
-    <style>
-        #log {
-            font-family: monospace;
-        }
-        #log .stderr {
-            color: red;
-        }
-    </style>
+    <link href="{{ url_for('static', filename='css/styles.css') }}" rel="stylesheet" type="text/css" />
 </head>
 <body>
-    <ul id="log">
+    <div id="log" class="terminal">
         {% for log in logs %}
-            <li class="{{log.type}}">{{ log.line }}</li>
+            <div class="terminal-line {{log.type}}"><span class="terminal-timestamp">{{ log.timestamp }}</span><span class="terminal-text">{{ log.line }}</span></div>
         {% endfor %}
     </ul>
 </body>

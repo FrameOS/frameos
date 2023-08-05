@@ -1,0 +1,29 @@
+.terminal {
+    background: #111;
+    color: #fff;
+    font-family: monospace;
+    padding: 0.5rem;
+}
+.terminal .terminal-line {
+    display: flex;
+    white-space: pre-line;
+    margin: 0.25rem 0;
+}
+
+.terminal .stderr {
+    color: #df3079;
+}
+
+.terminal .stdinfo {
+    color: #00a67d;
+}
+
+.terminal .terminal-timestamp {
+    opacity: 0.5;
+    margin-right: 0.5rem;
+    flex: 0 0 auto;
+}
+
+.terminal .terminal-text {
+    flex: 1 1 auto;
+}
