@@ -16,7 +16,7 @@ def not_found(e):
     return app.send_static_file('index.html')
 
 @app.route("/api/frames", methods=["GET"])
-def frames():
+def home():
     frames = models.Frame.query.all()
     frames_list = [frame.to_dict() for frame in frames]
     return jsonify(frames=frames_list)
@@ -27,4 +27,4 @@ def new_frame():
     frame = models.Frame(ip=ip, port=8999, status="uninitialized")
     db.session.add(frame)
     db.session.commit()
-    return jsonify(frame=frame)
+    return jsonify(frame=frame.to_dict())
