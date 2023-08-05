@@ -1,4 +1,4 @@
-import { actions, afterMount, kea, path } from 'kea'
+import { actions, afterMount, kea, path, reducers } from 'kea'
 
 import type { framesLogicType } from './framesLogicType'
 import { forms } from 'kea-forms'
@@ -10,7 +10,7 @@ export const framesLogic = kea<framesLogicType>([
   actions({
     addFrame: (frame: FrameType) => ({ frame }),
   }),
-  forms({
+  forms(({ actions }) => ({
     newFrame: {
       defaults: {} as FrameType,
       errors: (frame: Partial<FrameType>) => ({
@@ -32,12 +32,14 @@ export const framesLogic = kea<framesLogicType>([
           if (!response.ok) {
             throw new Error('Failed to submit frame')
           }
+
+          actions.resetNewFrame()
         } catch (error) {
           console.error(error)
         }
       },
     },
-  }),
+  })),
   loaders({
     frames: [
       [] as FrameType[],
@@ -57,6 +59,11 @@ export const framesLogic = kea<framesLogicType>([
         },
       },
     ],
+  }),
+  reducers({
+    frames: {
+      submitNewFrameSuccess: (state, payload) => [...state, payload.newFrame],
+    },
   }),
   afterMount(({ actions }) => {
     actions.loadFrames()
