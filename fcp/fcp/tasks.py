@@ -14,10 +14,10 @@ def log(type: str, line: str) -> None:
 @huey.task()
 def initialize_frame():
     with app.app_context():
+        ssh = SSHClient()
         try:
             log("stdinfo", "Connecting to marius@devbox")
 
-            ssh = SSHClient()
             ssh.set_missing_host_key_policy(AutoAddPolicy())
 
             # if ssh_key:
@@ -30,11 +30,14 @@ def initialize_frame():
             
             log("stdinfo", "Connected to marius@devbox")
             
-            stdin, stdout, stderr = ssh.exec_command("df -h")
+            # stdin, stdout, stderr = ssh.exec_command("df -h")
+            stdin, stdout, stderr = ssh.exec_command("sudo apt upgrade -y")
 
             while line := stdout.readline(): #not stdout.channel.exit_status_ready():
                 # line = stdout.readline()
                 log("stdout", line)
         except Exception as e:
             log("stderr", str(e))
-    
+        finally:
+            ssh.close()
+            log("stdinfo", "Connection closed")
