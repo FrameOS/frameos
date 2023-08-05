@@ -7,7 +7,7 @@ import eventlet
 
 eventlet.monkey_patch()
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='../frontend/dist', static_url_path='/')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///../fcp.db'
 socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*", message_queue='redis://')
 db = SQLAlchemy(app)

@@ -9,4 +9,9 @@ def new_log():
 @app.route('/')
 def index():
     logs = models.SSHLog.query.all()
-    return render_template('index.html', logs=logs)
+    # return render_template('index.html', logs=logs)
+    return app.send_static_file('index.html')
+
+@app.errorhandler(404)
+def not_found(e):
+    return app.send_static_file('index.html')

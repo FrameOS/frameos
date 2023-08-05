@@ -17,7 +17,6 @@ def initialize_frame():
         ssh = SSHClient()
         try:
             log("stdinfo", "Connecting to marius@devbox")
-
             ssh.set_missing_host_key_policy(AutoAddPolicy())
 
             # if ssh_key:
