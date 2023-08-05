@@ -6,12 +6,20 @@
 #
 async-timeout==4.0.2
     # via redis
+bcrypt==4.0.1
+    # via paramiko
 bidict==0.22.1
     # via python-socketio
 blinker==1.6.2
     # via flask
+cffi==1.15.1
+    # via
+    #   cryptography
+    #   pynacl
 click==8.1.6
     # via flask
+cryptography==41.0.3
+    # via paramiko
 dnspython==2.4.1
     # via eventlet
 eventlet==0.33.3
@@ -43,6 +51,12 @@ markupsafe==2.1.3
     # via
     #   jinja2
     #   werkzeug
+paramiko==3.3.1
+    # via -r requirements.in
+pycparser==2.21
+    # via cffi
+pynacl==1.5.0
+    # via paramiko
 python-engineio==4.5.1
     # via python-socketio
 python-socketio==5.8.0

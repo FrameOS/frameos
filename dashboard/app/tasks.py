@@ -26,3 +26,4 @@ def initialize_frame(id: int) -> None:
         frame_log = FrameLog(frame_id=id, line=line, type='stdout')
         db.session.add(frame_log)
         db.session.commit()
+

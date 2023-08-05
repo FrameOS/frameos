@@ -6,3 +6,4 @@ sqlalchemy
 huey
 honcho
 redis
+paramiko
