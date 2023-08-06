@@ -14,18 +14,18 @@ export function Logs() {
       ) : logs.length === 0 ? (
         'No Logs yet'
       ) : (
-        <div className="bg-black p-4">
+        <div className="bg-black p-4 font-mono text-sm">
           {logs.map((log) => (
             <div
               key={log.id}
               className={clsx({
-                flex: true,
+                'flex items-end': true,
                 '': log.type === 'stdout',
                 'text-yellow-300': log.type === 'stdinfo',
                 'text-red-300': log.type === 'stderr',
               })}
             >
-              <span className="flex-0 mr-2 opacity-60">{log.timestamp}</span>
+              <span className="flex-0 mr-2 text-yellow-900">{log.timestamp.replace('T', ' ')}</span>
               <span className="flex-1">{log.line}</span>
             </div>
           ))}

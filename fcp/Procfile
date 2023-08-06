@@ -1,2 +1,4 @@
-web: python run.py
+flask: python run.py
 huey: huey_consumer.py backend.huey
+vite: cd frontend && npm run dev:vite
+kea: cd frontend && npm run dev:kea

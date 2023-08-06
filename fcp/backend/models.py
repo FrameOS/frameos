@@ -34,7 +34,7 @@ class SSHLog(db.Model):
     def to_dict(self):
         return {
             'id': self.id,
-            'timestamp': self.timestamp,
+            'timestamp': self.timestamp.isoformat(),
             'type': self.type,
             'line': self.line,
             'frame_id': self.frame_id

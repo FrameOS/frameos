@@ -22,8 +22,8 @@ export function Frame(props: FrameSceneProps) {
         </H1>
         {frame ? (
           <>
-            <div className="flex gap-4 flex-col lg:flex-row">
-              <Details className="flex-1" />
+            <div className="flex gap-4 flex-col md:flex-row">
+              <Details className="flex-1 min-w-max" />
               <Image className="flex-0" />
             </div>
             <Logs />
