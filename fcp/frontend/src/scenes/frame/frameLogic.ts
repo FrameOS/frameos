@@ -58,6 +58,10 @@ export const frameLogic = kea<frameLogicType>([
     logs: {
       [socketLogic.actionTypes.newLog]: (state, { log }) => (log.frame_id === props.id ? [...state, log] : state),
     },
+    frame: {
+      [socketLogic.actionTypes.newFrame]: (state, { frame }) => (frame.id === props.id ? frame : state),
+      [socketLogic.actionTypes.updateFrame]: (state, { frame }) => (frame.id === props.id ? frame : state),
+    },
   })),
   selectors({
     id: [() => [(_, props) => props.id], (id) => id],

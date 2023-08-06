@@ -3,7 +3,7 @@ from backend import huey, db, app
 from backend.models import new_log as log, Frame, update_frame
 from paramiko import RSAKey, SSHClient, AutoAddPolicy
 from io import StringIO
-import time
+from eventlet import sleep
 
 
 @huey.task()
@@ -45,7 +45,7 @@ def initialize_frame(id: int):
                     exit_status = stdout.channel.recv_exit_status()
 
                 # Sleep to prevent busy-waiting
-                time.sleep(0.1)
+                sleep(0.1)
 
             if exit_status != 0:
                 log(id, "exit_status", f"The command exited with status {exit_status}")
