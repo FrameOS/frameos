@@ -1,6 +1,6 @@
 import { A } from 'kea-router'
-import { FrameType } from '../../types'
-import { H5 } from '../../components/H5'
+import { FrameType } from '~/types'
+import { H5 } from 'components/H5'
 
 interface FrameProps {
   frame: FrameType
@@ -13,7 +13,7 @@ export function Frame({ frame }: FrameProps): JSX.Element {
         <img className="rounded-t-lg" src={`/images/image${(frame.id % 20) + 1}.jpg`} alt="" />
       </A>
       <div className="flex justify-between px-4 pt-4 mb-2">
-        <H5>
+        <H5 className="text-ellipsis overflow-hidden">
           <A href={`/frames/${frame.id}`}>{frame.ip}</A>
         </H5>
       </div>

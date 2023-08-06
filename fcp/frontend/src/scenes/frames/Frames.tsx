@@ -2,7 +2,7 @@ import { useValues } from 'kea'
 import { framesLogic } from './framesLogic'
 import { NewFrame } from './NewFrame'
 import { Frame } from './Frame'
-import { H1 } from '../../components/H1'
+import { H1 } from 'components/H1'
 
 export function Frames() {
   const { frames } = useValues(framesLogic)

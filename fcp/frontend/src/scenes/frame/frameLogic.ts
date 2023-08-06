@@ -1,7 +1,7 @@
 import { actions, afterMount, kea, key, path, props, selectors } from 'kea'
 
 import type { frameLogicType } from './frameLogicType'
-import { FrameType, LogType } from '../../types'
+import { FrameType, LogType } from '~/types'
 import { loaders } from 'kea-loaders'
 
 export interface FrameLogicProps {
