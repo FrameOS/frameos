@@ -1,6 +1,6 @@
 import { A } from 'kea-router'
-import { FrameType } from '~/types'
-import { H5 } from 'components/H5'
+import { FrameType } from '../../types'
+import { H5 } from '../../components/H5'
 
 interface FrameProps {
   frame: FrameType

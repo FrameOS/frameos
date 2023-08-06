@@ -1,5 +1,5 @@
 import { useValues } from 'kea'
-import { H1 } from 'components/H1'
+import { H1 } from '../../components/H1'
 import { frameLogic } from './frameLogic'
 import { A } from 'kea-router'
 

@@ -3,7 +3,10 @@ from . import app, db, tasks, models, socketio
 
 @app.errorhandler(404)
 def not_found(e):
-    print(e)
+    return app.send_static_file('index.html')
+
+@app.route("/", methods=["GET"])
+def home():
     return app.send_static_file('index.html')
 
 @app.route("/api/frames", methods=["GET"])
