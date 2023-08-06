@@ -1,4 +1,4 @@
-from fcp import app, socketio, db
+from backend import app, socketio, db
 
 if __name__ == '__main__':
     with app.app_context():

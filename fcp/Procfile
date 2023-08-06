@@ -1,2 +1,2 @@
 web: python run.py
-huey: huey_consumer.py fcp.huey
+huey: huey_consumer.py backend.huey

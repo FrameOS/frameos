@@ -1,19 +1,15 @@
-from flask import jsonify, request
+from flask import jsonify, request, send_from_directory
 from . import app, db, tasks, models, socketio
-
-@app.route('/logs/new', methods=['GET'])
-def new_log():
-    tasks.initialize_frame()
-    return 'Success', 200
-    
-@app.route('/')
-def index():
-    logs = models.SSHLog.query.all()
-    return app.send_static_file('index.html')
 
 @app.errorhandler(404)
 def not_found(e):
+    print(e)
     return app.send_static_file('index.html')
+
+@app.route('/frames/<int:id>/initialize', methods=['GET'])
+def new_log(id: int):
+    tasks.initialize_frame(id)
+    return 'Success', 200
 
 @app.route("/api/frames", methods=["GET"])
 def home():
@@ -21,10 +17,14 @@ def home():
     frames_list = [frame.to_dict() for frame in frames]
     return jsonify(frames=frames_list)
 
-@app.route("/frames/new", methods=["POST"])
+@app.route("/api/frames/new", methods=["POST"])
 def new_frame():
     ip = request.form['ip']
     frame = models.Frame(ip=ip, port=8999, status="uninitialized")
     db.session.add(frame)
     db.session.commit()
     return jsonify(frame=frame.to_dict())
+
+@app.route('/images/<path:filename>')
+def custom_static(filename: str):
+    return send_from_directory(app.static_folder + '/images', filename)

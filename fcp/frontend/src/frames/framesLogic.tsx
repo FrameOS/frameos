@@ -24,7 +24,7 @@ export const framesLogic = kea<framesLogicType>([
             formData.append(key, (frame as any)[key])
           })
 
-          const response = await fetch('/frames/new', {
+          const response = await fetch('/api/frames/new', {
             method: 'POST',
             body: formData,
           })

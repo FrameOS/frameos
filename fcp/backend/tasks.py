@@ -12,7 +12,7 @@ def log(type: str, line: str) -> None:
 
 
 @huey.task()
-def initialize_frame():
+def initialize_frame(id: int):
     with app.app_context():
         ssh = SSHClient()
         try:
