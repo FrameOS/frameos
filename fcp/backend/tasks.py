@@ -1,14 +1,9 @@
 from huey import crontab
-from . import huey, db, models, socketio, app
+from backend import huey, db, app
+from backend.models import new_log as log, Frame, update_frame
 from paramiko import RSAKey, SSHClient, AutoAddPolicy
 from io import StringIO
-
-def log(id: int, type: str, line: str) -> None:
-    with app.app_context():
-        frame_log = models.SSHLog(frame_id=id, line=line, type=type)
-        db.session.add(frame_log)
-        db.session.commit()
-        socketio.emit('new_line', {'frame_id': id, 'line': line, 'type': type, 'timestamp': str(frame_log.timestamp)})
+import time
 
 
 @huey.task()
@@ -16,48 +11,53 @@ def initialize_frame(id: int):
     with app.app_context():
         ssh = SSHClient()
         try:
-            frame = models.Frame.query.get_or_404(id)
+            frame = Frame.query.get_or_404(id)
             if frame.status != 'uninitialized':
                 raise Exception(f"Frame status '{frame.status}', expected 'unitialized'")
 
             frame.status = 'initializing'
-            db.session.add(frame)
-            db.session.commit()
+            update_frame(frame)
 
-            log(id, "stdinfo", f"Connecting to {frame.ip}")
+            log(id, "stdinfo", f"Connecting to {frame.ssh_user}@{frame.host}")
             ssh.set_missing_host_key_policy(AutoAddPolicy())
 
-            # if ssh_key:
-            with open('/Users/marius/.ssh/id_rsa', 'r') as f:
-                ssh_key = f.read()
-            ssh_key_obj = RSAKey.from_private_key(StringIO(ssh_key))
+            if frame.ssh_pass:
+                ssh.connect(frame.host, username=frame.ssh_user, password=frame.ssh_pass, timeout=10)
+            else:
+                with open('/Users/marius/.ssh/id_rsa', 'r') as f:
+                    ssh_key = f.read()
+                ssh_key_obj = RSAKey.from_private_key(StringIO(ssh_key))
+                ssh.connect(frame.host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=10)
+            
+            log(id, "stdinfo", f"Connected to {frame.ssh_user}@{frame.host}")
 
-            split = frame.ip.split("@")
-            host = split[0] if len(split) == 1 else split[1]
-            user = split[0] if len(split) > 1 else "pi"
-            ssh.connect(host, username=user, pkey=ssh_key_obj, timeout=10)
-            # else:
-            #     ssh.connect(frame.ip, username=ssh_user, password=ssh_pass, timeout=10)
-            
-            log(id, "stdinfo", f"Connected to {frame.ip}")
-            
-            # stdin, stdout, stderr = ssh.exec_command("df -h")
             stdin, stdout, stderr = ssh.exec_command("sudo apt upgrade -y")
+                        
+            exit_status = None
+            while exit_status is None:
+                while line := stdout.readline():
+                    log(id, "stdout", line)
+                while line := stderr.readline():
+                    log(id, "stderr", line)
+                    
+                # Check if the command has finished running
+                if stdout.channel.exit_status_ready():
+                    exit_status = stdout.channel.recv_exit_status()
 
-            while line := stdout.readline(): #not stdout.channel.exit_status_ready():
-                # line = stdout.readline()
-                log(id, "stdout", line)
+                # Sleep to prevent busy-waiting
+                time.sleep(0.1)
+
+            if exit_status != 0:
+                log(id, "exit_status", f"The command exited with status {exit_status}")
 
             # Reset status so we can try again (TODO: make this work)
             frame.status = 'uninitialized'
-            db.session.add(frame)
-            db.session.commit()
+            update_frame(frame)
 
         except Exception as e:
             log(id, "stderr", str(e))
             frame.status = 'uninitialized'
-            db.session.add(frame)
-            db.session.commit()
+            update_frame(frame)
         finally:
             ssh.close()
             log(id, "stdinfo", "Connection closed")

@@ -1,9 +1,11 @@
 import { Suspense } from 'react'
-import { useValues } from 'kea'
+import { useMountedLogic, useValues } from 'kea'
 import { sceneLogic } from './sceneLogic'
 import { scenes } from './scenes'
+import { socketLogic } from './socketLogic'
 
 export function App() {
+  useMountedLogic(socketLogic)
   const { scene, params } = useValues(sceneLogic)
 
   const Scene = scenes[scene as keyof typeof scenes] || scenes.error404

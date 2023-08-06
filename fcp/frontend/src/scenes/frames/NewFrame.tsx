@@ -10,14 +10,13 @@ export function NewFrame(): JSX.Element {
       <Form logic={framesLogic} formKey="newFrame" className="space-y-6" enableFormOnSubmit>
         <H6>Add a smart frame</H6>
         <div>
-          <label htmlFor="ip" className="block mb-2 text-sm font-medium text-white">
+          <label htmlFor="host" className="block mb-2 text-sm font-medium text-white">
             IP address or hostname
           </label>
-          <Field name="ip">
+          <Field name="host">
             <input
-              type="ip"
-              name="ip"
-              id="ip"
+              type="text"
+              name="host"
               className="border text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 bg-gray-600 border-gray-500 placeholder-gray-400 text-white"
               placeholder="127.0.0.1"
               required

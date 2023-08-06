@@ -5,6 +5,7 @@ import { A } from 'kea-router'
 import { Logs } from './Logs'
 import { Image } from './Image'
 import { Details } from './Details'
+import { frameHost } from '../../decorators/frame'
 
 interface FrameSceneProps {
   id: string // from the URL
@@ -18,7 +19,8 @@ export function Frame(props: FrameSceneProps) {
     <BindLogic logic={frameLogic} props={logicProps}>
       <div className="space-y-4">
         <H1>
-          <A href="/">FrameOS</A> <span className="text-gray-400">&raquo;</span> {frameLoading ? '...' : frame.ip}
+          <A href="/">FrameOS</A> <span className="text-gray-400">&raquo;</span>{' '}
+          {frameLoading ? '...' : frameHost(frame)}
         </H1>
         {frame ? (
           <>

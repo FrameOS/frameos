@@ -4,6 +4,7 @@ import { H6 } from '../../components/H6'
 import { frameLogic } from './frameLogic'
 import clsx from 'clsx'
 import { Button } from '../../components/Button'
+import { frameHost, frameStatus } from '../../decorators/frame'
 
 export interface DetailsProps {
   className?: string
@@ -21,8 +22,15 @@ export function Details({ className }: DetailsProps) {
       ) : (
         <>
           <div>
-            <div>IP or hostname: {frame.ip}</div>
-            <div>Status: {frame.status}</div>
+            <div>Hostname: {frame.host}</div>
+            <div>SSH User: {frame.ssh_user}</div>
+            <div>SSH Port: {frame.ssh_port}</div>
+            <div>API Port: {frame.api_port}</div>
+            {frame.version ? <div>Client Version: {frame.version}</div> : null}
+            <div className="flex items-center">
+              <div className="mr-2">Status:</div>
+              {frameStatus(frame)}
+            </div>
           </div>
           {frame.status === 'uninitialized' ? <Button onClick={initialize}>Initialize</Button> : null}
         </>

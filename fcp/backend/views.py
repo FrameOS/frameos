@@ -33,10 +33,8 @@ def initialize_frame(id: int):
 
 @app.route("/api/frames/new", methods=["POST"])
 def new_frame():
-    ip = request.form['ip']
-    frame = models.Frame(ip=ip, port=8999, status="uninitialized")
-    db.session.add(frame)
-    db.session.commit()
+    host = request.form['host']
+    frame = models.new_frame(host)
     return jsonify(frame=frame.to_dict())
 
 @app.route('/images/<path:filename>')

@@ -4,6 +4,7 @@ import type { frameLogicType } from './frameLogicType'
 import { FrameType, LogType } from '~/types'
 import { loaders } from 'kea-loaders'
 import { connect } from 'socket.io-client'
+import { socketLogic } from '../socketLogic'
 
 export interface FrameLogicProps {
   id: number
@@ -14,7 +15,7 @@ export const frameLogic = kea<frameLogicType>([
   props({} as FrameLogicProps),
   key((props) => props.id),
 
-  actions({ initialize: true, addLog: (log: LogType) => ({ log }) }),
+  actions({ initialize: true }),
   loaders(({ props }) => ({
     frame: [
       null as FrameType | null,
@@ -53,11 +54,11 @@ export const frameLogic = kea<frameLogicType>([
       },
     ],
   })),
-  reducers({
+  reducers(({ props }) => ({
     logs: {
-      addLog: (state, { log }) => [...state, log],
+      [socketLogic.actionTypes.newLog]: (state, { log }) => (log.frame_id === props.id ? [...state, log] : state),
     },
-  }),
+  })),
   selectors({
     id: [() => [(_, props) => props.id], (id) => id],
   }),
@@ -69,10 +70,5 @@ export const frameLogic = kea<frameLogicType>([
   afterMount(({ actions, cache }) => {
     actions.loadFrame()
     actions.loadLogs()
-    cache.socket = connect('/')
-    cache.socket.on('new_line', actions.addLog)
-  }),
-  beforeUnmount(({ cache }) => {
-    cache.socket.close()
   }),
 ])

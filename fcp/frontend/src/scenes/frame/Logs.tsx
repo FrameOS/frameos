@@ -31,7 +31,7 @@ export function Logs() {
           {logs.map((log) => (
             <div
               key={log.id}
-              className={clsx('flex items-end', {
+              className={clsx('flex sm:flex-row flex-col', {
                 'text-yellow-300': log.type === 'stdinfo',
                 'text-red-300': log.type === 'stderr',
               })}

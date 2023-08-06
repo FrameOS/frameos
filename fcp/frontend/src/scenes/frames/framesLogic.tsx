@@ -1,9 +1,10 @@
-import { actions, afterMount, kea, path, reducers } from 'kea'
+import { actions, afterMount, kea, path, reducers, selectors } from 'kea'
 
 import type { framesLogicType } from './framesLogicType'
 import { forms } from 'kea-forms'
 import { loaders } from 'kea-loaders'
 import { FrameType } from '../../types'
+import { socketLogic } from '../socketLogic'
 
 export const framesLogic = kea<framesLogicType>([
   path(['src', 'frames', 'framesLogic']),
@@ -14,10 +15,9 @@ export const framesLogic = kea<framesLogicType>([
     newFrame: {
       defaults: {} as FrameType,
       errors: (frame: Partial<FrameType>) => ({
-        ip: !frame.ip ? 'Please enter IP' : null,
+        host: !frame.host ? 'Please enter a host' : null,
       }),
       submit: async (frame) => {
-        console.log({ frame })
         try {
           const formData = new FormData()
           Object.keys(frame).forEach((key) => {
@@ -42,7 +42,7 @@ export const framesLogic = kea<framesLogicType>([
   })),
   loaders({
     frames: [
-      [] as FrameType[],
+      {} as Record<number, FrameType>,
       {
         loadFrames: async () => {
           try {
@@ -51,7 +51,7 @@ export const framesLogic = kea<framesLogicType>([
               throw new Error('Failed to fetch frames')
             }
             const data = await response.json()
-            return data.frames as FrameType[]
+            return Object.fromEntries((data.frames as FrameType[]).map((frame) => [frame.id, frame]))
           } catch (error) {
             console.error(error)
             return []
@@ -60,9 +60,13 @@ export const framesLogic = kea<framesLogicType>([
       },
     ],
   }),
+  selectors({
+    framesList: [(s) => [s.frames], (frames) => Object.values(frames).sort((a, b) => a.id - b.id) as FrameType[]],
+  }),
   reducers({
     frames: {
-      submitNewFrameSuccess: (state, payload) => [...state, payload.newFrame],
+      [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
+      [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
     },
   }),
   afterMount(({ actions }) => {
