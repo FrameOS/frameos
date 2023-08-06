@@ -3,3 +3,9 @@ export interface FrameType {
   status: string
   ip: string
 }
+export interface LogType {
+  id: number
+  timestamp: string
+  line: string
+  type: string
+}
