@@ -19,3 +19,5 @@ export function Frames() {
     </div>
   )
 }
+
+export default Frames
