@@ -17,6 +17,13 @@ def initialize_frame(id: int):
         ssh = SSHClient()
         try:
             frame = models.Frame.query.get_or_404(id)
+            if frame.status != 'uninitialized':
+                raise Exception(f"Frame status '{frame.status}', expected 'unitialized'")
+
+            frame.status = 'initializing'
+            db.session.add(frame)
+            db.session.commit()
+
             log(id, "stdinfo", f"Connecting to {frame.ip}")
             ssh.set_missing_host_key_policy(AutoAddPolicy())
 
@@ -40,8 +47,17 @@ def initialize_frame(id: int):
             while line := stdout.readline(): #not stdout.channel.exit_status_ready():
                 # line = stdout.readline()
                 log(id, "stdout", line)
+
+            # Reset status so we can try again (TODO: make this work)
+            frame.status = 'uninitialized'
+            db.session.add(frame)
+            db.session.commit()
+
         except Exception as e:
             log(id, "stderr", str(e))
+            frame.status = 'uninitialized'
+            db.session.add(frame)
+            db.session.commit()
         finally:
             ssh.close()
             log(id, "stdinfo", "Connection closed")
