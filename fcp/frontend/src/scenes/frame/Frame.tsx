@@ -9,12 +9,12 @@ interface FrameSceneProps {
 
 export function Frame(props: FrameSceneProps) {
   const logicProps = { id: parseInt(props.id) }
-  const { id } = useValues(frameLogic(logicProps))
+  const { frame, frameLoading } = useValues(frameLogic(logicProps))
 
   return (
     <div>
       <H1>
-        <A href="/">FrameOS</A> &raquo; Frame {id}
+        <A href="/">FrameOS</A> <span className="text-gray-400">&raquo;</span> {frameLoading ? '...' : frame.ip}
       </H1>
     </div>
   )
