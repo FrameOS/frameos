@@ -12,6 +12,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "clsx": "^2.0.0",
     "kea": "^3.0.2",
     "kea-loaders": "^3.0.0",
     "kea-router": "^3.1.4",

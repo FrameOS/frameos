@@ -1,13 +1,16 @@
 import React from 'react'
+import { clsx } from 'clsx'
 
-type H1Props = {
-  children?: React.ReactNode
-}
-
-export function H1(props: H1Props) {
+export function H1({ children, className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
   return (
-    <h1 className="mb-4 text-2xl font-extrabold leading-none tracking-tight text-gray-900 md:text-3xl lg:text-4xl dark:text-white">
-      {props.children}
+    <h1
+      className={clsx(
+        'mb-4 text-2xl font-extrabold leading-none tracking-tight md:text-3xl lg:text-4xl text-white',
+        className
+      )}
+      {...props}
+    >
+      {children}
     </h1>
   )
 }
