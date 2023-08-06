@@ -21,7 +21,7 @@ export function Logs() {
               className={clsx({
                 flex: true,
                 '': log.type === 'stdout',
-                'text-green-300': log.type === 'stdinfo',
+                'text-yellow-300': log.type === 'stdinfo',
                 'text-red-300': log.type === 'stderr',
               })}
             >
