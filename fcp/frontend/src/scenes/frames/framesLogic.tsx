@@ -3,7 +3,7 @@ import { actions, afterMount, kea, path, reducers } from 'kea'
 import type { framesLogicType } from './framesLogicType'
 import { forms } from 'kea-forms'
 import { loaders } from 'kea-loaders'
-import { FrameType } from '../types'
+import { FrameType } from '../../types'
 
 export const framesLogic = kea<framesLogicType>([
   path(['src', 'frames', 'framesLogic']),

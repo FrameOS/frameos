@@ -2,7 +2,7 @@ import { actions, kea, path, reducers } from 'kea'
 
 import type { sceneLogicType } from './sceneLogicType'
 import { urlToAction } from 'kea-router'
-import { routes, scenes } from './scenes'
+import { routes } from './scenes'
 
 export const sceneLogic = kea<sceneLogicType>([
   path(['src', 'sceneLogic']),
