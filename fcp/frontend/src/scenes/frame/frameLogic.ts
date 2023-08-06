@@ -1,4 +1,4 @@
-import { actions, afterMount, kea, key, path, props, selectors } from 'kea'
+import { actions, afterMount, kea, key, listeners, path, props, selectors } from 'kea'
 
 import type { frameLogicType } from './frameLogicType'
 import { FrameType, LogType } from '~/types'
@@ -13,6 +13,7 @@ export const frameLogic = kea<frameLogicType>([
   props({} as FrameLogicProps),
   key((props) => props.id),
 
+  actions({ initialize: true }),
   loaders(({ props }) => ({
     frame: [
       null as FrameType | null,
@@ -54,6 +55,11 @@ export const frameLogic = kea<frameLogicType>([
   selectors({
     id: [() => [(_, props) => props.id], (id) => id],
   }),
+  listeners(({ props }) => ({
+    initialize: async () => {
+      await fetch(`/api/frames/${props.id}/initialize`, { method: 'POST' })
+    },
+  })),
   afterMount(({ actions }) => {
     actions.loadFrame()
     actions.loadLogs()
