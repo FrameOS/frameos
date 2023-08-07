@@ -10,9 +10,9 @@ export function frameHost(frame: FrameType): string {
 
 export function frameStatus(frame: FrameType): JSX.Element {
   return (
-    <>
-      {frame.status === 'initializing' ? <Spinner className="mr-2" /> : null}
+    <div className="flex gap-2 items-center">
       {frame.status}
-    </>
+      {frame.status === 'initializing' ? <Spinner /> : null}
+    </div>
   )
 }

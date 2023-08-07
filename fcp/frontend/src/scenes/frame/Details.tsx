@@ -21,18 +21,41 @@ export function Details({ className }: DetailsProps) {
         '...'
       ) : (
         <>
-          <div>
-            <div>Hostname: {frame.host}</div>
-            <div>SSH User: {frame.ssh_user}</div>
-            <div>SSH Port: {frame.ssh_port}</div>
-            <div>API Port: {frame.api_port}</div>
-            {frame.version ? <div>Client Version: {frame.version}</div> : null}
-            <div className="flex items-center">
-              <div className="mr-2">Status:</div>
-              {frameStatus(frame)}
-            </div>
-          </div>
-          {frame.status === 'uninitialized' ? <Button onClick={initialize}>Initialize</Button> : null}
+          <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5">
+            <tbody>
+              <tr>
+                <td className="text-blue-200 text-right">Hostname:</td>
+                <td>{frame.host}</td>
+              </tr>
+              <tr>
+                <td className="text-blue-200 text-right">SSH user:</td>
+                <td>{frame.ssh_user}</td>
+              </tr>
+              <tr>
+                <td className="text-blue-200 text-right">SSH port:</td>
+                <td>{frame.ssh_port}</td>
+              </tr>
+              <tr>
+                <td className="text-blue-200 text-right">API port:</td>
+                <td>{frame.api_port}</td>
+              </tr>
+              {frame.version ? (
+                <tr>
+                  <td className="text-blue-200 text-right">Client version:</td>
+                  <td>{frame.version}</td>
+                </tr>
+              ) : null}
+              <tr>
+                <td className="text-blue-200 text-right">Status:</td>
+                <td>{frameStatus(frame)}</td>
+              </tr>
+            </tbody>
+          </table>
+          {frame.status === 'uninitialized' ? (
+            <Button className="w-fit" onClick={initialize}>
+              Initialize
+            </Button>
+          ) : null}
         </>
       )}
     </Box>
