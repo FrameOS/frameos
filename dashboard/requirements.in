@@ -1,8 +1,0 @@
-celery
-eventlet
-flask
-flask_sqlalchemy
-flask-socketio
-requests
-paramiko
-scp
