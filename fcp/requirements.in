@@ -1,4 +1,4 @@
-eventlet
+gevent
 flask
 flask_socketio
 flask_sqlalchemy

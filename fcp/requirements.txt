@@ -20,10 +20,6 @@ click==8.1.6
     # via flask
 cryptography==41.0.3
     # via paramiko
-dnspython==2.4.1
-    # via eventlet
-eventlet==0.33.3
-    # via -r requirements.in
 flask==2.3.2
     # via
     #   -r requirements.in
@@ -33,9 +29,11 @@ flask-socketio==5.3.5
     # via -r requirements.in
 flask-sqlalchemy==3.0.5
     # via -r requirements.in
+gevent==23.7.0
+    # via -r requirements.in
 greenlet==2.0.2
     # via
-    #   eventlet
+    #   gevent
     #   sqlalchemy
 honcho==1.1.0
     # via -r requirements.in
@@ -63,8 +61,6 @@ python-socketio==5.8.0
     # via flask-socketio
 redis==4.6.0
     # via -r requirements.in
-six==1.16.0
-    # via eventlet
 sqlalchemy==2.0.19
     # via
     #   -r requirements.in
@@ -75,3 +71,10 @@ werkzeug==2.3.6
     # via flask
 zipp==3.16.2
     # via importlib-metadata
+zope-event==5.0
+    # via gevent
+zope-interface==6.0
+    # via gevent
+
+# The following packages are considered to be unsafe in a requirements file:
+# setuptools
