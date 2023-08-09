@@ -1,10 +1,10 @@
-from huey import crontab
-from backend import huey, db, app
+import json
+from backend import huey, app
 from backend.models import new_log as log, Frame, update_frame
 from paramiko import RSAKey, SSHClient, AutoAddPolicy
 from io import StringIO
 from gevent import sleep
-
+from scp import SCPClient
 
 @huey.task()
 def initialize_frame(id: int):
@@ -32,24 +32,34 @@ def initialize_frame(id: int):
                 
                 log(id, "stdinfo", f"Connected to {frame.ssh_user}@{frame.host}")
 
-                stdin, stdout, stderr = ssh.exec_command("sudo apt upgrade -y")
+                def exec_command(command: str) -> int:
+                    stdin, stdout, stderr = ssh.exec_command(command)
+                    exit_status = None
+                    while exit_status is None:
+                        while line := stdout.readline():
+                            log(id, "stdout", line)
+                        while line := stderr.readline():
+                            log(id, "stderr", line)
                             
-                exit_status = None
-                while exit_status is None:
-                    while line := stdout.readline():
-                        log(id, "stdout", line)
-                    while line := stderr.readline():
-                        log(id, "stderr", line)
-                        
-                    # Check if the command has finished running
-                    if stdout.channel.exit_status_ready():
-                        exit_status = stdout.channel.recv_exit_status()
+                        # Check if the command has finished running
+                        if stdout.channel.exit_status_ready():
+                            exit_status = stdout.channel.recv_exit_status()
 
-                    # Sleep to prevent busy-waiting
-                    sleep(0.1)
+                        # Sleep to prevent busy-waiting
+                        sleep(0.1)
 
-                if exit_status != 0:
-                    log(id, "exit_status", f"The command exited with status {exit_status}")
+                    if exit_status != 0:
+                        log(id, "exit_status", f"The command exited with status {exit_status}")
+                    
+                    return exit_status
+                
+                # exec_command("sudo apt update -y")
+                exec_command("sudo mkdir -p /srv/frameos")
+                exec_command(f"sudo chown -R {frame.ssh_user} /srv/frameos")
+                
+                with SCPClient(ssh.get_transport()) as scp:
+                    scp.putfo(StringIO(json.dumps(frame.to_dict())), "/srv/frameos/frame.json")
+                    scp.put("../client/frame.py", "/srv/frameos/frame.py")
 
                 # Reset status so we can try again (TODO: make this work)
                 frame.status = 'uninitialized'
