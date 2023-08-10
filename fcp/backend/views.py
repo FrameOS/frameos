@@ -47,3 +47,15 @@ def new_frame():
 @app.route('/images/<path:filename>')
 def custom_static(filename: str):
     return send_from_directory(app.static_folder + '/images', filename)
+
+@app.route('/api/log', methods=["POST"])
+def api_log():
+    auth_header = request.headers.get('Authorization')
+    api_key = auth_header.split(' ')[1]
+    frame = models.Frame.query.filter_by(api_key=api_key).first_or_404()
+
+    data = request.json
+    message = str(data.get('message', ''))
+    models.new_log(frame.id, "webhook", message)
+
+    return 'OK', 200

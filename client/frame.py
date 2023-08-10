@@ -3,6 +3,7 @@
 import sys
 import signal
 import time
+import json
 import threading
 import requests
 import RPi.GPIO as GPIO
@@ -29,10 +30,48 @@ parser.add_argument('--save', action='store_true', help='save generated image to
 parser.add_argument('--serve', action='store_true', help='start a webserver to live-stream logs', default=True)
 args = parser.parse_args()
 
+# Load the configuration from the 'frame.json' file.
+config = None
+try:
+    with open('frame.json', 'r') as file:
+        config = json.load(file)
+except FileNotFoundError:
+    print('Configuration file not found! Can\'t communicate with the control panel.')
+
+
+def send_log_request(message):
+    if config is None:
+        return
+
+    protocol = 'https' if config['api_port'] in [443, 8443] else 'http'
+    url = f"{protocol}://{config['api_host']}:{config['api_port']}/api/log"
+
+    headers = {
+        "Authorization": f"Bearer {config['api_key']}",
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "message": message
+    }
+
+    try:
+        requests.post(url, headers=headers, json=data)
+    except Exception as e:
+        print(f"Error sending log: {e}")
+
+
+def api_log(message):
+    """
+    Send a log message to the specified API endpoint in a non-blocking manner.
+    """
+    threading.Thread(target=send_log_request, args=(message,)).start()
+
 # Define log function that adds messages to the logs queue and emits them over the WebSocket
 def log(message):
     logs.append(message)
     socketio.emit('log', message)
+    api_log(message)
     if args.verbose:
         print(message)
 
@@ -61,8 +100,9 @@ if args.serve:
 # Setup the Inky display
 inky = auto(ask_user=True, verbose=args.verbose)
 
-print(inky.resolution)
-image_url = "https://source.unsplash.com/random/800x480/?bird"
+log(f"Frame resolution: {inky.resolution[0]}x{inky.resolution[1]}")
+image_url = f"https://source.unsplash.com/random/{inky.resolution[0]}x{inky.resolution[1]}/?bird"
+log(f"Using image: {image_url}")
 
 saturation = 1
 
@@ -78,14 +118,15 @@ reset_event = threading.Event()
 saved_image = None
 
 def update_image(request_source):
+    global saved_image
     if lock.locked():
         if args.verbose:
-            print(f"Update request from {request_source} rejected. An update is already in progress.")
+            log(f"Update request from {request_source} rejected. An update is already in progress.")
         return
 
     with lock:
         if args.verbose:
-            print(f"Image update requested by {request_source}, attempting to download new image...")
+            log(f"Image update requested by {request_source}, attempting to download new image...")
 
         response = requests.get(image_url)
         image = Image.open(BytesIO(response.content))
@@ -93,20 +134,20 @@ def update_image(request_source):
 
         if saved_image is None or resized_image.tobytes() != saved_image.tobytes():
             if args.verbose:
-                print("Downloaded new image, updating display...")
+                log("Downloaded new image, updating display...")
             inky.set_image(resized_image, saturation=saturation)
             inky.show()
             if args.verbose:
-                print("Image updated")
+                log("Image updated")
             saved_image = resized_image
             if args.save:
                 resized_image.save("image.png")
         else:
             if args.verbose:
                 if saved_image is not None:
-                    print("Downloaded image is the same as the existing image. Not updating the display.")
+                    log("Downloaded image is the same as the existing image. Not updating the display.")
                 else:
-                    print("Error downloading image")
+                    log("Error downloading image")
 
 def handle_button(pin):
     if BUTTONS.index(pin) == 0: # the first button is pressed
