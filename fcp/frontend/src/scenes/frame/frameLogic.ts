@@ -5,6 +5,7 @@ import { FrameType, LogType } from '~/types'
 import { loaders } from 'kea-loaders'
 import { connect } from 'socket.io-client'
 import { socketLogic } from '../socketLogic'
+import { forms } from 'kea-forms'
 
 export interface FrameLogicProps {
   id: number
@@ -72,6 +73,13 @@ export const frameLogic = kea<frameLogicType>([
     },
     reset: async () => {
       await fetch(`/api/frames/${props.id}/reset`, { method: 'POST' })
+    },
+  })),
+  forms(({ actions, values }) => ({
+    frame: {
+      submit: async () => {
+        actions.initialize()
+      },
     },
   })),
   afterMount(({ actions, cache }) => {

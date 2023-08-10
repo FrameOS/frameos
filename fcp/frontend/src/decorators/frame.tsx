@@ -12,7 +12,7 @@ export function frameStatus(frame: FrameType): JSX.Element {
   return (
     <div className="flex gap-2 items-center">
       {frame.status}
-      {frame.status === 'initializing' ? <Spinner /> : null}
+      {frame.status === 'deploying' ? <Spinner /> : null}
     </div>
   )
 }

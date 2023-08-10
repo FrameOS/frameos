@@ -68,10 +68,10 @@ def initialize_frame(id: int):
         ssh_connections.add(ssh)
         try:
             frame = Frame.query.get_or_404(id)
-            if frame.status != 'uninitialized':
-                raise Exception(f"Frame status '{frame.status}', expected 'unitialized'")
+            if frame.status == 'deploying':
+                raise Exception(f"Current frame status '{frame.status}' is not valid for this operation")
 
-            frame.status = 'initializing'
+            frame.status = 'deploying'
             update_frame(frame)
 
             log(id, "stdinfo", f"Connecting to {frame.ssh_user}@{frame.host}")
