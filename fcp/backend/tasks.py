@@ -112,7 +112,7 @@ def initialize_frame(id: int):
             # exec_command("sudo apt update -y")
             exec_command("sudo mkdir -p /srv/frameos")
             exec_command(f"sudo chown -R {frame.ssh_user} /srv/frameos")
-            
+
             with SCPClient(ssh.get_transport()) as scp:
                 log(id, "stdout", "> add /srv/frameos/frame.json")
                 scp.putfo(StringIO(json.dumps(frame.to_dict())), "/srv/frameos/frame.json")
@@ -121,19 +121,10 @@ def initialize_frame(id: int):
                 log(id, "stdout", "> add /srv/frameos/requirements.txt")
                 scp.put("../client/requirements.txt", "/srv/frameos/requirements.txt")
 
-            # log(id, "stdout", "> pip3 install -r requirements.txt    # this might take a while")
-            # exec_command("cd /srv/frameos && pip3 install -r requirements.txt")
+            exec_command("cd /srv/frameos && (sha256sum -c requirements.txt.sha256sum 2>/dev/null || (pip3 install -r requirements.txt && sha256sum requirements.txt > requirements.txt.sha256sum))")
 
             exec_command("tmux has-session -t frameos 2>/dev/null && tmux kill-session -t frameos")
-            # exec_command("cd /srv/frameos && tmux new-session -t frameos -d 'python3 frame.py'")
             exec_command("cd /srv/frameos && tmux new-session -s frameos -d 'python3 frame.py'")
-
-            # log(id, "stdout", "> killall -9 python3")
-            # exec_command("killall -9 python3")
-            # log(id, "stdout", "> killall -9 python3")
-            # exec_command("killall -9 python3")
-            # log(id, "stdout", "> tmux new -d 'python3 frame.py'")
-            # exec_command("cd /srv/frameos && tmux new -n frameos -d 'python3 frame.py'")
 
             frame.status = 'initialized'
             update_frame(frame)
