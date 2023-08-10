@@ -1,4 +1,7 @@
 #!/bin/bash
+
+# TODO: reuse the service part from this old script
+
 # set -e
 set -u
 set -o pipefail

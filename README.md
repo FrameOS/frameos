@@ -49,5 +49,16 @@ Get the pimoroni software installed with examples:
 curl https://get.pimoroni.com/inky | bash
 ```
 
-Then clone this repo, and run `./deploy.sh`
+If that's happy, all the dependencies should be installed.
 
+# FrameOS Control Panel
+
+Getting started:
+
+```bash
+python3 -m venv env
+source env/bin/activate
+pip install -r requirements.txt
+cd frontend && npm install && cd ..
+honcho start
+```
