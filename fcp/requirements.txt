@@ -30,6 +30,10 @@ flask-socketio==5.3.5
 flask-sqlalchemy==3.0.5
     # via -r requirements.in
 gevent==23.7.0
+    # via
+    #   -r requirements.in
+    #   gevent-websocket
+gevent-websocket==0.10.1
     # via -r requirements.in
 greenlet==2.0.2
     # via

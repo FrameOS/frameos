@@ -15,7 +15,7 @@ export const frameLogic = kea<frameLogicType>([
   props({} as FrameLogicProps),
   key((props) => props.id),
 
-  actions({ initialize: true }),
+  actions({ initialize: true, reset: true }),
   loaders(({ props }) => ({
     frame: [
       null as FrameType | null,
@@ -69,6 +69,9 @@ export const frameLogic = kea<frameLogicType>([
   listeners(({ props }) => ({
     initialize: async () => {
       await fetch(`/api/frames/${props.id}/initialize`, { method: 'POST' })
+    },
+    reset: async () => {
+      await fetch(`/api/frames/${props.id}/reset`, { method: 'POST' })
     },
   })),
   afterMount(({ actions, cache }) => {

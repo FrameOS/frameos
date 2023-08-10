@@ -12,7 +12,7 @@ export interface DetailsProps {
 
 export function Details({ className }: DetailsProps) {
   const { frame, frameLoading } = useValues(frameLogic)
-  const { initialize } = useActions(frameLogic)
+  const { initialize, reset } = useActions(frameLogic)
 
   return (
     <Box className={clsx('p-4 space-y-4', className)}>
@@ -54,6 +54,11 @@ export function Details({ className }: DetailsProps) {
           {frame.status === 'uninitialized' ? (
             <Button className="w-fit" onClick={initialize}>
               Initialize
+            </Button>
+          ) : null}
+          {frame.status !== 'uninitialized' ? (
+            <Button className="w-fit" onClick={reset}>
+              Reset
             </Button>
           ) : null}
         </>

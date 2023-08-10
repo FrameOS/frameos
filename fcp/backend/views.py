@@ -26,6 +26,12 @@ def get_logs(id: int):
     logs = [log.to_dict() for log in frame.logs]
     return jsonify(logs=logs)
 
+
+@app.route('/api/frames/<int:id>/reset', methods=['POST'])
+def reset_frame(id: int):
+    tasks.reset_frame(id)
+    return 'Success', 200
+
 @app.route('/api/frames/<int:id>/initialize', methods=['POST'])
 def initialize_frame(id: int):
     tasks.initialize_frame(id)
