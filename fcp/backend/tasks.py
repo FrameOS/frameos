@@ -74,6 +74,12 @@ def initialize_frame(id: int):
             frame.status = 'deploying'
             update_frame(frame)
 
+            frame_json = {
+                "api_host": frame.api_host,
+                "api_key": frame.api_key,
+                "api_port": frame.api_port,
+            }
+
             log(id, "stdinfo", f"Connecting to {frame.ssh_user}@{frame.host}")
             ssh.set_missing_host_key_policy(AutoAddPolicy())
 
@@ -115,7 +121,7 @@ def initialize_frame(id: int):
 
             with SCPClient(ssh.get_transport()) as scp:
                 log(id, "stdout", "> add /srv/frameos/frame.json")
-                scp.putfo(StringIO(json.dumps(frame.to_dict())), "/srv/frameos/frame.json")
+                scp.putfo(StringIO(json.dumps(frame_json, indent=4) + "\n"), "/srv/frameos/frame.json")
                 log(id, "stdout", "> add /srv/frameos/frame.py")
                 scp.put("../client/frame.py", "/srv/frameos/frame.py")
                 log(id, "stdout", "> add /srv/frameos/requirements.txt")
