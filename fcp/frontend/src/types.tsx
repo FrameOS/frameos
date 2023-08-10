@@ -4,6 +4,7 @@ export interface FrameType {
   ssh_user?: string
   ssh_pass?: string
   ssh_port: number
+  api_host?: string
   api_key?: string
   api_port: number
   status: string

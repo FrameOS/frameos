@@ -13,7 +13,9 @@ export const framesLogic = kea<framesLogicType>([
   }),
   forms(({ actions }) => ({
     newFrame: {
-      defaults: {} as FrameType,
+      defaults: {
+        api_host: typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port}` : null,
+      } as FrameType,
       errors: (frame: Partial<FrameType>) => ({
         host: !frame.host ? 'Please enter a host' : null,
       }),

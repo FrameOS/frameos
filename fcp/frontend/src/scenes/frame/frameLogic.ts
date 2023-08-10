@@ -77,6 +77,7 @@ export const frameLogic = kea<frameLogicType>([
   })),
   forms(({ actions, values }) => ({
     frame: {
+      defaults: {} as FrameType,
       submit: async () => {
         actions.initialize()
       },

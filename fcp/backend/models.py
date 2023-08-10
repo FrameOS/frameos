@@ -10,6 +10,7 @@ class Frame(db.Model):
     ssh_pass = db.Column(db.String(50), nullable=True)
     ssh_port = db.Column(db.Integer, default=22)
     # receiving logs
+    api_host = db.Column(db.String(256), nullable=True)
     api_key = db.Column(db.String(64), nullable=True)
     api_port = db.Column(db.Integer, default=8999)
     status = db.Column(db.String(15), nullable=False)
@@ -22,13 +23,14 @@ class Frame(db.Model):
             'ssh_user': self.ssh_user,
             'ssh_pass': self.ssh_pass,
             'ssh_port': self.ssh_port,
+            'api_host': self.api_host,
             'api_key': self.api_key,
             'api_port': self.api_port,
             'status': self.status,
             'version': self.version,
         }
 
-def new_frame(user_host: str) -> Frame:
+def new_frame(user_host: str, api_host: str) -> Frame:
     if '@' in user_host:
         user_pass, host = user_host.split('@')
     else:
@@ -42,8 +44,13 @@ def new_frame(user_host: str) -> Frame:
     if password is None and user == 'pi':
         password = 'raspberry'
 
+    if ':' in api_host:
+        api_host, api_port = user_pass.split(':')
+    else:
+        api_port = 8999
+
     api_key = secrets.token_hex(32)
-    frame = Frame(ssh_user=user, ssh_pass=password, host=host, api_port=8999, api_key=api_key, status="uninitialized")
+    frame = Frame(ssh_user=user, ssh_pass=password, host=host, api_host=api_host, api_port=int(api_port), api_key=api_key, status="uninitialized")
     db.session.add(frame)
     db.session.commit()
     socketio.emit('new_frame', frame.to_dict())
