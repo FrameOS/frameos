@@ -45,7 +45,7 @@ def new_frame(user_host: str, api_host: str) -> Frame:
         password = 'raspberry'
 
     if ':' in api_host:
-        api_host, api_port = user_pass.split(':')
+        api_host, api_port = api_host.split(':')
     else:
         api_port = 8999
 

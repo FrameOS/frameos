@@ -40,7 +40,8 @@ def initialize_frame(id: int):
 @app.route("/api/frames/new", methods=["POST"])
 def new_frame():
     host = request.form['host']
-    frame = models.new_frame(host)
+    api_host = request.form['api_host']
+    frame = models.new_frame(host, api_host)
     return jsonify(frame=frame.to_dict())
 
 @app.route('/images/<path:filename>')
