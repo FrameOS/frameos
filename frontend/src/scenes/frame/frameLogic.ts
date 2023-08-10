@@ -1,9 +1,8 @@
 import { actions, afterMount, beforeUnmount, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
 import type { frameLogicType } from './frameLogicType'
-import { FrameType, LogType } from '~/types'
+import { FrameType, LogType } from '../../types'
 import { loaders } from 'kea-loaders'
-import { connect } from 'socket.io-client'
 import { socketLogic } from '../socketLogic'
 import { forms } from 'kea-forms'
 
@@ -16,7 +15,7 @@ export const frameLogic = kea<frameLogicType>([
   props({} as FrameLogicProps),
   key((props) => props.id),
 
-  actions({ initialize: true, reset: true }),
+  actions({ initialize: true, reset: true, updateImage: true }),
   loaders(({ props }) => ({
     frame: [
       null as FrameType | null,
@@ -59,25 +58,46 @@ export const frameLogic = kea<frameLogicType>([
     logs: {
       [socketLogic.actionTypes.newLog]: (state, { log }) => (log.frame_id === props.id ? [...state, log] : state),
     },
-    frame: {
-      [socketLogic.actionTypes.newFrame]: (state, { frame }) => (frame.id === props.id ? frame : state),
-      [socketLogic.actionTypes.updateFrame]: (state, { frame }) => (frame.id === props.id ? frame : state),
-    },
+    frame: [
+      null as FrameType | null,
+      {
+        [socketLogic.actionTypes.newFrame]: (state, { frame }) => (frame.id === props.id ? frame : state),
+        [socketLogic.actionTypes.updateFrame]: (state, { frame }) => (frame.id === props.id ? frame : state),
+      },
+    ],
+    frameImageCounter: [
+      0,
+      {
+        updateImage: (state) => state + 1,
+      },
+    ],
   })),
-  selectors({
+  selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
-  }),
-  listeners(({ props }) => ({
+    frameImage: [
+      (s) => [(_, props) => props.id, s.frameImageCounter],
+      (id, counter) => {
+        return `/api/frames/${id}/image?t=${new Date().valueOf() + counter}`
+      },
+    ],
+  })),
+  listeners(({ props, actions }) => ({
     initialize: async () => {
       await fetch(`/api/frames/${props.id}/initialize`, { method: 'POST' })
     },
     reset: async () => {
       await fetch(`/api/frames/${props.id}/reset`, { method: 'POST' })
     },
+    [socketLogic.actionTypes.newLog]: ({ log }) => {
+      console.log('new log', log)
+      if (log.line.match('Image updated')) {
+        actions.updateImage()
+      }
+    },
   })),
   forms(({ actions, values }) => ({
     frame: {
-      defaults: {} as FrameType,
+      defaults: null as FrameType | null,
       submit: async () => {
         actions.initialize()
       },

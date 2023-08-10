@@ -13,7 +13,7 @@ export function Frame({ frame }: FrameProps): JSX.Element {
   return (
     <Box id={`frame-${frame.id}`}>
       <A href={`/frames/${frame.id}`}>
-        <img className="rounded-t-lg" src={`/images/image${(frame.id % 20) + 1}.jpg`} alt="" />
+        <img className="rounded-t-lg" src={`/api/frames/${frame.id}/image`} alt="" />
       </A>
       <div className="flex justify-between px-4 pt-4 mb-2">
         <H5 className="text-ellipsis overflow-hidden">

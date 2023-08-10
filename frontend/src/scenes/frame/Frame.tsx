@@ -20,7 +20,7 @@ export function Frame(props: FrameSceneProps) {
       <div className="space-y-4">
         <H1>
           <A href="/">FrameOS</A> <span className="text-gray-400">&raquo;</span>{' '}
-          {frameLoading ? '...' : frameHost(frame)}
+          {frameLoading || !frame ? '...' : frameHost(frame)}
         </H1>
         {frame ? (
           <>

@@ -9,3 +9,4 @@ honcho
 redis
 paramiko
 scp
+requests

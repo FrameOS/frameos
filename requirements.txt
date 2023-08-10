@@ -12,10 +12,14 @@ bidict==0.22.1
     # via python-socketio
 blinker==1.6.2
     # via flask
+certifi==2023.7.22
+    # via requests
 cffi==1.15.1
     # via
     #   cryptography
     #   pynacl
+charset-normalizer==3.2.0
+    # via requests
 click==8.1.6
     # via flask
 cryptography==41.0.3
@@ -43,6 +47,8 @@ honcho==1.1.0
     # via -r requirements.in
 huey==2.4.5
     # via -r requirements.in
+idna==3.4
+    # via requests
 importlib-metadata==6.8.0
     # via flask
 itsdangerous==2.1.2
@@ -67,6 +73,8 @@ python-socketio==5.8.0
     # via flask-socketio
 redis==4.6.0
     # via -r requirements.in
+requests==2.31.0
+    # via -r requirements.in
 scp==0.14.5
     # via -r requirements.in
 sqlalchemy==2.0.19
@@ -75,6 +83,8 @@ sqlalchemy==2.0.19
     #   flask-sqlalchemy
 typing-extensions==4.7.1
     # via sqlalchemy
+urllib3==2.0.4
+    # via requests
 werkzeug==2.3.6
     # via flask
 zipp==3.16.2
