@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flask App</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+
+<h2>Image Display</h2>
+<img id="displayedImage" src="/image" alt="Displayed Image">
+<br/>
+<button id="refreshButton">Refresh Image</button>
+
+<h2>Logs</h2>
+<pre id="logs"></pre>
+
+<script>
+    var socket = io.connect('http://' + document.domain + ':' + location.port);
+
+    socket.on('connect', function() {
+        console.log('Connected to the WebSocket');
+    });
+
+    socket.on('log_updated', function(data) {
+        $('#logs').text(data.data + "\n" + $('#logs').text());
+    });
+
+    socket.on('image_updated', function(data) {
+        $('#displayedImage').attr('src', '/image?' + new Date().getTime()); // Cache-busting
+    });
+
+    $('#refreshButton').click(function() {
+        $.get("/button-press", function(data) {
+            console.log(data);
+        });
+    });
+</script>
+
+</body>
+</html>

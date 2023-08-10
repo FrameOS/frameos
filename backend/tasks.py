@@ -122,10 +122,15 @@ def initialize_frame(id: int):
             with SCPClient(ssh.get_transport()) as scp:
                 log(id, "stdout", "> add /srv/frameos/frame.json")
                 scp.putfo(StringIO(json.dumps(frame_json, indent=4) + "\n"), "/srv/frameos/frame.json")
+                
                 log(id, "stdout", "> add /srv/frameos/frame.py")
-                scp.put("../device/frame.py", "/srv/frameos/frame.py")
+                scp.put("./device/frame.py", "/srv/frameos/frame.py")
+                
+                log(id, "stdout", "> add /srv/frameos/index.html")
+                scp.put("./device/index.html", "/srv/frameos/index.html")
+                
                 log(id, "stdout", "> add /srv/frameos/requirements.txt")
-                scp.put("../device/requirements.txt", "/srv/frameos/requirements.txt")
+                scp.put("./device/requirements.txt", "/srv/frameos/requirements.txt")
 
             exec_command("cd /srv/frameos && (sha256sum -c requirements.txt.sha256sum 2>/dev/null || (pip3 install -r requirements.txt && sha256sum requirements.txt > requirements.txt.sha256sum))")
 
