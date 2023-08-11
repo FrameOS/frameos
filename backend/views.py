@@ -37,6 +37,16 @@ def get_image(id: int):
     else:
         return jsonify({"error": "Unable to fetch image"}), response.status_code
 
+@app.route('/api/frames/<int:id>/refresh', methods=['POST'])
+def refresh_frame(id: int):
+    frame = models.Frame.query.get_or_404(id)
+    response = requests.get(f'http://{frame.host}:8999/refresh')
+        
+    if response.status_code == 200:
+        return "OK", 200
+    else:
+        return jsonify({"error": "Unable to refresh frame"}), response.status_code
+
 @app.route('/api/frames/<int:id>/reset', methods=['POST'])
 def reset_frame(id: int):
     tasks.reset_frame(id)

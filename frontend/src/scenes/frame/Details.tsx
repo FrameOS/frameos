@@ -14,11 +14,12 @@ export interface DetailsProps {
 
 export function Details({ className }: DetailsProps) {
   const { frame, frameLoading } = useValues(frameLogic)
+  const { refresh } = useActions(frameLogic)
 
   return (
     <Box className={clsx('p-4 space-y-4', className)}>
       <H6>Details</H6>
-      {frameLoading ? (
+      {frameLoading || !frame ? (
         '...'
       ) : (
         <>
@@ -69,7 +70,12 @@ export function Details({ className }: DetailsProps) {
                 </tr>
               </tbody>
             </table>
-            <Button type="submit">Redeploy</Button>
+            <div className="flex space-x-2">
+              <Button type="submit">Redeploy</Button>
+              <Button type="button" onClick={refresh}>
+                Refresh
+              </Button>
+            </div>
           </Form>
         </>
       )}
