@@ -12,7 +12,7 @@ from PIL import Image
 
 from flask import Flask, send_file
 from flask_socketio import SocketIO, emit
-
+from typing import Optional
 from threading import Lock, Thread, Event
 
 class Config:
@@ -30,11 +30,14 @@ class Config:
     def get(self, key, default=None):
         return self._data.get(key, default)
 
-class LogHandler:
-    def __init__(self, config: Config, limit: int, socketio: SocketIO):
+class Logger:
+    def __init__(self, config: Config, limit: int, socketio: Optional[SocketIO] = None):
         self.config = config
         self.logs: list = []
         self.limit = limit
+        self.socketio = socketio
+
+    def set_socketio(self, socketio: SocketIO):
         self.socketio = socketio
 
     def webhook_log_request(self, message):
@@ -59,7 +62,8 @@ class LogHandler:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         log_message = f'{timestamp}: {log}'
         self.logs.append(log_message)
-        self.socketio.emit('log_updated', {'data': log_message})
+        if self.socketio:
+            self.socketio.emit('log_updated', {'data': log_message})
         self.async_log_request(log_message)
         if len(self.logs) > self.limit:
             self.logs.pop(0)
@@ -75,7 +79,7 @@ class LogHandler:
 
 
 class ImageHandler:
-    def __init__(self, logger: LogHandler, socketio: SocketIO):
+    def __init__(self, logger: Logger, socketio: SocketIO):
         self.inky = auto(ask_user=True, verbose=True)
         self.logger = logger
         self.socketio = socketio
@@ -120,7 +124,7 @@ class ImageHandler:
         self.socketio.start_background_task(target=do_update)
 
 class ButtonHandler:
-    def __init__(self, logger: LogHandler, buttons: list, labels: list, image_handler: ImageHandler):
+    def __init__(self, logger: Logger, buttons: list, labels: list, image_handler: ImageHandler):
         self.logger = logger
         self.buttons = buttons
         self.labels = labels
@@ -151,13 +155,14 @@ class Scheduler:
 
 
 class Server:
-    def __init__(self):
-        self.config: Config = Config()
+    def __init__(self, config: Config, logger: Logger):
+        self.config = config
+        self.logger = logger
+
         self.app: Flask = Flask(__name__)
         self.app.config['SECRET_KEY'] = 'secret!'
         self.socketio: SocketIO = SocketIO(self.app, async_mode='threading')
-        self.logger: LogHandler = LogHandler(self.config, 100, socketio=self.socketio)
-
+        self.logger.set_socketio(self.socketio)
         self.logger.add(f"Starting FrameOS")
         self.image_handler: ImageHandler = ImageHandler(self.logger, self.socketio)
 
@@ -198,9 +203,10 @@ class Server:
 
 
 if __name__ == '__main__':
-    server = Server()
+    config = Config()
+    logger = Logger(config=config, limit=100)
     try:
+        server = Server(config=config, logger=logger)
         server.run()
     except Exception as e:
-        server.logger.add(traceback.format_exc())
-        print(traceback.format_exc())
+        logger.add(traceback.format_exc())
