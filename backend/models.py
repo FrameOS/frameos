@@ -83,8 +83,13 @@ def new_log(frame_id: int, type: str, line: str) -> Log:
     log = Log(frame_id=frame_id, type=type, line=line)
     db.session.add(log)
     db.session.commit()
-    if Log.query.count() > 1100:
-        oldest_logs = Log.query.order_by(Log.timestamp).limit(100).all()  
+    frame_logs_count = Log.query.filter_by(frame_id=frame_id).count()
+    if frame_logs_count > 1100:
+        oldest_logs = (Log.query
+                       .filter_by(frame_id=frame_id)
+                       .order_by(Log.timestamp)
+                       .limit(100)
+                       .all())
         for old_log in oldest_logs:
             db.session.delete(old_log)        
         db.session.commit()
