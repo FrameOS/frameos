@@ -78,6 +78,16 @@ def api_log():
     data = request.json
     log = data.get('log', None)
     if log is not None:
+        event = log.get('event', 'log')
         models.new_log(frame.id, "webhook", json.dumps(log))
+        if event == 'refresh_image':
+            frame.status = 'updating'
+            models.update_frame(frame)
+        if event == 'refresh_begin':
+            frame.status = 'refreshing'
+            models.update_frame(frame)
+        if event == 'refresh_end' or event == 'refresh_skip_no_change':
+            frame.status = 'initialized'
+            models.update_frame(frame)
 
     return 'OK', 200
