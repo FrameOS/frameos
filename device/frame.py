@@ -12,7 +12,7 @@ from PIL import Image
 
 from flask import Flask, send_file
 from flask_socketio import SocketIO, emit
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from threading import Lock, Thread, Event
 
 class Config:
@@ -33,14 +33,14 @@ class Config:
 class Logger:
     def __init__(self, config: Config, limit: int, socketio: Optional[SocketIO] = None):
         self.config = config
-        self.logs: list = []
+        self.logs: List[Dict[str, Any]] = []
         self.limit = limit
         self.socketio = socketio
 
     def set_socketio(self, socketio: SocketIO):
         self.socketio = socketio
 
-    def webhook_log_request(self, message):
+    def webhook_log_request(self, payload: Dict[str, Any]):
         if not self.config:
             return
         protocol = 'https' if self.config.get('api_port') in [443, 8443] else 'http'
@@ -49,33 +49,31 @@ class Logger:
             "Authorization": f"Bearer {self.config.get('api_key')}",
             "Content-Type": "application/json"
         }
-        data = {"message": message}
         try:
-            response = requests.post(url, headers=headers, json=data)
+            response = requests.post(url, headers=headers, json={"log": payload})
             response.raise_for_status()
         except requests.HTTPError as e:
             logging.error(f"Error sending log (HTTP {response.status_code}): {e}")
         except Exception as e:
             logging.error(f"Error sending log: {e}")
 
-    def add(self, log):
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        log_message = f'{timestamp}: {log}'
-        self.logs.append(log_message)
+    def log(self, payload: Dict[str, Any]):
+        payload = {'timestamp': datetime.now().isoformat(), **payload}
+        self.logs.append(json.dumps(payload))
         if self.socketio:
-            self.socketio.emit('log_updated', {'data': log_message})
-        self.async_log_request(log_message)
+            self.socketio.emit('log_event', {'log': payload})
+        self.async_log_request(payload)
         if len(self.logs) > self.limit:
             self.logs.pop(0)
 
     def get(self):
         return "\n".join(self.logs[::-1])
 
-    def async_log_request(self, message):
+    def async_log_request(self, payload: Dict[str, Any]):
         """
-        Send a log message to the specified API endpoint in a non-blocking manner.
+        Send a log payload to the specified API endpoint in a non-blocking manner.
         """
-        Thread(target=self.webhook_log_request, args=(message,)).start()
+        Thread(target=self.webhook_log_request, args=(payload,)).start()
 
 
 class ImageHandler:
@@ -89,35 +87,42 @@ class ImageHandler:
         self.image_update_lock: Lock = Lock()
         self.image_update_in_progress: bool = False
 
-        logger.add(f"Frame resolution: {self.inky.resolution[0]}x{self.inky.resolution[1]}")
-        logger.add(f"Image URL: {self.image_url}")
+        logger.log({ 'event': 'frame_info', "device": 'inky', 'width': self.inky.resolution[0], 'height': self.inky.resolution[1] })
 
     def download_url(self, url: str):
         response = requests.get(url)
-        return response.content
+        if response.history:
+            last_url = response.history[-1].url
+        else:
+            last_url = url
+        return response.content, last_url
 
     def slow_update_image_on_frame(self, content):
         image = Image.open(io.BytesIO(content))
         self.inky.set_image(image, saturation=1)
         self.inky.show()
 
-    def refresh_image(self, reason: str):
+    def refresh_image(self, source: str):
         if not self.image_update_lock.acquire(blocking=False):
-            self.logger.add(f"Update already in progress, ignoring request from {reason}")
+            self.logger.log({
+                'event': 'image_refresh_ignored_already_in_progress', 
+                'source': source,
+            })
             return
 
         def do_update():
             try:
                 self.image_update_in_progress = True
-                self.logger.add(f"Updating image: {reason}")
-                self.next_image = self.download_url(self.image_url)
-                self.logger.add(f"Downloaded: {self.image_url}")
+                self.logger.log({ 'event': 'refresh_image', 'source': source })
+                self.logger.log({ 'event': 'image_download', 'image_url': self.image_url })
+                self.next_image, last_url = self.download_url(self.image_url)
+                self.logger.log({ 'event': 'image_downloaded', 'image_url': last_url })
                 if self.current_image is None or hashlib.sha256(self.next_image).digest() != hashlib.sha256(self.current_image).digest():
                     self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
                     self.slow_update_image_on_frame(self.next_image)
                     self.current_image = self.next_image
                     self.next_image = None
-                    self.logger.add(f"Image updated") 
+                    self.logger.log({ 'event': 'image_refreshed' })
             finally:
                 self.image_update_in_progress = False
                 self.image_update_lock.release() 
@@ -136,20 +141,24 @@ class ButtonHandler:
 
     def handle_button(self, pin):
         label = self.labels[self.buttons.index(pin)]
-        self.logger.add(f"Button {label} pressed")  # Fixed logger reference
+        self.logger.log({ 'event': 'button press', 'label': label, 'pin': pin })
         if label == 'A':
             self.image_handler.refresh_image('button press')
 
 class Scheduler:
-    def __init__(self, image_handler: ImageHandler, reset_event: Event):
+    def __init__(self, image_handler: ImageHandler, reset_event: Event, logger: Logger, interval: int):
+        self.logger = logger
+        self.interval = interval
         self.image_handler = image_handler
-        self.reset_event: Event = reset_event
+        self.reset_event = reset_event
         self.schedule_thread: Thread = Thread(target=self.update_image_on_schedule)
+
+        logger.log({ 'event': 'schedule_info', 'image_url': self.image_handler.image_url, 'interval': self.interval })
         self.schedule_thread.start()
 
     def update_image_on_schedule(self):
         while True:
-            self.reset_event.wait(5 * 60)  # using the instance's reset_event
+            self.reset_event.wait(self.interval)  # using the instance's reset_event
             self.image_handler.refresh_image('schedule')
             self.reset_event.clear()  # using the instance's reset_event
 
@@ -163,7 +172,7 @@ class Server:
         self.app.config['SECRET_KEY'] = 'secret!'
         self.socketio: SocketIO = SocketIO(self.app, async_mode='threading')
         self.logger.set_socketio(self.socketio)
-        self.logger.add(f"Starting FrameOS")
+        self.logger.log({ 'event': 'startup' })
         self.image_handler: ImageHandler = ImageHandler(self.logger, self.socketio)
 
         @self.app.route('/')
@@ -187,7 +196,7 @@ class Server:
 
         @self.app.route('/refresh')
         def refresh():
-            self.image_handler.refresh_image('http call')
+            self.image_handler.refresh_image('http trigger')
             return "OK"
 
         @self.socketio.on('connect')
@@ -197,7 +206,7 @@ class Server:
     def run(self):
         button_handler: ButtonHandler = ButtonHandler(self.logger, [5, 6, 16, 24], ['A', 'B', 'C', 'D'], self.image_handler)
         reset_event: Event = Event()
-        scheduler: Scheduler = Scheduler(self.image_handler, reset_event)
+        scheduler: Scheduler = Scheduler(image_handler=self.image_handler, reset_event=reset_event, logger=self.logger, interval=300)
         self.image_handler.refresh_image('bootup')
         self.socketio.run(self.app, host='0.0.0.0', port=8999)
 
@@ -209,4 +218,5 @@ if __name__ == '__main__':
         server = Server(config=config, logger=logger)
         server.run()
     except Exception as e:
-        logger.add(traceback.format_exc())
+        logger.log({ 'error': traceback.format_exc() })
+        print(traceback.format_exc())

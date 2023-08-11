@@ -1,6 +1,7 @@
 from flask import jsonify, request, send_from_directory, Response
 from . import app, db, tasks, models, socketio
 import requests
+import json
 
 @app.errorhandler(404)
 def not_found(e):
@@ -75,7 +76,10 @@ def api_log():
     frame = models.Frame.query.filter_by(api_key=api_key).first_or_404()
 
     data = request.json
-    message = str(data.get('message', ''))
-    models.new_log(frame.id, "webhook", message)
+    log = data.get('log', None)
+    if log is not None:
+        log.pop('timestamp', None)
+        event = log.pop('event', 'log')
+        models.new_log(frame.id, "webhook", f"[{event}]: {json.dumps(log)}")
 
     return 'OK', 200
