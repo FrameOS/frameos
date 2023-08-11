@@ -83,5 +83,11 @@ def new_log(frame_id: int, type: str, line: str) -> Log:
     log = Log(frame_id=frame_id, type=type, line=line)
     db.session.add(log)
     db.session.commit()
+    if Log.query.count() > 1100:
+        oldest_logs = Log.query.order_by(Log.timestamp).limit(100).all()  
+        for old_log in oldest_logs:
+            db.session.delete(old_log)        
+        db.session.commit()
+
     socketio.emit('new_log', {**log.to_dict(), 'timestamp': str(log.timestamp)})
     return log
