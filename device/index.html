@@ -24,15 +24,27 @@
         console.log('Connected to the WebSocket');
     });
 
-    socket.on('log_updated', function(data) {
-        if (data.data.includes('Image updated') || data.data.includes('Downloaded')) {
-            $('#displayedImage').attr('src', '/image?' + new Date().getTime()); 
+    function addLog(log) {
+        const { timestamp, event, ...rest } = log
+        $('#logs').text(`${timestamp} [${event}] ${JSON.stringify(rest)}\n${$('#logs').text()}`);            
+    }
+
+    socket.on('log_event', function(data) {
+        if (data.log) {
+            if (data.log.event == 'refresh_begin' || data.log.event == 'refresh_end') {
+                $('#displayedImage').attr('src', '/image?' + new Date().getTime()); 
+            }
+            addLog(data.log)
+        } else {
+            for (let log of data.logs) {
+                addLog(log)
+            }
         }
-        $('#logs').text(data.data + "\n" + $('#logs').text());
     });
 
     $('#refreshButton').click(function() {
         $.get("/refresh", function(data) {
+            const { timestamp, event, ...rest } = data
             console.log(data);
         });
     });

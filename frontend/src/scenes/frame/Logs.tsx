@@ -28,18 +28,40 @@ export function Logs() {
           ref={setScrollDivRef}
           style={{ maxHeight: '500px' }}
         >
-          {logs.map((log) => (
-            <div
-              key={log.id}
-              className={clsx('flex sm:flex-row flex-col', {
-                'text-yellow-300': log.type === 'stdinfo',
-                'text-red-300': log.type === 'stderr',
-              })}
-            >
-              <span className="flex-0 mr-2 text-yellow-900">{log.timestamp.replace('T', ' ')}</span>
-              <span className="flex-1">{log.line}</span>
-            </div>
-          ))}
+          {logs.map((log) => {
+            let logLine: string | JSX.Element = String(log.line)
+            if (log.type === 'webhook') {
+              try {
+                const { event, timestamp, ...rest } = JSON.parse(log.line)
+                logLine = (
+                  <>
+                    <span className="text-yellow-600 mr-2">[{event}]</span>
+                    {Object.entries(rest).map(([key, value]) => (
+                      <span key={key} className="mr-2">
+                        <span className="text-gray-400">{key}=</span>
+                        <span>{JSON.stringify(value)}</span>
+                      </span>
+                    ))}
+                  </>
+                )
+              } catch (e) {
+                console.error(e)
+              }
+            }
+
+            return (
+              <div
+                key={log.id}
+                className={clsx('flex sm:flex-row flex-col', {
+                  'text-yellow-300': log.type === 'stdinfo',
+                  'text-red-300': log.type === 'stderr',
+                })}
+              >
+                <span className="flex-0 mr-2 text-yellow-900">{log.timestamp.replace('T', ' ')}</span>
+                <span className="flex-1">{logLine}</span>
+              </div>
+            )
+          })}
         </div>
       )}
     </Box>

@@ -89,9 +89,11 @@ export const frameLogic = kea<frameLogicType>([
       await fetch(`/api/frames/${props.id}/refresh`, { method: 'POST' })
     },
     [socketLogic.actionTypes.newLog]: ({ log }) => {
-      console.log('new log', log)
-      if (log.line.match('Image updated') || log.line.match('Downloaded')) {
-        actions.updateImage()
+      if (log.type === 'webhook') {
+        const parsed = JSON.parse(log.line)
+        if (parsed.event == 'refresh_begin' || parsed.event == 'refresh_end') {
+          actions.updateImage()
+        }
       }
     },
   })),

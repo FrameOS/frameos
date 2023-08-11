@@ -59,7 +59,7 @@ class Logger:
 
     def log(self, payload: Dict[str, Any]):
         payload = {'timestamp': datetime.now().isoformat(), **payload}
-        self.logs.append(json.dumps(payload))
+        self.logs.append(payload)
         if self.socketio:
             self.socketio.emit('log_event', {'log': payload})
         self.async_log_request(payload)
@@ -67,7 +67,7 @@ class Logger:
             self.logs.pop(0)
 
     def get(self):
-        return "\n".join(self.logs[::-1])
+        return self.logs
 
     def async_log_request(self, payload: Dict[str, Any]):
         """
@@ -105,7 +105,7 @@ class ImageHandler:
     def refresh_image(self, source: str):
         if not self.image_update_lock.acquire(blocking=False):
             self.logger.log({
-                'event': 'image_refresh_ignored_already_in_progress', 
+                'event': 'refresh_ignored_already_in_progress', 
                 'source': source,
             })
             return
@@ -113,16 +113,17 @@ class ImageHandler:
         def do_update():
             try:
                 self.image_update_in_progress = True
-                self.logger.log({ 'event': 'refresh_image', 'source': source })
-                self.logger.log({ 'event': 'image_download', 'image_url': self.image_url })
+                self.logger.log({ 'event': 'refresh_image', 'source': source, 'image_url': self.image_url })
                 self.next_image, last_url = self.download_url(self.image_url)
-                self.logger.log({ 'event': 'image_downloaded', 'image_url': last_url })
                 if self.current_image is None or hashlib.sha256(self.next_image).digest() != hashlib.sha256(self.current_image).digest():
+                    self.logger.log({ 'event': 'refresh_begin' })
                     self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
                     self.slow_update_image_on_frame(self.next_image)
                     self.current_image = self.next_image
                     self.next_image = None
-                    self.logger.log({ 'event': 'image_refreshed' })
+                    self.logger.log({ 'event': 'refresh_end' })
+                else:
+                    self.logger.log({ 'event': 'refresh_skip_no_change' })
             finally:
                 self.image_update_in_progress = False
                 self.image_update_lock.release() 
@@ -201,7 +202,7 @@ class Server:
 
         @self.socketio.on('connect')
         def test_connect():
-            emit('log_updated', {'data': self.logger.get()})
+            emit('log_event', {'logs': self.logger.get()})
 
     def run(self):
         button_handler: ButtonHandler = ButtonHandler(self.logger, [5, 6, 16, 24], ['A', 'B', 'C', 'D'], self.image_handler)

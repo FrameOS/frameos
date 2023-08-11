@@ -78,8 +78,6 @@ def api_log():
     data = request.json
     log = data.get('log', None)
     if log is not None:
-        log.pop('timestamp', None)
-        event = log.pop('event', 'log')
-        models.new_log(frame.id, "webhook", f"[{event}]: {json.dumps(log)}")
+        models.new_log(frame.id, "webhook", json.dumps(log))
 
     return 'OK', 200
