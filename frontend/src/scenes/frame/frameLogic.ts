@@ -90,7 +90,7 @@ export const frameLogic = kea<frameLogicType>([
     },
     [socketLogic.actionTypes.newLog]: ({ log }) => {
       console.log('new log', log)
-      if (log.line.match('Image updated')) {
+      if (log.line.match('Image updated') || log.line.match('Downloaded')) {
         actions.updateImage()
       }
     },

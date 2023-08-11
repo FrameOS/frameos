@@ -25,11 +25,10 @@
     });
 
     socket.on('log_updated', function(data) {
+        if (data.data.includes('Image updated') || data.data.includes('Downloaded')) {
+            $('#displayedImage').attr('src', '/image?' + new Date().getTime()); 
+        }
         $('#logs').text(data.data + "\n" + $('#logs').text());
-    });
-
-    socket.on('image_updated', function(data) {
-        $('#displayedImage').attr('src', '/image?' + new Date().getTime()); // Cache-busting
     });
 
     $('#refreshButton').click(function() {

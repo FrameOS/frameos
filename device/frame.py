@@ -2,54 +2,64 @@ import io
 import json
 import requests
 import hashlib
+import logging
 import RPi.GPIO as GPIO
-from flask import Flask, send_file
-from flask_socketio import SocketIO, emit
-from threading import Lock, Thread, Event
+import traceback
+
 from datetime import datetime
 from inky.auto import auto
 from PIL import Image
 
-app: Flask = Flask(__name__)
-app.config['SECRET_KEY'] = 'secret!'
-socketio: SocketIO = SocketIO(app, async_mode='threading')
+from flask import Flask, send_file
+from flask_socketio import SocketIO, emit
 
+from threading import Lock, Thread, Event
 
-def load_config(filename: str = 'frame.json') -> dict:
-    try:
-        with open(filename, 'r') as file:
-            return json.load(file)
-    except Exception as e:
-        print(f"Error loading configuration: {e}")
-        return {}
+class Config:
+    def __init__(self, filename='frame.json'):
+        self._data = self._load(filename)
 
+    def _load(self, filename):
+        try:
+            with open(filename, 'r') as file:
+                return json.load(file)
+        except Exception as e:
+            logging.error(f"Error loading configuration: {e}")
+            return {}
+
+    def get(self, key, default=None):
+        return self._data.get(key, default)
 
 class LogHandler:
-    def __init__(self, config: dict, limit: int):
+    def __init__(self, config: Config, limit: int, socketio: SocketIO):
         self.config = config
         self.logs: list = []
         self.limit = limit
+        self.socketio = socketio
 
     def webhook_log_request(self, message):
-        if self.config is None:
+        if not self.config:
             return
-        protocol = 'https' if self.config['api_port'] in [443, 8443] else 'http'
-        url = f"{protocol}://{self.config['api_host']}:{self.config['api_port']}/api/log"
+        protocol = 'https' if self.config.get('api_port') in [443, 8443] else 'http'
+        url = f"{protocol}://{self.config.get('api_host')}:{self.config.get('api_port')}/api/log"
         headers = {
-            "Authorization": f"Bearer {self.config['api_key']}",
+            "Authorization": f"Bearer {self.config.get('api_key')}",
             "Content-Type": "application/json"
         }
         data = {"message": message}
         try:
-            requests.post(url, headers=headers, json=data)
+            response = requests.post(url, headers=headers, json=data)
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            logging.error(f"Error sending log (HTTP {response.status_code}): {e}")
         except Exception as e:
-            print(f"Error sending log: {e}")
+            logging.error(f"Error sending log: {e}")
 
     def add(self, log):
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         log_message = f'{timestamp}: {log}'
         self.logs.append(log_message)
-        socketio.emit('log_updated', {'data': log_message})
+        self.socketio.emit('log_updated', {'data': log_message})
         self.async_log_request(log_message)
         if len(self.logs) > self.limit:
             self.logs.pop(0)
@@ -65,15 +75,20 @@ class LogHandler:
 
 
 class ImageHandler:
-    def __init__(self, inky, logger: LogHandler):
-        self.inky = inky
+    def __init__(self, logger: LogHandler, socketio: SocketIO):
+        self.inky = auto(ask_user=True, verbose=True)
         self.logger = logger
-        self.image_url: str = f"https://source.unsplash.com/random/{inky.resolution[0]}x{inky.resolution[1]}/?bird"
+        self.socketio = socketio
+        self.image_url: str = f"https://source.unsplash.com/random/{self.inky.resolution[0]}x{self.inky.resolution[1]}/?bird"
         self.current_image: bytes = None
+        self.next_image: bytes = None
         self.image_update_lock: Lock = Lock()
         self.image_update_in_progress: bool = False
 
-    def download_url(self, url):
+        logger.add(f"Frame resolution: {self.inky.resolution[0]}x{self.inky.resolution[1]}")
+        logger.add(f"Image URL: {self.image_url}")
+
+    def download_url(self, url: str):
         response = requests.get(url)
         return response.content
 
@@ -82,26 +97,27 @@ class ImageHandler:
         self.inky.set_image(image, saturation=1)
         self.inky.show()
 
-    def refresh_image(self, reason):
+    def refresh_image(self, reason: str):
         if not self.image_update_lock.acquire(blocking=False):
             self.logger.add(f"Update already in progress, ignoring request from {reason}")
             return
-        self.logger.add(f"Updating image via {reason}")
 
         def do_update():
             try:
                 self.image_update_in_progress = True
-                new_image = self.download_url(self.image_url)
-                if self.current_image is None or hashlib.sha256(new_image).digest() != hashlib.sha256(self.current_image).digest():
-                    socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
-                    self.slow_update_image_on_frame(new_image)
-                    self.current_image = new_image
+                self.logger.add(f"Updating image: {reason}")
+                self.next_image = self.download_url(self.image_url)
+                self.logger.add(f"Downloaded: {self.image_url}")
+                if self.current_image is None or hashlib.sha256(self.next_image).digest() != hashlib.sha256(self.current_image).digest():
+                    self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
+                    self.slow_update_image_on_frame(self.next_image)
+                    self.current_image = self.next_image
+                    self.next_image = None
                     self.logger.add(f"Image updated") 
-                    socketio.emit('image_updated', {'data': 'Image updated'})
             finally:
                 self.image_update_in_progress = False
                 self.image_update_lock.release() 
-        socketio.start_background_task(target=do_update)
+        self.socketio.start_background_task(target=do_update)
 
 class ButtonHandler:
     def __init__(self, logger: LogHandler, buttons: list, labels: list, image_handler: ImageHandler):
@@ -135,13 +151,15 @@ class Scheduler:
 
 
 class Server:
-    image_handler: ImageHandler
+    def __init__(self):
+        self.config: Config = Config()
+        self.app: Flask = Flask(__name__)
+        self.app.config['SECRET_KEY'] = 'secret!'
+        self.socketio: SocketIO = SocketIO(self.app, async_mode='threading')
+        self.logger: LogHandler = LogHandler(self.config, 100, socketio=self.socketio)
 
-    def __init__(self, app: Flask, socketio: SocketIO, logger: LogHandler, image_handler: ImageHandler):
-        self.app = app
-        self.socketio = socketio
-        self.logger = logger
-        self.image_handler = image_handler
+        self.logger.add(f"Starting FrameOS")
+        self.image_handler: ImageHandler = ImageHandler(self.logger, self.socketio)
 
         @self.app.route('/')
         def index():
@@ -151,15 +169,16 @@ class Server:
 
         @self.app.route('/image')
         def image():
-            if self.image_handler.current_image is None:
+            image = self.image_handler.next_image or self.image_handler.current_image
+            if image is None:
                 return "No image"
-            img_io = io.BytesIO(self.image_handler.current_image)
+            img_io = io.BytesIO(image)
             img_io.seek(0)
             return send_file(img_io, mimetype='image/jpeg')
 
         @self.app.route('/logs')
         def logs():
-            return logger.get()
+            return self.logger.get()
 
         @self.app.route('/refresh')
         def refresh():
@@ -168,25 +187,20 @@ class Server:
 
         @self.socketio.on('connect')
         def test_connect():
-            emit('log_updated', {'data': logger.get()})
+            emit('log_updated', {'data': self.logger.get()})
 
     def run(self):
+        button_handler: ButtonHandler = ButtonHandler(self.logger, [5, 6, 16, 24], ['A', 'B', 'C', 'D'], self.image_handler)
+        reset_event: Event = Event()
+        scheduler: Scheduler = Scheduler(self.image_handler, reset_event)
+        self.image_handler.refresh_image('bootup')
         self.socketio.run(self.app, host='0.0.0.0', port=8999)
 
 
 if __name__ == '__main__':
-    config: dict = load_config()
-    logger: LogHandler = LogHandler(config, 100)
-    logger.add(f"Starting FrameOS")
-
-    inky = auto(ask_user=True, verbose=True)
-    logger.add(f"Frame resolution: {inky.resolution[0]}x{inky.resolution[1]}")
-
-    image_handler: ImageHandler = ImageHandler(inky, logger)
-    button_handler: ButtonHandler = ButtonHandler(logger, [5, 6, 16, 24], ['A', 'B', 'C', 'D'], image_handler)
-    reset_event: Event = Event()
-    scheduler: Scheduler = Scheduler(image_handler, reset_event)
-    server: Server = Server(app, socketio, logger, image_handler)
-
-    image_handler.refresh_image('bootup')
-    server.run()
+    server = Server()
+    try:
+        server.run()
+    except Exception as e:
+        server.logger.add(traceback.format_exc())
+        print(traceback.format_exc())
