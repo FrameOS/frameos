@@ -44,9 +44,7 @@ export function Logs() {
                     ))}
                   </>
                 )
-              } catch (e) {
-                console.error(e)
-              }
+              } catch (e) {}
             }
 
             return (

@@ -12,3 +12,19 @@
   padding: 1rem;
   text-align: left;
 }
+
+@keyframes fadeInOut {
+  0% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0.2;
+  }
+}
+
+.continuous-fade-in-out {
+  animation: fadeInOut 3s infinite ease-in-out;
+}
