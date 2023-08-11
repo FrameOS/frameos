@@ -38,7 +38,8 @@ export function Logs() {
                     <span className="text-yellow-600 mr-2">[{event}]</span>
                     {Object.entries(rest).map(([key, value]) => (
                       <span key={key} className="mr-2">
-                        <span className="text-gray-400">{key}=</span>
+                        <br />
+                        <span className="text-gray-400 ml-8">{key}=</span>
                         <span>{JSON.stringify(value)}</span>
                       </span>
                     ))}

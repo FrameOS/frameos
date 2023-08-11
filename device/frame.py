@@ -102,18 +102,18 @@ class ImageHandler:
         self.inky.set_image(image, saturation=1)
         self.inky.show()
 
-    def refresh_image(self, source: str):
+    def refresh_image(self, trigger: str):
         if not self.image_update_lock.acquire(blocking=False):
             self.logger.log({
                 'event': 'refresh_ignored_already_in_progress', 
-                'source': source,
+                'trigger': trigger,
             })
             return
 
         def do_update():
             try:
                 self.image_update_in_progress = True
-                self.logger.log({ 'event': 'refresh_image', 'source': source, 'image_url': self.image_url })
+                self.logger.log({ 'event': 'refresh_image', 'trigger': trigger, 'image_url': self.image_url })
                 self.next_image, last_url = self.download_url(self.image_url)
                 if self.current_image is None or hashlib.sha256(self.next_image).digest() != hashlib.sha256(self.current_image).digest():
                     self.logger.log({ 'event': 'refresh_begin' })
