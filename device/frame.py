@@ -159,9 +159,9 @@ class Scheduler:
 
     def update_image_on_schedule(self):
         while True:
-            self.reset_event.wait(self.interval)  # using the instance's reset_event
+            self.reset_event.wait(self.interval)  
             self.image_handler.refresh_image('schedule')
-            self.reset_event.clear()  # using the instance's reset_event
+            self.reset_event.clear()  
 
 
 class Server:
