@@ -22,14 +22,21 @@ jobs:
         run: |
           wget https://downloads.raspberrypi.org/raspios_lite_armhf/images/raspios_lite_armhf-2023-05-03/2023-05-03-raspios-bullseye-armhf-lite.img.xz
           unxz 2023-05-03-raspios-bullseye-armhf-lite.img.xz
-
+          qemu-img resize ./2023-05-03-raspios-bullseye-armhf-lite.img 2G
+      
+      - name: Download QEMU-compatible Raspberry Pi Kernel and dtb
+        run: |
+          mkdir ~/qemu_rpi_kernel
+          wget -O ~/qemu_rpi_kernel/kernel-qemu-5.10.63-bullseye https://github.com/dhruvvyas90/qemu-rpi-kernel/raw/master/kernel-qemu-5.10.63-bullseye
+          wget -O ~/qemu_rpi_kernel/versatile-pb.dtb https://github.com/dhruvvyas90/qemu-rpi-kernel/raw/master/versatile-pb-bullseye-5.10.63.dtb
+  
       - name: Start QEMU and Customize Image
         run: |
           echo '#!/usr/bin/expect -f
 
           set timeout 3600
 
-          spawn qemu-system-arm -M versatilepb -cpu arm1176 -m 256 -drive file=./2023-05-03-raspios-bullseye-armhf-lite.img,format=raw -net user,hostfwd=tcp::5022-:22 -net nic -nodefaults -nographic
+          spawn qemu-system-arm -kernel ~/qemu_rpi_kernel/kernel-qemu-5.10.63-bullseye -dtb ~/qemu_rpi_kernel/versatile-pb.dtb -cpu arm1176 -m 256 -M versatilepb -drive file=./2023-05-03-raspios-bullseye-armhf-lite.img,format=raw -net user,hostfwd=tcp::5022-:22 -net nic -append "root=/dev/sda2 rootfstype=ext4 rw" -no-reboot -nographic
 
           expect "raspberrypi login:"
           send "pi\r"
@@ -51,17 +58,16 @@ jobs:
 
           expect eof' > modify_image.exp
 
-          # Make the script executable and run it
           chmod +x modify_image.exp
           ./modify_image.exp
 
-          # Set up SSH keys
           ssh-keygen -f ~/.ssh/id_rsa -N ""
           cat ~/.ssh/id_rsa.pub | ssh -p 5022 pi@localhost "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys"
 
-          # Use scp to copy files over to the emulated instance
           scp -P 5022 ./device/frame.py pi@localhost:/srv/frameos/frame.py
           scp -P 5022 ./device/requirements.txt pi@localhost:/srv/frameos/requirements.txt
+
+          xz 2023-05-03-raspios-bullseye-armhf-lite.img
 
       - name: Create Release
         id: create_release
@@ -81,6 +87,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./2023-05-03-raspios-bullseye-armhf-lite.img
-          asset_name: custom-raspberry-pi-os-32bit.img
+          asset_path: ./2023-05-03-raspios-bullseye-armhf-lite.img.xz
+          asset_name: frameos-raspberry-pi-os-32bit.img.xz
           asset_content_type: application/octet-stream
