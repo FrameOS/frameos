@@ -227,19 +227,19 @@ class ButtonHandler:
             self.image_handler.refresh_image('button press')
 
 class Scheduler:
-    def __init__(self, image_handler: ImageHandler, reset_event: Event, logger: Logger, interval: int):
+    def __init__(self, image_handler: ImageHandler, reset_event: Event, logger: Logger, config: Config):
         self.logger = logger
-        self.interval = interval
+        self.config = config
         self.image_handler = image_handler
         self.reset_event = reset_event
         self.schedule_thread: Thread = Thread(target=self.update_image_on_schedule)
 
-        logger.log({ 'event': 'schedule_start', 'interval': self.interval })
+        logger.log({ 'event': 'schedule_start', 'interval': self.config.interval })
         self.schedule_thread.start()
 
     def update_image_on_schedule(self):
         while True:
-            self.reset_event.wait(self.interval)  
+            self.reset_event.wait(self.config.interval)  
             self.image_handler.refresh_image('schedule')
             self.reset_event.clear()  
 
@@ -287,7 +287,7 @@ class Server:
     def run(self):
         button_handler: ButtonHandler = ButtonHandler(self.logger, [5, 6, 16, 24], ['A', 'B', 'C', 'D'], self.image_handler)
         reset_event: Event = Event()
-        scheduler: Scheduler = Scheduler(image_handler=self.image_handler, reset_event=reset_event, logger=self.logger, interval=300)
+        scheduler: Scheduler = Scheduler(image_handler=self.image_handler, reset_event=reset_event, logger=self.logger, config=config)
         self.image_handler.refresh_image('bootup')
         self.socketio.run(self.app, host='0.0.0.0', port=8999)
 

@@ -7,6 +7,8 @@ import { frameStatus } from '../../decorators/frame'
 import { Reveal } from '../../components/Reveal'
 import { framesModel } from '../../models/framesModel'
 import { frameLogic } from './frameLogic'
+import { Field, Form } from 'kea-forms'
+import { TextInput } from '../../components/TextInput'
 
 export interface DetailsProps {
   className?: string
@@ -14,16 +16,72 @@ export interface DetailsProps {
 }
 
 export function Details({ className, id }: DetailsProps) {
-  const { frame } = useValues(frameLogic({ id }))
+  const { frame, editing } = useValues(frameLogic({ id }))
+  const { editFrame, closeEdit } = useActions(frameLogic({ id }))
   const { redeployFrame, refreshFrame, restartFrame } = useActions(framesModel)
 
   return (
     <Box className={clsx('p-4 space-y-4', className)}>
-      <H6>Details</H6>
       {!frame ? (
         `Loading frame ${id}...`
+      ) : editing ? (
+        <>
+          <H6>Edit frame</H6>
+          <Form formKey="editFrame" logic={frameLogic} props={{ id }} className="space-y-4" enableFormOnSubmit>
+            <Field name="frame_host" label="Frame host">
+              <TextInput name="frame_host" placeholder="127.0.0.1" required />
+            </Field>
+            <Field name="frame_port" label="Frame port">
+              <TextInput name="frame_port" placeholder="8999" required />
+            </Field>
+            <Field name="ssh_user" label="SSH user">
+              <TextInput name="ssh_user" placeholder="pi" required />
+            </Field>
+            <Field name="ssh_pass" label="SSH pass">
+              <TextInput name="ssh_pass" placeholder="raspberry" required />
+            </Field>
+            <Field name="ssh_port" label="SSH port">
+              <TextInput name="ssh_port" placeholder="22" required />
+            </Field>
+            <Field name="server_host" label="Server host">
+              <TextInput name="server_host" placeholder="localhost" required />
+            </Field>
+            <Field name="server_port" label="Server port">
+              <TextInput name="server_port" placeholder="8999" required />
+            </Field>
+            <Field name="server_api_key" label="Server API key">
+              <TextInput name="server_api_key" placeholder="" required />
+            </Field>
+            <Field name="image_url" label="Image URL">
+              <TextInput
+                name="image_url"
+                placeholder="https://source.unsplash.com/random/{width}x{height}/?bird"
+                required
+              />
+            </Field>
+            <Field name="interval" label="Interval">
+              <TextInput name="interval" placeholder="300" required />
+            </Field>
+            <div className="flex space-x-2">
+              <Button type="submit">Save & restart</Button>
+              <Button
+                type="button"
+                onClick={() => closeEdit()}
+                className="bg-gray-600 hover:bg-gray-700 focus:ring-gray-800"
+              >
+                Cancel
+              </Button>
+            </div>
+          </Form>
+        </>
       ) : (
         <>
+          <div className="flex justify-between">
+            <H6>Details</H6>
+            <div className="flex-0">
+              <Button onClick={() => editFrame(frame)}>Edit</Button>
+            </div>
+          </div>
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5">
             <tbody>
               <tr>
