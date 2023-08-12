@@ -1,0 +1,92 @@
+name: Build Custom Raspberry Pi OS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Setup QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-arm
+
+      - name: Download Raspberry Pi OS Lite
+        run: |
+          wget https://downloads.raspberrypi.org/raspios_lite_arm64/images/raspios_lite_arm64-2023-05-03/2023-05-03-raspios-bullseye-arm64-lite.img.xz
+          unxz 2023-05-03-raspios-bullseye-arm64-lite.img.xz
+
+      - name: Install expect
+        run: |
+          sudo apt-get install -y expect
+
+      - name: Start QEMU and Customize Image
+        run: |
+          # Create the expect script
+          echo '#!/usr/bin/expect -f
+
+          set timeout 3600
+
+          spawn qemu-system-arm -M versatilepb -cpu arm1176 -m 256 -hda ./2023-05-03-raspios-bullseye-arm64-lite.img -net user,hostfwd=tcp::5022-:22 -net nic
+
+          expect "raspberrypi login:"
+          send "pi\r"
+
+          expect "Password:"
+          send "raspberry\r"
+
+          expect "pi@raspberrypi:~$"
+          send "sudo apt update -y\r"
+
+          expect "pi@raspberrypi:~$"
+          send "sudo apt-get install -y openssh-server\r"
+
+          expect "pi@raspberrypi:~$"
+          send "sudo systemctl enable ssh && sudo systemctl start ssh\r"
+
+          expect "pi@raspberrypi:~$"
+          send "sudo shutdown -h now\r"
+          
+          expect eof' > modify_image.exp
+
+          #   # Set up SSH keys
+          #   ssh-keygen -f ~/.ssh/id_rsa -N ""
+          #   cat ~/.ssh/id_rsa.pub | ssh -p 5022 pi@localhost "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys"
+
+          #   # Use scp to copy files over to the emulated instance
+          #   scp -P 5022 ./device/frame.py pi@localhost:/srv/frameos/frame.py
+          #   scp -P 5022 ./device/requirements.txt pi@localhost:/srv/frameos/requirements.txt
+          #   scp -P 5022 ./device/index.html pi@localhost:/srv/frameos/index.html
+
+          # Make the script executable and run it
+          chmod +x modify_image.exp
+          ./modify_image.exp
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./2023-05-03-raspios-bullseye-arm64-lite.img
+          asset_name: frame-os-unstable.img
+          asset_content_type: application/octet-stream
