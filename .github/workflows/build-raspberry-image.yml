@@ -26,9 +26,9 @@ jobs:
       
       - name: Download QEMU-compatible Raspberry Pi Kernel and dtb
         run: |
-          mkdir ~/qemu_rpi_kernel
-          wget -O ~/qemu_rpi_kernel/kernel-qemu-5.10.63-bullseye https://github.com/dhruvvyas90/qemu-rpi-kernel/raw/master/kernel-qemu-5.10.63-bullseye
-          wget -O ~/qemu_rpi_kernel/versatile-pb.dtb https://github.com/dhruvvyas90/qemu-rpi-kernel/raw/master/versatile-pb-bullseye-5.10.63.dtb
+          mkdir qemu_rpi_kernel
+          wget -O qemu_rpi_kernel/kernel-qemu-5.10.63-bullseye https://github.com/dhruvvyas90/qemu-rpi-kernel/raw/master/kernel-qemu-5.10.63-bullseye
+          wget -O qemu_rpi_kernel/versatile-pb.dtb https://github.com/dhruvvyas90/qemu-rpi-kernel/raw/master/versatile-pb-bullseye-5.10.63.dtb
       - name: Configure user and password for Raspberry Pi OS
         run: |
           mkdir boot_mount
@@ -43,7 +43,7 @@ jobs:
 
           set timeout 3600
 
-          spawn qemu-system-arm -kernel ~/qemu_rpi_kernel/kernel-qemu-5.10.63-bullseye -dtb ~/qemu_rpi_kernel/versatile-pb.dtb -cpu arm1176 -m 256 -M versatilepb -drive file=./2023-05-03-raspios-bullseye-armhf-lite.img,format=raw -net user,hostfwd=tcp::5022-:22 -net nic -append "root=/dev/sda2 rootfstype=ext4 rw" -no-reboot -nographic
+          spawn qemu-system-arm -kernel qemu_rpi_kernel/kernel-qemu-5.10.63-bullseye -dtb qemu_rpi_kernel/versatile-pb.dtb -cpu arm1176 -m 256 -M versatilepb -drive file=./2023-05-03-raspios-bullseye-armhf-lite.img,format=raw -net user,hostfwd=tcp::5022-:22 -net nic -append "root=/dev/sda2 rootfstype=ext4 rw" -no-reboot -nographic
 
           expect "raspberrypi login:"
           send "pi\r"
