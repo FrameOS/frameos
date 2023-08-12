@@ -66,7 +66,13 @@ export const framesModel = kea<framesModelType>([
     ],
   })),
   selectors({
-    framesList: [(s) => [s.frames], (frames) => Object.values(frames).sort((a, b) => a.id - b.id) as FrameType[]],
+    framesList: [
+      (s) => [s.frames],
+      (frames) =>
+        Object.values(frames).sort(
+          (a, b) => a.frame_host.localeCompare(b.frame_host) || (a.ssh_user || '').localeCompare(b.ssh_user || '')
+        ) as FrameType[],
+    ],
     getFrameImage: [
       (s) => [s.frameImageTimestamps],
       (frameImageTimestamps) => {

@@ -5,7 +5,7 @@ import { A } from 'kea-router'
 import { Logs } from './Logs'
 import { Image } from '../frames/Image'
 import { Details } from './Details'
-import { frameHost } from '../../decorators/frame'
+import { frameHost, frameUrl } from '../../decorators/frame'
 import { Box } from '../../components/Box'
 
 interface FrameSceneProps {
@@ -24,7 +24,9 @@ export function Frame(props: FrameSceneProps) {
       {frame ? (
         <>
           <Box className="m-auto max-w-max">
-            <Image id={frame.id} className="flex-1" />
+            <a href={frameUrl(frame)}>
+              <Image id={frame.id} className="flex-1" />
+            </a>
           </Box>
           <Details id={frame.id} className="flex-1" />
           <Logs id={frame.id} />

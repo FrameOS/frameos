@@ -3,7 +3,7 @@ import { Box } from '../../components/Box'
 import { H6 } from '../../components/H6'
 import clsx from 'clsx'
 import { Button } from '../../components/Button'
-import { frameStatus } from '../../decorators/frame'
+import { frameStatus, frameUrl } from '../../decorators/frame'
 import { Reveal } from '../../components/Reveal'
 import { framesModel } from '../../models/framesModel'
 import { frameLogic } from './frameLogic'
@@ -19,8 +19,6 @@ export function Details({ className, id }: DetailsProps) {
   const { frame, editing } = useValues(frameLogic({ id }))
   const { editFrame, closeEdit } = useActions(frameLogic({ id }))
   const { redeployFrame, refreshFrame, restartFrame } = useActions(framesModel)
-
-  const frameUrl = `http${frame.frame_port % 1000 === 443 ? 's' : ''}://${frame.frame_host}:${frame.frame_port}/kiosk`
 
   return (
     <Box className={clsx('p-4 space-y-4', className)}>
@@ -153,8 +151,8 @@ export function Details({ className, id }: DetailsProps) {
               <tr>
                 <td className="text-blue-200 text-right">Kiosk URL:</td>
                 <td className="truncate">
-                  <a href={frameUrl} target="_blank" rel="noreferer noopener">
-                    {frameUrl}
+                  <a href={frameUrl(frame)} target="_blank" rel="noreferer noopener">
+                    {frameUrl(frame)}
                   </a>
                 </td>
               </tr>

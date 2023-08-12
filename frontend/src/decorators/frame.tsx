@@ -18,3 +18,7 @@ export function frameStatus(frame: FrameType): JSX.Element {
     </div>
   )
 }
+
+export function frameUrl(frame: FrameType): string {
+  return `http${frame.frame_port % 1000 === 443 ? 's' : ''}://${frame.frame_host}:${frame.frame_port}/kiosk`
+}

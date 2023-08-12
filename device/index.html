@@ -5,20 +5,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FrameOS Frame</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <style>
-        body.kiosk {padding: 0;margin:0;background:black;}
-        body.kiosk .not-in-kiosk {display:none;}
+        #img-kiosk { display: none; }
+        body.kiosk {
+            padding: 0;
+            margin: 0;
+            background: black;
+        }
+        body.kiosk #img-kiosk {
+            display: block;
+            cursor: pointer;
+            width: 100vw;
+            height: 100vh;
+            background-repeat: no-repeat;
+            background-position: center center;
+            background-size: contain;
+            background-image: url('/image');
+        }
+        body.kiosk .not-in-kiosk { display: none; }
         body.kiosk #displayedImage { width: 100%; }
     </style>
 </head>
 <body class="{_body_class_}">
 
-<h2 class="not-in-kiosk">Image Display</h2>
-    
-<img id="displayedImage" src="/image" alt="Displayed Image">
+<div id="img-kiosk" onclick="this.style.backgroundSize = this.style.backgroundSize === 'cover' ? 'contain' : 'cover'"></div>
 
 <div class="not-in-kiosk">
+    <h2 class="not-in-kiosk">Image Display</h2>
+    <img id="displayedImage" src="/image" style='max-width:100%' alt="Displayed Image">
     <button id="refreshButton">Refresh Image</button>
     <button onClick="window.location.href = '/kiosk'">Kiosk Mode</button>
     <h2>Logs</h2>
@@ -28,30 +42,35 @@
 <script>
     var socket = io.connect('http://' + document.domain + ':' + location.port);
 
-    socket.on('connect', function() {
-        console.log('Connected to the WebSocket');
-    });
-
     function addLog(log) {
-        const { timestamp, event, ...rest } = log
-        $('#logs').text(`${timestamp} [${event}] ${JSON.stringify(rest)}\n${$('#logs').text()}`);            
+        const { timestamp, event, ...rest } = log;
+        const logsElem = document.getElementById('logs');
+        logsElem.textContent = `${timestamp} [${event}] ${JSON.stringify(rest)}\n${logsElem.textContent}`;
     }
 
     socket.on('log_event', function(data) {
         if (data.log) {
-            if (data.log.event == 'refresh_begin' || data.log.event == 'refresh_end') {
-                $('#displayedImage').attr('src', '/image?' + new Date().getTime()); 
+            if (data.log.event == 'refresh_begin') {
+                const displayedImage = document.getElementById('displayedImage')
+                if (displayedImage) {
+                    displayedImage.src = '/image?' + new Date().getTime();
+                }
+                const imgKioskElem = document.getElementById('img-kiosk');
+                if (imgKioskElem) {
+                    imgKioskElem.style.backgroundImage = 'url("/image?' + new Date().getTime() + '")';
+                }
             }
-            addLog(data.log)
+            addLog(data.log);
         } else {
+            // all logs on load
             for (let log of data.logs) {
-                addLog(log)
+                addLog(log);
             }
         }
     });
 
-    $('#refreshButton').click(function() {
-        $.get("/refresh");
+    document.getElementById('refreshButton').addEventListener('click', function() {
+        fetch("/refresh");
     });
 </script>
 </body>

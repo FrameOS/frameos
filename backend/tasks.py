@@ -104,6 +104,7 @@ def get_frame_json(frame: Frame) -> dict:
 @huey.task()
 def initialize_frame(id: int):
     with app.app_context():
+        ssh = None
         try:
             frame = Frame.query.get_or_404(id)
             if frame.status == 'deploying':
@@ -118,6 +119,7 @@ def initialize_frame(id: int):
 
             # exec_command(frame, ssh, "sudo apt -y install libopenjp2-7")
             exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libopenjp2-7\" || sudo apt -y install libopenjp2-7")
+            exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  tmux\" || sudo apt -y install tmux")
             exec_command(frame, ssh, "sudo mkdir -p /srv/frameos")
             exec_command(frame, ssh, f"sudo chown -R {frame.ssh_user} /srv/frameos")
 
@@ -147,7 +149,8 @@ def initialize_frame(id: int):
             frame.status = 'uninitialized'
             update_frame(frame)
         finally:
-            ssh.close()
+            if ssh is not None:
+                ssh.close()
             ssh_connections.remove(ssh)
             log(id, "stdinfo", "Connection closed")
 
