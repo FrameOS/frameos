@@ -34,7 +34,7 @@ jobs:
 
           set timeout 3600
 
-          spawn qemu-system-arm -M versatilepb -cpu arm1176 -m 256 -hda ./2023-05-03-raspios-bullseye-arm64-lite.img -net user,hostfwd=tcp::5022-:22 -net nic
+          spawn qemu-system-arm -M versatilepb -cpu arm1176 -m 256 -drive file=./2023-05-03-raspios-bullseye-arm64-lite.img,format=raw -net user,hostfwd=tcp::5022-:22 -net nic -nodefaults -no-audio
 
           expect "raspberrypi login:"
           send "pi\r"
