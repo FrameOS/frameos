@@ -47,11 +47,15 @@ jobs:
 
           expect "User configuration dialog"
           expect "raspberrypi login:"
-          expect "User configuration dialog"
+          expect "Multi-User System"
           send "pi\r"
 
           expect "Password:"
           send "raspberry\r"
+
+          expect "pi@raspberrypi"
+          expect "$"
+          send "ls\r"
 
           expect "pi@raspberrypi:~$"
           send "sudo apt update -y\r"
