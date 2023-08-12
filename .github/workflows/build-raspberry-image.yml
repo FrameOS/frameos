@@ -58,17 +58,7 @@ jobs:
           send "\r"
           send "\r"
 
-          expect "pi@raspberrypi:~$"
-          send "sudo apt update -y\r"
-
-          expect "pi@raspberrypi:~$"
-          send "sudo apt-get install -y openssh-server libopenjp2-7 tmux\r"
-
-          expect "pi@raspberrypi:~$"
-          send "sudo systemctl enable ssh && sudo systemctl start ssh\r"
-
-          expect "pi@raspberrypi:~$"
-          send "sudo shutdown -h now\r"
+          send "sudo apt update -y && sudo apt-get install -y openssh-server libopenjp2-7 tmux && sudo systemctl enable ssh && sudo systemctl start ssh && sudo shutdown -h now\r"
 
           expect eof' > modify_image.exp
 
