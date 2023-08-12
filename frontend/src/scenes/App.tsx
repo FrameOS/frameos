@@ -1,4 +1,4 @@
-import { Suspense } from 'react'
+import { LazyExoticComponent, Suspense } from 'react'
 import { useMountedLogic, useValues } from 'kea'
 import { sceneLogic } from './sceneLogic'
 import { scenes } from './scenes'
@@ -8,11 +8,12 @@ export function App() {
   useMountedLogic(socketLogic)
   const { scene, params } = useValues(sceneLogic)
 
-  const Scene = scenes[scene as keyof typeof scenes] || scenes.error404
+  const SceneComponent: (() => JSX.Element) | LazyExoticComponent<any> =
+    scenes[scene as keyof typeof scenes] || scenes.error404
 
   return (
     <Suspense fallback={<div>Loading...</div>}>
-      <Scene {...params} />
+      <SceneComponent {...params} />
     </Suspense>
   )
 }
