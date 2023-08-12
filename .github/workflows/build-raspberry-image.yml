@@ -20,7 +20,7 @@ jobs:
 
       - name: Download Raspberry Pi OS Lite (32-bit)
         run: |
-          wget https://downloads.raspberrypi.org/raspios_lite_armhf/images/raspios_lite_armhf-2023-05-03/2023-05-03-raspios-bullseye-armhf-lite.img.xz
+          wget -q https://downloads.raspberrypi.org/raspios_lite_armhf/images/raspios_lite_armhf-2023-05-03/2023-05-03-raspios-bullseye-armhf-lite.img.xz
           unxz 2023-05-03-raspios-bullseye-armhf-lite.img.xz
           qemu-img resize ./2023-05-03-raspios-bullseye-armhf-lite.img 2G
       
