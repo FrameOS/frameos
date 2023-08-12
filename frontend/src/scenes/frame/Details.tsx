@@ -20,6 +20,8 @@ export function Details({ className, id }: DetailsProps) {
   const { editFrame, closeEdit } = useActions(frameLogic({ id }))
   const { redeployFrame, refreshFrame, restartFrame } = useActions(framesModel)
 
+  const frameUrl = `http${frame.frame_port % 1000 === 443 ? 's' : ''}://${frame.frame_host}:${frame.frame_port}/kiosk`
+
   return (
     <Box className={clsx('p-4 space-y-4', className)}>
       {!frame ? (
@@ -38,7 +40,7 @@ export function Details({ className, id }: DetailsProps) {
               <TextInput name="ssh_user" placeholder="pi" required />
             </Field>
             <Field name="ssh_pass" label="SSH pass">
-              <TextInput name="ssh_pass" placeholder="raspberry" required />
+              <TextInput name="ssh_pass" placeholder="raspberry" />
             </Field>
             <Field name="ssh_port" label="SSH port">
               <TextInput name="ssh_port" placeholder="22" required />
@@ -137,12 +139,24 @@ export function Details({ className, id }: DetailsProps) {
                 </td>
               </tr>
               <tr>
-                <td className="text-blue-200 text-right">Image URL:</td>
-                <td className="truncate">{frame.image_url}</td>
-              </tr>
-              <tr>
                 <td className="text-blue-200 text-right">Interval:</td>
                 <td className="truncate">{frame.interval}</td>
+              </tr>
+              <tr>
+                <td className="text-blue-200 text-right">Image URL:</td>
+                <td className="truncate">
+                  <a href={frame.image_url} target="_blank" rel="noreferer noopener">
+                    {frame.image_url}
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td className="text-blue-200 text-right">Kiosk URL:</td>
+                <td className="truncate">
+                  <a href={frameUrl} target="_blank" rel="noreferer noopener">
+                    {frameUrl}
+                  </a>
+                </td>
               </tr>
             </tbody>
           </table>

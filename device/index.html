@@ -3,19 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flask App</title>
+    <title>FrameOS Frame</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body.kiosk {padding: 0;margin:0;background:black;}
+        body.kiosk .not-in-kiosk {display:none;}
+        body.kiosk #displayedImage { width: 100%; }
+    </style>
 </head>
-<body>
+<body class="{_body_class_}">
 
-<h2>Image Display</h2>
+<h2 class="not-in-kiosk">Image Display</h2>
+    
 <img id="displayedImage" src="/image" alt="Displayed Image">
-<br/>
-<button id="refreshButton">Refresh Image</button>
 
-<h2>Logs</h2>
-<pre id="logs"></pre>
+<div class="not-in-kiosk">
+    <button id="refreshButton">Refresh Image</button>
+    <button onClick="window.location.href = '/kiosk'">Kiosk Mode</button>
+    <h2>Logs</h2>
+    <pre id="logs"></pre>
+</div>
 
 <script>
     var socket = io.connect('http://' + document.domain + ':' + location.port);
@@ -43,12 +51,8 @@
     });
 
     $('#refreshButton').click(function() {
-        $.get("/refresh", function(data) {
-            const { timestamp, event, ...rest } = data
-            console.log(data);
-        });
+        $.get("/refresh");
     });
 </script>
-
 </body>
 </html>

@@ -260,7 +260,13 @@ class Server:
         def index():
             with open("index.html", "r") as file:
                 content = file.read()
-            return content
+            return content.replace('{_body_class_}', '')
+        
+        @self.app.route('/kiosk')
+        def kiosk():
+            with open("index.html", "r") as file:
+                content = file.read()
+            return content.replace('{_body_class_}', 'kiosk')
 
         @self.app.route('/image')
         def image():
