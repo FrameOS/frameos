@@ -45,16 +45,20 @@ class Webhook:
     def _run(self):
         while not self.stop_event.is_set():
             batch = []
-            for _ in range(100):
+            
+            # Start by getting at least one item. This will block if the queue is empty.
+            item = self.queue.get()
+            batch.append(item)
+
+            # Then try to fill the batch up to its max size without blocking
+            for _ in range(99):
                 try:
                     item = self.queue.get_nowait()
                     batch.append(item)
                 except Empty:
                     break
-            if batch:
-                self._send_batch(batch)
-            else:
-                time.sleep(0.2)
+
+            self._send_batch(batch)
 
     def _send_batch(self, batch: List[Dict[str, Any]]):
         if not self.config:
