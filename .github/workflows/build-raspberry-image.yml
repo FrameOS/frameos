@@ -53,8 +53,9 @@ jobs:
           expect "Password:"
           send "raspberry\r"
 
-          expect "pi@raspberrypi"
-          expect "$"
+          # expect "pi@raspberrypi"
+          expect "permitted by applicable law"
+          # expect "$"
           send "ls\r"
 
           expect "pi@raspberrypi:~$"
