@@ -68,6 +68,12 @@ export function Details({ className, id }: DetailsProps) {
                 <td className="text-blue-200 text-right">Status:</td>
                 <td>{frameStatus(frame)}</td>
               </tr>
+              <tr>
+                <td className="text-blue-200 text-right">Device:</td>
+                <td>
+                  {frame.device} {frame.width && frame.height ? `${frame.width}x${frame.height}` : ''}
+                </td>
+              </tr>
             </tbody>
           </table>
           <div className="flex space-x-2">

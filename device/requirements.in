@@ -2,8 +2,9 @@
 # pip-compile requirements.in
 
 flask==2.2.5
-flask-socketio=5.3.4
-
+flask-socketio==5.3.4
+RPi.GPIO
+pillow
 inky
 numpy==1.21.6
 werkzeug==2.2.3

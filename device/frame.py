@@ -3,12 +3,9 @@ import json
 import requests
 import hashlib
 import logging
-import RPi.GPIO as GPIO
 import traceback
 
 from datetime import datetime
-from inky.auto import auto
-from PIL import Image
 
 from flask import Flask, send_file
 from flask_socketio import SocketIO, emit
@@ -78,16 +75,22 @@ class Logger:
 
 class ImageHandler:
     def __init__(self, logger: Logger, socketio: SocketIO):
-        self.inky = auto(ask_user=True, verbose=True)
         self.logger = logger
         self.socketio = socketio
-        self.image_url: str = f"https://source.unsplash.com/random/{self.inky.resolution[0]}x{self.inky.resolution[1]}/?bird"
         self.current_image: bytes = None
         self.next_image: bytes = None
         self.image_update_lock: Lock = Lock()
         self.image_update_in_progress: bool = False
 
-        logger.log({ 'event': 'frame_info', "device": 'inky', 'width': self.inky.resolution[0], 'height': self.inky.resolution[1] })
+        try:
+            from inky.auto import auto
+            self.inky = auto()
+            self.image_url: str = f"https://source.unsplash.com/random/{self.inky.resolution[0]}x{self.inky.resolution[1]}/?bird"
+            logger.log({ 'event': 'device_info', "device": 'inky', 'width': self.inky.resolution[0], 'height': self.inky.resolution[1], 'color': self.inky.colour })
+        except Exception as e:
+            logger.log({ 'event': 'error_device', "device": 'inky', 'error': str(e), 'info': "Starting in WEB only mode." })
+            self.inky = None
+            self.image_url: str = f"https://source.unsplash.com/random/800x480/?bird"
 
     def download_url(self, url: str):
         response = requests.get(url)
@@ -98,9 +101,11 @@ class ImageHandler:
         return response.content, last_url
 
     def slow_update_image_on_frame(self, content):
-        image = Image.open(io.BytesIO(content))
-        self.inky.set_image(image, saturation=1)
-        self.inky.show()
+        if self.inky is not None:
+            from PIL import Image
+            image = Image.open(io.BytesIO(content))
+            self.inky.set_image(image, saturation=1)
+            self.inky.show()
 
     def refresh_image(self, trigger: str):
         if not self.image_update_lock.acquire(blocking=False):
@@ -135,10 +140,14 @@ class ButtonHandler:
         self.buttons = buttons
         self.labels = labels
         self.image_handler = image_handler
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(buttons, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        for pin in buttons:
-            GPIO.add_event_detect(pin, GPIO.FALLING, self.handle_button, bouncetime=250)
+        try:
+            import RPi.GPIO as GPIO
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(buttons, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            for pin in buttons:
+                GPIO.add_event_detect(pin, GPIO.FALLING, self.handle_button, bouncetime=250)
+        except Exception as e:
+            logger.log({ 'event': 'error_button_handler', 'error': str(e) })
 
     def handle_button(self, pin):
         label = self.labels[self.buttons.index(pin)]

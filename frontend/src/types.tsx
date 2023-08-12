@@ -9,6 +9,9 @@ export interface FrameType {
   api_port: number
   status: string
   version?: string
+  device?: string
+  width?: number
+  height?: number
 }
 export interface LogType {
   id: number

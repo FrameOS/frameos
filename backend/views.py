@@ -86,17 +86,14 @@ def api_log():
         event = log.get('event', 'log')
         models.new_log(frame.id, "webhook", json.dumps(log))
         
+        changes = {}
         if event == 'refresh_image':
-            frame.status = 'fetching'
-            models.update_frame(frame)
+            changes['status'] = 'fetching'
         if event == 'refresh_begin':
-            frame.status = 'refreshing'
-            models.update_frame(frame)
+            changes['status'] = 'refreshing'
         if event == 'refresh_end' or event == 'refresh_skip_no_change':
-            frame.status = 'ready'
-            models.update_frame(frame)
-        if event == 'frame_info':
-            changes = {}
+            changes['status'] = 'ready'
+        if event == 'device_info':
             if frame.status != 'ready':
                 changes['status'] = 'ready'
             if log.get('width', None) is not None and log['width'] != frame.width:
@@ -105,10 +102,14 @@ def api_log():
                 changes['height'] = log['height']
             if log.get('device', None) is not None and log['device'] != frame.device:
                 changes['device'] = log['device']
-            if len(changes) > 0:
-                print(changes)
-                for key, value in changes.items():
-                    setattr(frame, key, value)
+        if event == 'error_device':
+            changes['device'] = 'web_only'
+    
+        if len(changes) > 0:
+            print(changes)
+            for key, value in changes.items():
+                setattr(frame, key, value)
             models.update_frame(frame)
+
 
     return 'OK', 200
