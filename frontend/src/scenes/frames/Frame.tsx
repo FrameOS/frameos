@@ -18,7 +18,7 @@ export function Frame({ frame }: FrameProps): JSX.Element {
       <A href={`/frames/${frame.id}`}>
         <Image id={frame.id} />
       </A>
-      <div className="flex justify-between px-4 pt-4 mb-2">
+      <div className="flex justify-between px-4 pt-2 mb-2">
         <H5 className="text-ellipsis overflow-hidden">
           <A href={`/frames/${frame.id}`}>{frameHost(frame)}</A>
         </H5>

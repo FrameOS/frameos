@@ -12,7 +12,7 @@ export interface ImageProps {
 export function Image({ id, className }: ImageProps) {
   const { getFrameImage, frames } = useValues(framesModel)
   return (
-    <Box
+    <div
       className={clsx(
         'p-2 w-fit m-auto',
         frames[id]?.status === 'refreshing' ? 'continuous-fade-in-out' : null,
@@ -20,6 +20,6 @@ export function Image({ id, className }: ImageProps) {
       )}
     >
       {frames[id] ? <img className="rounded-lg" src={getFrameImage(id)} alt="" /> : null}
-    </Box>
+    </div>
   )
 }

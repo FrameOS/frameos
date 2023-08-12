@@ -6,7 +6,7 @@ import { Logs } from './Logs'
 import { Image } from '../frames/Image'
 import { Details } from './Details'
 import { frameHost } from '../../decorators/frame'
-import { framesModel } from '../../models/framesModel'
+import { Box } from '../../components/Box'
 
 interface FrameSceneProps {
   id: string // from the URL
@@ -25,7 +25,9 @@ export function Frame(props: FrameSceneProps) {
         <>
           <div className="flex gap-4 flex-col md:flex-row">
             <Details id={frame.id} className="flex-1 min-w-max" />
-            <Image id={frame.id} className="flex-0" />
+            <Box>
+              <Image id={frame.id} className="flex-0" />
+            </Box>
           </div>
           <Logs id={frame.id} />
         </>
