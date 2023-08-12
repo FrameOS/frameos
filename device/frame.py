@@ -88,9 +88,10 @@ class ImageHandler:
             self.image_url: str = f"https://source.unsplash.com/random/{self.inky.resolution[0]}x{self.inky.resolution[1]}/?bird"
             logger.log({ 'event': 'device_info', "device": 'inky', 'width': self.inky.resolution[0], 'height': self.inky.resolution[1], 'color': self.inky.colour })
         except Exception as e:
-            logger.log({ 'event': 'error_device', "device": 'inky', 'error': str(e), 'info': "Starting in WEB only mode." })
+            logger.log({ 'event': 'device_error', "device": 'inky', 'error': str(e), 'info': "Starting in WEB only mode." })
             self.inky = None
-            self.image_url: str = f"https://source.unsplash.com/random/800x480/?bird"
+            self.image_url: str = f"https://source.unsplash.com/random/1920x1080/?bird"
+            logger.log({ 'event': 'device_info', "device": 'web_only', 'width': 1920, 'height': 1080 })
 
     def download_url(self, url: str):
         response = requests.get(url)

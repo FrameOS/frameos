@@ -13,13 +13,18 @@ export function Image({ id, className }: ImageProps) {
   const { getFrameImage, frames } = useValues(framesModel)
   return (
     <div
-      className={clsx(
-        'p-2 w-fit m-auto',
-        frames[id]?.status === 'refreshing' ? 'continuous-fade-in-out' : null,
-        className
-      )}
+      className={clsx('p-2 m-auto', frames[id]?.status === 'refreshing' ? 'continuous-fade-in-out' : null, className)}
     >
-      {frames[id] ? <img className="rounded-lg" src={getFrameImage(id)} alt="" /> : null}
+      {frames[id] ? (
+        <img
+          className="rounded-lg w-full"
+          src={getFrameImage(id)}
+          style={
+            frames[id].width && frames[id].height ? { aspectRatio: `${frames[id].width} / ${frames[id].height}` } : {}
+          }
+          alt=""
+        />
+      ) : null}
     </div>
   )
 }

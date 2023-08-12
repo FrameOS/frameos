@@ -102,8 +102,6 @@ def api_log():
                 changes['height'] = log['height']
             if log.get('device', None) is not None and log['device'] != frame.device:
                 changes['device'] = log['device']
-        if event == 'error_device':
-            changes['device'] = 'web_only'
     
         if len(changes) > 0:
             print(changes)
