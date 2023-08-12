@@ -14,8 +14,10 @@ flask==2.2.5
     #   flask-socketio
 flask-socketio==5.3.4
     # via -r requirements.in
-importlib-metadata==6.8.0
-    # via flask
+importlib-metadata==6.7.0
+    # via
+    #   -r requirements.in
+    #   flask
 inky==1.5.0
     # via -r requirements.in
 itsdangerous==2.1.2
@@ -30,7 +32,7 @@ numpy==1.21.6
     # via
     #   -r requirements.in
     #   inky
-pillow==10.0.0
+pillow==9.5.0
     # via -r requirements.in
 python-engineio==4.5.1
     # via python-socketio

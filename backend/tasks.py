@@ -113,6 +113,8 @@ def initialize_frame(id: int):
                 "api_host": frame.api_host,
                 "api_key": frame.api_key,
                 "api_port": frame.api_port,
+                "width": frame.width,
+                "height": frame.height,
             }
 
             with SCPClient(ssh.get_transport()) as scp:

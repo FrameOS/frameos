@@ -1,6 +1,7 @@
 from . import db, socketio
 from sqlalchemy.dialects.sqlite import JSON
 import secrets
+import json
 
 # NB! Update frontend/src/types.tsx if you change this
 class Frame(db.Model):
@@ -105,3 +106,30 @@ def new_log(frame_id: int, type: str, line: str) -> Log:
 
     socketio.emit('new_log', {**log.to_dict(), 'timestamp': str(log.timestamp)})
     return log
+
+
+def process_log(frame: Frame, log: dict):
+    new_log(frame.id, "webhook", json.dumps(log))
+    
+    changes = {}
+    event = log.get('event', 'log')
+    if event == 'refresh_image':
+        changes['status'] = 'fetching'
+    if event == 'refresh_begin':
+        changes['status'] = 'refreshing'
+    if event == 'refresh_end' or event == 'refresh_skip_no_change':
+        changes['status'] = 'ready'
+    if event == 'device_info':
+        if frame.status != 'ready':
+            changes['status'] = 'ready'
+        if log.get('width', None) is not None and log['width'] != frame.width:
+            changes['width'] = log['width']
+        if log.get('height', None) is not None and log['height'] != frame.height:
+            changes['height'] = log['height']
+        if log.get('device', None) is not None and log['device'] != frame.device:
+            changes['device'] = log['device']
+
+    if len(changes) > 0:
+        for key, value in changes.items():
+            setattr(frame, key, value)
+        update_frame(frame)

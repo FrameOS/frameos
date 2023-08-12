@@ -4,6 +4,9 @@ import requests
 import hashlib
 import logging
 import traceback
+import time
+import atexit
+from queue import Queue, Empty
 
 from datetime import datetime
 
@@ -27,17 +30,33 @@ class Config:
     def get(self, key, default=None):
         return self._data.get(key, default)
 
-class Logger:
-    def __init__(self, config: Config, limit: int, socketio: Optional[SocketIO] = None):
+
+class Webhook:
+    def __init__(self, config: Config):
         self.config = config
-        self.logs: List[Dict[str, Any]] = []
-        self.limit = limit
-        self.socketio = socketio
+        self.queue = Queue()
+        self.stop_event = Event()
+        self.thread = Thread(target=self._run)
+        self.thread.start()
 
-    def set_socketio(self, socketio: SocketIO):
-        self.socketio = socketio
+    def add_log(self, payload: Dict[str, Any]):
+        self.queue.put(payload)
 
-    def webhook_log_request(self, payload: Dict[str, Any]):
+    def _run(self):
+        while not self.stop_event.is_set():
+            batch = []
+            for _ in range(100):
+                try:
+                    item = self.queue.get_nowait()
+                    batch.append(item)
+                except Empty:
+                    break
+            if batch:
+                self._send_batch(batch)
+            else:
+                time.sleep(0.2)
+
+    def _send_batch(self, batch: List[Dict[str, Any]]):
         if not self.config:
             return
         protocol = 'https' if self.config.get('api_port') in [443, 8443] else 'http'
@@ -47,51 +66,72 @@ class Logger:
             "Content-Type": "application/json"
         }
         try:
-            response = requests.post(url, headers=headers, json={"log": payload})
+            response = requests.post(url, headers=headers, json={"logs": batch})
             response.raise_for_status()
         except requests.HTTPError as e:
-            logging.error(f"Error sending log (HTTP {response.status_code}): {e}")
+            logging.error(f"Error sending logs (HTTP {response.status_code}): {e}")
         except Exception as e:
-            logging.error(f"Error sending log: {e}")
+            logging.error(f"Error sending logs: {e}")
+
+    def stop(self):
+        self.stop_event.set()
+        self.thread.join()
+
+
+class Logger:
+    def __init__(self, config: Config, limit: int, socketio: Optional[SocketIO] = None):
+        self.config = config
+        self.logs: List[Dict[str, Any]] = []
+        self.limit = limit
+        self.socketio = socketio
+        self.webhook = Webhook(config)
+
+    def set_socketio(self, socketio: SocketIO):
+        self.socketio = socketio
 
     def log(self, payload: Dict[str, Any]):
         payload = {'timestamp': datetime.now().isoformat(), **payload}
         self.logs.append(payload)
         if self.socketio:
             self.socketio.emit('log_event', {'log': payload})
-        self.async_log_request(payload)
+        self.webhook.add_log(payload)
         if len(self.logs) > self.limit:
             self.logs.pop(0)
 
     def get(self):
         return self.logs
 
-    def async_log_request(self, payload: Dict[str, Any]):
-        """
-        Send a log payload to the specified API endpoint in a non-blocking manner.
-        """
-        Thread(target=self.webhook_log_request, args=(payload,)).start()
-
+    def stop(self):
+        self.webhook.stop()
 
 class ImageHandler:
-    def __init__(self, logger: Logger, socketio: SocketIO):
+    def __init__(self, logger: Logger, socketio: SocketIO, config: Config):
         self.logger = logger
         self.socketio = socketio
         self.current_image: bytes = None
         self.next_image: bytes = None
         self.image_update_lock: Lock = Lock()
         self.image_update_in_progress: bool = False
+        self.width: Optional[int] = config.get('width', None)
+        self.height: Optional[int] = config.get('height', None)
+        self.device: Optional[str] = None
 
         try:
             from inky.auto import auto
             self.inky = auto()
-            self.image_url: str = f"https://source.unsplash.com/random/{self.inky.resolution[0]}x{self.inky.resolution[1]}/?bird"
-            logger.log({ 'event': 'device_info', "device": 'inky', 'width': self.inky.resolution[0], 'height': self.inky.resolution[1], 'color': self.inky.colour })
+            self.device = 'inky'
+            self.width = self.inky.resolution[0]
+            self.height = self.inky.resolution[1]
         except Exception as e:
             logger.log({ 'event': 'device_error', "device": 'inky', 'error': str(e), 'info': "Starting in WEB only mode." })
             self.inky = None
-            self.image_url: str = f"https://source.unsplash.com/random/1920x1080/?bird"
-            logger.log({ 'event': 'device_info', "device": 'web_only', 'width': 1920, 'height': 1080 })
+            self.device = 'web_only'
+            if self.width is None or self.height is None:
+                self.width = 1920
+                self.height = 1080
+
+        self.image_url: str = f"https://source.unsplash.com/random/{self.width}x{self.height}/?bird"
+        logger.log({ 'event': 'device_info', "device": self.device, 'width': self.width, 'height': self.height })
 
     def download_url(self, url: str):
         response = requests.get(url)
@@ -164,7 +204,7 @@ class Scheduler:
         self.reset_event = reset_event
         self.schedule_thread: Thread = Thread(target=self.update_image_on_schedule)
 
-        logger.log({ 'event': 'schedule_info', 'image_url': self.image_handler.image_url, 'interval': self.interval })
+        logger.log({ 'event': 'schedule_start', 'image_url': self.image_handler.image_url, 'interval': self.interval })
         self.schedule_thread.start()
 
     def update_image_on_schedule(self):
@@ -184,7 +224,7 @@ class Server:
         self.socketio: SocketIO = SocketIO(self.app, async_mode='threading')
         self.logger.set_socketio(self.socketio)
         self.logger.log({ 'event': 'startup' })
-        self.image_handler: ImageHandler = ImageHandler(self.logger, self.socketio)
+        self.image_handler: ImageHandler = ImageHandler(self.logger, self.socketio, self.config)
 
         @self.app.route('/')
         def index():
@@ -225,6 +265,7 @@ class Server:
 if __name__ == '__main__':
     config = Config()
     logger = Logger(config=config, limit=100)
+    atexit.register(logger.stop)
     try:
         server = Server(config=config, logger=logger)
         server.run()

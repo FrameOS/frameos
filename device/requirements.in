@@ -3,8 +3,9 @@
 
 flask==2.2.5
 flask-socketio==5.3.4
+importlib-metadata==6.7.0
 RPi.GPIO
-pillow
+pillow==9.5.0
 inky
 numpy==1.21.6
 werkzeug==2.2.3

@@ -81,33 +81,11 @@ def api_log():
     frame = models.Frame.query.filter_by(api_key=api_key).first_or_404()
 
     data = request.json
-    log = data.get('log', None)
-    if log is not None:
-        event = log.get('event', 'log')
-        models.new_log(frame.id, "webhook", json.dumps(log))
-        
-        changes = {}
-        if event == 'refresh_image':
-            changes['status'] = 'fetching'
-        if event == 'refresh_begin':
-            changes['status'] = 'refreshing'
-        if event == 'refresh_end' or event == 'refresh_skip_no_change':
-            changes['status'] = 'ready'
-        if event == 'device_info':
-            if frame.status != 'ready':
-                changes['status'] = 'ready'
-            if log.get('width', None) is not None and log['width'] != frame.width:
-                changes['width'] = log['width']
-            if log.get('height', None) is not None and log['height'] != frame.height:
-                changes['height'] = log['height']
-            if log.get('device', None) is not None and log['device'] != frame.device:
-                changes['device'] = log['device']
+    if log := data.get('log', None):
+        models.process_log(frame, log)
     
-        if len(changes) > 0:
-            print(changes)
-            for key, value in changes.items():
-                setattr(frame, key, value)
-            models.update_frame(frame)
-
+    if logs := data.get('logs', None):
+        for log in logs:
+            models.process_log(frame, log)
 
     return 'OK', 200
