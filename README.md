@@ -62,3 +62,12 @@ pip install -r requirements.txt
 cd frontend && npm install && cd ..
 honcho start
 ```
+
+## Updating models
+
+```bash
+# create migration after changing a model
+flask db migrate -m "something changed"
+# apply the migrations
+flask db upgrade
+```
