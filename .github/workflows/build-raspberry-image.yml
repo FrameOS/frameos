@@ -53,9 +53,10 @@ jobs:
           expect "Password:"
           send "raspberry\r"
 
-          # expect "pi@raspberrypi"
-          expect "permitted by applicable law"
-          # expect "$"
+          expect "permitted by applicable law."
+          send "bind 'set enable-bracketed-paste off'\r"
+
+          expect "pi@raspberrypi:~$"
           send "ls\r"
 
           expect "pi@raspberrypi:~$"
