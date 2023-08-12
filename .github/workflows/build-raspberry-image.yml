@@ -29,7 +29,14 @@ jobs:
           mkdir ~/qemu_rpi_kernel
           wget -O ~/qemu_rpi_kernel/kernel-qemu-5.10.63-bullseye https://github.com/dhruvvyas90/qemu-rpi-kernel/raw/master/kernel-qemu-5.10.63-bullseye
           wget -O ~/qemu_rpi_kernel/versatile-pb.dtb https://github.com/dhruvvyas90/qemu-rpi-kernel/raw/master/versatile-pb-bullseye-5.10.63.dtb
-  
+      - name: Configure user and password for Raspberry Pi OS
+        run: |
+          mkdir boot_mount
+          PASS=$(echo 'raspberry' | openssl passwd -6 -stdin)
+          sudo mount -o loop,offset=$((512*8192)) ./2023-05-03-raspios-bullseye-armhf-lite.img boot_mount/
+          echo "pi:$PASS" | sudo tee boot_mount/userconf.txt
+          sudo umount boot_mount
+        
       - name: Start QEMU and Customize Image
         run: |
           echo '#!/usr/bin/expect -f
