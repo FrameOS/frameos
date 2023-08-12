@@ -29,7 +29,7 @@ jobs:
 
           set timeout 3600
 
-          spawn qemu-system-arm -M versatilepb -cpu arm1176 -m 256 -drive file=./2023-05-03-raspios-bullseye-armhf-lite.img,format=raw -net user,hostfwd=tcp::5022-:22 -net nic -nodefaults -no-audio
+          spawn qemu-system-arm -M versatilepb -cpu arm1176 -m 256 -drive file=./2023-05-03-raspios-bullseye-armhf-lite.img,format=raw -net user,hostfwd=tcp::5022-:22 -net nic -nodefaults
 
           expect "raspberrypi login:"
           send "pi\r"
@@ -41,7 +41,7 @@ jobs:
           send "sudo apt update -y\r"
 
           expect "pi@raspberrypi:~$"
-          send "sudo apt-get install -y openssh-server\r"
+          send "sudo apt-get install -y openssh-server libopenjp2-7 tmux\r"
 
           expect "pi@raspberrypi:~$"
           send "sudo systemctl enable ssh && sudo systemctl start ssh\r"
