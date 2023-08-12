@@ -54,24 +54,20 @@ jobs:
           send "raspberry\r"
 
           expect "permitted by applicable law."
-          send "sh\r"
+          send "bind 'set enable-bracketed-paste off'\r"
+          send "\r"
+          send "\r"
 
-          expect "$"
-          send "export PS1='myuniqueprompt$ '\r"
-
-          expect "myuniqueprompt$"
-          send "your_next_command\r"
-
-          expect "myuniqueprompt$"
+          expect "pi@raspberrypi:~$"
           send "sudo apt update -y\r"
 
-          expect "myuniqueprompt$"
+          expect "pi@raspberrypi:~$"
           send "sudo apt-get install -y openssh-server libopenjp2-7 tmux\r"
 
-          expect "myuniqueprompt$"
+          expect "pi@raspberrypi:~$"
           send "sudo systemctl enable ssh && sudo systemctl start ssh\r"
 
-          expect "myuniqueprompt$"
+          expect "pi@raspberrypi:~$"
           send "sudo shutdown -h now\r"
 
           expect eof' > modify_image.exp
