@@ -3,9 +3,9 @@ import { FrameType } from '../types'
 
 export function frameHost(frame: FrameType): string {
   if (!frame.ssh_user || frame.ssh_user === 'pi') {
-    return frame.host
+    return frame.frame_host
   }
-  return `${frame.ssh_user}@${frame.host}`
+  return `${frame.ssh_user}@${frame.frame_host}`
 }
 
 export const frameStatusWithSpinner = ['deploying', 'fetching', 'refreshing', 'restarting', 'starting']

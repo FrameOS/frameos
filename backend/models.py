@@ -6,45 +6,57 @@ import json
 # NB! Update frontend/src/types.tsx if you change this
 class Frame(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    host = db.Column(db.String(256), unique=True, nullable=False)
-    # sending commands
+    # sending commands to frame
+    frame_host = db.Column(db.String(256), unique=True, nullable=False)
+    frame_port = db.Column(db.Integer, default=8999)
     ssh_user = db.Column(db.String(50), nullable=True)
     ssh_pass = db.Column(db.String(50), nullable=True)
     ssh_port = db.Column(db.Integer, default=22)
-    # receiving logs
-    api_host = db.Column(db.String(256), nullable=True)
-    api_key = db.Column(db.String(64), nullable=True)
-    api_port = db.Column(db.Integer, default=8999)
-    status = db.Column(db.String(15), nullable=False)
-    version = db.Column(db.String(50), nullable=True)
+    # receiving logs, connection from frame to us
+    server_host = db.Column(db.String(256), nullable=True)
+    server_port = db.Column(db.Integer, default=8999)
+    server_api_key = db.Column(db.String(64), nullable=True)
     # frame metadata
+    status = db.Column(db.String(15), nullable=False)
+    version = db.Column(db.String(50), nullable=True)    
     width = db.Column(db.Integer, nullable=True)
     height = db.Column(db.Integer, nullable=True)
     device = db.Column(db.String(256), nullable=True)
-
+    color = db.Column(db.String(256), nullable=True)
+    image_url = db.Column(db.String(256), nullable=True)
+    interval = db.Column(db.Double, default=300)
 
     def to_dict(self):
         return {
             'id': self.id,
-            'host': self.host,
+            'frame_host': self.frame_host,
+            'frame_port': self.frame_port,
             'ssh_user': self.ssh_user,
             'ssh_pass': self.ssh_pass,
             'ssh_port': self.ssh_port,
-            'api_host': self.api_host,
-            'api_key': self.api_key,
-            'api_port': self.api_port,
+            'server_host': self.server_host,
+            'server_port': self.server_port,
+            'server_api_key': self.server_api_key,
             'status': self.status,
             'version': self.version,
             'width': self.width,
             'height': self.height,
             'device': self.device,
+            'color': self.color,
+            'image_url': self.image_url,
+            'interval': self.interval
         }
 
-def new_frame(user_host: str, api_host: str) -> Frame:
-    if '@' in user_host:
-        user_pass, host = user_host.split('@')
+def new_frame(frame_host: str, server_host: str) -> Frame:
+    if '@' in frame_host:
+        user_pass, frame_host = frame_host.split('@')
     else:
-        user_pass, host = 'pi', user_host
+        user_pass, frame_host = 'pi', frame_host
+    
+    if ':' in frame_host:
+        frame_host, frame_port = frame_host.split(':')
+    else:
+        frame_port = 8999
 
     if ':' in user_pass:
         user, password = user_pass.split(':')
@@ -54,13 +66,21 @@ def new_frame(user_host: str, api_host: str) -> Frame:
     if password is None and user == 'pi':
         password = 'raspberry'
 
-    if ':' in api_host:
-        api_host, api_port = api_host.split(':')
+    if ':' in server_host:
+        server_host, server_port = server_host.split(':')
     else:
-        api_port = 8999
+        server_port = 8999
 
-    api_key = secrets.token_hex(32)
-    frame = Frame(ssh_user=user, ssh_pass=password, host=host, api_host=api_host, api_port=int(api_port), api_key=api_key, status="uninitialized")
+    frame = Frame(
+        ssh_user=user, 
+        ssh_pass=password, 
+        frame_host=frame_host, 
+        frame_port=int(frame_port), 
+        server_host=server_host, 
+        server_port=int(server_port), 
+        server_api_key=secrets.token_hex(32), 
+        status="uninitialized"
+    )
     db.session.add(frame)
     db.session.commit()
     socketio.emit('new_frame', frame.to_dict())
@@ -119,15 +139,13 @@ def process_log(frame: Frame, log: dict):
         changes['status'] = 'refreshing'
     if event == 'refresh_end' or event == 'refresh_skip_no_change':
         changes['status'] = 'ready'
-    if event == 'device_info':
+    if event == 'config':
         if frame.status != 'ready':
             changes['status'] = 'ready'
-        if log.get('width', None) is not None and log['width'] != frame.width:
-            changes['width'] = log['width']
-        if log.get('height', None) is not None and log['height'] != frame.height:
-            changes['height'] = log['height']
-        if log.get('device', None) is not None and log['device'] != frame.device:
-            changes['device'] = log['device']
+
+        for key in ['width', 'height', 'device', 'color', 'image_url', 'interval']:
+            if key in log and log[key] is not None and log[key] != getattr(frame, key):
+                changes[key] = log[key]
 
     if len(changes) > 0:
         for key, value in changes.items():

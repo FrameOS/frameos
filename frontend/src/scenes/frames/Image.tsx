@@ -19,9 +19,11 @@ export function Image({ id, className }: ImageProps) {
         <img
           className="rounded-lg w-full"
           src={getFrameImage(id)}
-          style={
-            frames[id].width && frames[id].height ? { aspectRatio: `${frames[id].width} / ${frames[id].height}` } : {}
-          }
+          style={{
+            ...(frames[id].width && frames[id].height
+              ? { aspectRatio: `${frames[id].width} / ${frames[id].height}`, maxWidth: frames[id].width }
+              : {}),
+          }}
           alt=""
         />
       ) : null}

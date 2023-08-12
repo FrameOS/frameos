@@ -4,6 +4,7 @@
 flask==2.2.5
 flask-socketio==5.3.4
 importlib-metadata==6.7.0
+zipp==3.15.0
 RPi.GPIO
 pillow==9.5.0
 inky

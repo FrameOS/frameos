@@ -31,7 +31,7 @@ def get_logs(id: int):
 @app.route('/api/frames/<int:id>/image', methods=['GET'])
 def get_image(id: int):
     frame = models.Frame.query.get_or_404(id)
-    response = requests.get(f'http://{frame.host}:8999/image')
+    response = requests.get(f'http://{frame.frame_host}:{frame.frame_port}/image')
         
     if response.status_code == 200:
         return Response(response.content, content_type='image/png')
@@ -41,7 +41,7 @@ def get_image(id: int):
 @app.route('/api/frames/<int:id>/refresh', methods=['POST'])
 def refresh_frame(id: int):
     frame = models.Frame.query.get_or_404(id)
-    response = requests.get(f'http://{frame.host}:8999/refresh')
+    response = requests.get(f'http://{frame.frame_host}:{frame.frame_port}/refresh')
         
     if response.status_code == 200:
         return "OK", 200
@@ -65,9 +65,9 @@ def initialize_frame(id: int):
 
 @app.route("/api/frames/new", methods=["POST"])
 def new_frame():
-    host = request.form['host']
-    api_host = request.form['api_host']
-    frame = models.new_frame(host, api_host)
+    frame_host = request.form['frame_host']
+    server_host = request.form['server_host']
+    frame = models.new_frame(frame_host, server_host)
     return jsonify(frame=frame.to_dict())
 
 @app.route('/images/<path:filename>')
@@ -77,8 +77,8 @@ def custom_static(filename: str):
 @app.route('/api/log', methods=["POST"])
 def api_log():
     auth_header = request.headers.get('Authorization')
-    api_key = auth_header.split(' ')[1]
-    frame = models.Frame.query.filter_by(api_key=api_key).first_or_404()
+    server_api_key = auth_header.split(' ')[1]
+    frame = models.Frame.query.filter_by(server_api_key=server_api_key).first_or_404()
 
     data = request.json
     if log := data.get('log', None):

@@ -60,12 +60,12 @@ def get_ssh_connection(frame: Frame) -> SSHClient:
     ssh.set_missing_host_key_policy(AutoAddPolicy())
 
     if frame.ssh_pass:
-        ssh.connect(frame.host, username=frame.ssh_user, password=frame.ssh_pass, timeout=10)
+        ssh.connect(frame.frame_host, username=frame.ssh_user, password=frame.ssh_pass, timeout=10)
     else:
         with open('/Users/marius/.ssh/id_rsa', 'r') as f:
             ssh_key = f.read()
         ssh_key_obj = RSAKey.from_private_key(StringIO(ssh_key))
-        ssh.connect(frame.host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=10)
+        ssh.connect(frame.frame_host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=10)
     return ssh
 
 def exec_command(frame: Frame, ssh: SSHClient, command: str) -> int:
@@ -90,6 +90,16 @@ def exec_command(frame: Frame, ssh: SSHClient, command: str) -> int:
     
     return exit_status
 
+def get_frame_json(frame: Frame) -> dict:
+    frame_json = frame.to_dict()
+    frame_json.pop("frame_host", None)
+    frame_json.pop("frame_port", None)
+    frame_json.pop("ssh_user", None)
+    frame_json.pop("ssh_pass", None)
+    frame_json.pop("ssh_port", None)
+    frame_json.pop("status", None)
+    return frame_json
+
 
 @huey.task()
 def initialize_frame(id: int):
@@ -102,24 +112,18 @@ def initialize_frame(id: int):
             frame.status = 'deploying'
             update_frame(frame)
 
-            log(id, "stdinfo", f"Connecting to {frame.ssh_user}@{frame.host}")
+            log(id, "stdinfo", f"Connecting to {frame.ssh_user}@{frame.frame_host}")
             ssh = get_ssh_connection(frame)                
-            log(id, "stdinfo", f"Connected to {frame.ssh_user}@{frame.host}")
+            log(id, "stdinfo", f"Connected to {frame.ssh_user}@{frame.frame_host}")
 
+            # exec_command(frame, ssh, "sudo apt -y install libopenjp2-7")
+            exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libopenjp2-7\" || sudo apt -y install libopenjp2-7")
             exec_command(frame, ssh, "sudo mkdir -p /srv/frameos")
             exec_command(frame, ssh, f"sudo chown -R {frame.ssh_user} /srv/frameos")
 
-            frame_json = {
-                "api_host": frame.api_host,
-                "api_key": frame.api_key,
-                "api_port": frame.api_port,
-                "width": frame.width,
-                "height": frame.height,
-            }
-
             with SCPClient(ssh.get_transport()) as scp:
                 log(id, "stdout", "> add /srv/frameos/frame.json")
-                scp.putfo(StringIO(json.dumps(frame_json, indent=4) + "\n"), "/srv/frameos/frame.json")
+                scp.putfo(StringIO(json.dumps(get_frame_json(frame), indent=4) + "\n"), "/srv/frameos/frame.json")
                 
                 log(id, "stdout", "> add /srv/frameos/frame.py")
                 scp.put("./device/frame.py", "/srv/frameos/frame.py")
@@ -150,16 +154,20 @@ def initialize_frame(id: int):
 @huey.task()
 def restart_frame(id: int):
     with app.app_context():
+        ssh = None
         try:
             frame = Frame.query.get_or_404(id)
 
             frame.status = 'restarting'
             update_frame(frame)
 
-            log(id, "stdinfo", f"Connecting to {frame.ssh_user}@{frame.host}")
+            log(id, "stdinfo", f"Connecting to {frame.ssh_user}@{frame.frame_host}")
             ssh = get_ssh_connection(frame)                
-            log(id, "stdinfo", f"Connected to {frame.ssh_user}@{frame.host}")
+            log(id, "stdinfo", f"Connected to {frame.ssh_user}@{frame.frame_host}")
 
+            log(id, "stdout", "> add /srv/frameos/frame.json")
+            with SCPClient(ssh.get_transport()) as scp:
+                scp.putfo(StringIO(json.dumps(get_frame_json(frame), indent=4) + "\n"), "/srv/frameos/frame.json")
             exec_command(frame, ssh, "tmux has-session -t frameos 2>/dev/null && tmux kill-session -t frameos")
             exec_command(frame, ssh, "cd /srv/frameos && tmux new-session -s frameos -d 'python3 frame.py'")
 
@@ -171,6 +179,7 @@ def restart_frame(id: int):
             frame.status = 'uninitialized'
             update_frame(frame)
         finally:
-            ssh.close()
+            if ssh is not None:
+                ssh.close()
             ssh_connections.remove(ssh)
             log(id, "stdinfo", "Connection closed")

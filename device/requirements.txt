@@ -48,5 +48,7 @@ werkzeug==2.2.3
     # via
     #   -r requirements.in
     #   flask
-zipp==3.16.2
-    # via importlib-metadata
+zipp==3.15.0
+    # via
+    #   -r requirements.in
+    #   importlib-metadata

@@ -15,9 +15,33 @@ from flask_socketio import SocketIO, emit
 from typing import Optional, List, Dict, Any
 from threading import Lock, Thread, Event
 
+VERSION = '1.0.0-prerelease'
+
 class Config:
     def __init__(self, filename='frame.json'):
         self._data = self._load(filename)
+        self.server_host: Optional[str] = self._data.get('server_host', None)
+        self.server_port: Optional[int] = self._data.get('server_port', None)
+        self.server_api_key: Optional[str] = self._data.get('server_api_key', None)
+        self.width: int = self._data.get('width', 1920)
+        self.height: int = self._data.get('height', 1080)
+        self.device: str = self._data.get('device', "kiosk")
+        self.color: Optional[str] = self._data.get('color', None)
+        self.image_url: Optional[str] = self._data.get('image_url', None)
+        self.interval: Optional[int] = self._data.get('interval', 300)
+
+    def to_dict(self):
+        return {
+            'server_host': self.server_host,
+            'server_port': self.server_port,
+            'server_api_key': self.server_api_key,
+            'width': self.width,
+            'height': self.height,
+            'device': self.device,
+            'color': self.color,
+            'image_url': self.image_url,
+            'interval': self.interval
+        }
 
     def _load(self, filename):
         try:
@@ -63,10 +87,10 @@ class Webhook:
     def _send_batch(self, batch: List[Dict[str, Any]]):
         if not self.config:
             return
-        protocol = 'https' if self.config.get('api_port') in [443, 8443] else 'http'
-        url = f"{protocol}://{self.config.get('api_host')}:{self.config.get('api_port')}/api/log"
+        protocol = 'https' if self.config.server_port % 1000 == 443 else 'http'
+        url = f"{protocol}://{self.config.server_host}:{self.config.server_port}/api/log"
         headers = {
-            "Authorization": f"Bearer {self.config.get('api_key')}",
+            "Authorization": f"Bearer {self.config.server_api_key}",
             "Content-Type": "application/json"
         }
         try:
@@ -116,34 +140,35 @@ class ImageHandler:
         self.next_image: bytes = None
         self.image_update_lock: Lock = Lock()
         self.image_update_in_progress: bool = False
-        self.width: Optional[int] = config.get('width', None)
-        self.height: Optional[int] = config.get('height', None)
-        self.device: Optional[str] = None
+        self.config: Config = config
 
         try:
             from inky.auto import auto
             self.inky = auto()
-            self.device = 'inky'
-            self.width = self.inky.resolution[0]
-            self.height = self.inky.resolution[1]
+            self.config.device = 'inky'
+            self.config.width = self.inky.resolution[0]
+            self.config.height = self.inky.resolution[1]
+            self.config.color = self.inky.colour
         except Exception as e:
             logger.log({ 'event': 'device_error', "device": 'inky', 'error': str(e), 'info': "Starting in WEB only mode." })
             self.inky = None
-            self.device = 'web_only'
-            if self.width is None or self.height is None:
-                self.width = 1920
-                self.height = 1080
+            self.config.device = 'web_only'
+            if self.config.width is None or self.config.height is None:
+                self.config.width = 1920
+                self.config.height = 1080
 
-        self.image_url: str = f"https://source.unsplash.com/random/{self.width}x{self.height}/?bird"
-        logger.log({ 'event': 'device_info', "device": self.device, 'width': self.width, 'height': self.height })
+        if self.config.image_url is None:
+            self.config.image_url = "https://source.unsplash.com/random/{width}x{height}/?bird"
+
+        config = self.config.to_dict()
+        config.pop('server_host', None)
+        config.pop('server_port', None)
+        config.pop('server_api_key', None)
+        logger.log({ 'event': 'config', **config })
 
     def download_url(self, url: str):
         response = requests.get(url)
-        if response.history:
-            last_url = response.history[-1].url
-        else:
-            last_url = url
-        return response.content, last_url
+        return response.content
 
     def slow_update_image_on_frame(self, content):
         if self.inky is not None:
@@ -163,8 +188,9 @@ class ImageHandler:
         def do_update():
             try:
                 self.image_update_in_progress = True
-                self.logger.log({ 'event': 'refresh_image', 'trigger': trigger, 'image_url': self.image_url })
-                self.next_image, last_url = self.download_url(self.image_url)
+                image_url = self.config.image_url.replace('{width}', str(self.config.width)).replace('{height}', str(self.config.height))
+                self.logger.log({ 'event': 'refresh_image', 'trigger': trigger, 'image_url': image_url })
+                self.next_image = self.download_url(image_url)
                 if self.current_image is None or hashlib.sha256(self.next_image).digest() != hashlib.sha256(self.current_image).digest():
                     self.logger.log({ 'event': 'refresh_begin' })
                     self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
@@ -208,7 +234,7 @@ class Scheduler:
         self.reset_event = reset_event
         self.schedule_thread: Thread = Thread(target=self.update_image_on_schedule)
 
-        logger.log({ 'event': 'schedule_start', 'image_url': self.image_handler.image_url, 'interval': self.interval })
+        logger.log({ 'event': 'schedule_start', 'interval': self.interval })
         self.schedule_thread.start()
 
     def update_image_on_schedule(self):

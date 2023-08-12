@@ -23,12 +23,10 @@ export function Frame(props: FrameSceneProps) {
       </H1>
       {frame ? (
         <>
-          <div className="flex gap-4 flex-col md:flex-row">
-            <Details id={frame.id} className="flex-1 min-w-max" />
-            <Box>
-              <Image id={frame.id} className="flex-0" />
-            </Box>
-          </div>
+          <Box className="m-auto max-w-max">
+            <Image id={frame.id} className="flex-1" />
+          </Box>
+          <Details id={frame.id} className="flex-1" />
           <Logs id={frame.id} />
         </>
       ) : null}

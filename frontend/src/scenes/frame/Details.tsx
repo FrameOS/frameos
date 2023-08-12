@@ -27,8 +27,12 @@ export function Details({ className, id }: DetailsProps) {
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5">
             <tbody>
               <tr>
-                <td className="text-blue-200 text-right">SSH host:</td>
-                <td>{frame.host}</td>
+                <td className="text-blue-200 text-right">Frame host:</td>
+                <td>{frame.frame_host}</td>
+              </tr>
+              <tr>
+                <td className="text-blue-200 text-right">Frame port:</td>
+                <td>{frame.frame_port}</td>
               </tr>
               <tr>
                 <td className="text-blue-200 text-right">SSH user:</td>
@@ -46,17 +50,17 @@ export function Details({ className, id }: DetailsProps) {
               </tr>
               <tr>
                 <td className="text-blue-200 text-right">API host:</td>
-                <td>{frame.api_host}</td>
+                <td>{frame.server_host}</td>
+              </tr>
+              <tr>
+                <td className="text-blue-200 text-right">API port:</td>
+                <td>{frame.server_port}</td>
               </tr>
               <tr>
                 <td className="text-blue-200 text-right">API key:</td>
                 <td>
-                  <Reveal>{frame.api_key}</Reveal>
+                  <Reveal>{frame.server_api_key}</Reveal>
                 </td>
-              </tr>
-              <tr>
-                <td className="text-blue-200 text-right">API port:</td>
-                <td>{frame.api_port}</td>
               </tr>
               {frame.version ? (
                 <tr>
@@ -71,8 +75,16 @@ export function Details({ className, id }: DetailsProps) {
               <tr>
                 <td className="text-blue-200 text-right">Device:</td>
                 <td>
-                  {frame.device} {frame.width && frame.height ? `${frame.width}x${frame.height}` : ''}
+                  {frame.device} {frame.color} {frame.width && frame.height ? `${frame.width}x${frame.height}` : ''}
                 </td>
+              </tr>
+              <tr>
+                <td className="text-blue-200 text-right">Image URL:</td>
+                <td className="truncate">{frame.image_url}</td>
+              </tr>
+              <tr>
+                <td className="text-blue-200 text-right">Interval:</td>
+                <td className="truncate">{frame.interval}</td>
               </tr>
             </tbody>
           </table>
