@@ -53,6 +53,11 @@ def reset_frame(id: int):
     tasks.reset_frame(id)
     return 'Success', 200
 
+@app.route('/api/frames/<int:id>/restart', methods=['POST'])
+def restart_frame(id: int):
+    tasks.restart_frame(id)
+    return 'Success', 200
+
 @app.route('/api/frames/<int:id>/initialize', methods=['POST'])
 def initialize_frame(id: int):
     tasks.initialize_frame(id)
@@ -80,14 +85,30 @@ def api_log():
     if log is not None:
         event = log.get('event', 'log')
         models.new_log(frame.id, "webhook", json.dumps(log))
+        
         if event == 'refresh_image':
-            frame.status = 'updating'
+            frame.status = 'fetching'
             models.update_frame(frame)
         if event == 'refresh_begin':
             frame.status = 'refreshing'
             models.update_frame(frame)
         if event == 'refresh_end' or event == 'refresh_skip_no_change':
-            frame.status = 'initialized'
+            frame.status = 'ready'
+            models.update_frame(frame)
+        if event == 'frame_info':
+            changes = {}
+            if frame.status != 'ready':
+                changes['status'] = 'ready'
+            if log.get('width', None) is not None and log['width'] != frame.width:
+                changes['width'] = log['width']
+            if log.get('height', None) is not None and log['height'] != frame.height:
+                changes['height'] = log['height']
+            if log.get('device', None) is not None and log['device'] != frame.device:
+                changes['device'] = log['device']
+            if len(changes) > 0:
+                print(changes)
+                for key, value in changes.items():
+                    setattr(frame, key, value)
             models.update_frame(frame)
 
     return 'OK', 200

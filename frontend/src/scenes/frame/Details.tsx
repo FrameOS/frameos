@@ -14,7 +14,7 @@ export interface DetailsProps {
 
 export function Details({ className }: DetailsProps) {
   const { frame, frameLoading } = useValues(frameLogic)
-  const { refresh } = useActions(frameLogic)
+  const { refresh, restart } = useActions(frameLogic)
 
   return (
     <Box className={clsx('p-4 space-y-4', className)}>
@@ -72,6 +72,9 @@ export function Details({ className }: DetailsProps) {
             </table>
             <div className="flex space-x-2">
               <Button type="submit">Redeploy</Button>
+              <Button type="button" onClick={restart}>
+                Restart
+              </Button>
               <Button type="button" onClick={refresh}>
                 Refresh
               </Button>

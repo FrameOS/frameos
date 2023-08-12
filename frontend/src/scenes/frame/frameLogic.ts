@@ -15,7 +15,7 @@ export const frameLogic = kea<frameLogicType>([
   props({} as FrameLogicProps),
   key((props) => props.id),
 
-  actions({ initialize: true, refresh: true, updateImage: true }),
+  actions({ initialize: true, restart: true, refresh: true, updateImage: true }),
   loaders(({ props }) => ({
     frame: [
       null as FrameType | null,
@@ -87,6 +87,9 @@ export const frameLogic = kea<frameLogicType>([
     },
     refresh: async () => {
       await fetch(`/api/frames/${props.id}/refresh`, { method: 'POST' })
+    },
+    restart: async () => {
+      await fetch(`/api/frames/${props.id}/restart`, { method: 'POST' })
     },
     [socketLogic.actionTypes.newLog]: ({ log }) => {
       if (log.type === 'webhook') {

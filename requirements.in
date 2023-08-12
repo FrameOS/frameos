@@ -1,6 +1,7 @@
 gevent
 gevent-websocket
 flask
+Flask-migrate
 flask_socketio
 flask_sqlalchemy
 sqlalchemy

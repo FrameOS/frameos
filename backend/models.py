@@ -1,4 +1,5 @@
 from . import db, socketio
+from sqlalchemy.dialects.sqlite import JSON
 import secrets
 
 # NB! Update frontend/src/types.tsx if you change this
@@ -15,6 +16,11 @@ class Frame(db.Model):
     api_port = db.Column(db.Integer, default=8999)
     status = db.Column(db.String(15), nullable=False)
     version = db.Column(db.String(50), nullable=True)
+    # frame metadata
+    width = db.Column(db.Integer, nullable=True)
+    height = db.Column(db.Integer, nullable=True)
+    device = db.Column(db.String(256), nullable=True)
+
 
     def to_dict(self):
         return {
@@ -28,6 +34,9 @@ class Frame(db.Model):
             'api_port': self.api_port,
             'status': self.status,
             'version': self.version,
+            'width': self.width,
+            'height': self.height,
+            'device': self.device,
         }
 
 def new_frame(user_host: str, api_host: str) -> Frame:

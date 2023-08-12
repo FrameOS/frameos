@@ -25,17 +25,14 @@ def task_not_run_handler(signal, task, exc=None):
     print(SIGNAL_LOCKED)
 
 ssh_connections = set()
-locks = set()
 
 def close_ssh_connection():
-    # Assuming 'ssh' is accessible here
     for ssh in ssh_connections:
-        ssh.close()
-    print("SSH connection closed.")
-    for lock in locks:
-        pass
-        # huey.release_lock(lock)
-        # lock.close()
+        try:
+            ssh.close()
+            print("SSH connection closed.")
+        except:
+            pass
 
 # Registering the close_ssh_connection function to be called on exit
 atexit.register(close_ssh_connection)
@@ -55,69 +52,68 @@ def reset_frame(id: int):
         if frame.status != 'uninitialized':
             frame.status = 'uninitialized'
             update_frame(frame)
-        
         log(id, "admin", "Resetting frame status to 'uninitialized'")
+
+def get_ssh_connection(frame: Frame) -> SSHClient:
+    ssh = SSHClient()
+    ssh_connections.add(ssh)
+    ssh.set_missing_host_key_policy(AutoAddPolicy())
+
+    if frame.ssh_pass:
+        ssh.connect(frame.host, username=frame.ssh_user, password=frame.ssh_pass, timeout=10)
+    else:
+        with open('/Users/marius/.ssh/id_rsa', 'r') as f:
+            ssh_key = f.read()
+        ssh_key_obj = RSAKey.from_private_key(StringIO(ssh_key))
+        ssh.connect(frame.host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=10)
+    return ssh
+
+def exec_command(frame: Frame, ssh: SSHClient, command: str) -> int:
+    log(frame.id, "stdout", f"> {command}")
+    _stdin, stdout, stderr = ssh.exec_command(command)
+    exit_status = None
+    while exit_status is None:
+        while line := stdout.readline():
+            log(frame.id, "stdout", line)
+        while line := stderr.readline():
+            log(frame.id, "stderr", line)
+            
+        # Check if the command has finished running
+        if stdout.channel.exit_status_ready():
+            exit_status = stdout.channel.recv_exit_status()
+
+        # Sleep to prevent busy-waiting
+        sleep(0.1)
+
+    if exit_status != 0:
+        log(frame.id, "exit_status", f"The command exited with status {exit_status}")
+    
+    return exit_status
 
 
 @huey.task()
 def initialize_frame(id: int):
     with app.app_context():
-        # with huey.lock_task(f'frame--{id}'):
-        locks.add(f'frame--{id}')
-        ssh = SSHClient()
-        ssh_connections.add(ssh)
         try:
             frame = Frame.query.get_or_404(id)
             if frame.status == 'deploying':
-                raise Exception(f"Current frame status '{frame.status}' is not valid for this operation")
+                raise Exception(f"Can not deploy while already deploying")
 
             frame.status = 'deploying'
             update_frame(frame)
+
+            log(id, "stdinfo", f"Connecting to {frame.ssh_user}@{frame.host}")
+            ssh = get_ssh_connection(frame)                
+            log(id, "stdinfo", f"Connected to {frame.ssh_user}@{frame.host}")
+
+            exec_command(frame, ssh, "sudo mkdir -p /srv/frameos")
+            exec_command(frame, ssh, f"sudo chown -R {frame.ssh_user} /srv/frameos")
 
             frame_json = {
                 "api_host": frame.api_host,
                 "api_key": frame.api_key,
                 "api_port": frame.api_port,
             }
-
-            log(id, "stdinfo", f"Connecting to {frame.ssh_user}@{frame.host}")
-            ssh.set_missing_host_key_policy(AutoAddPolicy())
-
-            if frame.ssh_pass:
-                ssh.connect(frame.host, username=frame.ssh_user, password=frame.ssh_pass, timeout=10)
-            else:
-                with open('/Users/marius/.ssh/id_rsa', 'r') as f:
-                    ssh_key = f.read()
-                ssh_key_obj = RSAKey.from_private_key(StringIO(ssh_key))
-                ssh.connect(frame.host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=10)
-            
-            log(id, "stdinfo", f"Connected to {frame.ssh_user}@{frame.host}")
-
-            def exec_command(command: str) -> int:
-                log(id, "stdout", f"> {command}")
-                stdin, stdout, stderr = ssh.exec_command(command)
-                exit_status = None
-                while exit_status is None:
-                    while line := stdout.readline():
-                        log(id, "stdout", line)
-                    while line := stderr.readline():
-                        log(id, "stderr", line)
-                        
-                    # Check if the command has finished running
-                    if stdout.channel.exit_status_ready():
-                        exit_status = stdout.channel.recv_exit_status()
-
-                    # Sleep to prevent busy-waiting
-                    sleep(0.1)
-
-                if exit_status != 0:
-                    log(id, "exit_status", f"The command exited with status {exit_status}")
-                
-                return exit_status
-            
-            # exec_command("sudo apt update -y")
-            exec_command("sudo mkdir -p /srv/frameos")
-            exec_command(f"sudo chown -R {frame.ssh_user} /srv/frameos")
 
             with SCPClient(ssh.get_transport()) as scp:
                 log(id, "stdout", "> add /srv/frameos/frame.json")
@@ -132,12 +128,40 @@ def initialize_frame(id: int):
                 log(id, "stdout", "> add /srv/frameos/requirements.txt")
                 scp.put("./device/requirements.txt", "/srv/frameos/requirements.txt")
 
-            exec_command("cd /srv/frameos && (sha256sum -c requirements.txt.sha256sum 2>/dev/null || (pip3 install -r requirements.txt && sha256sum requirements.txt > requirements.txt.sha256sum))")
+            exec_command(frame, ssh, "cd /srv/frameos && (sha256sum -c requirements.txt.sha256sum 2>/dev/null || (pip3 install -r requirements.txt && sha256sum requirements.txt > requirements.txt.sha256sum))")
 
-            exec_command("tmux has-session -t frameos 2>/dev/null && tmux kill-session -t frameos")
-            exec_command("cd /srv/frameos && tmux new-session -s frameos -d 'python3 frame.py'")
+            exec_command(frame, ssh, "tmux has-session -t frameos 2>/dev/null && tmux kill-session -t frameos")
+            exec_command(frame, ssh, "cd /srv/frameos && tmux new-session -s frameos -d 'python3 frame.py'")
 
-            frame.status = 'initialized'
+            frame.status = 'starting'
+            update_frame(frame)
+
+        except Exception as e:
+            log(id, "stderr", str(e))
+            frame.status = 'uninitialized'
+            update_frame(frame)
+        finally:
+            ssh.close()
+            ssh_connections.remove(ssh)
+            log(id, "stdinfo", "Connection closed")
+
+@huey.task()
+def restart_frame(id: int):
+    with app.app_context():
+        try:
+            frame = Frame.query.get_or_404(id)
+
+            frame.status = 'restarting'
+            update_frame(frame)
+
+            log(id, "stdinfo", f"Connecting to {frame.ssh_user}@{frame.host}")
+            ssh = get_ssh_connection(frame)                
+            log(id, "stdinfo", f"Connected to {frame.ssh_user}@{frame.host}")
+
+            exec_command(frame, ssh, "tmux has-session -t frameos 2>/dev/null && tmux kill-session -t frameos")
+            exec_command(frame, ssh, "cd /srv/frameos && tmux new-session -s frameos -d 'python3 frame.py'")
+
+            frame.status = 'starting'
             update_frame(frame)
 
         except Exception as e:
