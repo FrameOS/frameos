@@ -1,11 +1,11 @@
 import { useValues } from 'kea'
-import { framesLogic } from './framesLogic'
 import { NewFrame } from './NewFrame'
 import { Frame } from './Frame'
 import { H1 } from '../../components/H1'
+import { framesModel } from '../../models/framesModel'
 
 export function Frames() {
-  const { framesList } = useValues(framesLogic)
+  const { framesList } = useValues(framesModel)
   return (
     <div>
       <H1>FrameOS</H1>

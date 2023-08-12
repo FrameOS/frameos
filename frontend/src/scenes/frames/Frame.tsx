@@ -4,6 +4,9 @@ import { H5 } from '../../components/H5'
 import { Box } from '../../components/Box'
 import { frameHost, frameStatus } from '../../decorators/frame'
 import Spinner from '../../components/Spinner'
+import { useValues } from 'kea'
+import { framesModel } from '../../models/framesModel'
+import { Image } from './Image'
 
 interface FrameProps {
   frame: FrameType
@@ -13,7 +16,7 @@ export function Frame({ frame }: FrameProps): JSX.Element {
   return (
     <Box id={`frame-${frame.id}`}>
       <A href={`/frames/${frame.id}`}>
-        <img className="rounded-t-lg" src={`/api/frames/${frame.id}/image`} alt="" />
+        <Image id={frame.id} />
       </A>
       <div className="flex justify-between px-4 pt-4 mb-2">
         <H5 className="text-ellipsis overflow-hidden">

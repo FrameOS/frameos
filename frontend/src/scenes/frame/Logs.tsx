@@ -1,12 +1,12 @@
 import { useValues } from 'kea'
 import { Box } from '../../components/Box'
 import { H6 } from '../../components/H6'
-import { frameLogic } from './frameLogic'
 import clsx from 'clsx'
 import { useEffect, useRef, useState } from 'react'
+import { logsLogic } from './logsLogic'
 
-export function Logs() {
-  const { logs, logsLoading } = useValues(frameLogic)
+export function Logs({ id }: { id: number }) {
+  const { logs, logsLoading } = useValues(logsLogic({ id }))
   const [scrollDivRef, setScrollDivRef] = useState<HTMLDivElement | null>(null)
 
   useEffect(() => {
