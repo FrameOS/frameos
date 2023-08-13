@@ -1,4 +1,5 @@
 import json
+import os
 from backend import huey, app
 from backend.models import new_log as log, Frame, update_frame
 from paramiko import RSAKey, SSHClient, AutoAddPolicy
@@ -62,7 +63,7 @@ def get_ssh_connection(frame: Frame) -> SSHClient:
     if frame.ssh_pass:
         ssh.connect(frame.frame_host, username=frame.ssh_user, password=frame.ssh_pass, timeout=10)
     else:
-        with open('/Users/marius/.ssh/id_rsa', 'r') as f:
+        with open(os.path.expanduser('~/.ssh/id_rsa'), 'r') as f:
             ssh_key = f.read()
         ssh_key_obj = RSAKey.from_private_key(StringIO(ssh_key))
         ssh.connect(frame.frame_host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=10)

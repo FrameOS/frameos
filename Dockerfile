@@ -5,7 +5,7 @@ FROM python:3.9-slim-bullseye
 WORKDIR /app
 
 # Install Node.js based on platform
-RUN apt-get update && apt-get install -y curl build-essential libffi-dev \
+RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-server \
     && ARCHITECTURE=$(uname -m) \
     && if [ "$ARCHITECTURE" = "armv6l" ]; then \
          NODE_VERSION=14.x; \
@@ -53,4 +53,4 @@ RUN rm -rf /app/frontend && mv /tmp/frontend /app/
 EXPOSE 8999
 
 # Start huey in the background and then run the Flask application
-CMD ["sh", "-c", "huey_consumer.py backend.huey --worker-type=greenlet --workers=10 --flush-locks & python3 app.py"]
+CMD ["sh", "-c", "redis-server --daemonize yes && huey_consumer.py backend.huey --worker-type=greenlet --workers=10 --flush-locks & python3 app.py"]

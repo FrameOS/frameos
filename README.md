@@ -15,22 +15,32 @@ And:
 
 Get it with presoldered headers, or solder them yourself. Attach the two devices.
 
+## FrameOS Control Panel
+
+```bash
+docker run -d -p 8999:8999 mariusandra/frameos
+```
+
 ## Raspberry setup 
 
 Download the [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
 
-- Select [Raspberry Pi OS Lite](https://www.raspberrypi.org/downloads/raspberry-pi-os/) debian `bullseye`. Select 32-bit if you have the zero w v1, otherwise select 64 bit.
-- Click the "Gear" icon. Answer yes for the WiFi password popup if asked. Set:
-- Change the hostname to something unique, like `raam7.local`
+- Select [Raspberry Pi OS Lite](https://www.raspberrypi.org/downloads/raspberry-pi-os/) debian `bullseye`. 
+- Select 32-bit if you have the zero w v1, otherwise select 64 bit.
+- Click the "Gear" icon
+- Change the hostname to something unique, like `frame1.local`
 - Enable SSH with password. Set a strong user/password and note it down in your password manager.
 - Make sure the wifi user/password is correct.
 
 Plug in the raspberry, and wait until you can connect to it:
 
 ```bash
-ping raam7.local
-ssh raam@raam7.local
+ping frame1.local
+ssh raam@frame1.local
 ```
+
+
+
 
 Then run `sudo raspi-config` and:
 

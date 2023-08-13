@@ -7,20 +7,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8999:8999"
-    depends_on:
-      - redis
-    environment:
-      - REDIS_URL=redis://redis:6379/0
     volumes:
       - frameos-data:/app/data
 
-  redis:
-    image: "redis:latest"
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-
 volumes:
-  redis-data:
   frameos-data:
