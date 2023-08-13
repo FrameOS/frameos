@@ -11,6 +11,7 @@ jobs:
     strategy:
       matrix:
         platform: [linux/amd64, linux/arm64/v8, linux/arm/v6, linux/arm/v7]
+      fail-fast: false
 
     steps:
       - name: Checkout code
