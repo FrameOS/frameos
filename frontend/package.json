@@ -7,7 +7,7 @@
     "dev": "concurrently \"npm run dev:kea\" \"npm run dev:vite\" -n KEA,VITE -c green,magenta",
     "dev:kea": "kea-typegen watch --write-paths",
     "dev:vite": "vite build --watch",
-    "build": "tsc && vite build",
+    "build": "kea-typegen write --write-paths && tsc && vite build",
     "prettier": "prettier --write src",
     "preview": "vite preview"
   },
