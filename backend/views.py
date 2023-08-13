@@ -87,6 +87,14 @@ def new_frame():
     frame = models.new_frame(frame_host, server_host)
     return jsonify(frame=frame.to_dict())
 
+@app.route('/api/frames/<int:frame_id>', methods=['DELETE'])
+def delete_frame_route(frame_id):
+    success = models.delete_frame(frame_id)
+    if success:
+        return jsonify({'message': 'Frame deleted successfully'}), 200
+    else:
+        return jsonify({'message': 'Frame not found'}), 404
+
 @app.route('/images/<path:filename>')
 def custom_static(filename: str):
     return send_from_directory(app.static_folder + '/images', filename)

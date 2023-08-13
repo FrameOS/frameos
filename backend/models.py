@@ -91,6 +91,16 @@ def update_frame(frame: Frame):
     db.session.commit()
     socketio.emit('update_frame', frame.to_dict())
 
+def delete_frame(frame_id: int):
+    frame = Frame.query.get(frame_id)
+    if frame:
+        Log.query.filter_by(frame_id=frame_id).delete()
+        db.session.delete(frame)
+        db.session.commit()
+        socketio.emit('delete_frame', {'id': frame_id})
+        return True
+    return False
+
 class Log(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.DateTime, nullable=False, default=db.func.current_timestamp())

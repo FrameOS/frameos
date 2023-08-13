@@ -10,12 +10,14 @@ export const socketLogic = kea<socketLogicType>([
     newLog: (log: LogType) => ({ log }),
     newFrame: (frame: FrameType) => ({ frame }),
     updateFrame: (frame: FrameType) => ({ frame }),
+    deleteFrame: ({ id }: { id: number }) => ({ id }),
   }),
   afterMount(({ actions, cache }) => {
     cache.socket = connect('/')
     cache.socket.on('new_log', actions.newLog)
     cache.socket.on('new_frame', actions.newFrame)
     cache.socket.on('update_frame', actions.updateFrame)
+    cache.socket.on('delete_frame', actions.deleteFrame)
   }),
   beforeUnmount(({ cache }) => {
     cache.socket.close()

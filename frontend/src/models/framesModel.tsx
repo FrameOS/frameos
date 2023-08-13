@@ -5,6 +5,7 @@ import { FrameType } from '../types'
 import { socketLogic } from '../scenes/socketLogic'
 
 import type { framesModelType } from './framesModelType'
+import { router } from 'kea-router'
 
 export const framesModel = kea<framesModelType>([
   connect({ logic: [socketLogic] }),
@@ -16,6 +17,7 @@ export const framesModel = kea<framesModelType>([
     restartFrame: (id: number) => ({ id }),
     refreshFrame: (id: number) => ({ id }),
     updateFrameImage: (id: number) => ({ id }),
+    deleteFrame: (id: number) => ({ id }),
   }),
   loaders(({ values }) => ({
     frames: [
@@ -56,6 +58,11 @@ export const framesModel = kea<framesModelType>([
       {
         [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
         [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
+        [socketLogic.actionTypes.deleteFrame]: (state, { id }) => {
+          const newState = { ...state }
+          delete newState[id]
+          return newState
+        },
       },
     ],
     frameImageTimestamps: [
@@ -94,6 +101,12 @@ export const framesModel = kea<framesModelType>([
     },
     restartFrame: async ({ id }) => {
       await fetch(`/api/frames/${id}/restart`, { method: 'POST' })
+    },
+    deleteFrame: async ({ id }) => {
+      await fetch(`/api/frames/${id}`, { method: 'DELETE' })
+      if (router.values.location.pathname == '/frames/' + id) {
+        router.actions.push('/')
+      }
     },
     [socketLogic.actionTypes.newLog]: ({ log }) => {
       if (log.type === 'webhook') {

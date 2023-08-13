@@ -18,7 +18,7 @@ export interface DetailsProps {
 export function Details({ className, id }: DetailsProps) {
   const { frame, editing } = useValues(frameLogic({ id }))
   const { editFrame, closeEdit } = useActions(frameLogic({ id }))
-  const { redeployFrame, refreshFrame, restartFrame } = useActions(framesModel)
+  const { redeployFrame, refreshFrame, restartFrame, deleteFrame } = useActions(framesModel)
 
   return (
     <Box className={clsx('p-4 space-y-4', className)}>
@@ -70,6 +70,13 @@ export function Details({ className, id }: DetailsProps) {
                 className="bg-gray-600 hover:bg-gray-700 focus:ring-gray-800"
               >
                 Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => deleteFrame(frame.id)}
+                className="bg-red-600 hover:bg-red-700 focus:ring-red-800"
+              >
+                Delete
               </Button>
             </div>
           </Form>
