@@ -21,6 +21,8 @@ Get it with presoldered headers, or solder them yourself. Attach the two devices
 docker run -d -p 8999:8999 mariusandra/frameos
 ```
 
+Then load http://0.0.0.0:8999 - ideally with an IP that your frames can connect to.
+
 ## Raspberry setup 
 
 Download the [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
@@ -36,11 +38,12 @@ Plug in the raspberry, and wait until you can connect to it:
 
 ```bash
 ping frame1.local
-ssh raam@frame1.local
+ssh frame@frame1.local
 ```
 
+Then add it in the control interface.
 
-
+### Optional
 
 Then run `sudo raspi-config` and:
 
@@ -53,9 +56,10 @@ Optional, install tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
 ```
 
-# FrameOS Control Panel
+# Developing 
 
-Getting started:
+## FrameOS Control Panel
+
 
 ```bash
 python3 -m venv env
@@ -65,7 +69,7 @@ cd frontend && npm install && cd ..
 honcho start
 ```
 
-## Updating models
+## Migrations
 
 ```bash
 # create migration after changing a model

@@ -63,10 +63,14 @@ def get_ssh_connection(frame: Frame) -> SSHClient:
     if frame.ssh_pass:
         ssh.connect(frame.frame_host, username=frame.ssh_user, password=frame.ssh_pass, timeout=10)
     else:
-        with open(os.path.expanduser('~/.ssh/id_rsa'), 'r') as f:
-            ssh_key = f.read()
-        ssh_key_obj = RSAKey.from_private_key(StringIO(ssh_key))
-        ssh.connect(frame.frame_host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=10)
+        key_path = os.path.expanduser('~/.ssh/id_rsa')
+        if os.path.exists(key_path):
+            with open(key_path, 'r') as f:
+                ssh_key = f.read()
+            ssh_key_obj = RSAKey.from_private_key(StringIO(ssh_key))
+            ssh.connect(frame.frame_host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=10)
+        else:
+            raise Exception(f"SSH key file does not exist at {key_path}")
     return ssh
 
 def exec_command(frame: Frame, ssh: SSHClient, command: str) -> int:
