@@ -5,7 +5,7 @@ FROM python:3.9-slim-bullseye
 WORKDIR /app
 
 # Install Node.js 18 and build tools
-RUN apt-get update && apt-get install -y curl build-essential \
+RUN apt-get update && apt-get install -y curl build-essential libffi-dev \
     && curl -sL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y nodejs
 
@@ -30,7 +30,7 @@ RUN npm run build
 RUN find . -maxdepth 1 ! -name 'dist' ! -name '.' ! -name '..' -exec rm -rf {} \;
 
 # Cleanup node installations and build tools
-RUN apt-get remove -y nodejs build-essential \
+RUN apt-get remove -y nodejs build-essential libffi-dev \
     && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf /app/frontend/node_modules \
