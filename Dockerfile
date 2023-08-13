@@ -17,7 +17,8 @@ RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-s
 
 # Copy the requirements file and install using pip
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip3 install --upgrade pip \
+    && pip3 install --no-cache-dir -r requirements.txt
 
 # Change the working directory for npm install
 WORKDIR /tmp/frontend
