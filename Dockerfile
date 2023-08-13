@@ -4,9 +4,15 @@ FROM python:3.9-slim-bullseye
 # Set the working directory
 WORKDIR /app
 
-# Install Node.js 18 and build tools
+# Install Node.js based on platform
 RUN apt-get update && apt-get install -y curl build-essential libffi-dev \
-    && curl -sL https://deb.nodesource.com/setup_18.x | bash - \
+    && ARCHITECTURE=$(uname -m) \
+    && if [ "$ARCHITECTURE" = "armv6l" ]; then \
+         NODE_VERSION=14.x; \
+       else \
+         NODE_VERSION=18.x; \
+       fi \
+    && curl -sL https://deb.nodesource.com/setup_$NODE_VERSION | bash - \
     && apt-get install -y nodejs
 
 # Copy the requirements file and install using pip
