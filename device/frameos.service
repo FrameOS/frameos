@@ -1,0 +1,12 @@
+[Unit]
+Description=FrameOS Service
+After=network.target
+
+[Service]
+User=%I
+WorkingDirectory=/srv/frameos
+ExecStart=/usr/bin/python3 /srv/frameos/frame.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

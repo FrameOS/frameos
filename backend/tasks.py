@@ -120,8 +120,14 @@ def initialize_frame(id: int):
             # exec_command(frame, ssh, "sudo apt -y install libopenjp2-7")
             exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libopenjp2-7\" || sudo apt -y install libopenjp2-7")
             exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libatlas-base-dev\" || sudo apt -y install libatlas-base-dev")
-            exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  tmux\" || sudo apt -y install tmux")
             exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-pip\" || sudo apt -y install python3-pip")
+            
+            # enable i2c
+            exec_command(frame, ssh, 'grep -q "^dtparam=i2c_vc=on$" /boot/config.txt || echo "dtparam=i2c_vc=on" | sudo tee -a /boot/config.txt')
+            # enable spi
+            exec_command(frame, ssh, 'sudo raspi-config nonint do_spi 0')
+
+
             exec_command(frame, ssh, "sudo mkdir -p /srv/frameos")
             exec_command(frame, ssh, f"sudo chown -R {frame.ssh_user} /srv/frameos")
 
@@ -137,11 +143,26 @@ def initialize_frame(id: int):
                 
                 log(id, "stdout", "> add /srv/frameos/requirements.txt")
                 scp.put("./device/requirements.txt", "/srv/frameos/requirements.txt")
+                
+                with open("./device/frameos.service", "r") as file:
+                    service_contents = file.read().replace("%I", frame.ssh_user)
+                    print(service_contents)
+                with SCPClient(ssh.get_transport()) as scp:
+                    scp.putfo(StringIO(service_contents), "/tmp/frameos.service")
+
+            # Move service file to the appropriate location and set permissions
+            exec_command(frame, ssh, "sudo mv /tmp/frameos.service /etc/systemd/system/frameos.service")
+            exec_command(frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
+            exec_command(frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")
 
             exec_command(frame, ssh, "cd /srv/frameos && (sha256sum -c requirements.txt.sha256sum 2>/dev/null || (pip3 install -r requirements.txt && sha256sum requirements.txt > requirements.txt.sha256sum))")
 
-            exec_command(frame, ssh, "tmux has-session -t frameos 2>/dev/null && tmux kill-session -t frameos")
-            exec_command(frame, ssh, "cd /srv/frameos && tmux new-session -s frameos -d 'python3 frame.py'")
+            # Reload systemd, stop any existing service, enable and restart the new service
+            exec_command(frame, ssh, "sudo systemctl daemon-reload")
+            exec_command(frame, ssh, "sudo systemctl stop frameos.service || true")
+            exec_command(frame, ssh, "sudo systemctl enable frameos.service")
+            exec_command(frame, ssh, "sudo systemctl start frameos.service")
+            exec_command(frame, ssh, "sudo systemctl status frameos.service")
 
             frame.status = 'starting'
             update_frame(frame)
@@ -173,8 +194,11 @@ def restart_frame(id: int):
             log(id, "stdout", "> add /srv/frameos/frame.json")
             with SCPClient(ssh.get_transport()) as scp:
                 scp.putfo(StringIO(json.dumps(get_frame_json(frame), indent=4) + "\n"), "/srv/frameos/frame.json")
-            exec_command(frame, ssh, "tmux has-session -t frameos 2>/dev/null && tmux kill-session -t frameos")
-            exec_command(frame, ssh, "cd /srv/frameos && tmux new-session -s frameos -d 'python3 frame.py'")
+
+            exec_command(frame, ssh, "sudo systemctl stop frameos.service || true")
+            exec_command(frame, ssh, "sudo systemctl enable frameos.service")
+            exec_command(frame, ssh, "sudo systemctl start frameos.service")
+            exec_command(frame, ssh, "sudo systemctl status frameos.service")
 
             frame.status = 'starting'
             update_frame(frame)
