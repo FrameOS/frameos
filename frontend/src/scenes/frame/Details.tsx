@@ -73,7 +73,11 @@ export function Details({ className, id }: DetailsProps) {
               </Button>
               <Button
                 type="button"
-                onClick={() => deleteFrame(frame.id)}
+                onClick={() => {
+                  if (confirm('Are you sure you want to DELETE this frame?')) {
+                    deleteFrame(frame.id)
+                  }
+                }}
                 className="bg-red-600 hover:bg-red-700 focus:ring-red-800"
               >
                 Delete
