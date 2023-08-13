@@ -32,30 +32,16 @@ ping raam7.local
 ssh raam@raam7.local
 ```
 
+Then run `sudo raspi-config` and:
+
+1. enable spi
+2. enable i2c
+
 Optional, install tailscale
 
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh
 ```
-
-
-
-Upon boot run `raspi-config` and:
-
-1. change the password
-4. change the hostname
-2. enable spi
-3. enable i2c
-
-Update software as normal, also install `python3-pip`
-
-Get the pimoroni software installed with examples:
-
-```
-curl https://get.pimoroni.com/inky | bash
-```
-
-If that's happy, all the dependencies should be installed.
 
 # FrameOS Control Panel
 
