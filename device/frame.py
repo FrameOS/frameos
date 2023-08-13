@@ -14,7 +14,7 @@ from flask import Flask, send_file
 from flask_socketio import SocketIO, emit
 from typing import Optional, List, Dict, Any
 from threading import Lock, Thread, Event
-from PIL import Image, ImageChops, ImageFilter
+from PIL import Image, ImageChops
 
 VERSION = '1.0.0-prerelease'
 
@@ -177,28 +177,11 @@ class ImageHandler:
             self.inky.set_image(image, saturation=1)
             self.inky.show()
 
-    def are_images_equal(self, img1_content: bytes, img2_content: bytes, fuzziness: int = 0) -> bool:
-        """
-        Check if two image contents are equal.
-        :param img1_content: First image content as bytes.
-        :param img2_content: Second image content as bytes.
-        :param fuzziness: Intensity of fuzzy comparison. 0 for exact comparison.
-        :return: True if images are considered equal, False otherwise.
-        """
+    def are_images_equal(self, img1_content: bytes, img2_content: bytes) -> bool:
         with Image.open(io.BytesIO(img1_content)) as img1, Image.open(io.BytesIO(img2_content)) as img2:
-            # Quick check if sizes are different
             if img1.size != img2.size:
                 return False
-
-            # Exact comparison
-            if fuzziness == 0:
-                return not ImageChops.difference(img1, img2).getbbox()
-
-            # Fuzzy comparison
-            img1 = img1.resize((32, 32)).convert('L').filter(ImageFilter.SMOOTH)
-            img2 = img2.resize((32, 32)).convert('L').filter(ImageFilter.SMOOTH)
-            diff = ImageChops.difference(img1, img2)
-            return sum(diff.histogram()) <= fuzziness
+            return not ImageChops.difference(img1, img2).getbbox()
 
     def refresh_image(self, trigger: str):
         if not self.image_update_lock.acquire(blocking=False):
@@ -214,7 +197,7 @@ class ImageHandler:
                 image_url = self.config.image_url.replace('{width}', str(self.config.width)).replace('{height}', str(self.config.height))
                 self.logger.log({ 'event': 'refresh_image', 'trigger': trigger, 'image_url': image_url })
                 self.next_image = self.download_url(image_url)
-                if self.current_image is None or not self.are_images_equal(self.next_image, self.current_image, fuzziness=10):
+                if self.current_image is None or not self.are_images_equal(self.next_image, self.current_image):
                     self.logger.log({ 'event': 'refresh_begin' })
                     self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
                     self.slow_update_image_on_frame(self.next_image)
