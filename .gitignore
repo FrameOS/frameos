@@ -3,6 +3,7 @@ env
 node_modules
 __pycache__
 *.db
+data/
 
 # Logs
 logs

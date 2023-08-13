@@ -17,7 +17,7 @@ export interface DetailsProps {
 
 export function Details({ className, id }: DetailsProps) {
   const { frame, editing } = useValues(frameLogic({ id }))
-  const { editFrame, closeEdit } = useActions(frameLogic({ id }))
+  const { editFrame, closeEdit, setEditFrameValue } = useActions(frameLogic({ id }))
   const { redeployFrame, refreshFrame, restartFrame, deleteFrame } = useActions(framesModel)
 
   return (
@@ -53,14 +53,33 @@ export function Details({ className, id }: DetailsProps) {
               <TextInput name="server_api_key" placeholder="" required />
             </Field>
             <Field name="image_url" label="Image URL">
-              <TextInput
-                name="image_url"
-                placeholder="https://source.unsplash.com/random/{width}x{height}/?bird"
-                required
-              />
+              <TextInput name="image_url" placeholder="https://source.unsplash.com/random/{width}x{height}/?bird" />
             </Field>
+            <div className="space-x-2">
+              <span>Unsplash:</span>
+              <a
+                href="#"
+                className="underline"
+                onClick={(e) => {
+                  setEditFrameValue('image_url', 'https://source.unsplash.com/random/{width}x{height}/?bird')
+                  e.preventDefault()
+                }}
+              >
+                random birds
+              </a>
+              <a
+                href="#"
+                className="underline"
+                onClick={(e) => {
+                  setEditFrameValue('image_url', 'https://source.unsplash.com/random/{width}x{height}/?fruit')
+                  e.preventDefault()
+                }}
+              >
+                random fruit
+              </a>
+            </div>
             <Field name="interval" label="Interval">
-              <TextInput name="interval" placeholder="300" required />
+              <TextInput name="interval" placeholder="300" />
             </Field>
             <div className="flex space-x-2">
               <Button type="submit">Save & restart</Button>

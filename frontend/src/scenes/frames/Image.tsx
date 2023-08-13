@@ -1,6 +1,4 @@
 import { useValues } from 'kea'
-import { Box } from '../../components/Box'
-import { frameLogic } from '../frame/logsLogic'
 import clsx from 'clsx'
 import { framesModel } from '../../models/framesModel'
 
