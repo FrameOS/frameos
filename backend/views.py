@@ -57,15 +57,15 @@ def reset_frame(id: int):
 def update_frame(id: int):
     frame = models.Frame.query.get_or_404(id)
     frame.frame_host = request.form['frame_host']
-    frame.frame_port = request.form['frame_port']
+    frame.frame_port = int(request.form['frame_port'] or '8999')
     frame.ssh_user = request.form['ssh_user']
-    frame.ssh_pass = request.form['ssh_pass']
-    frame.ssh_port = request.form['ssh_port']
+    frame.ssh_pass = request.form['ssh_pass'] if request.form['ssh_pass'] != '' else None
+    frame.ssh_port = int(request.form['ssh_port'] or '22')
     frame.server_host = request.form['server_host']
-    frame.server_port = request.form['server_port']
+    frame.server_port = int(request.form['server_port'] or '8999')
     frame.server_api_key = request.form['server_api_key']
-    frame.image_url = request.form['image_url']
-    frame.interval = request.form['interval']
+    frame.image_url = request.form['image_url'] if request.form['image_url'] != '' else None
+    frame.interval = int(request.form['interval']) if request.form['interval'] != '' else None
     models.update_frame(frame)
     tasks.restart_frame(frame.id)
     return 'Success', 200
