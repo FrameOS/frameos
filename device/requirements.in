@@ -1,5 +1,7 @@
 # pip install pip-tools
 # pip-compile requirements.in
+-i https://piwheels.org/simple
+--extra-index-url https://pypi.org/simple
 
 flask==2.2.5
 flask-socketio==5.3.4

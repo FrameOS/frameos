@@ -120,6 +120,7 @@ def initialize_frame(id: int):
             # exec_command(frame, ssh, "sudo apt -y install libopenjp2-7")
             exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libopenjp2-7\" || sudo apt -y install libopenjp2-7")
             exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  tmux\" || sudo apt -y install tmux")
+            exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-pip\" || sudo apt -y install python3-pip")
             exec_command(frame, ssh, "sudo mkdir -p /srv/frameos")
             exec_command(frame, ssh, f"sudo chown -R {frame.ssh_user} /srv/frameos")
 

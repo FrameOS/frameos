@@ -1,8 +1,8 @@
 # FrameOS - smart home frames
 
-This is beyond-alpha level software. It's not meant to work for anyone other than myself.
+This is beta level software. Obvious things are missing.
 
-## Hardware 
+## Required hardware 
 
 Grab yourself a
 
@@ -13,26 +13,32 @@ And:
 
 - [Raspberry Pi Zero W](https://shop.pimoroni.com/products/raspberry-pi-zero-w?variant=39458414264403)
 
-Get it with presoldered headers, or solder them yourself.
+Get it with presoldered headers, or solder them yourself. Attach the two devices.
 
 ## Raspberry setup 
 
-Then Install [Raspberry Pi OS Lite](https://www.raspberrypi.org/downloads/raspberry-pi-os/) on a SD card (flash with [etcher](https://etcher.io/)). Remount the drive and edit the following files:
+Download the [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
 
-- `boot/ssh` - just create an empty file
-- `boot/wpa_supplicant.conf`
+- Select [Raspberry Pi OS Lite](https://www.raspberrypi.org/downloads/raspberry-pi-os/) debian `bullseye`. Select 32-bit if you have the zero w v1, otherwise select 64 bit.
+- Click the "Gear" icon. Answer yes for the WiFi password popup if asked. Set:
+- Change the hostname to something unique, like `raam7.local`
+- Enable SSH with password. Set a strong user/password and note it down in your password manager.
+- Make sure the wifi user/password is correct.
 
-```conf
-country=US # Your 2-digit country code
-ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-update_config=1
-network={
-    ssid="YOUR_NETWORK_NAME"
-    psk="YOUR_PASSWORD"
-    key_mgmt=WPA-PSK
-    scan_ssid=1
-}
+Plug in the raspberry, and wait until you can connect to it:
+
+```bash
+ping raam7.local
+ssh raam@raam7.local
 ```
+
+Optional, install tailscale
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+```
+
+
 
 Upon boot run `raspi-config` and:
 
