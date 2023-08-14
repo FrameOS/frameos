@@ -18,7 +18,7 @@ Attach them to a Raspberry Pi Zero W, and control the image via FrameOS.
 ![](https://mariusandra.com/frameos/images/0-frames.jpeg)
 
 
-## FrameOS
+## FrameOS (control software)
 
 FrameOS is the control center for your frames. You can run it
 continuously on a server, or locally on your computer when needed. You'll miss out on log aggregation if the FrameOS server is not always on. The frames however will keep on running and updating independently.
@@ -39,7 +39,7 @@ Then load http://0.0.0.0:8999 - ideally using a local IP that your frames can co
 ![](https://mariusandra.com/frameos/images/7-docker-fast-frameos.gif)
 
 
-## Raspberry setup
+## Raspberry Pi setup (individual frames)
 
 Download the [Raspberry Pi Imager](https://www.raspberrypi.com/software/) and select [Raspberry Pi OS Lite](https://www.raspberrypi.org/downloads/raspberry-pi-os/) debian `bullseye`. Select 32-bit if you have the zero w v1, otherwise select 64 bit.
 
@@ -109,11 +109,11 @@ This is perfect if your raspberry has a HDMI port, or you wish to connect to it 
 
 ## Periodic screenshot
 
-I've used the [Lovelace Kindle Screensaver](https://github.com/sibbl/hass-lovelace-kindle-screensaver) to expose a screenshot of a Home Assistant dashboard. The frame below checks it every 30 seconds, and only updates if anything changed.
+I've used the [Lovelace Kindle Screensaver](https://github.com/sibbl/hass-lovelace-kindle-screensaver) Home Assistant app to expose a screenshot of a Home Assistant dashboard on http://homeassistant.local:4999/. The frame below checks it every 30 seconds, and updates if the image changed.
 
 ![](https://mariusandra.com/frameos/images/16-wall.jpg)
 
-Native FrameOS support for URL or dashboard screenshots is not yet here.
+I'd like to natively support screenshots of websites in FrameOS, but it's not here now.
 
 # Developing locally
 
