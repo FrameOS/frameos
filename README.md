@@ -15,7 +15,7 @@ Supported frames:
 
 Attach them to a Raspberry Pi Zero W, and control the image via FrameOS.
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/0-frames.jpeg?raw=true)
+![](https://mariusandra.com/frameos/images/0-frames.jpeg)
 
 
 ## FrameOS
@@ -36,38 +36,38 @@ docker run -d -p 8999:8999 -v data:/app/data frameos
 
 Then load http://0.0.0.0:8999 - ideally using a local IP that your frames can connect to.
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/7-docker-fast-frameos.gif?raw=true)
+![](https://mariusandra.com/frameos/images/7-docker-fast-frameos.gif)
 
 
 ## Raspberry setup
 
 Download the [Raspberry Pi Imager](https://www.raspberrypi.com/software/) and select [Raspberry Pi OS Lite](https://www.raspberrypi.org/downloads/raspberry-pi-os/) debian `bullseye`. Select 32-bit if you have the zero w v1, otherwise select 64 bit.
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/1-os-raspberry-lite.gif?raw=true)
+![](https://mariusandra.com/frameos/images/1-os-raspberry-lite.gif)
 
 Click the "Gear" icon and make sure you have set the correct hostname, ssh user/password, and WiFi credentials. Set a strong password and save it in your password manager.
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/2-config-settings.gif?raw=true)
+![](https://mariusandra.com/frameos/images/2-config-settings.gif)
 
 Choose your SD card and write
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/3-storage-write.gif?raw=true)
+![](https://mariusandra.com/frameos/images/3-storage-write.gif)
 
 It'll take a while
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/4-wait-wait-wait.gif?raw=true)
+![](https://mariusandra.com/frameos/images/4-wait-wait-wait.gif)
 
 When done, place the card into the raspberry.
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/13-sdcard.gif?raw=true)
+![](https://mariusandra.com/frameos/images/13-sdcard.gif)
 
 Place the raspberry on the artboard, and plug it in
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/14-wire.gif?raw=true)
+![](https://mariusandra.com/frameos/images/14-wire.gif)
 
 And wait until it shows up with `ping` and `ssh`.
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/6-success.gif?raw=true)
+![](https://mariusandra.com/frameos/images/6-success.gif)
 
 If you're already here, and plan on using Inky Impresson frames, run `sudo raspi-config` and
 
@@ -76,38 +76,38 @@ If you're already here, and plan on using Inky Impresson frames, run `sudo raspi
 
 Sadly these aren't automated yet.
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/10-raspi-config.gif?raw=true)
+![](https://mariusandra.com/frameos/images/10-raspi-config.gif)
 
 ## Install the frame
 
 Finally, add the frame to FrameOS. Make sure both can ping each other with the IPs given.
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/8-deploy-frame.gif?raw=true)
+![](https://mariusandra.com/frameos/images/8-deploy-frame.gif)
 
 ## Kiosk mode
 
 With or without a connected frame, FrameOS can dispaly the current rotating image in Kiosk mode. Click the Kiosk URL to see the image in full screen. Perfect for showing over a HDMI connection in a browser.
 
-![](https://github.com/mariusandra/frameos-docs/blob/main/images/9-kiosk-mode.gif?raw=true)
+![](https://mariusandra.com/frameos/images/9-kiosk-mode.gif)
 
 ## Actual frames
 
 There's a chance everything went well and you have a good deploy:
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/11-good-deploy.gif?raw=true)
+![](https://mariusandra.com/frameos/images/11-good-deploy.gif)
 
 In thas case you should see something like this:
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/12-parrot.gif?raw=true)
+![](https://mariusandra.com/frameos/images/12-parrot.gif)
 
 Add multuple frames, and control their content remotely. 
 
 The second frame here uses [Lovelace Kindle Screensaver](https://github.com/sibbl/hass-lovelace-kindle-screensaver) to expose a screenshot of a Home Assistant dashboard.
 
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/15-multiple.gif?raw=true)
+![](https://mariusandra.com/frameos/images/15-multiple.gif)
 
-![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/16-wall.jpg?raw=true)
+![](https://mariusandra.com/frameos/images/16-wall.jpg)
 
 
 # Developing locally
