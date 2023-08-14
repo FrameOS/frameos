@@ -107,6 +107,9 @@ The second frame here uses [Lovelace Kindle Screensaver](https://github.com/sibb
 
 ![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/15-multiple.gif?raw=true)
 
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/16-wall.jpg?raw=true)
+
+
 # Developing locally
 
 ## FrameOS Control Panel
