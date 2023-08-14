@@ -100,7 +100,12 @@ In thas case you should see something like this:
 
 ![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/12-parrot.gif?raw=true)
 
+Add multuple frames, and control their content remotely. 
 
+The second frame here uses [Lovelace Kindle Screensaver](https://github.com/sibbl/hass-lovelace-kindle-screensaver) to expose a screenshot of a Home Assistant dashboard.
+
+
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/15-multiple.gif?raw=true)
 
 # Developing locally
 
