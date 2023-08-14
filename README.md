@@ -84,11 +84,6 @@ Finally, add the frame to FrameOS. Make sure both can ping each other with the I
 
 ![](https://mariusandra.com/frameos/images/8-deploy-frame.gif)
 
-## Kiosk mode
-
-With or without a connected frame, FrameOS can dispaly the current rotating image in Kiosk mode. Click the Kiosk URL to see the image in full screen. Perfect for showing over a HDMI connection in a browser.
-
-![](https://mariusandra.com/frameos/images/9-kiosk-mode.gif)
 
 ## Actual frames
 
@@ -102,13 +97,23 @@ In that case you should see something like this:
 
 Add multuple frames, and control their content remotely. 
 
-The second frame here uses [Lovelace Kindle Screensaver](https://github.com/sibbl/hass-lovelace-kindle-screensaver) to expose a screenshot of a Home Assistant dashboard.
-
-
 ![](https://mariusandra.com/frameos/images/15-multiple.gif)
+
+## Kiosk mode
+
+With or without a connected e-ink display, each deployed raspberry can show the current image in Kiosk mode. Click the Kiosk URL to see the image in full screen. 
+
+This is perfect if your raspberry has a HDMI port, or you wish to connect to it remotely.
+
+![](https://mariusandra.com/frameos/images/9-kiosk-mode.gif)
+
+## Periodic screenshot
+
+I've used the [Lovelace Kindle Screensaver](https://github.com/sibbl/hass-lovelace-kindle-screensaver) to expose a screenshot of a Home Assistant dashboard. The frame below checks it every 30 seconds, and only updates if anything changed.
 
 ![](https://mariusandra.com/frameos/images/16-wall.jpg)
 
+Native FrameOS support for URL or dashboard screenshots is not yet here.
 
 # Developing locally
 
