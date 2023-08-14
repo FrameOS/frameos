@@ -1,62 +1,108 @@
 # FrameOS - smart home frames
 
-This is beta level software. Obvious things are missing.
+This is beta software. Obvious things are missing.
 
 ## Required hardware 
 
-Grab yourself a
+The bare minimum: 
 
-- [Inky Impression 5.7"](https://shop.pimoroni.com/products/inky-impression-5-7?variant=32298701324371)
-- [Inky Impression 7.3"](https://shop.pimoroni.com/products/inky-impression-7-3?variant=40512683376723)
+- Any raspberry pi with a HDMI port and a browser for Kiosk mode.
 
-And:
+Supported frames:
 
-- [Raspberry Pi Zero W](https://shop.pimoroni.com/products/raspberry-pi-zero-w?variant=39458414264403)
+- [Inky Impression 5.7"](https://shop.pimoroni.com/products/inky-impression-5-7?variant=32298701324371) e-ink display
+- [Inky Impression 7.3"](https://shop.pimoroni.com/products/inky-impression-7-3?variant=40512683376723) e-ink display
 
-Get it with presoldered headers, or solder them yourself. Attach the two devices.
+Attach them to a Raspberry Pi Zero W, and control the image via FrameOS.
 
-## FrameOS Control Panel
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/0-frames.jpeg?raw=true)
 
-```bash
-docker run -d -p 8999:8999 mariusandra/frameos
-```
 
-Then load http://0.0.0.0:8999 - ideally with an IP that your frames can connect to.
+## FrameOS
 
-## Raspberry setup 
+FrameOS is the control center for your frames. You can run it
+continuously on a server, or locally on your computer when needed. You'll miss out on log aggregation if the FrameOS server is not always on. The frames however will keep on running and updating independently.
 
-Download the [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
-
-- Select [Raspberry Pi OS Lite](https://www.raspberrypi.org/downloads/raspberry-pi-os/) debian `bullseye`. 
-- Select 32-bit if you have the zero w v1, otherwise select 64 bit.
-- Click the "Gear" icon
-- Change the hostname to something unique, like `frame1.local`
-- Enable SSH with password. Set a strong user/password and note it down in your password manager.
-- Make sure the wifi user/password is correct.
-
-Plug in the raspberry, and wait until you can connect to it:
+Running FrameOS via Docker is the easiest. Alternatively read about developing locally below.
 
 ```bash
-ping frame1.local
-ssh frame@frame1.local
+# running the latest release
+docker run -d -p 8999:8999 -v data:/app/data mariusandra/frameos
+
+# build your own from this repository
+docker build . -t frameos
+docker run -d -p 8999:8999 -v data:/app/data frameos
 ```
 
-Then add it in the control interface.
+Then load http://0.0.0.0:8999 - ideally using a local IP that your frames can connect to.
 
-### Optional
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/7-docker-fast-frameos.gif?raw=true)
 
-Then run `sudo raspi-config` and:
 
-1. enable spi
-2. enable i2c
+## Raspberry setup
 
-Optional, install tailscale
+Download the [Raspberry Pi Imager](https://www.raspberrypi.com/software/) and select [Raspberry Pi OS Lite](https://www.raspberrypi.org/downloads/raspberry-pi-os/) debian `bullseye`. Select 32-bit if you have the zero w v1, otherwise select 64 bit.
 
-```bash
-curl -fsSL https://tailscale.com/install.sh | sh
-```
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/1-os-raspberry-lite.gif?raw=true)
 
-# Developing 
+Click the "Gear" icon and make sure you have set the correct hostname, ssh user/password, and WiFi credentials. Set a strong password and save it in your password manager.
+
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/2-config-settings.gif?raw=true)
+
+Choose your SD card and write
+
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/3-storage-write.gif?raw=true)
+
+It'll take a while
+
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/4-wait-wait-wait.gif?raw=true)
+
+When done, place the card into the raspberry.
+
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/13-sdcard.gif?raw=true)
+
+Place the raspberry on the artboard, and plug it in
+
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/14-wire.gif?raw=true)
+
+And wait until it shows up with `ping` and `ssh`.
+
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/6-success.gif?raw=true)
+
+If you're already here, and plan on using Inky Impresson frames, run `sudo raspi-config` and
+
+1. enable SPI
+2. enable I2C
+
+Sadly these aren't automated yet.
+
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/10-raspi-config.gif?raw=true)
+
+## Install the frame
+
+Finally, add the frame to FrameOS. Make sure both can ping each other with the IPs given.
+
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/8-deploy-frame.gif?raw=true)
+
+## Kiosk mode
+
+With or without a connected frame, FrameOS can dispaly the current rotating image in Kiosk mode. Click the Kiosk URL to see the image in full screen. Perfect for showing over a HDMI connection in a browser.
+
+![](https://github.com/mariusandra/frameos-docs/blob/main/images/9-kiosk-mode.gif?raw=true)
+
+## Actual frames
+
+There's a chance everything went well and you have a good deploy:
+
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/11-good-deploy.gif?raw=true)
+
+In thas case you should see something like this:
+
+![](https://raw.githubusercontent.com/mariusandra/frameos-docs/main/images/12-parrot.gif?raw=true)
+
+
+
+# Developing locally
 
 ## FrameOS Control Panel
 

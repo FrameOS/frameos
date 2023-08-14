@@ -38,7 +38,7 @@ export function Details({ className, id }: DetailsProps) {
               <TextInput name="ssh_user" placeholder="pi" required />
             </Field>
             <Field name="ssh_pass" label="SSH pass">
-              <TextInput name="ssh_pass" placeholder="raspberry" />
+              <TextInput name="ssh_pass" type="password" placeholder="raspberry" />
             </Field>
             <Field name="ssh_port" label="SSH port">
               <TextInput name="ssh_port" placeholder="22" required />
