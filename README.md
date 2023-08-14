@@ -96,9 +96,9 @@ There's a chance everything went well and you have a good deploy:
 
 ![](https://mariusandra.com/frameos/images/11-good-deploy.gif)
 
-In thas case you should see something like this:
+In that case you should see something like this:
 
-![](https://mariusandra.com/frameos/images/12-parrot.gif)
+![](https://mariusandra.com/frameos/images/12-parrot.gif?)
 
 Add multuple frames, and control their content remotely. 
 
@@ -131,3 +131,7 @@ flask db migrate -m "something changed"
 # apply the migrations
 flask db upgrade
 ```
+
+# TODO
+
+Tracked here: https://github.com/mariusandra/frameos/issues/1
