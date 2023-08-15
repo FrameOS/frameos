@@ -128,7 +128,7 @@ cd frontend && npm install && cd ..
 honcho start
 ```
 
-## Migrations
+## Running migrations
 
 ```bash
 # create migration after changing a model
