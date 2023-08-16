@@ -8,13 +8,15 @@ from threading import Thread
 from gevent import monkey
 from urllib.parse import urlparse
 
+monkey.patch_all()
+
 # Get the Redis URL
 redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 parsed_url = urlparse(redis_url)
 redis_host = parsed_url.hostname
 redis_port = parsed_url.port or 6379
 
-monkey.patch_all()
+os.makedirs('./data', exist_ok=True)
 
 app = Flask(__name__, static_folder='../frontend/dist', static_url_path='/')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///../data/fcp.db'
