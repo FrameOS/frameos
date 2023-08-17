@@ -1,0 +1,23 @@
+{
+    "name": "OpenAI",
+    "description": "Random AI generated art",
+    "version": "1.0.0",
+    "fields": [
+        {
+            "name": "prompt",
+            "type": "string",
+            "value": "",
+            "required": true,
+            "label": "Prompt",
+            "placeholder": "e.g. pumpkin pyjama party, digital art"
+        },
+        {
+            "name": "api_key",
+            "type": "string",
+            "value": "",
+            "required": true,
+            "label": "API Key",
+            "placeholder": "Copy it here"
+        }
+    ]
+}

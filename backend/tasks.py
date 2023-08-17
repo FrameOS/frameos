@@ -1,7 +1,7 @@
 import json
 import os
 from backend import huey, app
-from backend.models import new_log as log, Frame, update_frame
+from backend.models import new_log as log, Frame, update_frame, get_app_configs
 from paramiko import RSAKey, SSHClient, AutoAddPolicy
 from io import StringIO
 from gevent import sleep
@@ -132,7 +132,6 @@ def initialize_frame(id: int):
             # enable spi
             exec_command(frame, ssh, 'sudo raspi-config nonint do_spi 0')
 
-
             exec_command(frame, ssh, "sudo mkdir -p /srv/frameos")
             exec_command(frame, ssh, f"sudo chown -R {frame.ssh_user} /srv/frameos")
 
@@ -142,7 +141,22 @@ def initialize_frame(id: int):
                 
                 log(id, "stdout", "> add /srv/frameos/frame.py")
                 scp.put("./device/frame.py", "/srv/frameos/frame.py")
+
+                # Apps
+                local_apps_path = "./apps"
+                remote_apps_base = "/srv/frameos/apps"
                 
+                exec_command(frame, ssh, f"mkdir -p {remote_apps_base}")
+
+                log(id, "stdout", f"> add {remote_apps_base}/apps.py")
+                scp.put("./apps/apps.py", f"{remote_apps_base}/apps.py")
+                
+                app_configs = get_app_configs()
+                for name in app_configs.keys():
+                    local_app_path = os.path.join(local_apps_path, name)
+                    log(id, "stdout", f"> install {remote_apps_base}/{name}")
+                    scp.put(local_app_path, remote_apps_base, recursive=True)
+
                 log(id, "stdout", "> add /srv/frameos/index.html")
                 scp.put("./device/index.html", "/srv/frameos/index.html")
                 

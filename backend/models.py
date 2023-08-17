@@ -1,7 +1,23 @@
 from . import db, socketio
+from typing import Dict
 from sqlalchemy.dialects.sqlite import JSON
 import secrets
 import json
+import os
+
+def get_app_configs() -> Dict[str, Dict]:
+    local_apps_path = "./apps"
+    configs = {}
+    for app_name in os.listdir(local_apps_path):
+        local_app_path = os.path.join(local_apps_path, app_name)
+        if os.path.isdir(local_app_path):
+            config_path = os.path.join(local_app_path, "config.json")
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    if 'name' in config:
+                        configs[app_name] = config
+    return configs
 
 # NB! Update frontend/src/types.tsx if you change this
 class Frame(db.Model):
@@ -25,6 +41,8 @@ class Frame(db.Model):
     color = db.Column(db.String(256), nullable=True)
     image_url = db.Column(db.String(256), nullable=True)
     interval = db.Column(db.Double, default=300)
+    # apps
+    apps = db.Column(JSON, nullable=True)
 
     def to_dict(self):
         return {
@@ -44,7 +62,8 @@ class Frame(db.Model):
             'device': self.device,
             'color': self.color,
             'image_url': self.image_url,
-            'interval': self.interval
+            'interval': self.interval,
+            'apps': self.apps,
         }
 
 def new_frame(frame_host: str, server_host: str) -> Frame:
@@ -71,6 +90,7 @@ def new_frame(frame_host: str, server_host: str) -> Frame:
     else:
         server_port = 8999
 
+    app_configs = get_app_configs()
     frame = Frame(
         ssh_user=user, 
         ssh_pass=password, 
@@ -79,7 +99,8 @@ def new_frame(frame_host: str, server_host: str) -> Frame:
         server_host=server_host, 
         server_port=int(server_port), 
         server_api_key=secrets.token_hex(32), 
-        status="uninitialized"
+        status="uninitialized",
+        apps=[{ **app_configs['unsplash'], 'keyword': 'unsplash', 'config': {} }],
     )
     db.session.add(frame)
     db.session.commit()

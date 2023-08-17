@@ -16,8 +16,8 @@ export interface DetailsProps {
 }
 
 export function Details({ className, id }: DetailsProps) {
-  const { frame, editing } = useValues(frameLogic({ id }))
-  const { editFrame, closeEdit, setEditFrameValue } = useActions(frameLogic({ id }))
+  const { frame, editing } = useValues(frameLogic)
+  const { editFrame, closeEdit, setEditFrameValue } = useActions(frameLogic)
   const { redeployFrame, refreshFrame, restartFrame, deleteFrame } = useActions(framesModel)
 
   return (
@@ -83,21 +83,17 @@ export function Details({ className, id }: DetailsProps) {
             </Field>
             <div className="flex space-x-2">
               <Button type="submit">Save & restart</Button>
-              <Button
-                type="button"
-                onClick={() => closeEdit()}
-                className="bg-gray-600 hover:bg-gray-700 focus:ring-gray-800"
-              >
+              <Button type="button" color="gray" onClick={() => closeEdit()}>
                 Cancel
               </Button>
               <Button
                 type="button"
+                color="red"
                 onClick={() => {
                   if (confirm('Are you sure you want to DELETE this frame?')) {
                     deleteFrame(frame.id)
                   }
                 }}
-                className="bg-red-600 hover:bg-red-700 focus:ring-red-800"
               >
                 Delete
               </Button>
@@ -169,14 +165,6 @@ export function Details({ className, id }: DetailsProps) {
               <tr>
                 <td className="text-blue-200 text-right">Interval:</td>
                 <td className="truncate">{frame.interval}</td>
-              </tr>
-              <tr>
-                <td className="text-blue-200 text-right">Image URL:</td>
-                <td className="truncate">
-                  <a href={frame.image_url} target="_blank" rel="noreferer noopener">
-                    {frame.image_url}
-                  </a>
-                </td>
               </tr>
               <tr>
                 <td className="text-blue-200 text-right">Kiosk URL:</td>

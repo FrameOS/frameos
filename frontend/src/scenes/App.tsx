@@ -4,9 +4,11 @@ import { sceneLogic } from './sceneLogic'
 import { scenes } from './scenes'
 import { socketLogic } from './socketLogic'
 import { framesModel } from '../models/framesModel'
+import { appsModel } from '../models/appsModel'
 
 export function App() {
   useMountedLogic(socketLogic)
+  useMountedLogic(appsModel)
   useMountedLogic(framesModel)
   const { scene, params } = useValues(sceneLogic)
 

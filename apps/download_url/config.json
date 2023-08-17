@@ -1,0 +1,15 @@
+{
+    "name": "Download URL",
+    "description": "Download a specific URL",
+    "version": "1.0.0",
+    "fields": [
+        {
+            "name": "url",
+            "type": "string",
+            "value": "",
+            "required": true,
+            "label": "Image URL",
+            "placeholder": "https://domain/image"
+        }
+    ]
+}

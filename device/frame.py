@@ -6,15 +6,18 @@ import logging
 import traceback
 import time
 import atexit
+import traceback
 from queue import Queue, Empty
 
 from datetime import datetime
 
 from flask import Flask, send_file
 from flask_socketio import SocketIO, emit
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from threading import Lock, Thread, Event
 from PIL import Image, ImageChops
+
+from apps.apps import App, FrameConfig
 
 VERSION = '1.0.0-prerelease'
 
@@ -43,6 +46,18 @@ class Config:
             'image_url': self.image_url,
             'interval': self.interval
         }
+    
+    def to_frame_config(self):
+        return FrameConfig(
+            status='OK',
+            version=VERSION,
+            width=self.width,
+            height=self.height,
+            device=self.device,
+            color=self.color,
+            image_url=self.image_url,
+            interval=self.interval
+        )
 
     def _load(self, filename):
         try:
@@ -54,7 +69,7 @@ class Config:
 
     def get(self, key, default=None):
         return self._data.get(key, default)
-
+    
 
 class Webhook:
     def __init__(self, config: Config):
@@ -133,15 +148,75 @@ class Logger:
     def stop(self):
         self.webhook.stop()
 
+
+# in: device/frame.py
+class Apps:
+    def __init__(self, config: Config, logger: Logger):
+        self.config = config
+        self.logger = logger
+        self.apps: Dict[str, App] = {}
+        self.apps_configs: Dict[str, Dict] = {}
+        self.process_image_apps: List[Tuple[str, App]] = []
+
+        # Look at all the folders under '../apps/', and import them if they have a device.py file
+        # Each file will export one class that derives from App
+        try:
+            import os
+            import importlib.util
+            import inspect
+            for folder in os.listdir('./apps/'):
+                if os.path.isdir(f'./apps/{folder}') and os.path.isfile(f'./apps/{folder}/device.py') and os.path.isfile(f'./apps/{folder}/config.json'): 
+                    try:
+                        with open(f'./apps/{folder}/config.json', 'r') as file:
+                            config = json.load(file)
+                            self.apps_configs[folder] = config
+                        spec = importlib.util.spec_from_file_location(f"apps.{folder}", f"./apps/{folder}/device.py")
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                        for name, obj in inspect.getmembers(module):
+                            if inspect.isclass(obj) and issubclass(obj, App) and obj is not App:
+                                app_instance = obj(name=name, frame_config=self.config.to_frame_config(), app_config={}, log_function=self.logger.log)
+                                self.register(folder, app_instance)
+                    except Exception as e:
+                        self.logger.log({ 'event': 'app_init_error', 'app': folder, 'error': str(e), 'stacktrace': traceback.format_exc() })
+        except Exception as e:
+            self.logger.log({ 'event': 'apps_init_error', 'error': str(e), 'stacktrace': traceback.format_exc() })
+    
+    def register(self, name, app: App):
+        self.apps[name] = app
+        if app.process_image is not App.process_image:
+            self.process_image_apps.append((name, app))
+        self.logger.log({ 'event': 'register_app', 'app': name })
+
+    def process_image(self, image: Image) -> Image:
+        apps_ran=[]
+        for (name, app) in self.process_image_apps:
+            try:
+                self.logger.log({ 'event': 'running', 'app': name })
+                image = app.process_image(image) or image
+                apps_ran.append(name)
+            except Exception as e:
+                stacktrace = traceback.format_exc()
+                self.logger.log({
+                    'event': 'app_error',
+                    'app': name,
+                    'apps_ran': apps_ran,
+                    'error': str(e),
+                    'stacktrace': stacktrace
+                })
+        return image
+       
+
 class ImageHandler:
-    def __init__(self, logger: Logger, socketio: SocketIO, config: Config):
+    def __init__(self, logger: Logger, socketio: SocketIO, config: Config, apps: Apps):
         self.logger = logger
         self.socketio = socketio
-        self.current_image: bytes = None
-        self.next_image: bytes = None
+        self.current_image: Image = None
+        self.next_image: Image = None
         self.image_update_lock: Lock = Lock()
         self.image_update_in_progress: bool = False
         self.config: Config = config
+        self.apps: Apps = apps
 
         try:
             from inky.auto import auto
@@ -167,21 +242,18 @@ class ImageHandler:
         config.pop('server_api_key', None)
         logger.log({ 'event': 'config', **config })
 
-    def download_url(self, url: str):
-        response = requests.get(url)
-        return response.content
+    def generate_image(self, trigger: str):
+        return self.apps.process_image(self.current_image)
 
-    def slow_update_image_on_frame(self, content):
+    def slow_update_image_on_frame(self, image):
         if self.inky is not None:
-            image = Image.open(io.BytesIO(content))
             self.inky.set_image(image, saturation=1)
             self.inky.show()
 
-    def are_images_equal(self, img1_content: bytes, img2_content: bytes) -> bool:
-        with Image.open(io.BytesIO(img1_content)) as img1, Image.open(io.BytesIO(img2_content)) as img2:
-            if img1.size != img2.size:
-                return False
-            return not ImageChops.difference(img1, img2).getbbox()
+    def are_images_equal(self, img1: Image, img2: Image) -> bool:
+        if img1.size != img2.size:
+            return False
+        return not ImageChops.difference(img1, img2).getbbox()
 
     def refresh_image(self, trigger: str):
         if not self.image_update_lock.acquire(blocking=False):
@@ -194,9 +266,8 @@ class ImageHandler:
         def do_update():
             try:
                 self.image_update_in_progress = True
-                image_url = self.config.image_url.replace('{width}', str(self.config.width)).replace('{height}', str(self.config.height))
-                self.logger.log({ 'event': 'refresh_image', 'trigger': trigger, 'image_url': image_url })
-                self.next_image = self.download_url(image_url)
+                self.next_image = self.generate_image(trigger)
+                self.logger.log({ 'event': 'refresh_image', 'trigger': trigger })
                 if self.current_image is None or not self.are_images_equal(self.next_image, self.current_image):
                     self.logger.log({ 'event': 'refresh_begin' })
                     self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
@@ -206,6 +277,8 @@ class ImageHandler:
                     self.logger.log({ 'event': 'refresh_end' })
                 else:
                     self.logger.log({ 'event': 'refresh_skip_no_change' })
+            except Exception as e:
+                self.logger.log({ 'event': 'image_refresh_error', 'error': str(e), 'stacktrace': traceback.format_exc()  })
             finally:
                 self.image_update_in_progress = False
                 self.image_update_lock.release() 
@@ -260,7 +333,11 @@ class Server:
         self.socketio: SocketIO = SocketIO(self.app, async_mode='threading')
         self.logger.set_socketio(self.socketio)
         self.logger.log({ 'event': 'startup' })
-        self.image_handler: ImageHandler = ImageHandler(self.logger, self.socketio, self.config)
+        self.apps: Apps = Apps(self.config, self.logger)
+        self.image_handler: ImageHandler = ImageHandler(self.logger, self.socketio, self.config, self.apps)
+        self.saved_image: Optional[Any] = None
+        self.saved_bytes: Optional[bytes] = None
+        self.saved_format: Optional[str] = None
 
         @self.app.route('/')
         def index():
@@ -276,12 +353,20 @@ class Server:
 
         @self.app.route('/image')
         def image():
-            image = self.image_handler.next_image or self.image_handler.current_image
-            if image is None:
-                return "No image"
-            img_io = io.BytesIO(image)
-            img_io.seek(0)
-            return send_file(img_io, mimetype='image/jpeg')
+            try:
+                image = self.image_handler.next_image or self.image_handler.current_image or self.saved_image
+                if image is None:
+                    return "No image"
+                
+                if image != self.saved_image or self.saved_bytes is None:
+                    self.saved_bytes = io.BytesIO()
+                    self.saved_format = image.format or 'png'
+                    image.save(self.saved_bytes, format=self.saved_format)
+
+                self.saved_bytes.seek(0)
+                return send_file(self.saved_bytes, mimetype=f'image/{self.saved_format.lower()}', as_attachment=False)
+            except Exception as e:
+                self.logger.log({ 'event': 'kiosk_image_serve_error', 'error': str(e), 'stacktrace': traceback.format_exc() })
 
         @self.app.route('/logs')
         def logs():

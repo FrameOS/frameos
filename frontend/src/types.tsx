@@ -24,3 +24,24 @@ export interface LogType {
   line: string
   frame_id: number
 }
+
+export interface ConfigField {
+  name: string
+  label: string
+  type: string
+  required?: boolean
+  value?: any
+  placeholder?: string
+}
+
+export interface AppConfig {
+  name: string
+  description: string
+  version: string
+  fields: ConfigField[]
+}
+
+export interface FrameApp extends AppConfig {
+  keyword: string
+  config: Record<string, any>
+}

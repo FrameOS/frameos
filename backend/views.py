@@ -11,6 +11,10 @@ def not_found(e):
 def home():
     return app.send_static_file('index.html')
 
+@app.route("/api/apps", methods=["GET"])
+def apps():
+    return jsonify(apps=models.get_app_configs())
+
 @app.route("/api/frames", methods=["GET"])
 def frames():
     frames = models.Frame.query.all()
@@ -66,6 +70,14 @@ def update_frame(id: int):
     frame.server_api_key = request.form['server_api_key']
     frame.image_url = request.form['image_url'] if request.form['image_url'] != '' else None
     frame.interval = int(request.form['interval']) if request.form['interval'] != '' else None
+    models.update_frame(frame)
+    tasks.restart_frame(frame.id)
+    return 'Success', 200
+
+@app.route('/api/frames/<int:id>/update_apps', methods=['POST'])
+def update_apps(id: int):
+    frame = models.Frame.query.get_or_404(id)
+    frame.apps = json.loads(request.form['apps'])
     models.update_frame(frame)
     tasks.restart_frame(frame.id)
     return 'Success', 200
