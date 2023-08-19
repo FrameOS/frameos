@@ -19,6 +19,12 @@ class FrameConfig:
     image_url: str
     interval: float
 
+@dataclass
+class ProcessImagePayload:
+    next_image: Optional[Image.Image]
+    current_image: Optional[Image.Image]
+
+
 class App:
     def __init__(self, name: str, frame_config: FrameConfig, app_config: Optional[Dict[str, None]], log_function: Callable[[Dict], Any]) -> None:
         self.name = name
@@ -34,5 +40,5 @@ class App:
         if self.log_function:
             self.log_function({ "event": "app_error", "app": self.name, "message": message })
 
-    def process_image(image: Image):
+    def process_image(payload: ProcessImagePayload):
         pass

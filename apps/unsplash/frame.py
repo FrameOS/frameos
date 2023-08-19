@@ -1,13 +1,12 @@
 from PIL import Image, UnidentifiedImageError
-from typing import Optional
-from apps.apps import App
+from apps.apps import App, ProcessImagePayload
 import requests
 from requests.exceptions import RequestException
 import io
 
 class UnsplashApp(App):
-    def process_image(self, image: Optional[Image.Image]) -> Optional[Image.Image]:
-        if image is not None:
+    def process_image(self, payload: ProcessImagePayload):
+        if payload.next_image is not None:
             raise Exception('Image already present, will not override')
         
         image_url = "https://source.unsplash.com/random/{width}x{height}/?{keyword}"
@@ -23,10 +22,8 @@ class UnsplashApp(App):
             if 'image' not in content_type:
                 raise ValueError(f"Expected an image, but got content type: {content_type}")
 
-            image = Image.open(io.BytesIO(response.content))
+            payload.next_image = Image.open(io.BytesIO(response.content))
         except RequestException as e:
             raise Exception(f"Error fetching image from Unsplash. Error: {e}")
         except UnidentifiedImageError:
             raise Exception(f"Content returned from Unsplash is not in a valid image format. URL: {image_url}")
-
-        return image

@@ -17,7 +17,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from threading import Lock, Thread, Event
 from PIL import Image, ImageChops
 
-from apps.apps import App, FrameConfig
+from apps.apps import App, FrameConfig, ProcessImagePayload
 
 VERSION = '1.0.0-prerelease'
 
@@ -190,12 +190,14 @@ class Apps:
             features.append('process_image')
         self.logger.log({ 'event': f'@frame:register_app', 'name': name, 'features': features })
 
-    def process_image(self, image: Image) -> (Image, List[str]):
+    def process_image(self, next_image: Optional[Image.Image], current_image: Optional[Image.Image]) -> (Optional[Image.Image], List[str], List[str]):
         apps_ran=[]
+        apps_errored=[]
+        payload = ProcessImagePayload(next_image=next_image, current_image=current_image)
         for (name, app) in self.process_image_apps:
             try:
                 self.logger.log({ 'event': f'{name}:process_image' })
-                image = app.process_image(image)
+                app.process_image(payload)
                 apps_ran.append(name)
             except Exception as e:
                 stacktrace = traceback.format_exc()
@@ -206,7 +208,8 @@ class Apps:
                     'error': str(e),
                     'stacktrace': stacktrace
                 })
-        return image, apps_ran
+                apps_errored.append(name)
+        return payload.next_image, apps_ran, apps_errored
 
 class ImageHandler:
     def __init__(self, logger: Logger, socketio: SocketIO, config: Config, apps: Apps):
@@ -265,16 +268,18 @@ class ImageHandler:
             try:
                 self.logger.log({ 'event': '@frame:refresh_image', 'trigger': trigger })
                 self.image_update_in_progress = True
-                self.next_image, apps_ran = self.apps.process_image(self.current_image)
-                if self.current_image is None or not self.are_images_equal(self.next_image, self.current_image):
+                self.next_image, apps_ran, apps_errored = self.apps.process_image(None, self.current_image)
+                if self.next_image is None:
+                    self.logger.log({ 'event': '@frame:refresh_skipped', 'reason': 'no_image', 'apps_ran': apps_ran })
+                elif self.current_image is None or not self.are_images_equal(self.next_image, self.current_image):
                     self.logger.log({ 'event': '@frame:refreshing_screen' })
                     self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
                     self.slow_update_image_on_frame(self.next_image)
                     self.current_image = self.next_image
                     self.next_image = None
-                    self.logger.log({ 'event': '@frame:refresh_done', 'apps_ran': apps_ran })
+                    self.logger.log({ 'event': '@frame:refresh_done', 'apps_ran': apps_ran, **({'apps_errored': apps_errored} if len(apps_errored) > 0 else {}) })
                 else:
-                    self.logger.log({ 'event': '@frame:refresh_skipped_no_change', 'apps_ran': apps_ran })
+                    self.logger.log({ 'event': '@frame:refresh_skipped', 'reason': 'no_change', 'apps_ran': apps_ran, **({'apps_errored': apps_errored} if len(apps_errored) > 0 else {}) })
             except Exception as e:
                 self.logger.log({ 'event': '@frame:refresh_error', 'error': str(e), 'stacktrace': traceback.format_exc()  })
             finally:

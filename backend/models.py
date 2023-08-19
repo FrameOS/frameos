@@ -168,7 +168,7 @@ def process_log(frame: Frame, log: dict):
         changes['status'] = 'fetching'
     if event == '@frame:refreshing_screen':
         changes['status'] = 'refreshing'
-    if event == '@frame:refresh_done' or event == '@frame:refresh_skipped_no_change':
+    if event == '@frame:refresh_done' or event == '@frame:refresh_skipped':
         changes['status'] = 'ready'
     if event == 'config':
         if frame.status != 'ready':
