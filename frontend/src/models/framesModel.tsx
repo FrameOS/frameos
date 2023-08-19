@@ -111,7 +111,7 @@ export const framesModel = kea<framesModelType>([
     [socketLogic.actionTypes.newLog]: ({ log }) => {
       if (log.type === 'webhook') {
         const parsed = JSON.parse(log.line)
-        if (parsed.event == 'refresh_begin' || parsed.event == 'refresh_end') {
+        if (parsed.event == '@frame:refreshing_screen') {
           actions.updateFrameImage(log.frame_id)
         }
       }

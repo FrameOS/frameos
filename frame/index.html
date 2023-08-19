@@ -6,21 +6,23 @@
     <title>FrameOS Frame</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
-        #img-kiosk { display: none; }
         body.kiosk {
             padding: 0;
             margin: 0;
             background: black;
+            position: relative;
         }
-        body.kiosk #img-kiosk {
-            display: block;
-            cursor: pointer;
+        .image-holder {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100vw;
             height: 100vh;
             background-repeat: no-repeat;
             background-position: center center;
             background-size: contain;
-            background-image: url('/image');
+            transition: opacity 1s;
+            cursor: pointer;
         }
         body.kiosk .not-in-kiosk { display: none; }
         body.kiosk #displayedImage { width: 100%; }
@@ -28,11 +30,11 @@
 </head>
 <body class="{_body_class_}">
 
-<div id="img-kiosk" onclick="this.style.backgroundSize = this.style.backgroundSize === 'cover' ? 'contain' : 'cover'"></div>
+<div id="img-kiosk" style="opacity:1; background-image:url('/image')" class="image-holder" onclick="toggleImageSize()"></div>
+<div id="img-kiosk2" style="opacity:0" class="image-holder" onclick="toggleImageSize()"></div>
 
 <div class="not-in-kiosk">
     <h2 class="not-in-kiosk">Image Display</h2>
-    <img id="displayedImage" src="/image" style='max-width:100%' alt="Displayed Image">
     <button id="refreshButton">Refresh Image</button>
     <button onClick="window.location.href = '/kiosk'">Kiosk Mode</button>
     <h2>Logs</h2>
@@ -42,34 +44,58 @@
 <script>
     var socket = io.connect('http://' + document.domain + ':' + location.port);
 
+    function toggleImageSize() {
+        const imgKiosk1 = document.getElementById('img-kiosk');
+        const imgKiosk2 = document.getElementById('img-kiosk2');
+        
+        let currentSize = window.getComputedStyle(imgKiosk1, null).getPropertyValue('background-size');
+
+        if (currentSize.trim() === 'cover') {
+            imgKiosk1.style.backgroundSize = 'contain';
+            imgKiosk2.style.backgroundSize = 'contain';
+        } else {
+            imgKiosk1.style.backgroundSize = 'cover';
+            imgKiosk2.style.backgroundSize = 'cover';
+        }
+    }
+
     function addLog(log) {
         const { timestamp, event, ...rest } = log;
         const logsElem = document.getElementById('logs');
         logsElem.textContent = `${timestamp} [${event}] ${JSON.stringify(rest)}\n${logsElem.textContent}`;
     }
 
-    socket.on('log_event', function(data) {
+    function refreshImage() {
+        const newImageElem = (parseFloat(document.getElementById('img-kiosk').style.opacity) === 1) ? document.getElementById('img-kiosk2') : document.getElementById('img-kiosk');
+        const oldImageElem = (newImageElem.id === 'img-kiosk') ? document.getElementById('img-kiosk2') : document.getElementById('img-kiosk');
+
+        const imageUrl = '/image?' + new Date().getTime();
+
+        // Load image in a temp img element to detect when it's fully loaded
+        const tempImage = new Image();
+        tempImage.src = imageUrl;
+
+        tempImage.onload = () => {
+            newImageElem.style.backgroundImage = `url(${imageUrl})`;
+            oldImageElem.style.opacity = '0';
+            newImageElem.style.opacity = '1';
+        };
+    }
+
+    socket.on('log_event', (data) => {
         if (data.log) {
-            if (data.log.event == 'refresh_begin') {
-                const displayedImage = document.getElementById('displayedImage')
-                if (displayedImage) {
-                    displayedImage.src = '/image?' + new Date().getTime();
-                }
-                const imgKioskElem = document.getElementById('img-kiosk');
-                if (imgKioskElem) {
-                    imgKioskElem.style.backgroundImage = 'url("/image?' + new Date().getTime() + '")';
-                }
+            if (data.log.event == '@frame:refreshing_screen') {
+                refreshImage()
             }
             addLog(data.log);
         } else {
-            // all logs on load
             for (let log of data.logs) {
                 addLog(log);
             }
         }
     });
 
-    document.getElementById('refreshButton').addEventListener('click', function() {
+    document.getElementById('refreshButton').addEventListener('click', () => {
         fetch("/refresh");
     });
 </script>

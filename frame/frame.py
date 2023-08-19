@@ -271,7 +271,7 @@ class ImageHandler:
                 self.image_update_in_progress = True
                 self.next_image = self.generate_image(trigger)
                 if self.current_image is None or not self.are_images_equal(self.next_image, self.current_image):
-                    self.logger.log({ 'event': '@frame:refreshing_image_on_device' })
+                    self.logger.log({ 'event': '@frame:refreshing_screen' })
                     self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
                     self.slow_update_image_on_frame(self.next_image)
                     self.current_image = self.next_image

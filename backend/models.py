@@ -166,7 +166,7 @@ def process_log(frame: Frame, log: dict):
     event = log.get('event', 'log')
     if event == '@frame:refresh_image':
         changes['status'] = 'fetching'
-    if event == '@frame:refreshing_image_on_device':
+    if event == '@frame:refreshing_screen':
         changes['status'] = 'refreshing'
     if event == '@frame:refresh_done' or event == '@frame:refresh_skipped_no_change':
         changes['status'] = 'ready'
