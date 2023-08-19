@@ -17,7 +17,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from threading import Lock, Thread, Event
 from PIL import Image, ImageChops
 
-from apps.apps import App, FrameConfig, ProcessImagePayload
+from apps.apps import App, FrameConfig, ProcessImagePayload, FrameApp
 
 VERSION = '0.0.0'
 
@@ -33,6 +33,7 @@ class Config:
         self.color: Optional[str] = self._data.get('color', None)
         self.image_url: Optional[str] = self._data.get('image_url', None)
         self.interval: Optional[int] = self._data.get('interval', 300)
+        self.apps: Optional[List[FrameApp]] = self._data.get('apps', [])
 
     def to_dict(self):
         return {
@@ -44,7 +45,8 @@ class Config:
             'device': self.device,
             'color': self.color,
             'image_url': self.image_url,
-            'interval': self.interval
+            'interval': self.interval,
+            'apps': [app.to_dict() for app in self.apps],
         }
     
     def to_frame_config(self):
@@ -56,7 +58,8 @@ class Config:
             device=self.device,
             color=self.color,
             image_url=self.image_url,
-            interval=self.interval
+            interval=self.interval,
+            apps=self.apps,
         )
 
     def _load(self, filename):

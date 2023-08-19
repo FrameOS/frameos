@@ -1,8 +1,9 @@
 import { actions, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { subscriptions } from 'kea-subscriptions'
 import { framesModel } from '../../models/framesModel'
 
 import { forms } from 'kea-forms'
-import { FrameApp, FrameType } from '../../types'
+import { FrameApp } from '../../types'
 import { appsModel } from '../../models/appsModel'
 
 import type { appsLogicType } from './appsLogicType'
@@ -123,6 +124,13 @@ export const appsLogic = kea<appsLogicType>([
     },
     saveAppsAndRestart: () => {
       actions.submitAppsForm()
+    },
+  })),
+  subscriptions(({ actions }) => ({
+    frame: (value, oldValue) => {
+      if (value && JSON.stringify(value.apps) !== JSON.stringify(oldValue?.apps)) {
+        actions.setAppsFormValue('appsArray', value.apps)
+      }
     },
   })),
 ])

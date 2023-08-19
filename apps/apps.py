@@ -1,12 +1,21 @@
 from dataclasses import dataclass
-from typing import Dict, Optional, Any, Callable
+from typing import Dict, Optional, Any, Callable, List
 from PIL import Image
 
 @dataclass
-class Config:
+class ConfigField:
     name: str
     type: str
     required: bool = False
+
+@dataclass
+class FrameApp:
+    keyword: str
+    name: str
+    config: Dict
+    description: str
+    version: str
+    fields: List[ConfigField]
 
 @dataclass
 class FrameConfig:
@@ -18,6 +27,7 @@ class FrameConfig:
     color: str
     image_url: str
     interval: float
+    apps: List[FrameApp]
 
 @dataclass
 class ProcessImagePayload:
