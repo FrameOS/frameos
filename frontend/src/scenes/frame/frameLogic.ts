@@ -21,6 +21,9 @@ export const frameLogic = kea<frameLogicType>([
     removeApp: (index: number) => ({ index }),
     moveAppDown: (index: number) => ({ index }),
     moveAppUp: (index: number) => ({ index }),
+    saveApps: true,
+    saveAppsAndDeploy: true,
+    saveAppsAndRestart: true,
   }),
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
@@ -35,6 +38,7 @@ export const frameLogic = kea<frameLogicType>([
       submit: async (formValues, breakpoint) => {
         const formData = new FormData()
         formData.append('apps', JSON.stringify(formValues.appsArray))
+        formData.append('next_action', values.lastAppsSaveButtonPressed)
         const response = await fetch(`/api/frames/${values.id}/update_apps`, {
           method: 'POST',
           body: formData,
@@ -109,6 +113,14 @@ export const frameLogic = kea<frameLogicType>([
         },
       },
     ],
+    lastAppsSaveButtonPressed: [
+      'save',
+      {
+        saveApps: () => 'save',
+        saveAppsAndDeploy: () => 'deploy',
+        saveAppsAndRestart: () => 'restart',
+      },
+    ],
   }),
   listeners(({ actions, values }) => ({
     editFrame: async ({ frame }) => {
@@ -142,6 +154,15 @@ export const frameLogic = kea<frameLogicType>([
         ),
       }
       actions.setAppsFormValue('appsArray', [...values.appsForm.appsArray, frameApp])
+    },
+    saveApps: () => {
+      actions.submitAppsForm()
+    },
+    saveAppsAndDeploy: () => {
+      actions.submitAppsForm()
+    },
+    saveAppsAndRestart: () => {
+      actions.submitAppsForm()
     },
   })),
 ])

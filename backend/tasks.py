@@ -109,7 +109,7 @@ def get_frame_json(frame: Frame) -> dict:
 
 
 @huey.task()
-def initialize_frame(id: int):
+def deploy_frame(id: int):
     with app.app_context():
         ssh = None
         try:

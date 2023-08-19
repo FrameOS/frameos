@@ -19,12 +19,13 @@ export function Apps({ className }: AppsProps) {
     appsForm: { appsArray },
     isAppsFormValid,
   } = useValues(frameLogic)
-  const { addApp, moveAppUp, moveAppDown, removeApp } = useActions(frameLogic)
+  const { addApp, moveAppUp, moveAppDown, removeApp, saveApps, saveAppsAndDeploy, saveAppsAndRestart } =
+    useActions(frameLogic)
   const { apps } = useValues(appsModel)
 
   return (
     <Box className={clsx('p-4 space-y-8', className)}>
-      <Form logic={frameLogic} formKey="appsForm" className="space-y-4" enableFormOnSubmit>
+      <Form logic={frameLogic} formKey="appsForm" className="space-y-4">
         <H6>Apps that run each frame</H6>
         <div className="space-y-2">
           {appsArray.map(({ fields, keyword, name, description }, index) => {
@@ -64,9 +65,17 @@ export function Apps({ className }: AppsProps) {
             )
           })}
           {appsArray.length === 0 ? <div className="text-red-400">No apps enabled. Add one from below</div> : null}
-          <Button type="submit" color={isAppsFormValid ? 'blue' : 'gray'}>
-            Save & Restart
-          </Button>
+          <div className="flex space-x-2">
+            <Button type="button" onClick={saveApps} color={isAppsFormValid ? 'blue' : 'gray'}>
+              Save
+            </Button>
+            <Button type="button" onClick={saveAppsAndRestart} color={isAppsFormValid ? 'blue' : 'gray'}>
+              Save & Restart
+            </Button>
+            <Button type="button" onClick={saveAppsAndDeploy} color={isAppsFormValid ? 'blue' : 'gray'}>
+              Save & Redeploy
+            </Button>
+          </div>
         </div>
       </Form>
       <div className="space-y-2">

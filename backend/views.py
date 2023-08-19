@@ -79,7 +79,10 @@ def update_apps(id: int):
     frame = models.Frame.query.get_or_404(id)
     frame.apps = json.loads(request.form['apps'])
     models.update_frame(frame)
-    tasks.restart_frame(frame.id)
+    if request.form['next_action'] == 'restart':
+        tasks.restart_frame(frame.id)
+    elif request.form['next_action'] == 'deploy':
+        tasks.deploy_frame(frame.id)
     return 'Success', 200
 
 @app.route('/api/frames/<int:id>/restart', methods=['POST'])
@@ -88,8 +91,8 @@ def restart_frame(id: int):
     return 'Success', 200
 
 @app.route('/api/frames/<int:id>/initialize', methods=['POST'])
-def initialize_frame(id: int):
-    tasks.initialize_frame(id)
+def deploy_frame(id: int):
+    tasks.deploy_frame(id)
     return 'Success', 200
 
 @app.route("/api/frames/new", methods=["POST"])
