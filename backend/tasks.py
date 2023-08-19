@@ -56,6 +56,7 @@ def reset_frame(id: int):
         log(id, "admin", "Resetting frame status to 'uninitialized'")
 
 def get_ssh_connection(frame: Frame) -> SSHClient:
+    log(frame.id, "stdinfo", f"Connecting via SSH to {frame.ssh_user}@{frame.frame_host}")
     ssh = SSHClient()
     ssh_connections.add(ssh)
     ssh.set_missing_host_key_policy(AutoAddPolicy())
@@ -71,6 +72,7 @@ def get_ssh_connection(frame: Frame) -> SSHClient:
             ssh.connect(frame.frame_host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=10)
         else:
             raise Exception(f"SSH key file does not exist at {key_path}")
+    log(frame.id, "stdinfo", f"Connected via SSH to {frame.ssh_user}@{frame.frame_host}")
     return ssh
 
 def exec_command(frame: Frame, ssh: SSHClient, command: str) -> int:
@@ -118,9 +120,7 @@ def initialize_frame(id: int):
             frame.status = 'deploying'
             update_frame(frame)
 
-            log(id, "stdinfo", f"Connecting to {frame.ssh_user}@{frame.frame_host}")
             ssh = get_ssh_connection(frame)                
-            log(id, "stdinfo", f"Connected to {frame.ssh_user}@{frame.frame_host}")
 
             # exec_command(frame, ssh, "sudo apt -y install libopenjp2-7")
             exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libopenjp2-7\" || sudo apt -y install libopenjp2-7")
@@ -140,7 +140,7 @@ def initialize_frame(id: int):
                 scp.putfo(StringIO(json.dumps(get_frame_json(frame), indent=4) + "\n"), "/srv/frameos/frame.json")
                 
                 log(id, "stdout", "> add /srv/frameos/frame.py")
-                scp.put("./device/frame.py", "/srv/frameos/frame.py")
+                scp.put("./frame/frame.py", "/srv/frameos/frame.py")
 
                 # Apps
                 local_apps_path = "./apps"
@@ -158,12 +158,12 @@ def initialize_frame(id: int):
                     scp.put(local_app_path, remote_apps_base, recursive=True)
 
                 log(id, "stdout", "> add /srv/frameos/index.html")
-                scp.put("./device/index.html", "/srv/frameos/index.html")
+                scp.put("./frame/index.html", "/srv/frameos/index.html")
                 
                 log(id, "stdout", "> add /srv/frameos/requirements.txt")
-                scp.put("./device/requirements.txt", "/srv/frameos/requirements.txt")
+                scp.put("./frame/requirements.txt", "/srv/frameos/requirements.txt")
                 
-                with open("./device/frameos.service", "r") as file:
+                with open("./frame/frameos.service", "r") as file:
                     service_contents = file.read().replace("%I", frame.ssh_user)
                     print(service_contents)
                 with SCPClient(ssh.get_transport()) as scp:
@@ -193,8 +193,8 @@ def initialize_frame(id: int):
         finally:
             if ssh is not None:
                 ssh.close()
+                log(frame.id, "stdinfo", "SSH connection closed")
             ssh_connections.remove(ssh)
-            log(id, "stdinfo", "Connection closed")
 
 @huey.task()
 def restart_frame(id: int):
@@ -206,9 +206,7 @@ def restart_frame(id: int):
             frame.status = 'restarting'
             update_frame(frame)
 
-            log(id, "stdinfo", f"Connecting to {frame.ssh_user}@{frame.frame_host}")
             ssh = get_ssh_connection(frame)                
-            log(id, "stdinfo", f"Connected to {frame.ssh_user}@{frame.frame_host}")
 
             log(id, "stdout", "> add /srv/frameos/frame.json")
             with SCPClient(ssh.get_transport()) as scp:
@@ -229,5 +227,5 @@ def restart_frame(id: int):
         finally:
             if ssh is not None:
                 ssh.close()
+                log(id, "stdinfo", "SSH connection closed")
             ssh_connections.remove(ssh)
-            log(id, "stdinfo", "Connection closed")

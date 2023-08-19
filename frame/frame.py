@@ -149,7 +149,7 @@ class Logger:
         self.webhook.stop()
 
 
-# in: device/frame.py
+# in: frame/frame.py
 class Apps:
     def __init__(self, config: Config, logger: Logger):
         self.config = config
@@ -158,19 +158,19 @@ class Apps:
         self.apps_configs: Dict[str, Dict] = {}
         self.process_image_apps: List[Tuple[str, App]] = []
 
-        # Look at all the folders under '../apps/', and import them if they have a device.py file
+        # Look at all the folders under '../apps/', and import them if they have a frame.py file
         # Each file will export one class that derives from App
         try:
             import os
             import importlib.util
             import inspect
             for folder in os.listdir('./apps/'):
-                if os.path.isdir(f'./apps/{folder}') and os.path.isfile(f'./apps/{folder}/device.py') and os.path.isfile(f'./apps/{folder}/config.json'): 
+                if os.path.isdir(f'./apps/{folder}') and os.path.isfile(f'./apps/{folder}/frame.py') and os.path.isfile(f'./apps/{folder}/config.json'): 
                     try:
                         with open(f'./apps/{folder}/config.json', 'r') as file:
                             config = json.load(file)
                             self.apps_configs[folder] = config
-                        spec = importlib.util.spec_from_file_location(f"apps.{folder}", f"./apps/{folder}/device.py")
+                        spec = importlib.util.spec_from_file_location(f"apps.{folder}", f"apps/{folder}/frame.py")
                         module = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(module)
                         for name, obj in inspect.getmembers(module):
@@ -178,27 +178,29 @@ class Apps:
                                 app_instance = obj(name=name, frame_config=self.config.to_frame_config(), app_config={}, log_function=self.logger.log)
                                 self.register(folder, app_instance)
                     except Exception as e:
-                        self.logger.log({ 'event': 'app_init_error', 'app': folder, 'error': str(e), 'stacktrace': traceback.format_exc() })
+                        self.logger.log({ 'event': f'{folder}:error_initializing', 'error': str(e), 'stacktrace': traceback.format_exc() })
         except Exception as e:
-            self.logger.log({ 'event': 'apps_init_error', 'error': str(e), 'stacktrace': traceback.format_exc() })
+            self.logger.log({ 'event': f'@frame:error_initializing_apps', 'error': str(e), 'stacktrace': traceback.format_exc() })
     
     def register(self, name, app: App):
         self.apps[name] = app
+        features = []
         if app.process_image is not App.process_image:
             self.process_image_apps.append((name, app))
-        self.logger.log({ 'event': 'register_app', 'app': name })
+            features.append('process_image')
+        self.logger.log({ 'event': f'@frame:register_app', 'name': name, 'features': features })
 
     def process_image(self, image: Image) -> Image:
         apps_ran=[]
         for (name, app) in self.process_image_apps:
             try:
-                self.logger.log({ 'event': 'running', 'app': name })
+                self.logger.log({ 'event': f'{name}:process_image' })
                 image = app.process_image(image) or image
                 apps_ran.append(name)
             except Exception as e:
                 stacktrace = traceback.format_exc()
                 self.logger.log({
-                    'event': 'app_error',
+                    'event': f'{name}:error_processing_image',
                     'app': name,
                     'apps_ran': apps_ran,
                     'error': str(e),
@@ -226,7 +228,7 @@ class ImageHandler:
             self.config.height = self.inky.resolution[1]
             self.config.color = self.inky.colour
         except Exception as e:
-            logger.log({ 'event': 'device_error', "device": 'inky', 'error': str(e), 'info': "Starting in WEB only mode." })
+            logger.log({ 'event': '@frame:device_error', "device": 'inky', 'error': str(e), 'info': "Starting in WEB kiosk only mode." })
             self.inky = None
             self.config.device = 'web_only'
             if self.config.width is None or self.config.height is None:
@@ -240,7 +242,7 @@ class ImageHandler:
         config.pop('server_host', None)
         config.pop('server_port', None)
         config.pop('server_api_key', None)
-        logger.log({ 'event': 'config', **config })
+        logger.log({ 'event': '@frame:config', **config })
 
     def generate_image(self, trigger: str):
         return self.apps.process_image(self.current_image)
@@ -258,27 +260,27 @@ class ImageHandler:
     def refresh_image(self, trigger: str):
         if not self.image_update_lock.acquire(blocking=False):
             self.logger.log({
-                'event': 'refresh_ignored_already_in_progress', 
+                'event': '@frame:refresh_ignored_already_in_progress', 
                 'trigger': trigger,
             })
             return
 
         def do_update():
             try:
+                self.logger.log({ 'event': '@frame:refresh_image', 'trigger': trigger })
                 self.image_update_in_progress = True
                 self.next_image = self.generate_image(trigger)
-                self.logger.log({ 'event': 'refresh_image', 'trigger': trigger })
                 if self.current_image is None or not self.are_images_equal(self.next_image, self.current_image):
-                    self.logger.log({ 'event': 'refresh_begin' })
+                    self.logger.log({ 'event': '@frame:refreshing_image_on_device' })
                     self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
                     self.slow_update_image_on_frame(self.next_image)
                     self.current_image = self.next_image
                     self.next_image = None
-                    self.logger.log({ 'event': 'refresh_end' })
+                    self.logger.log({ 'event': '@frame:refresh_done' })
                 else:
-                    self.logger.log({ 'event': 'refresh_skip_no_change' })
+                    self.logger.log({ 'event': '@frame:refresh_skipped_no_change' })
             except Exception as e:
-                self.logger.log({ 'event': 'image_refresh_error', 'error': str(e), 'stacktrace': traceback.format_exc()  })
+                self.logger.log({ 'event': '@frame:refresh_error', 'error': str(e), 'stacktrace': traceback.format_exc()  })
             finally:
                 self.image_update_in_progress = False
                 self.image_update_lock.release() 
@@ -297,11 +299,11 @@ class ButtonHandler:
             for pin in buttons:
                 GPIO.add_event_detect(pin, GPIO.FALLING, self.handle_button, bouncetime=250)
         except Exception as e:
-            logger.log({ 'event': 'error_button_handler', 'error': str(e) })
+            logger.log({ 'event': '@frame:error_button_handler', 'error': str(e) })
 
     def handle_button(self, pin):
         label = self.labels[self.buttons.index(pin)]
-        self.logger.log({ 'event': 'button press', 'label': label, 'pin': pin })
+        self.logger.log({ 'event': '@frame:button_pressed', 'label': label, 'pin': pin })
         if label == 'A':
             self.image_handler.refresh_image('button press')
 
@@ -313,7 +315,7 @@ class Scheduler:
         self.reset_event = reset_event
         self.schedule_thread: Thread = Thread(target=self.update_image_on_schedule)
 
-        logger.log({ 'event': 'schedule_start', 'interval': self.config.interval })
+        logger.log({ 'event': '@frame:schedule_start', 'interval': self.config.interval })
         self.schedule_thread.start()
 
     def update_image_on_schedule(self):
@@ -332,7 +334,7 @@ class Server:
         self.app.config['SECRET_KEY'] = 'secret!'
         self.socketio: SocketIO = SocketIO(self.app, async_mode='threading')
         self.logger.set_socketio(self.socketio)
-        self.logger.log({ 'event': 'startup' })
+        self.logger.log({ 'event': '@frame:startup' })
         self.apps: Apps = Apps(self.config, self.logger)
         self.image_handler: ImageHandler = ImageHandler(self.logger, self.socketio, self.config, self.apps)
         self.saved_image: Optional[Any] = None
@@ -366,7 +368,7 @@ class Server:
                 self.saved_bytes.seek(0)
                 return send_file(self.saved_bytes, mimetype=f'image/{self.saved_format.lower()}', as_attachment=False)
             except Exception as e:
-                self.logger.log({ 'event': 'kiosk_image_serve_error', 'error': str(e), 'stacktrace': traceback.format_exc() })
+                self.logger.log({ 'event': '@frame/kiosk:error_serving_image', 'error': str(e), 'stacktrace': traceback.format_exc() })
 
         @self.app.route('/logs')
         def logs():
@@ -397,5 +399,5 @@ if __name__ == '__main__':
         server = Server(config=config, logger=logger)
         server.run()
     except Exception as e:
-        logger.log({ 'error': traceback.format_exc() })
+        logger.log({ 'event': '@frame:error', 'error': traceback.format_exc() })
         print(traceback.format_exc())

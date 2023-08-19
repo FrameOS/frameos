@@ -164,11 +164,11 @@ def process_log(frame: Frame, log: dict):
     
     changes = {}
     event = log.get('event', 'log')
-    if event == 'refresh_image':
+    if event == '@frame:refresh_image':
         changes['status'] = 'fetching'
-    if event == 'refresh_begin':
+    if event == '@frame:refreshing_image_on_device':
         changes['status'] = 'refreshing'
-    if event == 'refresh_end' or event == 'refresh_skip_no_change':
+    if event == '@frame:refresh_done' or event == '@frame:refresh_skipped_no_change':
         changes['status'] = 'ready'
     if event == 'config':
         if frame.status != 'ready':

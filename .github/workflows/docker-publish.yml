@@ -24,17 +24,17 @@ jobs:
           #   dockerfile: Dockerfile
           #   tag: mariusandra/frameos
           - platform: linux/amd64
-            dockerfile: device/Dockerfile
-            tag: mariusandra/frameos-device
+            dockerfile: frame/Dockerfile
+            tag: mariusandra/frameos-frame
           - platform: linux/arm64/v8
-            dockerfile: device/Dockerfile
-            tag: mariusandra/frameos-device
+            dockerfile: frame/Dockerfile
+            tag: mariusandra/frameos-frame
           # - platform: linux/arm/v6
-          #   dockerfile: device/Dockerfile
-          #   tag: mariusandra/frameos-device
+          #   dockerfile: frame/Dockerfile
+          #   tag: mariusandra/frameos-frame
           # - platform: linux/arm/v7
-          #   dockerfile: device/Dockerfile
-          #   tag: mariusandra/frameos-device
+          #   dockerfile: frame/Dockerfile
+          #   tag: mariusandra/frameos-frame
       fail-fast: false
 
     steps:
