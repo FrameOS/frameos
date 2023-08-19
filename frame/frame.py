@@ -190,12 +190,12 @@ class Apps:
             features.append('process_image')
         self.logger.log({ 'event': f'@frame:register_app', 'name': name, 'features': features })
 
-    def process_image(self, image: Image) -> Image:
+    def process_image(self, image: Image) -> (Image, List[str]):
         apps_ran=[]
         for (name, app) in self.process_image_apps:
             try:
                 self.logger.log({ 'event': f'{name}:process_image' })
-                image = app.process_image(image) or image
+                image = app.process_image(image)
                 apps_ran.append(name)
             except Exception as e:
                 stacktrace = traceback.format_exc()
@@ -206,8 +206,7 @@ class Apps:
                     'error': str(e),
                     'stacktrace': stacktrace
                 })
-        return image
-       
+        return image, apps_ran
 
 class ImageHandler:
     def __init__(self, logger: Logger, socketio: SocketIO, config: Config, apps: Apps):
@@ -244,9 +243,6 @@ class ImageHandler:
         config.pop('server_api_key', None)
         logger.log({ 'event': '@frame:config', **config })
 
-    def generate_image(self, trigger: str):
-        return self.apps.process_image(self.current_image)
-
     def slow_update_image_on_frame(self, image):
         if self.inky is not None:
             self.inky.set_image(image, saturation=1)
@@ -269,16 +265,16 @@ class ImageHandler:
             try:
                 self.logger.log({ 'event': '@frame:refresh_image', 'trigger': trigger })
                 self.image_update_in_progress = True
-                self.next_image = self.generate_image(trigger)
+                self.next_image, apps_ran = self.apps.process_image(self.current_image)
                 if self.current_image is None or not self.are_images_equal(self.next_image, self.current_image):
                     self.logger.log({ 'event': '@frame:refreshing_screen' })
                     self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
                     self.slow_update_image_on_frame(self.next_image)
                     self.current_image = self.next_image
                     self.next_image = None
-                    self.logger.log({ 'event': '@frame:refresh_done' })
+                    self.logger.log({ 'event': '@frame:refresh_done', 'apps_ran': apps_ran })
                 else:
-                    self.logger.log({ 'event': '@frame:refresh_skipped_no_change' })
+                    self.logger.log({ 'event': '@frame:refresh_skipped_no_change', 'apps_ran': apps_ran })
             except Exception as e:
                 self.logger.log({ 'event': '@frame:refresh_error', 'error': str(e), 'stacktrace': traceback.format_exc()  })
             finally:

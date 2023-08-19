@@ -30,6 +30,9 @@ class App:
         if self.log_function:
             self.log_function({ "event": "app_log", "app": self.name, "message": message })
         
+    def error(self, message: str):
+        if self.log_function:
+            self.log_function({ "event": "app_error", "app": self.name, "message": message })
 
     def process_image(image: Image):
         pass
