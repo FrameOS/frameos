@@ -12,15 +12,11 @@ export function Field({ children, name, label, className, ...props }: FieldProps
   const template: KeaFieldProps['template'] = ({ label, kids, error }) => {
     return (
       <div className={clsx('space-y-2', className)}>
-        {label ? (
-          <Label htmlFor={Array.isArray(name) ? name.map((name) => String(name)).join('.') : String(name)}>
-            {label}
-          </Label>
-        ) : null}
+        {label ? <Label>{label}</Label> : null}
         {kids as any}
-        {error ? <div className="text-danger flex items-center gap-1 text-sm text-red-300">{error}</div> : null}
+        {error ? <div className="text-danger flex items-center gap-1 text-sm text-red-400">{error}</div> : null}
       </div>
     )
   }
-  return <KeaField {...props} children={children} name={name} template={template} noStyle />
+  return <KeaField {...props} children={children} name={name} label={label} template={template} noStyle />
 }
