@@ -6,18 +6,20 @@ import { Button } from '../../components/Button'
 import { frameStatus, frameUrl } from '../../decorators/frame'
 import { Reveal } from '../../components/Reveal'
 import { framesModel } from '../../models/framesModel'
-import { frameLogic } from './frameLogic'
+import { detailsLogic } from './detailsLogic'
 import { Field, Form } from 'kea-forms'
 import { TextInput } from '../../components/TextInput'
+import { frameLogic } from './frameLogic'
 
 export interface DetailsProps {
   className?: string
   id: number
 }
 
-export function Details({ className, id }: DetailsProps) {
-  const { frame, editing } = useValues(frameLogic)
-  const { editFrame, closeEdit, setEditFrameValue } = useActions(frameLogic)
+export function Details({ className }: DetailsProps) {
+  const { id } = useValues(frameLogic)
+  const { frame, editing } = useValues(detailsLogic({ id }))
+  const { editFrame, closeEdit, setEditFrameValue } = useActions(detailsLogic({ id }))
   const { redeployFrame, refreshFrame, restartFrame, deleteFrame } = useActions(framesModel)
 
   return (
@@ -27,7 +29,7 @@ export function Details({ className, id }: DetailsProps) {
       ) : editing ? (
         <>
           <H6>Edit frame</H6>
-          <Form formKey="editFrame" logic={frameLogic} props={{ id }} className="space-y-4" enableFormOnSubmit>
+          <Form formKey="editFrame" logic={detailsLogic} props={{ id }} className="space-y-4" enableFormOnSubmit>
             <Field name="frame_host" label="Frame host">
               <TextInput name="frame_host" placeholder="127.0.0.1" required />
             </Field>

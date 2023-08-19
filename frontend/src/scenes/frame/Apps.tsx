@@ -2,12 +2,13 @@ import { useActions, useValues } from 'kea'
 import { Box } from '../../components/Box'
 import { H6 } from '../../components/H6'
 import clsx from 'clsx'
-import { frameLogic } from './frameLogic'
+import { appsLogic } from './appsLogic'
 import { appsModel } from '../../models/appsModel'
 import { Field } from '../../components/Field'
 import { TextInput } from '../../components/TextInput'
 import { Form, Group } from 'kea-forms'
 import { Button } from '../../components/Button'
+import { frameLogic } from './frameLogic'
 
 export interface AppsProps {
   className?: string
@@ -15,17 +16,19 @@ export interface AppsProps {
 }
 
 export function Apps({ className }: AppsProps) {
+  const { id } = useValues(frameLogic)
   const {
     appsForm: { appsArray },
     isAppsFormValid,
-  } = useValues(frameLogic)
-  const { addApp, moveAppUp, moveAppDown, removeApp, saveApps, saveAppsAndDeploy, saveAppsAndRestart } =
-    useActions(frameLogic)
+  } = useValues(appsLogic({ id }))
+  const { addApp, moveAppUp, moveAppDown, removeApp, saveApps, saveAppsAndDeploy, saveAppsAndRestart } = useActions(
+    appsLogic({ id })
+  )
   const { apps } = useValues(appsModel)
 
   return (
     <Box className={clsx('p-4 space-y-8', className)}>
-      <Form logic={frameLogic} formKey="appsForm" className="space-y-4">
+      <Form logic={appsLogic} props={{ id }} formKey="appsForm" className="space-y-4">
         <H6>Apps</H6>
         {appsArray.map(({ fields, keyword, name, description }, index) => {
           const app = apps[keyword]

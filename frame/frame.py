@@ -19,7 +19,7 @@ from PIL import Image, ImageChops
 
 from apps.apps import App, FrameConfig, ProcessImagePayload
 
-VERSION = '1.0.0-prerelease'
+VERSION = '0.0.0'
 
 class Config:
     def __init__(self, filename='frame.json'):
@@ -164,10 +164,10 @@ class Apps:
             import os
             import importlib.util
             import inspect
-            for folder in os.listdir('./apps/'):
-                if os.path.isdir(f'./apps/{folder}') and os.path.isfile(f'./apps/{folder}/frame.py') and os.path.isfile(f'./apps/{folder}/config.json'): 
+            for folder in os.listdir('apps/'):
+                if os.path.isdir(f'apps/{folder}') and os.path.isfile(f'apps/{folder}/frame.py') and os.path.isfile(f'apps/{folder}/config.json'): 
                     try:
-                        with open(f'./apps/{folder}/config.json', 'r') as file:
+                        with open(f'apps/{folder}/config.json', 'r') as file:
                             config = json.load(file)
                             self.apps_configs[folder] = config
                         spec = importlib.util.spec_from_file_location(f"apps.{folder}", f"apps/{folder}/frame.py")
