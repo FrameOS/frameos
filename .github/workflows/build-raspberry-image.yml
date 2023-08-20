@@ -69,7 +69,8 @@ jobs:
           ssh-keygen -f ~/.ssh/id_rsa -N ""
           cat ~/.ssh/id_rsa.pub | ssh -p 5022 pi@localhost "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys"
 
-          scp -P 5022 ./frame/frame.py pi@localhost:/srv/frameos/frame.py
+          scp -P 5022 ./frame/run.py pi@localhost:/srv/frameos/run.py
+          scp -P 5022 -r ./frame/frame pi@localhost:/srv/frameos/frame
           scp -P 5022 ./frame/requirements.txt pi@localhost:/srv/frameos/requirements.txt
 
           xz 2023-05-03-raspios-bullseye-armhf-lite.img

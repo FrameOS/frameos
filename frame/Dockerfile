@@ -16,4 +16,4 @@ RUN apt-get update && apt-get install -y build-essential libffi-dev \
 
 EXPOSE 8999
 
-CMD ["sh", "-c", "python3 frame.py"]
+CMD ["sh", "-c", "python3 run.py"]

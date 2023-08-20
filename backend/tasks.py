@@ -140,8 +140,11 @@ def deploy_frame(id: int):
                 log(id, "stdout", "> add /srv/frameos/frame.json")
                 scp.putfo(StringIO(json.dumps(get_frame_json(frame), indent=4) + "\n"), "/srv/frameos/frame.json")
                 
-                log(id, "stdout", "> add /srv/frameos/frame.py")
-                scp.put("./frame/frame.py", "/srv/frameos/frame.py")
+                log(id, "stdout", "> add /srv/frameos/run.py")
+                scp.put("./frame/run.py", "/srv/frameos/run.py")
+                
+                log(id, "stdout", "> add /srv/frameos/frame/*")
+                scp.put("./frame/frame", "/srv/frameos/", recursive=True)
 
                 # Apps
                 local_apps_path = "./apps"
