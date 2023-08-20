@@ -1,5 +1,5 @@
 from PIL import Image, UnidentifiedImageError
-from apps.apps import App, ProcessImagePayload
+from apps import App, ProcessImagePayload
 import requests
 from requests.exceptions import RequestException
 import io

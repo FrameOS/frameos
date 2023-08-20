@@ -7,7 +7,7 @@ from threading import Event
 
 from .config import Config
 from .logger import Logger
-from .apps import Apps
+from .app_handler import AppHandler
 from .image_handler import ImageHandler
 from .button_handler import ButtonHandler
 from .scheduler import Scheduler
@@ -22,7 +22,7 @@ class Server:
         self.socketio: SocketIO = SocketIO(self.app, async_mode='threading')
         self.logger.set_socketio(self.socketio)
         self.logger.log({ 'event': '@frame:startup' })
-        self.apps: Apps = Apps(self.config, self.logger)
+        self.apps: AppHandler = AppHandler(self.config, self.logger)
         self.image_handler: ImageHandler = ImageHandler(self.logger, self.socketio, self.config, self.apps)
         self.saved_image: Optional[Any] = None
         self.saved_bytes: Optional[bytes] = None

@@ -1,4 +1,4 @@
-from apps.apps import App, ProcessImagePayload
+from apps import App, ProcessImagePayload
 
 class RotateApp(App):
     def process_image(self, payload: ProcessImagePayload):

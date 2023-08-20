@@ -146,21 +146,10 @@ def deploy_frame(id: int):
                 log(id, "stdout", "> add /srv/frameos/frame/*")
                 scp.put("./frame/frame", "/srv/frameos/", recursive=True)
 
-                # Apps
-                local_apps_path = "./apps"
-                remote_apps_base = "/srv/frameos/apps"
-                
-                exec_command(frame, ssh, f"mkdir -p {remote_apps_base}")
-
-                log(id, "stdout", f"> add {remote_apps_base}/apps.py")
-                scp.put("./apps/apps.py", f"{remote_apps_base}/apps.py")
-                
-                app_configs = get_app_configs()
-
-                for name in app_configs.keys():
-                    local_app_path = os.path.join(local_apps_path, name)
-                    log(id, "stdout", f"> install {remote_apps_base}/{name}")
-                    scp.put(local_app_path, remote_apps_base, recursive=True)
+                # Install all apps, not just the ones currently preconfigured.
+                # This makes later changes easier. This might change.
+                log(id, "stdout", "> add /srv/frameos/apps/*")
+                scp.put("./frame/apps", "/srv/frameos/", recursive=True)
 
                 log(id, "stdout", "> add /srv/frameos/index.html")
                 scp.put("./frame/index.html", "/srv/frameos/index.html")
@@ -172,10 +161,10 @@ def deploy_frame(id: int):
                     service_contents = file.read().replace("%I", frame.ssh_user)
                     print(service_contents)
                 with SCPClient(ssh.get_transport()) as scp:
-                    scp.putfo(StringIO(service_contents), "/tmp/frameos.service")
+                    scp.putfo(StringIO(service_contents), "/srv/frameos/frameos.service")
 
             # Move service file to the appropriate location and set permissions
-            exec_command(frame, ssh, "sudo mv /tmp/frameos.service /etc/systemd/system/frameos.service")
+            exec_command(frame, ssh, "sudo mv /srv/frameos/frameos.service /etc/systemd/system/frameos.service")
             exec_command(frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
             exec_command(frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")
 

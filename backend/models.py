@@ -6,7 +6,7 @@ import json
 import os
 
 def get_app_configs() -> Dict[str, Dict]:
-    local_apps_path = "./apps"
+    local_apps_path = "./frame/apps"
     configs = {}
     for app_name in os.listdir(local_apps_path):
         local_app_path = os.path.join(local_apps_path, app_name)

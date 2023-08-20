@@ -8,12 +8,12 @@ import inspect
 from typing import Optional, List, Dict, Tuple
 from PIL import Image
 
-from apps.apps import App, ProcessImagePayload
+from apps import App, ProcessImagePayload
 
 from .config import Config
 from .logger import Logger
 
-class Apps:
+class AppHandler:
     def __init__(self, config: Config, logger: Logger):
         self.config = config
         self.logger = logger

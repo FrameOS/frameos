@@ -1,6 +1,6 @@
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
-from apps.apps import App, ProcessImagePayload
+from apps import App, ProcessImagePayload
 
 class ClockApp(App):
     def process_image(self, payload: ProcessImagePayload):

@@ -1,4 +1,4 @@
-from apps.apps import App, ProcessImagePayload
+from apps import App, ProcessImagePayload
 
 class ScaleApp(App):
     def process_image(self, payload: ProcessImagePayload):

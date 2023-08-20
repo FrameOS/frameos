@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Any, Callable, List
 from PIL import Image
 
+# NOTE: This file is read by both the frame and the controller. Don't import anything too funky.
+
 @dataclass
 class ConfigField:
     name: str

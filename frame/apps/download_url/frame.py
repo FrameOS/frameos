@@ -2,7 +2,7 @@ from PIL import Image, UnidentifiedImageError
 import requests
 from requests.exceptions import RequestException
 import io
-from apps.apps import App, ProcessImagePayload
+from apps import App, ProcessImagePayload
 
 class DownloadApp(App):
     def process_image(self, payload: ProcessImagePayload):

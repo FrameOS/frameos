@@ -3,7 +3,7 @@ import logging
 
 from typing import Optional
 
-from apps.apps import FrameConfig, AppConfig, ConfigField
+from apps import FrameConfig, AppConfig, ConfigField
 
 from .version import VERSION
 

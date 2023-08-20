@@ -1,4 +1,4 @@
-from .apps import Apps
+from .app_handler import AppHandler
 from .button_handler import ButtonHandler
 from .config import Config
 from .image_handler import ImageHandler

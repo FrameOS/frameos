@@ -6,11 +6,11 @@ from PIL import Image, ImageChops
 
 from .logger import Logger
 from .config import Config
-from .apps import Apps
+from .app_handler import AppHandler
 from .image_utils import scale_cover, scale_contain, scale_stretch, scale_center
 
 class ImageHandler:
-    def __init__(self, logger: Logger, socketio: SocketIO, config: Config, apps: Apps):
+    def __init__(self, logger: Logger, socketio: SocketIO, config: Config, app_handler: AppHandler):
         self.logger = logger
         self.socketio = socketio
         self.current_image: Image = None
@@ -18,7 +18,7 @@ class ImageHandler:
         self.image_update_lock: Lock = Lock()
         self.image_update_in_progress: bool = False
         self.config: Config = config
-        self.apps: Apps = apps
+        self.app_handler: AppHandler = app_handler
 
         try:
             from inky.auto import auto
@@ -67,7 +67,7 @@ class ImageHandler:
             try:
                 self.logger.log({ 'event': '@frame:refresh_image', 'trigger': trigger })
                 self.image_update_in_progress = True
-                self.next_image, apps_ran, apps_errored = self.apps.process_image(None, self.current_image)
+                self.next_image, apps_ran, apps_errored = self.app_handler.process_image(None, self.current_image)
                 
                 if self.next_image is None:
                     self.logger.log({ 'event': '@frame:refresh_skipped', 'reason': 'no_image', 'apps_ran': apps_ran })
