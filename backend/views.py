@@ -68,8 +68,9 @@ def update_frame(id: int):
     frame.server_host = request.form['server_host']
     frame.server_port = int(request.form['server_port'] or '8999')
     frame.server_api_key = request.form['server_api_key']
-    frame.image_url = request.form['image_url'] if request.form['image_url'] != '' else None
     frame.interval = int(request.form['interval']) if request.form['interval'] != '' else None
+    frame.width = int(request.form['width']) if request.form['width'] != '' else None
+    frame.height = int(request.form['height']) if request.form['height'] != '' else None
     models.update_frame(frame)
     tasks.restart_frame(frame.id)
     return 'Success', 200

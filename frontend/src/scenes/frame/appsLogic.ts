@@ -3,7 +3,7 @@ import { subscriptions } from 'kea-subscriptions'
 import { framesModel } from '../../models/framesModel'
 
 import { forms } from 'kea-forms'
-import { FrameApp } from '../../types'
+import { AppConfig } from '../../types'
 import { appsModel } from '../../models/appsModel'
 
 import type { appsLogicType } from './appsLogicType'
@@ -34,7 +34,7 @@ export const appsLogic = kea<appsLogicType>([
       options: {
         showErrorsOnTouch: true,
       },
-      defaults: { appsArray: [] as FrameApp[] },
+      defaults: { appsArray: [] as AppConfig[] },
       submit: async (formValues, breakpoint) => {
         const formData = new FormData()
         formData.append('apps', JSON.stringify(formValues.appsArray))
@@ -47,13 +47,13 @@ export const appsLogic = kea<appsLogicType>([
           throw new Error('Failed to submit frame')
         }
       },
-      errors: ({ appsArray }: { appsArray: FrameApp[] }) => {
-        const newArray: Partial<FrameApp>[] = appsArray.map((frameApp) => {
-          const app = appsModel.values.apps[frameApp.keyword]
+      errors: ({ appsArray }: { appsArray: AppConfig[] }) => {
+        const newArray: Partial<AppConfig>[] = appsArray.map((AppConfig) => {
+          const app = appsModel.values.apps[AppConfig.keyword]
           return {
             config: Object.fromEntries(
               app.fields
-                ?.filter(({ name, required }) => required && !frameApp.config[name])
+                ?.filter(({ name, required }) => required && !AppConfig.config[name])
                 .map(({ name }) => [name, 'This field is required'])
             ),
           }
@@ -66,7 +66,7 @@ export const appsLogic = kea<appsLogicType>([
   })),
   reducers({
     appsForm: [
-      { appsArray: [] as FrameApp[] },
+      { appsArray: [] as AppConfig[] },
       {
         removeApp: ({ appsArray }, { index }) => ({ appsArray: appsArray.filter((_, i) => i !== index) }),
         moveAppDown: ({ appsArray }, { index }) => {
@@ -102,7 +102,7 @@ export const appsLogic = kea<appsLogicType>([
     addApp: ({ keyword }) => {
       const { apps } = appsModel.values
       const app = apps[keyword]
-      const frameApp: FrameApp = {
+      const AppConfig: AppConfig = {
         keyword: keyword,
         name: app.name,
         description: app.description,
@@ -114,7 +114,7 @@ export const appsLogic = kea<appsLogicType>([
             .map(({ name, value }) => [name, value])
         ),
       }
-      actions.setAppsFormValue('appsArray', [...values.appsForm.appsArray, frameApp])
+      actions.setAppsFormValue('appsArray', [...values.appsForm.appsArray, AppConfig])
     },
     saveApps: () => {
       actions.submitAppsForm()

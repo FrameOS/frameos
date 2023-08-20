@@ -62,8 +62,9 @@ export const detailsLogic = kea<detailsLogicType>([
         server_host: frame.server_host,
         server_port: frame.server_port,
         server_api_key: frame.server_api_key,
-        image_url: frame.image_url,
         interval: frame.interval,
+        width: frame.width,
+        height: frame.height,
       })
     },
   })),

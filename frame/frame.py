@@ -7,17 +7,21 @@ import traceback
 import time
 import atexit
 import traceback
+import os
+import importlib.util
+import inspect
+
 from queue import Queue, Empty
 
 from datetime import datetime
-
+from dataclasses import asdict
 from flask import Flask, send_file
 from flask_socketio import SocketIO, emit
 from typing import Optional, List, Dict, Any, Tuple
 from threading import Lock, Thread, Event
 from PIL import Image, ImageChops
 
-from apps.apps import App, FrameConfig, ProcessImagePayload, FrameApp
+from apps.apps import App, FrameConfig, ProcessImagePayload, AppConfig, ConfigField
 
 VERSION = '0.0.0'
 
@@ -31,9 +35,16 @@ class Config:
         self.height: int = self._data.get('height', 1080)
         self.device: str = self._data.get('device', "kiosk")
         self.color: Optional[str] = self._data.get('color', None)
-        self.image_url: Optional[str] = self._data.get('image_url', None)
         self.interval: Optional[int] = self._data.get('interval', 300)
-        self.apps: Optional[List[FrameApp]] = self._data.get('apps', [])
+        apps_data = self._data.pop('apps', [])
+        self.apps = []
+        for app in apps_data:
+            fields = app.pop('fields', [])
+            app_config = AppConfig(
+                fields=[ConfigField(**field) for field in fields],
+                **app
+            )
+            self.apps.append(app_config)
 
     def to_dict(self):
         return {
@@ -44,9 +55,8 @@ class Config:
             'height': self.height,
             'device': self.device,
             'color': self.color,
-            'image_url': self.image_url,
             'interval': self.interval,
-            'apps': [app.to_dict() for app in self.apps],
+            'apps': self.apps,
         }
     
     def to_frame_config(self):
@@ -57,7 +67,6 @@ class Config:
             height=self.height,
             device=self.device,
             color=self.color,
-            image_url=self.image_url,
             interval=self.interval,
             apps=self.apps,
         )
@@ -158,27 +167,28 @@ class Apps:
         self.config = config
         self.logger = logger
         self.apps: Dict[str, App] = {}
-        self.apps_configs: Dict[str, Dict] = {}
         self.process_image_apps: List[Tuple[str, App]] = []
 
-        # Look at all the folders under '../apps/', and import them if they have a frame.py file
-        # Each file will export one class that derives from App
         try:
-            import os
-            import importlib.util
-            import inspect
-            for folder in os.listdir('apps/'):
+            apps_folders = os.listdir('apps/')
+            for app in self.config.apps:
+                folder = app.keyword
+                if folder not in apps_folders:
+                    continue
                 if os.path.isdir(f'apps/{folder}') and os.path.isfile(f'apps/{folder}/frame.py') and os.path.isfile(f'apps/{folder}/config.json'): 
                     try:
                         with open(f'apps/{folder}/config.json', 'r') as file:
                             config = json.load(file)
-                            self.apps_configs[folder] = config
+                        if config.get('version', None) != app.version:
+                            self.logger.log({ 'event': f'{folder}:version_mismatch', 'app': folder, 'installed_version': config.get('version', None), 'requested_version': app.version })
+                            continue
+                        
                         spec = importlib.util.spec_from_file_location(f"apps.{folder}", f"apps/{folder}/frame.py")
                         module = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(module)
                         for name, obj in inspect.getmembers(module):
                             if inspect.isclass(obj) and issubclass(obj, App) and obj is not App:
-                                app_instance = obj(name=name, frame_config=self.config.to_frame_config(), app_config={}, log_function=self.logger.log)
+                                app_instance = obj(name=name, app_config=app, frame_config=self.config.to_frame_config(), log_function=self.logger.log)
                                 self.register(folder, app_instance)
                     except Exception as e:
                         self.logger.log({ 'event': f'{folder}:error_initializing', 'error': str(e), 'stacktrace': traceback.format_exc() })
@@ -240,14 +250,12 @@ class ImageHandler:
                 self.config.width = 1920
                 self.config.height = 1080
 
-        if self.config.image_url is None:
-            self.config.image_url = "https://source.unsplash.com/random/{width}x{height}/?bird"
-
         config = self.config.to_dict()
         config.pop('server_host', None)
         config.pop('server_port', None)
         config.pop('server_api_key', None)
-        logger.log({ 'event': '@frame:config', **config })
+        config_apps = config.pop('apps', None)
+        logger.log({ 'event': '@frame:config', **config, 'apps': [{'keyword': app.keyword, 'config': app.config} for app in config_apps] })
 
     def slow_update_image_on_frame(self, image):
         if self.inky is not None:

@@ -39,10 +39,12 @@ class Frame(db.Model):
     height = db.Column(db.Integer, nullable=True)
     device = db.Column(db.String(256), nullable=True)
     color = db.Column(db.String(256), nullable=True)
-    image_url = db.Column(db.String(256), nullable=True)
     interval = db.Column(db.Double, default=300)
     # apps
     apps = db.Column(JSON, nullable=True)
+    
+    # deprecated
+    image_url = db.Column(db.String(256), nullable=True)
 
     def to_dict(self):
         return {
@@ -61,7 +63,6 @@ class Frame(db.Model):
             'height': self.height,
             'device': self.device,
             'color': self.color,
-            'image_url': self.image_url,
             'interval': self.interval,
             'apps': self.apps,
         }
@@ -174,7 +175,7 @@ def process_log(frame: Frame, log: dict):
         if frame.status != 'ready':
             changes['status'] = 'ready'
 
-        for key in ['width', 'height', 'device', 'color', 'image_url', 'interval']:
+        for key in ['width', 'height', 'device', 'color', 'interval']:
             if key in log and log[key] is not None and log[key] != getattr(frame, key):
                 changes[key] = log[key]
 

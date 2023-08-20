@@ -54,32 +54,12 @@ export function Details({ className }: DetailsProps) {
             <Field name="server_api_key" label="Server API key">
               <TextInput name="server_api_key" placeholder="" required />
             </Field>
-            <Field name="image_url" label="Image URL">
-              <TextInput name="image_url" placeholder="https://source.unsplash.com/random/{width}x{height}/?bird" />
+            <Field name="width" label="Width">
+              <TextInput name="width" placeholder="1920" />
             </Field>
-            <div className="space-x-2">
-              <span>Unsplash:</span>
-              <a
-                href="#"
-                className="underline"
-                onClick={(e) => {
-                  setEditFrameValue('image_url', 'https://source.unsplash.com/random/{width}x{height}/?bird')
-                  e.preventDefault()
-                }}
-              >
-                random birds
-              </a>
-              <a
-                href="#"
-                className="underline"
-                onClick={(e) => {
-                  setEditFrameValue('image_url', 'https://source.unsplash.com/random/{width}x{height}/?fruit')
-                  e.preventDefault()
-                }}
-              >
-                random fruit
-              </a>
-            </div>
+            <Field name="height" label="Height">
+              <TextInput name="height" placeholder="1080" />
+            </Field>
             <Field name="interval" label="Interval">
               <TextInput name="interval" placeholder="300" />
             </Field>

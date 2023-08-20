@@ -14,7 +14,6 @@ export interface FrameType {
   height?: number
   device?: string
   color?: string
-  image_url?: string
   interval: number
 }
 export interface LogType {
@@ -34,14 +33,14 @@ export interface ConfigField {
   placeholder?: string
 }
 
-export interface AppConfig {
+export interface AppConfigUninstalled {
   name: string
   description: string
   version: string
   fields: ConfigField[]
 }
 
-export interface FrameApp extends AppConfig {
+export interface AppConfig extends AppConfigUninstalled {
   keyword: string
   config: Record<string, any>
 }

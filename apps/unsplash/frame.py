@@ -12,7 +12,7 @@ class UnsplashApp(App):
         image_url = "https://source.unsplash.com/random/{width}x{height}/?{keyword}"
         image_url = image_url.replace('{width}', str(self.frame_config.width))
         image_url = image_url.replace('{height}', str(self.frame_config.height))
-        image_url = image_url.replace('{keyword}', str(self.app_config.get('keyword', 'nature')))
+        image_url = image_url.replace('{keyword}', str(self.config.get('keyword', 'nature')))
 
         try:
             response = requests.get(image_url)

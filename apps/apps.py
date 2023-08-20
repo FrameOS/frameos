@@ -6,10 +6,13 @@ from PIL import Image
 class ConfigField:
     name: str
     type: str
-    required: bool = False
+    required: Optional[bool] = False
+    value: Optional[Any] = None
+    label: Optional[str] = None
+    placeholder: Optional[str] = None
 
 @dataclass
-class FrameApp:
+class AppConfig:
     keyword: str
     name: str
     config: Dict
@@ -25,9 +28,8 @@ class FrameConfig:
     height: int
     device: str
     color: str
-    image_url: str
     interval: float
-    apps: List[FrameApp]
+    apps: List[AppConfig]
 
 @dataclass
 class ProcessImagePayload:
@@ -36,19 +38,20 @@ class ProcessImagePayload:
 
 
 class App:
-    def __init__(self, name: str, frame_config: FrameConfig, app_config: Optional[Dict[str, None]], log_function: Callable[[Dict], Any]) -> None:
+    def __init__(self, name: str, frame_config: FrameConfig, app_config: AppConfig, log_function: Callable[[Dict], Any]) -> None:
         self.name = name
         self.frame_config = frame_config
-        self.app_config = app_config or {}
+        self.app_config = app_config
         self.log_function = log_function
+        self.config: Dict = self.app_config.config or {}
     
     def log(self, message: str):
         if self.log_function:
-            self.log_function({ "event": "app_log", "app": self.name, "message": message })
+            self.log_function({ "event": f"{self.name}:log", "app": self.name, "message": message })
         
     def error(self, message: str):
         if self.log_function:
-            self.log_function({ "event": "app_error", "app": self.name, "message": message })
+            self.log_function({ "event": f"{self.name}:error", "app": self.name, "message": message })
 
     def process_image(payload: ProcessImagePayload):
         pass
