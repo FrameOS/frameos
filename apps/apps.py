@@ -48,11 +48,11 @@ class App:
     
     def log(self, message: str):
         if self.log_function:
-            self.log_function({ "event": f"{self.app_config.keyword}:log", "app": self.name, "message": message })
+            self.log_function({ "event": f"{self.app_config.keyword}:log", "message": message })
         
     def error(self, message: str):
         if self.log_function:
-            self.log_function({ "event": f"{self.name}:error", "app": self.name, "message": message })
+            self.log_function({ "event": f"{self.name}:error", "message": message })
 
     def process_image(payload: ProcessImagePayload):
         pass
