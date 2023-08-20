@@ -179,6 +179,7 @@ class Apps:
                     try:
                         with open(f'apps/{folder}/config.json', 'r') as file:
                             config = json.load(file)
+                       
                         if config.get('version', None) != app.version:
                             self.logger.log({ 'event': f'{folder}:version_mismatch', 'app': folder, 'installed_version': config.get('version', None), 'requested_version': app.version })
                             continue
@@ -199,7 +200,6 @@ class Apps:
         self.apps[name] = app
         features = []
         if app.process_image is not App.process_image:
-            self.process_image_apps.append((name, app))
             features.append('process_image')
         self.logger.log({ 'event': f'@frame:register_app', 'name': name, 'features': features })
 
@@ -207,21 +207,28 @@ class Apps:
         apps_ran=[]
         apps_errored=[]
         payload = ProcessImagePayload(next_image=next_image, current_image=current_image)
-        for (name, app) in self.process_image_apps:
-            try:
-                self.logger.log({ 'event': f'{name}:process_image' })
-                app.process_image(payload)
-                apps_ran.append(name)
-            except Exception as e:
-                stacktrace = traceback.format_exc()
-                self.logger.log({
-                    'event': f'{name}:error_processing_image',
-                    'app': name,
-                    'apps_ran': apps_ran,
-                    'error': str(e),
-                    'stacktrace': stacktrace
-                })
-                apps_errored.append(name)
+        for frame_app in self.config.apps:
+            app = self.apps.get(frame_app.keyword, None)
+            if app is None:
+                self.logger.log({ 'event': f'{frame_app.keyword}:app_not_found' })
+                apps_errored.append(app.keyword)
+                continue
+            keyword = frame_app.keyword
+            if app.process_image is not App.process_image:
+                try:
+                    self.logger.log({ 'event': f'{keyword}:process_image' })
+                    app.process_image(payload)
+                    apps_ran.append(keyword)
+                except Exception as e:
+                    stacktrace = traceback.format_exc()
+                    self.logger.log({
+                        'event': f'{keyword}:error_processing_image',
+                        'app': keyword,
+                        'apps_ran': apps_ran,
+                        'error': str(e),
+                        'stacktrace': stacktrace
+                    })
+                    apps_errored.append(keyword)
         return payload.next_image, apps_ran, apps_errored
 
 class ImageHandler:
@@ -259,6 +266,9 @@ class ImageHandler:
 
     def slow_update_image_on_frame(self, image):
         if self.inky is not None:
+            if image.width != self.inky.resolution[0] or image.height != self.inky.resolution[1]:
+                self.logger.log({ 'event': '@frame:resolution_mismatch', 'inky_resolution': self.inky.resolution, 'image_resolution': (image.width, image.height) })
+
             self.inky.set_image(image, saturation=1)
             self.inky.show()
 

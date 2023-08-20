@@ -153,13 +153,11 @@ def deploy_frame(id: int):
                 scp.put("./apps/apps.py", f"{remote_apps_base}/apps.py")
                 
                 app_configs = get_app_configs()
-                enabled_configs = set(app.get('keyword') for app in frame.apps)
 
                 for name in app_configs.keys():
-                    if name in enabled_configs:
-                        local_app_path = os.path.join(local_apps_path, name)
-                        log(id, "stdout", f"> install {remote_apps_base}/{name}")
-                        scp.put(local_app_path, remote_apps_base, recursive=True)
+                    local_app_path = os.path.join(local_apps_path, name)
+                    log(id, "stdout", f"> install {remote_apps_base}/{name}")
+                    scp.put(local_app_path, remote_apps_base, recursive=True)
 
                 log(id, "stdout", "> add /srv/frameos/index.html")
                 scp.put("./frame/index.html", "/srv/frameos/index.html")

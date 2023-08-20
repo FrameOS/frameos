@@ -47,7 +47,7 @@ class App:
     
     def log(self, message: str):
         if self.log_function:
-            self.log_function({ "event": f"{self.name}:log", "app": self.name, "message": message })
+            self.log_function({ "event": f"{self.app_config.keyword}:log", "app": self.name, "message": message })
         
     def error(self, message: str):
         if self.log_function:

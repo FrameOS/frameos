@@ -14,6 +14,8 @@ class UnsplashApp(App):
         image_url = image_url.replace('{height}', str(self.frame_config.height))
         image_url = image_url.replace('{keyword}', str(self.config.get('keyword', 'nature')))
 
+        self.log(f"Fetching image from Unsplash: {image_url}")
+
         try:
             response = requests.get(image_url)
             response.raise_for_status()

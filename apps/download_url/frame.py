@@ -19,8 +19,11 @@ class DownloadApp(App):
         try:
             response = requests.get(image_url)
             response.raise_for_status()
-            payload.next_image = resize_and_crop(Image.open(io.BytesIO(response.content)), self.frame_config.width, self.frame_config.height)
+            payload.next_image = Image.open(io.BytesIO(response.content))
             self.log(f"Downloaded image: {payload.next_image.width}x{payload.next_image.height} {payload.next_image.format} {payload.next_image.mode}")
+            if payload.next_image.width != self.frame_config.width or payload.next_image.height != self.frame_config.height:
+                self.log(f"Resizing image to {self.frame_config.width}x{self.frame_config.height}")
+                payload.next_image = resize_and_crop(payload.next_image, self.frame_config.width, self.frame_config.height)
         except RequestException as e:
             raise Exception(f"Error fetching image from {image_url}. Error: {e}")
         except UnidentifiedImageError:
