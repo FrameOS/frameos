@@ -10,22 +10,19 @@ export interface ImageProps {
 export function Image({ id, className }: ImageProps) {
   const { getFrameImage, frames } = useValues(framesModel)
   return (
-    <div
-      className={clsx(
-        'p-2 m-auto',
-        ['refreshing', 'fetching', 'restarting', 'starting'].includes(frames[id]?.status)
-          ? 'continuous-fade-in-out'
-          : null,
-        className
-      )}
-    >
+    <div className={clsx('p-2 m-auto', frames[id]?.status !== 'ready' ? 'continuous-fade-in-out' : null, className)}>
       {frames[id] ? (
         <img
           className="rounded-lg w-full"
           src={getFrameImage(id)}
           style={{
             ...(frames[id].width && frames[id].height
-              ? { aspectRatio: `${frames[id].width} / ${frames[id].height}`, maxWidth: frames[id].width }
+              ? {
+                  aspectRatio: `${frames[id].width} / ${frames[id].height}`,
+                  maxWidth: '100%',
+                  width: frames[id].width,
+                  height: 'auto',
+                }
               : {}),
           }}
           alt=""

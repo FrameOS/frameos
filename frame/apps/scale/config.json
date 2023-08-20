@@ -1,9 +1,0 @@
-{
-    "name": "Scale",
-    "description": "Scale or stretch the image",
-    "version": "1.0.0",
-    "fields": [
-        {"name": "scale_width", "type": "string", "required": true, "label": "Scale Width", "placeholder": "e.g., 1.5"},
-        {"name": "scale_height", "type": "string", "required": true, "label": "Scale Height", "placeholder": "e.g., 1.5"}
-    ]
-}

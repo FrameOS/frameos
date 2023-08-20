@@ -11,7 +11,7 @@ def scale_cover(image: Image.Image, target_width: int, target_height: int) -> Im
     # Resize the image based on the chosen scaling factor
     new_width = round(image.width * scale_factor)
     new_height = round(image.height * scale_factor)
-    image = image.resize((new_width, new_height), Image.ANTIALIAS)
+    image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
     # Calculate cropping coordinates
     left = (image.width - target_width) / 2
@@ -35,7 +35,7 @@ def scale_contain(image: Image.Image, target_width: int, target_height: int, bac
     # Resize the image based on the chosen scaling factor
     new_width = round(image.width * scale_factor)
     new_height = round(image.height * scale_factor)
-    image = image.resize((new_width, new_height), Image.ANTIALIAS)
+    image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
     
     # Create a new blank white image of target size
     background = Image.new('RGB', (target_width, target_height), background_color or 'white')
@@ -48,7 +48,8 @@ def scale_contain(image: Image.Image, target_width: int, target_height: int, bac
 
 def scale_stretch(image: Image.Image, target_width: int, target_height: int) -> Image.Image:
     # Simply resize the image to the target dimensions
-    return image.resize((target_width, target_height), Image.ANTIALIAS)
+    image = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
+    return image
 
 def scale_center(image: Image.Image, target_width: int, target_height: int, background_color: str) -> Image.Image:
     # Create a new blank white image of target size

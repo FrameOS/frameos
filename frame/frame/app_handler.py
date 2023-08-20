@@ -17,8 +17,7 @@ class AppHandler:
     def __init__(self, config: Config, logger: Logger):
         self.config = config
         self.logger = logger
-        self.apps: Dict[str, App] = {}
-        self.process_image_apps: List[Tuple[str, App]] = []
+        self.apps: List[(str, App)] = []
 
         try:
             apps_folders = os.listdir('apps/')
@@ -48,7 +47,7 @@ class AppHandler:
             self.logger.log({ 'event': f'@frame:error_initializing_apps', 'error': str(e), 'stacktrace': traceback.format_exc() })
     
     def register(self, name, app: App):
-        self.apps[name] = app
+        self.apps.append((name, app))
         features = []
         if app.process_image is not App.process_image:
             features.append('process_image')
@@ -58,13 +57,11 @@ class AppHandler:
         apps_ran=[]
         apps_errored=[]
         payload = ProcessImagePayload(next_image=next_image, current_image=current_image)
-        for frame_app in self.config.apps:
-            app = self.apps.get(frame_app.keyword, None)
+        for (keyword, app) in self.apps:
             if app is None:
-                self.logger.log({ 'event': f'{frame_app.keyword}:app_not_found' })
-                apps_errored.append(app.keyword)
+                self.logger.log({ 'event': f'{keyword}:app_not_found' })
+                apps_errored.append(keyword)
                 continue
-            keyword = frame_app.keyword
             if app.process_image is not App.process_image:
                 try:
                     self.logger.log({ 'event': f'{keyword}:process_image' })

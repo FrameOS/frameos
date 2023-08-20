@@ -48,16 +48,21 @@ export const appsLogic = kea<appsLogicType>([
         }
       },
       errors: ({ appsArray }: { appsArray: AppConfig[] }) => {
-        const newArray: Partial<AppConfig>[] = appsArray.map((AppConfig) => {
-          const app = appsModel.values.apps[AppConfig.keyword]
-          return {
-            config: Object.fromEntries(
-              app.fields
-                ?.filter(({ name, required }) => required && !AppConfig.config[name])
-                .map(({ name }) => [name, 'This field is required'])
-            ),
-          }
-        })
+        const newArray: Partial<AppConfig>[] = appsArray
+          .map((AppConfig) => {
+            const app = appsModel.values.apps[AppConfig.keyword]
+            if (!app) {
+              return null
+            }
+            return {
+              config: Object.fromEntries(
+                app?.fields
+                  ?.filter(({ name, required }) => required && !AppConfig.config[name])
+                  .map(({ name }) => [name, 'This field is required'])
+              ),
+            }
+          })
+          .filter((a): a is AppConfig => !!a)
         return {
           appsArray: newArray,
         }
