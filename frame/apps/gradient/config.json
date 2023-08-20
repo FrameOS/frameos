@@ -1,0 +1,28 @@
+{
+    "name": "Gradient",
+    "description": "Set a gradient background",
+    "version": "1.0.0",
+    "fields": [
+        {
+            "name": "start_color",
+            "type": "string",
+            "value": "#800080",
+            "required": true,
+            "label": "Start color (hex)"
+        },
+        {
+            "name": "end_color",
+            "type": "string",
+            "value": "#FFC0CB",
+            "required": true,
+            "label": "End color (hex)"
+        },
+        {
+            "name": "angle",
+            "type": "string",
+            "value": "45",
+            "required": true,
+            "label": "Angle (degrees)"
+        }
+    ]
+}

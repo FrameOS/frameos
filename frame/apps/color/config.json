@@ -1,0 +1,15 @@
+{
+    "name": "Color",
+    "description": "Set a single color background",
+    "version": "1.0.0",
+    "fields": [
+        {
+            "name": "color",
+            "type": "string",
+            "value": "white",
+            "required": true,
+            "label": "Color",
+            "placeholder": "Enter a color. E.g. white, #ff0000"
+        }
+    ]
+}
