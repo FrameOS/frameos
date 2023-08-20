@@ -29,6 +29,7 @@ export interface ConfigField {
   name: string
   label: string
   type: string
+  options?: string[]
   required?: boolean
   value?: any
   placeholder?: string

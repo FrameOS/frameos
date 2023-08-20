@@ -9,6 +9,7 @@ import { TextInput } from '../../components/TextInput'
 import { Form, Group } from 'kea-forms'
 import { Button } from '../../components/Button'
 import { frameLogic } from './frameLogic'
+import { Select } from '../../components/Select'
 
 export interface AppsProps {
   className?: string
@@ -57,9 +58,13 @@ export function Apps({ className }: AppsProps) {
                     </Button>
                   </div>
                 </div>
-                {fields.map(({ name, label, placeholder }) => (
+                {fields.map(({ name, label, placeholder, type, options }) => (
                   <Field key={name} name={['config', name]} label={label || name}>
-                    <TextInput placeholder={placeholder} />
+                    {type === 'select' ? (
+                      <Select placeholder={placeholder} options={options?.map((o) => ({ label: o, value: o })) ?? []} />
+                    ) : (
+                      <TextInput placeholder={placeholder} />
+                    )}
                   </Field>
                 ))}
               </Group>

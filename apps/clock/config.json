@@ -21,11 +21,38 @@
         },
         {
             "name": "position",
-            "type": "string",
+            "type": "select",
+            "options": [
+                "top-left",
+                "top-center",
+                "top-right",
+                "center-left",
+                "center-center",
+                "center-right",
+                "bottom-left",
+                "bottom-center",
+                "bottom-right"
+            ],
             "value": "top-left",
             "required": true,
             "label": "Position",
             "placeholder": "top-left"
+        },
+        {
+            "name": "border_width",
+            "type": "string",
+            "value": "1",
+            "required": true,
+            "label": "Border width (0 = disabled)",
+            "placeholder": "1"
+        },
+        {
+            "name": "border_color",
+            "type": "string",
+            "value": "white",
+            "required": true,
+            "label": "Border Color",
+            "placeholder": "white"
         }
     ]
 }
