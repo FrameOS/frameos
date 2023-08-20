@@ -10,6 +10,7 @@ import { detailsLogic } from './detailsLogic'
 import { Field, Form } from 'kea-forms'
 import { TextInput } from '../../components/TextInput'
 import { frameLogic } from './frameLogic'
+import { Select } from '../../components/Select'
 
 export interface DetailsProps {
   className?: string
@@ -64,7 +65,15 @@ export function Details({ className }: DetailsProps) {
               <TextInput name="interval" placeholder="300" />
             </Field>
             <Field name="scaling_mode" label="Scaling mode">
-              <TextInput name="scaling_mode" placeholder="cover" />
+              <Select
+                name="scaling_mode"
+                options={[
+                  { value: 'cover', label: 'Cover' },
+                  { value: 'contain', label: 'Contain' },
+                  { value: 'stretch', label: 'Stretch' },
+                  { value: 'center', label: 'Center' },
+                ]}
+              />
             </Field>
             <div className="flex space-x-2">
               <Button type="submit">Save & restart</Button>
