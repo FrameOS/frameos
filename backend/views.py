@@ -72,6 +72,7 @@ def update_frame(id: int):
     frame.height = int(request.form['height']) if request.form['height'] != '' else None
     frame.interval = int(request.form['interval']) if request.form['interval'] != '' else None
     frame.scaling_mode = request.form['scaling_mode']
+    frame.background_color = request.form['background_color']
     models.update_frame(frame)
     tasks.restart_frame(frame.id)
     return 'Success', 200

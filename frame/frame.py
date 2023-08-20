@@ -37,6 +37,7 @@ class Config:
         self.color: Optional[str] = self._data.get('color', None)
         self.interval: Optional[int] = self._data.get('interval', 300)
         self.scaling_mode: Optional[str] = self._data.get('scaling_mode', 'cover')
+        self.background_color: Optional[str] = self._data.get('background_color', 'white')
         apps_data = self._data.pop('apps', [])
         self.apps = []
         for app in apps_data:
@@ -58,6 +59,7 @@ class Config:
             'color': self.color,
             'interval': self.interval,
             'scaling_mode': self.scaling_mode,
+            'background_color': self.background_color,
             'apps': self.apps,
         }
     
@@ -71,6 +73,7 @@ class Config:
             color=self.color,
             interval=self.interval,
             scaling_mode=self.scaling_mode,
+            background_color=self.background_color,
             apps=self.apps,
         )
 
@@ -305,14 +308,15 @@ class ImageHandler:
                             'old_height': self.next_image.height,
                             'new_width': self.config.width,
                             'new_height': self.config.height,
-                            'scaling_mode': self.config.scaling_mode 
+                            'scaling_mode': self.config.scaling_mode,
+                            'background_color': self.config.background_color,
                         })
                         if self.config.scaling_mode == 'contain':
-                            self.next_image = scale_contain(self.next_image, self.config.width, self.config.height)
+                            self.next_image = scale_contain(self.next_image, self.config.width, self.config.height, self.config.background_color)
                         elif self.config.scaling_mode == 'stretch':
                             self.next_image = scale_stretch(self.next_image, self.config.width, self.config.height)
                         elif self.config.scaling_mode == 'center':
-                            self.next_image = scale_center(self.next_image, self.config.width, self.config.height)
+                            self.next_image = scale_center(self.next_image, self.config.width, self.config.height, self.config.background_color)
                         else: # cover
                             self.next_image = scale_cover(self.next_image, self.config.width, self.config.height)
 
@@ -358,7 +362,7 @@ def scale_cover(image: Image.Image, target_width: int, target_height: int) -> Im
 
     return image
 
-def scale_contain(image: Image.Image, target_width: int, target_height: int) -> Image.Image:
+def scale_contain(image: Image.Image, target_width: int, target_height: int, background_color: str) -> Image.Image:
     # Determine the scaling factor for both dimensions
     scale_width = target_width / image.width
     scale_height = target_height / image.height
@@ -372,7 +376,7 @@ def scale_contain(image: Image.Image, target_width: int, target_height: int) -> 
     image = image.resize((new_width, new_height), Image.ANTIALIAS)
     
     # Create a new blank white image of target size
-    background = Image.new('RGB', (target_width, target_height), 'white')
+    background = Image.new('RGB', (target_width, target_height), background_color or 'white')
     
     # Paste the scaled image onto the background
     offset = ((target_width - new_width) // 2, (target_height - new_height) // 2)
@@ -384,9 +388,9 @@ def scale_stretch(image: Image.Image, target_width: int, target_height: int) -> 
     # Simply resize the image to the target dimensions
     return image.resize((target_width, target_height), Image.ANTIALIAS)
 
-def scale_center(image: Image.Image, target_width: int, target_height: int) -> Image.Image:
+def scale_center(image: Image.Image, target_width: int, target_height: int, background_color: str) -> Image.Image:
     # Create a new blank white image of target size
-    background = Image.new('RGB', (target_width, target_height), 'white')
+    background = Image.new('RGB', (target_width, target_height), background_color or 'white')
     
     # Calculate offset to center the image
     offset = ((target_width - image.width) // 2, (target_height - image.height) // 2)

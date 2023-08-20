@@ -75,6 +75,9 @@ export function Details({ className }: DetailsProps) {
                 ]}
               />
             </Field>
+            <Field name="background_color" label="Background color">
+              <TextInput name="background_color" placeholder="white" />
+            </Field>
             <div className="flex space-x-2">
               <Button type="submit">Save & restart</Button>
               <Button type="button" color="gray" onClick={() => closeEdit()}>
@@ -163,6 +166,10 @@ export function Details({ className }: DetailsProps) {
               <tr>
                 <td className="text-blue-200 text-right">Scaling mode:</td>
                 <td className="truncate">{frame.scaling_mode}</td>
+              </tr>
+              <tr>
+                <td className="text-blue-200 text-right">Background color:</td>
+                <td className="truncate">{frame.background_color}</td>
               </tr>
               <tr>
                 <td className="text-blue-200 text-right">Kiosk URL:</td>
