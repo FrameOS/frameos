@@ -17,11 +17,13 @@ Attach them to a Raspberry Pi Zero W, and control the image via FrameOS.
 
 ![](https://mariusandra.com/frameos/images/0-frames.jpeg)
 
+## FrameOS controller
 
-## FrameOS (control software)
+The FrameOS controller is where you set up your frames. You can run it continuously on a server, or locally on your computer when needed. You'll miss out on log aggregation if the FrameOS server is not always on. The frames however will keep on running and updating independently.
 
-FrameOS is the control center for your frames. You can run it
-continuously on a server, or locally on your computer when needed. You'll miss out on log aggregation if the FrameOS server is not always on. The frames however will keep on running and updating independently.
+![2023-08-21 01 11 13](https://github.com/mariusandra/frameos/assets/53387/25e5666b-e380-4115-bedf-b149e332a1b1)
+
+## Running via docker
 
 Running FrameOS via Docker is the easiest. Alternatively read about developing locally below.
 
