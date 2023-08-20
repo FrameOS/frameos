@@ -1,0 +1,45 @@
+from PIL import Image, ImageDraw, ImageFont
+from datetime import datetime
+from apps.apps import App, ProcessImagePayload
+
+class ClockApp(App):
+    def process_image(self, payload: ProcessImagePayload):
+        # If there's no next_image, create a blank canvas
+        if payload.next_image is None:
+            width, height = self.frame_config.width, self.frame_config.height
+            payload.next_image = Image.new('RGB', (width, height), color='white')
+        
+        # Get the current time
+        current_time = datetime.now().strftime('%H:%M:%S')
+        
+        # Get the config settings
+        font_color = self.config.get('font_color', 'black')
+        font_size = int(self.config.get('font_size', 20))
+        position = self.config.get('position', 'top-left')
+        
+        # Prepare to draw the text
+        draw = ImageDraw.Draw(payload.next_image)
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+        text_width, text_height = draw.textsize(current_time, font=font)
+        
+        # Positioning the text
+        x, y = 4, 4
+        if position == 'top-right':
+            x = payload.next_image.width - text_width - 4
+        elif position == 'bottom-left':
+            y = payload.next_image.height - text_height - 4
+        elif position == 'bottom-right':
+            x = payload.next_image.width - text_width - 4
+            y = payload.next_image.height - text_height - 4
+        elif position == 'center-top':
+            x = (payload.next_image.width - text_width) / 2
+        elif position == 'center-middle':
+            x = (payload.next_image.width - text_width) / 2
+            y = (payload.next_image.height - text_height) / 2
+        elif position == 'center-bottom':
+            x = (payload.next_image.width - text_width) / 2
+            y = payload.next_image.height - text_height - 4
+
+        # Draw the text on the image
+        draw.text((x, y), current_time, fill=font_color, font=font)
+        self.log(f"Added clock: {current_time} at position {position}")

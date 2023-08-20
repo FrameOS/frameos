@@ -1,0 +1,31 @@
+{
+    "name": "Clock Overlay",
+    "description": "Overlay current time on the image",
+    "version": "1.0.0",
+    "fields": [
+        {
+            "name": "font_color",
+            "type": "string",
+            "value": "black",
+            "required": true,
+            "label": "Font Color",
+            "placeholder": "black"
+        },
+        {
+            "name": "font_size",
+            "type": "string",
+            "value": "20",
+            "required": true,
+            "label": "Font Size",
+            "placeholder": "20"
+        },
+        {
+            "name": "position",
+            "type": "string",
+            "value": "top-left",
+            "required": true,
+            "label": "Position",
+            "placeholder": "top-left"
+        }
+    ]
+}
