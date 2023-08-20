@@ -4,6 +4,7 @@ import { H6 } from '../../components/H6'
 import clsx from 'clsx'
 import { useEffect, useRef, useState } from 'react'
 import { logsLogic } from './logsLogic'
+import { insertBreaks } from '../../utils/insertBreaks'
 
 export function Logs({ id }: { id: number }) {
   const { logs, logsLoading } = useValues(logsLogic({ id }))
@@ -35,12 +36,11 @@ export function Logs({ id }: { id: number }) {
                 const { event, timestamp, ...rest } = JSON.parse(log.line)
                 logLine = (
                   <>
-                    <span className="text-yellow-600 mr-2">[{event}]</span>
+                    <span className="text-yellow-600 mr-2">{event}</span>
                     {Object.entries(rest).map(([key, value]) => (
                       <span key={key} className="mr-2">
-                        <br />
-                        <span className="text-gray-400 ml-8">{key}=</span>
-                        <span>{JSON.stringify(value)}</span>
+                        <span className="text-gray-400">{key}=</span>
+                        <span>{insertBreaks(JSON.stringify(value))}</span>
                       </span>
                     ))}
                   </>
@@ -56,8 +56,10 @@ export function Logs({ id }: { id: number }) {
                   'text-red-300': log.type === 'stderr',
                 })}
               >
-                <span className="flex-0 mr-2 text-yellow-900">{log.timestamp.replace('T', ' ')}</span>
-                <span className="flex-1">{logLine}</span>
+                <div className="flex-0 mr-2 text-yellow-900 whitespace-nowrap">{log.timestamp.replace('T', ' ')}</div>
+                <div className="flex-1 break-words" style={{ wordBreak: 'break-word' }}>
+                  {logLine}
+                </div>
               </div>
             )
           })}
