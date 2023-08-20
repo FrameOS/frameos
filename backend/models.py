@@ -40,6 +40,7 @@ class Frame(db.Model):
     device = db.Column(db.String(256), nullable=True)
     color = db.Column(db.String(256), nullable=True)
     interval = db.Column(db.Double, default=300)
+    scaling_mode = db.Column(db.String(64), nullable=True) # cover (default), contain, stretch, center
     # apps
     apps = db.Column(JSON, nullable=True)
     
@@ -64,6 +65,7 @@ class Frame(db.Model):
             'device': self.device,
             'color': self.color,
             'interval': self.interval,
+            'scaling_mode': self.scaling_mode,
             'apps': self.apps,
         }
 
@@ -102,6 +104,7 @@ def new_frame(frame_host: str, server_host: str) -> Frame:
         server_api_key=secrets.token_hex(32), 
         status="uninitialized",
         apps=[{ **app_configs['unsplash'], 'keyword': 'unsplash', 'config': {} }],
+        scaling_mode="cover"
     )
     db.session.add(frame)
     db.session.commit()
@@ -175,7 +178,7 @@ def process_log(frame: Frame, log: dict):
         if frame.status != 'ready':
             changes['status'] = 'ready'
 
-        for key in ['width', 'height', 'device', 'color', 'interval']:
+        for key in ['width', 'height', 'device', 'color', 'interval', 'scaling_mode']:
             if key in log and log[key] is not None and log[key] != getattr(frame, key):
                 changes[key] = log[key]
 

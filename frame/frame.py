@@ -36,6 +36,7 @@ class Config:
         self.device: str = self._data.get('device', "kiosk")
         self.color: Optional[str] = self._data.get('color', None)
         self.interval: Optional[int] = self._data.get('interval', 300)
+        self.scaling_mode: Optional[str] = self._data.get('scaling_mode', 'cover')
         apps_data = self._data.pop('apps', [])
         self.apps = []
         for app in apps_data:
@@ -56,6 +57,7 @@ class Config:
             'device': self.device,
             'color': self.color,
             'interval': self.interval,
+            'scaling_mode': self.scaling_mode,
             'apps': self.apps,
         }
     
@@ -68,6 +70,7 @@ class Config:
             device=self.device,
             color=self.color,
             interval=self.interval,
+            scaling_mode=self.scaling_mode,
             apps=self.apps,
         )
 
@@ -290,23 +293,117 @@ class ImageHandler:
                 self.logger.log({ 'event': '@frame:refresh_image', 'trigger': trigger })
                 self.image_update_in_progress = True
                 self.next_image, apps_ran, apps_errored = self.apps.process_image(None, self.current_image)
+                
                 if self.next_image is None:
                     self.logger.log({ 'event': '@frame:refresh_skipped', 'reason': 'no_image', 'apps_ran': apps_ran })
-                elif self.current_image is None or not self.are_images_equal(self.next_image, self.current_image):
-                    self.logger.log({ 'event': '@frame:refreshing_screen' })
-                    self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
-                    self.slow_update_image_on_frame(self.next_image)
-                    self.current_image = self.next_image
-                    self.next_image = None
-                    self.logger.log({ 'event': '@frame:refresh_done', 'apps_ran': apps_ran, **({'apps_errored': apps_errored} if len(apps_errored) > 0 else {}) })
                 else:
-                    self.logger.log({ 'event': '@frame:refresh_skipped', 'reason': 'no_change', 'apps_ran': apps_ran, **({'apps_errored': apps_errored} if len(apps_errored) > 0 else {}) })
+                    if self.config.width != self.next_image.width or self.config.height != self.next_image.height:
+                        self.logger.log({ 
+                            'event': '@frame:resizing_image', 
+                            'trigger': trigger,
+                            'old_width': self.next_image.width,
+                            'old_height': self.next_image.height,
+                            'new_width': self.config.width,
+                            'new_height': self.config.height,
+                            'scaling_mode': self.config.scaling_mode 
+                        })
+                        if self.config.scaling_mode == 'contain':
+                            self.next_image = scale_contain(self.next_image, self.config.width, self.config.height)
+                        elif self.config.scaling_mode == 'stretch':
+                            self.next_image = scale_stretch(self.next_image, self.config.width, self.config.height)
+                        elif self.config.scaling_mode == 'center':
+                            self.next_image = scale_center(self.next_image, self.config.width, self.config.height)
+                        else: # cover
+                            self.next_image = scale_cover(self.next_image, self.config.width, self.config.height)
+
+
+                    if self.current_image is None or not self.are_images_equal(self.next_image, self.current_image):
+                        self.logger.log({ 'event': '@frame:refreshing_screen' })
+                        self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
+                        self.slow_update_image_on_frame(self.next_image)
+                        self.current_image = self.next_image
+                        self.next_image = None
+                        self.logger.log({ 'event': '@frame:refresh_done', 'apps_ran': apps_ran, **({'apps_errored': apps_errored} if len(apps_errored) > 0 else {}) })
+                    else:
+                        self.logger.log({ 'event': '@frame:refresh_skipped', 'reason': 'no_change', 'apps_ran': apps_ran, **({'apps_errored': apps_errored} if len(apps_errored) > 0 else {}) })
             except Exception as e:
                 self.logger.log({ 'event': '@frame:refresh_error', 'error': str(e), 'stacktrace': traceback.format_exc()  })
             finally:
                 self.image_update_in_progress = False
                 self.image_update_lock.release() 
         self.socketio.start_background_task(target=do_update)
+
+
+def scale_cover(image: Image.Image, target_width: int, target_height: int) -> Image.Image:
+    # Determine the scaling factor for both dimensions
+    scale_width = target_width / image.width
+    scale_height = target_height / image.height
+    
+    # Choose the larger scaling factor to ensure the image covers the full area
+    scale_factor = max(scale_width, scale_height)
+    
+    # Resize the image based on the chosen scaling factor
+    new_width = round(image.width * scale_factor)
+    new_height = round(image.height * scale_factor)
+    image = image.resize((new_width, new_height), Image.ANTIALIAS)
+
+    # Calculate cropping coordinates
+    left = (image.width - target_width) / 2
+    top = (image.height - target_height) / 2
+    right = (image.width + target_width) / 2
+    bottom = (image.height + target_height) / 2
+
+    # Crop to the target size
+    image = image.crop((left, top, right, bottom))
+
+    return image
+
+def scale_contain(image: Image.Image, target_width: int, target_height: int) -> Image.Image:
+    # Determine the scaling factor for both dimensions
+    scale_width = target_width / image.width
+    scale_height = target_height / image.height
+    
+    # Choose the smaller scaling factor to ensure the entire image fits within the target area
+    scale_factor = min(scale_width, scale_height)
+    
+    # Resize the image based on the chosen scaling factor
+    new_width = round(image.width * scale_factor)
+    new_height = round(image.height * scale_factor)
+    image = image.resize((new_width, new_height), Image.ANTIALIAS)
+    
+    # Create a new blank white image of target size
+    background = Image.new('RGB', (target_width, target_height), 'white')
+    
+    # Paste the scaled image onto the background
+    offset = ((target_width - new_width) // 2, (target_height - new_height) // 2)
+    background.paste(image, offset)
+
+    return background
+
+def scale_stretch(image: Image.Image, target_width: int, target_height: int) -> Image.Image:
+    # Simply resize the image to the target dimensions
+    return image.resize((target_width, target_height), Image.ANTIALIAS)
+
+def scale_center(image: Image.Image, target_width: int, target_height: int) -> Image.Image:
+    # Create a new blank white image of target size
+    background = Image.new('RGB', (target_width, target_height), 'white')
+    
+    # Calculate offset to center the image
+    offset = ((target_width - image.width) // 2, (target_height - image.height) // 2)
+    
+    # If the image is larger than the target dimensions, crop it
+    if offset[0] < 0 or offset[1] < 0:
+        left = max(0, -offset[0])
+        top = max(0, -offset[1])
+        right = image.width - max(0, offset[0])
+        bottom = image.height - max(0, offset[1])
+        image = image.crop((left, top, right, bottom))
+        offset = ((target_width - image.width) // 2, (target_height - image.height) // 2)
+    
+    # Paste the image (or cropped version) onto the background
+    background.paste(image, offset)
+    
+    return background
 
 class ButtonHandler:
     def __init__(self, logger: Logger, buttons: list, labels: list, image_handler: ImageHandler):

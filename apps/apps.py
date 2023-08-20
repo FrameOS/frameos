@@ -29,6 +29,7 @@ class FrameConfig:
     device: str
     color: str
     interval: float
+    scaling_mode: str
     apps: List[AppConfig]
 
 @dataclass

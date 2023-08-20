@@ -11,7 +11,13 @@ export function Image({ id, className }: ImageProps) {
   const { getFrameImage, frames } = useValues(framesModel)
   return (
     <div
-      className={clsx('p-2 m-auto', frames[id]?.status === 'refreshing' ? 'continuous-fade-in-out' : null, className)}
+      className={clsx(
+        'p-2 m-auto',
+        ['refreshing', 'fetching', 'restarting', 'starting'].includes(frames[id]?.status)
+          ? 'continuous-fade-in-out'
+          : null,
+        className
+      )}
     >
       {frames[id] ? (
         <img

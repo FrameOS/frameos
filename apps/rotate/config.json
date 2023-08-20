@@ -1,0 +1,15 @@
+{
+    "name": "Rotate",
+    "description": "Rotate the image",
+    "version": "1.0.0",
+    "fields": [
+        {
+            "name": "rotation_degree",
+            "type": "string",
+            "value": "0",
+            "required": true,
+            "label": "Rotation Degree",
+            "placeholder": "e.g., 90"
+        }
+    ]
+}

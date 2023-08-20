@@ -63,6 +63,9 @@ export function Details({ className }: DetailsProps) {
             <Field name="interval" label="Interval">
               <TextInput name="interval" placeholder="300" />
             </Field>
+            <Field name="scaling_mode" label="Scaling mode">
+              <TextInput name="scaling_mode" placeholder="cover" />
+            </Field>
             <div className="flex space-x-2">
               <Button type="submit">Save & restart</Button>
               <Button type="button" color="gray" onClick={() => closeEdit()}>
@@ -147,6 +150,10 @@ export function Details({ className }: DetailsProps) {
               <tr>
                 <td className="text-blue-200 text-right">Interval:</td>
                 <td className="truncate">{frame.interval}</td>
+              </tr>
+              <tr>
+                <td className="text-blue-200 text-right">Scaling mode:</td>
+                <td className="truncate">{frame.scaling_mode}</td>
               </tr>
               <tr>
                 <td className="text-blue-200 text-right">Kiosk URL:</td>

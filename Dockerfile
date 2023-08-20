@@ -54,4 +54,4 @@ RUN rm -rf /app/frontend && mv /tmp/frontend /app/
 EXPOSE 8999
 
 # Start huey in the background and then run the Flask application
-CMD ["sh", "-c", "redis-server --daemonize yes && huey_consumer.py backend.huey --worker-type=greenlet --workers=10 --flush-locks & python3 app.py"]
+CMD ["sh", "-c", "redis-server --daemonize yes && flask db upgrade && huey_consumer.py backend.huey --worker-type=greenlet --workers=10 --flush-locks & python3 app.py"]
