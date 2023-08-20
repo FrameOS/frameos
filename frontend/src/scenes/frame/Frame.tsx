@@ -31,7 +31,7 @@ export function Frame(props: FrameSceneProps) {
                 <Image id={frame.id} className="flex-1" />
               </a>
             </Box>
-            <div className="flex space-x-4">
+            <div className="flex space-x-4 items-start">
               <Details id={frame.id} className="flex-1" />
               <Apps id={frame.id} className="flex-1" />
             </div>
