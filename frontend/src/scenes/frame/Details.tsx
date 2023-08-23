@@ -20,8 +20,8 @@ export interface DetailsProps {
 export function Details({ className }: DetailsProps) {
   const { id } = useValues(frameLogic)
   const { frame, editing } = useValues(detailsLogic({ id }))
-  const { editFrame, closeEdit, setEditFrameValue } = useActions(detailsLogic({ id }))
-  const { redeployFrame, refreshFrame, restartFrame, deleteFrame } = useActions(framesModel)
+  const { editFrame, closeEdit } = useActions(detailsLogic({ id }))
+  const { deleteFrame } = useActions(framesModel)
 
   return (
     <Box className={clsx('p-4 space-y-4', className)}>
@@ -181,17 +181,6 @@ export function Details({ className }: DetailsProps) {
               </tr>
             </tbody>
           </table>
-          <div className="flex space-x-2">
-            <Button type="button" onClick={() => redeployFrame(frame.id)}>
-              Redeploy
-            </Button>
-            <Button type="button" onClick={() => restartFrame(frame.id)}>
-              Restart
-            </Button>
-            <Button type="button" onClick={() => refreshFrame(frame.id)}>
-              Refresh
-            </Button>
-          </div>
         </>
       )}
     </Box>

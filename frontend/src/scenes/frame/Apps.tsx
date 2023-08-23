@@ -10,6 +10,7 @@ import { Form, Group } from 'kea-forms'
 import { Button } from '../../components/Button'
 import { frameLogic } from './frameLogic'
 import { Select } from '../../components/Select'
+import RenderLoop from './RenderLoop'
 
 export interface AppsProps {
   className?: string
@@ -22,7 +23,7 @@ export function Apps({ className }: AppsProps) {
     appsForm: { appsArray },
     isAppsFormValid,
   } = useValues(appsLogic({ id }))
-  const { addApp, moveAppUp, moveAppDown, removeApp, saveApps, saveAppsAndDeploy, saveAppsAndRestart } = useActions(
+  const { moveAppUp, moveAppDown, removeApp, saveApps, saveAppsAndDeploy, saveAppsAndRestart } = useActions(
     appsLogic({ id })
   )
   const { apps } = useValues(appsModel)
@@ -38,8 +39,17 @@ export function Apps({ className }: AppsProps) {
               <Group key={keyword} name={['appsArray', index]}>
                 <div className="flex items-start justify-between">
                   <div>
-                    <H6>{name}</H6>
-                    <div className="text-sm">{description}</div>
+                    <H6>{app.name || name}</H6>
+                    <div className="text-sm">{app.description || description}</div>
+                    {JSON.stringify(app.fields) !== JSON.stringify(fields) ? (
+                      <div className="text-sm text-yellow-300 flex space-x-1 mt-4">
+                        <div className="text-gray-400">⚠️</div>
+                        <div>
+                          Some fields have been updated since this app was added. Save and redeploy with a valid config
+                          to resolve this issue.
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="flex space-x-1">
                     <Button size="small" color="gray" onClick={() => moveAppUp(index)} disabled={index === 0}>
@@ -58,8 +68,26 @@ export function Apps({ className }: AppsProps) {
                     </Button>
                   </div>
                 </div>
-                {fields.map(({ name, label, placeholder, type, options }) => (
-                  <Field key={name} name={['config', name]} label={label || name}>
+                {(app.fields || fields).map(({ name, label, placeholder, type, options }) => (
+                  <Field
+                    key={name}
+                    name={['config', name]}
+                    label={
+                      !app ||
+                      app.fields?.some((field) => field.name === name) ===
+                        fields.some((field) => field.name === name) ? (
+                        label || name
+                      ) : (
+                        <div>
+                          {label || name}
+                          <div className="text-sm text-yellow-300 flex space-x-1">
+                            <div className="text-gray-400">⚠️</div>
+                            <div>This field has been updated since this app was added.</div>
+                          </div>
+                        </div>
+                      )
+                    }
+                  >
                     {type === 'select' ? (
                       <Select placeholder={placeholder} options={options?.map((o) => ({ label: o, value: o })) ?? []} />
                     ) : (
@@ -89,20 +117,28 @@ export function Apps({ className }: AppsProps) {
           </Button>
         </div>
       </Form>
-      <div className="space-y-2">
-        <H6>Add to queue</H6>
-        {Object.entries(apps).map(([keyword, { name, description }]) => (
-          <Box className="bg-gray-900 px-3 py-2 flex items-center justify-between">
-            <div>
-              <H6>{name}</H6>
-              <div className="text-sm">{description}</div>
-            </div>
-            <div>
-              <Button onClick={() => addApp(keyword)}>Add</Button>
-            </div>
-          </Box>
-        ))}
-      </div>
     </Box>
+  )
+}
+
+export function AddApps() {
+  const { apps } = useValues(appsModel)
+  const { id } = useValues(frameLogic)
+  const { addApp } = useActions(appsLogic({ id }))
+  return (
+    <div className="space-y-2">
+      <H6>Add to queue</H6>
+      {Object.entries(apps).map(([keyword, { name, description }]) => (
+        <Box className="bg-gray-900 px-3 py-2 flex items-center justify-between">
+          <div>
+            <H6>{name}</H6>
+            <div className="text-sm">{description}</div>
+          </div>
+          <div>
+            <Button onClick={() => addApp(keyword)}>Add</Button>
+          </div>
+        </Box>
+      ))}
+    </div>
   )
 }
