@@ -13,7 +13,7 @@ export function Frames() {
     <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">
       <PanelGroup direction="vertical" units="pixels">
         <Panel minSize={60} maxSize={60}>
-          <div className="bg-black text-white h-full w-full space-x-2 p-2 flex justify-between items-center">
+          <div className="bg-gray-800 text-white h-full w-full space-x-2 p-2 flex justify-between items-center">
             <H5>
               <A href="/">FrameOS</A>
             </H5>

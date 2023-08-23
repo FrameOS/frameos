@@ -24,7 +24,7 @@ export function Details({ className }: DetailsProps) {
   const { deleteFrame } = useActions(framesModel)
 
   return (
-    <Box className={clsx('p-4 space-y-4', className)}>
+    <div className={clsx('space-y-4', className)}>
       {!frame ? (
         `Loading frame ${id}...`
       ) : editing ? (
@@ -99,11 +99,8 @@ export function Details({ className }: DetailsProps) {
         </>
       ) : (
         <>
-          <div className="flex justify-between">
-            <H6>Details</H6>
-            <div className="flex-0">
-              <Button onClick={() => editFrame(frame)}>Edit</Button>
-            </div>
+          <div className="float-right">
+            <Button onClick={() => editFrame(frame)}>Edit</Button>
           </div>
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5">
             <tbody>
@@ -183,6 +180,6 @@ export function Details({ className }: DetailsProps) {
           </table>
         </>
       )}
-    </Box>
+    </div>
   )
 }

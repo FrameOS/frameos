@@ -29,9 +29,8 @@ export function Apps({ className }: AppsProps) {
   const { apps } = useValues(appsModel)
 
   return (
-    <Box className={clsx('p-4 space-y-8', className)}>
+    <div className={clsx('space-y-8', className)}>
       <Form logic={appsLogic} props={{ id }} formKey="appsForm" className="space-y-4">
-        <H6>Render queue</H6>
         {appsArray.map(({ fields, keyword, name, description }, index) => {
           const app = apps[keyword]
           return (
@@ -117,7 +116,7 @@ export function Apps({ className }: AppsProps) {
           </Button>
         </div>
       </Form>
-    </Box>
+    </div>
   )
 }
 
@@ -127,7 +126,6 @@ export function AddApps() {
   const { addApp } = useActions(appsLogic({ id }))
   return (
     <div className="space-y-2">
-      <H6>Add to queue</H6>
       {Object.entries(apps).map(([keyword, { name, description }]) => (
         <Box className="bg-gray-900 px-3 py-2 flex items-center justify-between">
           <div>

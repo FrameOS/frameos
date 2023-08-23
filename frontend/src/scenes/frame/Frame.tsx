@@ -15,12 +15,41 @@ import { H6 } from '../../components/H6'
 import { H5 } from '../../components/H5'
 import { Button } from '../../components/Button'
 import { framesModel } from '../../models/framesModel'
+import clsx from 'clsx'
 
 interface FrameSceneProps {
   id: string // from the URL
 }
 
 const defaultLayout = [33, 67]
+
+const Handle = ({ className }: { className: string }): JSX.Element => (
+  <PanelResizeHandle
+    className={clsx('bg-gray-900 hover:bg-blue-600 active:bg-blue-800 transition duration-1000', className)}
+  />
+)
+const Container = ({ header, children }: { header?: React.ReactNode; children: React.ReactNode }): JSX.Element => {
+  return (
+    <div className="flex flex-col w-full h-full max-w-full max-h-full">
+      {header ? <div>{header}</div> : null}
+      <Box className="overflow-auto w-full h-full max-w-full max-h-full p-4 m-2 rounded-lg">
+        <div className="overflow-auto w-full h-full max-w-full max-h-full rounded-lg">{children}</div>
+      </Box>
+    </div>
+  )
+}
+const Tabs = ({ children, className }: { children: React.ReactNode; className?: string }): JSX.Element => {
+  return (
+    <div
+      className={clsx(
+        'flex items-start flex-nowrap text-sm font-medium text-center text-gray-500 dark:border-gray-700 dark:text-gray-400 px-2',
+        className
+      )}
+    >
+      {children}
+    </div>
+  )
+}
 
 export function Frame(props: FrameSceneProps) {
   const frameLogicProps = { id: parseInt(props.id) }
@@ -38,102 +67,106 @@ export function Frame(props: FrameSceneProps) {
         <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">
           <PanelGroup direction="vertical" units="pixels">
             <Panel minSize={60} maxSize={60}>
-              <div className="bg-black text-white h-full w-full space-x-2 p-2 flex justify-between items-center">
+              <div className="bg-gray-800 text-white h-full w-full space-x-2 p-2 flex justify-between items-center">
                 <H5>
                   <A href="/">FrameOS</A> <span className="text-gray-400">&raquo;</span>{' '}
                   {!frame ? `Loading frame ${props.id}...` : frameHost(frame)}
                 </H5>
                 <div className="flex space-x-2">
-                  <Button type="button" onClick={() => refreshFrame(frame.id)}>
+                  <Button color="light-gray" type="button" onClick={() => refreshFrame(frame.id)}>
                     Refresh
                   </Button>
-                  <Button type="button" onClick={() => restartFrame(frame.id)}>
+                  <Button color="light-gray" type="button" onClick={() => restartFrame(frame.id)}>
                     Restart
                   </Button>
-                  <Button type="button" onClick={() => redeployFrame(frame.id)}>
+                  <Button color="light-gray" type="button" onClick={() => redeployFrame(frame.id)}>
                     Redeploy
                   </Button>
                 </div>
               </div>
             </Panel>
-            <Panel>
+            <Panel className="p-2 pb-4 pr-4">
               <PanelGroup direction="horizontal" onLayout={onLayout} units="percentages">
                 <Panel defaultSize={33}>
                   <PanelGroup direction="vertical" onLayout={onLayout}>
                     <Panel defaultSize={40}>
-                      <div className="overflow-auto w-full h-full max-w-full max-h-full p-2">
+                      <Container
+                        header={
+                          <Tabs className="w-auto mt-2">
+                            <Button color="light-gray" className="w-auto">
+                              Preview
+                            </Button>
+                          </Tabs>
+                        }
+                      >
                         <a href={frameUrl(frame)}>
                           <Image id={frame.id} />
                         </a>
-                      </div>
+                      </Container>
                     </Panel>
-                    <PanelResizeHandle className="h-1 bg-gray-700 hover:bg-blue-600 active:bg-blue-800 transition duration-1000" />
+                    <Handle className="h-1" />
                     <Panel defaultSize={60}>
-                      <div className="overflow-auto w-full h-full max-w-full max-h-full p-2">
+                      <Container
+                        header={
+                          <Tabs className="w-auto mt-2">
+                            <Button color="light-gray" className="w-auto">
+                              Details
+                            </Button>
+                          </Tabs>
+                        }
+                      >
                         <Details id={frame.id} className="overflow-auto" />
-                      </div>
+                      </Container>
                     </Panel>
                   </PanelGroup>
                 </Panel>
-                <PanelResizeHandle className="w-1 bg-gray-700 hover:bg-blue-600 active:bg-blue-800 transition duration-1000" />
+                <Handle className="w-1" />
                 <Panel>
-                  <div className="flex h-full max-h-full">
-                    <div className="flex-1 w-full overflow-x-auto overflow-y-hidden max-h-full max-w-full">
-                      <ul className="flex items-stretch flex-nowrap text-sm font-medium text-center text-gray-500 border-b border-gray-200 dark:border-gray-700 dark:text-gray-400">
-                        <li className="mr-2">
-                          <a
-                            href="#"
-                            aria-current="page"
-                            className="h-full items-center inline-flex px-4 p-2 text-yellow-600 bg-gray-100 rounded-t-lg active dark:bg-gray-800 dark:text-yellow-500"
+                  <PanelGroup direction="vertical">
+                    <Panel defaultSize={60}>
+                      <PanelGroup direction="horizontal" onLayout={onLayout}>
+                        <Panel defaultSize={60}>
+                          <Container
+                            header={
+                              <Tabs className="w-auto mt-2">
+                                <Button color="light-gray" className="w-auto">
+                                  Render queue
+                                </Button>
+                                <Button color="gray" className="w-auto">
+                                  Tab2
+                                </Button>
+                                <Button color="gray" className="w-auto">
+                                  Tab3
+                                </Button>
+                              </Tabs>
+                            }
                           >
-                            Render Queue
-                          </a>
-                        </li>
-                        <li className="mr-2">
-                          <a
-                            href="#"
-                            className="h-full items-center inline-flex px-4 p-2 rounded-t-lg hover:text-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+                            <Apps id={frame.id} className="overflow-auto" />
+                          </Container>
+                        </Panel>
+                        <Handle className="2-1" />
+                        <Panel defaultSize={40}>
+                          <Container
+                            header={
+                              <Tabs className="w-auto mt-2">
+                                <Button color="light-gray" className="w-auto">
+                                  Add apps
+                                </Button>
+                              </Tabs>
+                            }
                           >
-                            Kiosk mode
-                          </a>
-                        </li>
-                        <li className="mr-2">
-                          <a
-                            href="#"
-                            className="h-full items-center inline-flex px-4 p-2 rounded-t-lg hover:text-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 dark:hover:text-gray-300"
-                          >
-                            Edit app: Download URL
-                          </a>
-                        </li>
-                        <li>
-                          <a className="h-full items-center inline-flex px-4 p-2 text-gray-400 rounded-t-lg cursor-not-allowed dark:text-gray-500">
-                            Frame Settings
-                          </a>
-                        </li>
-                      </ul>
-                    </div>
-                    <PanelGroup direction="vertical">
-                      <Panel defaultSize={60}>
-                        <PanelGroup direction="horizontal" onLayout={onLayout}>
-                          <Panel defaultSize={60}>
-                            <div className="overflow-auto w-full h-full max-w-full max-h-full p-2">
-                              <Apps id={frame.id} className="overflow-auto" />
-                            </div>
-                          </Panel>
-                          <PanelResizeHandle className="w-1 bg-gray-700 hover:bg-blue-600 active:bg-blue-800 transition duration-1000" />
-                          <Panel defaultSize={40}>
-                            <div className="overflow-auto w-full h-full max-w-full max-h-full p-2">
-                              <AddApps />
-                            </div>
-                          </Panel>
-                        </PanelGroup>
-                      </Panel>
-                      <PanelResizeHandle className="h-1 bg-gray-700 hover:bg-blue-600 active:bg-blue-800 transition duration-1000" />
-                      <Panel defaultSize={40}>
+                            <AddApps />
+                          </Container>
+                        </Panel>
+                      </PanelGroup>
+                    </Panel>
+                    <Handle className="h-1" />
+                    <Panel defaultSize={40}>
+                      <Container>
                         <Logs id={frame.id} />
-                      </Panel>
-                    </PanelGroup>
-                  </div>
+                      </Container>
+                    </Panel>
+                  </PanelGroup>
                 </Panel>
               </PanelGroup>
             </Panel>
