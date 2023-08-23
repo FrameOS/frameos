@@ -186,7 +186,7 @@ export function Frame(props: FrameSceneProps) {
                           <Container
                             header={
                               <Tabs className="w-auto">
-                                <Tab active>Add apps to queue</Tab>
+                                <Tab active>Add apps to render queue</Tab>
                               </Tabs>
                             }
                           >
