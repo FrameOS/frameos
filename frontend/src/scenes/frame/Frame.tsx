@@ -16,6 +16,7 @@ import { H5 } from '../../components/H5'
 import { Button } from '../../components/Button'
 import { framesModel } from '../../models/framesModel'
 import clsx from 'clsx'
+import { detailsLogic } from './detailsLogic'
 
 interface FrameSceneProps {
   id: string // from the URL
@@ -23,16 +24,26 @@ interface FrameSceneProps {
 
 const defaultLayout = [33, 67]
 
-const Handle = ({ className }: { className: string }): JSX.Element => (
+const Handle = ({
+  direction,
+  className,
+}: {
+  direction: 'horizontal' | 'vertical'
+  className?: string
+}): JSX.Element => (
   <PanelResizeHandle
-    className={clsx('bg-gray-900 hover:bg-blue-600 active:bg-blue-800 transition duration-1000', className)}
+    className={clsx(
+      'bg-gray-900 hover:bg-blue-600 active:bg-blue-800 transition duration-1000',
+      className,
+      direction === 'horizontal' ? 'w-2 mx-1' : 'h-2 my-1'
+    )}
   />
 )
 const Container = ({ header, children }: { header?: React.ReactNode; children: React.ReactNode }): JSX.Element => {
   return (
     <div className="flex flex-col w-full h-full max-w-full max-h-full">
       {header ? <div>{header}</div> : null}
-      <Box className="overflow-auto w-full h-full max-w-full max-h-full p-4 m-2 rounded-lg">
+      <Box className="overflow-auto w-full h-full max-w-full max-h-full rounded-lg rounded-tl-none p-2">
         <div className="overflow-auto w-full h-full max-w-full max-h-full rounded-lg">{children}</div>
       </Box>
     </div>
@@ -42,7 +53,7 @@ const Tabs = ({ children, className }: { children: React.ReactNode; className?: 
   return (
     <div
       className={clsx(
-        'flex items-start flex-nowrap text-sm font-medium text-center text-gray-500 dark:border-gray-700 dark:text-gray-400 px-2',
+        'flex items-start flex-nowrap text-sm font-medium text-center text-gray-500 dark:border-gray-700 dark:text-gray-400 space-x-2',
         className
       )}
     >
@@ -50,11 +61,42 @@ const Tabs = ({ children, className }: { children: React.ReactNode; className?: 
     </div>
   )
 }
+const Tab = ({
+  children,
+  active,
+  className,
+  onClick,
+}: {
+  active?: boolean
+  children: React.ReactNode
+  className?: string
+  onClick?: () => void
+}): JSX.Element => {
+  return (
+    <div
+      className={clsx(
+        'w-auto w-full text-white focus:ring-4 focus:outline-none font-medium px-2 py-1 text-base text-center cursor-pointer border border-b-0',
+        active
+          ? 'bg-gray-800 border-gray-700 hover:bg-gray-500 focus:ring-gray-500'
+          : 'border-gray-900 hover:bg-gray-500 focus:ring-gray-500',
+
+        className
+      )}
+      onClick={onClick}
+    >
+      {children}
+    </div>
+  )
+}
 
 export function Frame(props: FrameSceneProps) {
-  const frameLogicProps = { id: parseInt(props.id) }
+  const id = parseInt(props.id)
+  const frameLogicProps = { id }
   const { frame } = useValues(frameLogic(frameLogicProps))
   const { redeployFrame, restartFrame, refreshFrame } = useActions(framesModel)
+
+  const { editFrame, closeEdit } = useActions(detailsLogic({ id }))
+  const { editing } = useValues(detailsLogic({ id }))
 
   const onLayout = (sizes: number[]) => {
     // document.cookie = `react-resizable-panels:layout=${JSON.stringify(sizes)}`;
@@ -85,17 +127,15 @@ export function Frame(props: FrameSceneProps) {
                 </div>
               </div>
             </Panel>
-            <Panel className="p-2 pb-4 pr-4">
+            <Panel className="p-4">
               <PanelGroup direction="horizontal" onLayout={onLayout} units="percentages">
                 <Panel defaultSize={33}>
                   <PanelGroup direction="vertical" onLayout={onLayout}>
                     <Panel defaultSize={40}>
                       <Container
                         header={
-                          <Tabs className="w-auto mt-2">
-                            <Button color="light-gray" className="w-auto">
-                              Preview
-                            </Button>
+                          <Tabs className="w-auto">
+                            <Tab active>Preview</Tab>
                           </Tabs>
                         }
                       >
@@ -104,14 +144,17 @@ export function Frame(props: FrameSceneProps) {
                         </a>
                       </Container>
                     </Panel>
-                    <Handle className="h-1" />
+                    <Handle direction="vertical" />
                     <Panel defaultSize={60}>
                       <Container
                         header={
-                          <Tabs className="w-auto mt-2">
-                            <Button color="light-gray" className="w-auto">
+                          <Tabs className="w-auto">
+                            <Tab active={!editing} onClick={() => closeEdit()}>
                               Details
-                            </Button>
+                            </Tab>
+                            <Tab active={editing} onClick={() => editFrame(frame)}>
+                              Edit
+                            </Tab>
                           </Tabs>
                         }
                       >
@@ -120,7 +163,7 @@ export function Frame(props: FrameSceneProps) {
                     </Panel>
                   </PanelGroup>
                 </Panel>
-                <Handle className="w-1" />
+                <Handle direction="horizontal" />
                 <Panel>
                   <PanelGroup direction="vertical">
                     <Panel defaultSize={60}>
@@ -128,30 +171,22 @@ export function Frame(props: FrameSceneProps) {
                         <Panel defaultSize={60}>
                           <Container
                             header={
-                              <Tabs className="w-auto mt-2">
-                                <Button color="light-gray" className="w-auto">
-                                  Render queue
-                                </Button>
-                                <Button color="gray" className="w-auto">
-                                  Tab2
-                                </Button>
-                                <Button color="gray" className="w-auto">
-                                  Tab3
-                                </Button>
+                              <Tabs className="w-auto">
+                                <Tab active>Render queue</Tab>
+                                <Tab>Diagram view</Tab>
+                                <Tab>Settings</Tab>
                               </Tabs>
                             }
                           >
                             <Apps id={frame.id} className="overflow-auto" />
                           </Container>
                         </Panel>
-                        <Handle className="2-1" />
+                        <Handle direction="horizontal" />
                         <Panel defaultSize={40}>
                           <Container
                             header={
-                              <Tabs className="w-auto mt-2">
-                                <Button color="light-gray" className="w-auto">
-                                  Add apps
-                                </Button>
+                              <Tabs className="w-auto">
+                                <Tab active>Add apps to queue</Tab>
                               </Tabs>
                             }
                           >
@@ -160,9 +195,15 @@ export function Frame(props: FrameSceneProps) {
                         </Panel>
                       </PanelGroup>
                     </Panel>
-                    <Handle className="h-1" />
+                    <Handle direction="vertical" />
                     <Panel defaultSize={40}>
-                      <Container>
+                      <Container
+                        header={
+                          <Tabs className="w-auto">
+                            <Tab active>Frame Logs</Tab>
+                          </Tabs>
+                        }
+                      >
                         <Logs id={frame.id} />
                       </Container>
                     </Panel>
@@ -177,27 +218,6 @@ export function Frame(props: FrameSceneProps) {
           Loading frame ${props.id} <Spinner />
         </div>
       )}
-      {/* 
-      <div className="space-y-4">
-        <H1>
-          <A href="/">FrameOS</A> <span className="text-gray-400">&raquo;</span>{' '}
-          {!frame ? `Loading frame ${props.id}...` : frameHost(frame)}
-        </H1>
-        {frame ? (
-          <>
-            <Box className="m-auto max-w-max">
-              <a href={frameUrl(frame)}>
-                <Image id={frame.id} className="flex-1" />
-              </a>
-            </Box>
-            <div className="flex space-x-4 items-start">
-              <Details id={frame.id} className="flex-1" />
-              <Apps id={frame.id} className="flex-1" />
-            </div>
-            <Logs id={frame.id} />
-          </>
-        ) : null}
-      </div> */}
     </BindLogic>
   )
 }

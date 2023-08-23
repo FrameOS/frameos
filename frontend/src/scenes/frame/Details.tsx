@@ -20,7 +20,7 @@ export interface DetailsProps {
 export function Details({ className }: DetailsProps) {
   const { id } = useValues(frameLogic)
   const { frame, editing } = useValues(detailsLogic({ id }))
-  const { editFrame, closeEdit } = useActions(detailsLogic({ id }))
+  const { closeEdit } = useActions(detailsLogic({ id }))
   const { deleteFrame } = useActions(framesModel)
 
   return (
@@ -29,7 +29,6 @@ export function Details({ className }: DetailsProps) {
         `Loading frame ${id}...`
       ) : editing ? (
         <>
-          <H6>Edit frame</H6>
           <Form formKey="editFrame" logic={detailsLogic} props={{ id }} className="space-y-4" enableFormOnSubmit>
             <Field name="frame_host" label="Frame host">
               <TextInput name="frame_host" placeholder="127.0.0.1" required />
@@ -99,9 +98,6 @@ export function Details({ className }: DetailsProps) {
         </>
       ) : (
         <>
-          <div className="float-right">
-            <Button onClick={() => editFrame(frame)}>Edit</Button>
-          </div>
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5">
             <tbody>
               <tr>
