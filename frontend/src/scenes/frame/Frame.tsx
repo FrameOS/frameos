@@ -94,8 +94,8 @@ const Tab = ({
 export function Frame(props: FrameSceneProps) {
   const id = parseInt(props.id)
   const frameLogicProps = { id }
-  const { frame, tab } = useValues(frameLogic(frameLogicProps))
-  const { setTab } = useActions(frameLogic(frameLogicProps))
+  const { frame, tab, selectedNodeId } = useValues(frameLogic(frameLogicProps))
+  const { setTab, deselectNode } = useActions(frameLogic(frameLogicProps))
   const { redeployFrame, restartFrame, refreshFrame } = useActions(framesModel)
 
   const { editFrame, closeEdit } = useActions(detailsLogic({ id }))
@@ -169,11 +169,11 @@ export function Frame(props: FrameSceneProps) {
                       <Container
                         header={
                           <Tabs>
+                            <Tab active={tab === 'diagram'} onClick={() => setTab('diagram')}>
+                              Default Scene
+                            </Tab>
                             <Tab active={tab === 'list'} onClick={() => setTab('list')}>
                               Render queue
-                            </Tab>
-                            <Tab active={tab === 'diagram'} onClick={() => setTab('diagram')}>
-                              Render diagram
                             </Tab>
                             <Tab active={tab === 'scene'} onClick={() => setTab('scene')}>
                               + Add Scene
@@ -184,7 +184,7 @@ export function Frame(props: FrameSceneProps) {
                         {tab === 'list' ? (
                           <Apps id={frame.id} className="overflow-auto" />
                         ) : tab === 'diagram' ? (
-                          <RenderLoop />
+                          <RenderLoop id={frame.id} />
                         ) : (
                           <>Nothing to see here...</>
                         )}
@@ -195,11 +195,14 @@ export function Frame(props: FrameSceneProps) {
                       <Container
                         header={
                           <Tabs>
-                            <Tab active>Add apps to render queue</Tab>
+                            {selectedNodeId ? <Tab active>Node</Tab> : null}
+                            <Tab active={!selectedNodeId} onClick={deselectNode}>
+                              Add apps
+                            </Tab>
                           </Tabs>
                         }
                       >
-                        <AddApps />
+                        {selectedNodeId ? null : <AddApps />}
                       </Container>
                     </Panel>
                   </PanelGroup>

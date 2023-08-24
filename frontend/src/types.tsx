@@ -17,6 +17,7 @@ export interface FrameType {
   interval: number
   scaling_mode: string
   background_color: string
+  apps?: AppConfig[]
 }
 export interface LogType {
   id: number
