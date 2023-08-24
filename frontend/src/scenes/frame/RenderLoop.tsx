@@ -56,10 +56,18 @@ function AppNode({ data, id, isConnectable }: NodeProps): JSX.Element {
 }
 
 function OutputNode({ data, isConnectable }: NodeProps): JSX.Element {
+  const { selectedNodeId } = useValues(frameLogic)
   return (
-    <div className="bg-Fuchsia-600">
+    <div
+      className={clsx(
+        'p-1 shadow-lg border border-2',
+        selectedNodeId === '0'
+          ? 'bg-indigo-950 border-indigo-900 shadow-indigo-700/50'
+          : 'bg-teal-950 border-teal-900 shadow-teal-700/50'
+      )}
+    >
       <Handle
-        type="source"
+        type="target"
         position={Position.Top}
         style={{ marginTop: 3 }}
         onConnect={(params) => console.log('handle onConnect', params)}
