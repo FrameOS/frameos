@@ -4,8 +4,7 @@ import { Frame } from './Frame'
 import { H1 } from '../../components/H1'
 import { framesModel } from '../../models/framesModel'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
-import { H5 } from '../../components/H5'
-import { A } from 'kea-router'
+import { Header } from '../../components/Header'
 
 export function Frames() {
   const { framesList } = useValues(framesModel)
@@ -13,12 +12,7 @@ export function Frames() {
     <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">
       <PanelGroup direction="vertical" units="pixels">
         <Panel minSize={60} maxSize={60}>
-          <div className="bg-gray-800 text-white h-full w-full space-x-2 p-2 flex justify-between items-center">
-            <H5>
-              <A href="/">FrameOS</A>
-            </H5>
-            <div>1.0.0</div>
-          </div>
+          <Header title="FrameOS" version="v1.0.0" />
         </Panel>
         <Panel>
           <div
