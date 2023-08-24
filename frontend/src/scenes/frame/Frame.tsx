@@ -42,8 +42,12 @@ const Handle = ({
 const Container = ({ header, children }: { header?: React.ReactNode; children: React.ReactNode }): JSX.Element => {
   return (
     <div className="flex flex-col w-full h-full max-w-full max-h-full">
-      {header ? <div>{header}</div> : null}
-      <Box className="overflow-auto w-full h-full max-w-full max-h-full rounded-lg rounded-tl-none p-2">
+      {header ? (
+        <div style={{ marginBottom: -1 }} className="z-10">
+          {header}
+        </div>
+      ) : null}
+      <Box className="overflow-auto w-full h-full max-w-full max-h-full rounded-lg rounded-tl-none p-2 z-0">
         <div className="overflow-auto w-full h-full max-w-full max-h-full rounded-lg">{children}</div>
       </Box>
     </div>
@@ -78,7 +82,7 @@ const Tab = ({
         'w-auto w-full text-white focus:ring-4 focus:outline-none font-medium px-2 py-1 text-base text-center cursor-pointer border border-b-0',
         active
           ? 'bg-gray-800 border-gray-700 hover:bg-gray-500 focus:ring-gray-500'
-          : 'border-gray-900 hover:bg-gray-500 focus:ring-gray-500',
+          : 'border-transparent hover:bg-gray-500 focus:ring-gray-500',
 
         className
       )}
