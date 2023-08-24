@@ -54,7 +54,7 @@ const Tabs = ({ children, className }: { children: React.ReactNode; className?: 
   return (
     <div
       className={clsx(
-        'flex items-start flex-nowrap text-sm font-medium text-center text-gray-500 dark:border-gray-700 dark:text-gray-400 space-x-2',
+        'flex items-start flex-nowrap text-sm font-medium text-center text-gray-500 dark:border-gray-700 dark:text-gray-400 space-x-2 w-auto',
         className
       )}
     >
@@ -76,7 +76,7 @@ const Tab = ({
   return (
     <div
       className={clsx(
-        'w-auto w-full text-white focus:ring-4 focus:outline-none font-medium px-2 py-1 text-base text-center cursor-pointer border border-b-0 truncate',
+        'w-auto text-white focus:ring-4 focus:outline-none font-medium px-2 py-1 text-base text-center cursor-pointer border border-b-0 truncate',
         active
           ? 'bg-gray-800 border-gray-700 hover:bg-gray-500 focus:ring-gray-500'
           : 'border-transparent hover:bg-gray-500 focus:ring-gray-500',
@@ -94,7 +94,8 @@ const Tab = ({
 export function Frame(props: FrameSceneProps) {
   const id = parseInt(props.id)
   const frameLogicProps = { id }
-  const { frame } = useValues(frameLogic(frameLogicProps))
+  const { frame, tab } = useValues(frameLogic(frameLogicProps))
+  const { setTab } = useActions(frameLogic(frameLogicProps))
   const { redeployFrame, restartFrame, refreshFrame } = useActions(framesModel)
 
   const { editFrame, closeEdit } = useActions(detailsLogic({ id }))
@@ -130,7 +131,7 @@ export function Frame(props: FrameSceneProps) {
                 <Panel defaultSize={40}>
                   <Container
                     header={
-                      <Tabs className="w-auto">
+                      <Tabs>
                         <Tab active>Preview</Tab>
                       </Tabs>
                     }
@@ -144,7 +145,7 @@ export function Frame(props: FrameSceneProps) {
                 <Panel defaultSize={60}>
                   <Container
                     header={
-                      <Tabs className="w-auto">
+                      <Tabs>
                         <Tab active={!editing} onClick={() => closeEdit()}>
                           Details
                         </Tab>
@@ -167,21 +168,33 @@ export function Frame(props: FrameSceneProps) {
                     <Panel defaultSize={60}>
                       <Container
                         header={
-                          <Tabs className="w-auto">
-                            <Tab active>Render queue</Tab>
-                            <Tab>Diagram view</Tab>
-                            <Tab>Settings</Tab>
+                          <Tabs>
+                            <Tab active={tab === 'list'} onClick={() => setTab('list')}>
+                              Render queue
+                            </Tab>
+                            <Tab active={tab === 'diagram'} onClick={() => setTab('diagram')}>
+                              Render diagram
+                            </Tab>
+                            <Tab active={tab === 'scene'} onClick={() => setTab('scene')}>
+                              + Add Scene
+                            </Tab>
                           </Tabs>
                         }
                       >
-                        <Apps id={frame.id} className="overflow-auto" />
+                        {tab === 'list' ? (
+                          <Apps id={frame.id} className="overflow-auto" />
+                        ) : tab === 'diagram' ? (
+                          <RenderLoop />
+                        ) : (
+                          <>Nothing to see here...</>
+                        )}
                       </Container>
                     </Panel>
                     <Handle direction="horizontal" />
                     <Panel defaultSize={40}>
                       <Container
                         header={
-                          <Tabs className="w-auto">
+                          <Tabs>
                             <Tab active>Add apps to render queue</Tab>
                           </Tabs>
                         }
@@ -195,7 +208,7 @@ export function Frame(props: FrameSceneProps) {
                 <Panel defaultSize={40}>
                   <Container
                     header={
-                      <Tabs className="w-auto">
+                      <Tabs>
                         <Tab active>Frame Logs</Tab>
                       </Tabs>
                     }
