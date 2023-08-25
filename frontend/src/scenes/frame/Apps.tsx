@@ -10,7 +10,7 @@ import { Form, Group } from 'kea-forms'
 import { Button } from '../../components/Button'
 import { frameLogic } from './frameLogic'
 import { Select } from '../../components/Select'
-import RenderLoop from './RenderLoop'
+import RenderLoop from './Diagram/Diagram'
 
 export interface AppsProps {
   className?: string

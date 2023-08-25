@@ -1,5 +1,3 @@
-import React from 'react'
-
 interface SpinnerProps {
   className?: string
 }
@@ -28,5 +26,3 @@ export function Spinner({ className }: SpinnerProps): JSX.Element {
     </div>
   )
 }
-
-export default Spinner

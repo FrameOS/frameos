@@ -4,91 +4,21 @@ import { Logs } from './Logs'
 import { Image } from './Image'
 import { Details } from './Details'
 import { frameHost, frameUrl } from '../../decorators/frame'
-import { Box } from '../../components/Box'
 import { AddApps, Apps } from './Apps'
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
-import Spinner from '../../components/Spinner'
-import RenderLoop from './RenderLoop'
+import { Panel, PanelGroup } from 'react-resizable-panels'
+import { Spinner } from '../../components/Spinner'
+import { Diagram } from './Diagram/Diagram'
 import { Button } from '../../components/Button'
 import { framesModel } from '../../models/framesModel'
-import clsx from 'clsx'
 import { detailsLogic } from './detailsLogic'
 import { Header } from '../../components/Header'
+import { Container } from '../../components/panels/Container'
+import { Tab } from '../../components/panels/Tab'
+import { Tabs } from '../../components/panels/Tabs'
+import { Handle } from '../../components/panels/Handle'
 
 interface FrameSceneProps {
-  id: string // from the URL
-}
-
-const defaultLayout = [33, 67]
-
-const Handle = ({
-  direction,
-  className,
-}: {
-  direction: 'horizontal' | 'vertical'
-  className?: string
-}): JSX.Element => (
-  <PanelResizeHandle
-    className={clsx(
-      'bg-gray-900 hover:bg-blue-600 active:bg-blue-800 transition duration-1000',
-      className,
-      direction === 'horizontal' ? 'w-2 mx-1' : 'h-2 my-1'
-    )}
-  />
-)
-const Container = ({ header, children }: { header?: React.ReactNode; children: React.ReactNode }): JSX.Element => {
-  return (
-    <div className="flex flex-col w-full h-full max-w-full max-h-full">
-      {header ? (
-        <div style={{ marginBottom: -1 }} className="z-10">
-          {header}
-        </div>
-      ) : null}
-      <Box className="overflow-auto w-full h-full max-w-full max-h-full rounded-lg rounded-tl-none p-2 z-0">
-        <div className="overflow-auto w-full h-full max-w-full max-h-full rounded-lg">{children}</div>
-      </Box>
-    </div>
-  )
-}
-const Tabs = ({ children, className }: { children: React.ReactNode; className?: string }): JSX.Element => {
-  return (
-    <div
-      className={clsx(
-        'flex items-start flex-nowrap text-sm font-medium text-center text-gray-500 dark:border-gray-700 dark:text-gray-400 space-x-2 w-auto',
-        className
-      )}
-    >
-      {children}
-    </div>
-  )
-}
-const Tab = ({
-  children,
-  active,
-  className,
-  onClick,
-}: {
-  active?: boolean
-  children: React.ReactNode
-  className?: string
-  onClick?: () => void
-}): JSX.Element => {
-  return (
-    <div
-      className={clsx(
-        'w-auto text-white focus:ring-4 focus:outline-none font-medium px-2 py-1 text-base text-center cursor-pointer border border-b-0 truncate',
-        active
-          ? 'bg-gray-800 border-gray-700 hover:bg-gray-500 focus:ring-gray-500'
-          : 'border-transparent hover:bg-gray-500 focus:ring-gray-500',
-
-        className
-      )}
-      title={typeof children === 'string' ? children : undefined}
-      onClick={onClick}
-    >
-      {children}
-    </div>
-  )
+  id: string // taken straight from the URL, thus a string
 }
 
 export function Frame(props: FrameSceneProps) {
@@ -184,7 +114,7 @@ export function Frame(props: FrameSceneProps) {
                         {tab === 'list' ? (
                           <Apps id={frame.id} className="overflow-auto" />
                         ) : tab === 'diagram' ? (
-                          <RenderLoop id={frame.id} />
+                          <Diagram />
                         ) : (
                           <>Nothing to see here...</>
                         )}

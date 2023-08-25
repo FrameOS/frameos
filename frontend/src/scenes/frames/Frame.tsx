@@ -3,9 +3,6 @@ import { FrameType } from '../../types'
 import { H5 } from '../../components/H5'
 import { Box } from '../../components/Box'
 import { frameHost, frameStatus } from '../../decorators/frame'
-import Spinner from '../../components/Spinner'
-import { useValues } from 'kea'
-import { framesModel } from '../../models/framesModel'
 import { Image } from './Image'
 
 interface FrameProps {

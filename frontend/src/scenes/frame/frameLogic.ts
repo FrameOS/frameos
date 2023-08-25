@@ -88,7 +88,7 @@ export const frameLogic = kea<frameLogicType>([
             .concat([
               {
                 id: '0',
-                type: 'output',
+                type: 'render',
                 position: { x: 0 + (apps.length ?? 0) * 200, y: 80 },
                 data: { label: 'Render Frame' },
               } as Node,

@@ -1,4 +1,4 @@
-import Spinner from '../components/Spinner'
+import { Spinner } from '../components/Spinner'
 import { FrameType } from '../types'
 
 export function frameHost(frame: FrameType): string {
