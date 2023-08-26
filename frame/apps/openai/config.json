@@ -17,7 +17,8 @@
             "value": "",
             "required": true,
             "label": "API Key",
-            "placeholder": "Copy it here"
+            "placeholder": "Copy it here",
+            "secret": true
         }
     ]
 }

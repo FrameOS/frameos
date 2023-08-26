@@ -4,6 +4,7 @@ from sqlalchemy.dialects.sqlite import JSON
 import secrets
 import json
 import os
+import uuid
 
 def get_app_configs() -> Dict[str, Dict]:
     local_apps_path = "./frame/apps"
@@ -44,7 +45,8 @@ class Frame(db.Model):
     background_color = db.Column(db.String(64), nullable=True)
     # apps
     apps = db.Column(JSON, nullable=True)
-    
+    scenes = db.Column(JSON, nullable=True)
+
     # deprecated
     image_url = db.Column(db.String(256), nullable=True)
 
@@ -69,6 +71,7 @@ class Frame(db.Model):
             'scaling_mode': self.scaling_mode,
             'background_color': self.background_color,
             'apps': self.apps,
+            'scenes': self.scenes,
         }
 
 def new_frame(frame_host: str, server_host: str) -> Frame:
@@ -106,6 +109,7 @@ def new_frame(frame_host: str, server_host: str) -> Frame:
         server_api_key=secrets.token_hex(32), 
         status="uninitialized",
         apps=[{ **app_configs['unsplash'], 'keyword': 'unsplash', 'config': {} }],
+        scenes=[{ 'id': uuid.uuid4(), 'name': 'Default Scene', 'nodes': [], 'edges': [] }],
         scaling_mode="cover",
         background_color="white",
     )

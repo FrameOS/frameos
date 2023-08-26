@@ -1,3 +1,5 @@
+import { Edge, Node } from 'reactflow'
+
 export interface FrameType {
   id: number
   frame_host: string
@@ -18,7 +20,9 @@ export interface FrameType {
   scaling_mode: string
   background_color: string
   apps?: AppConfig[]
+  scenes?: FrameScene[]
 }
+
 export interface LogType {
   id: number
   timestamp: string
@@ -33,6 +37,7 @@ export interface ConfigField {
   type: string
   options?: string[]
   required?: boolean
+  secret?: boolean
   value?: any
   placeholder?: string
 }
@@ -47,4 +52,36 @@ export interface AppConfigUninstalled {
 export interface AppConfig extends AppConfigUninstalled {
   keyword: string
   config: Record<string, any>
+}
+
+export interface FrameScene {
+  _id: string
+  name: string
+  nodes: Node[]
+  edges: Edge[]
+}
+
+export enum Area {
+  TopLeft = 'TopLeft',
+  TopRight = 'TopRight',
+  BottomLeft = 'BottomLeft',
+  BottomRight = 'BottomRight',
+}
+
+export enum Panel {
+  Diagram = 'Diagram',
+  Selection = 'Selection',
+  AddApps = 'AddApps',
+  FrameDetails = 'FrameDetails',
+  FrameSettings = 'FrameSettings',
+  Logs = 'Logs',
+  Image = 'Image',
+}
+
+export type PanelWithMetadata = {
+  panel: Panel
+  label?: string
+  active?: boolean
+  hidden?: boolean
+  metadata?: Record<string, any>
 }

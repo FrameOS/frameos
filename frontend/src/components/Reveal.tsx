@@ -4,6 +4,18 @@ interface RevealProps {
   children: React.ReactNode
 }
 
+export function RevealDots() {
+  return (
+    <div className="flex items-center justify-start space-x-1">
+      <div className="w-2 h-2 bg-teal-700 rounded-full" />
+      <div className="w-2 h-2 bg-teal-700 rounded-full" />
+      <div className="w-2 h-2 bg-teal-700 rounded-full" />
+      <div className="w-2 h-2 bg-teal-700 rounded-full" />
+      <div className="w-2 h-2 bg-teal-700 rounded-full" />
+    </div>
+  )
+}
+
 export function Reveal({ children }: RevealProps) {
   const [visible, setVisible] = useState(false)
 
@@ -13,13 +25,7 @@ export function Reveal({ children }: RevealProps) {
         children
       ) : (
         <div onClick={() => setVisible(true)} className="cursor-pointer">
-          <div className="flex items-center justify-start space-x-1">
-            <div className="w-2 h-2 bg-teal-700 rounded-full"></div>
-            <div className="w-2 h-2 bg-teal-700 rounded-full"></div>
-            <div className="w-2 h-2 bg-teal-700 rounded-full"></div>
-            <div className="w-2 h-2 bg-teal-700 rounded-full"></div>
-            <div className="w-2 h-2 bg-teal-700 rounded-full"></div>
-          </div>
+          <RevealDots />
         </div>
       )}
     </div>

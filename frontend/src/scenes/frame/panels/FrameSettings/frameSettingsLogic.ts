@@ -1,17 +1,17 @@
 import { actions, kea, key, listeners, path, props, reducers, selectors } from 'kea'
-import { framesModel } from '../../models/framesModel'
+import { framesModel } from '../../../../models/framesModel'
 
 import { forms } from 'kea-forms'
-import { FrameType } from '../../types'
+import { FrameType } from '../../../../types'
 
-import type { detailsLogicType } from './detailsLogicType'
+import type { frameSettingsLogicType } from './frameSettingsLogicType'
 
 export interface DetailsLogicProps {
   id: number
 }
 
-export const detailsLogic = kea<detailsLogicType>([
-  path(['src', 'scenes', 'frame', 'detailsLogic']),
+export const frameSettingsLogic = kea<frameSettingsLogicType>([
+  path(['src', 'scenes', 'frame', 'frameSettingsLogic']),
   props({} as DetailsLogicProps),
   key((props) => props.id),
   actions({

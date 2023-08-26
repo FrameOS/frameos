@@ -9,6 +9,7 @@ class ConfigField:
     name: str
     type: str
     required: Optional[bool] = False
+    secret: Optional[bool] = False
     options: Optional[List[str]] = None
     value: Optional[Any] = None
     label: Optional[str] = None

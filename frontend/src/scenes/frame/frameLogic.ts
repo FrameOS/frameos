@@ -14,18 +14,29 @@ import {
 import equal from 'fast-deep-equal'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
-import { AppConfig } from '../../types'
+import { AppConfig, Area, Panel, PanelWithMetadata } from '../../types'
 
 export interface FrameLogicProps {
   id: number
 }
 
+const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
+  [Area.TopLeft]: [{ panel: Panel.Diagram, active: true, hidden: false }],
+  [Area.TopRight]: [
+    { panel: Panel.Selection, active: false, hidden: true },
+    { panel: Panel.AddApps, active: true, hidden: false },
+    { panel: Panel.FrameDetails, active: false, hidden: false },
+    { panel: Panel.FrameSettings, active: false, hidden: false },
+  ],
+  [Area.BottomLeft]: [{ panel: Panel.Logs, active: true, hidden: false }],
+  [Area.BottomRight]: [{ panel: Panel.Image, active: true, hidden: false }],
+}
 export const frameLogic = kea<frameLogicType>([
   path(['src', 'scenes', 'frame', 'frameLogic']),
   props({} as FrameLogicProps),
   key((props) => props.id),
   actions({
-    setTab: (tab: string) => ({ tab }),
+    setPanel: (area: Area, panel: string) => ({ area, panel }),
     setNodes: (nodes: Node[]) => ({ nodes }),
     setEdges: (edges: Edge[]) => ({ edges }),
     addEdge: (edge: Edge | Connection) => ({ edge }),
@@ -34,7 +45,16 @@ export const frameLogic = kea<frameLogicType>([
     deselectNode: true,
   }),
   reducers({
-    tab: ['diagram', { setTab: (_, { tab }) => tab }],
+    panels: [
+      DEFAULT_LAYOUT as Record<Area, PanelWithMetadata[]>,
+      {
+        setPanel: (state, { area, panel }) => {
+          const newPanels = { ...state }
+          newPanels[area] = newPanels[area].map((p) => ({ ...p, active: p.panel === panel }))
+          return equal(state, newPanels) ? state : newPanels
+        },
+      },
+    ],
     nodes: [
       [] as Node[],
       {

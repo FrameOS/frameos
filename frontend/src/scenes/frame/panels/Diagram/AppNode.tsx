@@ -1,13 +1,16 @@
 import { useValues } from 'kea'
 import { NodeProps, Handle, Position } from 'reactflow'
-import { frameLogic } from '../frameLogic'
-import { AppConfig } from '../../../types'
+import { frameLogic } from '../../frameLogic'
+import { AppConfig } from '../../../../types'
 import clsx from 'clsx'
+import { Reveal, RevealDots } from '../../../../components/Reveal'
 
 export function AppNode({ data, id, isConnectable }: NodeProps): JSX.Element {
   const { nodes, selectedNodeId } = useValues(frameLogic)
 
   const app: AppConfig = data.app
+  const fields = Object.fromEntries((app.fields || []).map((field) => [field.name, field]))
+
   return (
     <div
       className={clsx(
@@ -32,7 +35,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps): JSX.Element {
               {Object.entries(app.config).map(([key, value]) => (
                 <tr key={key}>
                   <td className="font-sm text-indigo-200">{key}</td>
-                  <td>{value}</td>
+                  <td>{fields[key]?.secret ? <RevealDots /> : value}</td>
                 </tr>
               ))}
             </tbody>

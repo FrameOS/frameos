@@ -10,7 +10,6 @@ import { Form, Group } from 'kea-forms'
 import { Button } from '../../components/Button'
 import { frameLogic } from './frameLogic'
 import { Select } from '../../components/Select'
-import RenderLoop from './Diagram/Diagram'
 
 export interface AppsProps {
   className?: string
@@ -116,26 +115,6 @@ export function Apps({ className }: AppsProps) {
           </Button>
         </div>
       </Form>
-    </div>
-  )
-}
-
-export function AddApps() {
-  const { apps } = useValues(appsModel)
-  const { id } = useValues(frameLogic)
-  const { addApp } = useActions(appsLogic({ id }))
-  const onDragStart = (event: any, keyword: string) => {
-    event.dataTransfer.setData('application/reactflow', keyword)
-    event.dataTransfer.effectAllowed = 'move'
-  }
-  return (
-    <div className="space-y-2">
-      {Object.entries(apps).map(([keyword, { name, description }]) => (
-        <Box className="bg-gray-900 px-3 py-2 dndnode" draggable onDragStart={(event) => onDragStart(event, keyword)}>
-          <H6>{name}</H6>
-          <div className="text-sm">{description}</div>
-        </Box>
-      ))}
     </div>
   )
 }

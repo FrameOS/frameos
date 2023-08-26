@@ -1,11 +1,10 @@
-// import 'reactflow/dist/style.css'
 import 'reactflow/dist/base.css'
 import { useActions, useValues } from 'kea'
 import ReactFlow, { Node, ReactFlowInstance } from 'reactflow'
-import { frameLogic } from '../frameLogic'
+import { frameLogic } from '../../frameLogic'
 import { useCallback, useRef, useState } from 'react'
-import { appsModel } from '../../../models/appsModel'
-import { appConfigWithDefaults } from '../utils'
+import { appsModel } from '../../../../models/appsModel'
+import { appConfigWithDefaults } from '../../utils'
 import { AppNode } from './AppNode'
 import { RenderNode } from './RenderNode'
 
@@ -70,6 +69,7 @@ export function Diagram() {
         onDragOver={onDragOver}
         minZoom={0.2}
         maxZoom={4}
+        proOptions={{ hideAttribution: true }}
         fitView
         fitViewOptions={{ padding: 0.5 }}
         nodeTypes={nodeTypes}

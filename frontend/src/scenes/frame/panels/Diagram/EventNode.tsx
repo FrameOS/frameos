@@ -1,11 +1,10 @@
-// import 'reactflow/dist/style.css'
 import 'reactflow/dist/base.css'
 import { useValues } from 'kea'
 import { NodeProps, Handle, Position } from 'reactflow'
-import { frameLogic } from '../frameLogic'
+import { frameLogic } from '../../frameLogic'
 import clsx from 'clsx'
 
-export function RenderNode({ data, isConnectable }: NodeProps): JSX.Element {
+export function EventNode({ data, isConnectable }: NodeProps): JSX.Element {
   const { selectedNodeId } = useValues(frameLogic)
   return (
     <div

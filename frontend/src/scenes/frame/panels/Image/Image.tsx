@@ -1,14 +1,16 @@
 import { useValues } from 'kea'
 import clsx from 'clsx'
-import { framesModel } from '../../models/framesModel'
+import { framesModel } from '../../../../models/framesModel'
+import { frameLogic } from '../../frameLogic'
 
 export interface ImageProps {
   id: number
   className?: string
 }
 
-export function Image({ id, className }: ImageProps) {
+export function Image({ className }: ImageProps) {
   const { getFrameImage, frames } = useValues(framesModel)
+  const { id } = useValues(frameLogic)
   return (
     <div
       className={clsx(
