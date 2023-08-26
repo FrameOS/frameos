@@ -50,7 +50,7 @@ export const detailsLogic = kea<detailsLogicType>([
   reducers({
     editing: [false, { editFrame: () => true, closeEdit: () => false }],
   }),
-  listeners(({ actions, values }) => ({
+  listeners(({ actions }) => ({
     editFrame: async ({ frame }) => {
       actions.resetEditFrame()
       actions.setEditFrameValues({
