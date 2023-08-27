@@ -208,20 +208,23 @@ export const frameLogic = kea<frameLogicType>([
       } else {
         for (const [area, panels] of Object.entries(values.panels)) {
           if (panels.find((panel) => panel.panel === Panel.Selection)) {
-            if (
-              cache.panelBeforeSelection &&
-              cache.panelBeforeSelection !== Panel.Selection &&
-              panels.find((panel) => panel.panel === cache.panelBeforeSelection)
-            ) {
-              actions.setPanel(area as Area, cache.panelBeforeSelection)
+            const currentPanel = panels.find((panel) => panel.active)?.panel
+            if (currentPanel === Panel.Selection) {
+              if (
+                cache.panelBeforeSelection &&
+                cache.panelBeforeSelection !== Panel.Selection &&
+                panels.find((panel) => panel.panel === cache.panelBeforeSelection)
+              ) {
+                actions.setPanel(area as Area, cache.panelBeforeSelection)
+                return
+              }
+
+              const first = panels.find((panel) => !panel.hidden)?.panel
+              if (first) {
+                actions.setPanel(area as Area, first)
+              }
               return
             }
-
-            const first = panels.find((panel) => !panel.hidden)?.panel
-            if (first) {
-              actions.setPanel(area as Area, first)
-            }
-            return
           }
         }
       }
