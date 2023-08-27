@@ -9,6 +9,7 @@ import equal from 'fast-deep-equal'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
 import { AppConfig, Area, Panel, PanelWithMetadata } from '../../types'
+import { arrangeNodes } from './panels/Diagram/arrangeNodes'
 
 export interface FrameLogicProps {
   id: number
@@ -38,6 +39,8 @@ export const frameLogic = kea<frameLogicType>([
     onEdgesChange: (changes: EdgeChange[]) => ({ changes }),
     deselectNode: true,
     toggleFullScreenPanel: (panel: Panel) => ({ panel }),
+    rearrangeCurrentScene: true,
+    fitDiagramView: true,
   }),
   reducers({
     panels: [
@@ -88,6 +91,7 @@ export const frameLogic = kea<frameLogicType>([
         toggleFullScreenPanel: (state, { panel }) => (state === panel ? null : panel),
       },
     ],
+    fitViewCounter: [0, { fitDiagramView: (state) => state + 1 }],
   }),
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
@@ -127,7 +131,7 @@ export const frameLogic = kea<frameLogicType>([
                 ({
                   id: String(index + 1),
                   type: 'app',
-                  position: { x: 0 + index * 200, y: 0 },
+                  position: { x: -9999, y: -9999 },
                   data: { label: app.name, app },
                 } as Node)
             )
@@ -135,7 +139,7 @@ export const frameLogic = kea<frameLogicType>([
               {
                 id: '0',
                 type: 'render',
-                position: { x: 0 + (apps.length ?? 0) * 200, y: 80 },
+                position: { x: -9999, y: -9999 },
                 data: { label: 'Render Frame' },
               } as Node,
             ])
@@ -189,6 +193,18 @@ export const frameLogic = kea<frameLogicType>([
         ])
       }
     },
+    nodes: (nodes: Node[]) => {
+      if (nodes.length === 0) {
+        return
+      }
+      // Check that all nodes have a valid size, but are at the hidden position
+      for (const node of nodes) {
+        if (node.position.x !== -9999 || node.position.y !== -9999 || !node.width || !node.height) {
+          return
+        }
+      }
+      actions.rearrangeCurrentScene()
+    },
   })),
   subscriptions(({ actions, cache, values }) => ({
     selectedNode: (selectedNode, oldSelectedNode) => {
@@ -228,6 +244,12 @@ export const frameLogic = kea<frameLogicType>([
           }
         }
       }
+    },
+  })),
+  listeners(({ actions, values }) => ({
+    rearrangeCurrentScene: () => {
+      actions.setNodes(arrangeNodes(values.nodes, values.edges))
+      actions.fitDiagramView()
     },
   })),
 ])

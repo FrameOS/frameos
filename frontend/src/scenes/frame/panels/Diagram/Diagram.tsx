@@ -2,12 +2,13 @@ import 'reactflow/dist/base.css'
 import { useActions, useValues } from 'kea'
 import ReactFlow, { Node, ReactFlowInstance } from 'reactflow'
 import { frameLogic } from '../../frameLogic'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { appsModel } from '../../../../models/appsModel'
 import { appConfigWithDefaults } from '../../utils'
 import { AppNode } from './AppNode'
 import { RenderNode } from './RenderNode'
 import { EventNode } from './EventNode'
+import { Button } from '../../../../components/Button'
 
 const nodeTypes = {
   app: AppNode,
@@ -18,8 +19,9 @@ const nodeTypes = {
 export function Diagram() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
-  const { nodes, edges } = useValues(frameLogic)
-  const { onEdgesChange, onNodesChange, setNodes, addEdge } = useActions(frameLogic)
+  const { nodes, edges, fitViewCounter } = useValues(frameLogic)
+  const { onEdgesChange, onNodesChange, setNodes, addEdge, rearrangeCurrentScene, fitDiagramView } =
+    useActions(frameLogic)
 
   const onDragOver = useCallback((event: any) => {
     console.log(event)
@@ -69,6 +71,12 @@ export function Diagram() {
     [reactFlowInstance, nodes]
   )
 
+  useEffect(() => {
+    if (fitViewCounter > 0) {
+      reactFlowInstance?.fitView()
+    }
+  }, [fitViewCounter, reactFlowInstance])
+
   return (
     <div className="w-full h-full dndflow" ref={reactFlowWrapper}>
       <ReactFlow
@@ -83,10 +91,17 @@ export function Diagram() {
         minZoom={0.2}
         maxZoom={4}
         proOptions={{ hideAttribution: true }}
-        fitView
-        fitViewOptions={{ padding: 0.5 }}
         nodeTypes={nodeTypes}
-      />
+      >
+        <div className="absolute top-1 right-1 z-10 space-y-1 w-min">
+          <Button size="small" onClick={rearrangeCurrentScene} className="px-2" title="Rearrange (R)">
+            R
+          </Button>
+          <Button size="small" onClick={fitDiagramView} className="px-2" title="Fit to View (F)">
+            F
+          </Button>
+        </div>
+      </ReactFlow>
     </div>
   )
 }
