@@ -16,8 +16,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps): JSX.Element {
       className={clsx(
         'shadow-lg border border-2',
         selectedNodeId === id
-          ? 'bg-black border-indigo-900 shadow-indigo-700/50'
-          : 'bg-black border-sky-900 shadow-sky-700/50 '
+          ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
+          : 'bg-black bg-opacity-70 border-sky-900 shadow-sky-700/50 '
       )}
     >
       <div className={clsx('text-xl p-1', selectedNodeId === id ? 'bg-indigo-900' : 'bg-sky-900')}>{app.name}</div>

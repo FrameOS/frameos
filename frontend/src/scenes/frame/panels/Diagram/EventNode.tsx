@@ -14,8 +14,8 @@ export function EventNode({ data, id, isConnectable }: NodeProps): JSX.Element {
       className={clsx(
         'shadow-lg border border-2',
         selectedNodeId === id
-          ? 'bg-black border-indigo-900 shadow-indigo-700/50'
-          : 'bg-black border-red-900 shadow-red-700/50 '
+          ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
+          : 'bg-black bg-opacity-70 border-red-900 shadow-red-700/50 '
       )}
     >
       <div className={clsx('text-xl p-1', selectedNodeId === id ? 'bg-indigo-900' : 'bg-red-900')}>
