@@ -1,16 +1,10 @@
 import { actions, kea, key, path, props, reducers, selectors } from 'kea'
 import { framesModel } from '../../models/framesModel'
-import {
-  Edge,
-  Connection,
-  Node,
-  NodeChange,
-  EdgeChange,
-  applyEdgeChanges,
-  applyNodeChanges,
-  addEdge,
-  MarkerType,
-} from 'reactflow'
+import { applyEdgeChanges, applyNodeChanges, addEdge, MarkerType } from 'reactflow'
+import type { Node } from '@reactflow/core/dist/esm/types/nodes'
+import type { Edge } from '@reactflow/core/dist/esm/types/edges'
+import type { Connection } from '@reactflow/core/dist/esm/types/general'
+import type { EdgeChange, NodeChange } from '@reactflow/core/dist/esm/types/changes'
 import equal from 'fast-deep-equal'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
