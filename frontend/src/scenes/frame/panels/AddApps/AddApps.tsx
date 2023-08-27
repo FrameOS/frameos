@@ -8,20 +8,41 @@ import { H6 } from '../../../../components/H6'
 export function AddApps() {
   const { apps } = useValues(appsModel)
   const { id } = useValues(frameLogic)
-  const { addApp } = useActions(appsLogic({ id }))
-  const onDragStart = (event: any, keyword: string) => {
-    event.dataTransfer.setData('application/reactflow', keyword)
+  const onDragStart = (event: any, type: 'app' | 'event', keyword: string) => {
+    event.dataTransfer.setData('application/reactflow', JSON.stringify({ type, keyword }))
     event.dataTransfer.effectAllowed = 'move'
   }
   return (
     <div className="space-y-2">
       <div>Drag the boxes below onto the diagram</div>
       {Object.entries(apps).map(([keyword, { name, description }]) => (
-        <Box className="bg-gray-900 px-3 py-2 dndnode" draggable onDragStart={(event) => onDragStart(event, keyword)}>
+        <Box
+          className="bg-gray-900 px-3 py-2 dndnode"
+          draggable
+          onDragStart={(event) => onDragStart(event, 'app', keyword)}
+        >
           <H6>{name}</H6>
           <div className="text-sm">{description}</div>
         </Box>
       ))}
+
+      <Box
+        className="bg-gray-900 px-3 py-2 dndnode"
+        draggable
+        onDragStart={(event) => onDragStart(event, 'event', 'render')}
+      >
+        <H6>Event: Render</H6>
+        <div className="text-sm">When a new render is requested</div>
+      </Box>
+
+      <Box
+        className="bg-gray-900 px-3 py-2 dndnode"
+        draggable
+        onDragStart={(event) => onDragStart(event, 'event', 'button_press')}
+      >
+        <H6>Event: Button Press</H6>
+        <div className="text-sm">When a button is pressed</div>
+      </Box>
     </div>
   )
 }

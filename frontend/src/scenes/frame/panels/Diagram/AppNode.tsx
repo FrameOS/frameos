@@ -16,20 +16,35 @@ export function AppNode({ data, id, isConnectable }: NodeProps): JSX.Element {
       className={clsx(
         'shadow-lg border border-2',
         selectedNodeId === id
-          ? 'bg-indigo-950 border-indigo-900 shadow-indigo-700/50'
-          : 'bg-sky-950 border-sky-900 shadow-sky-700/50 '
+          ? 'bg-black border-indigo-900 shadow-indigo-700/50'
+          : 'bg-black border-sky-900 shadow-sky-700/50 '
       )}
     >
-      <Handle
-        type="target"
-        position={Position.Top}
-        style={{ marginTop: -3 }}
-        onConnect={(params) => console.log('handle onConnect', params)}
-        isConnectable={isConnectable}
-      />
       <div className={clsx('text-xl p-1', selectedNodeId === id ? 'bg-indigo-900' : 'bg-sky-900')}>{app.name}</div>
-      {app.config ? (
-        <div className="p-1">
+      <div className="p-1">
+        <div className="flex justify-between">
+          <div className="flex items-center space-x-1">
+            <Handle
+              type="target"
+              position={Position.Left}
+              style={{ position: 'relative', transform: 'none', left: 0, top: 0, background: 'white' }}
+              onConnect={(params) => console.log('handle onConnect', params)}
+              isConnectable={isConnectable}
+            />
+            <span>&nbsp;</span>
+          </div>
+          <div className="flex items-center space-x-1">
+            <span>next step</span>
+            <Handle
+              type="source"
+              position={Position.Right}
+              id="a"
+              style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
+              isConnectable={isConnectable}
+            />
+          </div>
+        </div>
+        {app.config ? (
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5">
             <tbody>
               {Object.entries(app.config).map(([key, value]) => (
@@ -40,15 +55,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps): JSX.Element {
               ))}
             </tbody>
           </table>
-        </div>
-      ) : null}
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        id="a"
-        style={{ marginBottom: -3 }}
-        isConnectable={isConnectable}
-      />
+        ) : null}
+      </div>
     </div>
   )
 }

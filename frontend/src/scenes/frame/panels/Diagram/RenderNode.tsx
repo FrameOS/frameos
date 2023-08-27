@@ -6,23 +6,30 @@ import clsx from 'clsx'
 
 export function RenderNode({ data, isConnectable }: NodeProps): JSX.Element {
   const { selectedNodeId } = useValues(frameLogic)
+  const id = '0'
   return (
     <div
       className={clsx(
-        'p-1 shadow-lg border border-2',
-        selectedNodeId === '0'
-          ? 'bg-indigo-950 border-indigo-900 shadow-indigo-700/50'
-          : 'bg-teal-950 border-teal-900 shadow-teal-700/50'
+        'shadow-lg border border-2',
+        selectedNodeId === id
+          ? 'bg-black border-indigo-900 shadow-indigo-700/50'
+          : 'bg-black border-green-900 shadow-green-700/50 '
       )}
     >
-      <Handle
-        type="target"
-        position={Position.Top}
-        style={{ marginTop: 3 }}
-        onConnect={(params) => console.log('handle onConnect', params)}
-        isConnectable={isConnectable}
-      />
-      <div className="text-xl">{data.label}</div>
+      <div className={clsx('text-xl p-1', selectedNodeId === id ? 'bg-indigo-900' : 'bg-green-900')}>Render Frame</div>
+      <div className="p-1">
+        <div className="flex justify-between">
+          <div className="flex items-center space-x-1">
+            <Handle
+              type="target"
+              position={Position.Right}
+              id="a"
+              style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
+              isConnectable={isConnectable}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

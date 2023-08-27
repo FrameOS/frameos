@@ -7,10 +7,12 @@ import { appsModel } from '../../../../models/appsModel'
 import { appConfigWithDefaults } from '../../utils'
 import { AppNode } from './AppNode'
 import { RenderNode } from './RenderNode'
+import { EventNode } from './EventNode'
 
 const nodeTypes = {
   app: AppNode,
   render: RenderNode,
+  event: EventNode,
 }
 
 export function Diagram() {
@@ -31,7 +33,7 @@ export function Diagram() {
       event.preventDefault()
 
       const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
-      const keyword = event.dataTransfer.getData('application/reactflow')
+      const { keyword, type } = JSON.parse(event.dataTransfer.getData('application/reactflow') ?? '{}')
 
       // check if the dropped element is valid
       if (typeof keyword === 'undefined' || !keyword) {
@@ -42,15 +44,26 @@ export function Diagram() {
         x: event.clientX - (reactFlowBounds?.left ?? 0),
         y: event.clientY - (reactFlowBounds?.top ?? 0),
       }) ?? { x: 0, y: 0 }
-      const app = appsModel.values.apps[keyword]
-      console.log({ apps: appsModel.values.apps, app, keyword })
-      const newNode: Node = {
-        id: String(Math.random()),
-        type: 'app',
-        position,
-        data: { label: app.name || keyword, app: appConfigWithDefaults(keyword, app) },
+
+      if (type === 'app') {
+        const app = appsModel.values.apps[keyword]
+        const newNode: Node = {
+          id: String(Math.random()),
+          type: 'app',
+          position,
+          data: { label: app.name || keyword, app: appConfigWithDefaults(keyword, app) },
+        }
+        setNodes([...nodes, newNode])
+      } else if (type === 'event') {
+        const newNode: Node = {
+          id: String(Math.random()),
+          type: 'event',
+          position,
+          data: { keyword },
+        }
+        setNodes([...nodes, newNode])
       }
-      setNodes([...nodes, newNode])
+
       window.setTimeout(() => reactFlowInstance?.fitView(), 50)
     },
     [reactFlowInstance, nodes]
