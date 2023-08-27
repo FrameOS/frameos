@@ -37,6 +37,7 @@ export const frameLogic = kea<frameLogicType>([
     onNodesChange: (changes: NodeChange[]) => ({ changes }),
     onEdgesChange: (changes: EdgeChange[]) => ({ changes }),
     deselectNode: true,
+    toggleFullScreenPanel: (panel: Panel) => ({ panel }),
   }),
   reducers({
     panels: [
@@ -81,6 +82,12 @@ export const frameLogic = kea<frameLogicType>([
         },
       },
     ],
+    fullScreenPanel: [
+      null as Panel | null,
+      {
+        toggleFullScreenPanel: (state, { panel }) => (state === panel ? null : panel),
+      },
+    ],
   }),
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
@@ -89,17 +96,24 @@ export const frameLogic = kea<frameLogicType>([
     selectedNodeId: [(s) => [s.selectedNode], (node) => node?.id ?? null],
     selectedApp: [(s) => [s.selectedNode], (node): AppConfig => node?.data.app ?? null],
     panelsWithConditions: [
-      (s) => [s.panels, s.selectedNode],
-      (panels, selectedNode) =>
-        Object.fromEntries(
-          Object.entries(panels).map(([area, panels]) => [
-            area,
-            panels.map((panel) => ({
-              ...panel,
-              hidden: panel.panel === Panel.Selection && !selectedNode,
-            })),
-          ])
-        ),
+      (s) => [s.panels, s.selectedNode, s.fullScreenPanel],
+      (panels, selectedNode, fullScreenPanel): Record<Area, PanelWithMetadata[]> =>
+        fullScreenPanel
+          ? {
+              [Area.TopLeft]: [{ panel: fullScreenPanel, active: true, hidden: false }],
+              [Area.TopRight]: [],
+              [Area.BottomLeft]: [],
+              [Area.BottomRight]: [],
+            }
+          : (Object.fromEntries(
+              Object.entries(panels).map(([area, panels]) => [
+                area,
+                panels.map((panel) => ({
+                  ...panel,
+                  hidden: panel.panel === Panel.Selection && !selectedNode,
+                })),
+              ])
+            ) as Record<Area, PanelWithMetadata[]>),
     ],
   })),
   subscriptions(({ actions }) => ({

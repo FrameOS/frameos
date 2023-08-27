@@ -10,7 +10,7 @@ import { Container } from '../../components/panels/Container'
 import { Tab } from '../../components/panels/Tab'
 import { Tabs } from '../../components/panels/Tabs'
 import { Handle } from '../../components/panels/Handle'
-import { Area, PanelWithMetadata } from '../../types'
+import { Area, PanelWithMetadata, Panel as PanelType } from '../../types'
 import { panels } from './panels/panels'
 
 interface FrameSceneProps {
@@ -20,7 +20,8 @@ interface FrameSceneProps {
 interface PanelAreaProps {
   area: Area
   areaPanels: PanelWithMetadata[]
-  setPanel: (area: Area, panel: string) => void
+  setPanel: (area: Area, panel: PanelType) => void
+  toggleFullScreenPanel: (panel: PanelType) => void
 }
 
 function pascalCaseToTitleCase(pascalCase: string): string {
@@ -28,7 +29,7 @@ function pascalCaseToTitleCase(pascalCase: string): string {
   return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
 }
 
-export function PanelArea({ area, areaPanels, setPanel }: PanelAreaProps): JSX.Element {
+export function PanelArea({ area, areaPanels, setPanel, toggleFullScreenPanel }: PanelAreaProps): JSX.Element {
   // Don't look at panel.active directly, as many might have it set
   const activePanel = areaPanels.find((panel) => panel.active) ?? areaPanels.find((panel) => !panel.hidden)
   const Component = activePanel ? panels[activePanel.panel] : null
@@ -40,7 +41,13 @@ export function PanelArea({ area, areaPanels, setPanel }: PanelAreaProps): JSX.E
           {areaPanels
             .filter((panel) => !panel.hidden || panel.active)
             .map((panel) => (
-              <Tab key={panel.panel} active={activePanel === panel} onClick={() => setPanel(area, panel.panel)}>
+              <Tab
+                key={panel.panel}
+                active={activePanel === panel}
+                onClick={() => setPanel(area, panel.panel)}
+                onDoubleClick={() => toggleFullScreenPanel(panel.panel)}
+                className="select-none"
+              >
                 {panel.label ?? pascalCaseToTitleCase(panel.panel)}
               </Tab>
             ))}
@@ -56,7 +63,7 @@ export function Frame(props: FrameSceneProps) {
   const id = parseInt(props.id)
   const frameLogicProps = { id }
   const { frame, panelsWithConditions: panels } = useValues(frameLogic(frameLogicProps))
-  const { setPanel } = useActions(frameLogic(frameLogicProps))
+  const { setPanel, toggleFullScreenPanel } = useActions(frameLogic(frameLogicProps))
   const { redeployFrame, restartFrame, refreshFrame } = useActions(framesModel)
 
   const onLayout = (sizes: number[]) => {
@@ -89,13 +96,23 @@ export function Frame(props: FrameSceneProps) {
                 <PanelGroup direction="vertical">
                   {panels.TopLeft.length > 0 ? (
                     <Panel defaultSize={60}>
-                      <PanelArea area={Area.TopLeft} areaPanels={panels.TopLeft} setPanel={setPanel} />
+                      <PanelArea
+                        area={Area.TopLeft}
+                        areaPanels={panels.TopLeft}
+                        setPanel={setPanel}
+                        toggleFullScreenPanel={toggleFullScreenPanel}
+                      />
                     </Panel>
                   ) : null}
                   {panels.TopLeft.length > 0 && panels.BottomLeft.length > 0 ? <Handle direction="vertical" /> : null}
                   {panels.BottomLeft.length > 0 ? (
                     <Panel defaultSize={40}>
-                      <PanelArea area={Area.BottomLeft} areaPanels={panels.BottomLeft} setPanel={setPanel} />
+                      <PanelArea
+                        area={Area.BottomLeft}
+                        areaPanels={panels.BottomLeft}
+                        setPanel={setPanel}
+                        toggleFullScreenPanel={toggleFullScreenPanel}
+                      />
                     </Panel>
                   ) : null}
                 </PanelGroup>
@@ -110,13 +127,23 @@ export function Frame(props: FrameSceneProps) {
                 <PanelGroup direction="vertical" onLayout={onLayout}>
                   {panels.TopRight.length > 0 ? (
                     <Panel defaultSize={60}>
-                      <PanelArea area={Area.TopRight} areaPanels={panels.TopRight} setPanel={setPanel} />
+                      <PanelArea
+                        area={Area.TopRight}
+                        areaPanels={panels.TopRight}
+                        setPanel={setPanel}
+                        toggleFullScreenPanel={toggleFullScreenPanel}
+                      />
                     </Panel>
                   ) : null}
                   {panels.TopRight.length > 0 && panels.BottomRight.length > 0 ? <Handle direction="vertical" /> : null}
                   {panels.BottomRight.length > 0 ? (
                     <Panel defaultSize={40}>
-                      <PanelArea area={Area.BottomRight} areaPanels={panels.BottomRight} setPanel={setPanel} />
+                      <PanelArea
+                        area={Area.BottomRight}
+                        areaPanels={panels.BottomRight}
+                        setPanel={setPanel}
+                        toggleFullScreenPanel={toggleFullScreenPanel}
+                      />
                     </Panel>
                   ) : null}
                 </PanelGroup>

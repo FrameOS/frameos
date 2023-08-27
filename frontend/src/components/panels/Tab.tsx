@@ -5,8 +5,9 @@ interface TabProps {
   children: React.ReactNode
   className?: string
   onClick?: () => void
+  onDoubleClick?: () => void
 }
-export function Tab({ children, active, className, onClick }: TabProps): JSX.Element {
+export function Tab({ children, active, className, onClick, onDoubleClick }: TabProps): JSX.Element {
   return (
     <div
       className={clsx(
@@ -19,6 +20,7 @@ export function Tab({ children, active, className, onClick }: TabProps): JSX.Ele
       )}
       title={typeof children === 'string' ? children : undefined}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
     >
       {children}
     </div>
