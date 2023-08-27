@@ -55,16 +55,14 @@ export function PanelArea({ area, areaPanels, setPanel }: PanelAreaProps): JSX.E
 export function Frame(props: FrameSceneProps) {
   const id = parseInt(props.id)
   const frameLogicProps = { id }
-  const { frame, panels } = useValues(frameLogic(frameLogicProps))
+  const { frame, panelsWithConditions: panels } = useValues(frameLogic(frameLogicProps))
   const { setPanel } = useActions(frameLogic(frameLogicProps))
   const { redeployFrame, restartFrame, refreshFrame } = useActions(framesModel)
 
   const onLayout = (sizes: number[]) => {
     // document.cookie = `react-resizable-panels:layout=${JSON.stringify(sizes)}`;
-    console.log(sizes)
+    // console.log(sizes)
   }
-
-  console.log(panels)
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>

@@ -88,6 +88,19 @@ export const frameLogic = kea<frameLogicType>([
     selectedNode: [(s) => [s.nodes], (nodes) => nodes.find((node) => node.selected) ?? null],
     selectedNodeId: [(s) => [s.selectedNode], (node) => node?.id ?? null],
     selectedApp: [(s) => [s.selectedNode], (node): AppConfig => node?.data.app ?? null],
+    panelsWithConditions: [
+      (s) => [s.panels, s.selectedNode],
+      (panels, selectedNode) =>
+        Object.fromEntries(
+          Object.entries(panels).map(([area, panels]) => [
+            area,
+            panels.map((panel) => ({
+              ...panel,
+              hidden: panel.panel === Panel.Selection && !selectedNode,
+            })),
+          ])
+        ),
+    ],
   })),
   subscriptions(({ actions }) => ({
     frame: (value, oldValue) => {
@@ -165,13 +178,15 @@ export const frameLogic = kea<frameLogicType>([
   })),
   subscriptions(({ actions, cache, values }) => ({
     selectedNode: (selectedNode, oldSelectedNode) => {
-      console.log({ selectedNode, oldSelectedNode })
       if (selectedNode) {
         for (const [area, panels] of Object.entries(values.panels)) {
           for (const panel of panels) {
             if (panel.panel === Panel.Selection) {
+              const currentPanel = panels.find((panel) => panel.active)?.panel
+              if (currentPanel !== Panel.Selection) {
+                cache.panelBeforeSelection = currentPanel
+              }
               actions.setPanel(area as Area, Panel.Selection, selectedNode.data?.app?.name)
-              cache.panelBeforeSelection = panels.find((panel) => panel.active)?.panel
               return
             }
           }
