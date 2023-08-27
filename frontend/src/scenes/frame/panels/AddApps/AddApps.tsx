@@ -15,6 +15,7 @@ export function AddApps() {
   }
   return (
     <div className="space-y-2">
+      <div>Drag the boxes below onto the diagram</div>
       {Object.entries(apps).map(([keyword, { name, description }]) => (
         <Box className="bg-gray-900 px-3 py-2 dndnode" draggable onDragStart={(event) => onDragStart(event, keyword)}>
           <H6>{name}</H6>

@@ -1,3 +1,7 @@
+import { frameLogic } from '../../frameLogic'
+import { useValues } from 'kea'
+
 export function Selection() {
-  return <>Hello</>
+  const { selectedApp } = useValues(frameLogic)
+  return <>Hello {selectedApp?.name}</>
 }

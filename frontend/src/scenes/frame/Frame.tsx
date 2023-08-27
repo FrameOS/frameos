@@ -23,6 +23,11 @@ interface PanelAreaProps {
   setPanel: (area: Area, panel: string) => void
 }
 
+function pascalCaseToTitleCase(pascalCase: string): string {
+  const words = pascalCase.replace(/([a-z])([A-Z])/g, '$1 $2').split(' ')
+  return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
+}
+
 export function PanelArea({ area, areaPanels, setPanel }: PanelAreaProps): JSX.Element {
   // Don't look at panel.active directly, as many might have it set
   const activePanel = areaPanels.find((panel) => panel.active) ?? areaPanels.find((panel) => !panel.hidden)
@@ -36,7 +41,7 @@ export function PanelArea({ area, areaPanels, setPanel }: PanelAreaProps): JSX.E
             .filter((panel) => !panel.hidden || panel.active)
             .map((panel) => (
               <Tab key={panel.panel} active={activePanel === panel} onClick={() => setPanel(area, panel.panel)}>
-                {panel.label ?? panel.panel}
+                {panel.label ?? pascalCaseToTitleCase(panel.panel)}
               </Tab>
             ))}
         </Tabs>

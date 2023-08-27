@@ -1,4 +1,4 @@
-import { actions, kea, key, path, props, reducers, selectors } from 'kea'
+import { actions, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { framesModel } from '../../models/framesModel'
 import { applyEdgeChanges, applyNodeChanges, addEdge, MarkerType } from 'reactflow'
 import type { Node } from '@reactflow/core/dist/esm/types/nodes'
@@ -30,7 +30,7 @@ export const frameLogic = kea<frameLogicType>([
   props({} as FrameLogicProps),
   key((props) => props.id),
   actions({
-    setPanel: (area: Area, panel: string) => ({ area, panel }),
+    setPanel: (area: Area, panel: string, label?: string) => ({ area, panel, label }),
     setNodes: (nodes: Node[]) => ({ nodes }),
     setEdges: (edges: Edge[]) => ({ edges }),
     addEdge: (edge: Edge | Connection) => ({ edge }),
@@ -42,9 +42,13 @@ export const frameLogic = kea<frameLogicType>([
     panels: [
       DEFAULT_LAYOUT as Record<Area, PanelWithMetadata[]>,
       {
-        setPanel: (state, { area, panel }) => {
+        setPanel: (state, { area, panel, label }) => {
           const newPanels = { ...state }
-          newPanels[area] = newPanels[area].map((p) => ({ ...p, active: p.panel === panel }))
+          newPanels[area] = newPanels[area].map((p) => ({
+            ...p,
+            active: p.panel === panel,
+            label: p.panel === panel && label ? label : p.label,
+          }))
           return equal(state, newPanels) ? state : newPanels
         },
       },
@@ -83,6 +87,7 @@ export const frameLogic = kea<frameLogicType>([
     frame: [(s) => [framesModel.selectors.frames, s.id], (frames, id) => frames[id] || null],
     selectedNode: [(s) => [s.nodes], (nodes) => nodes.find((node) => node.selected) ?? null],
     selectedNodeId: [(s) => [s.selectedNode], (node) => node?.id ?? null],
+    selectedApp: [(s) => [s.selectedNode], (node): AppConfig => node?.data.app ?? null],
   })),
   subscriptions(({ actions }) => ({
     frame: (value, oldValue) => {
@@ -155,6 +160,41 @@ export const frameLogic = kea<frameLogicType>([
             },
           },
         ])
+      }
+    },
+  })),
+  subscriptions(({ actions, cache, values }) => ({
+    selectedNode: (selectedNode, oldSelectedNode) => {
+      console.log({ selectedNode, oldSelectedNode })
+      if (selectedNode) {
+        for (const [area, panels] of Object.entries(values.panels)) {
+          for (const panel of panels) {
+            if (panel.panel === Panel.Selection) {
+              actions.setPanel(area as Area, Panel.Selection, selectedNode.data?.app?.name)
+              cache.panelBeforeSelection = panels.find((panel) => panel.active)?.panel
+              return
+            }
+          }
+        }
+      } else {
+        for (const [area, panels] of Object.entries(values.panels)) {
+          if (panels.find((panel) => panel.panel === Panel.Selection)) {
+            if (
+              cache.panelBeforeSelection &&
+              cache.panelBeforeSelection !== Panel.Selection &&
+              panels.find((panel) => panel.panel === cache.panelBeforeSelection)
+            ) {
+              actions.setPanel(area as Area, cache.panelBeforeSelection)
+              return
+            }
+
+            const first = panels.find((panel) => !panel.hidden)?.panel
+            if (first) {
+              actions.setPanel(area as Area, first)
+            }
+            return
+          }
+        }
       }
     },
   })),
