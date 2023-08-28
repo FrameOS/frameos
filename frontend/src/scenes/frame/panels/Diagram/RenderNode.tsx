@@ -22,7 +22,7 @@ export function RenderNode({ data, isConnectable }: NodeProps): JSX.Element {
           <div className="flex items-center space-x-1">
             <Handle
               type="target"
-              position={Position.Right}
+              position={Position.Left}
               id="a"
               style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
               isConnectable={isConnectable}
