@@ -1,4 +1,5 @@
 import traceback
+import os
 
 from flask_socketio import SocketIO
 from threading import Lock
@@ -7,7 +8,9 @@ from PIL import Image, ImageChops
 from .logger import Logger
 from .config import Config
 from .app_handler import AppHandler
-from .image_utils import scale_cover, scale_contain, scale_stretch, scale_center
+from .image_utils import scale_cover, scale_contain, scale_stretch, scale_center, \
+    image_to_framebuffer, get_framebuffer_info, try_to_disable_cursor_blinking
+
 
 class ImageHandler:
     def __init__(self, logger: Logger, socketio: SocketIO, config: Config, app_handler: AppHandler):
@@ -28,12 +31,27 @@ class ImageHandler:
             self.config.height = self.inky.resolution[1]
             self.config.color = self.inky.colour
         except Exception as e:
-            logger.log({ 'event': '@frame:device_error', "device": 'inky', 'error': str(e), 'info': "Starting in WEB kiosk only mode." })
             self.inky = None
-            self.config.device = 'web_only'
-            if self.config.width is None or self.config.height is None:
-                self.config.width = 1920
-                self.config.height = 1080
+            logger.log({'event': '@frame:device_error', "device": 'inky', 'error': str(e), })
+
+            try:
+                if os.access('/dev/fb0', os.W_OK):
+                    width, height, bits_per_pixel = get_framebuffer_info('/dev/fb0')
+                    self.config.device = 'framebuffer'
+                    self.config.width = width
+                    self.config.height = height
+
+                    try_to_disable_cursor_blinking()
+                else:
+                    raise Exception("No framebuffer device found.")
+            except Exception as e:
+                self.config.device = 'web_only'
+                logger.log({'event': '@frame:device_error', "device": 'framebuffer', 'error': str(e),
+                            'info': "Starting in WEB only mode."})
+
+                if self.config.width is None or self.config.height is None:
+                    self.config.width = 1920
+                    self.config.height = 1080
 
         config = self.config.to_dict()
         config.pop('server_host', None)
@@ -49,6 +67,8 @@ class ImageHandler:
 
             self.inky.set_image(image, saturation=1)
             self.inky.show()
+        elif self.config.device == 'framebuffer':
+            image_to_framebuffer(image)
 
     def are_images_equal(self, img1: Image, img2: Image) -> bool:
         if img1.size != img2.size:

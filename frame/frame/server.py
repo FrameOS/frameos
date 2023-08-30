@@ -75,4 +75,5 @@ class Server:
         reset_event: Event = Event()
         scheduler: Scheduler = Scheduler(image_handler=self.image_handler, reset_event=reset_event, logger=self.logger, config=self.config)
         self.image_handler.refresh_image('bootup')
+        self.logger.log({'event': '@frame/kiosk:start', 'message': 'Starting web kiosk server on port 8999'})
         self.socketio.run(self.app, host='0.0.0.0', port=8999, allow_unsafe_werkzeug=True)

@@ -1,11 +1,10 @@
 import json
 import traceback
-import traceback
 import os
 import importlib.util
 import inspect
 
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List
 from PIL import Image
 
 from apps import App, ProcessImagePayload
