@@ -2,13 +2,13 @@ import { afterMount, kea, path } from 'kea'
 
 import type { appsModelType } from './appsModelType'
 import { loaders } from 'kea-loaders'
-import { AppConfig } from '../types'
+import { App } from '../types'
 
 export const appsModel = kea<appsModelType>([
   path(['src', 'models', 'appsModel']),
   loaders(({ values }) => ({
     apps: [
-      {} as Record<string, AppConfig>,
+      {} as Record<string, App>,
       {
         loadApps: async () => {
           try {
@@ -17,7 +17,7 @@ export const appsModel = kea<appsModelType>([
               throw new Error('Failed to fetch frames')
             }
             const data = await response.json()
-            return data.apps as Record<string, AppConfig>
+            return data.apps as Record<string, App>
           } catch (error) {
             console.error(error)
             return values.apps

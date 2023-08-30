@@ -32,7 +32,7 @@ export const frameSettingsLogic = kea<frameSettingsLogicType>([
             const value = (frame as any)[key]
             formData.append(key, value === null || value === undefined ? '' : value)
           })
-          const response = await fetch(`/api/frames/${values.id}/update`, {
+          const response = await fetch(`/api/frames/${values.id}`, {
             method: 'POST',
             body: formData,
           })

@@ -1,24 +1,18 @@
 import { actions, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { framesModel } from '../../models/framesModel'
-import { applyEdgeChanges, applyNodeChanges, addEdge, MarkerType } from 'reactflow'
-import type { Node } from '@reactflow/core/dist/esm/types/nodes'
-import type { Edge } from '@reactflow/core/dist/esm/types/edges'
-import type { Connection } from '@reactflow/core/dist/esm/types/general'
-import type { EdgeChange, NodeChange } from '@reactflow/core/dist/esm/types/changes'
 import equal from 'fast-deep-equal'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
-import { AppConfig, Area, Panel, PanelWithMetadata } from '../../types'
-import { arrangeNodes } from './panels/Diagram/arrangeNodes'
+import { Area, FrameType, Panel, PanelWithMetadata } from '../../types'
+import { forms } from 'kea-forms'
 
 export interface FrameLogicProps {
   id: number
 }
 
 const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
-  [Area.TopLeft]: [{ panel: Panel.Diagram, active: true, hidden: false }],
+  [Area.TopLeft]: [{ panel: Panel.Diagram, active: true, hidden: false, metadata: { sceneId: 'default' } }],
   [Area.TopRight]: [
-    { panel: Panel.Selection, active: false, hidden: true },
     { panel: Panel.AddApps, active: true, hidden: false },
     { panel: Panel.FrameDetails, active: false, hidden: false },
     { panel: Panel.FrameSettings, active: false, hidden: false },
@@ -32,17 +26,68 @@ export const frameLogic = kea<frameLogicType>([
   key((props) => props.id),
   actions({
     setPanel: (area: Area, panel: string, label?: string) => ({ area, panel, label }),
-    setNodes: (nodes: Node[]) => ({ nodes }),
-    setEdges: (edges: Edge[]) => ({ edges }),
-    addEdge: (edge: Edge | Connection) => ({ edge }),
-    onNodesChange: (changes: NodeChange[]) => ({ changes }),
-    onEdgesChange: (changes: EdgeChange[]) => ({ changes }),
-    deselectNode: true,
     toggleFullScreenPanel: (panel: Panel) => ({ panel }),
-    rearrangeCurrentScene: true,
-    fitDiagramView: true,
+    updateScene: (sceneId: string, scene: any) => ({ sceneId, scene }),
+    saveFrame: true,
+    refreshFrame: true,
+    restartFrame: true,
+    redeployFrame: true,
   }),
+  forms(({ actions, values }) => ({
+    frameForm: {
+      options: {
+        showErrorsOnTouch: true,
+      },
+      defaults: {} as FrameType,
+      submit: async (frame, breakpoint) => {
+        const formData = new FormData()
+        formData.append('scenes', JSON.stringify(frame.scenes))
+        if (values.nextAction) {
+          formData.append('next_action', values.nextAction)
+        }
+        const response = await fetch(`/api/frames/${values.id}`, {
+          method: 'POST',
+          body: formData,
+        })
+        if (!response.ok) {
+          throw new Error('Failed to update frame')
+        }
+      },
+      errors: (frame) => {
+        // const newArray: Partial<AppConfig>[] = appsArray
+        //   .map((AppConfig) => {
+        //     const app = appsModel.values.apps[AppConfig.keyword]
+        //     if (!app) {
+        //       return null
+        //     }
+        //     return {
+        //       config: Object.fromEntries(
+        //         app?.fields
+        //           ?.filter(({ name, required }) => required && !AppConfig.config[name])
+        //           .map(({ name }) => [name, 'This field is required'])
+        //       ),
+        //     }
+        //   })
+        //   .filter((a): a is AppConfig => !!a)
+        // return {
+        //   appsArray: newArray,
+        // }\
+        return {}
+      },
+    },
+  })),
+
   reducers({
+    currentScene: ['default', {}],
+    nextAction: [
+      null as string | null,
+      {
+        saveFrame: () => null,
+        refreshFrame: () => 'refresh',
+        restartFrame: () => 'restart',
+        redeployFrame: () => 'redeploy',
+      },
+    ],
     panels: [
       DEFAULT_LAYOUT as Record<Area, PanelWithMetadata[]>,
       {
@@ -57,50 +102,18 @@ export const frameLogic = kea<frameLogicType>([
         },
       },
     ],
-    nodes: [
-      [] as Node[],
-      {
-        setNodes: (_, { nodes }) => nodes,
-        onNodesChange: (state, { changes }) => {
-          const newNodes = applyNodeChanges(changes, state)
-          return equal(state, newNodes) ? state : newNodes
-        },
-        deselectNode: (state) => {
-          const newNodes = state.map((node) => ({ ...node, selected: false }))
-          return equal(state, newNodes) ? state : newNodes
-        },
-      },
-    ],
-    edges: [
-      [] as Edge[],
-      {
-        setEdges: (_, { edges }) => edges,
-        onEdgesChange: (state, { changes }) => {
-          const newEdges = applyEdgeChanges(changes, state)
-          return equal(state, newEdges) ? state : newEdges
-        },
-        addEdge: (state, { edge }) => {
-          const newEdges = addEdge(edge, state)
-          return equal(state, newEdges) ? state : newEdges
-        },
-      },
-    ],
     fullScreenPanel: [
       null as Panel | null,
       {
         toggleFullScreenPanel: (state, { panel }) => (state === panel ? null : panel),
       },
     ],
-    fitViewCounter: [0, { fitDiagramView: (state) => state + 1 }],
   }),
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
     frame: [(s) => [framesModel.selectors.frames, s.id], (frames, id) => frames[id] || null],
-    selectedNode: [(s) => [s.nodes], (nodes) => nodes.find((node) => node.selected) ?? null],
-    selectedNodeId: [(s) => [s.selectedNode], (node) => node?.id ?? null],
-    selectedApp: [(s) => [s.selectedNode], (node): AppConfig => node?.data.app ?? null],
     panelsWithConditions: [
-      (s) => [s.panels, s.selectedNode, s.fullScreenPanel],
+      (s) => [s.panels, () => null, s.fullScreenPanel], // s.selectedNode
       (panels, selectedNode, fullScreenPanel): Record<Area, PanelWithMetadata[]> =>
         fullScreenPanel
           ? {
@@ -109,147 +122,20 @@ export const frameLogic = kea<frameLogicType>([
               [Area.BottomLeft]: [],
               [Area.BottomRight]: [],
             }
-          : (Object.fromEntries(
-              Object.entries(panels).map(([area, panels]) => [
-                area,
-                panels.map((panel) => ({
-                  ...panel,
-                  hidden: panel.panel === Panel.Selection && !selectedNode,
-                })),
-              ])
-            ) as Record<Area, PanelWithMetadata[]>),
+          : panels,
     ],
   })),
   subscriptions(({ actions }) => ({
     frame: (value, oldValue) => {
-      if (value && JSON.stringify(value.apps) !== JSON.stringify(oldValue?.apps)) {
-        const apps: AppConfig[] = value.apps || []
-        actions.setNodes(
-          apps
-            .map(
-              (app, index) =>
-                ({
-                  id: String(index + 1),
-                  type: 'app',
-                  position: { x: -9999, y: -9999 },
-                  data: { label: app.name, app },
-                } as Node)
-            )
-            .concat([
-              {
-                id: '0',
-                type: 'render',
-                position: { x: -9999, y: -9999 },
-                data: { label: 'Render Frame' },
-              } as Node,
-            ])
-        )
-        actions.setEdges([
-          {
-            id: 'e1-2',
-            source: '1',
-            target: '2',
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              width: 20,
-              height: 20,
-              color: '#FF0072',
-            },
-            style: {
-              strokeWidth: 2,
-              stroke: '#FF0072',
-            },
-          },
-          {
-            id: 'e2-3',
-            source: '2',
-            target: '3',
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              width: 20,
-              height: 20,
-              color: '#FF0072',
-            },
-            style: {
-              strokeWidth: 2,
-              stroke: '#FF0072',
-            },
-          },
-          {
-            id: 'e3-0',
-            source: '3',
-            target: '0',
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              width: 20,
-              height: 20,
-              color: '#FF0072',
-            },
-            style: {
-              strokeWidth: 2,
-              stroke: '#FF0072',
-            },
-          },
-        ])
-      }
-    },
-    nodes: (nodes: Node[]) => {
-      if (nodes.length === 0) {
-        return
-      }
-      // Check that all nodes have a valid size, but are at the hidden position
-      for (const node of nodes) {
-        if (node.position.x !== -9999 || node.position.y !== -9999 || !node.width || !node.height) {
-          return
-        }
-      }
-      actions.rearrangeCurrentScene()
-    },
-  })),
-  subscriptions(({ actions, cache, values }) => ({
-    selectedNode: (selectedNode, oldSelectedNode) => {
-      if (selectedNode) {
-        for (const [area, panels] of Object.entries(values.panels)) {
-          for (const panel of panels) {
-            if (panel.panel === Panel.Selection) {
-              const currentPanel = panels.find((panel) => panel.active)?.panel
-              if (currentPanel !== Panel.Selection) {
-                cache.panelBeforeSelection = currentPanel
-              }
-              actions.setPanel(area as Area, Panel.Selection, selectedNode.data?.app?.name)
-              return
-            }
-          }
-        }
-      } else {
-        for (const [area, panels] of Object.entries(values.panels)) {
-          if (panels.find((panel) => panel.panel === Panel.Selection)) {
-            const currentPanel = panels.find((panel) => panel.active)?.panel
-            if (currentPanel === Panel.Selection) {
-              if (
-                cache.panelBeforeSelection &&
-                cache.panelBeforeSelection !== Panel.Selection &&
-                panels.find((panel) => panel.panel === cache.panelBeforeSelection)
-              ) {
-                actions.setPanel(area as Area, cache.panelBeforeSelection)
-                return
-              }
-
-              const first = panels.find((panel) => !panel.hidden)?.panel
-              if (first) {
-                actions.setPanel(area as Area, first)
-              }
-              return
-            }
-          }
-        }
+      if (value && JSON.stringify(value.scenes) !== JSON.stringify(oldValue?.scenes)) {
+        actions.resetFrameForm(value)
       }
     },
   })),
-  listeners(({ actions, values }) => ({
-    rearrangeCurrentScene: () => {
-      actions.setNodes(arrangeNodes(values.nodes, values.edges))
-      actions.fitDiagramView()
-    },
+  listeners(({ actions }) => ({
+    saveFrame: () => actions.submitFrameForm(),
+    refreshFrame: () => actions.submitFrameForm(),
+    redeployFrame: () => actions.submitFrameForm(),
+    restartFrame: () => actions.submitFrameForm(),
   })),
 ])

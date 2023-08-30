@@ -19,7 +19,6 @@ export interface FrameType {
   interval: number
   scaling_mode: string
   background_color: string
-  apps?: AppConfig[]
   scenes?: FrameScene[]
 }
 
@@ -42,16 +41,20 @@ export interface ConfigField {
   placeholder?: string
 }
 
-export interface AppConfigUninstalled {
+export interface App {
   name: string
   description: string
   version: string
   fields: ConfigField[]
 }
 
-export interface AppConfig extends AppConfigUninstalled {
+export interface AppNodeData {
   keyword: string
   config: Record<string, any>
+}
+
+export interface EventNodeData {
+  keyword: string
 }
 
 export interface FrameScene {
@@ -70,7 +73,6 @@ export enum Area {
 
 export enum Panel {
   Diagram = 'Diagram',
-  Selection = 'Selection',
   AddApps = 'AddApps',
   FrameDetails = 'FrameDetails',
   FrameSettings = 'FrameSettings',

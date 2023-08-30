@@ -1,12 +1,10 @@
 import { useValues } from 'kea'
 import { NodeProps, Handle, Position } from 'reactflow'
-import { frameLogic } from '../../frameLogic'
-import { AppConfig } from '../../../../types'
 import clsx from 'clsx'
-import { Reveal, RevealDots } from '../../../../components/Reveal'
+import { diagramLogic } from './diagramLogic'
 
 export function EventNode({ data, id, isConnectable }: NodeProps): JSX.Element {
-  const { selectedNodeId } = useValues(frameLogic)
+  const { selectedNodeId } = useValues(diagramLogic)
   const { keyword } = data
 
   return (
@@ -27,11 +25,10 @@ export function EventNode({ data, id, isConnectable }: NodeProps): JSX.Element {
             <span>&nbsp;</span>
           </div>
           <div className="flex items-center space-x-1">
-            <span>next step</span>
             <Handle
               type="source"
               position={Position.Right}
-              id="a"
+              id="next"
               style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
               isConnectable={isConnectable}
             />

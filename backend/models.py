@@ -108,8 +108,8 @@ def new_frame(frame_host: str, server_host: str) -> Frame:
         server_port=int(server_port), 
         server_api_key=secrets.token_hex(32), 
         status="uninitialized",
-        apps=[{ **app_configs['unsplash'], 'keyword': 'unsplash', 'config': {} }],
-        scenes=[{ 'id': uuid.uuid4(), 'name': 'Default Scene', 'nodes': [], 'edges': [] }],
+        apps=[],
+        scenes=[create_default_scene()],
         scaling_mode="cover",
         background_color="white",
     )
@@ -193,3 +193,49 @@ def process_log(frame: Frame, log: dict):
         for key, value in changes.items():
             setattr(frame, key, value)
         update_frame(frame)
+
+def create_default_scene() -> Dict:
+    event_uuid = str(uuid.uuid4())
+    unsplash_uuid = str(uuid.uuid4())
+    edge_uuid = str(uuid.uuid4())
+    return {
+        "_id": "default",
+        "edges": [
+            {
+                "id": edge_uuid,
+                "source": event_uuid,
+                "sourceHandle": "next",
+                "target": unsplash_uuid,
+                "targetHandle": "prev"
+            }
+        ],
+        "nodes": [
+            {
+                "id": event_uuid,
+                "type": "event",
+                "position": {
+                    "x": 259.18108974358967,
+                    "y": 379.3192307692308
+                },
+                "data": {
+                    "keyword": "render"
+                },
+                "width": 132,
+                "height": 72
+            },
+            {
+                "id": unsplash_uuid,
+                "type": "app",
+                "position": {
+                    "x": 598.6810897435896,
+                    "y": 412.8192307692308
+                },
+                "data": {
+                    "keyword": "unsplash",
+                    "config": {}
+                },
+                "width": 133,
+                "height": 102
+            }
+        ]
+    }

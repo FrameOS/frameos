@@ -1,15 +1,15 @@
 import { useValues } from 'kea'
 import { NodeProps, Handle, Position } from 'reactflow'
-import { frameLogic } from '../../frameLogic'
-import { AppConfig } from '../../../../types'
+import { App, AppNodeData } from '../../../../types'
 import clsx from 'clsx'
-import { Reveal, RevealDots } from '../../../../components/Reveal'
+import { RevealDots } from '../../../../components/Reveal'
+import { diagramLogic } from './diagramLogic'
 
-export function AppNode({ data, id, isConnectable }: NodeProps): JSX.Element {
-  const { nodes, selectedNodeId } = useValues(frameLogic)
+export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JSX.Element {
+  const { apps, selectedNodeId } = useValues(diagramLogic)
 
-  const app: AppConfig = data.app
-  const fields = Object.fromEntries((app.fields || []).map((field) => [field.name, field]))
+  const app: App | undefined = apps[data.keyword]
+  const fields = Object.fromEntries((app?.fields || []).map((field) => [field.name, field]))
 
   return (
     <div
@@ -27,6 +27,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps): JSX.Element {
             <Handle
               type="target"
               position={Position.Left}
+              id="prev"
               style={{ position: 'relative', transform: 'none', left: 0, top: 0, background: 'white' }}
               onConnect={(params) => console.log('handle onConnect', params)}
               isConnectable={isConnectable}
@@ -34,23 +35,30 @@ export function AppNode({ data, id, isConnectable }: NodeProps): JSX.Element {
             <span>&nbsp;</span>
           </div>
           <div className="flex items-center space-x-1">
-            <span>next step</span>
             <Handle
               type="source"
               position={Position.Right}
-              id="a"
+              id="next"
               style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
               isConnectable={isConnectable}
             />
           </div>
         </div>
-        {app.config ? (
+        {app?.fields ? (
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5">
             <tbody>
-              {Object.entries(app.config).map(([key, value]) => (
-                <tr key={key}>
-                  <td className="font-sm text-indigo-200">{key}</td>
-                  <td>{fields[key]?.secret ? <RevealDots /> : value}</td>
+              {app?.fields.map((field, i) => (
+                <tr key={i}>
+                  <td className="font-sm text-indigo-200">{field.name}</td>
+                  <td>
+                    {field.secret ? (
+                      <RevealDots />
+                    ) : !(field.name in data.config) ? (
+                      String(field.value)
+                    ) : (
+                      String(data.config[field.name])
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

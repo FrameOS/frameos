@@ -4,7 +4,6 @@ import { frameHost } from '../../decorators/frame'
 import { Panel, PanelGroup } from 'react-resizable-panels'
 import { Spinner } from '../../components/Spinner'
 import { Button } from '../../components/Button'
-import { framesModel } from '../../models/framesModel'
 import { Header } from '../../components/Header'
 import { Handle } from '../../components/panels/Handle'
 import { Area } from '../../types'
@@ -17,14 +16,10 @@ interface FrameSceneProps {
 export function Frame(props: FrameSceneProps) {
   const id = parseInt(props.id)
   const frameLogicProps = { id }
-  const { frame, panelsWithConditions: panels } = useValues(frameLogic(frameLogicProps))
-  const { setPanel, toggleFullScreenPanel } = useActions(frameLogic(frameLogicProps))
-  const { redeployFrame, restartFrame, refreshFrame } = useActions(framesModel)
-
-  const onLayout = (sizes: number[]) => {
-    // document.cookie = `react-resizable-panels:layout=${JSON.stringify(sizes)}`;
-    // console.log(sizes)
-  }
+  const { frame, panelsWithConditions: panels, frameFormChanged } = useValues(frameLogic(frameLogicProps))
+  const { setPanel, toggleFullScreenPanel, saveFrame, refreshFrame, restartFrame, redeployFrame } = useActions(
+    frameLogic(frameLogicProps)
+  )
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -34,21 +29,21 @@ export function Frame(props: FrameSceneProps) {
             title="FrameOS"
             subtitle={!frame ? `Loading frame ${props.id}...` : frameHost(frame)}
             buttons={[
-              // <Button color="light-gray" type="button" onClick={() => saveFrame()}>
-              //   Save
-              // </Button>,
-              <Button color="light-gray" type="button" onClick={() => refreshFrame(frame.id)}>
-                Refresh
+              <Button color={frameFormChanged ? 'teal' : 'light-gray'} type="button" onClick={() => saveFrame()}>
+                Save
               </Button>,
-              <Button color="light-gray" type="button" onClick={() => restartFrame(frame.id)}>
-                Restart
+              <Button color="light-gray" type="button" onClick={() => refreshFrame()}>
+                &&nbsp;Refresh
               </Button>,
-              <Button color="light-gray" type="button" onClick={() => redeployFrame(frame.id)}>
-                Redeploy
+              <Button color="light-gray" type="button" onClick={() => restartFrame()}>
+                &&nbsp;Restart
+              </Button>,
+              <Button color="light-gray" type="button" onClick={() => redeployFrame()}>
+                &&nbsp;Redeploy
               </Button>,
             ]}
           />
-          <PanelGroup direction="horizontal" onLayout={onLayout} units="percentages" className="flex-1 p-4">
+          <PanelGroup direction="horizontal" units="percentages" className="flex-1 p-4">
             {panels.TopLeft.length > 0 || panels.BottomLeft.length > 0 ? (
               <Panel>
                 <PanelGroup direction="vertical">
@@ -82,7 +77,7 @@ export function Frame(props: FrameSceneProps) {
             ) : null}
             {panels.TopRight.length > 0 || panels.BottomRight.length > 0 ? (
               <Panel defaultSize={33}>
-                <PanelGroup direction="vertical" onLayout={onLayout}>
+                <PanelGroup direction="vertical">
                   {panels.TopRight.length > 0 ? (
                     <Panel defaultSize={60}>
                       <PanelArea

@@ -1,13 +1,11 @@
-import { useActions, useValues } from 'kea'
+import { useValues } from 'kea'
 import { appsModel } from '../../../../models/appsModel'
 import { frameLogic } from '../../frameLogic'
-import { appsLogic } from '../../appsLogic'
 import { Box } from '../../../../components/Box'
 import { H6 } from '../../../../components/H6'
 
 export function AddApps() {
   const { apps } = useValues(appsModel)
-  const { id } = useValues(frameLogic)
   const onDragStart = (event: any, type: 'app' | 'event', keyword: string) => {
     event.dataTransfer.setData('application/reactflow', JSON.stringify({ type, keyword }))
     event.dataTransfer.effectAllowed = 'move'
@@ -26,13 +24,14 @@ export function AddApps() {
         </Box>
       ))}
 
+      <H6>Events</H6>
       <Box
         className="bg-gray-900 px-3 py-2 dndnode"
         draggable
         onDragStart={(event) => onDragStart(event, 'event', 'render')}
       >
         <H6>Event: Render</H6>
-        <div className="text-sm">When a new render is requested</div>
+        <div className="text-sm">When a scene render is requested</div>
       </Box>
 
       <Box
@@ -41,7 +40,7 @@ export function AddApps() {
         onDragStart={(event) => onDragStart(event, 'event', 'button_press')}
       >
         <H6>Event: Button Press</H6>
-        <div className="text-sm">When a button is pressed</div>
+        <div className="text-sm">When a button is pressed (not implemented yet)</div>
       </Box>
     </div>
   )

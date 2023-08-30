@@ -57,37 +57,6 @@ def reset_frame(id: int):
     tasks.reset_frame(id)
     return 'Success', 200
 
-@app.route('/api/frames/<int:id>/update', methods=['POST'])
-def update_frame(id: int):
-    frame = models.Frame.query.get_or_404(id)
-    frame.frame_host = request.form['frame_host']
-    frame.frame_port = int(request.form['frame_port'] or '8999')
-    frame.ssh_user = request.form['ssh_user']
-    frame.ssh_pass = request.form['ssh_pass'] if request.form['ssh_pass'] != '' else None
-    frame.ssh_port = int(request.form['ssh_port'] or '22')
-    frame.server_host = request.form['server_host']
-    frame.server_port = int(request.form['server_port'] or '8999')
-    frame.server_api_key = request.form['server_api_key']
-    frame.width = int(request.form['width']) if request.form['width'] != '' else None
-    frame.height = int(request.form['height']) if request.form['height'] != '' else None
-    frame.interval = int(request.form['interval']) if request.form['interval'] != '' else None
-    frame.scaling_mode = request.form['scaling_mode']
-    frame.background_color = request.form['background_color']
-    models.update_frame(frame)
-    tasks.restart_frame(frame.id)
-    return 'Success', 200
-
-@app.route('/api/frames/<int:id>/update_apps', methods=['POST'])
-def update_apps(id: int):
-    frame = models.Frame.query.get_or_404(id)
-    frame.apps = json.loads(request.form['apps'])
-    models.update_frame(frame)
-    if request.form['next_action'] == 'restart':
-        tasks.restart_frame(frame.id)
-    elif request.form['next_action'] == 'deploy':
-        tasks.deploy_frame(frame.id)
-    return 'Success', 200
-
 @app.route('/api/frames/<int:id>/restart', methods=['POST'])
 def restart_frame(id: int):
     tasks.restart_frame(id)
@@ -96,6 +65,50 @@ def restart_frame(id: int):
 @app.route('/api/frames/<int:id>/initialize', methods=['POST'])
 def deploy_frame(id: int):
     tasks.deploy_frame(id)
+    return 'Success', 200
+
+@app.route('/api/frames/<int:id>', methods=['POST'])
+def update_frame(id: int):
+    frame = models.Frame.query.get_or_404(id)
+    # I have many years of engineering experience
+    if 'scenes' in request.form:
+        frame.scenes = json.loads(request.form['scenes'])
+    if 'frame_host' in request.form:
+        frame.frame_host = request.form['frame_host']
+    if 'frame_port' in request.form:
+        frame.frame_port = int(request.form['frame_port'] or '8999')
+    if 'ssh_user' in request.form:
+        frame.ssh_user = request.form['ssh_user']
+    if 'ssh_pass' in request.form:
+        frame.ssh_pass = request.form['ssh_pass'] if request.form['ssh_pass'] != '' else None
+    if 'ssh_port' in request.form:
+        frame.ssh_port = int(request.form['ssh_port'] or '22')
+    if 'server_host' in request.form:
+        frame.server_host = request.form['server_host']
+    if 'server_port' in request.form:
+        frame.server_port = int(request.form['server_port'] or '8999')
+    if 'server_api_key' in request.form:
+        frame.server_api_key = request.form['server_api_key']
+    if 'server_ssh_user' in request.form:
+        frame.width = int(request.form['width']) if request.form['width'] != '' else None
+    if 'height' in request.form:
+        frame.height = int(request.form['height']) if request.form['height'] != '' else None
+    if 'interval' in request.form:
+        frame.interval = int(request.form['interval']) if request.form['interval'] != '' else None
+    if 'scaling_mode' in request.form:
+        frame.scaling_mode = request.form['scaling_mode']
+    if 'background_color' in request.form:
+        frame.background_color = request.form['background_color']
+
+    models.update_frame(frame)
+
+    if request.form.get('next_action') == 'restart':
+        tasks.restart_frame(frame.id)
+    elif request.form.get('next_action') == 'redeploy':
+        tasks.deploy_frame(frame.id)
+    elif request.form.get('next_action') == 'refresh':
+        refresh_frame(frame.id)
+
     return 'Success', 200
 
 @app.route("/api/frames/new", methods=["POST"])

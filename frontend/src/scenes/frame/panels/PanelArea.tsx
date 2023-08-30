@@ -35,13 +35,14 @@ export function PanelArea({ area, areaPanels, setPanel, toggleFullScreenPanel }:
                 onDoubleClick={() => toggleFullScreenPanel(panel.panel)}
                 className="select-none"
               >
-                {panel.label ?? pascalCaseToTitleCase(panel.panel)}
+                {panel.label ??
+                  (panel?.metadata?.sceneId ? `Scene: ${panel.metadata.sceneId}` : pascalCaseToTitleCase(panel.panel))}
               </Tab>
             ))}
         </Tabs>
       }
     >
-      {Component ? <Component /> : <>Nothing to see here...</>}
+      {Component ? <Component {...(activePanel?.metadata ?? {})} /> : <>Nothing to see here...</>}
     </Container>
   )
 }
