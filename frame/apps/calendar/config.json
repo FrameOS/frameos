@@ -131,7 +131,7 @@
         {
             "name": "today_font_color",
             "type": "string",
-            "value": "black",
+            "value": "red",
             "required": true,
             "label": "Today Font Color",
             "placeholder": "red"
@@ -155,7 +155,7 @@
         {
             "name": "today_border_color",
             "type": "string",
-            "value": "white",
+            "value": "black",
             "required": true,
             "label": "Today Border Color",
             "placeholder": "black"

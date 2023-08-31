@@ -23,24 +23,24 @@ class CalendarApp(App):
         
         # Config settings
         font_color = self.config.get('font_color', 'black')
-        font_size = int(self.config.get('font_size', 20))
+        font_size = int(self.config.get('font_size', 40))
         border_color = self.config.get('border_color', 'white')
-        border_width = int(self.config.get('border_width', 1))
-        calendar_width_percentage = float(self.config.get('calendar_width_percentage', '100')) / 100
-        calendar_height_percentage = float(self.config.get('calendar_height_percentage', '100')) / 100
-        position = self.config.get('position', 'top-left')
+        border_width = int(self.config.get('border_width', 2))
+        calendar_width_percentage = float(self.config.get('calendar_width_percentage', '80')) / 100
+        calendar_height_percentage = float(self.config.get('calendar_height_percentage', '80')) / 100
+        position = self.config.get('position', 'center-center')
         font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
 
         title_font_color = self.config.get('title_font_color', 'black')
         title_font_size = int(self.config.get('title_font_size', 50))
         title_border_color = self.config.get('title_border_color', 'white')
-        title_border_width = int(self.config.get('title_border_width', 1))
+        title_border_width = int(self.config.get('title_border_width', 2))
         title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", title_font_size)
 
         today_font_color = self.config.get('today_font_color', 'red')
         today_font_size = int(self.config.get('today_font_size', 60))
         today_border_color = self.config.get('today_border_color', 'black')
-        today_border_width = int(self.config.get('today_border_width', 1))
+        today_border_width = int(self.config.get('today_border_width', 2))
         today_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", today_font_size)
 
         draw = ImageDraw.Draw(payload.next_image)
@@ -107,7 +107,7 @@ class CalendarApp(App):
             draw.line([(line_start_x, line_start_y), (line_end_x, line_end_y)], fill=border_color)
 
         # Draw month name at the top
-        title_text = self.config.get('title_template', '{month}')
+        title_text = self.config.get('title_template', "Let's pretend it's \"{month}\"")
         title_text = title_text.replace('{month}', month_name)
         title_text = title_text.replace('{year}', year)
         title_alignment = self.config.get('title_alignment', 'left')
