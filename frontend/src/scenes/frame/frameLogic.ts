@@ -9,6 +9,22 @@ import { forms } from 'kea-forms'
 export interface FrameLogicProps {
   id: number
 }
+const FRAME_KEYS = [
+  'frame_host',
+  'frame_port',
+  'ssh_user',
+  'ssh_pass',
+  'ssh_port',
+  'server_host',
+  'server_port',
+  'server_api_key',
+  'width',
+  'height',
+  'interval',
+  'scaling_mode',
+  'background_color',
+  'scenes',
+]
 
 const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
   [Area.TopLeft]: [{ panel: Panel.Diagram, active: true, hidden: false, metadata: { sceneId: 'default' } }],
@@ -41,7 +57,14 @@ export const frameLogic = kea<frameLogicType>([
       defaults: {} as FrameType,
       submit: async (frame, breakpoint) => {
         const formData = new FormData()
-        formData.append('scenes', JSON.stringify(frame.scenes))
+        for (const key of FRAME_KEYS) {
+          const value = frame[key as keyof typeof frame]
+          if (typeof value === 'string') {
+            formData.append(key, value)
+          } else {
+            formData.append(key, JSON.stringify(frame[key as keyof typeof frame]))
+          }
+        }
         if (values.nextAction) {
           formData.append('next_action', values.nextAction)
         }
@@ -52,27 +75,6 @@ export const frameLogic = kea<frameLogicType>([
         if (!response.ok) {
           throw new Error('Failed to update frame')
         }
-      },
-      errors: (frame) => {
-        // const newArray: Partial<AppConfig>[] = appsArray
-        //   .map((AppConfig) => {
-        //     const app = appsModel.values.apps[AppConfig.keyword]
-        //     if (!app) {
-        //       return null
-        //     }
-        //     return {
-        //       config: Object.fromEntries(
-        //         app?.fields
-        //           ?.filter(({ name, required }) => required && !AppConfig.config[name])
-        //           .map(({ name }) => [name, 'This field is required'])
-        //       ),
-        //     }
-        //   })
-        //   .filter((a): a is AppConfig => !!a)
-        // return {
-        //   appsArray: newArray,
-        // }\
-        return {}
       },
     },
   })),
@@ -126,9 +128,11 @@ export const frameLogic = kea<frameLogicType>([
     ],
   })),
   subscriptions(({ actions }) => ({
-    frame: (value, oldValue) => {
-      if (value && JSON.stringify(value.scenes) !== JSON.stringify(oldValue?.scenes)) {
-        actions.resetFrameForm(value)
+    frame: (frame, oldFrame) => {
+      if (frame) {
+        if (FRAME_KEYS.some((key) => JSON.stringify(frame[key]) !== JSON.stringify(oldFrame?.[key]))) {
+          actions.resetFrameForm(frame)
+        }
       }
     },
   })),

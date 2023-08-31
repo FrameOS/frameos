@@ -4,7 +4,6 @@ import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
 import { Field, Form } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
-import { frameSettingsLogic } from './frameSettingsLogic'
 import { Select } from '../../../../components/Select'
 import { frameLogic } from '../../frameLogic'
 
@@ -14,9 +13,8 @@ export interface DetailsProps {
 }
 
 export function FrameSettings({ className }: DetailsProps) {
-  const { id } = useValues(frameLogic)
-  const { frame, editing } = useValues(frameSettingsLogic({ id }))
-  const { closeEdit } = useActions(frameSettingsLogic({ id }))
+  const { id, frame, frameFormTouches } = useValues(frameLogic)
+  const { touchFrameFormField } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
 
   return (
@@ -25,7 +23,25 @@ export function FrameSettings({ className }: DetailsProps) {
         `Loading frame ${id}...`
       ) : (
         <>
-          <Form formKey="editFrame" logic={frameSettingsLogic} props={{ id }} className="space-y-4" enableFormOnSubmit>
+          <div className="flex space-x-2">
+            <div className="flex-1"></div>
+            <div>
+              <Button
+                type="button"
+                color="red"
+                size="small"
+                className="flex-0"
+                onClick={() => {
+                  if (confirm('Are you sure you want to DELETE this frame?')) {
+                    deleteFrame(frame.id)
+                  }
+                }}
+              >
+                Delete frame
+              </Button>
+            </div>
+          </div>
+          <Form formKey="frameForm" logic={frameLogic} props={{ id }} className="space-y-4" enableFormOnSubmit>
             <Field name="frame_host" label="Frame host">
               <TextInput name="frame_host" placeholder="127.0.0.1" required />
             </Field>
@@ -36,7 +52,12 @@ export function FrameSettings({ className }: DetailsProps) {
               <TextInput name="ssh_user" placeholder="pi" required />
             </Field>
             <Field name="ssh_pass" label="SSH pass">
-              <TextInput name="ssh_pass" type="password" placeholder="raspberry" />
+              <TextInput
+                name="ssh_pass"
+                onClick={() => touchFrameFormField('ssh_pass')}
+                type={frameFormTouches.ssh_pass ? 'text' : 'password'}
+                placeholder="raspberry"
+              />
             </Field>
             <Field name="ssh_port" label="SSH port">
               <TextInput name="ssh_port" placeholder="22" required />
@@ -48,7 +69,13 @@ export function FrameSettings({ className }: DetailsProps) {
               <TextInput name="server_port" placeholder="8999" required />
             </Field>
             <Field name="server_api_key" label="Server API key">
-              <TextInput name="server_api_key" placeholder="" required />
+              <TextInput
+                name="server_api_key"
+                onClick={() => touchFrameFormField('server_api_key')}
+                type={frameFormTouches.server_api_key ? 'text' : 'password'}
+                placeholder=""
+                required
+              />
             </Field>
             <Field name="width" label="Width">
               <TextInput name="width" placeholder="1920" />
@@ -73,23 +100,6 @@ export function FrameSettings({ className }: DetailsProps) {
             <Field name="background_color" label="Background color">
               <TextInput name="background_color" placeholder="white" />
             </Field>
-            <div className="flex space-x-2">
-              <Button type="submit">Save & restart</Button>
-              <Button type="button" color="gray" onClick={() => closeEdit()}>
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                color="red"
-                onClick={() => {
-                  if (confirm('Are you sure you want to DELETE this frame?')) {
-                    deleteFrame(frame.id)
-                  }
-                }}
-              >
-                Delete
-              </Button>
-            </div>
           </Form>
         </>
       )}
