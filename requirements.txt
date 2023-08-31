@@ -26,6 +26,8 @@ click==8.1.6
     # via flask
 cryptography==41.0.3
     # via paramiko
+dacite==1.8.1
+    # via -r requirements.in
 flask==2.3.2
     # via
     #   -r requirements.in

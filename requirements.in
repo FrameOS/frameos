@@ -11,3 +11,4 @@ redis
 paramiko
 scp
 requests
+dacite

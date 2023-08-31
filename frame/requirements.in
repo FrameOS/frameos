@@ -3,6 +3,7 @@
 -i https://piwheels.org/simple
 --extra-index-url https://pypi.org/simple
 
+dacite==1.8.1
 flask==2.2.5
 flask-socketio==5.3.4
 importlib-metadata==6.7.0

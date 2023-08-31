@@ -18,11 +18,11 @@ class ConfigField:
 @dataclass
 class AppConfig:
     keyword: str
-    name: str
-    config: Dict
-    description: str
-    version: str
-    fields: List[ConfigField]
+    name: Optional[str]
+    config: Optional[Dict]
+    description: Optional[str]
+    version: Optional[str]
+    fields: Optional[List[ConfigField]]
 
 @dataclass
 class Edge:

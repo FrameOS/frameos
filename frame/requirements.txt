@@ -4,10 +4,15 @@
 #
 #    pip-compile requirements.in
 #
+--index-url https://piwheels.org/simple
+--extra-index-url https://pypi.org/simple
+
 bidict==0.22.1
     # via python-socketio
 click==8.1.6
     # via flask
+dacite==1.8.1
+    # via -r requirements.in
 flask==2.2.5
     # via
     #   -r requirements.in

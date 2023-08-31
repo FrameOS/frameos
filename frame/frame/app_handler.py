@@ -4,10 +4,11 @@ import os
 import importlib.util
 import inspect
 
-from typing import Optional, List, Dict, ClassVar
+from typing import Optional, List, Dict, Type, Any
 from PIL import Image
 
 from apps import AppConfig, App, ProcessImagePayload, FrameScene, Node
+from dacite import from_dict
 
 from .config import Config
 from .logger import Logger
@@ -16,7 +17,7 @@ class AppHandler:
     def __init__(self, config: Config, logger: Logger):
         self.config = config
         self.logger = logger
-        self.app_classes: Dict[str, ClassVar[App]] = {}
+        self.app_classes: Dict[str, Type[App]] = {}
         self.app_configs: Dict[str, AppConfig] = {}
         self.rendering_apps: List[(str, App)] = []
 
@@ -38,7 +39,11 @@ class AppHandler:
                 if os.path.isdir(f'apps/{folder}') and os.path.isfile(f'apps/{folder}/frame.py') and os.path.isfile(f'apps/{folder}/config.json'):
                     try:
                         with open(f'apps/{folder}/config.json', 'r') as file:
-                            config = json.load(file)
+                            config = from_dict(data_class=AppConfig, data={
+                                **json.load(file),
+                                'keyword': folder
+                            })
+
                         spec = importlib.util.spec_from_file_location(f"apps.{folder}", f"apps/{folder}/frame.py")
                         module = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(module)
@@ -61,21 +66,36 @@ class AppHandler:
                         elif node.type == 'app':
                             keyword = node.data.get('keyword')
                             if keyword in self.app_classes:
-                                app_instance = self.app_classes.get(keyword)(
-                                    keyword=keyword,
-                                    config=node.data.get('config') or {},
-                                    frame_config=self.config.to_frame_config(),
-                                    log_function=self.logger.log
-                                )
+                                app_instance = self.get_app_node(keyword, node.data.get('config'))
                                 self.rendering_apps.append((keyword, app_instance))
 
         except Exception as e:
             self.logger.log({ 'event': f'@frame:error_initializing_apps', 'error': str(e), 'stacktrace': traceback.format_exc() })
     
-    def register(self, name, app: ClassVar[App], config: AppConfig):
+    def register(self, name: str, app: Type[App], config: AppConfig):
         self.app_classes[name] = app
         self.app_configs[name] = config
         self.logger.log({ 'event': f'@frame:register_app', 'name': name })
+
+    def get_app_node(self, name: str, node_config: Optional[Dict[str, Any]]) -> App:
+        if name not in self.app_classes or name not in self.app_configs:
+            self.logger.log({'event': f'@frame:error_get_app_node', 'name': name, 'error': f"App '{name}' not registered"})
+            return None
+        app_config = self.app_configs[name]
+        AppClass = self.app_classes[name]
+        config = {}
+        for field in app_config.fields:
+            if node_config and field.name in node_config:
+                config[field.name] = node_config[field.name]
+            else:
+                config[field.name] = field.value
+
+        return AppClass(
+            keyword=name,
+            config=config,
+            frame_config=self.config.to_frame_config(),
+            log_function=self.logger.log
+        )
 
     def find_chains(self, scene: FrameScene, event_keyword = 'render') -> List[Node]:
         nodes_dict = {node.id: node for node in scene.nodes}
