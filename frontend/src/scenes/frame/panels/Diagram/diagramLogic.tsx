@@ -39,6 +39,7 @@ export const diagramLogic = kea<diagramLogicType>([
     rearrangeCurrentScene: true,
     fitDiagramView: true,
     keywordDropped: (keyword: string, type: string, position: XYPosition) => ({ keyword, type, position }),
+    updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
   }),
   reducers({
     nodes: [
@@ -51,6 +52,14 @@ export const diagramLogic = kea<diagramLogicType>([
         },
         deselectNode: (state) => {
           const newNodes = state.map((node) => ({ ...node, selected: false }))
+          return equal(state, newNodes) ? state : newNodes
+        },
+        updateNodeConfig: (state, { id, field, value }) => {
+          const newNodes = state.map((node) =>
+            node.id === id
+              ? { ...node, data: { ...(node.data ?? {}), config: { ...(node.data.config ?? {}), [field]: value } } }
+              : node
+          )
           return equal(state, newNodes) ? state : newNodes
         },
       },

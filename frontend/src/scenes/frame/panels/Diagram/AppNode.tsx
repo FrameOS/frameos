@@ -1,4 +1,4 @@
-import { useValues } from 'kea'
+import { useActions, useValues } from 'kea'
 import { NodeProps, Handle, Position } from 'reactflow'
 import { App, AppNodeData } from '../../../../types'
 import clsx from 'clsx'
@@ -7,6 +7,7 @@ import { diagramLogic } from './diagramLogic'
 
 export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JSX.Element {
   const { apps, selectedNodeId } = useValues(diagramLogic)
+  const { updateNodeConfig } = useActions(diagramLogic)
 
   const app: App | undefined = apps[data.keyword]
   const fields = Object.fromEntries((app?.fields || []).map((field) => [field.name, field]))
@@ -48,7 +49,16 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5">
             <tbody>
               {app?.fields.map((field, i) => (
-                <tr key={i}>
+                <tr
+                  key={i}
+                  onDoubleClick={() => {
+                    const value = !(field.name in data.config) ? String(field.value) : String(data.config[field.name])
+                    const newValue = window.prompt(`Edit ${field.name}`, value)
+                    if (typeof newValue === 'string') {
+                      updateNodeConfig(id, field.name, newValue)
+                    }
+                  }}
+                >
                   <td className="font-sm text-indigo-200">{field.name}</td>
                   <td>
                     {field.secret ? (
