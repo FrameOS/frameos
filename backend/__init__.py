@@ -19,7 +19,7 @@ redis_port = parsed_url.port or 6379
 os.makedirs('./data', exist_ok=True)
 
 app = Flask(__name__, static_folder='../frontend/dist', static_url_path='/')
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///../data/fcp.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///../data/frameos.db'
 
 socketio = SocketIO(app, async_mode='gevent', cors_allowed_origins="*", message_queue=redis_url)
 db = SQLAlchemy(app)
