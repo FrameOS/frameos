@@ -80,7 +80,7 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
     scene: [
       (s) => [s.editingFrame, s.sceneId],
-      (editingFrame, sceneId) => (editingFrame.scenes ?? []).find((s) => s._id === sceneId) || null,
+      (editingFrame, sceneId) => (editingFrame.scenes ?? []).find((s) => s.id === sceneId) || null,
     ],
     selectedNode: [(s) => [s.nodes], (nodes) => nodes.find((node) => node.selected) ?? null],
     selectedNodeId: [(s) => [s.selectedNode], (node) => node?.id ?? null],

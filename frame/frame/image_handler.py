@@ -57,8 +57,8 @@ class ImageHandler:
         config.pop('server_host', None)
         config.pop('server_port', None)
         config.pop('server_api_key', None)
-        config_apps = config.pop('apps', None)
-        logger.log({ 'event': '@frame:config', **config, 'apps': [{'keyword': app.keyword, 'config': app.config} for app in config_apps] })
+        config.pop('scenes', None)
+        logger.log({ 'event': '@frame:config', **config })
 
     def slow_update_image_on_frame(self, image):
         if self.inky is not None:

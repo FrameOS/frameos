@@ -16,7 +16,7 @@ class ClockApp(App):
         # Get the config settings
         font_color = self.config.get('font_color', 'black')
         font_size = int(self.config.get('font_size', 20))
-        position = self.config.get('position', 'top-left')
+        position = self.config.get('position', 'center-center')
         border_color = self.config.get('border_color', 'white')
         border_width = int(self.config.get('border_width', 1))
         

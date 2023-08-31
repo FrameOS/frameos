@@ -24,11 +24,11 @@ export function Diagram({ sceneId }: { sceneId: string }) {
     frameId,
     sceneId,
     onChange: (nodes, edges) => {
-      const hasScene = frame.scenes?.some(({ _id }) => _id === sceneId)
+      const hasScene = frame.scenes?.some(({ id }) => id === sceneId)
       setFrameFormValues({
         scenes: hasScene
-          ? frame.scenes?.map((scene) => (scene._id === sceneId ? { ...scene, nodes, edges } : scene))
-          : [...(frame.scenes ?? []), { _id: sceneId, nodes, edges }],
+          ? frame.scenes?.map((scene) => (scene.id === sceneId ? { ...scene, nodes, edges } : scene))
+          : [...(frame.scenes ?? []), { id: sceneId, nodes, edges }],
       })
     },
   }

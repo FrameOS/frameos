@@ -3,7 +3,7 @@ import logging
 
 from typing import Optional
 
-from apps import FrameConfig, AppConfig, ConfigField
+from apps import FrameConfig, AppConfig, ConfigField, FrameScene, Node, Edge
 
 from .version import VERSION
 
@@ -20,15 +20,14 @@ class Config:
         self.interval: Optional[int] = self._data.get('interval', 300)
         self.scaling_mode: Optional[str] = self._data.get('scaling_mode', 'cover')
         self.background_color: Optional[str] = self._data.get('background_color', 'white')
-        apps_data = self._data.pop('apps', [])
-        self.apps = []
-        for app in apps_data:
-            fields = app.pop('fields', [])
-            app_config = AppConfig(
-                fields=[ConfigField(**field) for field in fields],
-                **app
-            )
-            self.apps.append(app_config)
+
+        scenes_data = self._data.pop('scenes', [])
+        self.scenes = []
+        for scene in scenes_data:
+            nodes = [Node(id=node.get('id'), type=node.get('type'), data=node.get('data')) for node in scene.pop('nodes', [])]
+            edges = [Edge(id=edge.get('id'), source=edge.get('source'), target=edge.get('target'), sourceHandle=edge.get('sourceHandle'), targetHandle=edge.get('targetHandle')) for edge in scene.pop('edges', [])]
+            self.scenes.append(FrameScene(id=scene.get('id'), nodes=nodes, edges=edges))
+
 
     def to_dict(self):
         return {
@@ -42,7 +41,7 @@ class Config:
             'interval': self.interval,
             'scaling_mode': self.scaling_mode,
             'background_color': self.background_color,
-            'apps': self.apps,
+            'scenes': self.scenes,
         }
     
     def to_frame_config(self):
@@ -56,7 +55,7 @@ class Config:
             interval=self.interval,
             scaling_mode=self.scaling_mode,
             background_color=self.background_color,
-            apps=self.apps,
+            scenes=self.scenes,
         )
 
     def _load(self, filename):

@@ -58,7 +58,7 @@ export interface EventNodeData {
 }
 
 export interface FrameScene {
-  _id: string
+  id: string
   name: string
   nodes: Node[]
   edges: Edge[]

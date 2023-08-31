@@ -25,6 +25,28 @@ class AppConfig:
     fields: List[ConfigField]
 
 @dataclass
+class Edge:
+    id: str
+    source: str
+    target: str
+    sourceHandle: Optional[str] = None
+    targetHandle: Optional[str] = None
+
+@dataclass
+class Node:
+    id: str
+    type: str
+    data: Dict
+    # skipping less relevant fields
+
+@dataclass
+class FrameScene:
+  id: str
+  nodes: List[Node]
+  edges: List[Edge]
+
+
+@dataclass
 class FrameConfig:
     status: str
     version: str
@@ -35,7 +57,7 @@ class FrameConfig:
     interval: float
     scaling_mode: str
     background_color: str
-    apps: List[AppConfig]
+    scenes: List[FrameScene]
 
 @dataclass
 class ProcessImagePayload:
@@ -44,20 +66,19 @@ class ProcessImagePayload:
 
 
 class App:
-    def __init__(self, name: str, frame_config: FrameConfig, app_config: AppConfig, log_function: Callable[[Dict], Any]) -> None:
-        self.name = name
+    def __init__(self, keyword: str, config: Dict, frame_config: FrameConfig, log_function: Callable[[Dict], Any]) -> None:
         self.frame_config = frame_config
-        self.app_config = app_config
+        self.config = config
+        self.keyword = keyword
         self.log_function = log_function
-        self.config: Dict = self.app_config.config or {}
-    
+
     def log(self, message: str):
         if self.log_function:
-            self.log_function({ "event": f"{self.app_config.keyword}:log", "message": message })
+            self.log_function({ "event": f"{self.keyword}:log", "message": message })
         
     def error(self, message: str):
         if self.log_function:
-            self.log_function({ "event": f"{self.name}:error", "message": message })
+            self.log_function({ "event": f"{self.keyword}:error", "message": message })
 
     def process_image(payload: ProcessImagePayload):
         pass

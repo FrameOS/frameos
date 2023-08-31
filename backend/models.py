@@ -70,7 +70,6 @@ class Frame(db.Model):
             'interval': self.interval,
             'scaling_mode': self.scaling_mode,
             'background_color': self.background_color,
-            'apps': self.apps,
             'scenes': self.scenes,
         }
 
@@ -199,7 +198,7 @@ def create_default_scene() -> Dict:
     unsplash_uuid = str(uuid.uuid4())
     edge_uuid = str(uuid.uuid4())
     return {
-        "_id": "default",
+        "id": "default",
         "edges": [
             {
                 "id": edge_uuid,

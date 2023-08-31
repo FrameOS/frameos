@@ -33,10 +33,10 @@
                 "bottom-center",
                 "bottom-right"
             ],
-            "value": "top-left",
+            "value": "center-center",
             "required": true,
             "label": "Position",
-            "placeholder": "top-left"
+            "placeholder": "center-center"
         },
         {
             "name": "border_width",
