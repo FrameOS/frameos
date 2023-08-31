@@ -12,9 +12,9 @@ import equal from 'fast-deep-equal'
 import type { diagramLogicType } from './diagramLogicType'
 import { subscriptions } from 'kea-subscriptions'
 import { AppNodeData, EventNodeData, FrameScene } from '../../../../types'
-import { arrangeNodes } from './arrangeNodes'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
+import { arrangeNodes } from '../../../../utils/arrangeNodes'
 
 export interface DiagramLogicProps {
   frameId: number

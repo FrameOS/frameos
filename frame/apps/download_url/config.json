@@ -1,6 +1,7 @@
 {
     "name": "Download URL",
     "description": "Download a specific URL",
+    "category": "image",
     "version": "1.0.0",
     "fields": [
         {

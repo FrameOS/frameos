@@ -1,6 +1,7 @@
 {
     "name": "Unsplash",
     "description": "Random unsplash image",
+    "category": "image",
     "version": "1.0.0",
     "fields": [
         {

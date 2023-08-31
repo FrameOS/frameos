@@ -1,6 +1,7 @@
 {
     "name": "Calendar Overlay",
     "description": "Overlay current month in a 7-day grid on the image",
+    "category": "overlay",
     "version": "1.0.0",
     "fields": [
         {
@@ -90,7 +91,7 @@
         },
         {
             "name": "title_template",
-            "type": "string",
+            "type": "text",
             "value": "Let's pretend it's \"{month}\"",
             "required": true,
             "label": "Title Template",

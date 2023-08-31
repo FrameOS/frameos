@@ -1,6 +1,7 @@
 {
     "name": "Rotate",
     "description": "Rotate the image",
+    "category": "util",
     "version": "1.0.0",
     "fields": [
         {

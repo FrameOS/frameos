@@ -1,7 +1,7 @@
 import { Node } from '@reactflow/core/dist/esm/types/nodes'
 import { Edge } from '@reactflow/core/dist/esm/types/edges'
 
-const SPACE_BETWEEN_NODES = 50
+const SPACE_BETWEEN_NODES = 100
 const SPACE_BETWEEN_CHAINS = 50
 
 export function arrangeNodes(nodes: Node[], edges: Edge[]): Node[] {

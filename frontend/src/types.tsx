@@ -43,6 +43,7 @@ export interface ConfigField {
 
 export interface App {
   name: string
+  category: string
   description: string
   version: string
   fields: ConfigField[]
@@ -62,6 +63,13 @@ export interface FrameScene {
   name: string
   nodes: Node[]
   edges: Edge[]
+}
+
+export interface FrameSceneIndexed {
+  id: string
+  name: string
+  nodes: Record<string, Node[]>
+  edges: Record<string, Edge[]>
 }
 
 export enum Area {

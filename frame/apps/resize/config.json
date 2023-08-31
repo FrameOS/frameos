@@ -1,6 +1,7 @@
 {
     "name": "Resize",
     "description": "Scale or stretch the image",
+    "category": "util",
     "version": "1.0.0",
     "fields": [
         {"name": "width", "type": "string", "required": true, "label": "New Width", "placeholder": "e.g., 1024"},

@@ -1,6 +1,7 @@
 {
     "name": "Clock Overlay",
     "description": "Overlay current time on the image",
+    "category": "overlay",
     "version": "1.0.0",
     "fields": [
         {

@@ -1,6 +1,7 @@
 {
     "name": "Gradient",
     "description": "Set a gradient background",
+    "category": "image",
     "version": "1.0.0",
     "fields": [
         {

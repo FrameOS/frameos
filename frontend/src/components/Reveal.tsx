@@ -4,9 +4,9 @@ interface RevealProps {
   children: React.ReactNode
 }
 
-export function RevealDots() {
+export function RevealDots(props: React.HTMLProps<HTMLDivElement>) {
   return (
-    <div className="flex items-center justify-start space-x-1">
+    <div className="flex items-center justify-start space-x-1" {...props}>
       <div className="w-2 h-2 bg-teal-700 rounded-full" />
       <div className="w-2 h-2 bg-teal-700 rounded-full" />
       <div className="w-2 h-2 bg-teal-700 rounded-full" />

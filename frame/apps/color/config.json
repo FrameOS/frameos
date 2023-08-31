@@ -1,6 +1,7 @@
 {
     "name": "Color",
     "description": "Set a single color background",
+    "category": "image",
     "version": "1.0.0",
     "fields": [
         {
