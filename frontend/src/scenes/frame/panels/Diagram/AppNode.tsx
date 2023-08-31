@@ -59,7 +59,19 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                     }
                   }}
                 >
-                  <td className="font-sm text-indigo-200">{field.name}</td>
+                  <td
+                    className={clsx(
+                      'font-sm text-indigo-200',
+                      field.name in data.config && data.config[field.name] !== field.value ? 'underline font-bold' : ''
+                    )}
+                    title={
+                      field.name in data.config && data.config[field.name] !== field.value
+                        ? `${field.name} has been modified`
+                        : undefined
+                    }
+                  >
+                    {field.name}
+                  </td>
                   <td>
                     {field.secret ? (
                       <RevealDots />
