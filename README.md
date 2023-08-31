@@ -12,6 +12,8 @@ Supported frames:
 
 - [Inky Impression 5.7"](https://shop.pimoroni.com/products/inky-impression-5-7?variant=32298701324371) e-ink display
 - [Inky Impression 7.3"](https://shop.pimoroni.com/products/inky-impression-7-3?variant=40512683376723) e-ink display
+- Waveshare 5" round 1080x1080 LCD display vis HDMI
+- probably others
 
 Attach them to a Raspberry Pi Zero W, and control the image via FrameOS.
 
@@ -21,7 +23,7 @@ Attach them to a Raspberry Pi Zero W, and control the image via FrameOS.
 
 The FrameOS controller is where you set up your frames. You can run it continuously on a server, or locally on your computer when needed. You'll miss out on log aggregation if the FrameOS server is not always on. The frames however will keep on running and updating independently.
 
-![2023-08-21 01 11 13](https://frameos.net/assets/images/frameos-screenshot-5490da95ea8678e1d4f6ba3b58a7d320.png)
+![](https://frameos.net/assets/images/diagram-reload-13b29b62750b3db0475aab66cdf49518.gif)
 
 ## Installation
 
