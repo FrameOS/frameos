@@ -90,11 +90,11 @@ def update_frame(id: int):
     if 'server_api_key' in request.form:
         frame.server_api_key = request.form['server_api_key']
     if 'width' in request.form:
-        frame.width = int(request.form['width']) if request.form['width'] != '' else None
+        frame.width = int(request.form['width']) if request.form['width'] != '' and request.form['width'] != 'null' else None
     if 'height' in request.form:
-        frame.height = int(request.form['height']) if request.form['height'] != '' else None
+        frame.height = int(request.form['height']) if request.form['height'] != '' and request.form['height'] != 'null' else None
     if 'color' in request.form:
-        frame.color = request.form['color'] if request.form['color'] != '' else None
+        frame.color = request.form['color'] if request.form['color'] != '' and request.form['color'] != 'null' else None
     if 'interval' in request.form:
         frame.interval = int(request.form['interval']) if request.form['interval'] != '' else None
     if 'scaling_mode' in request.form:
