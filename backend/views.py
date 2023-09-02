@@ -1,5 +1,5 @@
 from flask import jsonify, request, send_from_directory, Response
-from . import app, db, tasks, models, socketio
+from . import app, tasks, models, redis
 import requests
 import json
 
@@ -36,10 +36,14 @@ def get_logs(id: int):
 def get_image(id: int):
     frame = models.Frame.query.get_or_404(id)
     response = requests.get(f'http://{frame.frame_host}:{frame.frame_port}/image')
-        
+
     if response.status_code == 200:
+        redis.set(f'frame:{id}:image', response.content, ex=86400 * 30)
         return Response(response.content, content_type='image/png')
     else:
+        last_image = redis.get(f'frame:{id}:image')
+        if last_image:
+            return Response(last_image, content_type='image/png')
         return jsonify({"error": "Unable to fetch image"}), response.status_code
 
 @app.route('/api/frames/<int:id>/refresh', methods=['POST'])
@@ -93,6 +97,8 @@ def update_frame(id: int):
         frame.width = int(request.form['width']) if request.form['width'] != '' and request.form['width'] != 'null' else None
     if 'height' in request.form:
         frame.height = int(request.form['height']) if request.form['height'] != '' and request.form['height'] != 'null' else None
+    if 'rotate' in request.form:
+        frame.rotate = int(request.form['rotate']) if request.form['rotate'] != '' and request.form['rotate'] != 'null' else None
     if 'color' in request.form:
         frame.color = request.form['color'] if request.form['color'] != '' and request.form['color'] != 'null' else None
     if 'interval' in request.form:

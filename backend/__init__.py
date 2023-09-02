@@ -4,9 +4,10 @@ from flask_migrate import Migrate
 from flask_socketio import SocketIO
 from flask_sqlalchemy import SQLAlchemy
 from huey import RedisHuey
-from threading import Thread
 from gevent import monkey
 from urllib.parse import urlparse
+
+from redis import Redis
 
 monkey.patch_all()
 
@@ -15,6 +16,7 @@ redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 parsed_url = urlparse(redis_url)
 redis_host = parsed_url.hostname
 redis_port = parsed_url.port or 6379
+redis = Redis(host=redis_host, port=redis_port)
 
 os.makedirs('./data', exist_ok=True)
 
