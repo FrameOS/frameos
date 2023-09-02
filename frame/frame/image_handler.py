@@ -10,6 +10,7 @@ from .config import Config
 from .app_handler import AppHandler
 from .image_utils import scale_cover, scale_contain, scale_stretch, scale_center, \
     image_to_framebuffer, get_framebuffer_info, try_to_disable_cursor_blinking
+from .waveshare import WaveShare
 
 
 class ImageHandler:
@@ -43,6 +44,7 @@ class ImageHandler:
                 self.config.width = self.inky.resolution[0]
                 self.config.height = self.inky.resolution[1]
                 self.config.color = self.inky.colour
+                self.logger.log({'event': '@frame:device', "device": self.config.device, 'info': "init done"})
                 return
             except Exception as e:
                 self.inky = None
@@ -57,25 +59,22 @@ class ImageHandler:
                     self.config.height = height
 
                     try_to_disable_cursor_blinking()
+                    self.logger.log({'event': '@frame:device', "device": self.config.device, 'info': "init done"})
                     return
                 else:
                     raise Exception("No framebuffer device found.")
             except Exception as e:
                 self.logger.log({'event': '@frame:device_error', "device": 'framebuffer', 'error': str(e), })
 
-        if self.config.device == 'waveshare.epd_7in5_V2':
+        if self.config.device.startswith('waveshare.epd'):
             try:
-                from lib.waveshare_epd import epd7in5_V2
-                self.epd = epd7in5_V2.EPD()
-                self.epd.init()
-                self.config.device = 'waveshare.epd_7in5_V2'
-                self.config.width = self.epd.width
-                self.config.height = self.epd.height
+                self.ws = WaveShare(self.config.device.replace('waveshare.', ''), self.logger)
+                self.ws.init_device()
+                self.logger.log({'event': '@frame:device', "device": self.config.device, 'info': "init done"})
                 return
             except Exception as e:
-                self.logger.log({'event': '@frame:device_error', "device": 'waveshare.epd_7in5_V2', 'error': str(e), })
+                self.logger.log({'event': '@frame:device_error', "device": self.config.device, 'error': str(e), })
 
-        # self.config.device = 'web_only'
         self.logger.log({'event': '@frame:device', "device": 'web_only', 'info': "Starting in WEB only mode."})
 
         if self.config.width is None or self.config.height is None:
@@ -83,10 +82,8 @@ class ImageHandler:
             self.config.height = 600
 
     def slow_update_image_on_frame(self, image):
-        if self.epd is not None:
-            self.epd.init()
-            self.epd.display(self.epd.getbuffer(image))
-            self.epd.sleep()
+        if self.ws is not None:
+            self.ws.display_image(image)
         elif self.inky is not None:
             if image.width != self.inky.resolution[0] or image.height != self.inky.resolution[1]:
                 self.logger.log({ 'event': '@frame:resolution_mismatch', 'inky_resolution': self.inky.resolution, 'image_resolution': (image.width, image.height) })
