@@ -22,18 +22,33 @@ class ImageHandler:
         self.image_update_in_progress: bool = False
         self.config: Config = config
         self.app_handler: AppHandler = app_handler
+        self.inky = None # inky frames
+        self.epd = None # waveshare frames
 
-        try:
-            from inky.auto import auto
-            self.inky = auto()
-            self.config.device = 'inky'
-            self.config.width = self.inky.resolution[0]
-            self.config.height = self.inky.resolution[1]
-            self.config.color = self.inky.colour
-        except Exception as e:
-            self.inky = None
-            logger.log({'event': '@frame:device_error', "device": 'inky', 'error': str(e), })
+        self.verify_device()
 
+        config = self.config.to_dict()
+        config.pop('server_host', None)
+        config.pop('server_port', None)
+        config.pop('server_api_key', None)
+        config.pop('scenes', None)
+        self.logger.log({ 'event': '@frame:config', **config })
+
+    def verify_device(self):
+        if self.config.device == 'inky' or self.config.device is None:
+            try:
+                from inky.auto import auto
+                self.inky = auto()
+                self.config.device = 'inky'
+                self.config.width = self.inky.resolution[0]
+                self.config.height = self.inky.resolution[1]
+                self.config.color = self.inky.colour
+                return
+            except Exception as e:
+                self.inky = None
+                self.logger.log({'event': '@frame:device_error', "device": 'inky', 'error': str(e), })
+
+        if self.config.device == 'framebuffer' or self.config.device is None:
             try:
                 if os.access('/dev/fb0', os.W_OK):
                     width, height, bits_per_pixel = get_framebuffer_info('/dev/fb0')
@@ -42,26 +57,37 @@ class ImageHandler:
                     self.config.height = height
 
                     try_to_disable_cursor_blinking()
+                    return
                 else:
                     raise Exception("No framebuffer device found.")
             except Exception as e:
-                self.config.device = 'web_only'
-                logger.log({'event': '@frame:device_error', "device": 'framebuffer', 'error': str(e),
-                            'info': "Starting in WEB only mode."})
+                self.logger.log({'event': '@frame:device_error', "device": 'framebuffer', 'error': str(e), })
 
-                if self.config.width is None or self.config.height is None:
-                    self.config.width = 1920
-                    self.config.height = 1080
+        if self.config.device == 'waveshare.epd_7in5_V2':
+            try:
+                from lib.waveshare_epd import epd7in5_V2
+                self.epd = epd7in5_V2.EPD()
+                self.epd.init()
+                self.config.device = 'waveshare.epd_7in5_V2'
+                self.config.width = self.epd.width
+                self.config.height = self.epd.height
+                return
+            except Exception as e:
+                self.logger.log({'event': '@frame:device_error', "device": 'waveshare.epd_7in5_V2', 'error': str(e), })
 
-        config = self.config.to_dict()
-        config.pop('server_host', None)
-        config.pop('server_port', None)
-        config.pop('server_api_key', None)
-        config.pop('scenes', None)
-        logger.log({ 'event': '@frame:config', **config })
+        # self.config.device = 'web_only'
+        self.logger.log({'event': '@frame:device', "device": 'web_only', 'info': "Starting in WEB only mode."})
+
+        if self.config.width is None or self.config.height is None:
+            self.config.width = 800
+            self.config.height = 600
 
     def slow_update_image_on_frame(self, image):
-        if self.inky is not None:
+        if self.epd is not None:
+            self.epd.init()
+            self.epd.display(self.epd.getbuffer(image))
+            self.epd.sleep()
+        elif self.inky is not None:
             if image.width != self.inky.resolution[0] or image.height != self.inky.resolution[1]:
                 self.logger.log({ 'event': '@frame:resolution_mismatch', 'inky_resolution': self.inky.resolution, 'image_resolution': (image.width, image.height) })
 

@@ -5,6 +5,8 @@ import { H6 } from '../../components/H6'
 import { TextInput } from '../../components/TextInput'
 import { Field } from '../../components/Field'
 import { newFrameForm } from './newFrameForm'
+import { Select } from '../../components/Select'
+import { devices } from '../frame/constants'
 
 export function NewFrame(): JSX.Element {
   return (
@@ -16,6 +18,9 @@ export function NewFrame(): JSX.Element {
         </Field>
         <Field name="server_host" label="API host for reverse access">
           <TextInput name="server_host" placeholder="127.0.0.1" required />
+        </Field>
+        <Field name="device" label="Driver">
+          <Select name="device" options={devices} />
         </Field>
         <Button type="submit">Add Frame</Button>
       </Form>

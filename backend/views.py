@@ -89,16 +89,20 @@ def update_frame(id: int):
         frame.server_port = int(request.form['server_port'] or '8999')
     if 'server_api_key' in request.form:
         frame.server_api_key = request.form['server_api_key']
-    if 'server_ssh_user' in request.form:
+    if 'width' in request.form:
         frame.width = int(request.form['width']) if request.form['width'] != '' else None
     if 'height' in request.form:
         frame.height = int(request.form['height']) if request.form['height'] != '' else None
+    if 'color' in request.form:
+        frame.color = request.form['color'] if request.form['color'] != '' else None
     if 'interval' in request.form:
         frame.interval = int(request.form['interval']) if request.form['interval'] != '' else None
     if 'scaling_mode' in request.form:
         frame.scaling_mode = request.form['scaling_mode']
     if 'background_color' in request.form:
         frame.background_color = request.form['background_color']
+    if 'device' in request.form:
+        frame.device = request.form['device']
 
     models.update_frame(frame)
 
@@ -115,7 +119,8 @@ def update_frame(id: int):
 def new_frame():
     frame_host = request.form['frame_host']
     server_host = request.form['server_host']
-    frame = models.new_frame(frame_host, server_host)
+    device = request.form['device']
+    frame = models.new_frame(frame_host, server_host, device)
     return jsonify(frame=frame.to_dict())
 
 @app.route('/api/frames/<int:frame_id>', methods=['DELETE'])

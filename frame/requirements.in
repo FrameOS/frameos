@@ -13,3 +13,4 @@ pillow==9.5.0
 inky
 numpy==1.21.6
 werkzeug==2.2.3
+# Jetson.GPIO ## ?? needed for waveshare ??

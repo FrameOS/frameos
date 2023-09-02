@@ -151,6 +151,10 @@ def deploy_frame(id: int):
                 log(id, "stdout", "> add /srv/frameos/apps/*")
                 scp.put("./frame/apps", "/srv/frameos/", recursive=True)
 
+                if 'waveshare.' in frame.device:
+                    log(id, "stdout", "> add /srv/frameos/lib/*")
+                    scp.put("./frame/lib", "/srv/frameos/", recursive=True)
+
                 log(id, "stdout", "> add /srv/frameos/index.html")
                 scp.put("./frame/index.html", "/srv/frameos/index.html")
                 

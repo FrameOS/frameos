@@ -1,12 +1,12 @@
 import React from 'react'
 import clsx from 'clsx'
 
-interface Option {
+export interface Option {
   value: string
   label: string
 }
 
-interface SelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'onChange'> {
+export interface SelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'onChange'> {
   onChange?: (value: string) => void
   options: Option[]
   theme?: 'node' | 'full'

@@ -20,6 +20,8 @@ const FRAME_KEYS = [
   'server_api_key',
   'width',
   'height',
+  'color',
+  'device',
   'interval',
   'scaling_mode',
   'background_color',

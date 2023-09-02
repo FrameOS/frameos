@@ -15,7 +15,7 @@ class Config:
         self.server_api_key: Optional[str] = self._data.get('server_api_key', None)
         self.width: int = self._data.get('width', 1920)
         self.height: int = self._data.get('height', 1080)
-        self.device: str = self._data.get('device', "kiosk")
+        self.device: str = self._data.get('device', "web_only")
         self.color: Optional[str] = self._data.get('color', None)
         self.interval: Optional[int] = self._data.get('interval', 300)
         self.scaling_mode: Optional[str] = self._data.get('scaling_mode', 'cover')

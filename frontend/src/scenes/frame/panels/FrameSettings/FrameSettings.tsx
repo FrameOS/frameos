@@ -6,6 +6,7 @@ import { Field, Form } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import { frameLogic } from '../../frameLogic'
+import { devices } from '../../constants'
 
 export interface DetailsProps {
   className?: string
@@ -85,6 +86,9 @@ export function FrameSettings({ className }: DetailsProps) {
             </Field>
             <Field name="interval" label="Interval">
               <TextInput name="interval" placeholder="300" />
+            </Field>
+            <Field name="device" label="Device">
+              <Select name="device" options={devices} />
             </Field>
             <Field name="scaling_mode" label="Scaling mode">
               <Select

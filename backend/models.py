@@ -1,5 +1,5 @@
 from . import db, socketio
-from typing import Dict
+from typing import Dict, Optional
 from sqlalchemy.dialects.sqlite import JSON
 import secrets
 import json
@@ -73,7 +73,7 @@ class Frame(db.Model):
             'scenes': self.scenes,
         }
 
-def new_frame(frame_host: str, server_host: str) -> Frame:
+def new_frame(frame_host: str, server_host: str, device: Optional[str]) -> Frame:
     if '@' in frame_host:
         user_pass, frame_host = frame_host.split('@')
     else:
@@ -111,6 +111,7 @@ def new_frame(frame_host: str, server_host: str) -> Frame:
         scenes=[create_default_scene()],
         scaling_mode="cover",
         background_color="white",
+        device=device or "web_only",
     )
     db.session.add(frame)
     db.session.commit()
