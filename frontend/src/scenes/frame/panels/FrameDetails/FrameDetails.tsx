@@ -69,7 +69,7 @@ export function FrameDetails({ className }: DetailsProps) {
               <tr>
                 <td className="text-blue-200 text-right">Device:</td>
                 <td>
-                  {frame.device} {frame.color} {frame.width && frame.height ? `${frame.width}x${frame.height}` : ''}
+                  {frame.device} {frame.width && frame.height ? `${frame.width}x${frame.height}` : ''} {frame.color}
                 </td>
               </tr>
               <tr>

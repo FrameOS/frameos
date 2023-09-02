@@ -24,7 +24,7 @@ class ImageHandler:
         self.config: Config = config
         self.app_handler: AppHandler = app_handler
         self.inky = None # inky frames
-        self.epd = None # waveshare frames
+        self.ws: WaveShare = None
 
         self.verify_device()
 
@@ -57,6 +57,7 @@ class ImageHandler:
                     self.config.device = 'framebuffer'
                     self.config.width = width
                     self.config.height = height
+                    self.config.color = f"{bits_per_pixel}bpp"
 
                     try_to_disable_cursor_blinking()
                     self.logger.log({'event': '@frame:device', "device": self.config.device, 'info': "init done"})

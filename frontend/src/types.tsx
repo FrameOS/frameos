@@ -81,11 +81,12 @@ export enum Area {
 
 export enum Panel {
   Diagram = 'Diagram',
-  AddApps = 'AddApps',
   FrameDetails = 'FrameDetails',
   FrameSettings = 'FrameSettings',
-  Logs = 'Logs',
   Image = 'Image',
+  Logs = 'Logs',
+  Apps = 'Apps',
+  Events = 'Events',
 }
 
 export type PanelWithMetadata = {
