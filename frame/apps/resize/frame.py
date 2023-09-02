@@ -11,7 +11,6 @@ class ResizeApp(App):
         width = int(self.config.get('width', 1))
         height = int(self.config.get('height', 1))
         scaling_mode = self.config.get('scaling_mode')
-
         current_width = payload.next_image.width
         current_height = payload.next_image.height
 

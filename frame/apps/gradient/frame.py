@@ -4,14 +4,10 @@ import math
 
 class GradientBackgroundApp(App):
     def process_image(self, payload: ProcessImagePayload):
-        if payload.next_image is not None:
-            raise Exception('Image already present, will not override')
-
         start_color = tuple(int(self.config.get('start_color')[i:i+2], 16) for i in (1, 3, 5))
         end_color = tuple(int(self.config.get('end_color')[i:i+2], 16) for i in (1, 3, 5))
         angle = float(self.config.get('angle', 0))  # default angle is 0 (vertical)
-        width = self.frame_config.width
-        height = self.frame_config.height
+        width, height = payload.next_image.size
 
         # Calculate the diagonal length
         diagonal = int(math.ceil(math.sqrt(width**2 + height**2)))

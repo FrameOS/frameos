@@ -18,9 +18,12 @@ export function Image({ id, className }: ImageProps) {
           style={{
             ...(frames[id].width && frames[id].height
               ? {
-                  aspectRatio: `${frames[id].width} / ${frames[id].height}`,
+                  aspectRatio:
+                    frames[id].rotate === 90 || frames[id].rotate === 270
+                      ? `${frames[id].height} / ${frames[id].width}`
+                      : `${frames[id].width} / ${frames[id].height}`,
+                  width: frames[id].rotate === 90 || frames[id].rotate === 270 ? frames[id].height : frames[id].width,
                   maxWidth: '100%',
-                  width: frames[id].width,
                   height: 'auto',
                 }
               : {}),

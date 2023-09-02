@@ -43,6 +43,7 @@ class Frame(db.Model):
     interval = db.Column(db.Double, default=300)
     scaling_mode = db.Column(db.String(64), nullable=True) # cover (default), contain, stretch, center
     background_color = db.Column(db.String(64), nullable=True)
+    rotate = db.Column(db.Integer, nullable=True)
     # apps
     apps = db.Column(JSON, nullable=True)
     scenes = db.Column(JSON, nullable=True)
@@ -69,6 +70,7 @@ class Frame(db.Model):
             'color': self.color,
             'interval': self.interval,
             'scaling_mode': self.scaling_mode,
+            'rotate': self.rotate,
             'background_color': self.background_color,
             'scenes': self.scenes,
         }
@@ -110,6 +112,7 @@ def new_frame(frame_host: str, server_host: str, device: Optional[str]) -> Frame
         apps=[],
         scenes=[create_default_scene()],
         scaling_mode="cover",
+        rotate=0,
         background_color="white",
         device=device or "web_only",
     )
@@ -185,7 +188,7 @@ def process_log(frame: Frame, log: dict):
         if frame.status != 'ready':
             changes['status'] = 'ready'
 
-        for key in ['width', 'height', 'device', 'color', 'interval', 'scaling_mode', 'background_color']:
+        for key in ['width', 'height', 'device', 'color', 'interval', 'scaling_mode', 'rotate', 'background_color']:
             if key in log and log[key] is not None and log[key] != getattr(frame, key):
                 changes[key] = log[key]
 

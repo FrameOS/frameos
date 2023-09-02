@@ -117,7 +117,10 @@ class AppHandler:
     def process_image(self, next_image: Optional[Image.Image], current_image: Optional[Image.Image]) -> (Optional[Image.Image], List[str], List[str]):
         apps_ran=[]
         apps_errored=[]
-        payload = ProcessImagePayload(next_image=next_image, current_image=current_image)
+        payload = ProcessImagePayload(
+            next_image=next_image,
+            current_image=current_image,
+        )
         for (keyword, app) in self.rendering_apps:
             if app is None:
                 self.logger.log({ 'event': f'{keyword}:app_not_found' })

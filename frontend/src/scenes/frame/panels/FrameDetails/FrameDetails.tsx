@@ -81,6 +81,10 @@ export function FrameDetails({ className }: DetailsProps) {
                 <td className="truncate">{frame.scaling_mode}</td>
               </tr>
               <tr>
+                <td className="text-blue-200 text-right">Rotate:</td>
+                <td className="truncate">{frame.rotate}</td>
+              </tr>
+              <tr>
                 <td className="text-blue-200 text-right">Background color:</td>
                 <td className="truncate">{frame.background_color}</td>
               </tr>

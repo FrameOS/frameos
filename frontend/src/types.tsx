@@ -18,6 +18,7 @@ export interface FrameType {
   color?: string
   interval: number
   scaling_mode: string
+  rotate?: number
   background_color: string
   scenes?: FrameScene[]
 }

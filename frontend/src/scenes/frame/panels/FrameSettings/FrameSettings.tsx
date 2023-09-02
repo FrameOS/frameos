@@ -101,6 +101,17 @@ export function FrameSettings({ className }: DetailsProps) {
                 ]}
               />
             </Field>
+            <Field name="rotate" label="Rotate">
+              <Select
+                name="rotate"
+                options={[
+                  { value: '0', label: '0 degrees' },
+                  { value: '90', label: '90 degrees' },
+                  { value: '180', label: '180 degrees' },
+                  { value: '270', label: '270 degrees' },
+                ]}
+              />
+            </Field>
             <Field name="background_color" label="Background color">
               <TextInput name="background_color" placeholder="white" />
             </Field>

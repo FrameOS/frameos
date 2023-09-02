@@ -57,6 +57,7 @@ class FrameConfig:
     interval: float
     scaling_mode: str
     background_color: str
+    rotate: int
     scenes: List[FrameScene]
 
 @dataclass

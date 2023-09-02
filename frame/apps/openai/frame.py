@@ -6,9 +6,6 @@ import io
 import json
 class OpenAIApp(App):
     def process_image(self, payload: ProcessImagePayload):
-        if payload.next_image is not None:
-            raise Exception('Image already present, will not override')
-            
         api_key = self.config.get('api_key', None)
         if api_key is None:
             raise ValueError("No API key provided for DALL·E 2")
@@ -35,7 +32,9 @@ class OpenAIApp(App):
 
             image_response = requests.get(image_url)
             image_response.raise_for_status()
-            payload.next_image = Image.open(io.BytesIO(image_response.content))            
+            openai_image = Image.open(io.BytesIO(image_response.content))
+            # TODO: scale modes and retain width/height
+            payload.next_image = openai_image
             self.log(f"Image: {payload.next_image.width}x{payload.next_image.height} {payload.next_image.format} {payload.next_image.mode}")
         except RequestException as e:
             raise Exception(f"Error fetching image from DALL·E 2 API. Error: {e}")

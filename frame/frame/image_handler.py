@@ -83,16 +83,19 @@ class ImageHandler:
             self.config.height = 600
 
     def slow_update_image_on_frame(self, image):
+        rotated_image = image
+        if isinstance(self.config.rotate, int) and self.config.rotate != 0:
+            rotated_image = image.rotate(self.config.rotate, expand=True)
         if self.ws is not None:
-            self.ws.display_image(image)
+            self.ws.display_image(rotated_image)
         elif self.inky is not None:
-            if image.width != self.inky.resolution[0] or image.height != self.inky.resolution[1]:
-                self.logger.log({ 'event': '@frame:resolution_mismatch', 'inky_resolution': self.inky.resolution, 'image_resolution': (image.width, image.height) })
+            if rotated_image.width != self.inky.resolution[0] or rotated_image.height != self.inky.resolution[1]:
+                self.logger.log({ 'event': '@frame:resolution_mismatch', 'inky_resolution': self.inky.resolution, 'image_resolution': (rotated_image.width, rotated_image.height) })
 
-            self.inky.set_image(image, saturation=1)
+            self.inky.set_image(rotated_image, saturation=1)
             self.inky.show()
         elif self.config.device == 'framebuffer':
-            image_to_framebuffer(image)
+            image_to_framebuffer(rotated_image)
 
     def are_images_equal(self, img1: Image, img2: Image) -> bool:
         if img1.size != img2.size:
@@ -111,7 +114,14 @@ class ImageHandler:
             try:
                 self.logger.log({ 'event': '@frame:refresh_image', 'trigger': trigger })
                 self.image_update_in_progress = True
-                self.next_image, apps_ran, apps_errored = self.app_handler.process_image(None, self.current_image)
+
+                requested_width = self.config.height if self.config.rotate in [90,270] else self.config.width
+                requested_height = self.config.width if self.config.rotate in [90,270] else self.config.height
+
+                self.next_image = Image.new(
+                    'RGB', (requested_width, requested_height), color=self.config.background_color or 'white'
+                )
+                self.next_image, apps_ran, apps_errored = self.app_handler.process_image(self.next_image, self.current_image)
                 
                 if self.next_image is None:
                     self.logger.log({ 'event': '@frame:refresh_skipped', 'reason': 'no_image', 'apps_ran': apps_ran })
@@ -122,20 +132,20 @@ class ImageHandler:
                             'trigger': trigger,
                             'old_width': self.next_image.width,
                             'old_height': self.next_image.height,
-                            'new_width': self.config.width,
-                            'new_height': self.config.height,
+                            'new_width': requested_width,
+                            'new_height': requested_height,
                             'scaling_mode': self.config.scaling_mode,
+                            'rotate': self.config.rotate,
                             'background_color': self.config.background_color,
                         })
                         if self.config.scaling_mode == 'contain':
-                            self.next_image = scale_contain(self.next_image, self.config.width, self.config.height, self.config.background_color)
+                            self.next_image = scale_contain(self.next_image, requested_width, requested_height, self.config.background_color)
                         elif self.config.scaling_mode == 'stretch':
-                            self.next_image = scale_stretch(self.next_image, self.config.width, self.config.height)
+                            self.next_image = scale_stretch(self.next_image, requested_width, requested_height)
                         elif self.config.scaling_mode == 'center':
-                            self.next_image = scale_center(self.next_image, self.config.width, self.config.height, self.config.background_color)
+                            self.next_image = scale_center(self.next_image, requested_width, requested_height, self.config.background_color)
                         else: # cover
-                            self.next_image = scale_cover(self.next_image, self.config.width, self.config.height)
-
+                            self.next_image = scale_cover(self.next_image, requested_width, requested_height)
 
                     if self.current_image is None or not self.are_images_equal(self.next_image, self.current_image):
                         self.logger.log({ 'event': '@frame:refreshing_screen' })
@@ -150,6 +160,5 @@ class ImageHandler:
                 self.logger.log({ 'event': '@frame:refresh_error', 'error': str(e), 'stacktrace': traceback.format_exc()  })
             finally:
                 self.image_update_in_progress = False
-                self.image_update_lock.release() 
+                self.image_update_lock.release()
         self.socketio.start_background_task(target=do_update)
-

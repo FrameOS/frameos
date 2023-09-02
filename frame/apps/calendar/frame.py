@@ -7,11 +7,8 @@ from frame.image_utils import draw_text_with_border
 
 class CalendarApp(App):
     def process_image(self, payload: ProcessImagePayload):
-        width, height = payload.next_image.size if payload.next_image else (self.frame_config.width, self.frame_config.height)
-        
-        if payload.next_image is None:
-            payload.next_image = Image.new('RGB', (width, height), color='white')
-        
+        width, height = payload.next_image.size
+
         # Get the current month details
         now = datetime.now()
         month_name = now.strftime('%B')

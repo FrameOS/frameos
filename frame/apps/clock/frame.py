@@ -5,11 +5,7 @@ from frame.image_utils import draw_text_with_border
 
 class ClockApp(App):
     def process_image(self, payload: ProcessImagePayload):
-        # If there's no next_image, create a blank canvas
-        if payload.next_image is None:
-            width, height = self.frame_config.width, self.frame_config.height
-            payload.next_image = Image.new('RGB', (width, height), color='white')
-        
+        width, height = payload.next_image.size
         # Get the current time
         current_time = datetime.now().strftime('%H:%M:%S')
         

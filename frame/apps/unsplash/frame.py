@@ -6,12 +6,10 @@ import io
 
 class UnsplashApp(App):
     def process_image(self, payload: ProcessImagePayload):
-        if payload.next_image is not None:
-            raise Exception('Image already present, will not override')
-        
         image_url = "https://source.unsplash.com/random/{width}x{height}/?{keyword}"
-        image_url = image_url.replace('{width}', str(self.frame_config.width))
-        image_url = image_url.replace('{height}', str(self.frame_config.height))
+        width, height = payload.next_image.size
+        image_url = image_url.replace('{width}', str(width))
+        image_url = image_url.replace('{height}', str(height))
         image_url = image_url.replace('{keyword}', str(self.config.get('keyword', 'nature')))
 
         self.log(f"Fetching image from Unsplash: {image_url}")

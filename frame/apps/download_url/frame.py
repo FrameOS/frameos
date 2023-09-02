@@ -6,15 +6,12 @@ from apps import App, ProcessImagePayload
 
 class DownloadApp(App):
     def process_image(self, payload: ProcessImagePayload):
-        if payload.next_image is not None:
-            raise Exception('Image already present, will not override')
-
         image_url = self.config.get('url', None)
         if not image_url:
-            raise ValueError("Image URL is not provided in app config")
-
-        image_url = image_url.replace('{width}', str(self.frame_config.width))
-        image_url = image_url.replace('{height}', str(self.frame_config.height))
+            raise ValueError("URL not provided in app config")
+        width, height = payload.next_image.size
+        image_url = image_url.replace('{width}', str(width))
+        image_url = image_url.replace('{height}', str(height))
         
         try:
             response = requests.get(image_url)

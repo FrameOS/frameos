@@ -24,6 +24,7 @@ const FRAME_KEYS = [
   'device',
   'interval',
   'scaling_mode',
+  'rotate',
   'background_color',
   'scenes',
 ]
@@ -64,7 +65,7 @@ export const frameLogic = kea<frameLogicType>([
           const value = frame[key as keyof typeof frame]
           if (typeof value === 'string') {
             formData.append(key, value)
-          } else {
+          } else if (value !== undefined && value !== null) {
             formData.append(key, JSON.stringify(frame[key as keyof typeof frame]))
           }
         }

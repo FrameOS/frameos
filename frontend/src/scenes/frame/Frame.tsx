@@ -106,7 +106,7 @@ export function Frame(props: FrameSceneProps) {
         </div>
       ) : (
         <div>
-          Loading frame ${props.id} <Spinner />
+          Loading frame {props.id} <Spinner />
         </div>
       )}
     </BindLogic>

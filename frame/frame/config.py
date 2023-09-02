@@ -19,6 +19,7 @@ class Config:
         self.color: Optional[str] = self._data.get('color', None)
         self.interval: Optional[int] = self._data.get('interval', 300)
         self.scaling_mode: Optional[str] = self._data.get('scaling_mode', 'cover')
+        self.rotate: Optional[int] = self._data.get('rotate', 0)
         self.background_color: Optional[str] = self._data.get('background_color', 'white')
 
         scenes_data = self._data.pop('scenes', [])
@@ -40,6 +41,7 @@ class Config:
             'color': self.color,
             'interval': self.interval,
             'scaling_mode': self.scaling_mode,
+            'rotate': self.rotate,
             'background_color': self.background_color,
             'scenes': self.scenes,
         }
@@ -54,6 +56,7 @@ class Config:
             color=self.color,
             interval=self.interval,
             scaling_mode=self.scaling_mode,
+            rotate=self.rotate,
             background_color=self.background_color,
             scenes=self.scenes,
         )
