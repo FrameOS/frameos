@@ -32,13 +32,28 @@ export function Frame(props: FrameSceneProps) {
               <Button color={frameFormChanged ? 'teal' : 'light-gray'} type="button" onClick={() => saveFrame()}>
                 Save
               </Button>,
-              <Button color="light-gray" type="button" onClick={() => refreshFrame()}>
+              <Button
+                color="light-gray"
+                type="button"
+                onClick={() => refreshFrame()}
+                title="Refresh the frame with its _old_ config. Save any unsaved changes, but don't apply them."
+              >
                 &&nbsp;Refresh
               </Button>,
-              <Button color="light-gray" type="button" onClick={() => restartFrame()}>
+              <Button
+                color="light-gray"
+                type="button"
+                onClick={() => restartFrame()}
+                title="Restart the frame with the new config."
+              >
                 &&nbsp;Restart
               </Button>,
-              <Button color="light-gray" type="button" onClick={() => redeployFrame()}>
+              <Button
+                color="light-gray"
+                type="button"
+                onClick={() => redeployFrame()}
+                title="Redeploy FrameOS onto the frame."
+              >
                 &&nbsp;Redeploy
               </Button>,
             ]}
