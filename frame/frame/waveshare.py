@@ -1,6 +1,9 @@
 import importlib
 import inspect
 
+from .image_utils import rgb_to_eink_images
+
+
 class WaveShare:
     SUPPORTED_DEVICES = [
         "epd1in02", "epd1in64g", "epd2in13", "epd2in66", "epd4in2b_V2", "epd5in83", "epd7in5b_V2",
@@ -10,6 +13,7 @@ class WaveShare:
         "epd1in54", "epd2in13d", "epd2in36g", "epd2in9", "epd4in01f", "epd5in83bc", "epd7in5bc", "epd7in5_V2",
         "epd1in54_V2", "epd2in13g", "epd2in66b", "epd2in7_V2", "epd2in9_V2", "epd4in2bc", "epd5in83b_V2", "epd7in5b_HD",
     ]
+    BLACKRED = ['epd7in5b_V2']
 
     def __init__(self, device, logger):
         if device not in self.SUPPORTED_DEVICES:
@@ -41,5 +45,10 @@ class WaveShare:
 
     def display_image(self, image):
         self.init_device()
-        self.epd.display(self.epd.getbuffer(image))
+
+        if self.device in self.BLACKRED:
+            black_data, red_data = rgb_to_eink_images(image)
+            self.epd.display(self.epd.getbuffer(black_data), self.epd.getbuffer(red_data))
+        else:
+            self.epd.display(self.epd.getbuffer(image))
         self.epd.sleep()

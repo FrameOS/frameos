@@ -165,3 +165,30 @@ def rgb_to_rgb565(img):
 
 def try_to_disable_cursor_blinking():
     subprocess.run('sudo sh -c "setterm -cursor off > /dev/tty0"', shell=True)
+
+
+def rgb_to_eink_images(rgb_img: Image, red_threshold=(100, 50, 50)):
+    pixels = list(rgb_img.getdata())
+
+    black = []
+    red = []
+
+    # Loop through the original pixels
+    for pixel in pixels:
+        r, g, b = pixel
+        gray_value = int(0.2989 * r + 0.5870 * g + 0.1140 * b)
+
+        if r > red_threshold[0] and g > red_threshold[1] and b > red_threshold[2]:
+            red.append(gray_value)
+            black.append(255)
+        else:
+            black.append(gray_value)
+            red.append(255)
+
+    red_img = Image.new('L', rgb_img.size, 255)
+    red_img.putdata(red)
+
+    black_img = Image.new('L', rgb_img.size, 255)
+    black_img.putdata(black)
+
+    return black_img, red_img
