@@ -6,8 +6,9 @@ import { Logs } from './Logs/Logs'
 import { Apps } from './Apps/Apps'
 import { Events } from './Events/Events'
 import { Panel } from '../../../types'
+import { EditApp } from './EditApp/EditApp'
 
-export const panels: Record<Panel, (...props: any[]) => JSX.Element> = {
+export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   Diagram,
   FrameDetails,
   FrameSettings,
@@ -15,4 +16,5 @@ export const panels: Record<Panel, (...props: any[]) => JSX.Element> = {
   Logs,
   Apps,
   Events,
+  EditApp,
 }

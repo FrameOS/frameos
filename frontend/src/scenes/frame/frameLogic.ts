@@ -29,24 +29,11 @@ const FRAME_KEYS = [
   'scenes',
 ]
 
-const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
-  [Area.TopLeft]: [{ panel: Panel.Diagram, active: true, hidden: false, metadata: { sceneId: 'default' } }],
-  [Area.TopRight]: [
-    { panel: Panel.Apps, active: true, hidden: false },
-    { panel: Panel.Events, active: true, hidden: false },
-    { panel: Panel.FrameDetails, active: false, hidden: false },
-    { panel: Panel.FrameSettings, active: false, hidden: false },
-  ],
-  [Area.BottomLeft]: [{ panel: Panel.Logs, active: true, hidden: false }],
-  [Area.BottomRight]: [{ panel: Panel.Image, active: true, hidden: false }],
-}
 export const frameLogic = kea<frameLogicType>([
   path(['src', 'scenes', 'frame', 'frameLogic']),
   props({} as FrameLogicProps),
   key((props) => props.id),
   actions({
-    setPanel: (area: Area, panel: string, label?: string) => ({ area, panel, label }),
-    toggleFullScreenPanel: (panel: Panel) => ({ panel }),
     updateScene: (sceneId: string, scene: any) => ({ sceneId, scene }),
     saveFrame: true,
     refreshFrame: true,
@@ -94,42 +81,10 @@ export const frameLogic = kea<frameLogicType>([
         redeployFrame: () => 'redeploy',
       },
     ],
-    panels: [
-      DEFAULT_LAYOUT as Record<Area, PanelWithMetadata[]>,
-      {
-        setPanel: (state, { area, panel, label }) => {
-          const newPanels = { ...state }
-          newPanels[area] = newPanels[area].map((p) => ({
-            ...p,
-            active: p.panel === panel,
-            label: p.panel === panel && label ? label : p.label,
-          }))
-          return equal(state, newPanels) ? state : newPanels
-        },
-      },
-    ],
-    fullScreenPanel: [
-      null as Panel | null,
-      {
-        toggleFullScreenPanel: (state, { panel }) => (state === panel ? null : panel),
-      },
-    ],
   }),
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
     frame: [(s) => [framesModel.selectors.frames, s.id], (frames, id) => frames[id] || null],
-    panelsWithConditions: [
-      (s) => [s.panels, () => null, s.fullScreenPanel], // s.selectedNode
-      (panels, selectedNode, fullScreenPanel): Record<Area, PanelWithMetadata[]> =>
-        fullScreenPanel
-          ? {
-              [Area.TopLeft]: [{ panel: fullScreenPanel, active: true, hidden: false }],
-              [Area.TopRight]: [],
-              [Area.BottomLeft]: [],
-              [Area.BottomRight]: [],
-            }
-          : panels,
-    ],
   })),
   subscriptions(({ actions }) => ({
     frame: (frame, oldFrame) => {

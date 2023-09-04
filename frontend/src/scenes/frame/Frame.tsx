@@ -1,13 +1,10 @@
 import { BindLogic, useActions, useValues } from 'kea'
 import { frameLogic } from './frameLogic'
 import { frameHost } from '../../decorators/frame'
-import { Panel, PanelGroup } from 'react-resizable-panels'
 import { Spinner } from '../../components/Spinner'
 import { Button } from '../../components/Button'
 import { Header } from '../../components/Header'
-import { Handle } from '../../components/panels/Handle'
-import { Area } from '../../types'
-import { PanelArea } from './panels/PanelArea'
+import { Panels } from './panels/Panels'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -16,10 +13,8 @@ interface FrameSceneProps {
 export function Frame(props: FrameSceneProps) {
   const id = parseInt(props.id)
   const frameLogicProps = { id }
-  const { frame, panelsWithConditions: panels, frameFormChanged } = useValues(frameLogic(frameLogicProps))
-  const { setPanel, toggleFullScreenPanel, saveFrame, refreshFrame, restartFrame, redeployFrame } = useActions(
-    frameLogic(frameLogicProps)
-  )
+  const { frame, frameFormChanged } = useValues(frameLogic(frameLogicProps))
+  const { saveFrame, refreshFrame, restartFrame, redeployFrame } = useActions(frameLogic(frameLogicProps))
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -58,66 +53,7 @@ export function Frame(props: FrameSceneProps) {
               </Button>,
             ]}
           />
-          <PanelGroup direction="horizontal" units="percentages" className="flex-1 p-4">
-            {panels.TopLeft.length > 0 || panels.BottomLeft.length > 0 ? (
-              <Panel>
-                <PanelGroup direction="vertical">
-                  {panels.TopLeft.length > 0 ? (
-                    <Panel defaultSize={60}>
-                      <PanelArea
-                        area={Area.TopLeft}
-                        areaPanels={panels.TopLeft}
-                        setPanel={setPanel}
-                        toggleFullScreenPanel={toggleFullScreenPanel}
-                      />
-                    </Panel>
-                  ) : null}
-                  {panels.TopLeft.length > 0 && panels.BottomLeft.length > 0 ? <Handle direction="vertical" /> : null}
-                  {panels.BottomLeft.length > 0 ? (
-                    <Panel defaultSize={40}>
-                      <PanelArea
-                        area={Area.BottomLeft}
-                        areaPanels={panels.BottomLeft}
-                        setPanel={setPanel}
-                        toggleFullScreenPanel={toggleFullScreenPanel}
-                      />
-                    </Panel>
-                  ) : null}
-                </PanelGroup>
-              </Panel>
-            ) : null}
-            {(panels.TopLeft.length > 0 || panels.BottomLeft.length > 0) &&
-            (panels.TopRight.length > 0 || panels.BottomRight.length > 0) ? (
-              <Handle direction="horizontal" />
-            ) : null}
-            {panels.TopRight.length > 0 || panels.BottomRight.length > 0 ? (
-              <Panel defaultSize={33}>
-                <PanelGroup direction="vertical">
-                  {panels.TopRight.length > 0 ? (
-                    <Panel defaultSize={60}>
-                      <PanelArea
-                        area={Area.TopRight}
-                        areaPanels={panels.TopRight}
-                        setPanel={setPanel}
-                        toggleFullScreenPanel={toggleFullScreenPanel}
-                      />
-                    </Panel>
-                  ) : null}
-                  {panels.TopRight.length > 0 && panels.BottomRight.length > 0 ? <Handle direction="vertical" /> : null}
-                  {panels.BottomRight.length > 0 ? (
-                    <Panel defaultSize={40}>
-                      <PanelArea
-                        area={Area.BottomRight}
-                        areaPanels={panels.BottomRight}
-                        setPanel={setPanel}
-                        toggleFullScreenPanel={toggleFullScreenPanel}
-                      />
-                    </Panel>
-                  ) : null}
-                </PanelGroup>
-              </Panel>
-            ) : null}
-          </PanelGroup>
+          <Panels />
         </div>
       ) : (
         <div>

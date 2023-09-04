@@ -88,6 +88,7 @@ export enum Panel {
   Logs = 'Logs',
   Apps = 'Apps',
   Events = 'Events',
+  EditApp = 'EditApp',
 }
 
 export type PanelWithMetadata = {

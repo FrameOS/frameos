@@ -1,4 +1,4 @@
-import { panels } from './panels'
+import { allPanels } from './allPanels'
 import { Container } from '../../../components/panels/Container'
 import { Tabs } from '../../../components/panels/Tabs'
 import { Tab } from '../../../components/panels/Tab'
@@ -19,7 +19,7 @@ function pascalCaseToTitleCase(pascalCase: string): string {
 export function PanelArea({ area, areaPanels, setPanel, toggleFullScreenPanel }: PanelAreaProps): JSX.Element {
   // Don't look at panel.active directly, as many might have it set
   const activePanel = areaPanels.find((panel) => panel.active) ?? areaPanels.find((panel) => !panel.hidden)
-  const Component = activePanel ? panels[activePanel.panel] : null
+  const Component = activePanel ? allPanels[activePanel.panel] : null
 
   return (
     <Container
