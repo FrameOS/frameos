@@ -11,6 +11,8 @@ from .app_handler import AppHandler
 from .image_handler import ImageHandler
 from .button_handler import ButtonHandler
 from .scheduler import Scheduler
+from .touch_click_handler import TouchClickHandler
+
 
 class Server:
     def __init__(self, config: Config, logger: Logger):
@@ -73,6 +75,8 @@ class Server:
     def run(self):
         if self.config.device == 'pimoroni.inky_impression':
             button_handler: ButtonHandler = ButtonHandler(self.logger, [5, 6, 16, 24], ['A', 'B', 'C', 'D'], self.image_handler)
+        touch_handler = TouchClickHandler(self.logger, self.image_handler)
+        touch_handler.start()
         reset_event: Event = Event()
         scheduler: Scheduler = Scheduler(image_handler=self.image_handler, reset_event=reset_event, logger=self.logger, config=self.config)
         self.image_handler.refresh_image('bootup')
