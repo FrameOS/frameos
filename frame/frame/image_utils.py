@@ -1,8 +1,12 @@
+from typing import Optional
+
 from PIL import Image
 import numpy as np
 import struct
 import fcntl
 import subprocess
+
+from .logger import Logger
 
 def scale_cover(image: Image.Image, target_width: int, target_height: int) -> Image.Image:
     # Determine the scaling factor for both dimensions
@@ -88,8 +92,8 @@ def draw_text_with_border(draw, position, text, font, font_color, border_color, 
     draw.text((x, y), text, fill=font_color, font=font)
 
 
-def image_to_framebuffer(img: Image, fb_path='/dev/fb0'):
-    xres, yres, bpp = get_framebuffer_info(fb_path)
+def image_to_framebuffer(img: Image, fb_path='/dev/fb0', logger: Optional[Logger]=None):
+    xres, yres, bpp, color_mode = get_framebuffer_info(fb_path)
 
     # Open and convert the image
     if img.width != xres or img.height != yres:
@@ -99,35 +103,42 @@ def image_to_framebuffer(img: Image, fb_path='/dev/fb0'):
     if bpp == 16:
         mode = 'RGB565'
     elif bpp == 24:
-        mode = 'RGB'
+        mode = color_mode or'RGB'
     elif bpp == 32:
-        mode = 'RGBX'
+        mode = color_mode or 'RGBX'
     else:
         raise ValueError(f"Unsupported bit-depth: {bpp}")
 
-    if img.mode == 'RGB' and mode == 'RGB565':
+    if img.mode == 'RGB' and bpp == 16:
         pixels = rgb_to_rgb565(img)
+    elif img.mode == 'RGB' and bpp == 32:
+        pixels = rgb_to_rgbx(img, color_mode)
     else:
         pixels = img.convert(mode).tobytes("raw", mode)
+
     with open(fb_path, "wb") as f:
         f.write(pixels)
 
 FBIOGET_VSCREENINFO = 0x4600
 
 def get_framebuffer_info(fb_path='/dev/fb0'):
-    # Define only the xres, yres, and bits_per_pixel fields
-    format_str = 'IIIIIII'
-    buf = struct.pack(format_str, 0, 0, 0, 0, 0, 0, 0)  # Initial data
+    format_str = 'IIIIIIIIIIIIIIIIIIII'
+    buf = struct.pack(format_str, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
     with open(fb_path, 'rb') as fb:
-        # Perform ioctl call to get the data
         res = fcntl.ioctl(fb.fileno(), FBIOGET_VSCREENINFO, buf)
-        xres, yres, _, _, _, _, bpp = struct.unpack(format_str, res)
+        xres, yres, _, _, _, _, bpp, grayscale, red_offset, red_length, _, green_offset, green_length, _, blue_offset, blue_length, _, x_offset, x_length, _ = struct.unpack(format_str, res)
 
-    if bpp != 16 and bpp != 24 and bpp != 32:
+    if bpp not in [16, 24, 32]:
         raise ValueError(f"Unsupported bit-depth: {bpp}")
 
-    return xres, yres, bpp
+    # Sorting colors by their offset to determine the order
+    colors = [('R', red_offset, red_length), ('G', green_offset, green_length), ('B', blue_offset, blue_length), ('X', x_offset, x_length)]
+    colors = [color for color in colors if (color[2] or 0) > 0]
+    colors = sorted(colors, key=lambda x: x[1])
+    color_format = ''.join([color[0] for color in colors])
+
+    return xres, yres, bpp, color_format
 
 def get_bit_depth(img):
     mode_to_depth = {
@@ -146,7 +157,35 @@ def get_bit_depth(img):
 
     return mode_to_depth.get(img.mode, None)
 
-def rgb_to_rgb565(img):
+
+def rgb_to_rgbx(img, color_mode = 'RGBX'):
+    """Convert a PIL.Image in RGB mode to RGBX or similar mode."""
+    r, g, b = img``````````````````````````````````````.split()
+
+    # Convert channels to arrays
+    r = np.asarray(r)
+    g = np.asarray(g)
+    b = np.asarray(b)
+    x = np.zeros_like(r).astype(np.uint8)
+
+    # Stack the channels along the third dimension and reshape into a single byte stream
+    channels = ()
+    for color in color_mode:
+        if color == 'R':
+            channels += (r,)
+        elif color == 'G':
+            channels += (g,)
+        elif color == 'B':
+            channels += (b,)
+        elif color == 'X':
+            channels += (x,)
+        else:
+            raise ValueError(f"Unsupported color mode: {color_mode}. Only letters R, G, B, and X are allowed.")
+
+    return np.stack(channels, axis=-1).tobytes()
+
+
+def rgb_to_rgb565(img, color_mode = 'RGBX'):
     """Convert a PIL.Image (in RGB mode) to RGB565 mode."""
     r, g, b = img.split()
 
@@ -162,6 +201,7 @@ def rgb_to_rgb565(img):
 
     # Combine and return as bytes
     return (r565 | g565 | b565).tobytes()
+
 
 def try_to_disable_cursor_blinking():
     subprocess.run('sudo sh -c "setterm -cursor off > /dev/tty0"', shell=True)
