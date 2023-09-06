@@ -1,16 +1,24 @@
 {
-    "name": "Color",
-    "description": "Set a single color background",
-    "category": "image",
-    "version": "1.0.0",
-    "fields": [
-        {
-            "name": "color",
-            "type": "string",
-            "value": "white",
-            "required": true,
-            "label": "Color",
-            "placeholder": "Enter a color. E.g. white, #ff0000"
-        }
-    ]
+  "name": "Color",
+  "description": "Set a single color background",
+  "category": "image",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "effect",
+      "type": "select",
+      "options": ["none", "pastel-time-rainbow"],
+      "value": "none",
+      "required": true,
+      "label": "Effect"
+    },
+    {
+      "name": "color",
+      "type": "string",
+      "value": "white",
+      "required": true,
+      "label": "Color",
+      "placeholder": "Enter a color. E.g. white, #ff0000"
+    }
+  ]
 }
