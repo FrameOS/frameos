@@ -102,7 +102,7 @@ def update_frame(id: int):
     if 'color' in request.form:
         frame.color = request.form['color'] if request.form['color'] != '' and request.form['color'] != 'null' else None
     if 'interval' in request.form:
-        frame.interval = int(request.form['interval']) if request.form['interval'] != '' else None
+        frame.interval = float(request.form['interval']) if request.form['interval'] != '' else None
     if 'scaling_mode' in request.form:
         frame.scaling_mode = request.form['scaling_mode']
     if 'background_color' in request.form:
