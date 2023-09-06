@@ -15,7 +15,7 @@ export function Image({ className }: ImageProps) {
     <div
       className={clsx(
         'max-w-full max-h-full w-full h-full flex items-center justify-center',
-        frames[id]?.status !== 'ready' ? 'continuous-fade-in-out' : null,
+        frames[id]?.status !== 'ready' && frames[id]?.interval > 5 ? 'continuous-fade-in-out' : null,
         className
       )}
     >
