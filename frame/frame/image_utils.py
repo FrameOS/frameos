@@ -160,7 +160,7 @@ def get_bit_depth(img):
 
 def rgb_to_rgbx(img, color_mode = 'RGBX'):
     """Convert a PIL.Image in RGB mode to RGBX or similar mode."""
-    r, g, b = img``````````````````````````````````````.split()
+    r, g, b = img.split()
 
     # Convert channels to arrays
     r = np.asarray(r)
