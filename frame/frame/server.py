@@ -71,7 +71,8 @@ class Server:
             emit('log_event', {'logs': self.logger.get()})
 
     def run(self):
-        button_handler: ButtonHandler = ButtonHandler(self.logger, [5, 6, 16, 24], ['A', 'B', 'C', 'D'], self.image_handler)
+        if self.config.device == 'pimoroni.inky_impression':
+            button_handler: ButtonHandler = ButtonHandler(self.logger, [5, 6, 16, 24], ['A', 'B', 'C', 'D'], self.image_handler)
         reset_event: Event = Event()
         scheduler: Scheduler = Scheduler(image_handler=self.image_handler, reset_event=reset_event, logger=self.logger, config=self.config)
         self.image_handler.refresh_image('bootup')

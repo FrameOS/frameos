@@ -12,6 +12,7 @@ from .image_utils import scale_cover, scale_contain, scale_stretch, scale_center
     image_to_framebuffer, get_framebuffer_info, try_to_disable_cursor_blinking
 from .waveshare import WaveShare
 
+FRAMEBUFFER_DRIVERS = ['framebuffer', 'pimoroni.hyperpixel2r']
 
 class ImageHandler:
     def __init__(self, logger: Logger, socketio: SocketIO, config: Config, app_handler: AppHandler):
@@ -36,28 +37,14 @@ class ImageHandler:
         self.logger.log({ 'event': '@frame:config', **config })
 
     def verify_device(self):
-        if self.config.device == 'inky' or self.config.device is None:
-            try:
-                from inky.auto import auto
-                self.inky = auto()
-                self.config.device = 'inky'
-                self.config.width = self.inky.resolution[0]
-                self.config.height = self.inky.resolution[1]
-                self.config.color = self.inky.colour
-                self.logger.log({'event': '@frame:device', "device": self.config.device, 'info': "init done"})
-                return
-            except Exception as e:
-                self.inky = None
-                self.logger.log({'event': '@frame:device_error', "device": 'inky', 'error': str(e), })
-
-        if self.config.device == 'framebuffer' or self.config.device is None:
+        if self.config.device in FRAMEBUFFER_DRIVERS or self.config.device is None:
             try:
                 if os.access('/dev/fb0', os.W_OK):
-                    width, height, bits_per_pixel = get_framebuffer_info('/dev/fb0')
-                    self.config.device = 'framebuffer'
+                    width, height, bits_per_pixel, color_format = get_framebuffer_info('/dev/fb0')
+                    self.config.device = self.config.device or 'framebuffer'
                     self.config.width = width
                     self.config.height = height
-                    self.config.color = f"{bits_per_pixel}bpp"
+                    self.config.color = f"{bits_per_pixel}bpp {color_format}"
 
                     try_to_disable_cursor_blinking()
                     self.logger.log({'event': '@frame:device', "device": self.config.device, 'info': "init done"})
@@ -65,7 +52,7 @@ class ImageHandler:
                 else:
                     raise Exception("No framebuffer device found.")
             except Exception as e:
-                self.logger.log({'event': '@frame:device_error', "device": 'framebuffer', 'error': str(e), })
+                self.logger.log({'event': '@frame:device_error', "device": 'framebuffer', 'error': str(e), 'stacktrace': traceback.format_exc() })
 
         if self.config.device.startswith('waveshare.epd'):
             try:
@@ -74,7 +61,21 @@ class ImageHandler:
                 self.logger.log({'event': '@frame:device', "device": self.config.device, 'info': "init done"})
                 return
             except Exception as e:
-                self.logger.log({'event': '@frame:device_error', "device": self.config.device, 'error': str(e), })
+                self.logger.log({'event': '@frame:device_error', "device": self.config.device, 'error': str(e), 'stacktrace': traceback.format_exc() })
+
+        if self.config.device == 'pimoroni.inky_impression' or self.config.device is None:
+            try:
+                from inky.auto import auto
+                self.inky = auto()
+                self.config.device = 'pimoroni.inky_impression'
+                self.config.width = self.inky.resolution[0]
+                self.config.height = self.inky.resolution[1]
+                self.config.color = self.inky.colour
+                self.logger.log({'event': '@frame:device', "device": self.config.device, 'info': "init done"})
+                return
+            except Exception as e:
+                self.inky = None
+                self.logger.log({'event': '@frame:device_error', "device": 'pimoroni.inky_impression', 'error': str(e), })
 
         self.logger.log({'event': '@frame:device', "device": 'web_only', 'info': "Starting in WEB only mode."})
 
@@ -91,11 +92,10 @@ class ImageHandler:
         elif self.inky is not None:
             if rotated_image.width != self.inky.resolution[0] or rotated_image.height != self.inky.resolution[1]:
                 self.logger.log({ 'event': '@frame:resolution_mismatch', 'inky_resolution': self.inky.resolution, 'image_resolution': (rotated_image.width, rotated_image.height) })
-
             self.inky.set_image(rotated_image, saturation=1)
             self.inky.show()
-        elif self.config.device == 'framebuffer':
-            image_to_framebuffer(rotated_image)
+        elif self.config.device in FRAMEBUFFER_DRIVERS:
+            image_to_framebuffer(rotated_image, logger=self.logger)
 
     def are_images_equal(self, img1: Image, img2: Image) -> bool:
         if img1.size != img2.size:
