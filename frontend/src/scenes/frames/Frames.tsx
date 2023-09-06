@@ -17,14 +17,16 @@ export function Frames() {
         <Panel>
           <div
             id="frames"
-            className="max-h-full overflow-auto p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
+            className="max-h-full overflow-auto p-4 columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4"
           >
             {framesList.map((frame) => (
-              <div key={frame.id}>
+              <div key={frame.id} className="mb-4 break-inside-avoid">
                 <Frame frame={frame} />
               </div>
             ))}
-            <NewFrame />
+            <div className="mb-4 break-inside-avoid">
+              <NewFrame />
+            </div>
           </div>
         </Panel>
       </PanelGroup>
