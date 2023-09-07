@@ -11,6 +11,14 @@
             "required": false,
             "label": "Random keyword (one word)",
             "placeholder": "e.g. pineapple, nature, birds, power"
+        },
+        {
+            "name": "cache_seconds",
+            "type": "string",
+            "value": "60",
+            "required": false,
+            "label": "Seconds to cache the result (0 = no cache)",
+            "placeholder": "Default: 60. Use 0 for no cache"
         }
     ]
 }

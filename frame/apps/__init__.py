@@ -72,6 +72,10 @@ class App:
         self.config = config
         self.keyword = keyword
         self.log_function = log_function
+        self.__post_init__()
+
+    def __post_init__(self):
+        pass
 
     def log(self, message: str):
         if self.log_function:
