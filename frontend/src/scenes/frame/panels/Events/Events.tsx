@@ -25,7 +25,7 @@ export function Events() {
         onDragStart={(event) => onDragStart(event, 'event', 'button_press')}
       >
         <H6>Event: Button Press</H6>
-        <div className="text-sm">When a button is pressed (not implemented yet)</div>
+        <div className="text-sm">When a button or screen is pressed</div>
       </Box>
     </div>
   )

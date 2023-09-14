@@ -1,13 +1,18 @@
 from evdev import InputDevice, ecodes, list_devices
+
+from .app_handler import AppHandler
 from .logger import Logger
 from .image_handler import ImageHandler
 import threading
 
+from apps import ExecutionContext
+
 
 class TouchClickHandler:
-    def __init__(self, logger: Logger, image_handler: ImageHandler):
+    def __init__(self, logger: Logger, image_handler: ImageHandler, app_handler: AppHandler):
         self.logger = logger
         self.image_handler = image_handler
+        self.app_handler = app_handler
         self.device_paths = list_devices()
         self.devices = [InputDevice(path) for path in self.device_paths]
         self.logger.log({'event': '@frame:input_devices', 'devices': [dev.name for dev in self.devices]})
@@ -30,8 +35,24 @@ class TouchClickHandler:
 
     def handle_touch_click(self):
         self.logger.log({'event': '@frame:touchscreen_pressed'})
-        self.image_handler.refresh_image('touchscreen press')
+        # self.image_handler.refresh_image('touchscreen press')
+        self.app_handler.run(
+            ExecutionContext(
+                event='button_press',
+                image=None,
+                apps_ran=[],
+                apps_errored=[]
+            )
+        )
 
     def handle_mouse_click(self):
         self.logger.log({'event': '@frame:mouse_clicked'})
-        self.image_handler.refresh_image('mouse click')
+        # self.image_handler.refresh_image('mouse click')
+        self.app_handler.run(
+            ExecutionContext(
+                event='button_press',
+                image=None,
+                apps_ran=[],
+                apps_errored=[]
+            )
+        )

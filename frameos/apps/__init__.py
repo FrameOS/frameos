@@ -69,17 +69,29 @@ class ExecutionContext:
     apps_errored: List[str]
 
 class App:
-    def __init__(self, keyword: str, config: Dict, frame_config: FrameConfig, log_function: Callable[[Dict], Any], node: Node) -> None:
+    def __init__(
+            self,
+            keyword: str,
+            config: Dict,
+            frame_config: FrameConfig,
+            log_function: Callable[[Dict], Any],
+            rerender_function: Callable[[str], None],
+            node: Node,
+    ) -> None:
         self.frame_config = frame_config
         self.config = config
         self.keyword = keyword
         self.log_function = log_function
+        self.rerender_function = rerender_function
         self.state: Dict[str, Any] = {}
         self.node: Node = node
         self.__post_init__()
 
     def __post_init__(self):
         pass
+
+    def rerender(self, trigger = None):
+        self.rerender_function(self.keyword if trigger is None else trigger)
 
     def log(self, message: str):
         if self.log_function:

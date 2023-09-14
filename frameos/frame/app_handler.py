@@ -5,13 +5,15 @@ import importlib.util
 import inspect
 
 from dacite import from_dict
-from typing import Optional, List, Dict, Type, Any
+from typing import Optional, List, Dict, Type, Any, TYPE_CHECKING
 from PIL.Image import Image
 
 from apps import AppConfig, App, Node, Edge, FrameConfigScene, ExecutionContext
 from .config import Config
 from .logger import Logger
 
+if TYPE_CHECKING:
+    from .image_handler import ImageHandler
 
 class SceneHandler:
     def __init__(self, frame_config_scene: FrameConfigScene, app_handler: "AppHandler", logger: Logger):
@@ -70,7 +72,9 @@ class AppHandler:
         self.apps: Dict[str, App] = {}
         self.scene_handlers: Dict[str, SceneHandler] = {}
         self.current_scene_id: Optional[str] = None
+        self.image_handler: Optional["ImageHandler"] = None
 
+    def init(self):
         try:
             self.init_apps()
         except Exception as e:
@@ -153,7 +157,8 @@ class AppHandler:
             config=config,
             frame_config=self.config.to_frame_config(),
             log_function=self.logger.log,
-            node=node
+            rerender_function=self.image_handler.refresh_image,
+            node=node,
         )
 
     def run(self, context: ExecutionContext) -> ExecutionContext:
@@ -176,3 +181,6 @@ class AppHandler:
         )
         self.run(context)
         return context
+
+    def register_image_handler(self, image_handler: "ImageHandler"):
+        self.image_handler = image_handler

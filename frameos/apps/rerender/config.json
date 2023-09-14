@@ -1,0 +1,7 @@
+{
+    "name": "ReRender",
+    "description": "Trigger a render event. Synchronous and blocking. Don't use in a render event listener.",
+    "category": "util",
+    "version": "1.0.0",
+    "fields": []
+}

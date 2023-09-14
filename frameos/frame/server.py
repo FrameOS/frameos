@@ -24,8 +24,12 @@ class Server:
         self.socketio: SocketIO = SocketIO(self.app, async_mode='threading')
         self.logger.set_socketio(self.socketio)
         self.logger.log({ 'event': '@frame:startup' })
-        self.apps: AppHandler = AppHandler(self.config, self.logger)
-        self.image_handler: ImageHandler = ImageHandler(self.logger, self.socketio, self.config, self.apps)
+
+        self.app_handler: AppHandler = AppHandler(self.config, self.logger)
+        self.image_handler: ImageHandler = ImageHandler(self.logger, self.socketio, self.config, self.app_handler)
+        self.app_handler.register_image_handler(self.image_handler)
+        self.app_handler.init()
+
         self.saved_image: Optional[Any] = None
         self.saved_bytes: Optional[bytes] = None
         self.saved_format: Optional[str] = None
@@ -75,7 +79,7 @@ class Server:
     def run(self):
         if self.config.device == 'pimoroni.inky_impression':
             button_handler: ButtonHandler = ButtonHandler(self.logger, [5, 6, 16, 24], ['A', 'B', 'C', 'D'], self.image_handler)
-        touch_handler = TouchClickHandler(self.logger, self.image_handler)
+        touch_handler = TouchClickHandler(self.logger, self.image_handler, self.app_handler)
         touch_handler.start()
         reset_event: Event = Event()
         scheduler: Scheduler = Scheduler(image_handler=self.image_handler, reset_event=reset_event, logger=self.logger, config=self.config)
