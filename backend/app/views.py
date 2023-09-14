@@ -125,7 +125,7 @@ def update_frame(id: int):
 def new_frame():
     frame_host = request.form['frame_host']
     server_host = request.form['server_host']
-    device = request.form['device']
+    device = request.form.get('device', 'web_only')
     frame = models.new_frame(frame_host, server_host, device)
     return jsonify(frame=frame.to_dict())
 
