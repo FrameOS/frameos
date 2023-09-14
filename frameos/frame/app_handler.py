@@ -1,0 +1,178 @@
+import json
+import traceback
+import os
+import importlib.util
+import inspect
+
+from dacite import from_dict
+from typing import Optional, List, Dict, Type, Any
+from PIL.Image import Image
+
+from apps import AppConfig, App, Node, Edge, FrameConfigScene, ExecutionContext
+from .config import Config
+from .logger import Logger
+
+
+class SceneHandler:
+    def __init__(self, frame_config_scene: FrameConfigScene, app_handler: "AppHandler", logger: Logger):
+        self.app_handler = app_handler
+        self.logger = logger
+        self.id = frame_config_scene.id
+        self.nodes: List[Node] = frame_config_scene.nodes
+        self.edges: List[Edge] = frame_config_scene.edges
+        self.nodes_dict: Dict[str, Node] = {node.id: node for node in self.nodes}
+        self.edges_dict: Dict[str, Node] = {edge.source: edge.target for edge in self.edges}
+        self.apps_dict: Dict[str, App] = app_handler.apps
+        self.event_start_nodes: Dict[str, List[str]] = {}
+
+        for node in self.nodes:
+            if node.type == 'event':
+                keyword = node.data.get('keyword', None)
+                if keyword is not None:
+                    if not keyword in self.event_start_nodes:
+                        self.event_start_nodes[keyword] = []
+                    self.event_start_nodes[keyword].append(node.id)
+
+    def run(self, context: ExecutionContext):
+        if context.event in self.event_start_nodes:
+            for node_id in self.event_start_nodes[context.event]:
+                node = self.nodes_dict[node_id]
+                while node is not None:
+                    if node.type == 'app':
+                        self.run_node(node, context)
+                    if node.id in self.edges_dict:
+                        node = self.nodes_dict[self.edges_dict[node.id]]
+                    else:
+                        break
+
+    def run_node(self, node: Node, context: ExecutionContext):
+        if node.type == 'app':
+            if not node.id in self.apps_dict:
+                raise Exception(f'App with id {node.id} not initialized')
+            app = self.apps_dict[node.id]
+            try:
+                app.run(context)
+                context.apps_ran.append(node.id)
+            except Exception as e:
+                context.apps_errored.append(node.id)
+                self.app_handler.logger.log(
+                    {'event': f'@frame:error:run_node', 'error': str(e), 'stacktrace': traceback.format_exc()})
+        else:
+            raise Exception(f'Unknown execution node type: {node.type}')
+
+
+class AppHandler:
+    def __init__(self, config: Config, logger: Logger):
+        self.config = config
+        self.logger = logger
+        self.app_classes: Dict[str, Type[App]] = {}
+        self.app_configs: Dict[str, AppConfig] = {}
+        self.apps: Dict[str, App] = {}
+        self.scene_handlers: Dict[str, SceneHandler] = {}
+        self.current_scene_id: Optional[str] = None
+
+        try:
+            self.init_apps()
+        except Exception as e:
+            self.logger.log({'event': f'@frame:error:init_apps', 'error': str(e), 'stacktrace': traceback.format_exc()})
+        try:
+            self.init_scenes()
+        except Exception as e:
+            self.logger.log(
+                {'event': f'@frame:error:init_apps', 'error': str(e), 'stacktrace': traceback.format_exc()})
+
+    def init_apps(self):
+        all_apps_keywords = set()
+        frame_config = self.config.to_frame_config()
+        for scene in self.config.scenes:
+            for node in scene.nodes:
+                if node.type == 'app' and node.data.get('keyword'):
+                    all_apps_keywords.add(node.data.get('keyword'))
+        self.logger.log({'event': f'@frame:apps', 'apps': list(all_apps_keywords)})
+
+        apps_folders = os.listdir('apps/')
+        for folder in all_apps_keywords:
+            if folder not in apps_folders:
+                self.logger.log({'event': f'@frame:error_no_app', 'error': f"folder '{folder}' not present under apps/",
+                                 'stacktrace': traceback.format_exc()})
+                continue
+
+            if os.path.isdir(f'apps/{folder}') and os.path.isfile(f'apps/{folder}/frame.py') and os.path.isfile(f'apps/{folder}/config.json'):
+                self.init_app(folder)
+
+        for scene in self.config.scenes:
+            for node in scene.nodes:
+                keyword = node.data.get('keyword')
+                # config?
+                if node.type == 'app' and node.data.get('keyword'):
+                    self.apps[node.id] = self.get_app_for_node(name=keyword, node=node, node_config=node.data.get('config'))
+
+    def init_app(self, folder: str):
+        try:
+            with open(f'apps/{folder}/config.json', 'r') as file:
+                config = from_dict(data_class=AppConfig, data={
+                    **json.load(file),
+                    'keyword': folder
+                })
+
+            spec = importlib.util.spec_from_file_location(f"apps.{folder}", f"apps/{folder}/frame.py")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            for name, obj in inspect.getmembers(module):
+                if inspect.isclass(obj) and issubclass(obj, App) and obj is not App:
+                    self.register_app(folder, obj, config)
+        except Exception as e:
+            self.logger.log(
+                {'event': f'{folder}:error_initializing', 'error': str(e), 'stacktrace': traceback.format_exc()})
+
+    def register_app(self, name: str, app: Type[App], config: AppConfig):
+        self.app_classes[name] = app
+        self.app_configs[name] = config
+        self.logger.log({ 'event': f'@frame:register_app', 'name': name })
+
+    def init_scenes(self):
+        for frame_config_scene in self.config.scenes:
+            scene_handler = SceneHandler(frame_config_scene=frame_config_scene, app_handler=self, logger=self.logger)
+            self.scene_handlers[scene_handler.id] = scene_handler
+
+    def get_app_for_node(self, name: str, node: Node, node_config: Optional[Dict[str, Any]]) -> App:
+        if name not in self.app_classes or name not in self.app_configs:
+            raise Exception(f"App '{name}' not registered")
+
+        app_config = self.app_configs[name]
+        AppClass = self.app_classes[name]
+        config = {}
+        for field in app_config.fields:
+            if node_config and field.name in node_config:
+                config[field.name] = node_config[field.name]
+            else:
+                config[field.name] = field.value
+
+        return AppClass(
+            keyword=name,
+            config=config,
+            frame_config=self.config.to_frame_config(),
+            log_function=self.logger.log,
+            node=node
+        )
+
+    def run(self, context: ExecutionContext) -> ExecutionContext:
+        if self.current_scene_id is None:
+            if len(self.scene_handlers) == 0:
+                raise Exception('No scenes registered')
+            self.current_scene_id = list(self.scene_handlers.keys())[0]
+        current_scene = self.scene_handlers[self.current_scene_id]
+        if current_scene is None:
+            raise Exception(f'Scene {self.current_scene_id} not found')
+        current_scene.run(context)
+        return context
+
+    def render(self, next_image: Optional[Image]) -> ExecutionContext:
+        context = ExecutionContext(
+            event='render',
+            image=next_image,
+            apps_ran=[],
+            apps_errored=[]
+        )
+        self.run(context)
+        return context

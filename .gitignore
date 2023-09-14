@@ -1,9 +1,8 @@
 # python
 env
-node_modules
 __pycache__
 *.db
-data/
+db/
 
 # Logs
 *.log

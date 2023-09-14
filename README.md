@@ -4,9 +4,10 @@ This is beta software. Obvious things are missing.
 
 ## Required hardware 
 
-The bare minimum: 
+The bare minimum. Either:
 
-- Any raspberry pi with a HDMI port and a browser for Kiosk mode.
+- Any raspberry pi with a HDMI port
+- Any random SSH host with an accessible web port (web kiosk mode)
 
 Supported frames:
 
@@ -31,20 +32,27 @@ Read more in [the documentation](https://frameos.net/).
 
 # Developing locally
 
-## FrameOS Control Panel
+## FrameOS Controller
 
 
 ```bash
+cd backend 
 python3 -m venv env
 source env/bin/activate
-pip install -r requirements.txt
-cd frontend && npm install && cd ..
+pip install -r requirements.txt --no-binary gevent
+flask db upgrade
+
+cd ../frontend
+npm install
+cd ..
+
 honcho start
 ```
 
 ## Running migrations
 
 ```bash
+cd backend
 # create migration after changing a model
 flask db migrate -m "something changed"
 # apply the migrations
