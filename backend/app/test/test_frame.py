@@ -1,26 +1,8 @@
 import unittest
-from app import db, app
 from app.models import Frame, new_frame, update_frame, delete_frame, new_log, Log
-
-# Using an in-memory SQLite DB for tests
 from app.test.base import BaseTestCase
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
-app.config['TESTING'] = True
-
 class TestFrameModel(BaseTestCase):
-
-    def setUp(self):
-        self.client = app.test_client()
-        self.app_context = app.app_context()
-        self.app_context.push()
-        db.create_all()
-
-    def tearDown(self):
-        db.session.remove()
-        db.drop_all()
-        self.app_context.pop()
-
     def test_frame_creation(self):
         frame = new_frame("pi@192.168.1.1:8999", "server_host.com", "device_test")
         self.assertEqual(frame.frame_host, "192.168.1.1")
@@ -53,7 +35,6 @@ class TestFrameModel(BaseTestCase):
     def test_to_dict_method(self):
         frame = new_frame("pi@192.168.1.1", "server_host.com", None)
         frame_dict = frame.to_dict()
-        print(frame_dict)
         self.assertEqual(frame_dict['frame_host'], "192.168.1.1")
         self.assertEqual(frame_dict['frame_port'], 8999)
         self.assertEqual(frame_dict['ssh_user'], "pi")
