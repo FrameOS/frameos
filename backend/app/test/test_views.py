@@ -4,7 +4,7 @@ from flask import json
 from app import app, db, models  # Adjust this import as per your project structure
 from app.test.base import BaseTestCase
 
-class TestLogModel(BaseTestCase):
+class TestViews(BaseTestCase):
 
     def setUp(self):
         super().setUp()

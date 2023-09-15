@@ -4,7 +4,7 @@ from app.models import Frame, new_frame, process_log, new_log, Log
 from app.test.base import BaseTestCase
 from sqlalchemy.exc import IntegrityError
 
-class TestLogModel(BaseTestCase):
+class TestModelsLog(BaseTestCase):
 
     def setUp(self):
         super().setUp()

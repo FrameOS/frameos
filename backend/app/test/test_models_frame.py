@@ -2,7 +2,7 @@ import unittest
 from app.models import Frame, new_frame, update_frame, delete_frame, new_log, Log
 from app.test.base import BaseTestCase
 
-class TestFrameModel(BaseTestCase):
+class TestModelsFrame(BaseTestCase):
     def test_frame_creation(self):
         frame = new_frame("pi@192.168.1.1:8999", "server_host.com", "device_test")
         self.assertEqual(frame.frame_host, "192.168.1.1")
