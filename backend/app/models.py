@@ -83,6 +83,9 @@ def new_frame(frame_host: str, server_host: str, device: Optional[str]) -> Frame
     
     if ':' in frame_host:
         frame_host, frame_port = frame_host.split(':')
+        frame_port = int(frame_port or '8999')
+        if int(frame_port) > 65535 or int(frame_port) < 0:
+            raise ValueError("Invalid frame port")
     else:
         frame_port = 8999
 
@@ -99,12 +102,11 @@ def new_frame(frame_host: str, server_host: str, device: Optional[str]) -> Frame
     else:
         server_port = 8999
 
-    app_configs = get_app_configs()
     frame = Frame(
         ssh_user=user, 
         ssh_pass=password, 
         frame_host=frame_host, 
-        frame_port=int(frame_port), 
+        frame_port=frame_port,
         server_host=server_host, 
         server_port=int(server_port), 
         server_api_key=secrets.token_hex(32), 

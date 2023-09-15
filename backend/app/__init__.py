@@ -1,15 +1,15 @@
+from gevent import monkey
+monkey.patch_all()
 import os
 from flask import Flask
 from flask_migrate import Migrate
 from flask_socketio import SocketIO
 from flask_sqlalchemy import SQLAlchemy
 from huey import RedisHuey
-from gevent import monkey
 from urllib.parse import urlparse
 
 from redis import Redis
 
-monkey.patch_all()
 
 # Get the Redis URL
 redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
