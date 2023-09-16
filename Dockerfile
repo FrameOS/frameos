@@ -16,7 +16,8 @@ RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-s
     && apt-get install -y nodejs
 
 # Copy the requirements file and install using pip
-COPY requirements.txt .
+WORKDIR /app/backend
+COPY backend/requirements.txt .
 RUN pip3 install --upgrade pip \
     && pip3 install --no-cache-dir -r requirements.txt
 
@@ -54,4 +55,4 @@ RUN rm -rf /app/frontend && mv /tmp/frontend /app/
 EXPOSE 8999
 
 # Start huey in the background and then run the Flask application
-CMD ["sh", "-c", "redis-server --daemonize yes && flask db upgrade && huey_consumer.py backend.huey --worker-type=greenlet --workers=10 --flush-locks & python3 app.py"]
+CMD ["sh", "-c", "redis-server --daemonize yes && cd backend && flask db upgrade && huey_consumer.py backend.huey --worker-type=greenlet --workers=10 --flush-locks & python3 app.py"]
