@@ -81,6 +81,7 @@ export enum Area {
 }
 
 export enum Panel {
+  Debug = 'Debug',
   Diagram = 'Diagram',
   FrameDetails = 'FrameDetails',
   FrameSettings = 'FrameSettings',

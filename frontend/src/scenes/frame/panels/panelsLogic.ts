@@ -10,7 +10,10 @@ export interface PanelsLogicProps {
   id: number
 }
 const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
-  [Area.TopLeft]: [{ panel: Panel.Diagram, active: true, hidden: false, metadata: { sceneId: 'default' } }],
+  [Area.TopLeft]: [
+    { panel: Panel.Diagram, active: true, hidden: false, metadata: { sceneId: 'default' } },
+    { panel: Panel.Debug, active: false, hidden: false },
+  ],
   [Area.TopRight]: [
     { panel: Panel.Apps, active: true, hidden: false },
     { panel: Panel.Events, active: true, hidden: false },

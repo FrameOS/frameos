@@ -1,5 +1,5 @@
 {
-  "name": "vite-kea-react-ts-template",
+  "name": "@frameos/frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -21,6 +21,7 @@
     "kea-subscriptions": "^3.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-json-view": "^1.21.3",
     "react-resizable-panels": "^0.0.55",
     "reactflow": "^11.8.3",
     "socket.io-client": "^4.7.2",
@@ -42,5 +43,11 @@
     "tailwindcss": "^3.3.3",
     "typescript": "^4.6.4",
     "vite": "^3.1.0"
+  },
+  "overrides": {
+    "react-json-view": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    }
   }
 }

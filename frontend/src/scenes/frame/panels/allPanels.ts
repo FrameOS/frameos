@@ -7,9 +7,11 @@ import { Apps } from './Apps/Apps'
 import { Events } from './Events/Events'
 import { Panel } from '../../../types'
 import { EditApp } from './EditApp/EditApp'
+import { Debug } from './Debug/Debug'
 
 export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   Diagram,
+  Debug,
   FrameDetails,
   FrameSettings,
   Image,
