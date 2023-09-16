@@ -3,9 +3,14 @@ import { NodeProps, Handle, Position } from 'reactflow'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 
-export function EventNode({ data, id, isConnectable }: NodeProps): JSX.Element {
-  const { selectedNodeId } = useValues(diagramLogic)
+export function EventNode(props: NodeProps): JSX.Element {
+  const { data, id } = props
+  const { selectedNodeId, edgesForNode } = useValues(diagramLogic)
   const { keyword } = data
+
+  const edges = edgesForNode[id] || []
+  let usedAsSource = edges.some((edge) => edge.source === id)
+  let usedAsTarget = edges.some((edge) => edge.target === id)
 
   return (
     <div
@@ -21,18 +26,30 @@ export function EventNode({ data, id, isConnectable }: NodeProps): JSX.Element {
       </div>
       <div className="p-1">
         <div className="flex justify-between">
+          {usedAsTarget || !usedAsSource ? (
+            <div className="flex items-center space-x-1">
+              <Handle
+                type="target"
+                position={Position.Left}
+                id="prev"
+                style={{ position: 'relative', transform: 'none', left: 0, top: 0, background: 'white' }}
+              />
+              <span>&nbsp;</span>
+            </div>
+          ) : null}
           <div className="flex items-center space-x-1">
             <span>&nbsp;</span>
           </div>
-          <div className="flex items-center space-x-1">
-            <Handle
-              type="source"
-              position={Position.Right}
-              id="next"
-              style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
-              isConnectable={isConnectable}
-            />
-          </div>
+          {usedAsSource || !usedAsTarget ? (
+            <div className="flex items-center space-x-1">
+              <Handle
+                type="source"
+                position={Position.Right}
+                id="next"
+                style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

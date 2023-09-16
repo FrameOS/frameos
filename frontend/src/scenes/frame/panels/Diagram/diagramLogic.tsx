@@ -93,6 +93,25 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
     selectedNode: [(s) => [s.nodes], (nodes) => nodes.find((node) => node.selected) ?? null],
     selectedNodeId: [(s) => [s.selectedNode], (node) => node?.id ?? null],
+    edgesForNode: [
+      (s) => [s.edges],
+      (edges: Edge[]): Record<string, Edge[]> => {
+        return edges.reduce((acc, edge) => {
+          acc[edge.source] = [...(acc[edge.source] ?? []), edge]
+          acc[edge.target] = [...(acc[edge.target] ?? []), edge]
+          return acc
+        }, {} as Record<string, Edge[]>)
+      },
+    ],
+    nodesById: [
+      (s) => [s.nodes],
+      (nodes: Node[]): Record<string, Node[]> => {
+        return nodes.reduce((acc, node) => {
+          acc[node.id] = [...(acc[node.id] ?? []), node]
+          return acc
+        }, {} as Record<string, Node[]>)
+      },
+    ],
   })),
   subscriptions(({ actions, values, props }) => ({
     nodes: (nodes: Node[], oldNodes: Node[]) => {
