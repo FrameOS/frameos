@@ -38,9 +38,10 @@ class SceneHandler:
     def run(self, context: ExecutionContext):
         if context.event in self.event_start_nodes:
             for node_id in self.event_start_nodes[context.event]:
-                node = self.nodes_dict[node_id]
+                start_node = self.nodes_dict[node_id]
+                node = start_node
                 while node is not None:
-                    if node.type == 'app':
+                    if node != start_node and (node.type == 'app' or node.type == 'event'):
                         self.run_node(node, context)
                     if node.id in self.edges_dict:
                         node = self.nodes_dict[self.edges_dict[node.id]]
@@ -59,6 +60,12 @@ class SceneHandler:
                 context.apps_errored.append(node.id)
                 self.app_handler.logger.log(
                     {'event': f'@frame:error:run_node', 'error': str(e), 'stacktrace': traceback.format_exc()})
+        elif node.type == 'event':
+            keyword = node.data.get('keyword', None)
+            if keyword == 'render':
+                self.app_handler.image_handler.refresh_image('dispatch:render')
+            else:
+                raise Exception(f"Can't yet dispatch events with keyword: {keyword}")
         else:
             raise Exception(f'Unknown execution node type: {node.type}')
 
@@ -172,7 +179,7 @@ class AppHandler:
         current_scene.run(context)
         return context
 
-    def render(self, next_image: Optional[Image]) -> ExecutionContext:
+    def render(self, next_image: Optional[Image] = None) -> ExecutionContext:
         context = ExecutionContext(
             event='render',
             image=next_image,

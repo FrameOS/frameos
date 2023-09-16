@@ -8,7 +8,7 @@ export function Events() {
   }
   return (
     <div className="space-y-2">
-      <div>Drag the boxes below onto the diagram</div>
+      <div>Events can be dispatched or listened to. Connect either end.</div>
 
       <Box
         className="bg-gray-900 px-3 py-2 dndnode"
@@ -16,7 +16,10 @@ export function Events() {
         onDragStart={(event) => onDragStart(event, 'event', 'render')}
       >
         <H6>Event: Render</H6>
-        <div className="text-sm">When a scene render is requested</div>
+        <div className="text-sm">
+          When a scene render is requested. Don't dispatch at the end of a render listener, or you'll have an endless
+          loop.
+        </div>
       </Box>
 
       <Box
