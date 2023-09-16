@@ -1,9 +1,6 @@
 import unittest
 from app import db, app
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
-app.config['TESTING'] = True
-
 class BaseTestCase(unittest.TestCase):
 
     def setUp(self):
