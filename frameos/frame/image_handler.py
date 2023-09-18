@@ -54,6 +54,9 @@ class ImageHandler:
             except Exception as e:
                 self.logger.log({'event': '@frame:device_error', "device": 'framebuffer', 'error': str(e), 'stacktrace': traceback.format_exc() })
 
+        if self.config.device is None:
+            self.config.device = 'web_only'
+
         if self.config.device.startswith('waveshare.epd'):
             try:
                 self.ws = WaveShare(self.config.device.replace('waveshare.', ''), self.logger)

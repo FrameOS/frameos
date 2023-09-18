@@ -14,3 +14,4 @@ inky
 numpy==1.21.6
 werkzeug==2.2.3
 evdev==1.6.1
+requests==2.31.0

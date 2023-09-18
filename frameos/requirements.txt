@@ -9,6 +9,10 @@
 
 bidict==0.22.1
     # via python-socketio
+certifi==2023.7.22
+    # via requests
+charset-normalizer==3.2.0
+    # via requests
 click==8.1.6
     # via flask
 dacite==1.8.1
@@ -21,6 +25,8 @@ flask==2.2.5
     #   flask-socketio
 flask-socketio==5.3.4
     # via -r requirements.in
+idna==3.4
+    # via requests
 importlib-metadata==6.7.0
     # via
     #   -r requirements.in
@@ -45,12 +51,16 @@ python-engineio==4.5.1
     # via python-socketio
 python-socketio==5.8.0
     # via flask-socketio
+requests==2.31.0
+    # via -r requirements.in
 rpi-gpio==0.7.1
     # via -r requirements.in
 smbus2==0.4.2
     # via inky
 spidev==3.6
     # via inky
+urllib3==2.0.4
+    # via requests
 werkzeug==2.2.3
     # via
     #   -r requirements.in
