@@ -1,0 +1,11 @@
+{
+    "name": "HA Sensor",
+    "description": "Show Home Assistant sensor data (not usable yet)",
+    "category": "util",
+    "version": "1.0.0",
+    "fields": [
+        {"name": "access_token", "type": "string", "required": true, "label": "HA long-lived access token", "secret": true},
+        {"name": "sensor", "type": "string", "required": true, "label": "Sensor", "placeholder": ""},
+        {"name": "ha_url", "type": "string", "required": true, "label": "Home Assistant URL", "placeholder": ""}
+    ]
+}
