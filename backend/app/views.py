@@ -8,6 +8,9 @@ import json
 
 @app.errorhandler(404)
 def not_found(e):
+    if User.query.first() is None:
+        flash('Please register the first user!')
+        return redirect(url_for('register'))
     return app.send_static_file('index.html')
 
 @app.route("/", methods=["GET"])
