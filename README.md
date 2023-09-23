@@ -39,7 +39,7 @@ Read more in [the documentation](https://frameos.net/).
 cd backend 
 python3 -m venv env
 source env/bin/activate
-pip install -r requirements.txt --no-binary gevent
+pip install -r requirements.txt
 flask db upgrade
 
 cd ../frontend
@@ -59,7 +59,7 @@ flask db migrate -m "something changed"
 flask db upgrade
 ```
 
-## FrameOS client software
+## FrameOS device software
 
 Running it natively on a Mac will fail with
 

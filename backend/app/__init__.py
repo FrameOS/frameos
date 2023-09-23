@@ -1,7 +1,10 @@
+import secrets
+
 from gevent import monkey
 monkey.patch_all()
 import os
 from flask import Flask
+from flask_login import LoginManager
 from flask_migrate import Migrate
 from flask_socketio import SocketIO
 from flask_sqlalchemy import SQLAlchemy
@@ -20,12 +23,22 @@ redis = Redis(host=redis_host, port=redis_port)
 
 os.makedirs('../db', exist_ok=True)
 
-app = Flask(__name__, static_folder='../../frontend/dist', static_url_path='/')
+app = Flask(__name__, static_folder='../../frontend/dist', static_url_path='/', template_folder='../templates')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///../../db/frameos.db'
+app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY') or secrets.token_hex(32)
 
 socketio = SocketIO(app, async_mode='gevent', cors_allowed_origins="*", message_queue=redis_url)
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 huey = RedisHuey('fcp', host=redis_host, port=redis_port)
+
+login_manager = LoginManager()
+login_manager.login_view = 'login'
+login_manager.init_app(app)
+
+@login_manager.user_loader
+def load_user(user_id):
+    from .models import User
+    return User.query.get(int(user_id))
 
 from . import models, views, tasks

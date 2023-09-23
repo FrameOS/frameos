@@ -1,5 +1,8 @@
-from flask import jsonify, request, send_from_directory, Response
-from . import app, tasks, models, redis
+from flask import jsonify, request, send_from_directory, Response, redirect, url_for, render_template, flash
+from flask_login import login_user, logout_user, login_required, current_user
+from . import db, app, tasks, models, redis
+from .models import User
+from .forms import LoginForm, RegisterForm
 import requests
 import json
 
@@ -8,31 +11,37 @@ def not_found(e):
     return app.send_static_file('index.html')
 
 @app.route("/", methods=["GET"])
-def home():
+@login_required
+def index():
     return app.send_static_file('index.html')
 
 @app.route("/api/apps", methods=["GET"])
+@login_required
 def apps():
     return jsonify(apps=models.get_app_configs())
 
 @app.route("/api/frames", methods=["GET"])
+@login_required
 def frames():
     frames = models.Frame.query.all()
     frames_list = [frame.to_dict() for frame in frames]
     return jsonify(frames=frames_list)
 
 @app.route('/api/frames/<int:id>', methods=['GET'])
+@login_required
 def get_frame(id: int):
     frame = models.Frame.query.get_or_404(id)
     return jsonify(frame=frame.to_dict())
 
 @app.route('/api/frames/<int:id>/logs', methods=['GET'])
+@login_required
 def get_logs(id: int):
     frame = models.Frame.query.get_or_404(id)
     logs = [log.to_dict() for log in frame.logs]
     return jsonify(logs=logs)
 
 @app.route('/api/frames/<int:id>/image', methods=['GET'])
+@login_required
 def get_image(id: int):
     frame = models.Frame.query.get_or_404(id)
     response = requests.get(f'http://{frame.frame_host}:{frame.frame_port}/image')
@@ -47,6 +56,7 @@ def get_image(id: int):
         return jsonify({"error": "Unable to fetch image"}), response.status_code
 
 @app.route('/api/frames/<int:id>/refresh', methods=['POST'])
+@login_required
 def refresh_frame(id: int):
     frame = models.Frame.query.get_or_404(id)
     response = requests.get(f'http://{frame.frame_host}:{frame.frame_port}/refresh')
@@ -57,21 +67,25 @@ def refresh_frame(id: int):
         return jsonify({"error": "Unable to refresh frame"}), response.status_code
 
 @app.route('/api/frames/<int:id>/reset', methods=['POST'])
+@login_required
 def reset_frame(id: int):
     tasks.reset_frame(id)
     return 'Success', 200
 
 @app.route('/api/frames/<int:id>/restart', methods=['POST'])
+@login_required
 def restart_frame(id: int):
     tasks.restart_frame(id)
     return 'Success', 200
 
 @app.route('/api/frames/<int:id>/initialize', methods=['POST'])
+@login_required
 def deploy_frame(id: int):
     tasks.deploy_frame(id)
     return 'Success', 200
 
 @app.route('/api/frames/<int:id>', methods=['POST'])
+@login_required
 def update_frame(id: int):
     frame = models.Frame.query.get_or_404(id)
     # I have many years of engineering experience
@@ -122,6 +136,7 @@ def update_frame(id: int):
     return 'Success', 200
 
 @app.route("/api/frames/new", methods=["POST"])
+@login_required
 def new_frame():
     frame_host = request.form['frame_host']
     server_host = request.form['server_host']
@@ -130,6 +145,7 @@ def new_frame():
     return jsonify(frame=frame.to_dict())
 
 @app.route('/api/frames/<int:frame_id>', methods=['DELETE'])
+@login_required
 def delete_frame_route(frame_id):
     success = models.delete_frame(frame_id)
     if success:
@@ -138,6 +154,7 @@ def delete_frame_route(frame_id):
         return jsonify({'message': 'Frame not found'}), 404
 
 @app.route('/images/<path:filename>')
+@login_required
 def custom_static(filename: str):
     return send_from_directory(app.static_folder + '/images', filename)
 
@@ -156,3 +173,43 @@ def api_log():
             models.process_log(frame, log)
 
     return 'OK', 200
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if User.query.first() is not None:
+        flash('Only one user is allowed. Please login!')
+        return redirect(url_for('login'))
+    form = RegisterForm()
+    if form.validate_on_submit():
+        user = User(username=form.username.data, email=form.email.data)
+        user.set_password(form.password.data)
+        db.session.add(user)
+        db.session.commit()
+        flash('Congratulations, you are now a registered user!')
+        return redirect(url_for('login'))
+    elif len(form.errors) > 0:
+        flash(form.errors)
+    return render_template('register.html', title='Register', form=form)
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if User.query.first() is None:
+        flash('Please register the first user!')
+        return redirect(url_for('register'))
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    form = LoginForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(username=form.username.data).first()
+        if user is None or not user.check_password(form.password.data):
+            flash('Invalid username or password')
+            return redirect(url_for('login'))
+        login_user(user, remember=form.remember_me.data)
+        return redirect(url_for('index'))
+    return render_template('login.html', title='Sign In', form=form)
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('index'))

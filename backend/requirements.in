@@ -1,4 +1,6 @@
-gevent
+--no-binary gevent
+
+gevent==23.7.0
 gevent-websocket
 flask
 Flask-migrate
@@ -12,3 +14,8 @@ paramiko
 scp
 requests
 dacite
+Flask-Login
+wtforms
+flask_wtf
+email_validator
+ipdb
