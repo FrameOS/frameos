@@ -11,7 +11,11 @@ def not_found(e):
     if User.query.first() is None:
         flash('Please register the first user!')
         return redirect(url_for('register'))
-    return app.send_static_file('index.html')
+    if current_user.is_authenticated:
+        return app.send_static_file('index.html')
+    else:
+        flash('Please login!')
+        return redirect(url_for('login'))
 
 @app.route("/", methods=["GET"])
 @login_required
