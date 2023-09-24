@@ -12,6 +12,7 @@ class UnsplashApp(App):
     def __post_init__(self):
         self.cached_content: Optional[bytes] = None
         self.cache_seconds = float(self.config.get('cache_seconds', '60'))
+        self.cache_url: Optional[str] = None
         self.cache_expires_at: Optional[datetime] = None
 
     def run(self, context: ExecutionContext):
@@ -21,7 +22,7 @@ class UnsplashApp(App):
         image_url = f"https://source.unsplash.com/random/{width}x{height}/?{keyword}"
         self.log(f"keyword: {keyword}, image_url: {image_url}")
 
-        if self.cached_content is not None and self.cache_expires_at > datetime.now():
+        if self.cached_content is not None and self.cache_expires_at > datetime.now() and self.cache_url == image_url:
             self.log(f"Using cached image from Unsplash. Expires at: {self.cache_expires_at}")
             context.image = Image.open(io.BytesIO(self.cached_content))
             return
@@ -38,6 +39,7 @@ class UnsplashApp(App):
 
             self.cached_content = response.content
             self.cache_expires_at = datetime.now() + timedelta(seconds=self.cache_seconds)
+            self.cache_url = image_url
             context.image = Image.open(io.BytesIO(response.content))
         except RequestException as e:
             raise Exception(f"Error fetching image from Unsplash. Error: {e}")
