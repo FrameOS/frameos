@@ -4,6 +4,7 @@ import os
 from flask_socketio import SocketIO
 from threading import Lock
 from PIL import Image, ImageChops
+import RPi.GPIO as GPIO
 
 from .logger import Logger
 from .config import Config
@@ -166,3 +167,16 @@ class ImageHandler:
                 self.image_update_in_progress = False
                 self.image_update_lock.release()
         self.socketio.start_background_task(target=do_update)
+
+    def display_on(self):
+        if self.config.device == 'pimoroni.hyperpixel2r':
+            GPIO.cleanup()
+
+    def display_off(self):
+        if self.config.device == 'pimoroni.hyperpixel2r':
+            GPIO.setmode(GPIO.BCM)
+            pin = 19
+            GPIO.setup(pin, GPIO.OUT)
+            pwm = GPIO.PWM(pin, 1000)
+            pwm.start(0)
+            pwm.stop()

@@ -72,6 +72,16 @@ class Server:
             self.image_handler.refresh_image('http trigger')
             return "OK"
 
+        @self.app.route('/display_off')
+        def display_off():
+            self.image_handler.display_off()
+            return "off"
+
+        @self.app.route('/display_on')
+        def display_on():
+            self.image_handler.display_on()
+            return "on"
+
         @self.socketio.on('connect')
         def test_connect():
             emit('log_event', {'logs': self.logger.get()})
