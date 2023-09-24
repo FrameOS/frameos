@@ -7,7 +7,10 @@ class ClockApp(App):
     def run(self, context: ExecutionContext):
         width, height = context.image.size
         # Get the current time
-        current_time = datetime.now().strftime('%H:%M:%S')
+        format = self.config.get('format', '%H:%M:%S')
+        if format == 'custom':
+            format = self.config.get('format_custom', '%H:%M:%S')
+        current_time = datetime.now().strftime(format)
         
         # Get the config settings
         font_color = self.config.get('font_color', 'black')

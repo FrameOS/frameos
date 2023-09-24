@@ -54,6 +54,27 @@
             "required": true,
             "label": "Border Color",
             "placeholder": "white"
+        },
+        {
+            "name": "format",
+            "type": "select",
+            "options": [
+                "%H:%M:%S",
+                "%H:%M",
+                "custom"
+            ],
+            "value": "%H:%M:%S",
+            "required": true,
+            "label": "Format",
+            "placeholder": "%H:%M:%S"
+        },
+        {
+            "name": "format_custom",
+            "type": "string",
+            "value": "",
+            "required": false,
+            "label": "Custom format",
+            "placeholder": ""
         }
     ]
 }
