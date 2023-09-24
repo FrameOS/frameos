@@ -1,5 +1,5 @@
 from app import db, socketio
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from sqlalchemy.dialects.sqlite import JSON
 import secrets
 import json
@@ -21,6 +21,22 @@ def get_app_configs() -> Dict[str, Dict]:
                     if 'name' in config:
                         configs[app_name] = config
     return configs
+
+def get_one_app_sources(keyword: str) -> Optional[Dict[str, str]]:
+    local_apps_path = "../frameos/apps"
+    apps = os.listdir(local_apps_path)
+    sources: Dict[str, str] = {}
+    if keyword in apps:
+        local_app_path = os.path.join(local_apps_path, keyword)
+        app_path = os.path.join(local_app_path, "frame.py")
+        if os.path.exists(app_path):
+            with open(app_path, 'r') as f:
+                sources['frame.py'] = f.read()
+        config_path = os.path.join(local_app_path, "config.json")
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                sources['config.json'] = f.read()
+    return sources
 
 # NB! Update frontend/src/types.tsx if you change this
 class Frame(db.Model):
@@ -252,6 +268,18 @@ class User(db.Model, UserMixin):
     username = db.Column(db.String(150), unique=True)
     email = db.Column(db.String(120), unique=True)
     password = db.Column(db.String(128))
+
+    def set_password(self, password):
+        self.password = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password, password)
+
+
+class App(db.Model, UserMixin):
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(150), unique=True)
+    value = db.Column(db.Text)
 
     def set_password(self, password):
         self.password = generate_password_hash(password)

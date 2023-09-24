@@ -4,7 +4,6 @@ import equal from 'fast-deep-equal'
 import { Area, Panel, PanelWithMetadata } from '../../../types'
 
 import type { panelsLogicType } from './panelsLogicType'
-import { editAppLogic } from './EditApp/editAppLogic'
 
 export interface PanelsLogicProps {
   id: number
@@ -16,7 +15,7 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
   ],
   [Area.TopRight]: [
     { panel: Panel.Apps, active: true, hidden: false },
-    { panel: Panel.Events, active: true, hidden: false },
+    { panel: Panel.Events, active: false, hidden: false },
     { panel: Panel.FrameDetails, active: false, hidden: false },
     { panel: Panel.FrameSettings, active: false, hidden: false },
   ],
@@ -30,9 +29,7 @@ export const panelsLogic = kea<panelsLogicType>([
   actions({
     setPanel: (area: Area, panel: string, label?: string) => ({ area, panel, label }),
     toggleFullScreenPanel: (panel: Panel) => ({ panel }),
-  }),
-  connect({
-    logic: [editAppLogic],
+    editApp: (keyword: string) => ({ keyword }),
   }),
   reducers({
     panels: [
@@ -47,6 +44,21 @@ export const panelsLogic = kea<panelsLogicType>([
           }))
           return equal(state, newPanels) ? state : newPanels
         },
+        editApp: (state, { keyword }) => ({
+          ...state,
+          [Area.TopLeft]: [
+            ...state[Area.TopLeft].map((a) => ({ ...a, active: false })),
+            {
+              panel: Panel.EditApp,
+              label: `${keyword}`,
+              active: true,
+              hidden: false,
+              metadata: {
+                keyword,
+              },
+            },
+          ],
+        }),
       },
     ],
     fullScreenPanel: [
@@ -60,8 +72,8 @@ export const panelsLogic = kea<panelsLogicType>([
     id: [() => [(_, props) => props.id], (id) => id],
     frame: [(s) => [framesModel.selectors.frames, s.id], (frames, id) => frames[id] || null],
     panelsWithConditions: [
-      (s) => [s.panels, s.fullScreenPanel, editAppLogic.selectors.editingApps],
-      (panels, fullScreenPanel, editingApps): Record<Area, PanelWithMetadata[]> =>
+      (s) => [s.panels, s.fullScreenPanel],
+      (panels, fullScreenPanel): Record<Area, PanelWithMetadata[]> =>
         fullScreenPanel
           ? {
               [Area.TopLeft]: [{ panel: fullScreenPanel, active: true, hidden: false }],
@@ -69,21 +81,7 @@ export const panelsLogic = kea<panelsLogicType>([
               [Area.BottomLeft]: [],
               [Area.BottomRight]: [],
             }
-          : {
-              ...panels,
-              [Area.TopLeft]: [
-                ...panels[Area.TopLeft],
-                ...Object.keys(editingApps).map((keyword) => ({
-                  panel: Panel.EditApp,
-                  label: `${keyword}`,
-                  active: false,
-                  hidden: false,
-                  metadata: {
-                    keyword,
-                  },
-                })),
-              ],
-            },
+          : panels,
     ],
   })),
 ])

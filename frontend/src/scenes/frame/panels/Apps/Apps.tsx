@@ -4,12 +4,12 @@ import { Box } from '../../../../components/Box'
 import { H6 } from '../../../../components/H6'
 import { PencilSquare } from '../../../../icons/icons'
 import { frameLogic } from '../../frameLogic'
-import { editAppLogic } from '../EditApp/editAppLogic'
+import { panelsLogic } from '../panelsLogic'
 
 export function Apps() {
   const { appsByCategory } = useValues(appsModel)
   const { id } = useValues(frameLogic)
-  const { editApp } = useActions(editAppLogic)
+  const { editApp } = useActions(panelsLogic({ id }))
   const onDragStart = (event: any, keyword: string) => {
     event.dataTransfer.setData('application/reactflow', JSON.stringify({ type: 'app', keyword }))
     event.dataTransfer.effectAllowed = 'move'

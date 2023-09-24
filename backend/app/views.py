@@ -27,6 +27,11 @@ def index():
 def apps():
     return jsonify(apps=models.get_app_configs())
 
+@app.route("/api/apps/source/<string:keyword>", methods=["GET"])
+@login_required
+def builtin_app(keyword: str):
+    return jsonify(models.get_one_app_sources(keyword))
+
 @app.route("/api/frames", methods=["GET"])
 @login_required
 def frames():
