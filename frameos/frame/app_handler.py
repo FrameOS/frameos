@@ -26,6 +26,7 @@ class SceneHandler:
         self.edges_dict: Dict[str, Node] = {edge.source: edge.target for edge in self.edges}
         self.apps_dict: Dict[str, App] = app_handler.apps
         self.event_start_nodes: Dict[str, List[str]] = {}
+        self.state = {}
 
         for node in self.nodes:
             if node.type == 'event':
@@ -36,6 +37,7 @@ class SceneHandler:
                     self.event_start_nodes[keyword].append(node.id)
 
     def run(self, context: ExecutionContext):
+        context.state = self.state
         if context.event in self.event_start_nodes:
             for node_id in self.event_start_nodes[context.event]:
                 start_node = self.nodes_dict[node_id]
@@ -179,12 +181,13 @@ class AppHandler:
         current_scene.run(context)
         return context
 
-    def render(self, next_image: Optional[Image] = None) -> ExecutionContext:
+    def dispatch_event(self, event: str, image: Optional[Image] = None):
         context = ExecutionContext(
-            event='render',
-            image=next_image,
+            event=event,
+            image=image,
             apps_ran=[],
-            apps_errored=[]
+            apps_errored=[],
+            state={},
         )
         self.run(context)
         return context

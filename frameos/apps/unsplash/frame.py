@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -14,11 +15,11 @@ class UnsplashApp(App):
         self.cache_expires_at: Optional[datetime] = None
 
     def run(self, context: ExecutionContext):
-        image_url = "https://source.unsplash.com/random/{width}x{height}/?{keyword}"
+        # self.log(json.dumps(context.state))
         width, height = context.image.size
-        image_url = image_url.replace('{width}', str(width))
-        image_url = image_url.replace('{height}', str(height))
-        image_url = image_url.replace('{keyword}', str(self.config.get('keyword', 'nature')))
+        keyword = self.get_config(context.state, 'keyword', 'nature')
+        image_url = f"https://source.unsplash.com/random/{width}x{height}/?{keyword}"
+        self.log(f"keyword: {keyword}, image_url: {image_url}")
 
         if self.cached_content is not None and self.cache_expires_at > datetime.now():
             self.log(f"Using cached image from Unsplash. Expires at: {self.cache_expires_at}")

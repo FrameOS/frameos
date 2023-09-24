@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from typing import Dict, Optional, Any, Callable, List
 from PIL.Image import Image
@@ -67,6 +68,7 @@ class ExecutionContext:
     image: Optional[Image]
     apps_ran: List[str]
     apps_errored: List[str]
+    state: Dict
 
 class App:
     def __init__(
@@ -83,7 +85,6 @@ class App:
         self.keyword = keyword
         self.log_function = log_function
         self.rerender_function = rerender_function
-        self.state: Dict[str, Any] = {}
         self.node: Node = node
         self.__post_init__()
 
@@ -103,3 +104,33 @@ class App:
 
     def run(self, payload: ExecutionContext):
         pass
+
+    def get_config(self, state: Dict, key: str, default = None):
+        text = self.config.get(key, default)
+        # self.log(f"get_config: {key} --> {text}")
+        return self.parse_str(text, state)
+
+    def parse_str(self, text: str, state: Dict):
+        # self.log(f"parse_str: {text}")
+        def replace_with_state_value(match):
+            keys = match.group(1).split('.')
+            value = state
+            for key in keys:
+                # self.log(f"key: {key}")
+                if '[' in key and ']' in key:  # if key is a list index
+                    key, index = re.match(r'([^\[]+)\[([^\]]+)\]', key).groups()
+                    try:
+                        index = int(index)  # convert index to integer
+                        value = value.get(key, [])[index]  # get list by key and then get value by index
+                    except (ValueError, IndexError, KeyError, TypeError):
+                        return '{}'
+                else:  # if key is a dictionary key
+                    try:
+                        # self.log(f"trying value[{key}], when value=={value}")
+                        value = value[key]
+                    except (KeyError, TypeError):
+                        # self.log(f"error")
+                        return ''
+            return str(value)
+        return re.sub(r'{state.([^}]+)}', replace_with_state_value, text)
+

@@ -124,7 +124,7 @@ class ImageHandler:
                 self.next_image = Image.new(
                     'RGB', (requested_width, requested_height), color=self.config.background_color or 'white'
                 )
-                context = self.app_handler.render(self.next_image)
+                context = self.app_handler.dispatch_event('render', image=self.next_image)
                 self.next_image, apps_ran, apps_errored = context.image, context.apps_ran, context.apps_errored
                 
                 if self.next_image is None:

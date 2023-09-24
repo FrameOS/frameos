@@ -5,9 +5,6 @@ from .logger import Logger
 from .image_handler import ImageHandler
 import threading
 
-from apps import ExecutionContext
-
-
 class TouchClickHandler:
     def __init__(self, logger: Logger, image_handler: ImageHandler, app_handler: AppHandler):
         self.logger = logger
@@ -35,24 +32,8 @@ class TouchClickHandler:
 
     def handle_touch_click(self):
         self.logger.log({'event': '@frame:touchscreen_pressed'})
-        # self.image_handler.refresh_image('touchscreen press')
-        self.app_handler.run(
-            ExecutionContext(
-                event='button_press',
-                image=None,
-                apps_ran=[],
-                apps_errored=[]
-            )
-        )
+        self.app_handler.dispatch_event('button_press')
 
     def handle_mouse_click(self):
         self.logger.log({'event': '@frame:mouse_clicked'})
-        # self.image_handler.refresh_image('mouse click')
-        self.app_handler.run(
-            ExecutionContext(
-                event='button_press',
-                image=None,
-                apps_ran=[],
-                apps_errored=[]
-            )
-        )
+        self.app_handler.dispatch_event('button_press')
