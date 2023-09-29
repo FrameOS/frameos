@@ -25,7 +25,7 @@ os.makedirs('../db', exist_ok=True)
 
 app = Flask(__name__, static_folder='../../frontend/dist', static_url_path='/', template_folder='../templates')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///../../db/frameos.db'
-app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY') or secrets.token_hex(32)
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY') or secrets.token_hex(32)
 
 socketio = SocketIO(app, async_mode='gevent', cors_allowed_origins="*", message_queue=redis_url)
 db = SQLAlchemy(app)
