@@ -4,18 +4,19 @@ import { App, AppNodeData } from '../../../../types'
 import clsx from 'clsx'
 import { RevealDots } from '../../../../components/Reveal'
 import { diagramLogic } from './diagramLogic'
-import { Form, Group } from 'kea-forms'
-import { frameLogic } from '../../frameLogic'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import { useState } from 'react'
 import { TextArea } from '../../../../components/TextArea'
+import { PencilSquare } from '../../../../icons/icons'
+import { panelsLogic } from '../panelsLogic'
 
 export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JSX.Element {
-  const { apps, selectedNodeId } = useValues(diagramLogic)
+  const { apps, frameId, selectedNodeId } = useValues(diagramLogic)
   const { updateNodeConfig } = useActions(diagramLogic)
   const app: App | undefined = apps[data.keyword]
   const [localRevealed, setLocalRevealed] = useState<Record<string, boolean>>({})
+  const { editApp } = useActions(panelsLogic({ id: frameId }))
 
   return (
     <div
@@ -26,7 +27,18 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
           : 'bg-black bg-opacity-70 border-sky-900 shadow-sky-700/50 '
       )}
     >
-      <div className={clsx('text-xl p-1', selectedNodeId === id ? 'bg-indigo-900' : 'bg-sky-900')}>{app?.name}</div>
+      <div
+        className={clsx(
+          'text-xl p-1',
+          selectedNodeId === id ? 'bg-indigo-900' : 'bg-sky-900',
+          'flex w-full justify-between items-center'
+        )}
+      >
+        <div>{app?.name}</div>
+        <div className="cursor-pointer hover:text-blue-400" onClick={() => editApp(data.keyword)}>
+          <PencilSquare />
+        </div>
+      </div>
       <div className="p-1">
         <div className="flex justify-between">
           <div className="flex items-center space-x-1">
