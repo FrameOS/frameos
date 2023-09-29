@@ -9,6 +9,7 @@ import type { logsLogicType } from './logsLogicType'
 export interface logsLogicProps {
   id: number
 }
+const MAX_LOG_LINES = 1000
 
 export const logsLogic = kea<logsLogicType>([
   path(['src', 'scenes', 'frame', 'logsLogic']),
@@ -37,7 +38,8 @@ export const logsLogic = kea<logsLogicType>([
   })),
   reducers(({ props }) => ({
     logs: {
-      [socketLogic.actionTypes.newLog]: (state, { log }) => (log.frame_id === props.id ? [...state, log] : state),
+      [socketLogic.actionTypes.newLog]: (state, { log }) =>
+        log.frame_id === props.id ? [...state, log].slice(-MAX_LOG_LINES) : state,
     },
   })),
   afterMount(({ actions, cache }) => {

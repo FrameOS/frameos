@@ -16,7 +16,7 @@ export function Apps() {
   }
   return (
     <div className="space-y-2">
-      <div>Drag the boxes below onto the diagram</div>
+      <div>Drag the boxes below onto the scene</div>
 
       {Object.entries(appsByCategory).map(([category, apps]) => (
         <div className="mt-4 space-y-2">
