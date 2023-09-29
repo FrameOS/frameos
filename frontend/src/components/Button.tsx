@@ -3,7 +3,7 @@ import { clsx } from 'clsx'
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   size?: 'normal' | 'small'
-  color?: 'blue' | 'teal' | 'gray' | 'red' | 'light-gray'
+  color?: 'blue' | 'teal' | 'gray' | 'red' | 'light-gray' | 'none'
 }
 
 export function Button({ size, color, children, className, disabled, ...props }: ButtonProps) {
@@ -16,6 +16,8 @@ export function Button({ size, color, children, className, disabled, ...props }:
       ? 'bg-blue-900 hover:bg-blue-800 focus:ring-blue-800'
       : color === 'light-gray'
       ? 'bg-gray-600 hover:bg-gray-500 focus:ring-gray-500'
+      : color === 'none'
+      ? 'hover:bg-teal-800 focus:ring-teal-800'
       : 'bg-teal-900 hover:bg-teal-800 focus:ring-teal-800'
   const sizeClassName =
     size === 'small'

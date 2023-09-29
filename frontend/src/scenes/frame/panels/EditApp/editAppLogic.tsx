@@ -6,7 +6,7 @@ import { loaders } from 'kea-loaders'
 export const editAppLogic = kea<editAppLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'EditApp', 'editAppLogic']),
   key((props) => `${props.frameId}/${props.keyword}`),
-  actions({ toggleFile: (file: string) => ({ file }) }),
+  actions({ setActiveFile: (file: string) => ({ file }) }),
   loaders(({ props }) => ({
     sources: [
       {} as Record<string, string>,
@@ -19,16 +19,10 @@ export const editAppLogic = kea<editAppLogicType>([
     ],
   })),
   reducers({
-    openFiles: [
-      ['frame.py'] as string[],
+    activeFile: [
+      'frame.py' as string,
       {
-        toggleFile: (state, { file }) => {
-          if (state.includes(file)) {
-            return state.filter((f) => f !== file)
-          } else {
-            return [...state, file]
-          }
-        },
+        setActiveFile: (state, { file }) => file,
       },
     ],
   }),
