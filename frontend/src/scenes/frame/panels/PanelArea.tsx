@@ -8,7 +8,7 @@ export interface PanelAreaProps {
   area: Area
   areaPanels: PanelWithMetadata[]
   setPanel: (area: Area, panel: PanelType) => void
-  toggleFullScreenPanel: (panel: PanelType) => void
+  toggleFullScreenPanel: (panel: PanelWithMetadata) => void
 }
 
 function pascalCaseToTitleCase(pascalCase: string): string {
@@ -32,7 +32,7 @@ export function PanelArea({ area, areaPanels, setPanel, toggleFullScreenPanel }:
                 key={panel.panel}
                 active={activePanel === panel}
                 onClick={() => setPanel(area, panel.panel)}
-                onDoubleClick={() => toggleFullScreenPanel(panel.panel)}
+                onDoubleClick={() => toggleFullScreenPanel(panel)}
                 className="select-none"
               >
                 {panel.label ??

@@ -28,7 +28,7 @@ export const panelsLogic = kea<panelsLogicType>([
   key((props) => props.id),
   actions({
     setPanel: (area: Area, panel: string, label?: string) => ({ area, panel, label }),
-    toggleFullScreenPanel: (panel: Panel) => ({ panel }),
+    toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
     editApp: (keyword: string) => ({ keyword }),
   }),
   reducers({
@@ -62,9 +62,9 @@ export const panelsLogic = kea<panelsLogicType>([
       },
     ],
     fullScreenPanel: [
-      null as Panel | null,
+      null as PanelWithMetadata | null,
       {
-        toggleFullScreenPanel: (state, { panel }) => (state === panel ? null : panel),
+        toggleFullScreenPanel: (state, { panel }) => (equal(state, panel) ? null : panel),
       },
     ],
   }),
@@ -76,7 +76,7 @@ export const panelsLogic = kea<panelsLogicType>([
       (panels, fullScreenPanel): Record<Area, PanelWithMetadata[]> =>
         fullScreenPanel
           ? {
-              [Area.TopLeft]: [{ panel: fullScreenPanel, active: true, hidden: false }],
+              [Area.TopLeft]: [{ ...fullScreenPanel, active: true, hidden: false }],
               [Area.TopRight]: [],
               [Area.BottomLeft]: [],
               [Area.BottomRight]: [],
