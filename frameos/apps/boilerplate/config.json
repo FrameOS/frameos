@@ -1,0 +1,16 @@
+{
+    "name": "Boilerplate",
+    "description": "Starter and documentation. Drag me onto the frame, then click the edit icon.",
+    "category": "boilerplate",
+    "version": "1.0.0",
+    "fields": [
+        {
+            "name": "my_name",
+            "type": "string",
+            "value": "black",
+            "required": true,
+            "label": "Enter your name",
+            "placeholder": "Mr Smith"
+        }
+    ]
+}

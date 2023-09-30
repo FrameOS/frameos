@@ -5,6 +5,7 @@ import { loaders } from 'kea-loaders'
 import { App } from '../types'
 
 export const categoryLabels: Record<string, any> = {
+  boilerplate: 'Boilerplate',
   image: 'Image generation',
   overlay: 'Overlays',
   util: 'Utilities',

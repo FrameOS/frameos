@@ -16,8 +16,6 @@ export function Apps() {
   }
   return (
     <div className="space-y-2">
-      <div>Drag the boxes below onto the scene</div>
-
       {Object.entries(appsByCategory).map(([category, apps]) => (
         <div className="mt-4 space-y-2">
           <H6 className="capitalize mt-4">{categoryLabels[category] ?? category}</H6>
@@ -30,9 +28,6 @@ export function Apps() {
               <div>
                 <H6>{name}</H6>
                 <div className="text-sm">{description}</div>
-              </div>
-              <div className="cursor-pointer hover:text-blue-400" onClick={() => editApp(keyword)}>
-                <PencilSquare />
               </div>
             </Box>
           ))}

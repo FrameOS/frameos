@@ -52,7 +52,9 @@ export interface App {
 
 export interface AppNodeData {
   keyword: string
+  name?: string
   config: Record<string, any>
+  sources?: Record<string, string>
 }
 
 export interface EventNodeData {

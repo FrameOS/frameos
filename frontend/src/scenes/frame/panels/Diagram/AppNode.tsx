@@ -12,10 +12,10 @@ import { PencilSquare } from '../../../../icons/icons'
 import { panelsLogic } from '../panelsLogic'
 
 export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JSX.Element {
-  const { apps, frameId, selectedNodeId } = useValues(diagramLogic)
+  const { apps, frameId, selectedNodeId, sceneId } = useValues(diagramLogic)
   const { updateNodeConfig } = useActions(diagramLogic)
   const app: App | undefined = apps[data.keyword]
-  const [localRevealed, setLocalRevealed] = useState<Record<string, boolean>>({})
+  const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
   const { editApp } = useActions(panelsLogic({ id: frameId }))
 
   return (
@@ -35,7 +35,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
         )}
       >
         <div>{app?.name}</div>
-        <div className="cursor-pointer hover:text-blue-400" onClick={() => editApp(data.keyword)}>
+        <div className="cursor-pointer hover:text-blue-400" onClick={() => editApp(sceneId, id, data)}>
           <PencilSquare />
         </div>
       </div>
@@ -81,8 +81,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                     {field.name}
                   </td>
                   <td className="cursor-text">
-                    {field.secret && !localRevealed[field.name] ? (
-                      <RevealDots onClick={() => setLocalRevealed({ ...localRevealed, [field.name]: true })} />
+                    {field.secret && !secretRevealed[field.name] ? (
+                      <RevealDots onClick={() => setSecretRevealed({ ...secretRevealed, [field.name]: true })} />
                     ) : field.type === 'select' ? (
                       <Select
                         theme="node"

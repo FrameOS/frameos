@@ -1,15 +1,27 @@
 import { useActions, useValues } from 'kea'
-import { editAppLogic } from './editAppLogic'
+import { editAppLogic, EditAppLogicProps } from './editAppLogic'
 import { Button } from '../../../../components/Button'
 import Editor from '@monaco-editor/react'
+import { AppNodeData } from '../../../../types'
+import { frameLogic } from '../../frameLogic'
 
 interface EditAppProps {
-  keyword: string
+  sceneId: string
+  nodeId: string
+  nodeData: AppNodeData
 }
 
-export function EditApp({ keyword }: EditAppProps) {
-  const { sources, sourcesLoading, activeFile } = useValues(editAppLogic({ keyword }))
-  const { setActiveFile } = useActions(editAppLogic({ keyword }))
+export function EditApp({ sceneId, nodeId, nodeData }: EditAppProps) {
+  const { id: frameId } = useValues(frameLogic)
+  const logicProps: EditAppLogicProps = {
+    frameId,
+    sceneId,
+    nodeId,
+    keyword: nodeData.keyword,
+    sources: nodeData.sources,
+  }
+  const { sources, sourcesLoading, activeFile } = useValues(editAppLogic(logicProps))
+  const { setActiveFile } = useActions(editAppLogic(logicProps))
 
   function setEditorTheme(monaco: any) {
     monaco.editor.defineTheme('darkframe', {
@@ -38,7 +50,7 @@ export function EditApp({ keyword }: EditAppProps) {
       <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full">
         <Editor
           height="100%"
-          path={`${keyword}/${activeFile}`}
+          path={`${nodeId}/${activeFile}`}
           language={activeFile.endsWith('.json') ? 'json' : 'python'}
           value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
           theme="darkframe"

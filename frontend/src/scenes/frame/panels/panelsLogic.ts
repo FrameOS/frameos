@@ -1,7 +1,7 @@
 import { actions, connect, kea, key, path, props, reducers, selectors } from 'kea'
 import { framesModel } from '../../../models/framesModel'
 import equal from 'fast-deep-equal'
-import { Area, Panel, PanelWithMetadata } from '../../../types'
+import { AppNodeData, Area, Panel, PanelWithMetadata } from '../../../types'
 
 import type { panelsLogicType } from './panelsLogicType'
 
@@ -34,7 +34,7 @@ export const panelsLogic = kea<panelsLogicType>([
   actions({
     setPanel: (area: Area, panel: PanelWithMetadata, label?: string) => ({ area, panel, label }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
-    editApp: (keyword: string) => ({ keyword }),
+    editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
   }),
   reducers({
     panels: [
@@ -49,17 +49,19 @@ export const panelsLogic = kea<panelsLogicType>([
           }))
           return equal(state, newPanels) ? state : newPanels
         },
-        editApp: (state, { keyword }) => ({
+        editApp: (state, { sceneId, nodeId, nodeData }) => ({
           ...state,
           [Area.TopLeft]: [
             ...state[Area.TopLeft].map((a) => ({ ...a, active: false })),
             {
               panel: Panel.EditApp,
-              label: `${keyword}`,
+              label: nodeData.name || nodeData.keyword || nodeId,
               active: true,
               hidden: false,
               metadata: {
-                keyword,
+                sceneId,
+                nodeId,
+                nodeData,
               },
             },
           ],

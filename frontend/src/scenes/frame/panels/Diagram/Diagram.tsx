@@ -11,6 +11,7 @@ import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 
 const nodeTypes = {
   app: AppNode,
+  source: AppNode,
   render: RenderNode,
   event: EventNode,
 }
