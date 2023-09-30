@@ -44,6 +44,11 @@ export function EditApp({ keyword }: EditAppProps) {
           theme="darkframe"
           beforeMount={setEditorTheme}
           onChange={() => {}}
+          options={{
+            minimap: {
+              enabled: false, // This line disables the minimap
+            },
+          }}
         />
       </div>
     </div>

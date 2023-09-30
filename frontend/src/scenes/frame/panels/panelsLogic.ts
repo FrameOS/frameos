@@ -9,25 +9,30 @@ export interface PanelsLogicProps {
   id: number
 }
 const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
-  [Area.TopLeft]: [
-    { panel: Panel.Diagram, active: true, hidden: false, metadata: { sceneId: 'default' } },
-    { panel: Panel.Debug, active: false, hidden: false },
-  ],
+  [Area.TopLeft]: [{ panel: Panel.Diagram, active: true, hidden: false, metadata: { sceneId: 'default' } }],
   [Area.TopRight]: [
     { panel: Panel.Apps, active: true, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
     { panel: Panel.FrameDetails, active: false, hidden: false },
     { panel: Panel.FrameSettings, active: false, hidden: false },
   ],
-  [Area.BottomLeft]: [{ panel: Panel.Logs, active: true, hidden: false }],
+  [Area.BottomLeft]: [
+    { panel: Panel.Logs, active: true, hidden: false },
+    { panel: Panel.Debug, active: false, hidden: false },
+  ],
   [Area.BottomRight]: [{ panel: Panel.Image, active: true, hidden: false }],
 }
+
+function panelsEqual(panel1: PanelWithMetadata, panel2: PanelWithMetadata) {
+  return panel1.panel === panel2.panel && equal(panel1.metadata || {}, panel2.metadata || {})
+}
+
 export const panelsLogic = kea<panelsLogicType>([
   path(['src', 'scenes', 'frame', 'panelsLogic']),
   props({} as PanelsLogicProps),
   key((props) => props.id),
   actions({
-    setPanel: (area: Area, panel: string, label?: string) => ({ area, panel, label }),
+    setPanel: (area: Area, panel: PanelWithMetadata, label?: string) => ({ area, panel, label }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
     editApp: (keyword: string) => ({ keyword }),
   }),
@@ -39,8 +44,8 @@ export const panelsLogic = kea<panelsLogicType>([
           const newPanels = { ...state }
           newPanels[area] = newPanels[area].map((p) => ({
             ...p,
-            active: p.panel === panel,
-            label: p.panel === panel && label ? label : p.label,
+            active: panelsEqual(p, panel),
+            label: panelsEqual(p, panel) && label ? label : p.label,
           }))
           return equal(state, newPanels) ? state : newPanels
         },

@@ -2,12 +2,12 @@ import { allPanels } from './allPanels'
 import { Container } from '../../../components/panels/Container'
 import { Tabs } from '../../../components/panels/Tabs'
 import { Tab } from '../../../components/panels/Tab'
-import { Area, Panel as PanelType, PanelWithMetadata } from '../../../types'
+import { Area, PanelWithMetadata } from '../../../types'
 
 export interface PanelAreaProps {
   area: Area
   areaPanels: PanelWithMetadata[]
-  setPanel: (area: Area, panel: PanelType) => void
+  setPanel: (area: Area, panel: PanelWithMetadata) => void
   toggleFullScreenPanel: (panel: PanelWithMetadata) => void
 }
 
@@ -31,7 +31,7 @@ export function PanelArea({ area, areaPanels, setPanel, toggleFullScreenPanel }:
               <Tab
                 key={panel.panel}
                 active={activePanel === panel}
-                onClick={() => setPanel(area, panel.panel)}
+                onClick={() => setPanel(area, panel)}
                 onDoubleClick={() => toggleFullScreenPanel(panel)}
                 className="select-none"
               >
