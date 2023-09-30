@@ -15,17 +15,8 @@ export function EditApp({ keyword }: EditAppProps) {
     monaco.editor.defineTheme('darkframe', {
       base: 'vs-dark',
       inherit: true,
-      rules: [
-        {
-          token: 'comment',
-          foreground: '#5d7988',
-          fontStyle: 'italic',
-        },
-        { token: 'constant', foreground: '#e06c75' },
-      ],
-      colors: {
-        'editor.background': '#000000',
-      },
+      rules: [],
+      colors: { 'editor.background': '#000000' },
     })
   }
 
@@ -48,8 +39,8 @@ export function EditApp({ keyword }: EditAppProps) {
         <Editor
           height="100%"
           path={`${keyword}/${activeFile}`}
-          defaultLanguage={activeFile.endsWith('.json') ? 'json' : 'python'}
-          defaultValue={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
+          language={activeFile.endsWith('.json') ? 'json' : 'python'}
+          value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
           theme="darkframe"
           beforeMount={setEditorTheme}
           onChange={() => {}}
