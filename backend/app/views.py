@@ -50,6 +50,7 @@ def get_frame(id: int):
 def get_logs(id: int):
     frame = models.Frame.query.get_or_404(id)
     logs = [log.to_dict() for log in frame.logs]
+    logs = logs[-1000:]
     return jsonify(logs=logs)
 
 @app.route('/api/frames/<int:id>/image', methods=['GET'])

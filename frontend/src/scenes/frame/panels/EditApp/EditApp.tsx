@@ -1,6 +1,7 @@
 import { useActions, useValues } from 'kea'
 import { editAppLogic } from './editAppLogic'
 import { Button } from '../../../../components/Button'
+import Editor from '@monaco-editor/react'
 
 interface EditAppProps {
   keyword: string
@@ -9,12 +10,32 @@ interface EditAppProps {
 export function EditApp({ keyword }: EditAppProps) {
   const { sources, sourcesLoading, activeFile } = useValues(editAppLogic({ keyword }))
   const { setActiveFile } = useActions(editAppLogic({ keyword }))
+
+  function setEditorTheme(monaco: any) {
+    monaco.editor.defineTheme('darkframe', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [
+        {
+          token: 'comment',
+          foreground: '#5d7988',
+          fontStyle: 'italic',
+        },
+        { token: 'constant', foreground: '#e06c75' },
+      ],
+      colors: {
+        'editor.background': '#000000',
+      },
+    })
+  }
+
   if (sourcesLoading) {
     return <div>Loading...</div>
   }
+
   return (
-    <div className="flex flex-row max-h-full h-full max-w-full w-full">
-      <div className="max-w-40">
+    <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
+      <div className="max-w-40 space-y-1">
         {Object.entries(sources).map(([file, source]) => (
           <div key={file} className="w-min">
             <Button size="small" color={activeFile === file ? 'teal' : 'none'} onClick={() => setActiveFile(file)}>
@@ -23,8 +44,16 @@ export function EditApp({ keyword }: EditAppProps) {
           </div>
         ))}
       </div>
-      <div className="bg-black p-4 font-mono text-sm overflow-y-auto overflow-x-auto w-full">
-        <pre>{sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}</pre>
+      <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full">
+        <Editor
+          height="100%"
+          path={`${keyword}/${activeFile}`}
+          defaultLanguage={activeFile.endsWith('.json') ? 'json' : 'python'}
+          defaultValue={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
+          theme="darkframe"
+          beforeMount={setEditorTheme}
+          onChange={() => {}}
+        />
       </div>
     </div>
   )
