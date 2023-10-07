@@ -1,6 +1,6 @@
 import 'reactflow/dist/base.css'
 import { useActions, useValues, BindLogic } from 'kea'
-import ReactFlow, { ReactFlowInstance } from 'reactflow'
+import ReactFlow, { Background, BackgroundVariant, ReactFlowInstance } from 'reactflow'
 import { frameLogic } from '../../frameLogic'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppNode } from './AppNode'
@@ -82,6 +82,7 @@ export function Diagram({ sceneId }: { sceneId: string }) {
           proOptions={{ hideAttribution: true }}
           nodeTypes={nodeTypes}
         >
+          <Background id="1" gap={24} color="#cccccc" variant={BackgroundVariant.Dots} />
           <div className="absolute top-1 right-1 z-10 space-y-1 w-min">
             <Button size="small" onClick={rearrangeCurrentScene} className="px-2" title="Rearrange (R)">
               R
