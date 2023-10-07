@@ -84,10 +84,10 @@ export function Diagram({ sceneId }: { sceneId: string }) {
         >
           <Background id="1" gap={24} color="#cccccc" variant={BackgroundVariant.Dots} />
           <div className="absolute top-1 right-1 z-10 flex gap-2">
-            <Button size="small" onClick={fitDiagramView} title="Fit to View (F)">
+            <Button size="small" onClick={fitDiagramView} title="Fit to View (F)" color="gray">
               Zoom out
             </Button>
-            <Button size="small" onClick={rearrangeCurrentScene} title="Rearrange (R)">
+            <Button size="small" onClick={rearrangeCurrentScene} title="Rearrange (R)" color="gray">
               Rearrange
             </Button>
           </div>

@@ -37,31 +37,37 @@ export function EditApp({ sceneId, nodeId, nodeData }: EditAppProps) {
   }
 
   return (
-    <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
-      <div className="max-w-40 space-y-1">
-        {Object.entries(sources).map(([file, source]) => (
-          <div key={file} className="w-min">
-            <Button size="small" color={activeFile === file ? 'teal' : 'none'} onClick={() => setActiveFile(file)}>
-              {file}
-            </Button>
-          </div>
-        ))}
+    <div className="flex flex-col gap-2 max-h-full h-full max-w-full w-full">
+      <div className="bg-gray-700 p-2 border-gray-500">
+        <strong>Note!</strong> You're editing the system app <strong>{nodeData.keyword}</strong>. If you make any
+        changes, the app will be forked onto the current scene.
       </div>
-      <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full">
-        <Editor
-          height="100%"
-          path={`${nodeId}/${activeFile}`}
-          language={activeFile.endsWith('.json') ? 'json' : 'python'}
-          value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
-          theme="darkframe"
-          beforeMount={setEditorTheme}
-          onChange={() => {}}
-          options={{
-            minimap: {
-              enabled: false, // This line disables the minimap
-            },
-          }}
-        />
+      <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
+        <div className="max-w-40 space-y-1">
+          {Object.entries(sources).map(([file, source]) => (
+            <div key={file} className="w-min">
+              <Button size="small" color={activeFile === file ? 'teal' : 'none'} onClick={() => setActiveFile(file)}>
+                {file}
+              </Button>
+            </div>
+          ))}
+        </div>
+        <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full">
+          <Editor
+            height="100%"
+            path={`${nodeId}/${activeFile}`}
+            language={activeFile.endsWith('.json') ? 'json' : 'python'}
+            value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
+            theme="darkframe"
+            beforeMount={setEditorTheme}
+            onChange={() => {}}
+            options={{
+              minimap: {
+                enabled: false, // This line disables the minimap
+              },
+            }}
+          />
+        </div>
       </div>
     </div>
   )

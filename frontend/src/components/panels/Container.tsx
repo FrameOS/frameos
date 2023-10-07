@@ -14,7 +14,7 @@ export function Container({ header, children }: ContainerProps): JSX.Element {
         </div>
       ) : null}
       <Box className="overflow-auto w-full h-full max-w-full max-h-full rounded-lg rounded-tl-none p-2 z-0">
-        <div className="overflow-auto w-full h-full max-w-full max-h-full rounded-lg">{children}</div>
+        <div className="overflow-auto w-full h-full max-w-full max-h-full rounded-lg rounded-tl-none">{children}</div>
       </Box>
     </div>
   )

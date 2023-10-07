@@ -21,7 +21,7 @@ export function Image({ className }: ImageProps) {
     >
       {frames[id] ? (
         <img
-          className="rounded-lg max-w-full max-h-full"
+          className="rounded-lg rounded-tl-none max-w-full max-h-full"
           src={getFrameImage(id)}
           style={{
             ...(frames[id].width && frames[id].height
