@@ -21,7 +21,7 @@ export function Apps() {
           <H6 className="capitalize mt-4">{categoryLabels[category] ?? category}</H6>
           {Object.entries(apps).map(([keyword, { name, description }]) => (
             <Box
-              className="bg-gray-900 px-3 py-2 dndnode cursor-move flex items-center justify-between space-x-2"
+              className="bg-gray-900 px-3 py-2 dndnode flex items-center justify-between space-x-2 cursor-move"
               draggable
               onDragStart={(event) => onDragStart(event, keyword)}
             >

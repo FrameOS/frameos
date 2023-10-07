@@ -73,8 +73,8 @@ export function FrameDetails({ className }: DetailsProps) {
                 </td>
               </tr>
               <tr>
-                <td className="text-blue-200 text-right">Interval:</td>
-                <td className="truncate">{frame.interval}</td>
+                <td className="text-blue-200 text-right">Refresh interval:</td>
+                <td className="truncate">{frame.interval} seconds</td>
               </tr>
               <tr>
                 <td className="text-blue-200 text-right">Scaling mode:</td>

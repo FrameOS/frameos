@@ -84,7 +84,7 @@ export function FrameSettings({ className }: DetailsProps) {
             <Field name="height" label="Height">
               <TextInput name="height" placeholder="1080" />
             </Field>
-            <Field name="interval" label="Interval">
+            <Field name="interval" label="Refresh interval (seconds)">
               <TextInput name="interval" placeholder="300" />
             </Field>
             <Field name="device" label="Device">
