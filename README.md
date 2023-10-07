@@ -1,28 +1,21 @@
 # FrameOS - smart home frames
 
-This is beta software. Obvious things are missing.
+FrameOS is a conductor of Raspberry Pi-powered e-ink displays and LCD screens.
 
-## Required hardware 
+To get started:
 
-The bare minimum. Either:
+- Read the **[device guides](/devices)** - getting started guides, links to 3d-printable models and other resources for each supported display.
+- Install the **[FrameOS controller](/installation/controller)** - a self-hosted python app that lets you build and deploy software onto individual frames via SSH.
+- Set up the SD card for the [Raspberry Pi](/installation/raspberry) that'll be used in the frame.
+- Finally, deploy prebuilt [apps](/apps) onto your frames, or code your own.
 
-- Any raspberry pi with a HDMI port
-- Any random SSH host with an accessible web port (web kiosk mode)
+![](https://frameos.net/assets/images/1-frames-d127cdd40eaec7b65932a78a7a2034ae.jpg)
 
-Supported frames:
-
-- [Inky Impression 5.7"](https://shop.pimoroni.com/products/inky-impression-5-7?variant=32298701324371) e-ink display
-- [Inky Impression 7.3"](https://shop.pimoroni.com/products/inky-impression-7-3?variant=40512683376723) e-ink display
-- Waveshare 5" round 1080x1080 LCD display vis HDMI
-- probably others
-
-Attach them to a Raspberry Pi Zero W, and control the image via FrameOS.
-
-![](https://mariusandra.com/frameos/images/0-frames.jpeg)
+![](https://frameos.net/assets/images/diagram-reload-13b29b62750b3db0475aab66cdf49518.gif)
 
 ## FrameOS controller
 
-The FrameOS controller is where you set up your frames. You can run it continuously on a server, or locally on your computer when needed. You'll miss out on log aggregation if the FrameOS server is not always on. The frames however will keep on running and updating independently.
+The FrameOS controller is where you set up your frames. You can run it continuously on a server, or locally on your computer when needed. You'll just miss out on log aggregation if the controller is offline. The frames run independently.
 
 ![](https://frameos.net/assets/images/diagram-reload-13b29b62750b3db0475aab66cdf49518.gif)
 
