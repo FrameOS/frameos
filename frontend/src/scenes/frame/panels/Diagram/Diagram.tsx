@@ -83,12 +83,12 @@ export function Diagram({ sceneId }: { sceneId: string }) {
           nodeTypes={nodeTypes}
         >
           <Background id="1" gap={24} color="#cccccc" variant={BackgroundVariant.Dots} />
-          <div className="absolute top-1 right-1 z-10 space-y-1 w-min">
-            <Button size="small" onClick={rearrangeCurrentScene} className="px-2" title="Rearrange (R)">
-              R
+          <div className="absolute top-1 right-1 z-10 flex gap-2">
+            <Button size="small" onClick={fitDiagramView} title="Fit to View (F)">
+              Zoom out
             </Button>
-            <Button size="small" onClick={fitDiagramView} className="px-2" title="Fit to View (F)">
-              F
+            <Button size="small" onClick={rearrangeCurrentScene} title="Rearrange (R)">
+              Rearrange
             </Button>
           </div>
         </ReactFlow>
