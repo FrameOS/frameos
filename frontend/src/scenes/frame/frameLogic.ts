@@ -39,6 +39,12 @@ export const frameLogic = kea<frameLogicType>([
     refreshFrame: true,
     restartFrame: true,
     redeployFrame: true,
+    updateNodeSource: (sceneId: string, nodeId: string, file: string, source: string) => ({
+      sceneId,
+      nodeId,
+      file,
+      source,
+    }),
   }),
   forms(({ actions, values }) => ({
     frameForm: {

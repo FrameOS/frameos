@@ -13,15 +13,20 @@ interface EditAppProps {
 
 export function EditApp({ sceneId, nodeId, nodeData }: EditAppProps) {
   const { id: frameId } = useValues(frameLogic)
+  const { updateNodeSource } = useActions(frameLogic)
   const logicProps: EditAppLogicProps = {
     frameId,
     sceneId,
     nodeId,
     keyword: nodeData.keyword,
     sources: nodeData.sources,
+    onChange: (file, source) => {
+      updateNodeSource(sceneId, nodeId, file, source)
+      // TODO: this does nothing
+    },
   }
-  const { sources, sourcesLoading, activeFile } = useValues(editAppLogic(logicProps))
-  const { setActiveFile } = useActions(editAppLogic(logicProps))
+  const { sources, sourcesLoading, activeFile, hasChanges, configJson } = useValues(editAppLogic(logicProps))
+  const { setActiveFile, updateFile } = useActions(editAppLogic(logicProps))
 
   function setEditorTheme(monaco: any) {
     monaco.editor.defineTheme('darkframe', {
@@ -36,11 +41,23 @@ export function EditApp({ sceneId, nodeId, nodeData }: EditAppProps) {
     return <div>Loading...</div>
   }
 
+  const name = configJson?.name || nodeData.keyword
+
   return (
     <div className="flex flex-col gap-2 max-h-full h-full max-w-full w-full">
       <div className="bg-gray-700 p-2 border-gray-500">
-        <strong>Note!</strong> You're editing the system app <strong>{nodeData.keyword}</strong>. If you make any
-        changes, the app will be forked onto the current scene.
+        {nodeData.keyword ? (
+          hasChanges ? (
+            <>
+              <strong>{name}</strong> will be forked onto the current scene when you save
+            </>
+          ) : (
+            <>
+              <strong>Note!</strong> You're editing the system app <strong>{name}</strong>. If you make any changes, the
+              app will be forked onto the current scene.
+            </>
+          )
+        ) : null}
       </div>
       <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
         <div className="max-w-40 space-y-1">
@@ -60,12 +77,8 @@ export function EditApp({ sceneId, nodeId, nodeData }: EditAppProps) {
             value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
             theme="darkframe"
             beforeMount={setEditorTheme}
-            onChange={() => {}}
-            options={{
-              minimap: {
-                enabled: false, // This line disables the minimap
-              },
-            }}
+            onChange={(value) => updateFile(activeFile, value ?? '')}
+            options={{ minimap: { enabled: false } }}
           />
         </div>
       </div>
