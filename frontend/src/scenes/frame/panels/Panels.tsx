@@ -10,7 +10,7 @@ export function Panels() {
   const { id, frame } = useValues(frameLogic)
   const logicProps = { id }
   const { panelsWithConditions: panels } = useValues(panelsLogic(logicProps))
-  const { setPanel, toggleFullScreenPanel } = useActions(panelsLogic(logicProps))
+  const { setPanel, closePanel, toggleFullScreenPanel } = useActions(panelsLogic(logicProps))
 
   return frame ? (
     <PanelGroup direction="horizontal" units="percentages" className="flex-1 p-4">
@@ -24,6 +24,7 @@ export function Panels() {
                   areaPanels={panels.TopLeft}
                   setPanel={setPanel}
                   toggleFullScreenPanel={toggleFullScreenPanel}
+                  closePanel={closePanel}
                 />
               </Panel>
             ) : null}
@@ -35,6 +36,7 @@ export function Panels() {
                   areaPanels={panels.BottomLeft}
                   setPanel={setPanel}
                   toggleFullScreenPanel={toggleFullScreenPanel}
+                  closePanel={closePanel}
                 />
               </Panel>
             ) : null}
@@ -55,6 +57,7 @@ export function Panels() {
                   areaPanels={panels.TopRight}
                   setPanel={setPanel}
                   toggleFullScreenPanel={toggleFullScreenPanel}
+                  closePanel={closePanel}
                 />
               </Panel>
             ) : null}
@@ -66,6 +69,7 @@ export function Panels() {
                   areaPanels={panels.BottomRight}
                   setPanel={setPanel}
                   toggleFullScreenPanel={toggleFullScreenPanel}
+                  closePanel={closePanel}
                 />
               </Panel>
             ) : null}

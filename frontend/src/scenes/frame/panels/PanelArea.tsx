@@ -8,6 +8,7 @@ export interface PanelAreaProps {
   area: Area
   areaPanels: PanelWithMetadata[]
   setPanel: (area: Area, panel: PanelWithMetadata) => void
+  closePanel: (panel: PanelWithMetadata) => void
   toggleFullScreenPanel: (panel: PanelWithMetadata) => void
 }
 
@@ -16,7 +17,13 @@ function pascalCaseToTitleCase(pascalCase: string): string {
   return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
 }
 
-export function PanelArea({ area, areaPanels, setPanel, toggleFullScreenPanel }: PanelAreaProps): JSX.Element {
+export function PanelArea({
+  area,
+  areaPanels,
+  setPanel,
+  closePanel,
+  toggleFullScreenPanel,
+}: PanelAreaProps): JSX.Element {
   // Don't look at panel.active directly, as many might have it set
   const activePanel = areaPanels.find((panel) => panel.active) ?? areaPanels.find((panel) => !panel.hidden)
   const Component = activePanel ? allPanels[activePanel.panel] : null
@@ -29,11 +36,13 @@ export function PanelArea({ area, areaPanels, setPanel, toggleFullScreenPanel }:
             .filter((panel) => !panel.hidden || panel.active)
             .map((panel) => (
               <Tab
-                key={panel.panel}
+                key={panel.key}
                 active={activePanel === panel}
                 onClick={() => setPanel(area, panel)}
                 onDoubleClick={() => toggleFullScreenPanel(panel)}
                 className="select-none"
+                closable={panel.closable}
+                onClose={() => closePanel(panel)}
               >
                 {panel.label ??
                   (panel?.metadata?.sceneId ? `Scene: ${panel.metadata.sceneId}` : pascalCaseToTitleCase(panel.panel))}

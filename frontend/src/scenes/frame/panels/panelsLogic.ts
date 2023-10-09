@@ -24,7 +24,7 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
 }
 
 function panelsEqual(panel1: PanelWithMetadata, panel2: PanelWithMetadata) {
-  return panel1.panel === panel2.panel && equal(panel1.metadata || {}, panel2.metadata || {})
+  return panel1.panel === panel2.panel && panel1.key === panel2.key
 }
 
 export const panelsLogic = kea<panelsLogicType>([
@@ -32,7 +32,8 @@ export const panelsLogic = kea<panelsLogicType>([
   props({} as PanelsLogicProps),
   key((props) => props.id),
   actions({
-    setPanel: (area: Area, panel: PanelWithMetadata, label?: string) => ({ area, panel, label }),
+    setPanel: (area: Area, panel: PanelWithMetadata) => ({ area, panel }),
+    closePanel: (panel: PanelWithMetadata) => ({ panel }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
   }),
@@ -40,24 +41,29 @@ export const panelsLogic = kea<panelsLogicType>([
     panels: [
       DEFAULT_LAYOUT as Record<Area, PanelWithMetadata[]>,
       {
-        setPanel: (state, { area, panel, label }) => {
+        setPanel: (state, { area, panel }) => {
           const newPanels = { ...state }
           newPanels[area] = newPanels[area].map((p) => ({
             ...p,
             active: panelsEqual(p, panel),
-            label: panelsEqual(p, panel) && label ? label : p.label,
           }))
           return equal(state, newPanels) ? state : newPanels
         },
+        closePanel: (state, { panel }) =>
+          Object.fromEntries(
+            Object.entries(state).map(([k, v]) => [k, v.filter((p) => !panelsEqual(p, panel))])
+          ) as Record<Area, PanelWithMetadata[]>,
         editApp: (state, { sceneId, nodeId, nodeData }) => ({
           ...state,
           [Area.TopLeft]: [
             ...state[Area.TopLeft].map((a) => ({ ...a, active: false })),
             {
               panel: Panel.EditApp,
+              key: `${sceneId}.${nodeId}`,
               label: nodeData.name || nodeData.keyword || nodeId,
               active: true,
               hidden: false,
+              closable: true,
               metadata: {
                 sceneId,
                 nodeId,
@@ -71,7 +77,7 @@ export const panelsLogic = kea<panelsLogicType>([
     fullScreenPanel: [
       null as PanelWithMetadata | null,
       {
-        toggleFullScreenPanel: (state, { panel }) => (equal(state, panel) ? null : panel),
+        toggleFullScreenPanel: (state, { panel }) => (state && panelsEqual(state, panel) ? null : panel),
       },
     ],
   }),
@@ -83,10 +89,10 @@ export const panelsLogic = kea<panelsLogicType>([
       (panels, fullScreenPanel): Record<Area, PanelWithMetadata[]> =>
         fullScreenPanel
           ? {
-              [Area.TopLeft]: [{ ...fullScreenPanel, active: true, hidden: false }],
-              [Area.TopRight]: [],
-              [Area.BottomLeft]: [],
-              [Area.BottomRight]: [],
+              [Area.TopLeft]: panels.TopLeft.filter((p) => panelsEqual(p, fullScreenPanel)),
+              [Area.TopRight]: panels.TopRight.filter((p) => panelsEqual(p, fullScreenPanel)),
+              [Area.BottomLeft]: panels.BottomLeft.filter((p) => panelsEqual(p, fullScreenPanel)),
+              [Area.BottomRight]: panels.BottomRight.filter((p) => panelsEqual(p, fullScreenPanel)),
             }
           : panels,
     ],
