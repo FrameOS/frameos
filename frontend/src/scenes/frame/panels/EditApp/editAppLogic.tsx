@@ -1,7 +1,8 @@
-import { actions, afterMount, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, kea, key, listeners, path, props, propsChanged, reducers, selectors } from 'kea'
 
 import type { editAppLogicType } from './editAppLogicType'
 import { loaders } from 'kea-loaders'
+import { frameLogic } from '../../frameLogic'
 
 export interface EditAppLogicProps {
   frameId: number
@@ -10,7 +11,6 @@ export interface EditAppLogicProps {
   keyword: string
   sources?: Record<string, string>
   setTitle?: (title: string) => void
-  onChange?: (file: string, source: string) => void
 }
 
 export const editAppLogic = kea<editAppLogicType>([
@@ -20,6 +20,8 @@ export const editAppLogic = kea<editAppLogicType>([
   actions({
     setActiveFile: (file: string) => ({ file }),
     updateFile: (file: string, source: string) => ({ file, source }),
+    saveChanges: true,
+    setInitialSources: (sources: Record<string, string>) => ({ sources }),
   }),
   loaders(({ props, values }) => ({
     sources: [
@@ -49,6 +51,7 @@ export const editAppLogic = kea<editAppLogicType>([
       props.sources ? structuredClone(props.sources) : ({} as Record<string, string>),
       {
         loadSourcesSuccess: (_, { sources }) => sources,
+        setInitialSources: (_, { sources }) => sources,
       },
     ],
   })),
@@ -81,14 +84,20 @@ export const editAppLogic = kea<editAppLogicType>([
       },
     ],
   }),
-  listeners(({ props, values }) => ({
+  listeners(({ actions, props, values }) => ({
     updateFile: ({ file, source }) => {
-      props.onChange?.(file, source)
       props.setTitle?.(values.hasChanges ? `* ${props.keyword}` : props.keyword)
+    },
+    saveChanges: () => {
+      frameLogic({ id: props.frameId }).actions.updateNodeData(props.sceneId, props.nodeId, {
+        sources: values.sources,
+      })
+      actions.setInitialSources(values.sources)
+      props.setTitle?.(props.keyword)
     },
   })),
   afterMount(({ actions, props }) => {
-    if (props.keyword) {
+    if (!props.sources) {
       actions.loadSources()
     }
   }),

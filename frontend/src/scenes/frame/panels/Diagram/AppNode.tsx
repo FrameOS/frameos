@@ -34,7 +34,10 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
           'flex w-full justify-between items-center'
         )}
       >
-        <div>{app?.name}</div>
+        <div>
+          {data?.sources ? 'Custom: ' : ''}
+          {app?.name}
+        </div>
         <div className="cursor-pointer hover:text-blue-400" onClick={() => editApp(sceneId, id, data)}>
           <PencilSquare />
         </div>

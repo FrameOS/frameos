@@ -1,9 +1,8 @@
 import { actions, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { framesModel } from '../../models/framesModel'
-import equal from 'fast-deep-equal'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
-import { Area, FrameType, Panel, PanelWithMetadata } from '../../types'
+import { FrameScene, FrameType } from '../../types'
 import { forms } from 'kea-forms'
 
 export interface FrameLogicProps {
@@ -34,17 +33,12 @@ export const frameLogic = kea<frameLogicType>([
   props({} as FrameLogicProps),
   key((props) => props.id),
   actions({
-    updateScene: (sceneId: string, scene: any) => ({ sceneId, scene }),
+    updateScene: (sceneId: string, scene: Partial<FrameScene>) => ({ sceneId, scene }),
+    updateNodeData: (sceneId: string, nodeId: string, nodeData: Record<string, any>) => ({ sceneId, nodeId, nodeData }),
     saveFrame: true,
     refreshFrame: true,
     restartFrame: true,
     redeployFrame: true,
-    updateNodeSource: (sceneId: string, nodeId: string, file: string, source: string) => ({
-      sceneId,
-      nodeId,
-      file,
-      source,
-    }),
   }),
   forms(({ actions, values }) => ({
     frameForm: {
@@ -101,10 +95,40 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
   })),
-  listeners(({ actions }) => ({
+  listeners(({ actions, values }) => ({
     saveFrame: () => actions.submitFrameForm(),
     refreshFrame: () => actions.submitFrameForm(),
     redeployFrame: () => actions.submitFrameForm(),
     restartFrame: () => actions.submitFrameForm(),
+    updateScene: ({ sceneId, scene }) => {
+      const { frame } = values
+      const hasScene = frame.scenes?.some(({ id }) => id === sceneId)
+      actions.setFrameFormValues({
+        scenes: hasScene
+          ? frame.scenes?.map((s) => (s.id === sceneId ? { ...s, ...scene } : s))
+          : [...(frame.scenes ?? []), { ...scene, id: sceneId }],
+      })
+    },
+    updateNodeData: ({ sceneId, nodeId, nodeData }) => {
+      const { frame } = values
+      const scene = frame.scenes?.find(({ id }) => id === sceneId)
+      const currentNode = scene?.nodes?.find(({ id }) => id === nodeId)
+      if (currentNode) {
+        actions.setFrameFormValues({
+          scenes: frame.scenes?.map((s) =>
+            s.id === sceneId
+              ? {
+                  ...s,
+                  nodes: s.nodes?.map((n) =>
+                    n.id === nodeId ? { ...n, data: { ...(n.data ?? {}), ...nodeData } } : n
+                  ),
+                }
+              : s
+          ),
+        })
+      } else {
+        console.error(`Node ${nodeId} not found in scene ${sceneId}`)
+      }
+    },
   })),
 ])

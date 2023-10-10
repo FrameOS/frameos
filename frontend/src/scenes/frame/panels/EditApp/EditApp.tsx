@@ -16,7 +16,6 @@ interface EditAppProps {
 
 export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
   const { id: frameId } = useValues(frameLogic)
-  const { updateNodeSource } = useActions(frameLogic)
   const { setPanelTitle, persistUntilClosed } = useActions(panelsLogic)
   const logicProps: EditAppLogicProps = {
     frameId,
@@ -25,15 +24,11 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
     keyword: nodeData.keyword,
     sources: nodeData.sources,
     setTitle: (title) => setPanelTitle(panel, title),
-    onChange: (file, source) => {
-      updateNodeSource(sceneId, nodeId, file, source)
-      // TODO: this does nothing
-    },
   }
   const { sources, sourcesLoading, activeFile, hasChanges, changedFiles, configJson } = useValues(
     editAppLogic(logicProps)
   )
-  const { setActiveFile, updateFile } = useActions(editAppLogic(logicProps))
+  const { saveChanges, setActiveFile, updateFile } = useActions(editAppLogic(logicProps))
 
   useEffect(() => {
     persistUntilClosed(panel, editAppLogic(logicProps))
@@ -56,12 +51,17 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
 
   return (
     <div className="flex flex-col gap-2 max-h-full h-full max-w-full w-full">
-      {nodeData.keyword && !hasChanges ? (
+      {!nodeData.sources && !hasChanges ? (
         <div className="bg-amber-800 p-2">
           You're editing a read-only system app <strong>{name}</strong>. Changes will be saved on a copy.
         </div>
       ) : hasChanges ? (
-        <div className="bg-amber-800 p-2">You have changes. Click here to save.</div>
+        <div className="bg-gray-900 p-2">
+          You have changes.{' '}
+          <Button size="small" onClick={saveChanges}>
+            Click here to save them
+          </Button>
+        </div>
       ) : null}
       <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
         <div className="max-w-40 space-y-1">
