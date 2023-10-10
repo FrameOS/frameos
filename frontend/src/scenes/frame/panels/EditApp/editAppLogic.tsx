@@ -9,6 +9,7 @@ export interface EditAppLogicProps {
   nodeId: string
   keyword: string
   sources?: Record<string, string>
+  setTitle?: (title: string) => void
   onChange?: (file: string, source: string) => void
 }
 
@@ -61,6 +62,14 @@ export const editAppLogic = kea<editAppLogicType>([
         return Object.entries(sources).some(([file, source]) => source !== initialSources[file])
       },
     ],
+    changedFiles: [
+      (s) => [s.sources, s.sourcesLoading, s.initialSources],
+      (sources, sourcesLoading, initialSources): Record<string, boolean> => {
+        return Object.fromEntries(
+          Object.entries(sources).map(([file, source]) => [file, source !== initialSources[file]])
+        )
+      },
+    ],
     configJson: [
       (s) => [s.sources],
       (sources): Record<string, any> | null => {
@@ -72,9 +81,10 @@ export const editAppLogic = kea<editAppLogicType>([
       },
     ],
   }),
-  listeners(({ props }) => ({
+  listeners(({ props, values }) => ({
     updateFile: ({ file, source }) => {
       props.onChange?.(file, source)
+      props.setTitle?.(values.hasChanges ? `* ${props.keyword}` : props.keyword)
     },
   })),
   afterMount(({ actions, props }) => {

@@ -2,31 +2,42 @@ import { useActions, useValues } from 'kea'
 import { editAppLogic, EditAppLogicProps } from './editAppLogic'
 import { Button } from '../../../../components/Button'
 import Editor from '@monaco-editor/react'
-import { AppNodeData } from '../../../../types'
+import { AppNodeData, PanelWithMetadata } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
+import { panelsLogic } from '../panelsLogic'
+import { useEffect } from 'react'
 
 interface EditAppProps {
+  panel: PanelWithMetadata
   sceneId: string
   nodeId: string
   nodeData: AppNodeData
 }
 
-export function EditApp({ sceneId, nodeId, nodeData }: EditAppProps) {
+export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
   const { id: frameId } = useValues(frameLogic)
   const { updateNodeSource } = useActions(frameLogic)
+  const { setPanelTitle, persistUntilClosed } = useActions(panelsLogic)
   const logicProps: EditAppLogicProps = {
     frameId,
     sceneId,
     nodeId,
     keyword: nodeData.keyword,
     sources: nodeData.sources,
+    setTitle: (title) => setPanelTitle(panel, title),
     onChange: (file, source) => {
       updateNodeSource(sceneId, nodeId, file, source)
       // TODO: this does nothing
     },
   }
-  const { sources, sourcesLoading, activeFile, hasChanges, configJson } = useValues(editAppLogic(logicProps))
+  const { sources, sourcesLoading, activeFile, hasChanges, changedFiles, configJson } = useValues(
+    editAppLogic(logicProps)
+  )
   const { setActiveFile, updateFile } = useActions(editAppLogic(logicProps))
+
+  useEffect(() => {
+    persistUntilClosed(panel, editAppLogic(logicProps))
+  }, [])
 
   function setEditorTheme(monaco: any) {
     monaco.editor.defineTheme('darkframe', {
@@ -45,25 +56,24 @@ export function EditApp({ sceneId, nodeId, nodeData }: EditAppProps) {
 
   return (
     <div className="flex flex-col gap-2 max-h-full h-full max-w-full w-full">
-      <div className="bg-gray-700 p-2 border-gray-500">
-        {nodeData.keyword ? (
-          hasChanges ? (
-            <>
-              <strong>{name}</strong> will be forked onto the current scene when you save
-            </>
-          ) : (
-            <>
-              <strong>Note!</strong> You're editing the system app <strong>{name}</strong>. If you make any changes, the
-              app will be forked onto the current scene.
-            </>
-          )
-        ) : null}
-      </div>
+      {nodeData.keyword && !hasChanges ? (
+        <div className="bg-amber-800 p-2">
+          You're editing a read-only system app <strong>{name}</strong>. Changes will be saved on a copy.
+        </div>
+      ) : hasChanges ? (
+        <div className="bg-amber-800 p-2">You have changes. Click here to save.</div>
+      ) : null}
       <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
         <div className="max-w-40 space-y-1">
           {Object.entries(sources).map(([file, source]) => (
             <div key={file} className="w-min">
-              <Button size="small" color={activeFile === file ? 'teal' : 'none'} onClick={() => setActiveFile(file)}>
+              <Button
+                size="small"
+                color={activeFile === file ? 'teal' : 'none'}
+                onClick={() => setActiveFile(file)}
+                className="whitespace-nowrap"
+              >
+                {changedFiles[file] ? '* ' : ''}
                 {file}
               </Button>
             </div>

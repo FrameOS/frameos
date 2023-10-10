@@ -44,14 +44,14 @@ export function PanelArea({
                 closable={panel.closable}
                 onClose={() => closePanel(panel)}
               >
-                {panel.label ??
+                {panel.title ??
                   (panel?.metadata?.sceneId ? `Scene: ${panel.metadata.sceneId}` : pascalCaseToTitleCase(panel.panel))}
               </Tab>
             ))}
         </Tabs>
       }
     >
-      {Component ? <Component {...(activePanel?.metadata ?? {})} /> : <>Nothing to see here...</>}
+      {Component ? <Component panel={activePanel} {...(activePanel?.metadata ?? {})} /> : <>Nothing to see here...</>}
     </Container>
   )
 }

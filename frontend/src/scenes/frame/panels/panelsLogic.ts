@@ -1,4 +1,4 @@
-import { actions, connect, kea, key, path, props, reducers, selectors } from 'kea'
+import { actions, BuiltLogic, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { framesModel } from '../../../models/framesModel'
 import equal from 'fast-deep-equal'
 import { AppNodeData, Area, Panel, PanelWithMetadata } from '../../../types'
@@ -8,6 +8,9 @@ import type { panelsLogicType } from './panelsLogicType'
 export interface PanelsLogicProps {
   id: number
 }
+
+export interface AnyBuiltLogic extends BuiltLogic {}
+
 const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
   [Area.TopLeft]: [{ panel: Panel.Diagram, active: true, hidden: false, metadata: { sceneId: 'default' } }],
   [Area.TopRight]: [
@@ -33,9 +36,11 @@ export const panelsLogic = kea<panelsLogicType>([
   key((props) => props.id),
   actions({
     setPanel: (area: Area, panel: PanelWithMetadata) => ({ area, panel }),
+    setPanelTitle: (panel: PanelWithMetadata, title: string) => ({ panel, title }),
     closePanel: (panel: PanelWithMetadata) => ({ panel }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
+    persistUntilClosed: (panel: PanelWithMetadata, logic: AnyBuiltLogic) => ({ panel, logic }),
   }),
   reducers({
     panels: [
@@ -60,7 +65,7 @@ export const panelsLogic = kea<panelsLogicType>([
             {
               panel: Panel.EditApp,
               key: `${sceneId}.${nodeId}`,
-              label: nodeData.name || nodeData.keyword || nodeId,
+              title: nodeData.name || nodeData.keyword || nodeId,
               active: true,
               hidden: false,
               closable: true,
@@ -72,6 +77,10 @@ export const panelsLogic = kea<panelsLogicType>([
             },
           ],
         }),
+        setPanelTitle: (state, { panel, title }) =>
+          Object.fromEntries(
+            Object.entries(state).map(([k, v]) => [k, v.map((p) => (panelsEqual(p, panel) ? { ...p, title } : p))])
+          ) as Record<Area, PanelWithMetadata[]>,
       },
     ],
     fullScreenPanel: [
@@ -96,5 +105,21 @@ export const panelsLogic = kea<panelsLogicType>([
             }
           : panels,
     ],
+  })),
+  listeners(({ cache }) => ({
+    persistUntilClosed: ({ panel, logic }) => {
+      if (!cache.closeListeners) {
+        cache.closeListeners = {} as Record<string, () => void>
+      }
+      if (!cache.closeListeners[`${panel.panel}.${panel.key}`]) {
+        cache.closeListeners[`${panel.panel}.${panel.key}`] = logic.mount()
+      }
+    },
+    closePanel: ({ panel }) => {
+      if (cache.closeListeners && cache.closeListeners[`${panel.panel}.${panel.key}`]) {
+        cache.closeListeners[`${panel.panel}.${panel.key}`]()
+        delete cache.closeListeners[`${panel.panel}.${panel.key}`]
+      }
+    },
   })),
 ])

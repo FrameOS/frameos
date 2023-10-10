@@ -97,7 +97,7 @@ export enum Panel {
 export type PanelWithMetadata = {
   panel: Panel
   key?: string
-  label?: string
+  title?: string
   active?: boolean
   hidden?: boolean
   metadata?: Record<string, any>
