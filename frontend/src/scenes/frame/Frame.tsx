@@ -13,7 +13,7 @@ interface FrameSceneProps {
 export function Frame(props: FrameSceneProps) {
   const id = parseInt(props.id)
   const frameLogicProps = { id }
-  const { frame, frameFormChanged } = useValues(frameLogic(frameLogicProps))
+  const { frame, frameChanged } = useValues(frameLogic(frameLogicProps))
   const { saveFrame, refreshFrame, restartFrame, redeployFrame } = useActions(frameLogic(frameLogicProps))
 
   return (
@@ -24,7 +24,7 @@ export function Frame(props: FrameSceneProps) {
             title="FrameOS"
             subtitle={!frame ? `Loading frame ${props.id}...` : frameHost(frame)}
             buttons={[
-              <Button color={frameFormChanged ? 'teal' : 'light-gray'} type="button" onClick={() => saveFrame()}>
+              <Button color={frameChanged ? 'teal' : 'light-gray'} type="button" onClick={() => saveFrame()}>
                 Save
               </Button>,
               <Button

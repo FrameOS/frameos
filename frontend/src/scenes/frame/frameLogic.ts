@@ -86,14 +86,10 @@ export const frameLogic = kea<frameLogicType>([
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
     frame: [(s) => [framesModel.selectors.frames, s.id], (frames, id) => frames[id] || null],
-    scenesWithChanges: [
+    frameChanged: [
       (s) => [s.frame, s.frameForm],
-      (frame, frameForm): Record<string, boolean> => {
-        const frameScenes = Object.fromEntries((frame?.scenes ?? []).map((s) => [s.id, s]))
-        return Object.fromEntries(
-          Object.values(frameForm?.scenes ?? []).map((s) => [s.id, !equal(s, frameScenes[s.id])])
-        )
-      },
+      (frame, frameForm) =>
+        FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], frameForm?.[key as keyof FrameType])),
     ],
   })),
   subscriptions(({ actions }) => ({

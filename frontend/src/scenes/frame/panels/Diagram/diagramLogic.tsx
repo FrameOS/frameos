@@ -83,9 +83,10 @@ export const diagramLogic = kea<diagramLogicType>([
   selectors(() => ({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
     sceneId: [() => [(_, props) => props.sceneId], (sceneId) => sceneId],
+    originalFrame: [(s) => [framesModel.selectors.frames, s.frameId], (frames, frameId) => frames[frameId] || null],
     editingFrame: [
-      (s) => [s.frameForm, framesModel.selectors.frames, s.frameId],
-      (frameForm, frames, frameId) => frameForm || frames[frameId] || null,
+      (s) => [s.frameForm, s.originalFrame],
+      (frameForm, originalFrame) => frameForm || originalFrame || null,
     ],
     scene: [
       (s) => [s.editingFrame, s.sceneId],
@@ -112,6 +113,22 @@ export const diagramLogic = kea<diagramLogicType>([
         }, {} as Record<string, Node[]>)
       },
     ],
+    hasChanges: [
+      (s) => [s.nodes, s.edges, s.sceneId, s.originalFrame],
+      (nodes, edges, sceneId, originalFrame) => {
+        const scene = originalFrame?.scenes?.find((s) => s.id === sceneId)
+        return (
+          !equal(
+            nodes?.map((n) => (n.selected ? { ...n, selected: false } : n)),
+            scene?.nodes
+          ) ||
+          !equal(
+            edges?.map((e) => (e.selected ? { ...e, selected: false } : e)),
+            scene?.edges
+          )
+        )
+      },
+    ],
   })),
   subscriptions(({ actions, values, props }) => ({
     nodes: (nodes: Node[], oldNodes: Node[]) => {
@@ -129,7 +146,9 @@ export const diagramLogic = kea<diagramLogicType>([
       if (typeof oldNodes !== 'undefined' && !equal(nodes, oldNodes)) {
         actions.setFrameFormValues({
           scenes: values.editingFrame.scenes?.map((scene) =>
-            scene.id === props.sceneId && !equal(scene.nodes, nodes) ? { ...scene, nodes } : scene
+            scene.id === props.sceneId && !equal(scene.nodes, nodes)
+              ? { ...scene, nodes: nodes.map((n) => (n.selected ? { ...n, selected: false } : n)) }
+              : scene
           ),
         })
       }
@@ -139,7 +158,9 @@ export const diagramLogic = kea<diagramLogicType>([
       if (typeof oldEdges !== 'undefined' && edges && !equal(edges, oldEdges)) {
         actions.setFrameFormValues({
           scenes: values.editingFrame.scenes?.map((scene) =>
-            scene.id === props.sceneId && !equal(scene.edges, edges) ? { ...scene, edges } : scene
+            scene.id === props.sceneId && !equal(scene.edges, edges)
+              ? { ...scene, edges: edges.map((e) => (e.selected ? { ...e, selected: false } : e)) }
+              : scene
           ),
         })
       }

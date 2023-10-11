@@ -90,11 +90,13 @@ export function Diagram({ sceneId }: DiagramProps) {
 }
 
 Diagram.PanelTitle = function DiagramPanelTitle({ sceneId }: DiagramProps) {
-  const { scenesWithChanges } = useValues(frameLogic)
+  const { id: frameId } = useValues(frameLogic)
+  const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
+  const { hasChanges } = useValues(diagramLogic(diagramLogicProps))
 
   return (
     <>
-      {scenesWithChanges[sceneId] ? '* ' : ''}Scene: {sceneId}
+      {hasChanges ? '* ' : ''}Scene: {sceneId}
     </>
   )
 }
