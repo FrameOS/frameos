@@ -10,7 +10,10 @@ export const newFrameForm = kea<newFrameFormType>([
   forms(({ actions }) => ({
     newFrame: {
       defaults: {
-        server_host: typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port}` : null,
+        server_host:
+          typeof window !== 'undefined'
+            ? `${window.location.hostname}:${window.location.port || window.location.protocol === 'https:' ? 443 : 80}`
+            : null,
       } as FrameType,
       errors: (frame: Partial<FrameType>) => ({
         frame_host: !frame.frame_host ? 'Please enter a host' : null,
