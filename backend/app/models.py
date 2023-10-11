@@ -41,8 +41,9 @@ def get_one_app_sources(keyword: str) -> Optional[Dict[str, str]]:
 # NB! Update frontend/src/types.tsx if you change this
 class Frame(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(256), nullable=False)
     # sending commands to frame
-    frame_host = db.Column(db.String(256), unique=True, nullable=False)
+    frame_host = db.Column(db.String(256), nullable=False)
     frame_port = db.Column(db.Integer, default=8999)
     ssh_user = db.Column(db.String(50), nullable=True)
     ssh_pass = db.Column(db.String(50), nullable=True)
@@ -72,6 +73,7 @@ class Frame(db.Model):
     def to_dict(self):
         return {
             'id': self.id,
+            'name': self.name,
             'frame_host': self.frame_host,
             'frame_port': self.frame_port,
             'ssh_user': self.ssh_user,
@@ -93,7 +95,7 @@ class Frame(db.Model):
             'scenes': self.scenes,
         }
 
-def new_frame(frame_host: str, server_host: str, device: Optional[str]) -> Frame:
+def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str]) -> Frame:
     if '@' in frame_host:
         user_pass, frame_host = frame_host.split('@')
     else:
@@ -121,6 +123,7 @@ def new_frame(frame_host: str, server_host: str, device: Optional[str]) -> Frame
         server_port = 8999
 
     frame = Frame(
+        name=name,
         ssh_user=user, 
         ssh_pass=password, 
         frame_host=frame_host, 

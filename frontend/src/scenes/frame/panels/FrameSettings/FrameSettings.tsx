@@ -43,6 +43,9 @@ export function FrameSettings({ className }: DetailsProps) {
             </div>
           </div>
           <Form formKey="frameForm" logic={frameLogic} props={{ id }} className="space-y-4" enableFormOnSubmit>
+            <Field name="name" label="Name">
+              <TextInput name="name" placeholder="Hallway frame" required />
+            </Field>
             <Field name="frame_host" label="Frame host">
               <TextInput name="frame_host" placeholder="127.0.0.1" required />
             </Field>

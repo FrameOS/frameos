@@ -21,6 +21,10 @@ export function FrameDetails({ className }: DetailsProps) {
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5">
             <tbody>
               <tr>
+                <td className="text-blue-200 text-right">Name:</td>
+                <td>{frame.name}</td>
+              </tr>
+              <tr>
                 <td className="text-blue-200 text-right">Frame host:</td>
                 <td>{frame.frame_host}</td>
               </tr>

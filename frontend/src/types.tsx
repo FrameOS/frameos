@@ -2,6 +2,7 @@ import { Edge, Node } from 'reactflow'
 
 export interface FrameType {
   id: number
+  name: string
   frame_host: string
   frame_port: number
   ssh_user?: string

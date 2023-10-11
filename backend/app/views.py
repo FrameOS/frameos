@@ -104,6 +104,8 @@ def update_frame(id: int):
     # I have many years of engineering experience
     if 'scenes' in request.form:
         frame.scenes = json.loads(request.form['scenes'])
+    if 'name' in request.form:
+        frame.name = request.form['name']
     if 'frame_host' in request.form:
         frame.frame_host = request.form['frame_host']
     if 'frame_port' in request.form:
@@ -151,10 +153,11 @@ def update_frame(id: int):
 @app.route("/api/frames/new", methods=["POST"])
 @login_required
 def new_frame():
+    name = request.form['name']
     frame_host = request.form['frame_host']
     server_host = request.form['server_host']
     device = request.form.get('device', 'web_only')
-    frame = models.new_frame(frame_host, server_host, device)
+    frame = models.new_frame(name, frame_host, server_host, device)
     return jsonify(frame=frame.to_dict())
 
 @app.route('/api/frames/<int:frame_id>', methods=['DELETE'])

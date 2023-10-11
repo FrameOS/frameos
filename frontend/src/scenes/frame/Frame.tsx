@@ -22,7 +22,7 @@ export function Frame(props: FrameSceneProps) {
         <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute flex flex-col">
           <Header
             title="FrameOS"
-            subtitle={!frame ? `Loading frame ${props.id}...` : frameHost(frame)}
+            subtitle={!frame ? `Loading frame ${props.id}...` : frame.name || frameHost(frame)}
             buttons={[
               <Button color={frameChanged ? 'teal' : 'light-gray'} type="button" onClick={() => saveFrame()}>
                 Save

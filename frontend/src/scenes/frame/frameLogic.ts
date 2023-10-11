@@ -10,6 +10,7 @@ export interface FrameLogicProps {
   id: number
 }
 const FRAME_KEYS = [
+  'name',
   'frame_host',
   'frame_port',
   'ssh_user',

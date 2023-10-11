@@ -16,6 +16,7 @@ export const newFrameForm = kea<newFrameFormType>([
             : null,
       } as FrameType,
       errors: (frame: Partial<FrameType>) => ({
+        name: !frame.name ? 'Please enter a name' : null,
         frame_host: !frame.frame_host ? 'Please enter a host' : null,
       }),
       submit: async (frame) => {

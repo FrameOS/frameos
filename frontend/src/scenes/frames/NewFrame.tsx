@@ -13,6 +13,9 @@ export function NewFrame(): JSX.Element {
     <Box id="add-frame" className="p-4">
       <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
         <H6>Add a smart frame</H6>
+        <Field name="name" label="Name">
+          <TextInput name="name" placeholder="Kitchen Frame" required />
+        </Field>
         <Field name="frame_host" label="IP address or hostname">
           <TextInput name="frame_host" placeholder="127.0.0.1" required />
         </Field>

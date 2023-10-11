@@ -36,8 +36,7 @@ def upgrade():
     sa.Column('color', sa.String(length=256), nullable=True),
     sa.Column('image_url', sa.String(length=256), nullable=True),
     sa.Column('interval', sa.Double(), nullable=True),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('frame_host')
+    sa.PrimaryKeyConstraint('id')
     )
     op.create_table('log',
     sa.Column('id', sa.Integer(), nullable=False),
