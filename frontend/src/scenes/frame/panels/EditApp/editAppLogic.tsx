@@ -1,8 +1,10 @@
-import { actions, afterMount, kea, key, listeners, path, props, propsChanged, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, kea, key, listeners, path, props, propsChanged, reducers, selectors } from 'kea'
 
 import type { editAppLogicType } from './editAppLogicType'
 import { loaders } from 'kea-loaders'
 import { frameLogic } from '../../frameLogic'
+import { panelsLogic } from '../panelsLogic'
+import { Panel } from '../../../../types'
 
 export interface EditAppLogicProps {
   frameId: number
@@ -10,13 +12,20 @@ export interface EditAppLogicProps {
   nodeId: string
   keyword: string
   sources?: Record<string, string>
-  setTitle?: (title: string) => void
 }
 
 export const editAppLogic = kea<editAppLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'EditApp', 'editAppLogic']),
   props({} as EditAppLogicProps),
   key((props) => `${props.frameId}:${props.sceneId}.${props.nodeId}.${props.keyword}`),
+  connect((props: EditAppLogicProps) => ({
+    actions: [
+      frameLogic({ id: props.frameId }),
+      ['updateNodeData'],
+      panelsLogic({ id: props.frameId }),
+      ['setPanelTitle'],
+    ],
+  })),
   actions({
     setActiveFile: (file: string) => ({ file }),
     updateFile: (file: string, source: string) => ({ file, source }),
@@ -86,14 +95,16 @@ export const editAppLogic = kea<editAppLogicType>([
   }),
   listeners(({ actions, props, values }) => ({
     updateFile: ({ file, source }) => {
-      props.setTitle?.(values.hasChanges ? `* ${props.keyword}` : props.keyword)
+      actions.setPanelTitle(
+        Panel.EditApp,
+        `${props.sceneId}.${props.nodeId}`,
+        values.hasChanges ? `* ${props.keyword}` : props.keyword
+      )
     },
     saveChanges: () => {
-      frameLogic({ id: props.frameId }).actions.updateNodeData(props.sceneId, props.nodeId, {
-        sources: values.sources,
-      })
+      actions.updateNodeData(props.sceneId, props.nodeId, { sources: values.sources })
+      actions.setPanelTitle(Panel.EditApp, `${props.sceneId}.${props.nodeId}`, props.keyword)
       actions.setInitialSources(values.sources)
-      props.setTitle?.(props.keyword)
     },
   })),
   afterMount(({ actions, props }) => {
