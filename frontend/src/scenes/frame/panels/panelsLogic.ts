@@ -60,22 +60,26 @@ export const panelsLogic = kea<panelsLogicType>([
           ) as Record<Area, PanelWithMetadata[]>,
         editApp: (state, { sceneId, nodeId, nodeData }) => ({
           ...state,
-          [Area.TopLeft]: [
-            ...state[Area.TopLeft].map((a) => ({ ...a, active: false })),
-            {
-              panel: Panel.EditApp,
-              key: `${sceneId}.${nodeId}`,
-              title: nodeData.name || nodeData.keyword || nodeId,
-              active: true,
-              hidden: false,
-              closable: true,
-              metadata: {
-                sceneId,
-                nodeId,
-                nodeData,
-              },
-            },
-          ],
+          [Area.TopLeft]: state[Area.TopLeft].find((a) => a.panel === Panel.EditApp && a.key === `${sceneId}.${nodeId}`)
+            ? state[Area.TopLeft].map((a) =>
+                a.key === `${sceneId}.${nodeId}` ? { ...a, active: true } : a.active ? { ...a, active: false } : a
+              )
+            : [
+                ...state[Area.TopLeft].map((a) => ({ ...a, active: false })),
+                {
+                  panel: Panel.EditApp,
+                  key: `${sceneId}.${nodeId}`,
+                  title: nodeData.name || nodeData.keyword || nodeId,
+                  active: true,
+                  hidden: false,
+                  closable: true,
+                  metadata: {
+                    sceneId,
+                    nodeId,
+                    nodeData,
+                  },
+                },
+              ],
         }),
         setPanelTitle: (state, { panel, title }) =>
           Object.fromEntries(
