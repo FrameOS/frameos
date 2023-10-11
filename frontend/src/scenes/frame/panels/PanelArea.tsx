@@ -3,6 +3,7 @@ import { Container } from '../../../components/panels/Container'
 import { Tabs } from '../../../components/panels/Tabs'
 import { Tab } from '../../../components/panels/Tab'
 import { Area, PanelWithMetadata } from '../../../types'
+import { EditApp } from './EditApp/EditApp'
 
 export interface PanelAreaProps {
   area: Area
@@ -34,20 +35,34 @@ export function PanelArea({
         <Tabs>
           {areaPanels
             .filter((panel) => !panel.hidden || panel.active)
-            .map((panel) => (
-              <Tab
-                key={panel.key}
-                active={activePanel === panel}
-                onClick={() => setPanel(area, panel)}
-                onDoubleClick={() => toggleFullScreenPanel(panel)}
-                className="select-none"
-                closable={panel.closable}
-                onClose={() => closePanel(panel)}
-              >
-                {panel.title ??
-                  (panel?.metadata?.sceneId ? `Scene: ${panel.metadata.sceneId}` : pascalCaseToTitleCase(panel.panel))}
-              </Tab>
-            ))}
+            .map((panel) => {
+              const Comp = allPanels[panel.panel]
+              const PanelTitle: ((props: Record<string, any>) => JSX.Element) | null =
+                Comp && 'PanelTitle' in Comp ? (Comp.PanelTitle as any) : null
+
+              return (
+                <Tab
+                  key={panel.key}
+                  active={activePanel === panel}
+                  onClick={() => setPanel(area, panel)}
+                  onDoubleClick={() => toggleFullScreenPanel(panel)}
+                  className="select-none"
+                  closable={panel.closable}
+                  onClose={() => closePanel(panel)}
+                >
+                  {PanelTitle ? (
+                    <PanelTitle panel={panel} {...(panel?.metadata ?? {})} />
+                  ) : (
+                    <>
+                      {panel.title ??
+                        (panel?.metadata?.sceneId
+                          ? `Scene: ${panel.metadata.sceneId}`
+                          : pascalCaseToTitleCase(panel.panel))}
+                    </>
+                  )}
+                </Tab>
+              )
+            })}
         </Tabs>
       }
     >

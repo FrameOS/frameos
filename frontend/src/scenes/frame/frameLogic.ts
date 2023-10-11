@@ -4,6 +4,7 @@ import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
 import { FrameScene, FrameType } from '../../types'
 import { forms } from 'kea-forms'
+import equal from 'fast-deep-equal'
 
 export interface FrameLogicProps {
   id: number
@@ -85,6 +86,15 @@ export const frameLogic = kea<frameLogicType>([
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
     frame: [(s) => [framesModel.selectors.frames, s.id], (frames, id) => frames[id] || null],
+    scenesWithChanges: [
+      (s) => [s.frame, s.frameForm],
+      (frame, frameForm): Record<string, boolean> => {
+        const frameScenes = Object.fromEntries((frame?.scenes ?? []).map((s) => [s.id, s]))
+        return Object.fromEntries(
+          Object.values(frameForm?.scenes ?? []).map((s) => [s.id, !equal(s, frameScenes[s.id])])
+        )
+      },
+    ],
   })),
   subscriptions(({ actions }) => ({
     frame: (frame, oldFrame) => {

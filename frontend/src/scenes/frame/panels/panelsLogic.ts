@@ -1,4 +1,4 @@
-import { actions, BuiltLogic, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { actions, BuiltLogic, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { framesModel } from '../../../models/framesModel'
 import equal from 'fast-deep-equal'
 import { AppNodeData, Area, Panel, PanelWithMetadata } from '../../../types'
@@ -36,7 +36,6 @@ export const panelsLogic = kea<panelsLogicType>([
   key((props) => props.id),
   actions({
     setPanel: (area: Area, panel: PanelWithMetadata) => ({ area, panel }),
-    setPanelTitle: (panel: Panel, key: string | null, title: string) => ({ panel, key, title }),
     closePanel: (panel: PanelWithMetadata) => ({ panel }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
@@ -81,13 +80,6 @@ export const panelsLogic = kea<panelsLogicType>([
                 },
               ],
         }),
-        setPanelTitle: (state, { panel, key, title }) =>
-          Object.fromEntries(
-            Object.entries(state).map(([k, v]) => [
-              k,
-              v.map((p) => (p.panel === panel && (p.key ?? null) == (key ?? null) ? { ...p, title } : p)),
-            ])
-          ) as Record<Area, PanelWithMetadata[]>,
       },
     ],
     fullScreenPanel: [

@@ -16,23 +16,15 @@ const nodeTypes = {
   event: EventNode,
 }
 
-export function Diagram({ sceneId }: { sceneId: string }) {
+interface DiagramProps {
+  sceneId: string
+}
+
+export function Diagram({ sceneId }: DiagramProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
-  const { id: frameId, frame } = useValues(frameLogic)
-  const { setFrameFormValues } = useActions(frameLogic)
-  const diagramLogicProps: DiagramLogicProps = {
-    frameId,
-    sceneId,
-    onChange: (nodes, edges) => {
-      const hasScene = frame.scenes?.some(({ id }) => id === sceneId)
-      setFrameFormValues({
-        scenes: hasScene
-          ? frame.scenes?.map((scene) => (scene.id === sceneId ? { ...scene, nodes, edges } : scene))
-          : [...(frame.scenes ?? []), { id: sceneId, nodes, edges }],
-      })
-    },
-  }
+  const { id: frameId } = useValues(frameLogic)
+  const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
   const { nodes, edges, fitViewCounter } = useValues(diagramLogic(diagramLogicProps))
   const { onEdgesChange, onNodesChange, setNodes, addEdge, rearrangeCurrentScene, fitDiagramView, keywordDropped } =
     useActions(diagramLogic(diagramLogicProps))
@@ -94,5 +86,15 @@ export function Diagram({ sceneId }: { sceneId: string }) {
         </ReactFlow>
       </div>
     </BindLogic>
+  )
+}
+
+Diagram.PanelTitle = function DiagramPanelTitle({ sceneId }: DiagramProps) {
+  const { scenesWithChanges } = useValues(frameLogic)
+
+  return (
+    <>
+      {scenesWithChanges[sceneId] ? '* ' : ''}Scene: {sceneId}
+    </>
   )
 }

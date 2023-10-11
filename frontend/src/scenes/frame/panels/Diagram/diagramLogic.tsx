@@ -19,7 +19,6 @@ import { arrangeNodes } from '../../../../utils/arrangeNodes'
 export interface DiagramLogicProps {
   frameId: number
   sceneId: string
-  onChange?: (nodes: Node[], edges: Edge[]) => void
 }
 
 export const diagramLogic = kea<diagramLogicType>([
@@ -28,6 +27,7 @@ export const diagramLogic = kea<diagramLogicType>([
   key((props) => `${props.frameId}/${props.sceneId}`),
   connect((props: DiagramLogicProps) => ({
     values: [frameLogic({ id: props.frameId }), ['frame', 'frameForm'], appsModel, ['apps']],
+    actions: [frameLogic({ id: props.frameId }), ['setFrameFormValues']],
   })),
   actions({
     setNodes: (nodes: Node[]) => ({ nodes }),
@@ -125,15 +125,23 @@ export const diagramLogic = kea<diagramLogicType>([
         actions.rearrangeCurrentScene()
       }
 
-      // Do not call `props.onChange` on first render
+      // Do not update on first render
       if (typeof oldNodes !== 'undefined' && !equal(nodes, oldNodes)) {
-        props?.onChange?.(nodes, values.edges)
+        actions.setFrameFormValues({
+          scenes: values.editingFrame.scenes?.map((scene) =>
+            scene.id === props.sceneId && !equal(scene.nodes, nodes) ? { ...scene, nodes } : scene
+          ),
+        })
       }
     },
     edges: (edges: Edge[], oldEdges: Edge[]) => {
-      // Do not call `props.onChange` on first render
+      // Do not update on first render
       if (typeof oldEdges !== 'undefined' && edges && !equal(edges, oldEdges)) {
-        props?.onChange?.(values.nodes, edges)
+        actions.setFrameFormValues({
+          scenes: values.editingFrame.scenes?.map((scene) =>
+            scene.id === props.sceneId && !equal(scene.edges, edges) ? { ...scene, edges } : scene
+          ),
+        })
       }
     },
     scene: (scene: FrameScene, oldScene: FrameScene) => {

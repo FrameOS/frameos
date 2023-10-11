@@ -19,12 +19,7 @@ export const editAppLogic = kea<editAppLogicType>([
   props({} as EditAppLogicProps),
   key((props) => `${props.frameId}:${props.sceneId}.${props.nodeId}.${props.keyword}`),
   connect((props: EditAppLogicProps) => ({
-    actions: [
-      frameLogic({ id: props.frameId }),
-      ['updateNodeData'],
-      panelsLogic({ id: props.frameId }),
-      ['setPanelTitle'],
-    ],
+    actions: [frameLogic({ id: props.frameId }), ['updateNodeData']],
   })),
   actions({
     setActiveFile: (file: string) => ({ file }),
@@ -94,16 +89,8 @@ export const editAppLogic = kea<editAppLogicType>([
     ],
   }),
   listeners(({ actions, props, values }) => ({
-    updateFile: ({ file, source }) => {
-      actions.setPanelTitle(
-        Panel.EditApp,
-        `${props.sceneId}.${props.nodeId}`,
-        values.hasChanges ? `* ${props.keyword}` : props.keyword
-      )
-    },
     saveChanges: () => {
       actions.updateNodeData(props.sceneId, props.nodeId, { sources: values.sources })
-      actions.setPanelTitle(Panel.EditApp, `${props.sceneId}.${props.nodeId}`, props.keyword)
       actions.setInitialSources(values.sources)
     },
   })),

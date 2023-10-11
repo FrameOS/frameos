@@ -16,14 +16,13 @@ interface EditAppProps {
 
 export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
   const { id: frameId } = useValues(frameLogic)
-  const { setPanelTitle, persistUntilClosed } = useActions(panelsLogic)
+  const { persistUntilClosed } = useActions(panelsLogic)
   const logicProps: EditAppLogicProps = {
     frameId,
     sceneId,
     nodeId,
     keyword: nodeData.keyword,
     sources: nodeData.sources,
-    setTitle: (title) => setPanelTitle(panel, title),
   }
   const { sources, sourcesLoading, activeFile, hasChanges, changedFiles, configJson } = useValues(
     editAppLogic(logicProps)
@@ -52,8 +51,8 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
   return (
     <div className="flex flex-col gap-2 max-h-full h-full max-w-full w-full">
       {!nodeData.sources && !hasChanges ? (
-        <div className="bg-amber-800 p-2">
-          You're editing a read-only system app <strong>{name}</strong>. Changes will be saved on a copy.
+        <div className="bg-gray-950 p-2">
+          You're editing a read-only system app <strong>{name}</strong>. Changes will be saved on a copy on the scene.
         </div>
       ) : hasChanges ? (
         <div className="bg-gray-900 p-2">
@@ -93,5 +92,23 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
         </div>
       </div>
     </div>
+  )
+}
+EditApp.PanelTitle = function EditAppPanelTitle({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
+  const { id: frameId } = useValues(frameLogic)
+  const logicProps: EditAppLogicProps = {
+    frameId,
+    sceneId,
+    nodeId,
+    keyword: nodeData.keyword,
+    sources: nodeData.sources,
+  }
+  const { hasChanges } = useValues(editAppLogic(logicProps))
+
+  return (
+    <>
+      {hasChanges ? '* ' : ''}
+      {nodeData.keyword}
+    </>
   )
 }
