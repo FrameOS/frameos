@@ -1,56 +1,42 @@
+import io
+
+import requests
 from PIL import Image, ImageDraw, ImageFont
-from datetime import datetime
 from apps import App, ExecutionContext
 from frame.image_utils import draw_text_with_border
 
-class ClockApp(App):
+class BoilerplateApp(App):
+    state = {}
     def run(self, context: ExecutionContext):
-        width, height = context.image.size
-        # Get the current time
-        format = self.config.get('format', '%H:%M:%S')
-        if format == 'custom':
-            format = self.config.get('format_custom', '%H:%M:%S')
-        current_time = datetime.now().strftime(format)
-        
-        # Get the config settings
-        font_color = self.config.get('font_color', 'black')
-        font_size = int(self.config.get('font_size', 20))
-        position = self.config.get('position', 'center-center')
-        border_color = self.config.get('border_color', 'white')
-        border_width = int(self.config.get('border_width', 1))
-        
-        # Prepare to draw the text
-        draw = ImageDraw.Draw(context.image)
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
-        text_width, text_height = draw.textsize(current_time, font=font)
-        text_width += border_width * 2
-        text_height += border_width * 2
-        
-        # Positioning the text
-        x, y = 4, 4
-        if position == 'top-right':
-            x = context.image.width - text_width - 4
-        elif position == 'top-center':
-            x = (context.image.width - text_width) / 2
-        elif position == 'bottom-left':
-            y = context.image.height - text_height - 4
-        elif position == 'bottom-center':
-            x = (context.image.width - text_width) / 2
-            y = context.image.height - text_height - 4
-        elif position == 'bottom-right':
-            x = context.image.width - text_width - 4
-        elif position == 'center-left':
-            y = (context.image.height - text_height) / 2
-        elif position == 'center-center':
-            x = (context.image.width - text_width) / 2
-            y = (context.image.height - text_height) / 2
-        elif position == 'center-right':
-            x = context.image.width - text_width - 4
-            y = (context.image.height - text_height) / 2
+        # Each execution starts from an event. The most common event is "render".
+        self.log(f"logging logging log: {context.event == 'render'}")
 
-        # Draw the text on the image
-        if border_width != 0:
-            draw_text_with_border(draw, (x, y), current_time, font, font_color, border_color, border_width)
-        else:
-            draw.text((x, y), current_time, fill=font_color, font=font)
-        self.log(f"Added clock: {current_time} at position {position}")
+        # In the render context you can modify an image.
+        width, height = context.image.size
+
+        # Swap it out if you want to
+        image_url = f"https://source.unsplash.com/random/{width}x{height}/?bananas"
+        response = requests.get(image_url)
+        context.image = Image.open(io.BytesIO(response.content))
+
+        # Access config
+        my_name = self.config.get('my_name', "unknown")
+
+        # Draw some text on it
+        text = f"FrameOS is {my_name}"
+        draw = ImageDraw.Draw(context.image)
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 48 if width > 500 else 24)
+        text_width, text_height = draw.textsize(text, font=font)
+        x, y = (width - text_width) / 2, (height - text_height) / 2
+        # draw.text((x, y), text, fill='white', font=font) # boring
+        draw_text_with_border(draw, (x, y), text, font, 'white', 'black', 3)
+
+        # You can use the context's "state" to carry random data between apps.
+        # It's cleared each execution.
+        context.state["really_bananas"] = "i know right"
+
+        # Use class variables to carry state between executions.
+        self.state["bananas"] = "yes"
+
+        # Ask ChatGPT for other PIL drawing commands and go, well, you know it by now: bananas
+

@@ -265,7 +265,7 @@ def create_default_scene() -> Dict:
                     "y": 412.8192307692308
                 },
                 "data": {
-                    "keyword": "unsplash",
+                    "keyword": "boilerplate",
                     "config": {}
                 },
                 "width": 133,

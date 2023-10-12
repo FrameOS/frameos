@@ -12,7 +12,9 @@ export const newFrameForm = kea<newFrameFormType>([
       defaults: {
         server_host:
           typeof window !== 'undefined'
-            ? `${window.location.hostname}:${window.location.port || window.location.protocol === 'https:' ? 443 : 80}`
+            ? `${window.location.hostname}:${
+                window.location.port || (window.location.protocol === 'https:' ? 443 : 80)
+              }`
             : null,
       } as FrameType,
       errors: (frame: Partial<FrameType>) => ({
