@@ -23,6 +23,28 @@ The FrameOS controller is where you set up your frames. You can run it continuou
 
 Read more in [the documentation](https://frameos.net/).
 
+Docker quickstart:
+
+```bash
+# running the latest release
+docker run -d -p 8999:8999 -v ./db:/app/db --name frameos --restart always mariusandra/frameos
+
+# update daily to the latest release
+docker run -d \
+    --name watchtower \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    containrrr/watchtower \
+    --interval 86400
+    frameos
+
+# one time update
+docker run \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    containrrr/watchtower \
+    --run-once \
+    frameos
+```
+
 # Developing locally
 
 ## FrameOS Controller
