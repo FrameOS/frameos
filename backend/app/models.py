@@ -159,6 +159,14 @@ def delete_frame(frame_id: int):
         return True
     return False
 
+def get_apps_from_scenes(scenes: List[Dict]) -> Dict[str, Dict]:
+    apps = {}
+    for scene in scenes:
+        for node in scene.get('nodes', []):
+            if node['type'] == 'app' and node.get('data', {}).get('sources', None) is not None:
+                apps[node['id']] = node['data']['sources']
+    return apps
+
 class Log(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.DateTime, nullable=False, default=db.func.current_timestamp())

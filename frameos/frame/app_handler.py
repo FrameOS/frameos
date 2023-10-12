@@ -3,6 +3,8 @@ import traceback
 import os
 import importlib.util
 import inspect
+import zipfile
+import zipimport
 
 from dacite import from_dict
 from typing import Optional, List, Dict, Type, Any, TYPE_CHECKING
@@ -96,11 +98,14 @@ class AppHandler:
 
     def init_apps(self):
         all_apps_keywords = set()
-        frame_config = self.config.to_frame_config()
+        app_node_ids = set()
         for scene in self.config.scenes:
             for node in scene.nodes:
                 if node.type == 'app' and node.data.get('keyword'):
-                    all_apps_keywords.add(node.data.get('keyword'))
+                    if node.data.get('sources') is None:
+                        all_apps_keywords.add(node.data.get('keyword'))
+                    else:
+                        app_node_ids.add(node.id)
         self.logger.log({'event': f'@frame:apps', 'apps': list(all_apps_keywords)})
 
         apps_folders = os.listdir('apps/')
@@ -111,16 +116,23 @@ class AppHandler:
                 continue
 
             if os.path.isdir(f'apps/{folder}') and os.path.isfile(f'apps/{folder}/frame.py') and os.path.isfile(f'apps/{folder}/config.json'):
-                self.init_app(folder)
+                self.init_system_app(folder)
+
+        for node_id in app_node_ids:
+            app_id = "app_" + node_id.replace('-', '_')
+            if os.path.isfile(f'apps/{app_id}.zip'):
+                self.init_custom_app(app_id)
 
         for scene in self.config.scenes:
             for node in scene.nodes:
-                keyword = node.data.get('keyword')
-                # config?
-                if node.type == 'app' and node.data.get('keyword'):
+                if node.data.get('sources') is not None:
+                    keyword = "app_" + node.id.replace('-', '_')
+                else:
+                    keyword = node.data.get('keyword')
+                if node.type == 'app' and keyword:
                     self.apps[node.id] = self.get_app_for_node(name=keyword, node=node, node_config=node.data.get('config'))
 
-    def init_app(self, folder: str):
+    def init_system_app(self, folder: str):
         try:
             with open(f'apps/{folder}/config.json', 'r') as file:
                 config = from_dict(data_class=AppConfig, data={
@@ -137,6 +149,24 @@ class AppHandler:
         except Exception as e:
             self.logger.log(
                 {'event': f'{folder}:error_initializing', 'error': str(e), 'stacktrace': traceback.format_exc()})
+
+    def init_custom_app(self, app_id: str):
+        try:
+            with zipfile.ZipFile(f'apps/{app_id}.zip', 'r') as zip_ref:
+                with zip_ref.open(f'config.json') as file:
+                    config = from_dict(data_class=AppConfig, data={
+                        **json.load(file),
+                        'keyword': app_id
+                    })
+            importer = zipimport.zipimporter(f'apps/{app_id}.zip')
+            frame_module = importer.load_module(f'frame')
+            for name, obj in inspect.getmembers(frame_module):
+                if inspect.isclass(obj) and issubclass(obj, App) and obj is not App:
+                    self.register_app(app_id, obj, config)
+
+        except Exception as e:
+            self.logger.log(
+                {'event': f'node:error_initializing', 'id': app_id, 'error': str(e), 'stacktrace': traceback.format_exc()})
 
     def register_app(self, name: str, app: Type[App], config: AppConfig):
         self.app_classes[name] = app

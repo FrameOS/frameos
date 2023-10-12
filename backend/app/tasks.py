@@ -1,7 +1,10 @@
+import io
 import json
 import os
+from zipfile import ZipFile
+
 from app import huey, app
-from app.models import new_log as log, Frame, update_frame, get_app_configs
+from app.models import new_log as log, Frame, update_frame, get_apps_from_scenes
 from paramiko import RSAKey, SSHClient, AutoAddPolicy
 from io import StringIO
 from gevent import sleep
@@ -151,6 +154,16 @@ def deploy_frame(id: int):
 
                 log(id, "stdout", "> add /srv/frameos/apps/*")
                 scp.put("../frameos/apps", "/srv/frameos/", recursive=True)
+
+                for node_id, sources in get_apps_from_scenes(frame.scenes).items():
+                    app_id = "app_" + node_id.replace('-', '_')
+                    log(id, "stdout", f"> add /srv/frameos/apps/{app_id}.zip")
+                    zip_archive = io.BytesIO()
+                    with ZipFile(zip_archive, "w") as new_archive:
+                        for file, source in sources.items():
+                            new_archive.writestr(os.path.join(file), source.encode())
+                    zip_archive.seek(0)
+                    scp.putfo(zip_archive, f"/srv/frameos/apps/{app_id}.zip")
 
                 if 'waveshare.' in frame.device:
                     log(id, "stdout", "> add /srv/frameos/lib/*")
