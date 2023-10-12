@@ -15,12 +15,12 @@ class BoilerplateApp(App):
         width, height = context.image.size
 
         # Swap it out if you want to
-        image_url = f"https://source.unsplash.com/random/{width}x{height}/?bananas"
+        image_url = f"https://source.unsplash.com/random/{width}x{height}/?nature"
         response = requests.get(image_url)
         context.image = Image.open(io.BytesIO(response.content))
 
         # Access config
-        my_name = self.config.get('my_name', "unknown")
+        my_name = self.config.get('my_name', "Bananas")
 
         # Draw some text on it
         text = f"FrameOS is {my_name}"
