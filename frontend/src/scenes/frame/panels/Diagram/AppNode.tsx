@@ -26,25 +26,29 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
     configJsonError = e instanceof Error ? e.message : String(e)
   }
   const app: App | undefined = configJson || apps[data.keyword]
+  const isCustomApp = !!data?.sources
+
   return (
     <div
       className={clsx(
         'shadow-lg border border-2',
         selectedNodeId === id
           ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
+          : isCustomApp
+          ? 'bg-black bg-opacity-70 border-teal-900 shadow-teal-700/50 '
           : 'bg-black bg-opacity-70 border-sky-900 shadow-sky-700/50 '
       )}
     >
       <div
         className={clsx(
-          'text-xl p-1',
-          selectedNodeId === id ? 'bg-indigo-900' : 'bg-sky-900',
+          'text-xl p-1 gap-1',
+          selectedNodeId === id ? 'bg-indigo-900' : isCustomApp ? 'bg-teal-900' : 'bg-sky-900',
           'flex w-full justify-between items-center'
         )}
       >
         <div>
-          {data?.sources ? 'Edited: ' : ''}
           {app?.name}
+          {isCustomApp ? ' (edit)' : ''}
         </div>
         <div className="cursor-pointer hover:text-blue-400" onClick={() => editApp(sceneId, id, data)}>
           <PencilSquare />
