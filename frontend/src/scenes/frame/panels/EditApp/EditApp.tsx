@@ -114,12 +114,12 @@ EditApp.PanelTitle = function EditAppPanelTitle({ panel, sceneId, nodeId, nodeDa
     keyword: nodeData.keyword,
     sources: nodeData.sources,
   }
-  const { hasChanges } = useValues(editAppLogic(logicProps))
+  const { hasChanges, configJson } = useValues(editAppLogic(logicProps))
 
   return (
     <>
       {hasChanges ? '* ' : ''}
-      {nodeData.keyword}
+      {configJson?.name ?? nodeData.keyword ?? nodeId}
     </>
   )
 }
