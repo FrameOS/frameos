@@ -117,12 +117,13 @@ export const frameLogic = kea<frameLogicType>([
       })
     },
     updateNodeData: ({ sceneId, nodeId, nodeData }) => {
-      const { frame } = values
-      const scene = frame.scenes?.find(({ id }) => id === sceneId)
+      const { frame, frameForm } = values
+      const scenes = frameForm.scenes ?? frame.scenes
+      const scene = scenes?.find(({ id }) => id === sceneId)
       const currentNode = scene?.nodes?.find(({ id }) => id === nodeId)
       if (currentNode) {
         actions.setFrameFormValues({
-          scenes: frame.scenes?.map((s) =>
+          scenes: scenes?.map((s) =>
             s.id === sceneId
               ? {
                   ...s,

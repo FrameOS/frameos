@@ -33,22 +33,36 @@ export interface LogType {
 }
 
 export interface ConfigField {
+  /** Unique config field keyword */
   name: string
+  /** Human readable label */
   label: string
-  type: string
+  /** Type of the field, only 'string' is supported for now */
+  type: 'string' | 'text' | 'select'
+  /** List of options for the field, only used if type is 'select' */
   options?: string[]
+  /** Whether the field is required */
   required?: boolean
+  /** Whether the field is a secret and is hidden from display */
   secret?: boolean
+  /** Default value for the field */
   value?: any
+  /** Placeholder text for the field */
   placeholder?: string
 }
 
+/** config.json schema */
 export interface App {
+  /** Name for this app */
   name: string
-  category: string
-  description: string
-  version: string
-  fields: ConfigField[]
+  /** Category for this app */
+  category?: string
+  /** Description for this app */
+  description?: string
+  /** Version for this app */
+  version?: string
+
+  fields?: ConfigField[]
 }
 
 export interface AppNodeData {

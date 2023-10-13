@@ -6,6 +6,7 @@ import { AppNodeData, PanelWithMetadata } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
 import { useEffect } from 'react'
+import schema from '../../../../../schema/config_json.json'
 
 interface EditAppProps {
   panel: PanelWithMetadata
@@ -33,12 +34,22 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
     persistUntilClosed(panel, editAppLogic(logicProps))
   }, [])
 
-  function setEditorTheme(monaco: any) {
+  function beforeMount(monaco: any) {
     monaco.editor.defineTheme('darkframe', {
       base: 'vs-dark',
       inherit: true,
       rules: [],
       colors: { 'editor.background': '#000000' },
+    })
+    monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+      validate: true,
+      schemas: [
+        {
+          uri: 'http://internal/node-schema.json',
+          fileMatch: ['config.json'], // associate with our model
+          schema: schema,
+        },
+      ],
     })
   }
 
@@ -85,7 +96,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
             language={activeFile.endsWith('.json') ? 'json' : 'python'}
             value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
             theme="darkframe"
-            beforeMount={setEditorTheme}
+            beforeMount={beforeMount}
             onChange={(value) => updateFile(activeFile, value ?? '')}
             options={{ minimap: { enabled: false } }}
           />

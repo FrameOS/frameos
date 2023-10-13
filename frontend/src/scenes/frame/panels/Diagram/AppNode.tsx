@@ -14,10 +14,18 @@ import { panelsLogic } from '../panelsLogic'
 export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JSX.Element {
   const { apps, frameId, selectedNodeId, sceneId } = useValues(diagramLogic)
   const { updateNodeConfig } = useActions(diagramLogic)
-  const app: App | undefined = apps[data.keyword]
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
   const { editApp } = useActions(panelsLogic({ id: frameId }))
 
+  const sourceConfigJson = data?.sources?.['config.json']
+  let configJson: App | null = null
+  let configJsonError: string | null = null
+  try {
+    configJson = JSON.parse(sourceConfigJson || 'null')
+  } catch (e) {
+    configJsonError = e instanceof Error ? e.message : String(e)
+  }
+  const app: App | undefined = configJson || apps[data.keyword]
   return (
     <div
       className={clsx(
@@ -35,7 +43,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
         )}
       >
         <div>
-          {data?.sources ? 'Custom: ' : ''}
+          {data?.sources ? 'Edited: ' : ''}
           {app?.name}
         </div>
         <div className="cursor-pointer hover:text-blue-400" onClick={() => editApp(sceneId, id, data)}>
@@ -65,6 +73,13 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
             />
           </div>
         </div>
+        {configJsonError !== null ? (
+          <div className="text-red-400">
+            Error parsing config.json:
+            <br />
+            {configJsonError}
+          </div>
+        ) : null}
         {app?.fields ? (
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5">
             <tbody>

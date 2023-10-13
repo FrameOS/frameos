@@ -5,7 +5,7 @@ import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 
 export function Debug() {
-  const { frame } = useValues(frameLogic)
+  const { frame, frameForm } = useValues(frameLogic)
   const { setFrameFormValue } = useActions(frameLogic)
   const setValue = (value: any) => {
     setFrameFormValue('scenes', value)
@@ -14,7 +14,7 @@ export function Debug() {
     <div className="space-y-2">
       <H6>Scenes</H6>
       <ReactJson
-        src={frame.scenes ?? []}
+        src={frameForm?.scenes ?? frame.scenes ?? []}
         theme="ocean"
         name="scenes"
         style={{ background: 'none' }}
