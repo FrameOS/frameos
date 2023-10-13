@@ -1,4 +1,4 @@
-import { afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { afterMount, connect, kea, key, path, props, reducers } from 'kea'
 
 import { LogType } from '../../../../types'
 import { loaders } from 'kea-loaders'
@@ -9,7 +9,7 @@ import type { logsLogicType } from './logsLogicType'
 export interface logsLogicProps {
   id: number
 }
-const MAX_LOG_LINES = 1000
+const MAX_LOG_LINES = 100000
 
 export const logsLogic = kea<logsLogicType>([
   path(['src', 'scenes', 'frame', 'logsLogic']),
