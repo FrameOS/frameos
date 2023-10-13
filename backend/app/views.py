@@ -1,3 +1,6 @@
+import gzip
+import io
+
 from flask import jsonify, request, send_from_directory, Response, redirect, url_for, render_template, flash
 from flask_login import login_user, logout_user, login_required, current_user
 from . import db, app, tasks, models, redis
@@ -5,6 +8,19 @@ from .models import User
 from .forms import LoginForm, RegisterForm
 import requests
 import json
+
+
+@app.before_request
+def before_request():
+    """
+    Check if the incoming request is gzipped and decompress it if it is.
+    """
+    if request.headers.get('Content-Encoding') == 'gzip':
+        compressed_data = io.BytesIO(request.get_data(cache=False))
+        decompressed_data = gzip.GzipFile(fileobj=compressed_data, mode='rb').read()
+        request._cached_data = decompressed_data
+        request.get_json = lambda cache=False: json.loads(decompressed_data.decode('utf-8'))
+
 
 @app.errorhandler(404)
 def not_found(e):

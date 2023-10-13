@@ -1,3 +1,6 @@
+import gzip
+import json
+
 import requests
 import logging
 
@@ -44,10 +47,12 @@ class Webhook:
         url = f"{protocol}://{self.config.server_host}:{self.config.server_port}/api/log"
         headers = {
             "Authorization": f"Bearer {self.config.server_api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Content-Encoding": "gzip",
         }
         try:
-            response = requests.post(url, headers=headers, json={"logs": batch})
+            payload = json.dumps({"logs": batch}).encode('utf-8')
+            response = requests.post(url, headers=headers, data=gzip.compress(payload))
             response.raise_for_status()
         except requests.HTTPError as e:
             logging.error(f"Error sending logs (HTTP {response.status_code}): {e}")
