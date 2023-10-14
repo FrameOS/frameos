@@ -44,8 +44,8 @@
             "type": "string",
             "value": "1",
             "required": true,
-            "label": "Border width (0 = disabled)",
-            "placeholder": "1"
+            "label": "Border width",
+            "placeholder": "0"
         },
         {
             "name": "border_color",

@@ -100,7 +100,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                         : undefined
                     }
                   >
-                    {field.name}
+                    {field.label ?? field.name}
                   </td>
                   <td className="cursor-text">
                     {field.secret && !secretRevealed[field.name] ? (
@@ -108,6 +108,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                     ) : field.type === 'select' ? (
                       <Select
                         theme="node"
+                        placeholder={field.placeholder}
                         value={field.name in data.config ? data.config[field.name] : field.value}
                         options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
                         onChange={(value) => updateNodeConfig(id, field.name, value)}
@@ -115,12 +116,14 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                     ) : field.type === 'text' ? (
                       <TextArea
                         theme="node"
+                        placeholder={field.placeholder}
                         value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
                         onChange={(value) => updateNodeConfig(id, field.name, value)}
                       />
                     ) : (
                       <TextInput
                         theme="node"
+                        placeholder={field.placeholder}
                         value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
                         onChange={(value) => updateNodeConfig(id, field.name, value)}
                       />

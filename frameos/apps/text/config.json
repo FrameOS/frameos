@@ -1,0 +1,83 @@
+{
+  "name": "Text Overlay",
+  "description": "Overlay a block of text",
+  "category": "overlay",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "text",
+      "type": "text",
+      "value": "",
+      "required": false,
+      "label": "Text",
+      "placeholder": "Write your prose here"
+    },
+    {
+      "name": "position",
+      "type": "select",
+      "options": [
+        "top-left",
+        "top-center",
+        "top-right",
+        "center-left",
+        "center-center",
+        "center-right",
+        "bottom-left",
+        "bottom-center",
+        "bottom-right"
+      ],
+      "value": "center-center",
+      "required": true,
+      "label": "Position",
+      "placeholder": "center-center"
+    },
+    {
+      "name": "offset_x",
+      "type": "string",
+      "value": "0",
+      "required": true,
+      "label": "Offset X",
+      "placeholder": "0"
+    },
+      {
+      "name": "offset_y",
+      "type": "string",
+      "value": "0",
+      "required": true,
+      "label": "Offset Y",
+      "placeholder": "0"
+    },
+    {
+      "name": "font_color",
+      "type": "string",
+      "value": "black",
+      "required": true,
+      "label": "Font Color",
+      "placeholder": "black"
+    },
+    {
+      "name": "font_size",
+      "type": "string",
+      "value": "20",
+      "required": true,
+      "label": "Font Size",
+      "placeholder": "20"
+    },
+    {
+      "name": "border_color",
+      "type": "string",
+      "value": "white",
+      "required": true,
+      "label": "Border Color",
+      "placeholder": "white"
+    },
+    {
+      "name": "border_width",
+      "type": "string",
+      "value": "1",
+      "required": true,
+      "label": "Border width",
+      "placeholder": "0"
+    }
+  ]
+}
