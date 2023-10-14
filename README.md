@@ -1,29 +1,41 @@
 # FrameOS - smart home frames
 
-FrameOS is a conductor of Raspberry Pi-powered e-ink displays and LCD screens.
+FrameOS is a tool for controlling Raspberry Pi-powered e-ink displays, a repository of apps to run on them, and an IDE for writing your own. 
 
 To get started:
 
-- Read the **[device guides](/devices)** - getting started guides, links to 3d-printable models and other resources for each supported display.
-- Install the **[FrameOS controller](/installation/controller)** - a self-hosted python app that lets you build and deploy software onto individual frames via SSH.
-- Set up the SD card for the [Raspberry Pi](/installation/raspberry) that'll be used in the frame.
-- Finally, deploy prebuilt [apps](/apps) onto your frames, or code your own.
+1. Install the [FrameOS controller](/installation/controller), a dockerized python app, which is used to deploy apps onto individual frames via SSH.
+
+2. Read the [decice hardware guide](/devices) for your screen type. Typically you'll just need to connect the display to a Raspberry Pi, install the OS, and make sure it's reachable over the network. 
+
+3. Once connected, deploy our prebuilt [apps](/apps), or code your own directly inside the contrller.
+
+4. Finally, for a professional look, 3d print a case around your frame, or order one online.
+
+![](https://frameos.net/assets/images/walkthrough-c32e7b67dd9a6f14ebef743755b0fc8e.gif)
+
+
+
+## Supported platforms
+
+We support all the most common e-ink displays out there.
+
+- Pimoroni e-ink frames
+- Waveshare e-ink
+- Framebuffer HDMI output
+- Web server kiosk mode
+
+[See the full list here!](/devices)
 
 ![](https://frameos.net/assets/images/1-frames-d127cdd40eaec7b65932a78a7a2034ae.jpg)
-
-![](https://frameos.net/assets/images/diagram-reload-13b29b62750b3db0475aab66cdf49518.gif)
 
 ## FrameOS controller
 
 The FrameOS controller is where you set up your frames. You can run it continuously on a server, or locally on your computer when needed. You'll just miss out on log aggregation if the controller is offline. The frames run independently.
 
-![](https://frameos.net/assets/images/diagram-reload-13b29b62750b3db0475aab66cdf49518.gif)
+Read more in [the documentation](https://frameos.net/installation/controller).
 
-## Installation
-
-Read more in [the documentation](https://frameos.net/).
-
-Docker quickstart:
+### Docker quickstart
 
 ```bash
 # running the latest release
@@ -44,52 +56,3 @@ docker run \
     --run-once \
     frameos
 ```
-
-# Developing locally
-
-## FrameOS Controller
-
-
-```bash
-cd backend 
-python3 -m venv env
-source env/bin/activate
-pip install -r requirements.txt
-flask db upgrade
-
-cd ../frontend
-npm install
-cd ..
-
-honcho start
-```
-
-## Running migrations
-
-```bash
-cd backend
-# create migration after changing a model
-flask db migrate -m "something changed"
-# apply the migrations
-flask db upgrade
-```
-
-## FrameOS device software
-
-Running it natively on a Mac will fail with
-
-```bash
-spidev_module.c:33:10: fatal error: 'linux/spi/spidev.h' file not found
-#include <linux/spi/spidev.h>
-```
-
-So we use Docker:
-
-```bash
-cd frameos
-docker build -t frameos . && docker run -t -i frameos python3 test.py
-```
-
-# TODO
-
-Tracked here: https://github.com/mariusandra/frameos/issues/1
