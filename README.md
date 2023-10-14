@@ -39,7 +39,8 @@ Read more in [the documentation](https://frameos.net/installation/controller).
 
 ```bash
 # running the latest release
-docker run -d -p 8999:8999 -v ./db:/app/db --name frameos --restart always mariusandra/frameos
+SECRET_KEY=$(openssl rand -base64 32)
+docker run -d -p 8999:8999 -v ./db:/app/db --name frameos --restart always -e SECRET_KEY="$SECRET_KEY" mariusandra/frameos
 
 # update daily to the latest release
 docker run -d \
