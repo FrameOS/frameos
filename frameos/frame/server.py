@@ -88,7 +88,7 @@ class Server:
 
     def run(self):
         if self.config.device == 'pimoroni.inky_impression':
-            button_handler: ButtonHandler = ButtonHandler(self.logger, [5, 6, 16, 24], ['A', 'B', 'C', 'D'], self.image_handler)
+            ButtonHandler(self.logger, [5, 6, 16, 24], ['A', 'B', 'C', 'D'], self.image_handler, self.app_handler)
         touch_handler = TouchClickHandler(self.logger, self.image_handler, self.app_handler)
         touch_handler.start()
         reset_event: Event = Event()

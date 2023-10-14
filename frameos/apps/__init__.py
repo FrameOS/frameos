@@ -65,6 +65,7 @@ class FrameConfig:
 @dataclass
 class ExecutionContext:
     event: str
+    payload: Dict
     image: Optional[Image]
     apps_ran: List[str]
     apps_errored: List[str]

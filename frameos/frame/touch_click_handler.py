@@ -1,4 +1,4 @@
-from evdev import InputDevice, ecodes, list_devices
+from evdev import InputDevice, ecodes, list_devices, categorize
 
 from .app_handler import AppHandler
 from .logger import Logger
@@ -22,18 +22,29 @@ class TouchClickHandler:
         for device in self.devices:
             self.logger.log({'event': '@frame:listening_device', 'device_name': device.name})
             device.grab()  # Grab the device to receive its events
+            x, y = None, None
 
             # Async event loop
             for event in device.read_loop():
-                if event.type == ecodes.EV_KEY and event.code == ecodes.BTN_TOUCH and event.value == 1:
-                    self.handle_touch_click()
-                if event.type == ecodes.EV_KEY and event.code == ecodes.BTN_MOUSE and event.value == 1:
-                    self.handle_mouse_click()
+                if event.type == ecodes.EV_ABS:
+                    absinfo = categorize(event).event
+                    if absinfo.axis == ecodes.ABS_X:
+                        x = absinfo.value
+                    elif absinfo.axis == ecodes.ABS_Y:
+                        y = absinfo.value
 
-    def handle_touch_click(self):
-        self.logger.log({'event': '@frame:touchscreen_pressed'})
-        self.app_handler.dispatch_event('button_press')
+                # If event is relative axis event, extract relative x, y coordinates
+                elif event.type == ecodes.EV_REL:
+                    relinfo = categorize(event).event
+                    if relinfo.axis == ecodes.REL_X:
+                        x = relinfo.value  # Replace with relative movement calculation if needed
+                    elif relinfo.axis == ecodes.REL_Y:
+                        y = relinfo.value  # Replace with relative movement calculation if needed
 
-    def handle_mouse_click(self):
-        self.logger.log({'event': '@frame:mouse_clicked'})
-        self.app_handler.dispatch_event('button_press')
+                elif event.type == ecodes.EV_KEY:
+                    if event.code == ecodes.BTN_TOUCH and event.value == 1:
+                        self.logger.log({'event': '@frame:touch_press'})
+                        self.app_handler.dispatch_event('touch_press', payload={'x': x, 'y': y})
+                    if event.code == ecodes.BTN_MOUSE and event.value == 1:
+                        self.logger.log({'event': '@frame:mouse_click'})
+                        self.app_handler.dispatch_event('mouse_click', payload={'x': x, 'y': y})

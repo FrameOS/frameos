@@ -211,9 +211,10 @@ class AppHandler:
         current_scene.run(context)
         return context
 
-    def dispatch_event(self, event: str, image: Optional[Image] = None):
+    def dispatch_event(self, event: str, payload: Optional[Dict] = None, image: Optional[Image] = None):
         context = ExecutionContext(
             event=event,
+            payload=payload or {},
             image=image,
             apps_ran=[],
             apps_errored=[],
