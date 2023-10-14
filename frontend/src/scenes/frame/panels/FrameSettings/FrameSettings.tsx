@@ -7,6 +7,7 @@ import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import { frameLogic } from '../../frameLogic'
 import { devices } from '../../constants'
+import { downloadJson } from '../../../../utils/downloadJson'
 
 export interface DetailsProps {
   className?: string
@@ -26,21 +27,29 @@ export function FrameSettings({ className }: DetailsProps) {
         <>
           <div className="flex space-x-2">
             <div className="flex-1"></div>
-            <div>
-              <Button
-                type="button"
-                color="red"
-                size="small"
-                className="flex-0"
-                onClick={() => {
-                  if (confirm('Are you sure you want to DELETE this frame?')) {
-                    deleteFrame(frame.id)
-                  }
-                }}
-              >
-                Delete frame
-              </Button>
-            </div>
+            <Button
+              type="button"
+              size="small"
+              className="flex-0"
+              onClick={() => {
+                downloadJson(frame, `${frame.name || `frame-${frame.id}`}.json`)
+              }}
+            >
+              Export frame
+            </Button>
+            <Button
+              type="button"
+              color="red"
+              size="small"
+              className="flex-0"
+              onClick={() => {
+                if (confirm('Are you sure you want to DELETE this frame?')) {
+                  deleteFrame(frame.id)
+                }
+              }}
+            >
+              Delete frame
+            </Button>
           </div>
           <Form formKey="frameForm" logic={frameLogic} props={{ id }} className="space-y-4" enableFormOnSubmit>
             <Field name="name" label="Name">
