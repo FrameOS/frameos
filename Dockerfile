@@ -30,6 +30,7 @@ RUN npm install
 
 # Copy frontend source files and run build
 COPY frontend/ ./
+COPY version.json ./
 RUN npm run build
 
 # Delete all files except the dist folder
