@@ -16,7 +16,7 @@ export interface DetailsProps {
 
 export function FrameSettings({ className }: DetailsProps) {
   const { id, frame, frameFormTouches } = useValues(frameLogic)
-  const { touchFrameFormField } = useActions(frameLogic)
+  const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
 
   return (
@@ -32,10 +32,54 @@ export function FrameSettings({ className }: DetailsProps) {
               size="small"
               className="flex-0"
               onClick={() => {
+                function handleFileSelect(event: Event): void {
+                  const inputElement = event.target as HTMLInputElement
+                  const file = inputElement.files?.[0]
+
+                  if (!file) {
+                    console.error('No file selected')
+                    return
+                  }
+
+                  const reader = new FileReader()
+
+                  reader.onload = (loadEvent: ProgressEvent<FileReader>) => {
+                    try {
+                      const jsonData = JSON.parse(loadEvent.target?.result as string)
+                      const { id, ...rest } = jsonData
+                      setFrameFormValues(rest)
+                      console.log('Imported frame:', jsonData)
+                      console.log('Press SAVE now to save the imported frame')
+                    } catch (error) {
+                      console.error('Error parsing JSON:', error)
+                    }
+                  }
+
+                  reader.onerror = () => {
+                    console.error('Error reading file:', reader.error)
+                  }
+
+                  reader.readAsText(file)
+                }
+
+                const fileInput = document.createElement('input')
+                fileInput.type = 'file'
+                fileInput.accept = '.json'
+                fileInput.addEventListener('change', handleFileSelect)
+                fileInput.click()
+              }}
+            >
+              Import .json
+            </Button>
+            <Button
+              type="button"
+              size="small"
+              className="flex-0"
+              onClick={() => {
                 downloadJson(frame, `${frame.name || `frame-${frame.id}`}.json`)
               }}
             >
-              Export frame
+              Export .json
             </Button>
             <Button
               type="button"
