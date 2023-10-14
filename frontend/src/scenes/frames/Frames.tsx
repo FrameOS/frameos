@@ -1,10 +1,10 @@
 import { useValues } from 'kea'
 import { NewFrame } from './NewFrame'
 import { Frame } from './Frame'
-import { H1 } from '../../components/H1'
 import { framesModel } from '../../models/framesModel'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { Header } from '../../components/Header'
+import { version } from '../../../../version.json'
 
 export function Frames() {
   const { framesList } = useValues(framesModel)
@@ -12,7 +12,7 @@ export function Frames() {
     <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">
       <PanelGroup direction="vertical" units="pixels">
         <Panel minSize={60} maxSize={60}>
-          <Header title="FrameOS" version="v1.0.0" />
+          <Header title="FrameOS" version={version} />
         </Panel>
         <Panel>
           <div
