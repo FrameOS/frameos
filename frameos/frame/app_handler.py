@@ -58,6 +58,7 @@ class SceneHandler:
                 raise Exception(f'App with id {node.id} not initialized')
             app = self.apps_dict[node.id]
             try:
+                app._last_context = context
                 app.run(context)
                 context.apps_ran.append(node.id)
             except Exception as e:

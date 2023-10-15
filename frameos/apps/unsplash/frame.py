@@ -16,9 +16,8 @@ class UnsplashApp(App):
         self.cache_expires_at: Optional[datetime] = None
 
     def run(self, context: ExecutionContext):
-        # self.log(json.dumps(context.state))
         width, height = context.image.size
-        keyword = self.get_config(context.state, 'keyword', 'nature')
+        keyword = self.get_config('keyword', 'nature')
         image_url = f"https://source.unsplash.com/random/{width}x{height}/?{keyword}"
         self.log(f"keyword: {keyword}, image_url: {image_url}")
 

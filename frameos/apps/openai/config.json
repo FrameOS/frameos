@@ -6,7 +6,8 @@
     "fields": [
         {
             "name": "prompt",
-            "type": "string",
+            "type": "text",
+            "rows": 4,
             "value": "",
             "required": true,
             "label": "Prompt",

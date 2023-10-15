@@ -7,11 +7,11 @@ import json
 
 class OpenAIApp(App):
     def run(self, context: ExecutionContext):
-        api_key = self.get_setting('openai', 'api_key')
+        api_key = self.get_setting(['openai', 'api_key'], None)
         if api_key is None:
             raise ValueError("Please provide an OpenAI API key in the settings.")
 
-        prompt = self.get_config(context.state, 'prompt', None)
+        prompt = self.get_config('prompt', None)
         if not prompt:
             raise ValueError("No prompt provided in app config")
 

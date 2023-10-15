@@ -48,7 +48,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
       >
         <div>
           {app?.name}
-          {isCustomApp ? ' (edit)' : ''}
+          {isCustomApp ? ' (edited)' : ''}
         </div>
         <div className="cursor-pointer hover:text-blue-400" onClick={() => editApp(sceneId, id, data)}>
           <PencilSquare />

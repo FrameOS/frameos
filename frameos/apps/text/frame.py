@@ -5,7 +5,7 @@ from frame.image_utils import draw_text_with_border
 
 class ClockApp(App):
     def run(self, context: ExecutionContext):
-        text = self.get_config(context.state, 'text', '')
+        text = self.get_config('text', '')
 
         # Get the config settings
         font_color = self.config.get('font_color', 'black')

@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from typing import Dict, Optional, Any, Callable, List
+from typing import Dict, Optional, Any, Callable, List, Union
 from PIL.Image import Image
 
 # NOTE: This file is read by both the frame and the controller. Don't import anything too funky.
@@ -87,10 +87,11 @@ class App:
         self.frame_config = frame_config
         self.config = config
         self.keyword = keyword
+        self.node: Node = node
         self._log_function = log_function
         self._rerender_function = rerender_function
         self._dispatch_function = dispatch_function
-        self.node: Node = node
+        self._last_context: Optional[ExecutionContext] = None
         self.__post_init__()
 
     def __post_init__(self):
@@ -108,15 +109,16 @@ class App:
     def run(self, payload: ExecutionContext):
         pass
 
-    def get_config(self, state: Dict, key: str, default = None):
+    def get_config(self, key: str, default = None):
         text = self.config.get(key, default)
-        return self.parse_str(text, state)
+        return self.parse_str(text, self._last_context.state if self._last_context else {})
 
-    def get_setting(self, *keys: str):
+    def get_setting(self, key: Union[str, List[str]], default = None):
+        key_list = (key if isinstance(key, list) else [key])
         start = self.frame_config.settings
-        for key in keys:
-            start = start.get(key, {})
-        return start or None
+        for i, k in enumerate(key_list):
+            start = start.get(k, default if i == len(key_list) - 1 else {})
+        return start
 
     def parse_str(self, text: str, state: Dict):
         def replace_with_state_value(match):
