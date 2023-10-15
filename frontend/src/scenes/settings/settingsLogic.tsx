@@ -6,49 +6,73 @@ import { socketLogic } from '../socketLogic'
 import type { settingsLogicType } from './settingsLogicType'
 import { forms } from 'kea-forms'
 
+function setDefaultSettings(settings: Record<string, any>): Record<string, any> {
+  return {
+    ...settings,
+    home_assistant: settings.home_assistant ?? {},
+    github: settings.github ?? {},
+    openai: settings.openai ?? {},
+  }
+}
+
+// @ts-ignore
 export const settingsLogic = kea<settingsLogicType>([
   path(['src', 'scenes', 'settings', 'settingsLogic']),
   connect({ logic: [socketLogic] }),
   actions({
-    updateSettings: (settings: Record<string, any>) => ({ settings }),
+    updateSavedSettings: (settings: Record<string, any>) => ({ settings }),
   }),
   loaders(({ values }) => ({
-    settings: [
-      {} as Record<string, any>,
+    savedSettings: [
+      setDefaultSettings({}),
       {
         loadSettings: async () => {
           try {
             const response = await fetch(`/api/settings`)
             if (!response.ok) {
-              throw new Error('Failed to fetch logs')
+              throw new Error('Failed to fetch settings')
             }
             const data = await response.json()
-            return { ...values.settings, ...data }
+            return setDefaultSettings({ ...values.savedSettings, ...data })
           } catch (error) {
             console.error(error)
-            return values.settings
+            return values.savedSettings
           }
         },
       },
     ],
   })),
-  forms({
+  reducers({
+    savedSettings: { updateSavedSettings: (state, { settings }) => setDefaultSettings({ ...state, ...settings }) },
+  }),
+  forms(({ values, actions }) => ({
     settings: {
-      defaults: {},
-      submit: () => {
-        debugger
+      defaults: setDefaultSettings({}),
+      submit: async (formValues) => {
+        const response = await fetch(`/api/settings`, {
+          method: 'POST',
+          body: JSON.stringify(formValues),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        })
+        if (!response.ok) {
+          throw new Error('Failed to update frame')
+        }
+        actions.resetSettings(setDefaultSettings(await response.json()))
       },
     },
-  }),
-  reducers({
-    settings: { updateSettings: (state, { settings }) => ({ ...state, ...settings }) },
-  }),
+  })),
   afterMount(({ actions }) => {
     actions.loadSettings()
   }),
-  listeners(({ props, actions }) => ({
+  listeners(({ values, actions }) => ({
+    loadSettingsSuccess: ({ savedSettings }) => {
+      actions.resetSettings(setDefaultSettings(savedSettings))
+    },
     [socketLogic.actionTypes.updateSettings]: ({ settings }) => {
-      actions.updateSettings(settings)
+      actions.updateSavedSettings(setDefaultSettings(settings))
+      actions.resetSettings(setDefaultSettings({ ...values.savedSettings, ...settings }))
     },
   })),
 ])

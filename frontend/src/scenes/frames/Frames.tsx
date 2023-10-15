@@ -1,10 +1,12 @@
 import { useValues } from 'kea'
+import { A, router } from 'kea-router'
 import { NewFrame } from './NewFrame'
 import { Frame } from './Frame'
 import { framesModel } from '../../models/framesModel'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { Header } from '../../components/Header'
 import { version } from '../../../../version.json'
+import { Button } from '../../components/Button'
 
 export function Frames() {
   const { framesList } = useValues(framesModel)
@@ -12,7 +14,17 @@ export function Frames() {
     <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">
       <PanelGroup direction="vertical" units="pixels">
         <Panel minSize={60} maxSize={60}>
-          <Header title="FrameOS" right={version} />
+          <Header
+            title="FrameOS"
+            right={
+              <div className="flex gap-2 items-center">
+                v{version}
+                <Button color="light-gray" onClick={() => router.actions.push('/settings')}>
+                  Settings
+                </Button>
+              </div>
+            }
+          />
         </Panel>
         <Panel>
           <div

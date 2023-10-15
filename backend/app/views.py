@@ -51,7 +51,33 @@ def builtin_app(keyword: str):
 @app.route("/api/settings", methods=["GET"])
 @login_required
 def settings():
-    return jsonify({"openai": {"api_key": ""}})
+    all_settings = models.Settings.query.all()
+    current_settings = {setting.key: setting.value for setting in all_settings}
+    return jsonify(current_settings)
+
+@app.route("/api/settings", methods=["POST"])
+@login_required
+def set_settings():
+    all_settings = models.Settings.query.all()
+    current_settings = {setting.key: setting.value for setting in all_settings}
+
+    payload = request.get_json()
+    if not payload:
+        return jsonify(error="No JSON payload received"), 400
+
+    for key, value in payload.items():
+        if value != current_settings.get(key, None):
+            if key in current_settings:
+                setting = models.Settings.query.filter_by(key=key).first()
+                setting.value = value
+            else:
+                setting = models.Settings(key=key, value=value)
+                db.session.add(setting)
+    db.session.commit()
+
+    all_settings = models.Settings.query.all()
+    current_settings = {setting.key: setting.value for setting in all_settings}
+    return jsonify(current_settings)
 
 @app.route("/api/frames", methods=["GET"])
 @login_required

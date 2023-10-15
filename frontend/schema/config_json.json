@@ -58,6 +58,10 @@
           "description": "Whether the field is required",
           "type": "boolean"
         },
+        "rows": {
+          "description": "Number of rows for the field, only used if type is 'text'",
+          "type": "number"
+        },
         "secret": {
           "description": "Whether the field is a secret and is hidden from display",
           "type": "boolean"

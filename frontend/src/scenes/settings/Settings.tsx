@@ -11,7 +11,7 @@ import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
 
 export function Settings() {
-  const { settings, settingsLoading, settingsChanged } = useValues(settingsLogic)
+  const { savedSettings, savedSettingsLoading, settingsChanged } = useValues(settingsLogic)
   const { submitSettings } = useActions(settingsLogic)
   return (
     <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">
@@ -27,7 +27,7 @@ export function Settings() {
             }
           />
         </Panel>
-        {settingsLoading ? (
+        {savedSettingsLoading ? (
           <Spinner />
         ) : (
           <Panel>
@@ -35,12 +35,12 @@ export function Settings() {
               id="frames"
               className="max-h-full overflow-auto p-4 columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4"
             >
-              <Form logic={settingsLogic} formKey="settings" onSubmit={submitSettings}>
+              <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings}>
                 <Group name="openai">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>OpenAI</H6>
-                    <Field name="api_key" label="API key" secret={!!settings?.openai?.api_key}>
-                      <TextInput name="api_key" autoFocus={!!settings?.openai?.api_key} />
+                    <Field name="api_key" label="API key" secret={!!savedSettings?.openai?.api_key}>
+                      <TextInput name="api_key" autoFocus={!!savedSettings?.openai?.api_key} />
                     </Field>
                   </Box>
                 </Group>
@@ -50,16 +50,20 @@ export function Settings() {
                     <Field name="url" label="Home assistant URL">
                       <TextInput name="url" placeholder="http://homeassistant.local:8123" />
                     </Field>
-                    <Field name="access_token" label="Access token" secret={!!settings?.home_assistant?.access_token}>
-                      <TextInput name="access_token" autoFocus={!!settings?.home_assistant?.access_token} />
+                    <Field
+                      name="access_token"
+                      label="Access token"
+                      secret={!!savedSettings?.home_assistant?.access_token}
+                    >
+                      <TextInput name="access_token" autoFocus={!!savedSettings?.home_assistant?.access_token} />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="github">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>Github</H6>
-                    <Field name="api_key" label="API key" secret={!!settings?.github?.api_key}>
-                      <TextInput name="api_key" autoFocus={!!settings?.github?.api_key} />
+                    <Field name="api_key" label="API key" secret={!!savedSettings?.github?.api_key}>
+                      <TextInput name="api_key" autoFocus={!!savedSettings?.github?.api_key} />
                     </Field>
                   </Box>
                 </Group>

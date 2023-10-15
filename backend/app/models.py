@@ -286,14 +286,14 @@ class User(db.Model, UserMixin):
     def check_password(self, password):
         return check_password_hash(self.password, password)
 
-
-class App(db.Model, UserMixin):
+class Settings(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    key = db.Column(db.String(150), unique=True)
-    value = db.Column(db.Text)
+    key = db.Column(db.String(128), nullable=False)
+    value = db.Column(JSON, nullable=True)
 
-    def set_password(self, password):
-        self.password = generate_password_hash(password)
-
-    def check_password(self, password):
-        return check_password_hash(self.password, password)
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'key': self.key,
+            'value': self.value,
+        }
