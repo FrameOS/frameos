@@ -1,0 +1,612 @@
+[
+  {
+    "name": "Pimoroni Magical OpenAI",
+    "description": "Random images from OpenAI, with each button mapped to one choice for the next image.",
+    "interval": 7200,
+    "background_color": "white",
+    "scenes": [
+      {
+        "edges": [
+          {
+            "id": "f19f8fbc-3902-45ed-8329-d9ec349bfbb3",
+            "source": "84bf37ff-8724-4038-b522-0e1a81b5e7ea",
+            "sourceHandle": "next",
+            "target": "8ddedbe3-a9dd-423e-9615-ebfdb15cbd19",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "1baaecc9-0692-4251-bca6-2e1aa78a6172",
+            "source": "8ddedbe3-a9dd-423e-9615-ebfdb15cbd19",
+            "sourceHandle": "next",
+            "target": "f6e65cbe-2b45-473e-af2b-f80cd1fdd91d",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "a6d92b14-ddf4-40d5-8edb-1176cbb607ed",
+            "source": "e8dfad5b-be0e-4419-a209-e992df6041cd",
+            "sourceHandle": "next",
+            "target": "0d9577f1-d61f-4fb8-8de6-ff7dfb671932",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "3898bda9-de2a-4567-9184-227826bffe3f",
+            "source": "f2ec49b1-c1c6-4f2b-afb3-e69b9e5f6e3d",
+            "sourceHandle": "next",
+            "target": "4dd49a7e-50f6-4ce2-b1f4-3184535789f0",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "e9bb4fbd-30e9-4e9f-8810-1dfdbb08acb4",
+            "source": "884d6502-16f6-496f-bfec-d6274c2f2c75",
+            "sourceHandle": "next",
+            "target": "6294e6fa-135d-49a2-9b9d-5e367625230f",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "12fb8511-4a6c-4d4b-b05a-ac7b29997bbc",
+            "source": "773023a7-e705-457f-9df3-6501883290b8",
+            "sourceHandle": "next",
+            "target": "e8dfad5b-be0e-4419-a209-e992df6041cd",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "4cadec9c-354b-4a83-9dca-a121fc28a576",
+            "source": "6294e6fa-135d-49a2-9b9d-5e367625230f",
+            "sourceHandle": "next",
+            "target": "773023a7-e705-457f-9df3-6501883290b8",
+            "targetHandle": "prev"
+          }
+        ],
+        "id": "default",
+        "nodes": [
+          {
+            "data": {
+              "keyword": "render"
+            },
+            "dragging": false,
+            "height": 96,
+            "id": "884d6502-16f6-496f-bfec-d6274c2f2c75",
+            "position": {
+              "x": 248.1073536076201,
+              "y": 331.6214535714322
+            },
+            "positionAbsolute": {
+              "x": 248.1073536076201,
+              "y": 331.6214535714322
+            },
+            "selected": false,
+            "type": "event",
+            "width": 132
+          },
+          {
+            "data": {
+              "keyword": "button_press"
+            },
+            "dragging": false,
+            "height": 120,
+            "id": "84bf37ff-8724-4038-b522-0e1a81b5e7ea",
+            "position": {
+              "x": 351.30261156511955,
+              "y": 578.177395918425
+            },
+            "positionAbsolute": {
+              "x": 351.30261156511955,
+              "y": 578.177395918425
+            },
+            "selected": false,
+            "type": "event",
+            "width": 190
+          },
+          {
+            "data": {
+              "keyword": "render"
+            },
+            "dragging": false,
+            "height": 72,
+            "id": "f6e65cbe-2b45-473e-af2b-f80cd1fdd91d",
+            "position": {
+              "x": 910.7469806961415,
+              "y": 565.8021504593105
+            },
+            "positionAbsolute": {
+              "x": 910.7469806961415,
+              "y": 565.8021504593105
+            },
+            "selected": false,
+            "type": "event",
+            "width": 132
+          },
+          {
+            "data": {
+              "config": {
+                "cache_seconds": "0",
+                "keyword": "{keyword}"
+              },
+              "keyword": "unsplash"
+            },
+            "dragging": false,
+            "height": 130,
+            "id": "bed166c6-6903-41d1-b08f-b81b674ac620",
+            "position": {
+              "x": 895.0184929295232,
+              "y": 366.70789326357993
+            },
+            "positionAbsolute": {
+              "x": 895.0184929295232,
+              "y": 366.70789326357993
+            },
+            "selected": false,
+            "type": "app",
+            "width": 373
+          },
+          {
+            "data": {
+              "config": {},
+              "keyword": "code",
+              "sources": {
+                "config.json": "{\n    \"name\": \"Code\",\n    \"description\": \"Clean starter\",\n    \"category\": \"boilerplate\",\n    \"version\": \"1.0.0\",\n    \"fields\": []\n}",
+                "frame.py": "import io\n\nimport requests\nfrom PIL import Image, ImageDraw, ImageFont\nfrom apps import App, ExecutionContext\nfrom frame.image_utils import draw_text_with_border\n \nclass CodeApp(App):\n    def run(self, context: ExecutionContext):\n        button = context.payload.get('label')\n\n        if button == 'A' and len(context.state.get('options', [])) > 0:\n            context.state['keyword'] = context.state.get('options', [])[0]\n        if button == 'B' and len(context.state.get('options', [])) > 1:\n            context.state['keyword'] = context.state.get('options', [])[1]\n        if button == 'C' and len(context.state.get('options', [])) > 2:\n            context.state['keyword'] = context.state.get('options', [])[2]\n        if button == 'D' and len(context.state.get('options', [])) > 3:\n            context.state['keyword'] = context.state.get('options', [])[3]\n\n"
+              }
+            },
+            "dragging": false,
+            "height": 72,
+            "id": "8ddedbe3-a9dd-423e-9615-ebfdb15cbd19",
+            "position": {
+              "x": 669.7218525156858,
+              "y": 587.430819215161
+            },
+            "positionAbsolute": {
+              "x": 669.7218525156858,
+              "y": 587.430819215161
+            },
+            "selected": false,
+            "type": "app",
+            "width": 163
+          },
+          {
+            "data": {
+              "config": {
+                "button_a": "tails",
+                "button_b": "happy",
+                "button_c": "wow",
+                "button_d": "halloween",
+                "default_button": "C",
+                "keyword": "",
+                "options": "Giggling Gecko\nMoonlit Ride\nEnchanting Elephants\nFiery Phoenix\nRainbow Waterfall\nDancing Trees\nAlien Picnic\nMarshmallow Clouds\nGleaming Galaxy\nWhiskered Wizard\nCurious Cat\nDrumming Duck\nMischievous Mice\nFluttering Butterflies\nStarry Night\nSailing Snails\nCastle in the Sky\nCuddly Koala\nShimmering Seahorse\nSecret Garden\nJuggling Jester\nClockwork Owl\nDreaming Dragonfly\nSparkling Snowflake\nPegasus Parade\nDaring Detective\nFloating Island\nMunching Monster\nCosmic Circus\nRoaring Rocket\nPuzzled Penguin\nTiptoeing Tiger\nZany Zebra\nMidnight Moose\nHarmonious Hedgehogs\nCandy Corn Forest\nFrog Prince\nLost Treasure\nWise Willow\nChirping Chick\nSunflower Sunset\nMellow Marsh\nRainbow Bridge\nRacing Rabbits\nSkating Squirrel\nMelodic Mushroom\nTowering Tulip\nMusical Mountains\nQueen Bee\nJellybean Jungle\nKissing Kangaroo\nHiding Hippo\nJazzy Jaguar\nIce Cream Island\nSleepy Snail\nWiggling Worm\nGleeful Goat\nPizza Planet\nLighthouse Life\nBalancing Bear\nEnergetic Elf\nWonder Wheel\nExploding Volcano\nLucky Leprechaun\nFlying Fish\nJellyfish Jamboree\nCarousel of Dreams\nTalking Teapot\nBenevolent Bat\nSolar-Powered Sunflower\nCloud Castle\nElfish Elephant\nQuizzical Quokka\nSpinning Spider\nBeaming Bluebird\nTreehouse Town\nElephant's Ears\nUnderwater Utopia\nCupcake Carnival\nLemonade Lake\nVolcano Village\nHovering Hummingbird\nOctopus Orchestra\nHappy Hyena\nWinking Walrus\nLively Ladybug\nBuzzy Bumblebee\nChocolate Mountain\nHappy Hippopotamus\nIce-skating Insects\nBamboo Balloon\nNapping Narwhal\nParty Pineapple\nTumbling Turtles\nHula Hoop House\nRocking Rhino\nBlushing Berry\nPyramid Playground\nHoneycomb Haven\nLemon-Lime Lagoon"
+              },
+              "keyword": "code",
+              "sources": {
+                "config.json": "{\n    \"name\": \"Config\",\n    \"category\": \"boilerplate\",\n    \"version\": \"1.0.0\",\n    \"fields\": [\n        {\n            \"name\": \"options\",\n            \"label\": \"Option per line\",\n            \"value\": \"apple\\nbanana\\nchicken\\ndinosaur\",\n            \"type\": \"text\",\n            \"rows\": 12\n        },\n        {\n            \"name\": \"keyword\",\n            \"label\": \"Default option\",\n            \"type\": \"string\",\n            \"value\": \"\"\n        }\n    ]\n}",
+                "frame.py": "import io\nimport random\nimport requests\nfrom PIL import Image, ImageDraw, ImageFont\nfrom apps import App, ExecutionContext\nfrom frame.image_utils import draw_text_with_border\n\nclass CodeApp(App):\n    def run(self, context: ExecutionContext):\n        context.state['options'] = self.config.get('options', '').strip().split('\\n')\n        context.state['keyword'] = self.config.get('keyword', '')\n        if not context.state['keyword']:\n            context.state['keyword'] = random.choice(context.state['options'])\n"
+              }
+            },
+            "dragging": false,
+            "height": 394,
+            "id": "4dd49a7e-50f6-4ce2-b1f4-3184535789f0",
+            "position": {
+              "x": 522.8410046755962,
+              "y": -103.81714962255364
+            },
+            "positionAbsolute": {
+              "x": 522.8410046755962,
+              "y": -103.81714962255364
+            },
+            "selected": false,
+            "type": "app",
+            "width": 316
+          },
+          {
+            "data": {
+              "config": {
+                "border_color": "black",
+                "border_width": "2",
+                "font_color": "white",
+                "font_size": "30",
+                "position": "bottom-center",
+                "text": "{keyword}"
+              },
+              "keyword": "text"
+            },
+            "dragging": false,
+            "height": 346,
+            "id": "e8dfad5b-be0e-4419-a209-e992df6041cd",
+            "position": {
+              "x": 1301.0642683715992,
+              "y": 133.1793084834771
+            },
+            "positionAbsolute": {
+              "x": 1301.0642683715992,
+              "y": 133.1793084834771
+            },
+            "selected": false,
+            "type": "app",
+            "width": 300
+          },
+          {
+            "data": {
+              "config": {
+                "border_width": "2",
+                "position": "center-left",
+                "text": "<-- {options.0}\n\n\n\n\n<-- {options.1}\n\n\n\n\n<-- {options.2}\n\n\n\n\n<-- {options.3}"
+              },
+              "keyword": "text"
+            },
+            "dragging": false,
+            "height": 346,
+            "id": "0d9577f1-d61f-4fb8-8de6-ff7dfb671932",
+            "position": {
+              "x": 1726.2348413319,
+              "y": 132.0246151942049
+            },
+            "positionAbsolute": {
+              "x": 1726.2348413319,
+              "y": 132.0246151942049
+            },
+            "selected": false,
+            "type": "app",
+            "width": 300
+          },
+          {
+            "data": {
+              "keyword": "init"
+            },
+            "dragging": false,
+            "height": 72,
+            "id": "f2ec49b1-c1c6-4f2b-afb3-e69b9e5f6e3d",
+            "position": {
+              "x": 292.1891216626365,
+              "y": -112.69547878294037
+            },
+            "positionAbsolute": {
+              "x": 292.1891216626365,
+              "y": -112.69547878294037
+            },
+            "selected": false,
+            "type": "event",
+            "width": 101
+          },
+          {
+            "data": {
+              "config": {},
+              "keyword": "code",
+              "sources": {
+                "config.json": "{\n    \"name\": \"Randomize options\",\n    \"version\": \"1.0.0\",\n    \"fields\": []\n}",
+                "frame.py": "import io\nimport random\nimport requests\nfrom PIL import Image, ImageDraw, ImageFont\nfrom apps import App, ExecutionContext\nfrom frame.image_utils import draw_text_with_border\n\nclass CodeApp(App):\n    def run(self, context: ExecutionContext):\n        random.shuffle(context.state['options'])"
+              }
+            },
+            "dragging": false,
+            "height": 72,
+            "id": "6294e6fa-135d-49a2-9b9d-5e367625230f",
+            "position": {
+              "x": 449.7890000827841,
+              "y": 390.1270362968628
+            },
+            "positionAbsolute": {
+              "x": 449.7890000827841,
+              "y": 390.1270362968628
+            },
+            "selected": false,
+            "type": "app",
+            "width": 286
+          },
+          {
+            "data": {
+              "config": {
+                "prompt": "colored high contrast line art pencil drawing of {keyword} cute professional lines talented artist lots of detail",
+                "scaling_mode": "stretch"
+              },
+              "keyword": "openai"
+            },
+            "dragging": false,
+            "height": 202,
+            "id": "773023a7-e705-457f-9df3-6501883290b8",
+            "position": {
+              "x": 964.651462660808,
+              "y": 126.24400264308662
+            },
+            "positionAbsolute": {
+              "x": 964.651462660808,
+              "y": 126.24400264308662
+            },
+            "selected": false,
+            "type": "app",
+            "width": 302
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Pimoroni Unsplash Four",
+    "description": "4 Random images from OpenAI, depending on the pressed button.",
+    "interval": 7200,
+    "background_color": "white",
+    "scenes": [
+      {
+        "edges": [
+          {
+            "id": "f19f8fbc-3902-45ed-8329-d9ec349bfbb3",
+            "source": "84bf37ff-8724-4038-b522-0e1a81b5e7ea",
+            "sourceHandle": "next",
+            "target": "8ddedbe3-a9dd-423e-9615-ebfdb15cbd19",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "1baaecc9-0692-4251-bca6-2e1aa78a6172",
+            "source": "8ddedbe3-a9dd-423e-9615-ebfdb15cbd19",
+            "sourceHandle": "next",
+            "target": "f6e65cbe-2b45-473e-af2b-f80cd1fdd91d",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "0ea76f32-67de-4fd5-9016-805b0785ceac",
+            "source": "bed166c6-6903-41d1-b08f-b81b674ac620",
+            "sourceHandle": "next",
+            "target": "e8dfad5b-be0e-4419-a209-e992df6041cd",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "a6d92b14-ddf4-40d5-8edb-1176cbb607ed",
+            "source": "e8dfad5b-be0e-4419-a209-e992df6041cd",
+            "sourceHandle": "next",
+            "target": "0d9577f1-d61f-4fb8-8de6-ff7dfb671932",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "3898bda9-de2a-4567-9184-227826bffe3f",
+            "source": "f2ec49b1-c1c6-4f2b-afb3-e69b9e5f6e3d",
+            "sourceHandle": "next",
+            "target": "4dd49a7e-50f6-4ce2-b1f4-3184535789f0",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "e9bb4fbd-30e9-4e9f-8810-1dfdbb08acb4",
+            "source": "884d6502-16f6-496f-bfec-d6274c2f2c75",
+            "sourceHandle": "next",
+            "target": "6294e6fa-135d-49a2-9b9d-5e367625230f",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "1ff55c41-652d-4625-8f5f-ecb20a1fc34a",
+            "source": "6294e6fa-135d-49a2-9b9d-5e367625230f",
+            "sourceHandle": "next",
+            "target": "bed166c6-6903-41d1-b08f-b81b674ac620",
+            "targetHandle": "prev"
+          }
+        ],
+        "id": "default",
+        "nodes": [
+          {
+            "data": {
+              "keyword": "render"
+            },
+            "dragging": false,
+            "height": 96,
+            "id": "884d6502-16f6-496f-bfec-d6274c2f2c75",
+            "position": {
+              "x": 248.1073536076201,
+              "y": 331.6214535714322
+            },
+            "positionAbsolute": {
+              "x": 248.1073536076201,
+              "y": 331.6214535714322
+            },
+            "selected": false,
+            "type": "event",
+            "width": 132
+          },
+          {
+            "data": {
+              "keyword": "button_press"
+            },
+            "dragging": false,
+            "height": 120,
+            "id": "84bf37ff-8724-4038-b522-0e1a81b5e7ea",
+            "position": {
+              "x": 351.30261156511955,
+              "y": 578.177395918425
+            },
+            "positionAbsolute": {
+              "x": 351.30261156511955,
+              "y": 578.177395918425
+            },
+            "selected": false,
+            "type": "event",
+            "width": 190
+          },
+          {
+            "data": {
+              "keyword": "render"
+            },
+            "dragging": false,
+            "height": 72,
+            "id": "f6e65cbe-2b45-473e-af2b-f80cd1fdd91d",
+            "position": {
+              "x": 910.7469806961415,
+              "y": 565.8021504593105
+            },
+            "positionAbsolute": {
+              "x": 910.7469806961415,
+              "y": 565.8021504593105
+            },
+            "selected": false,
+            "type": "event",
+            "width": 132
+          },
+          {
+            "data": {
+              "config": {
+                "cache_seconds": "0",
+                "keyword": "{keyword}"
+              },
+              "keyword": "unsplash"
+            },
+            "dragging": false,
+            "height": 130,
+            "id": "bed166c6-6903-41d1-b08f-b81b674ac620",
+            "position": {
+              "x": 786.5562100512008,
+              "y": 368.13502856461054
+            },
+            "positionAbsolute": {
+              "x": 786.5562100512008,
+              "y": 368.13502856461054
+            },
+            "selected": false,
+            "type": "app",
+            "width": 373
+          },
+          {
+            "data": {
+              "config": {},
+              "keyword": "code",
+              "sources": {
+                "config.json": "{\n    \"name\": \"Code\",\n    \"description\": \"Clean starter\",\n    \"category\": \"boilerplate\",\n    \"version\": \"1.0.0\",\n    \"fields\": []\n}",
+                "frame.py": "import io\n\nimport requests\nfrom PIL import Image, ImageDraw, ImageFont\nfrom apps import App, ExecutionContext\nfrom frame.image_utils import draw_text_with_border\n \nclass CodeApp(App):\n    def run(self, context: ExecutionContext):\n        self.log(f\"hello\")\n\n        button = context.payload.get('label')\n\n        if button == 'A' and len(context.state.get('options', [])) > 0:\n            context.state['keyword'] = context.state.get('options', [])[0]\n        if button == 'B' and len(context.state.get('options', [])) > 1:\n            context.state['keyword'] = context.state.get('options', [])[1]\n        if button == 'C' and len(context.state.get('options', [])) > 2:\n            context.state['keyword'] = context.state.get('options', [])[2]\n        if button == 'D' and len(context.state.get('options', [])) > 3:\n            context.state['keyword'] = context.state.get('options', [])[3]\n\n"
+              }
+            },
+            "dragging": false,
+            "height": 72,
+            "id": "8ddedbe3-a9dd-423e-9615-ebfdb15cbd19",
+            "position": {
+              "x": 669.7218525156858,
+              "y": 587.430819215161
+            },
+            "positionAbsolute": {
+              "x": 669.7218525156858,
+              "y": 587.430819215161
+            },
+            "selected": false,
+            "type": "app",
+            "width": 140
+          },
+          {
+            "data": {
+              "config": {
+                "button_a": "tails",
+                "button_b": "happy",
+                "button_c": "wow",
+                "button_d": "halloween",
+                "default_button": "C",
+                "keyword": "",
+                "options": "Quokka\nPancake\nGoofy\nWaffle\nBlobfish\nNarwhal\nKaboom\nZany\nConfetti\nFlabbergasted\nTumbleweed\nZigzag\nDisco\nSneakers\nSpaghetti\nMustache\nUkelele\nPineapple\nPuddle\nGobble\nLlama\nWiggle\nJellybean\nFluff\nSprout\nCactus\nHoverboard\nKite\nHiccup\nTwirl\nHappy\nWow"
+              },
+              "keyword": "code",
+              "sources": {
+                "config.json": "{\n    \"name\": \"Config\",\n    \"category\": \"boilerplate\",\n    \"version\": \"1.0.0\",\n    \"fields\": [\n        {\n            \"name\": \"options\",\n            \"label\": \"Option per line\",\n            \"value\": \"apple\\nbanana\\nchicken\\ndinosaur\",\n            \"type\": \"text\",\n            \"rows\": 12\n        },\n        {\n            \"name\": \"keyword\",\n            \"label\": \"Default option\",\n            \"type\": \"string\",\n            \"value\": \"\"\n        }\n    ]\n}",
+                "frame.py": "import io\nimport random\nimport requests\nfrom PIL import Image, ImageDraw, ImageFont\nfrom apps import App, ExecutionContext\nfrom frame.image_utils import draw_text_with_border\n\nclass CodeApp(App):\n    def run(self, context: ExecutionContext):\n        context.state['options'] = self.config.get('options', '').strip().split('\\n')\n        context.state['keyword'] = self.config.get('keyword', '')\n        if not context.state['keyword']:\n            context.state['keyword'] = random.choice(context.state['options'])\n"
+              }
+            },
+            "dragging": false,
+            "height": 394,
+            "id": "4dd49a7e-50f6-4ce2-b1f4-3184535789f0",
+            "position": {
+              "x": 522.8410046755962,
+              "y": -105.80369786792446
+            },
+            "positionAbsolute": {
+              "x": 522.8410046755962,
+              "y": -105.80369786792446
+            },
+            "selected": false,
+            "type": "app",
+            "width": 316
+          },
+          {
+            "data": {
+              "config": {
+                "border_color": "black",
+                "border_width": "2",
+                "font_color": "white",
+                "font_size": "100",
+                "text": "{keyword}"
+              },
+              "keyword": "text"
+            },
+            "dragging": false,
+            "height": 346,
+            "id": "e8dfad5b-be0e-4419-a209-e992df6041cd",
+            "position": {
+              "x": 1301.0642683715992,
+              "y": 133.1793084834771
+            },
+            "positionAbsolute": {
+              "x": 1301.0642683715992,
+              "y": 133.1793084834771
+            },
+            "selected": false,
+            "type": "app",
+            "width": 300
+          },
+          {
+            "data": {
+              "config": {
+                "border_width": "2",
+                "position": "center-left",
+                "text": "<-- {options.0}\n\n\n\n\n<-- {options.1}\n\n\n\n\n<-- {options.2}\n\n\n\n\n<-- {options.3}"
+              },
+              "keyword": "text"
+            },
+            "dragging": false,
+            "height": 346,
+            "id": "0d9577f1-d61f-4fb8-8de6-ff7dfb671932",
+            "position": {
+              "x": 1726.2348413319,
+              "y": 132.0246151942049
+            },
+            "positionAbsolute": {
+              "x": 1726.2348413319,
+              "y": 132.0246151942049
+            },
+            "selected": false,
+            "type": "app",
+            "width": 300
+          },
+          {
+            "data": {
+              "keyword": "init"
+            },
+            "dragging": false,
+            "height": 72,
+            "id": "f2ec49b1-c1c6-4f2b-afb3-e69b9e5f6e3d",
+            "position": {
+              "x": 292.1891216626365,
+              "y": -112.69547878294037
+            },
+            "positionAbsolute": {
+              "x": 292.1891216626365,
+              "y": -112.69547878294037
+            },
+            "selected": false,
+            "type": "event",
+            "width": 101
+          },
+          {
+            "data": {
+              "config": {},
+              "keyword": "code",
+              "sources": {
+                "config.json": "{\n    \"name\": \"Randomize options\",\n    \"version\": \"1.0.0\",\n    \"fields\": []\n}",
+                "frame.py": "import io\nimport random\nimport requests\nfrom PIL import Image, ImageDraw, ImageFont\nfrom apps import App, ExecutionContext\nfrom frame.image_utils import draw_text_with_border\n\nclass CodeApp(App):\n    def run(self, context: ExecutionContext):\n        random.shuffle(context.state['options'])"
+              }
+            },
+            "dragging": false,
+            "height": 72,
+            "id": "6294e6fa-135d-49a2-9b9d-5e367625230f",
+            "position": {
+              "x": 449.7890000827841,
+              "y": 390.1270362968628
+            },
+            "positionAbsolute": {
+              "x": 449.7890000827841,
+              "y": 390.1270362968628
+            },
+            "selected": false,
+            "type": "app",
+            "width": 262
+          }
+        ]
+      }
+    ]
+  }
+]

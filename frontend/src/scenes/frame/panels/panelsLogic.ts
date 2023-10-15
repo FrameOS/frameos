@@ -14,7 +14,8 @@ export interface AnyBuiltLogic extends BuiltLogic {}
 const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
   [Area.TopLeft]: [{ panel: Panel.Diagram, active: true, hidden: false, metadata: { sceneId: 'default' } }],
   [Area.TopRight]: [
-    { panel: Panel.Apps, active: true, hidden: false },
+    { panel: Panel.Templates, active: true, hidden: false },
+    { panel: Panel.Apps, active: false, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
     { panel: Panel.FrameDetails, active: false, hidden: false },
     { panel: Panel.FrameSettings, active: false, hidden: false },

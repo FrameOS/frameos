@@ -24,6 +24,14 @@ export interface FrameType {
   scenes?: FrameScene[]
 }
 
+export interface TemplateType {
+  name: string
+  description?: string
+  interval?: number
+  background_color?: string
+  scenes?: FrameScene[]
+}
+
 export interface LogType {
   id: number
   timestamp: string
@@ -109,6 +117,7 @@ export enum Panel {
   Apps = 'Apps',
   Events = 'Events',
   EditApp = 'EditApp',
+  Templates = 'Templates',
 }
 
 export type PanelWithMetadata = {
