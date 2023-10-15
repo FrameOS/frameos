@@ -1,17 +1,17 @@
 import { useActions, useValues } from 'kea'
-import { Field, Form, Group } from 'kea-forms'
+import { Form, Group } from 'kea-forms'
 import { Panel, PanelGroup } from 'react-resizable-panels'
 import { Header } from '../../components/Header'
-import { version } from '../../../../version.json'
 import { Box } from '../../components/Box'
 import { settingsLogic } from './settingsLogic'
 import { Spinner } from '../../components/Spinner'
 import { H6 } from '../../components/H6'
 import { TextInput } from '../../components/TextInput'
 import { Button } from '../../components/Button'
+import { Field } from '../../components/Field'
 
 export function Settings() {
-  const { settingsLoading, settingsChanged } = useValues(settingsLogic)
+  const { settings, settingsLoading, settingsChanged } = useValues(settingsLogic)
   const { submitSettings } = useActions(settingsLogic)
   return (
     <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">
@@ -39,8 +39,8 @@ export function Settings() {
                 <Group name="openai">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>OpenAI</H6>
-                    <Field name="api_key" label="API key">
-                      <TextInput name="api_key" />
+                    <Field name="api_key" label="API key" secret={!!settings?.openai?.api_key}>
+                      <TextInput name="api_key" autoFocus={!!settings?.openai?.api_key} />
                     </Field>
                   </Box>
                 </Group>
@@ -50,16 +50,16 @@ export function Settings() {
                     <Field name="url" label="Home assistant URL">
                       <TextInput name="url" placeholder="http://homeassistant.local:8123" />
                     </Field>
-                    <Field name="access_token" label="Access token">
-                      <TextInput name="access_token" />
+                    <Field name="access_token" label="Access token" secret={!!settings?.home_assistant?.access_token}>
+                      <TextInput name="access_token" autoFocus={!!settings?.home_assistant?.access_token} />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="github">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>Github</H6>
-                    <Field name="api_key" label="API key">
-                      <TextInput name="api_key" />
+                    <Field name="api_key" label="API key" secret={!!settings?.github?.api_key}>
+                      <TextInput name="api_key" autoFocus={!!settings?.github?.api_key} />
                     </Field>
                   </Box>
                 </Group>

@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import clsx from 'clsx'
 
 interface RevealProps {
   children: React.ReactNode
+  className?: string
 }
 
 export function RevealDots(props: React.HTMLProps<HTMLDivElement>) {
@@ -16,7 +18,7 @@ export function RevealDots(props: React.HTMLProps<HTMLDivElement>) {
   )
 }
 
-export function Reveal({ children }: RevealProps) {
+export function Reveal({ className, children }: RevealProps) {
   const [visible, setVisible] = useState(false)
 
   return (
@@ -24,7 +26,7 @@ export function Reveal({ children }: RevealProps) {
       {visible ? (
         children
       ) : (
-        <div onClick={() => setVisible(true)} className="cursor-pointer">
+        <div onClick={() => setVisible(true)} className={clsx('cursor-pointer', className)}>
           <RevealDots />
         </div>
       )}
