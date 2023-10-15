@@ -1,17 +1,25 @@
 {
-    "name": "OpenAI",
-    "description": "Random AI generated art",
-    "category": "image",
-    "version": "1.0.0",
-    "fields": [
-        {
-            "name": "prompt",
-            "type": "text",
-            "rows": 4,
-            "value": "",
-            "required": true,
-            "label": "Prompt",
-            "placeholder": "e.g. pumpkin pyjama party, digital art"
-        }
-    ]
+  "name": "OpenAI",
+  "description": "Random AI generated art",
+  "category": "image",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "prompt",
+      "type": "text",
+      "rows": 4,
+      "value": "",
+      "required": true,
+      "label": "Prompt",
+      "placeholder": "e.g. pumpkin pyjama party, digital art"
+    },
+    {
+      "name": "scaling_mode",
+      "type": "select",
+      "options": ["cover", "contain", "stretch", "center"],
+      "value": "cover",
+      "required": true,
+      "label": "Scaling mode"
+    }
+  ]
 }

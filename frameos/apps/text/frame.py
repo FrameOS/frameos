@@ -20,28 +20,35 @@ class ClockApp(App):
         text_width, text_height = draw.textsize(text, font=font)
         text_width += border_width * 2
         text_height += border_width * 2
+        align = 'left'
         
         # Positioning the text
         x, y = 4, 4
         if position == 'top-right':
             x = context.image.width - text_width - 4
+            align = 'right'
         elif position == 'top-center':
             x = (context.image.width - text_width) / 2
+            align = 'center'
         elif position == 'bottom-left':
             y = context.image.height - text_height - 4
         elif position == 'bottom-center':
             x = (context.image.width - text_width) / 2
             y = context.image.height - text_height - 4
+            align = 'center'
         elif position == 'bottom-right':
             x = context.image.width - text_width - 4
+            align = 'right'
         elif position == 'center-left':
             y = (context.image.height - text_height) / 2
         elif position == 'center-center':
             x = (context.image.width - text_width) / 2
             y = (context.image.height - text_height) / 2
+            align = 'center'
         elif position == 'center-right':
             x = context.image.width - text_width - 4
             y = (context.image.height - text_height) / 2
+            align = 'right'
 
         offset_x = int(self.config.get('offset_x', '0'))
         offset_y = int(self.config.get('offset_y', '0'))
@@ -51,7 +58,7 @@ class ClockApp(App):
 
         # Draw the text on the image
         if border_width != 0:
-            draw_text_with_border(draw, (x, y), text, font, font_color, border_color, border_width)
+            draw_text_with_border(draw, (x, y), text, font, font_color, border_color, border_width, align)
         else:
-            draw.text((x, y), text, fill=font_color, font=font)
+            draw.text((x, y), text, fill=font_color, font=font, align=align)
         self.log(f"Drew text: {text} at position {position}")

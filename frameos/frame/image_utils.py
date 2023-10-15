@@ -80,16 +80,16 @@ def scale_center(image: Image.Image, target_width: int, target_height: int, back
     
     return background
 
-def draw_text_with_border(draw, position, text, font, font_color, border_color, border_width=1):
+def draw_text_with_border(draw, position, text, font, font_color, border_color, border_width=1, align='left'):
     x, y = position
 
     # Draw the border by offsetting the text by the thickness value in all directions
     for dx in range(-border_width, border_width+1):
         for dy in range(-border_width, border_width+1):
-            draw.text((x+dx, y+dy), text, font=font, fill=border_color)
+            draw.text((x+dx, y+dy), text, font=font, fill=border_color, align=align)
 
     # Draw the main text
-    draw.text((x, y), text, fill=font_color, font=font)
+    draw.text((x, y), text, fill=font_color, font=font, align=align)
 
 
 def image_to_framebuffer(img: Image, fb_path='/dev/fb0', logger: Optional[Logger]=None):
