@@ -30,8 +30,6 @@ class OpenAIApp(App):
             response.raise_for_status()
             response_json = json.loads(response.content)
             image_url = response_json.get('data', [{}])[0].get('url')
-            self.log(f"Image url: {image_url}")
-
             image_response = requests.get(image_url)
             image_response.raise_for_status()
             openai_image = Image.open(io.BytesIO(image_response.content))
