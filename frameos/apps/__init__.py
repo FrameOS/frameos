@@ -112,6 +112,12 @@ class App:
         text = self.config.get(key, default)
         return self.parse_str(text, state)
 
+    def get_setting(self, *keys: str):
+        start = self.frame_config.settings
+        for key in keys:
+            start = start.get(key, {})
+        return start or None
+
     def parse_str(self, text: str, state: Dict):
         def replace_with_state_value(match):
             keys = match.group(1).split('.')

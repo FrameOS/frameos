@@ -5,9 +5,14 @@ from apps import App, ExecutionContext
 class SensorApp(App):
     def run(self, context: ExecutionContext):
         self.log("sensor app")
-        access_token = self.config.get('access_token')
+        ha_url = self.get_setting('home_assistant', 'url')
+        if not ha_url:
+            raise ValueError("Please provide a Home Assistant URL in the settings.")
+        access_token = self.get_setting('home_assistant', 'access_token')
+        if not access_token:
+            raise ValueError("Please provide a Home Assistant access token in the settings.")
+
         sensor = self.config.get('sensor')
-        ha_url = self.config.get('ha_url')
         state_key = self.config.get('state_key')
         url = f"{ha_url}/api/states/{sensor}"
         headers = {

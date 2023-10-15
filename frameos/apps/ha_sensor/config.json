@@ -4,8 +4,6 @@
     "category": "util",
     "version": "1.0.0",
     "fields": [
-        {"name": "ha_url", "type": "string", "required": true, "label": "Home Assistant URL", "placeholder": ""},
-        {"name": "access_token", "type": "string", "required": true, "label": "HA long-lived access token", "secret": true},
         {"name": "sensor", "type": "string", "required": true, "label": "Sensor", "placeholder": ""},
         {"name": "state_key", "type": "string", "required": true, "label": "State key to store the json in", "value": "sensor", "placeholder": ""}
     ]

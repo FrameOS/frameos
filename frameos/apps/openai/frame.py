@@ -7,11 +7,11 @@ import json
 
 class OpenAIApp(App):
     def run(self, context: ExecutionContext):
-        api_key = self.config.get('api_key', None)
+        api_key = self.get_setting('openai', 'api_key')
         if api_key is None:
-            raise ValueError("No API key provided for DALL·E 2")
+            raise ValueError("Please provide an OpenAI API key in the settings.")
 
-        prompt = self.config.get('prompt', None)
+        prompt = self.get_config(context.state, 'prompt', None)
         if not prompt:
             raise ValueError("No prompt provided in app config")
 
