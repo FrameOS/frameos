@@ -1,4 +1,57 @@
-[
+[{
+    "name": "Unsplash Nature",
+    "description": "Random nature images from Unsplash, updated every 10 minutes.",
+    "interval": 600,
+    "background_color": "white",
+    "scenes": [
+    {
+      "edges": [
+        {
+          "id": "8f1dd728-b51a-43b3-9713-8db83a85b22e",
+          "source": "a2371854-d2c6-4341-84f6-58c1dd351882",
+          "sourceHandle": "next",
+          "target": "d656debf-b1cf-46fa-a845-e754262680e8",
+          "targetHandle": "prev"
+        }
+      ],
+      "id": "default",
+      "nodes": [
+        {
+          "data": {
+            "keyword": "render"
+          },
+          "height": 96,
+          "id": "a2371854-d2c6-4341-84f6-58c1dd351882",
+          "position": {
+            "x": 259.18108974358967,
+            "y": 379.3192307692308
+          },
+          "type": "event",
+          "width": 132
+        },
+        {
+          "id": "d656debf-b1cf-46fa-a845-e754262680e8",
+          "type": "app",
+          "position": {
+            "x": 519.7726500412836,
+            "y": 385.04297696819566
+          },
+          "data": {
+            "keyword": "unsplash",
+            "config": {}
+          },
+          "width": 361,
+          "height": 130,
+          "selected": false,
+          "positionAbsolute": {
+            "x": 519.7726500412836,
+            "y": 385.04297696819566
+          },
+          "dragging": false
+        }
+      ]
+    }
+    ]},
   {
     "name": "Pimoroni Magical OpenAI",
     "description": "Random images from OpenAI, with each button mapped to one choice for the next image.",
