@@ -49,6 +49,8 @@ export interface ConfigField {
   value?: any
   /** Placeholder text for the field */
   placeholder?: string
+  /** Number of rows for the field, only used if type is 'text' */
+  rows?: number
 }
 
 /** config.json schema */

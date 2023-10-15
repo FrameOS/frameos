@@ -56,6 +56,10 @@ export function EventNode(props: NodeProps): JSX.Element {
             <div>payload.label</div>
             <div>payload.pin</div>
           </div>
+        ) : keyword === 'render' && usedAsSource ? (
+          <div className="text-right">
+            <div>image</div>
+          </div>
         ) : null}
       </div>
     </div>

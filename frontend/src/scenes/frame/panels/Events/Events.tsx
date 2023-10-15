@@ -2,7 +2,8 @@ import { Box } from '../../../../components/Box'
 import { H6 } from '../../../../components/H6'
 
 const events = {
-  render: "Render the screen. Triggered according to the frame's refresh interval.",
+  init: 'Scene initialization. Triggered when the scene is loaded.',
+  render: "Render the scene. Triggered according to the frame's refresh interval, or when explicitly requested.",
   button_press: 'When a button is pressed',
   touch_press: 'When a touch screen is pressed',
   mouse_click: 'When a mouse is clicked',

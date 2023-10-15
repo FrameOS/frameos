@@ -14,6 +14,7 @@ class ConfigField:
     options: Optional[List[str]] = None
     value: Optional[Any] = None
     label: Optional[str] = None
+    rows: Optional[int] = None
     placeholder: Optional[str] = None
 
 @dataclass
@@ -79,13 +80,15 @@ class App:
             frame_config: FrameConfig,
             log_function: Callable[[Dict], Any],
             rerender_function: Callable[[str], None],
+            dispatch_function: Callable[[str, Optional[Dict], Optional[Image]], ExecutionContext],
             node: Node,
     ) -> None:
         self.frame_config = frame_config
         self.config = config
         self.keyword = keyword
-        self.log_function = log_function
-        self.rerender_function = rerender_function
+        self._log_function = log_function
+        self._rerender_function = rerender_function
+        self._dispatch_function = dispatch_function
         self.node: Node = node
         self.__post_init__()
 
@@ -93,22 +96,19 @@ class App:
         pass
 
     def rerender(self, trigger = None):
-        self.rerender_function(self.keyword if trigger is None else trigger)
+        self._rerender_function(self.keyword if trigger is None else trigger)
 
     def log(self, message: str):
-        if self.log_function:
-            self.log_function({ "event": f"{self.keyword}:log", "message": message })
+        self._log_function({ "event": f"{self.keyword}:log", "message": message })
         
     def error(self, message: str):
-        if self.log_function:
-            self.log_function({ "event": f"{self.keyword}:error", "message": message })
+        self._log_function({ "event": f"{self.keyword}:error", "message": message })
 
     def run(self, payload: ExecutionContext):
         pass
 
     def get_config(self, state: Dict, key: str, default = None):
         text = self.config.get(key, default)
-        # self.log(f"get_config: {key} --> {text}")
         return self.parse_str(text, state)
 
     def parse_str(self, text: str, state: Dict):
@@ -117,9 +117,15 @@ class App:
             value = state
             for key in keys:
                 try:
-                    value = value[key]
+                    if isinstance(value, list):
+                        value = value[int(key)]
+                    else:
+                        value = value[key]
                 except (KeyError, TypeError):
                     return ''
             return str(value)
         return re.sub(r'{([^}]+)}', replace_with_state_value, text)
 
+    def dispatch(self, event: str, payload: Optional[Dict] = None, image: Optional[Image] = None) -> ExecutionContext:
+        self._log_function({ "event": f"{self.keyword}:{event}", "payload": payload, "image": bool(image) })
+        return self._dispatch_function(event, payload, image)

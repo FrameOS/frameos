@@ -156,7 +156,7 @@ def deploy_frame(id: int):
                 scp.put("../frameos/apps", "/srv/frameos/", recursive=True)
 
                 for node_id, sources in get_apps_from_scenes(frame.scenes).items():
-                    app_id = "app_" + node_id.replace('-', '_')
+                    app_id = "node_" + node_id.replace('-', '_')
                     log(id, "stdout", f"> add /srv/frameos/apps/{app_id}.zip")
                     zip_archive = io.BytesIO()
                     with ZipFile(zip_archive, "w") as new_archive:

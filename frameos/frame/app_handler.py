@@ -119,14 +119,14 @@ class AppHandler:
                 self.init_system_app(folder)
 
         for node_id in app_node_ids:
-            app_id = "app_" + node_id.replace('-', '_')
+            app_id = "node_" + node_id.replace('-', '_')
             if os.path.isfile(f'apps/{app_id}.zip'):
                 self.init_custom_app(app_id)
 
         for scene in self.config.scenes:
             for node in scene.nodes:
                 if node.data.get('sources') is not None:
-                    keyword = "app_" + node.id.replace('-', '_')
+                    keyword = "node_" + node.id.replace('-', '_')
                 else:
                     keyword = node.data.get('keyword')
                 if node.type == 'app' and keyword:
@@ -177,6 +177,7 @@ class AppHandler:
         for frame_config_scene in self.config.scenes:
             scene_handler = SceneHandler(frame_config_scene=frame_config_scene, app_handler=self, logger=self.logger)
             self.scene_handlers[scene_handler.id] = scene_handler
+        self.dispatch_event('init')
 
     def get_app_for_node(self, name: str, node: Node, node_config: Optional[Dict[str, Any]]) -> App:
         if name not in self.app_classes or name not in self.app_configs:
@@ -197,6 +198,7 @@ class AppHandler:
             frame_config=self.config.to_frame_config(),
             log_function=self.logger.log,
             rerender_function=self.image_handler.refresh_image,
+            dispatch_function=self.dispatch_event,
             node=node,
         )
 

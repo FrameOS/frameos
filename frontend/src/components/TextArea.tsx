@@ -4,9 +4,10 @@ import { clsx } from 'clsx'
 interface TextAreaProps extends Omit<React.InputHTMLAttributes<HTMLTextAreaElement>, 'onChange'> {
   onChange?: (value: string) => void
   theme?: 'node' | 'full'
+  rows?: number
 }
 
-export function TextArea({ className, onChange, theme, ...props }: TextAreaProps) {
+export function TextArea({ className, onChange, theme, rows, ...props }: TextAreaProps) {
   return (
     <textarea
       className={clsx(
@@ -15,7 +16,7 @@ export function TextArea({ className, onChange, theme, ...props }: TextAreaProps
         theme === 'node' && 'block text-white bg-zinc-800 focus:bg-zinc-700 hover:bg-zinc-700 w-full min-w-min px-0.5',
         className
       )}
-      rows={theme === 'node' ? 3 : 8}
+      rows={rows ?? (theme === 'node' ? 3 : 8)}
       onChange={onChange ? (e) => onChange(e.target.value) : undefined}
       {...props}
     />
