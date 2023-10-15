@@ -297,3 +297,6 @@ class Settings(db.Model):
             'key': self.key,
             'value': self.value,
         }
+
+def get_settings_dict() -> Dict:
+    return {setting.key: setting.value for setting in Settings.query.all()}

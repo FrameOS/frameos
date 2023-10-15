@@ -4,7 +4,7 @@ import io
 from flask import jsonify, request, send_from_directory, Response, redirect, url_for, render_template, flash
 from flask_login import login_user, logout_user, login_required, current_user
 from . import db, app, tasks, models, redis
-from .models import User
+from .models import User, get_settings_dict
 from .forms import LoginForm, RegisterForm
 import requests
 import json
@@ -51,15 +51,12 @@ def builtin_app(keyword: str):
 @app.route("/api/settings", methods=["GET"])
 @login_required
 def settings():
-    all_settings = models.Settings.query.all()
-    current_settings = {setting.key: setting.value for setting in all_settings}
-    return jsonify(current_settings)
+    return jsonify(get_settings_dict())
 
 @app.route("/api/settings", methods=["POST"])
 @login_required
 def set_settings():
-    all_settings = models.Settings.query.all()
-    current_settings = {setting.key: setting.value for setting in all_settings}
+    current_settings = get_settings_dict()
 
     payload = request.get_json()
     if not payload:
@@ -75,9 +72,7 @@ def set_settings():
                 db.session.add(setting)
     db.session.commit()
 
-    all_settings = models.Settings.query.all()
-    current_settings = {setting.key: setting.value for setting in all_settings}
-    return jsonify(current_settings)
+    return jsonify(get_settings_dict())
 
 @app.route("/api/frames", methods=["GET"])
 @login_required

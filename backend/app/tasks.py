@@ -4,7 +4,7 @@ import os
 from zipfile import ZipFile
 
 from app import huey, app
-from app.models import new_log as log, Frame, update_frame, get_apps_from_scenes
+from app.models import new_log as log, Frame, update_frame, get_apps_from_scenes, get_settings_dict
 from paramiko import RSAKey, SSHClient, AutoAddPolicy
 from io import StringIO
 from gevent import sleep
@@ -108,6 +108,7 @@ def get_frame_json(frame: Frame) -> dict:
     frame_json.pop("ssh_pass", None)
     frame_json.pop("ssh_port", None)
     frame_json.pop("status", None)
+    frame_json['settings'] = get_settings_dict() # TODO: might not want to save all settings on all frames
     return frame_json
 
 

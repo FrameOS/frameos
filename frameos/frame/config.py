@@ -1,7 +1,7 @@
 import json
 import logging
 
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from apps import FrameConfig, FrameConfigScene, Node, Edge
 
@@ -21,6 +21,7 @@ class Config:
         self.scaling_mode: Optional[str] = self._data.get('scaling_mode', 'cover')
         self.rotate: Optional[int] = self._data.get('rotate', 0)
         self.background_color: Optional[str] = self._data.get('background_color', 'white')
+        self.settings: Optional[Dict] = self._data.get('settings', {})
 
         scenes_data = self._data.pop('scenes', [])
         self.scenes: List[FrameConfigScene] = []
@@ -43,6 +44,7 @@ class Config:
             'rotate': self.rotate,
             'background_color': self.background_color,
             'scenes': self.scenes,
+            'settings': self.settings,
         }
     
     def to_frame_config(self):
@@ -58,6 +60,7 @@ class Config:
             rotate=self.rotate,
             background_color=self.background_color,
             scenes=self.scenes,
+            settings=self.settings,
         )
 
     def _load(self, filename):

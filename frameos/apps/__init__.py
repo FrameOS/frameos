@@ -62,6 +62,7 @@ class FrameConfig:
     background_color: str
     rotate: int
     scenes: List[FrameConfigScene]
+    settings: Dict
 
 @dataclass
 class ExecutionContext:

@@ -7,7 +7,7 @@ from frame.image_utils import draw_text_with_border
 
 class BoilerplateApp(App):
     # Local state, persists between executions
-    state = {}
+    local_state = {}
 
     def run(self, context: ExecutionContext):
         # Each run starts from an event.
@@ -39,7 +39,7 @@ class BoilerplateApp(App):
             context.state["really_bananas"] = "i know right"
 
             # Use class variables to carry state between executions.
-            self.state["bananas"] = "yes"
+            self.local_state["bananas"] = "yes"
 
             # Ask ChatGPT for other PIL drawing commands and go, well, you know it by now: bananas
 

@@ -35,6 +35,7 @@ class ImageHandler:
         config.pop('server_port', None)
         config.pop('server_api_key', None)
         config.pop('scenes', None)
+        config.pop('settings', None)
         self.logger.log({ 'event': '@frame:config', **config })
 
     def verify_device(self):
