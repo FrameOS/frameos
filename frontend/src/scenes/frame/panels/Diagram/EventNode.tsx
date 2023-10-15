@@ -26,7 +26,7 @@ export function EventNode(props: NodeProps): JSX.Element {
       </div>
       <div className="p-1">
         <div className="flex justify-between">
-          {usedAsTarget || !usedAsSource ? (
+          {keyword === 'render' && (usedAsTarget || !usedAsSource) ? (
             <div className="flex items-center space-x-1">
               <Handle
                 type="target"
@@ -51,6 +51,12 @@ export function EventNode(props: NodeProps): JSX.Element {
             </div>
           ) : null}
         </div>
+        {keyword === 'button_press' ? (
+          <div className="text-right">
+            <div>payload.label</div>
+            <div>payload.pin</div>
+          </div>
+        ) : null}
       </div>
     </div>
   )

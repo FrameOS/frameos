@@ -67,9 +67,9 @@ class ExecutionContext:
     event: str
     payload: Dict
     image: Optional[Image]
+    state: Dict
     apps_ran: List[str]
     apps_errored: List[str]
-    state: Dict
 
 class App:
     def __init__(
