@@ -48,6 +48,11 @@ def apps():
 def builtin_app(keyword: str):
     return jsonify(models.get_one_app_sources(keyword))
 
+@app.route("/api/settings", methods=["GET"])
+@login_required
+def settings():
+    return jsonify({"openai": {"api_key": ""}})
+
 @app.route("/api/frames", methods=["GET"])
 @login_required
 def frames():

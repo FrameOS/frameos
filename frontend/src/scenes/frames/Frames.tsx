@@ -12,7 +12,7 @@ export function Frames() {
     <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">
       <PanelGroup direction="vertical" units="pixels">
         <Panel minSize={60} maxSize={60}>
-          <Header title="FrameOS" version={version} />
+          <Header title="FrameOS" right={version} />
         </Panel>
         <Panel>
           <div
@@ -20,7 +20,7 @@ export function Frames() {
             className="max-h-full overflow-auto p-4 columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4"
           >
             {framesList.map((frame) => (
-              <div key={frame.id} className="mb-4 break-inside-avoid">
+              <div key={frame.id} className="mb-4">
                 <Frame frame={frame} />
               </div>
             ))}

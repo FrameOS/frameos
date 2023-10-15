@@ -5,11 +5,11 @@ import { H5 } from './H5'
 interface HeaderProps {
   title: React.ReactNode
   subtitle?: string
-  version?: string
+  right?: React.ReactNode | string
   buttons?: React.ReactElement[]
 }
 
-export function Header({ title, subtitle, version, buttons = [] }: HeaderProps) {
+export function Header({ title, subtitle, right, buttons = [] }: HeaderProps) {
   return (
     <div
       className="bg-gray-800 text-white h-full w-full space-x-2 p-2 pt-3 px-4 flex justify-between items-center"
@@ -25,7 +25,7 @@ export function Header({ title, subtitle, version, buttons = [] }: HeaderProps) 
         )}
       </H5>
       <div className="flex space-x-2">
-        {version && <div>{version}</div>}
+        {right && <div>{right}</div>}
         {buttons.map((button, idx) => React.cloneElement(button, { key: idx }))}
       </div>
     </div>

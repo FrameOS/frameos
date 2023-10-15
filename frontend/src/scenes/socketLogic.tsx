@@ -11,6 +11,7 @@ export const socketLogic = kea<socketLogicType>([
     newFrame: (frame: FrameType) => ({ frame }),
     updateFrame: (frame: FrameType) => ({ frame }),
     deleteFrame: ({ id }: { id: number }) => ({ id }),
+    updateSettings: (settings: Record<string, any>) => ({ settings }),
   }),
   afterMount(({ actions, cache }) => {
     cache.socket = connect('/')
@@ -18,6 +19,7 @@ export const socketLogic = kea<socketLogicType>([
     cache.socket.on('new_frame', actions.newFrame)
     cache.socket.on('update_frame', actions.updateFrame)
     cache.socket.on('delete_frame', actions.deleteFrame)
+    cache.socket.on('update_settings', actions.updateSettings)
   }),
   beforeUnmount(({ cache }) => {
     cache.socket.close()
