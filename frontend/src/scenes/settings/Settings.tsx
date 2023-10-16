@@ -9,6 +9,7 @@ import { H6 } from '../../components/H6'
 import { TextInput } from '../../components/TextInput'
 import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
+import { TextArea } from '../../components/TextArea'
 
 export function Settings() {
   const { savedSettings, savedSettingsLoading, settingsChanged } = useValues(settingsLogic)
@@ -65,6 +66,16 @@ export function Settings() {
                     <Field name="api_key" label="API key" secret={!!savedSettings?.github?.api_key}>
                       <TextInput name="api_key" autoFocus={!!savedSettings?.github?.api_key} />
                     </Field>
+                  </Box>
+                </Group>
+                <Group name="repositories">
+                  <Box className="p-2 mb-4 space-y-2">
+                    <H6>App & Template Repositories</H6>
+                    {[...(savedSettings?.repositories ?? []), '+'].map((repo: string, index: number) => (
+                      <Field name={index} label="Repository URL" key={index}>
+                        <TextArea rows={4} />
+                      </Field>
+                    ))}
                   </Box>
                 </Group>
               </Form>

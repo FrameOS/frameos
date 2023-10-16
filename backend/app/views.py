@@ -4,7 +4,7 @@ import io
 from flask import jsonify, request, send_from_directory, Response, redirect, url_for, render_template, flash
 from flask_login import login_user, logout_user, login_required, current_user
 from . import db, app, tasks, models, redis
-from .models import User, get_settings_dict
+from .models import User, get_settings_dict, Template
 from .forms import LoginForm, RegisterForm
 import requests
 import json
@@ -231,6 +231,67 @@ def api_log():
             models.process_log(frame, log)
 
     return 'OK', 200
+
+# Create (POST)
+@app.route("/api/templates", methods=["POST"])
+@login_required
+def create_template():
+    data = request.json
+    new_template = Template(
+        name=data.get('name'),
+        description=data.get('description'),
+        scenes=data.get('scenes'),
+        config=data.get('config')
+    )
+    db.session.add(new_template)
+    db.session.commit()
+    return jsonify(new_template.to_dict()), 201
+
+# Read (GET) for all templates
+@app.route("/api/templates", methods=["GET"])
+@login_required
+def get_templates():
+    templates = [template.to_dict() for template in Template.query.all()]
+    return jsonify(templates)
+
+# Read (GET) for a specific template
+@app.route("/api/templates/<template_id>", methods=["GET"])
+@login_required
+def get_template(template_id):
+    template = Template.query.get(template_id)
+    if not template:
+        return jsonify({"error": "Template not found"}), 404
+    return jsonify(template.to_dict())
+
+# Update (PUT)
+@app.route("/api/templates/<template_id>", methods=["PUT"])
+@login_required
+def update_template(template_id):
+    template = Template.query.get(template_id)
+    if not template:
+        return jsonify({"error": "Template not found"}), 404
+    data = request.json
+    if 'name' in data:
+        template.name = data.get('name', template.name)
+    if 'description' in data:
+        template.description = data.get('description', template.description)
+    if 'scenes' in data:
+        template.scenes = data.get('scenes', template.scenes)
+    if 'config' in data:
+        template.config = data.get('config', template.config)
+    db.session.commit()
+    return jsonify(template.to_dict())
+
+# Delete (DELETE)
+@app.route("/api/templates/<template_id>", methods=["DELETE"])
+@login_required
+def delete_template(template_id):
+    template = Template.query.get(template_id)
+    if not template:
+        return jsonify({"error": "Template not found"}), 404
+    db.session.delete(template)
+    db.session.commit()
+    return jsonify({"message": "Template deleted successfully"}), 200
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():

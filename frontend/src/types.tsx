@@ -27,9 +27,12 @@ export interface FrameType {
 export interface TemplateType {
   name: string
   description?: string
-  interval?: number
-  background_color?: string
   scenes?: FrameScene[]
+  image?: any
+  config?: {
+    interval?: number
+    background_color?: string
+  }
 }
 
 export interface LogType {

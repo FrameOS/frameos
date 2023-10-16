@@ -12,6 +12,7 @@ function setDefaultSettings(settings: Record<string, any>): Record<string, any> 
     home_assistant: settings.home_assistant ?? {},
     github: settings.github ?? {},
     openai: settings.openai ?? {},
+    repositories: settings.repositories ?? [],
   }
 }
 
@@ -43,7 +44,9 @@ export const settingsLogic = kea<settingsLogicType>([
     ],
   })),
   reducers({
-    savedSettings: { updateSavedSettings: (state, { settings }) => setDefaultSettings({ ...state, ...settings }) },
+    savedSettings: {
+      updateSavedSettings: (state, { settings }) => setDefaultSettings({ ...state, ...settings }),
+    },
   }),
   forms(({ values, actions }) => ({
     settings: {
@@ -63,6 +66,14 @@ export const settingsLogic = kea<settingsLogicType>([
       },
     },
   })),
+  reducers({
+    settings: {
+      setSettingsValue: (state, { name, value }) =>
+        Array.isArray(name) && name.length == 2 && name[0] === 'repositories' && name[1] >= state.length
+          ? setDefaultSettings({ ...state, respositories: [...state.repositories, value] })
+          : state,
+    },
+  }),
   afterMount(({ actions }) => {
     actions.loadSettings()
   }),

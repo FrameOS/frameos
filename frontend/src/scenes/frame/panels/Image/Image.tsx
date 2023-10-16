@@ -4,7 +4,6 @@ import { framesModel } from '../../../../models/framesModel'
 import { frameLogic } from '../../frameLogic'
 
 export interface ImageProps {
-  id: number
   className?: string
 }
 

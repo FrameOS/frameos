@@ -2,12 +2,13 @@ import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
-import { Field, Form } from 'kea-forms'
+import { Form } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import { frameLogic } from '../../frameLogic'
 import { devices } from '../../constants'
 import { downloadJson } from '../../../../utils/downloadJson'
+import { Field } from '../../../../components/Field'
 
 export interface DetailsProps {
   className?: string

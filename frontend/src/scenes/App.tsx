@@ -5,11 +5,13 @@ import { scenes } from './scenes'
 import { socketLogic } from './socketLogic'
 import { framesModel } from '../models/framesModel'
 import { appsModel } from '../models/appsModel'
+import { templatesModel } from '../models/templatesModel'
 
 export function App() {
   useMountedLogic(socketLogic)
   useMountedLogic(appsModel)
   useMountedLogic(framesModel)
+  useMountedLogic(templatesModel)
   const { scene, params } = useValues(sceneLogic)
 
   const SceneComponent: (() => JSX.Element) | LazyExoticComponent<any> =

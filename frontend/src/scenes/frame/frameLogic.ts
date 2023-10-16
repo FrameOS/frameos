@@ -2,7 +2,7 @@ import { actions, kea, key, listeners, path, props, reducers, selectors } from '
 import { framesModel } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
-import { FrameScene, FrameType } from '../../types'
+import { FrameScene, FrameType, TemplateType } from '../../types'
 import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
 
@@ -41,6 +41,7 @@ export const frameLogic = kea<frameLogicType>([
     refreshFrame: true,
     restartFrame: true,
     redeployFrame: true,
+    applyTemplate: (template: TemplateType) => ({ template }),
   }),
   forms(({ actions, values }) => ({
     frameForm: {
@@ -137,6 +138,15 @@ export const frameLogic = kea<frameLogicType>([
       } else {
         console.error(`Node ${nodeId} not found in scene ${sceneId}`)
       }
+    },
+    applyTemplate: ({ template }) => {
+      actions.setFrameFormValues({
+        ...('scenes' in template ? { scenes: template.scenes } : {}),
+        ...('interval' in (template.config ?? {}) ? { interval: template.config?.interval } : {}),
+        ...('background_color' in (template.config ?? {})
+          ? { background_color: template.config?.background_color }
+          : {}),
+      })
     },
   })),
 ])
