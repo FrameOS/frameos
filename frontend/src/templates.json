@@ -1,6 +1,6 @@
 [{
     "name": "Unsplash Nature",
-    "description": "Random nature images from Unsplash, updated every 10 minutes.",
+    "description": "Random images from Unsplash. One word keyword search.",
     "interval": 600,
     "background_color": "white",
     "scenes": [
@@ -53,8 +53,8 @@
     }
     ]},
   {
-    "name": "Pimoroni Magical OpenAI",
-    "description": "Random images from OpenAI, with each button mapped to one choice for the next image.",
+    "name": "Inky / Magical OpenAI",
+    "description": "[Made for Pimoroni Inky Impressions 7.3\"] Random images from OpenAI, with each button mapped to one choice for the next image.",
     "interval": 7200,
     "background_color": "white",
     "scenes": [
@@ -370,8 +370,8 @@
     ]
   },
   {
-    "name": "Pimoroni Unsplash Four",
-    "description": "4 Random images from OpenAI, depending on the pressed button.",
+    "name": "Inky / Unsplash Four",
+    "description": "[Made for Pimoroni Inky Impressions 7.3\"] 4 Random images from Unsplash, depending on the pressed button.",
     "interval": 7200,
     "background_color": "white",
     "scenes": [

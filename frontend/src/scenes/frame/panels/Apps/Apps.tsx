@@ -15,10 +15,10 @@ export function Apps() {
     event.dataTransfer.effectAllowed = 'move'
   }
   return (
-    <div className="space-y-2">
+    <div className="space-y-8">
       {Object.entries(appsByCategory).map(([category, apps]) => (
-        <div className="mt-4 space-y-2">
-          <H6 className="capitalize mt-4">{categoryLabels[category] ?? category}</H6>
+        <div className="space-y-2">
+          <H6 className="capitalize">{categoryLabels[category] ?? category}</H6>
           {Object.entries(apps).map(([keyword, { name, description }]) => (
             <Box
               className="bg-gray-900 px-3 py-2 dndnode flex items-center justify-between space-x-2 cursor-move"
