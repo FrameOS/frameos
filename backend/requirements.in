@@ -19,3 +19,4 @@ wtforms
 flask_wtf
 email_validator
 ipdb
+pillow==9.5.0

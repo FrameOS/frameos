@@ -1,11 +1,12 @@
 import gzip
 import io
 
-from flask import jsonify, request, send_from_directory, Response, redirect, url_for, render_template, flash
+from flask import jsonify, request, send_from_directory, send_file, Response, redirect, url_for, render_template, flash
 from flask_login import login_user, logout_user, login_required, current_user
 from . import db, app, tasks, models, redis
 from .models import User, get_settings_dict, Template
 from .forms import LoginForm, RegisterForm
+from PIL import Image
 import requests
 import json
 
@@ -99,8 +100,13 @@ def get_logs(id: int):
 @login_required
 def get_image(id: int):
     frame = models.Frame.query.get_or_404(id)
-    response = requests.get(f'http://{frame.frame_host}:{frame.frame_port}/image')
 
+    if request.args.get('t') == '-1':
+        last_image = redis.get(f'frame:{id}:image')
+        if last_image:
+            return Response(last_image, content_type='image/png')
+
+    response = requests.get(f'http://{frame.frame_host}:{frame.frame_port}/image')
     if response.status_code == 200:
         redis.set(f'frame:{id}:image', response.content, ex=86400 * 30)
         return Response(response.content, content_type='image/png')
@@ -245,6 +251,21 @@ def create_template():
     )
     db.session.add(new_template)
     db.session.commit()
+
+    if data.get('from_frame_id'):
+        frame_id = data.get('from_frame_id')
+        last_image = redis.get(f'frame:{frame_id}:image')
+        if last_image:
+            try:
+                image = Image.open(io.BytesIO(last_image))
+                new_template.image = last_image
+                new_template.image_width = image.width
+                new_template.image_height = image.height
+                db.session.commit()
+            except Exception as e:
+                print(e)
+                pass
+
     return jsonify(new_template.to_dict()), 201
 
 # Read (GET) for all templates
@@ -262,6 +283,15 @@ def get_template(template_id):
     if not template:
         return jsonify({"error": "Template not found"}), 404
     return jsonify(template.to_dict())
+
+# Read (GET) for a specific template
+@app.route("/api/templates/<template_id>/image", methods=["GET"])
+@login_required
+def get_template_image(template_id):
+    template = Template.query.get(template_id)
+    if not template or not template.image:
+        return jsonify({"error": "Template not found"}), 404
+    return send_file(io.BytesIO(template.image), mimetype='image/jpeg')
 
 # Update (PUT)
 @app.route("/api/templates/<template_id>", methods=["PUT"])

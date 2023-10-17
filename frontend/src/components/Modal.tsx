@@ -28,7 +28,7 @@ export function Modal({ children, title, footer, onClose }: ModalProps): JSX.Ele
                 ) : null}
               </div>
             ) : null}
-            <div className="overflow-y-scroll max-h-[70vw]">{children}</div>
+            <div className="overflow-y-scroll max-h-[70vh]">{children}</div>
             {footer}
           </div>
         </div>

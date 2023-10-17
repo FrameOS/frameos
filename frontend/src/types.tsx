@@ -25,13 +25,18 @@ export interface FrameType {
 }
 
 export interface TemplateType {
+  id?: number
   name: string
   description?: string
   scenes?: FrameScene[]
   image?: any
+  image_width?: number
+  image_height?: number
   config?: {
     interval?: number
     background_color?: string
+    scaling_mode?: string
+    rotate?: number
   }
 }
 

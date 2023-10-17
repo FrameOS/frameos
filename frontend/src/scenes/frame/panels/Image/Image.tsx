@@ -31,8 +31,6 @@ export function Image({ className }: ImageProps) {
                       : `${frames[id].width} / ${frames[id].height}`,
                   maxWidth: '100%',
                   maxHeight: '100%',
-                  // width: frames[id].width,
-                  // height: 'auto',
                 }
               : {}),
           }}

@@ -310,6 +310,8 @@ class Template(db.Model):
     scenes = db.Column(JSON, nullable=True)
     config = db.Column(JSON, nullable=True)
     image = db.Column(LargeBinary, nullable=True)
+    image_width = db.Column(db.Integer, nullable=True)
+    image_height = db.Column(db.Integer, nullable=True)
 
     def to_dict(self):
         return {
@@ -318,4 +320,6 @@ class Template(db.Model):
             'description': self.description,
             'scenes': self.scenes,
             'config': self.config,
+            'image_width': self.image_width,
+            'image_height': self.image_height,
         }

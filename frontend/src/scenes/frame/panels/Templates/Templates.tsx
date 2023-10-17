@@ -61,22 +61,35 @@ export function Templates() {
         <div className="space-y-2">
           <H6>Local templates</H6>
           {templates.map((template) => (
-            <Box className="bg-gray-900 px-3 py-2 dndnode space-y-2">
-              <div className="flex items-center justify-between">
-                <H6>{template.name}</H6>
-                <Button
-                  size="small"
-                  color="light-gray"
-                  onClick={() => {
-                    if (confirm(`Are you sure you want to replace the scene with the "${template.name}" template?`)) {
-                      applyTemplate(template as TemplateType)
+            <Box
+              className="bg-gray-900 dndnode relative"
+              style={
+                template.image_width && template.image_height
+                  ? {
+                      backgroundImage: `url("/api/templates/${template.id}/image")`,
+                      backgroundSize: 'cover',
+                      aspectRatio: `${template.image_width} / ${template.image_height}`,
                     }
-                  }}
-                >
-                  Replace
-                </Button>
+                  : {}
+              }
+            >
+              <div className="w-full h-full p-3 space-y-2" style={{ background: 'rgba(0,0,0,0.5)' }}>
+                <div className="flex items-center justify-between">
+                  <H6>{template.name}</H6>
+                  <Button
+                    size="small"
+                    color="light-gray"
+                    onClick={() => {
+                      if (confirm(`Are you sure you want to replace the scene with the "${template.name}" template?`)) {
+                        applyTemplate(template as TemplateType)
+                      }
+                    }}
+                  >
+                    Replace
+                  </Button>
+                </div>
+                {template.description && <div className="text-white text-sm">{template.description}</div>}
               </div>
-              <div className="text-gray-400 text-sm">{template.description}</div>
             </Box>
           ))}
           {templates.length === 0 ? <div className="text-muted">You have no local templates.</div> : null}

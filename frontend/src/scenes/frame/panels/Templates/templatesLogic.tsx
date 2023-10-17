@@ -18,19 +18,23 @@ export const templatesLogic = kea<templatesLogicType>([
     showModal: true,
     hideModal: true,
   }),
-  forms(({ actions, values }) => ({
+  forms(({ actions, values, props }) => ({
     newTemplate: {
       defaults: {} as TemplateType,
       submit: async (formValues) => {
-        const request: TemplateType = {
+        const request: TemplateType & Record<string, any> = {
           name: formValues.name,
           description: formValues.description,
           scenes: values.frame.scenes,
           config: {
             interval: values.frame.interval,
             background_color: values.frame.background_color,
+            scaling_mode: values.frame.scaling_mode,
+            rotate: values.frame.rotate,
           },
+          from_frame_id: props.id,
         }
+
         const response = await fetch(`/api/templates`, {
           method: 'POST',
           body: JSON.stringify(request),

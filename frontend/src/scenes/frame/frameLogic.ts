@@ -143,6 +143,8 @@ export const frameLogic = kea<frameLogicType>([
       actions.setFrameFormValues({
         ...('scenes' in template ? { scenes: template.scenes } : {}),
         ...('interval' in (template.config ?? {}) ? { interval: template.config?.interval } : {}),
+        ...('scaling_mode' in (template.config ?? {}) ? { scaling_mode: template.config?.scaling_mode } : {}),
+        ...('rotate' in (template.config ?? {}) ? { rotate: template.config?.rotate } : {}),
         ...('background_color' in (template.config ?? {})
           ? { background_color: template.config?.background_color }
           : {}),
