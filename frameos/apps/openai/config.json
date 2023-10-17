@@ -7,7 +7,7 @@
     {
       "name": "prompt",
       "type": "text",
-      "rows": 4,
+      "rows": 6,
       "value": "",
       "required": true,
       "label": "Prompt",

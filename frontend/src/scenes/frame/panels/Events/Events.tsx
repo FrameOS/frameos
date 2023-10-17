@@ -16,7 +16,7 @@ export function Events() {
   }
   return (
     <div className="space-y-2">
-      <div>Events can be dispatched or listened to. Connect either end.</div>
+      <div>Did you know: the "render" event can be dispatched or listened to. Connect either end.</div>
 
       {Object.entries(events).map(([keyword, description]) => (
         <Box

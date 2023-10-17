@@ -1,7 +1,10 @@
 import re
 from dataclasses import dataclass
-from typing import Dict, Optional, Any, Callable, List, Union
+from typing import Dict, Optional, Any, Callable, List, Union, TYPE_CHECKING
 from PIL.Image import Image
+
+if TYPE_CHECKING:
+    from frameos.frame.app_handler import AppHandler
 
 # NOTE: This file is read by both the frame and the controller. Don't import anything too funky.
 
@@ -79,18 +82,15 @@ class App:
             keyword: str,
             config: Dict,
             frame_config: FrameConfig,
-            log_function: Callable[[Dict], Any],
-            rerender_function: Callable[[str], None],
-            dispatch_function: Callable[[str, Optional[Dict], Optional[Image]], ExecutionContext],
             node: Node,
+            app_handler: "AppHandler",
     ) -> None:
-        self.frame_config = frame_config
-        self.config = config
         self.keyword = keyword
+        self.config = config
+        self.frame_config = frame_config
         self.node: Node = node
-        self._log_function = log_function
-        self._rerender_function = rerender_function
-        self._dispatch_function = dispatch_function
+        self.app_handler = app_handler
+        self._log: Callable[[Dict], Any] = app_handler.logger.log
         self._last_context: Optional[ExecutionContext] = None
         self.__post_init__()
 
@@ -98,13 +98,13 @@ class App:
         pass
 
     def rerender(self, trigger = None):
-        self._rerender_function(self.keyword if trigger is None else trigger)
+        self.app_handler.image_handler.refresh_image(self.keyword if trigger is None else trigger)
 
     def log(self, message: str):
-        self._log_function({ "event": f"{self.keyword}:log", "message": message })
+        self._log({ "event": f"{self.keyword}:log", "message": message })
         
     def error(self, message: str):
-        self._log_function({ "event": f"{self.keyword}:error", "message": message })
+        self._log({ "event": f"{self.keyword}:error", "message": message })
 
     def run(self, payload: ExecutionContext):
         pass
@@ -136,5 +136,5 @@ class App:
         return re.sub(r'{([^}]+)}', replace_with_state_value, text)
 
     def dispatch(self, event: str, payload: Optional[Dict] = None, image: Optional[Image] = None) -> ExecutionContext:
-        self._log_function({ "event": f"{self.keyword}:{event}", "payload": payload, "image": bool(image) })
-        return self._dispatch_function(event, payload, image)
+        self._log({ "event": f"{self.keyword}:{event}", "payload": payload, "image": bool(image) })
+        return self.app_handler.dispatch_event(event, payload, image)

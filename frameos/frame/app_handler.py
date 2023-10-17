@@ -197,9 +197,7 @@ class AppHandler:
             keyword=name,
             config=config,
             frame_config=self.config.to_frame_config(),
-            log_function=self.logger.log,
-            rerender_function=self.image_handler.refresh_image,
-            dispatch_function=self.dispatch_event,
+            app_handler=self,
             node=node,
         )
 
