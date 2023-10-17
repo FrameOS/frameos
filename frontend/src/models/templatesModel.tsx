@@ -1,4 +1,4 @@
-import { actions, afterMount, kea, path, reducers, selectors } from 'kea'
+import { actions, afterMount, kea, listeners, path, reducers, selectors } from 'kea'
 
 import type { templatesModelType } from './templatesModelType'
 import { loaders } from 'kea-loaders'
@@ -9,6 +9,7 @@ export const templatesModel = kea<templatesModelType>([
   actions({
     updateTemplate: (template: TemplateType) => ({ template }),
     removeTemplate: (id: number) => ({ id }),
+    exportTemplate: (id: number) => ({ id }),
   }),
   loaders(({ values }) => ({
     templates: [
@@ -53,6 +54,25 @@ export const templatesModel = kea<templatesModelType>([
       },
     },
   }),
+  listeners(() => ({
+    exportTemplate: async ({ id }) => {
+      const response = await fetch(`/api/templates/${id}/export`)
+      if (!response.ok) {
+        throw new Error('Failed to export template')
+      }
+      const jsonData = await response.json()
+      const jsonString: string = JSON.stringify(jsonData, null, 2)
+      const blob = new Blob([jsonString], { type: 'application/json' })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${jsonData.name || 'Exported Template'}.json`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    },
+  })),
   afterMount(({ actions }) => {
     actions.loadTemplates()
   }),

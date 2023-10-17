@@ -15,10 +15,10 @@ import { templatesModel } from '../../../../models/templatesModel'
 import { TemplateType } from '../../../../types'
 
 export function Templates() {
-  const { setFrameFormValues, applyTemplate } = useActions(frameLogic)
-  const { id, frameFormChanged } = useValues(frameLogic)
+  const { applyTemplate } = useActions(frameLogic)
+  const { id } = useValues(frameLogic)
   const { templates } = useValues(templatesModel)
-  const { removeTemplate } = useActions(templatesModel)
+  const { removeTemplate, exportTemplate } = useActions(templatesModel)
   const { showingModal } = useValues(templatesLogic({ id }))
   const { showModal, hideModal, submitNewTemplate } = useActions(templatesLogic({ id }))
   return (
@@ -78,6 +78,15 @@ export function Templates() {
                 <div className="flex items-center justify-between">
                   <H6>{template.name}</H6>
                   <div className="flex items-center gap-2">
+                    <Button
+                      size="small"
+                      color="light-gray"
+                      onClick={() => {
+                        template.id && exportTemplate(template.id)
+                      }}
+                    >
+                      JSON
+                    </Button>
                     <Button
                       size="small"
                       color="light-gray"

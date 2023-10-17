@@ -1,3 +1,4 @@
+import base64
 import gzip
 import io
 
@@ -292,6 +293,18 @@ def get_template_image(template_id):
     if not template or not template.image:
         return jsonify({"error": "Template not found"}), 404
     return send_file(io.BytesIO(template.image), mimetype='image/jpeg')
+
+# Export (GET) for a specific template
+@app.route("/api/templates/<template_id>/export", methods=["GET"])
+@login_required
+def export_template(template_id):
+    template = Template.query.get(template_id)
+    if not template:
+        return jsonify({"error": "Template not found"}), 404
+    template_dict = template.to_dict()
+    base64_image = base64.b64encode(template.image).decode('utf-8') if template.image else None
+    template_dict['image'] = f"data:image/jpeg;base64,{base64_image}"
+    return jsonify(template_dict)
 
 # Update (PUT)
 @app.route("/api/templates/<template_id>", methods=["PUT"])
