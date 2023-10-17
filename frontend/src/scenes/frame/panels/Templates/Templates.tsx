@@ -18,6 +18,7 @@ export function Templates() {
   const { setFrameFormValues, applyTemplate } = useActions(frameLogic)
   const { id, frameFormChanged } = useValues(frameLogic)
   const { templates } = useValues(templatesModel)
+  const { removeTemplate } = useActions(templatesModel)
   const { showingModal } = useValues(templatesLogic({ id }))
   const { showModal, hideModal, submitNewTemplate } = useActions(templatesLogic({ id }))
   return (
@@ -76,17 +77,35 @@ export function Templates() {
               <div className="w-full h-full p-3 space-y-2" style={{ background: 'rgba(0,0,0,0.5)' }}>
                 <div className="flex items-center justify-between">
                   <H6>{template.name}</H6>
-                  <Button
-                    size="small"
-                    color="light-gray"
-                    onClick={() => {
-                      if (confirm(`Are you sure you want to replace the scene with the "${template.name}" template?`)) {
-                        applyTemplate(template as TemplateType)
-                      }
-                    }}
-                  >
-                    Replace
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="small"
+                      color="light-gray"
+                      onClick={() => {
+                        if (
+                          template.id &&
+                          confirm(`Are you sure you want to delete the template "${template.name}"?`)
+                        ) {
+                          removeTemplate(template.id)
+                        }
+                      }}
+                    >
+                      Delete
+                    </Button>
+                    <Button
+                      size="small"
+                      color="light-gray"
+                      onClick={() => {
+                        if (
+                          confirm(`Are you sure you want to replace the scene with the "${template.name}" template?`)
+                        ) {
+                          applyTemplate(template as TemplateType)
+                        }
+                      }}
+                    >
+                      Install
+                    </Button>
+                  </div>
                 </div>
                 {template.description && <div className="text-white text-sm">{template.description}</div>}
               </div>

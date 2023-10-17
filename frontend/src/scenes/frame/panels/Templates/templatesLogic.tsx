@@ -4,6 +4,7 @@ import { forms } from 'kea-forms'
 import type { templatesLogicType } from './templatesLogicType'
 import { TemplateType } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
+import { templatesModel } from '../../../../models/templatesModel'
 
 export interface TemplateLogicProps {
   id: number
@@ -13,7 +14,10 @@ export const templatesLogic = kea<templatesLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Templates', 'templatesLogic']),
   props({} as TemplateLogicProps),
   key((props) => props.id),
-  connect((props: TemplateLogicProps) => ({ values: [frameLogic(props), ['frame']] })),
+  connect((props: TemplateLogicProps) => ({
+    values: [frameLogic(props), ['frame']],
+    actions: [templatesModel, ['updateTemplate']],
+  })),
   actions({
     showModal: true,
     hideModal: true,
@@ -47,6 +51,7 @@ export const templatesLogic = kea<templatesLogicType>([
         }
         actions.hideModal()
         actions.resetNewTemplate()
+        actions.updateTemplate(await response.json())
       },
       errors: (newTemplate) => ({
         name: !newTemplate.name ? 'Name is required' : null,
