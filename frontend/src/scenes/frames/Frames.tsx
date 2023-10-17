@@ -18,7 +18,7 @@ export function Frames() {
             title="FrameOS"
             right={
               <div className="flex gap-2 items-center">
-                v{version}
+                {version}
                 <Button color="light-gray" onClick={() => router.actions.push('/settings')}>
                   Settings
                 </Button>
