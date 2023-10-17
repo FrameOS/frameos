@@ -76,6 +76,9 @@ class ExecutionContext:
     apps_ran: List[str]
     apps_errored: List[str]
 
+class BreakExecution(Exception):
+    pass
+
 class App:
     def __init__(
             self,
@@ -99,6 +102,12 @@ class App:
 
     def rerender(self, trigger = None):
         self.app_handler.image_handler.refresh_image(self.keyword if trigger is None else trigger)
+
+    def is_rendering(self):
+        return self.app_handler.image_handler.image_update_in_progress
+
+    def break_execution(self, message: Optional[str] = None):
+        raise BreakExecution(message)
 
     def log(self, message: str):
         self._log({ "event": f"{self.keyword}:log", "message": message })

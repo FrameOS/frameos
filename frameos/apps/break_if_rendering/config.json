@@ -1,0 +1,14 @@
+{
+    "name": "Break if rendering",
+    "description": "Abort execution of the current flow if currently rendering.",
+    "category": "util",
+    "version": "1.0.0",
+    "fields": [
+        {
+            "name": "message",
+            "type": "text",
+            "value": "",
+            "label": "Message to log"
+        }
+    ]
+}

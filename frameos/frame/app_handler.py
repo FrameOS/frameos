@@ -10,7 +10,7 @@ from dacite import from_dict
 from typing import Optional, List, Dict, Type, Any, TYPE_CHECKING
 from PIL.Image import Image
 
-from apps import AppConfig, App, Node, Edge, FrameConfigScene, ExecutionContext
+from apps import AppConfig, App, Node, Edge, FrameConfigScene, ExecutionContext, BreakExecution
 from .config import Config
 from .logger import Logger
 
@@ -39,18 +39,21 @@ class SceneHandler:
                     self.event_start_nodes[keyword].append(node.id)
 
     def run(self, context: ExecutionContext):
-        context.state = self.state
-        if context.event in self.event_start_nodes:
-            for node_id in self.event_start_nodes[context.event]:
-                start_node = self.nodes_dict[node_id]
-                node = start_node
-                while node is not None:
-                    if node != start_node and (node.type == 'app' or node.type == 'event'):
-                        self.run_node(node, context)
-                    if node.id in self.edges_dict:
-                        node = self.nodes_dict[self.edges_dict[node.id]]
-                    else:
-                        break
+        try:
+            context.state = self.state
+            if context.event in self.event_start_nodes:
+                for node_id in self.event_start_nodes[context.event]:
+                    start_node = self.nodes_dict[node_id]
+                    node = start_node
+                    while node is not None:
+                        if node != start_node and (node.type == 'app' or node.type == 'event'):
+                            self.run_node(node, context)
+                        if node.id in self.edges_dict:
+                            node = self.nodes_dict[self.edges_dict[node.id]]
+                        else:
+                            break
+        except BreakExecution as e:
+            return
 
     def run_node(self, node: Node, context: ExecutionContext):
         if node.type == 'app':
@@ -61,6 +64,10 @@ class SceneHandler:
                 app._last_context = context
                 app.run(context)
                 context.apps_ran.append(node.id)
+            except BreakExecution as e:
+                self.app_handler.logger.log(
+                    {'event': f'@frame:break_execution', 'info': "Execution halted", 'app': node.id, 'message': str(e)})
+                raise
             except Exception as e:
                 context.apps_errored.append(node.id)
                 self.app_handler.logger.log(
