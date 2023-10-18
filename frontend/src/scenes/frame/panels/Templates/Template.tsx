@@ -5,13 +5,6 @@ import { H6 } from '../../../../components/H6'
 import { Button } from '../../../../components/Button'
 import { Menu } from '@headlessui/react'
 
-interface TemplateProps {
-  template: TemplateType
-  exportTemplate: typeof templatesModel.actions.exportTemplate
-  removeTemplate: typeof templatesModel.actions.removeTemplate
-  applyTemplate: typeof frameLogic.actions.applyTemplate
-  editTemplate: (template: TemplateType) => void
-}
 import React, { useState } from 'react'
 import { Transition } from '@headlessui/react'
 import {
@@ -23,6 +16,13 @@ import {
 } from '@heroicons/react/24/solid'
 import { usePopper } from 'react-popper'
 
+interface TemplateProps {
+  template: TemplateType
+  applyTemplate: (template: TemplateType) => void
+  exportTemplate?: (id: number) => void
+  removeTemplate?: (id: number) => void
+  editTemplate?: (template: TemplateType) => void
+}
 export function Template({ template, exportTemplate, removeTemplate, applyTemplate, editTemplate }: TemplateProps) {
   let [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   let [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
@@ -34,7 +34,7 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
       style={
         template.image_width && template.image_height
           ? {
-              backgroundImage: `url("/api/templates/${template.id}/image")`,
+              backgroundImage: `url("${template.image}")`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
               aspectRatio: `${template.image_width} / ${template.image_height}`,
@@ -52,105 +52,117 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
         <div className="flex items-start justify-between">
           <H6>{template.name}</H6>
           <div className="flex items-start gap-1">
-            <div className="relative inline-block text-left">
-              <Menu>
-                {({ open, close }) => (
-                  <>
-                    <Menu.Button
-                      ref={setReferenceElement}
-                      className="inline-flex justify-center w-full px-1 py-1 text-sm font-medium text-white bg-gray-700 hover:bg-gray-500 focus:ring-gray-500 rounded-md focus:outline-none rounded-md shadow-sm"
-                    >
-                      <EllipsisVerticalIcon className="w-5 h-5" aria-label="Menu" />
-                    </Menu.Button>
-                    <Transition
-                      show={open}
-                      enter="transition ease-out duration-100"
-                      enterFrom="transform opacity-0 scale-95"
-                      enterTo="transform opacity-100 scale-100"
-                      leave="transition ease-in duration-75"
-                      leaveFrom="transform opacity-100 scale-100"
-                      leaveTo="transform opacity-0 scale-95"
-                    >
-                      <Menu.Items
-                        static
-                        className="absolute right-0 w-56 mt-2 origin-top-right bg-gray-600 divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
-                        ref={setPopperElement}
-                        style={styles.popper}
-                        {...attributes.popper}
+            {editTemplate || exportTemplate || removeTemplate ? (
+              <div className="relative inline-block text-left">
+                <Menu>
+                  {({ open, close }) => (
+                    <>
+                      <Menu.Button
+                        ref={setReferenceElement}
+                        className="inline-flex justify-center w-full px-1 py-1 text-sm font-medium text-white bg-gray-700 hover:bg-gray-500 focus:ring-gray-500 rounded-md focus:outline-none rounded-md shadow-sm"
                       >
-                        <div className="py-1">
-                          <Menu.Item>
-                            {({ active }) => (
-                              <a
-                                href="#"
-                                className={`${
-                                  active ? 'bg-teal-700 text-white' : 'text-white'
-                                } block px-4 py-2 text-sm flex gap-2`}
-                                onClick={(e) => {
-                                  e.preventDefault()
-                                  editTemplate(template)
-                                  close()
-                                }}
-                              >
-                                <PencilSquareIcon className="w-5 h-5" />
-                                Edit template
-                              </a>
-                            )}
-                          </Menu.Item>
-                          <Menu.Item>
-                            {({ active }) => (
-                              <a
-                                href="#"
-                                className={`${
-                                  active ? 'bg-teal-700 text-white' : 'text-white'
-                                } block px-4 py-2 text-sm flex gap-2`}
-                                onClick={(e) => {
-                                  e.preventDefault()
-                                  template.id && exportTemplate(template.id)
-                                  close()
-                                }}
-                              >
-                                <DocumentArrowDownIcon className="w-5 h-5" />
-                                Export as JSON
-                              </a>
-                            )}
-                          </Menu.Item>
-                          <Menu.Item>
-                            {({ active }) => (
-                              <a
-                                href="#"
-                                className={`${
-                                  active ? 'bg-teal-700 text-white' : 'text-white'
-                                } block px-4 py-2 text-sm flex gap-2`}
-                                onClick={(e) => {
-                                  e.preventDefault()
-                                  if (
-                                    template.id &&
-                                    confirm(`Are you sure you want to delete the template "${template.name}"?`)
-                                  ) {
-                                    removeTemplate(template.id)
-                                    close()
-                                  }
-                                }}
-                              >
-                                <TrashIcon className="w-5 h-5" />
-                                Delete
-                              </a>
-                            )}
-                          </Menu.Item>
-                        </div>
-                      </Menu.Items>
-                    </Transition>
-                  </>
-                )}
-              </Menu>
-            </div>
+                        <EllipsisVerticalIcon className="w-5 h-5" aria-label="Menu" />
+                      </Menu.Button>
+                      <Transition
+                        show={open}
+                        enter="transition ease-out duration-100"
+                        enterFrom="transform opacity-0 scale-95"
+                        enterTo="transform opacity-100 scale-100"
+                        leave="transition ease-in duration-75"
+                        leaveFrom="transform opacity-100 scale-100"
+                        leaveTo="transform opacity-0 scale-95"
+                      >
+                        <Menu.Items
+                          static
+                          className="absolute right-0 w-56 mt-2 origin-top-right bg-gray-600 divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+                          ref={setPopperElement}
+                          style={styles.popper}
+                          {...attributes.popper}
+                        >
+                          <div className="py-1">
+                            {editTemplate ? (
+                              <Menu.Item>
+                                {({ active }) => (
+                                  <a
+                                    href="#"
+                                    className={`${
+                                      active ? 'bg-teal-700 text-white' : 'text-white'
+                                    } block px-4 py-2 text-sm flex gap-2`}
+                                    onClick={(e) => {
+                                      e.preventDefault()
+                                      editTemplate(template)
+                                      close()
+                                    }}
+                                  >
+                                    <PencilSquareIcon className="w-5 h-5" />
+                                    Edit template
+                                  </a>
+                                )}
+                              </Menu.Item>
+                            ) : null}
+                            {exportTemplate ? (
+                              <Menu.Item>
+                                {({ active }) => (
+                                  <a
+                                    href="#"
+                                    className={`${
+                                      active ? 'bg-teal-700 text-white' : 'text-white'
+                                    } block px-4 py-2 text-sm flex gap-2`}
+                                    onClick={(e) => {
+                                      e.preventDefault()
+                                      template.id && exportTemplate(template.id)
+                                      close()
+                                    }}
+                                  >
+                                    <DocumentArrowDownIcon className="w-5 h-5" />
+                                    Download JSON
+                                  </a>
+                                )}
+                              </Menu.Item>
+                            ) : null}
+                            {removeTemplate ? (
+                              <Menu.Item>
+                                {({ active }) => (
+                                  <a
+                                    href="#"
+                                    className={`${
+                                      active ? 'bg-teal-700 text-white' : 'text-white'
+                                    } block px-4 py-2 text-sm flex gap-2`}
+                                    onClick={(e) => {
+                                      e.preventDefault()
+                                      if (
+                                        template.id &&
+                                        confirm(`Are you sure you want to delete the template "${template.name}"?`)
+                                      ) {
+                                        removeTemplate(template.id)
+                                        close()
+                                      }
+                                    }}
+                                  >
+                                    <TrashIcon className="w-5 h-5" />
+                                    Delete
+                                  </a>
+                                )}
+                              </Menu.Item>
+                            ) : null}
+                          </div>
+                        </Menu.Items>
+                      </Transition>
+                    </>
+                  )}
+                </Menu>
+              </div>
+            ) : null}
             <Button
               size="small"
               color="teal"
               className="flex gap-1 items-center"
               onClick={() => {
-                if (confirm(`Are you sure you want to replace the scene with the "${template.name}" template?`)) {
+                if (
+                  confirm(
+                    `Replace the frame's contents with the template "${template.name}"? You will still need to save and deploy.`
+                  )
+                ) {
                   applyTemplate(template as TemplateType)
                 }
               }}

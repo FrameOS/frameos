@@ -40,24 +40,8 @@ export function Templates() {
         </div>
         <div className="space-y-2">
           <H6>Official templates</H6>
-          {globalTemplates.map((template) => (
-            <Box className="bg-gray-900 px-3 py-2 dndnode space-y-2">
-              <div className="flex items-center justify-between">
-                <H6>{template.name}</H6>
-                <Button
-                  size="small"
-                  color="light-gray"
-                  onClick={() => {
-                    if (confirm(`Are you sure you want to replace the scene with the "${template.name}" template?`)) {
-                      applyTemplate(template as TemplateType)
-                    }
-                  }}
-                >
-                  Replace
-                </Button>
-              </div>
-              <div className="text-gray-400 text-sm">{template.description}</div>
-            </Box>
+          {(globalTemplates as TemplateType[]).map((template) => (
+            <Template template={template} applyTemplate={applyTemplate} />
           ))}
         </div>
       </div>
