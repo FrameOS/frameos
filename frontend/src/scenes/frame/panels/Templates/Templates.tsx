@@ -13,6 +13,7 @@ import { TextArea } from '../../../../components/TextArea'
 import { Image } from '../Image/Image'
 import { templatesModel } from '../../../../models/templatesModel'
 import { TemplateType } from '../../../../types'
+import { Template } from './Template'
 
 export function Templates() {
   const { applyTemplate } = useActions(frameLogic)
@@ -62,70 +63,12 @@ export function Templates() {
         <div className="space-y-2">
           <H6>Local templates</H6>
           {templates.map((template) => (
-            <div
-              className="shadow bg-gray-900 break-inside-avoid dndnode relative rounded-lg"
-              style={
-                template.image_width && template.image_height
-                  ? {
-                      backgroundImage: `url("/api/templates/${template.id}/image")`,
-                      backgroundSize: 'cover',
-                      backgroundPosition: 'center',
-                      aspectRatio: `${template.image_width} / ${template.image_height}`,
-                    }
-                  : {}
-              }
-            >
-              <div
-                className="w-full h-full p-3 space-y-2 rounded-lg border border-gray-700"
-                style={{
-                  backgroundImage:
-                    'linear-gradient(to bottom, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.5) 30%, rgba(0, 0, 0, 0.6) 70%, rgba(0, 0, 0, 0.7) 100%)',
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <H6>{template.name}</H6>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="small"
-                      color="light-gray"
-                      onClick={() => {
-                        template.id && exportTemplate(template.id)
-                      }}
-                    >
-                      JSON
-                    </Button>
-                    <Button
-                      size="small"
-                      color="light-gray"
-                      onClick={() => {
-                        if (
-                          template.id &&
-                          confirm(`Are you sure you want to delete the template "${template.name}"?`)
-                        ) {
-                          removeTemplate(template.id)
-                        }
-                      }}
-                    >
-                      Delete
-                    </Button>
-                    <Button
-                      size="small"
-                      color="light-gray"
-                      onClick={() => {
-                        if (
-                          confirm(`Are you sure you want to replace the scene with the "${template.name}" template?`)
-                        ) {
-                          applyTemplate(template as TemplateType)
-                        }
-                      }}
-                    >
-                      Install
-                    </Button>
-                  </div>
-                </div>
-                {template.description && <div className="text-white text-sm">{template.description}</div>}
-              </div>
-            </div>
+            <Template
+              template={template}
+              exportTemplate={exportTemplate}
+              removeTemplate={removeTemplate}
+              applyTemplate={applyTemplate}
+            />
           ))}
           {templates.length === 0 ? <div className="text-muted">You have no local templates.</div> : null}
         </div>
