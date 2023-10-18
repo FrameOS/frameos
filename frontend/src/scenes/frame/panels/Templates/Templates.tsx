@@ -4,60 +4,25 @@ import { H6 } from '../../../../components/H6'
 import { frameLogic } from '../../frameLogic'
 import { Button } from '../../../../components/Button'
 import globalTemplates from '../../../../templates.json'
-import { Modal } from '../../../../components/Modal'
 import { templatesLogic } from './templatesLogic'
-import { Form } from 'kea-forms'
-import { TextInput } from '../../../../components/TextInput'
-import { Field } from '../../../../components/Field'
-import { TextArea } from '../../../../components/TextArea'
-import { Image } from '../Image/Image'
 import { templatesModel } from '../../../../models/templatesModel'
 import { TemplateType } from '../../../../types'
 import { Template } from './Template'
+import { EditTemplate } from './EditTemplate'
 
 export function Templates() {
   const { applyTemplate } = useActions(frameLogic)
   const { id } = useValues(frameLogic)
   const { templates } = useValues(templatesModel)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
-  const { showingModal } = useValues(templatesLogic({ id }))
-  const { showModal, hideModal, submitNewTemplate } = useActions(templatesLogic({ id }))
+  const { saveAsNewTemplate, editLocalTemplate } = useActions(templatesLogic({ id }))
   return (
     <>
       <div className="space-y-2 float-right">
-        <Button size="small" onClick={showModal}>
+        <Button size="small" onClick={saveAsNewTemplate}>
           Save as template
         </Button>
-        {showingModal ? (
-          <Form logic={templatesLogic} props={{ id }} formKey="newTemplate">
-            <Modal
-              title={<>Save as template</>}
-              onClose={hideModal}
-              footer={
-                <div className="flex items-center justify-end p-6 border-t border-solid border-blueGray-200 rounded-b">
-                  <Button color="none" onClick={hideModal}>
-                    Close
-                  </Button>
-                  <Button color="teal" onClick={submitNewTemplate}>
-                    Save Changes
-                  </Button>
-                </div>
-              }
-            >
-              <div className="relative p-6 flex-auto space-y-4">
-                <Field name="name" label="Template name">
-                  <TextInput placeholder="Template name" required />
-                </Field>
-                <Field name="description" label="Description">
-                  <TextArea placeholder="Pretty pictures..." required />
-                </Field>
-                <Field name="image" label="Image">
-                  <Image />
-                </Field>
-              </div>
-            </Modal>
-          </Form>
-        ) : null}
+        <EditTemplate />
       </div>
       <div className="space-y-8">
         <div className="space-y-2">
@@ -68,6 +33,7 @@ export function Templates() {
               exportTemplate={exportTemplate}
               removeTemplate={removeTemplate}
               applyTemplate={applyTemplate}
+              editTemplate={editLocalTemplate}
             />
           ))}
           {templates.length === 0 ? <div className="text-muted">You have no local templates.</div> : null}

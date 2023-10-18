@@ -10,6 +10,7 @@ interface TemplateProps {
   exportTemplate: typeof templatesModel.actions.exportTemplate
   removeTemplate: typeof templatesModel.actions.removeTemplate
   applyTemplate: typeof frameLogic.actions.applyTemplate
+  editTemplate: (template: TemplateType) => void
 }
 import React from 'react'
 import { Transition } from '@headlessui/react'
@@ -21,7 +22,7 @@ import {
   TrashIcon,
 } from '@heroicons/react/24/solid'
 
-export function Template({ template, exportTemplate, removeTemplate, applyTemplate }: TemplateProps) {
+export function Template({ template, exportTemplate, removeTemplate, applyTemplate, editTemplate }: TemplateProps) {
   return (
     <div
       className="shadow bg-gray-900 break-inside-avoid dndnode relative rounded-lg"
@@ -74,6 +75,11 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
                                 className={`${
                                   active ? 'bg-teal-700 text-white' : 'text-white'
                                 } block px-4 py-2 text-sm flex gap-2`}
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  editTemplate(template)
+                                  close()
+                                }}
                               >
                                 <PencilSquareIcon className="w-5 h-5" />
                                 Edit template

@@ -307,7 +307,7 @@ def export_template(template_id):
     return jsonify(template_dict)
 
 # Update (PUT)
-@app.route("/api/templates/<template_id>", methods=["PUT"])
+@app.route("/api/templates/<template_id>", methods=["PATCH"])
 @login_required
 def update_template(template_id):
     template = Template.query.get(template_id)
@@ -318,10 +318,6 @@ def update_template(template_id):
         template.name = data.get('name', template.name)
     if 'description' in data:
         template.description = data.get('description', template.description)
-    if 'scenes' in data:
-        template.scenes = data.get('scenes', template.scenes)
-    if 'config' in data:
-        template.config = data.get('config', template.config)
     db.session.commit()
     return jsonify(template.to_dict())
 

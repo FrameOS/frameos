@@ -19,43 +19,61 @@ export const templatesLogic = kea<templatesLogicType>([
     actions: [templatesModel, ['updateTemplate']],
   })),
   actions({
-    showModal: true,
+    saveAsNewTemplate: true,
+    editLocalTemplate: (template: TemplateType) => ({ template }),
     hideModal: true,
   }),
   forms(({ actions, values, props }) => ({
-    newTemplate: {
+    templateForm: {
       defaults: {} as TemplateType,
+      errors: (templateForm) => ({
+        name: !templateForm.name ? 'Name is required' : null,
+      }),
       submit: async (formValues) => {
-        const request: TemplateType & Record<string, any> = {
-          name: formValues.name,
-          description: formValues.description,
-          scenes: values.frame.scenes,
-          config: {
-            interval: values.frame.interval,
-            background_color: values.frame.background_color,
-            scaling_mode: values.frame.scaling_mode,
-            rotate: values.frame.rotate,
-          },
-          from_frame_id: props.id,
-        }
-
-        const response = await fetch(`/api/templates`, {
-          method: 'POST',
-          body: JSON.stringify(request),
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        })
-        if (!response.ok) {
-          throw new Error('Failed to update frame')
+        if (formValues.id) {
+          const request = {
+            name: formValues.name,
+            description: formValues.description,
+          }
+          const response = await fetch(`/api/templates/${formValues.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(request),
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          })
+          if (!response.ok) {
+            throw new Error('Failed to update template')
+          }
+          actions.updateTemplate(await response.json())
+        } else {
+          const request: TemplateType & Record<string, any> = {
+            name: formValues.name,
+            description: formValues.description,
+            scenes: values.frame.scenes,
+            config: {
+              interval: values.frame.interval,
+              background_color: values.frame.background_color,
+              scaling_mode: values.frame.scaling_mode,
+              rotate: values.frame.rotate,
+            },
+            from_frame_id: props.id,
+          }
+          const response = await fetch(`/api/templates`, {
+            method: 'POST',
+            body: JSON.stringify(request),
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          })
+          if (!response.ok) {
+            throw new Error('Failed to update frame')
+          }
+          actions.updateTemplate(await response.json())
         }
         actions.hideModal()
-        actions.resetNewTemplate()
-        actions.updateTemplate(await response.json())
+        actions.resetTemplateForm()
       },
-      errors: (newTemplate) => ({
-        name: !newTemplate.name ? 'Name is required' : null,
-      }),
       options: {
         showErrorsOnTouch: true,
       },
@@ -65,12 +83,18 @@ export const templatesLogic = kea<templatesLogicType>([
     showingModal: [
       false,
       {
-        showModal: () => true,
+        saveAsNewTemplate: () => true,
+        editLocalTemplate: () => true,
         hideModal: () => false,
       },
     ],
-    newTemplate: {
-      showModal: () => ({ name: '' }),
+    templateForm: {
+      saveAsNewTemplate: () => ({ name: '' }),
+      editLocalTemplate: (_, { template }) => ({
+        id: template.id,
+        name: template.name,
+        description: template.description,
+      }),
     },
   }),
 ])

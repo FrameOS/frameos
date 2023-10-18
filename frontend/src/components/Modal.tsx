@@ -11,8 +11,8 @@ export function Modal({ children, title, footer, onClose }: ModalProps): JSX.Ele
   return ReactDOM.createPortal(
     <>
       <div className="justify-center items-center flex overflow-x-hidden overflow-y-auto fixed inset-0 z-50 outline-none focus:outline-none">
-        <div className="relative w-auto my-6 mx-auto max-w-3xl">
-          <div className="border-0 rounded-lg shadow-lg relative flex flex-col w-full bg-gray-700 outline-none focus:outline-none">
+        <div className="relative w-auto my-6 mx-auto max-w-[767px] w-full">
+          <div className="border-0 rounded-lg shadow-lg relative flex flex-col bg-gray-700 outline-none focus:outline-none">
             {title ? (
               <div className="flex items-start justify-between p-5 border-b border-solid border-blueGray-200 rounded-t">
                 <h3 className="text-3xl font-semibold">{title}</h3>

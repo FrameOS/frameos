@@ -21,7 +21,8 @@ export function Button({ size, color, children, className, disabled, full, ...pr
       ? 'hover:bg-teal-800 focus:ring-teal-800'
       : color === 'none-gray'
       ? 'hover:bg-gray-950 focus:ring-gray-950'
-      : 'bg-teal-900 hover:bg-teal-800 focus:ring-teal-800'
+      : 'bg-teal-700 hover:bg-teal-600 focus:ring-teal-600'
+
   const sizeClassName =
     size === 'small'
       ? 'text-white focus:ring-1 focus:outline-none font-medium rounded-lg text-sm px-2 py-1 text-center'
