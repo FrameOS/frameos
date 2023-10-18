@@ -12,7 +12,7 @@ interface TemplateProps {
   applyTemplate: typeof frameLogic.actions.applyTemplate
   editTemplate: (template: TemplateType) => void
 }
-import React from 'react'
+import React, { useState } from 'react'
 import { Transition } from '@headlessui/react'
 import {
   ArrowDownTrayIcon,
@@ -21,8 +21,13 @@ import {
   PencilSquareIcon,
   TrashIcon,
 } from '@heroicons/react/24/solid'
+import { usePopper } from 'react-popper'
 
 export function Template({ template, exportTemplate, removeTemplate, applyTemplate, editTemplate }: TemplateProps) {
+  let [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
+  let [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
+  let { styles, attributes } = usePopper(referenceElement, popperElement)
+
   return (
     <div
       className="shadow bg-gray-900 break-inside-avoid dndnode relative rounded-lg"
@@ -51,7 +56,10 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
               <Menu>
                 {({ open, close }) => (
                   <>
-                    <Menu.Button className="inline-flex justify-center w-full px-1 py-1 text-sm font-medium text-white bg-gray-700 hover:bg-gray-500 focus:ring-gray-500 rounded-md focus:outline-none rounded-md shadow-sm">
+                    <Menu.Button
+                      ref={setReferenceElement}
+                      className="inline-flex justify-center w-full px-1 py-1 text-sm font-medium text-white bg-gray-700 hover:bg-gray-500 focus:ring-gray-500 rounded-md focus:outline-none rounded-md shadow-sm"
+                    >
                       <EllipsisVerticalIcon className="w-5 h-5" aria-label="Menu" />
                     </Menu.Button>
                     <Transition
@@ -66,6 +74,9 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
                       <Menu.Items
                         static
                         className="absolute right-0 w-56 mt-2 origin-top-right bg-gray-600 divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+                        ref={setPopperElement}
+                        style={styles.popper}
+                        {...attributes.popper}
                       >
                         <div className="py-1">
                           <Menu.Item>
