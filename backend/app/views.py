@@ -245,12 +245,18 @@ def api_log():
 @app.route("/api/templates", methods=["POST"])
 @login_required
 def create_template():
-    data = request.json
+    if 'file' in request.files:
+        zip_file = request.files['file'].read()
+    elif 'url' in request.form:
+        zip_file = requests.get(request.form['url']).content
+    else:
+        data = request.json
+        zip_file = None
+        if data.get('url'):
+            zip_file = requests.get(data.get('url')).content
 
-    if data.get('url'):
-        zip_file = requests.get(data.get('url'))
-        zip_file = zipfile.ZipFile(io.BytesIO(zip_file.content))
-
+    if zip_file:
+        zip_file = zipfile.ZipFile(io.BytesIO(zip_file))
         folder_name = ''
         for name in zip_file.namelist():
             print(name)

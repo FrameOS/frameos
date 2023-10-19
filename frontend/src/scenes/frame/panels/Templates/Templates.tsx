@@ -57,6 +57,34 @@ export function Templates() {
               </Button>
             </Form>
           </Box>
+          <Box className="p-4 space-y-2 bg-gray-900">
+            <H6>Upload template</H6>
+            <Form
+              logic={templatesLogic}
+              props={{ id }}
+              formKey="uploadTemplateForm"
+              enableFormOnSubmit
+              className="space-y-2"
+            >
+              <Field label="" name="file">
+                {({ onChange }) => (
+                  <input
+                    type="file"
+                    accept=".zip"
+                    onChange={(e: React.FormEvent<HTMLInputElement>) => {
+                      const target = e.target as HTMLInputElement & {
+                        files: FileList
+                      }
+                      onChange(target.files[0])
+                    }}
+                  />
+                )}
+              </Field>
+              <Button type="submit" color="light-gray">
+                Upload template
+              </Button>
+            </Form>
+          </Box>
         </div>
         <div className="space-y-2">
           <H6>Official templates</H6>

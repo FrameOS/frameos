@@ -6,7 +6,7 @@ interface TextInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement
   theme?: 'node' | 'full'
 }
 
-export function TextInput({ className, onChange, theme, ...props }: TextInputProps) {
+export function TextInput({ className, onChange, theme, type, ...props }: TextInputProps) {
   return (
     <input
       className={clsx(
@@ -16,7 +16,7 @@ export function TextInput({ className, onChange, theme, ...props }: TextInputPro
         className
       )}
       size={theme === 'node' ? 15 : 20}
-      type="text"
+      type={type ?? 'text'}
       onChange={onChange ? (e) => onChange(e.target.value) : undefined}
       {...props}
     />

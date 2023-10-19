@@ -103,6 +103,27 @@ export const templatesLogic = kea<templatesLogicType>([
         actions.resetAddTemplateUrlForm()
       },
     },
+    uploadTemplateForm: {
+      defaults: {
+        file: null,
+      } as { file: any },
+      errors: (addTemplateUrlForm) => ({
+        file: !addTemplateUrlForm.file ? 'File is required' : null,
+      }),
+      submit: async (formValues) => {
+        const formData = new FormData()
+        formData.append('file', formValues.file)
+        const response = await fetch(`/api/templates`, {
+          method: 'POST',
+          body: formData,
+        })
+        if (!response.ok) {
+          throw new Error('Failed to update frame')
+        }
+        actions.updateTemplate(await response.json())
+        actions.resetUploadTemplateForm()
+      },
+    },
   })),
   reducers({
     showingModal: [
