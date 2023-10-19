@@ -46,7 +46,7 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
         className="w-full h-full p-3 space-y-2 rounded-lg border border-gray-700"
         style={{
           backgroundImage:
-            'linear-gradient(to bottom, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.5) 30%, rgba(0, 0, 0, 0.6) 70%, rgba(0, 0, 0, 0.7) 100%)',
+            'linear-gradient(to bottom, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.6) 30%, rgba(0, 0, 0, 0.7) 70%, rgba(0, 0, 0, 0.8) 100%)',
         }}
       >
         <div className="flex items-start justify-between">
