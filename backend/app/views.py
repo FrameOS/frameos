@@ -310,22 +310,16 @@ def export_template(template_id):
 
     template_dict = template.to_dict()
     template_dict.pop('id')
-    if request.args.get('format', None) == 'zip':
-        in_memory = io.BytesIO()
-        with zipfile.ZipFile(in_memory, 'a', zipfile.ZIP_DEFLATED) as zf:
-            scenes = template_dict.pop('scenes')
-            template_dict['scenes'] = './scenes.json'
-            template_dict['image'] = './image.jpg'
-            zf.writestr(f"{template_name}/scenes.json", json.dumps(scenes, indent=2))
-            zf.writestr(f"{template_name}/template.json", json.dumps(template_dict, indent=2))
-            zf.writestr(f"{template_name}/image.jpg", template.image)
-        in_memory.seek(0)
-        return Response(in_memory.getvalue(), content_type='application/zip', headers={"Content-Disposition": f"attachment; filename={template_name}.zip"})
-
-    else: # json
-        base64_image = base64.b64encode(template.image).decode('utf-8') if template.image else None
-        template_dict['image'] = f"data:image/jpeg;base64,{base64_image}"
-        return Response(json.dumps(template_dict, indent=2), content_type='application/json', headers={"Content-Disposition": f"attachment; filename={template_name}.json"})
+    in_memory = io.BytesIO()
+    with zipfile.ZipFile(in_memory, 'a', zipfile.ZIP_DEFLATED) as zf:
+        scenes = template_dict.pop('scenes')
+        template_dict['scenes'] = './scenes.json'
+        template_dict['image'] = './image.jpg'
+        zf.writestr(f"{template_name}/scenes.json", json.dumps(scenes, indent=2))
+        zf.writestr(f"{template_name}/template.json", json.dumps(template_dict, indent=2))
+        zf.writestr(f"{template_name}/image.jpg", template.image)
+    in_memory.seek(0)
+    return Response(in_memory.getvalue(), content_type='application/zip', headers={"Content-Disposition": f"attachment; filename={template_name}.zip"})
 
 # Update (PUT)
 @app.route("/api/templates/<template_id>", methods=["PATCH"])

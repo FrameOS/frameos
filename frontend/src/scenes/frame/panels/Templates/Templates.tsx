@@ -19,7 +19,7 @@ export function Templates() {
     <>
       <div className="space-y-2 float-right">
         <Button size="small" onClick={saveAsNewTemplate}>
-          Save as template
+          Save as template...
         </Button>
         <EditTemplate />
       </div>

@@ -21,8 +21,9 @@ export function EditTemplate() {
           <Modal
             title={newTemplate ? <>Save as new template</> : <>Edit template</>}
             onClose={hideModal}
+            open={showingModal}
             footer={
-              <div className="flex items-center justify-end p-6 border-t border-solid border-blueGray-200 rounded-b">
+              <div className="flex items-top justify-end gap-2 p-6 border-t border-solid border-blueGray-200 rounded-b">
                 <Button color="none" onClick={hideModal}>
                   Close
                 </Button>

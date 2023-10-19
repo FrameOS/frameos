@@ -97,7 +97,7 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
                                       }}
                                     >
                                       <PencilSquareIcon className="w-5 h-5" />
-                                      Edit template
+                                      Edit metadata
                                     </a>
                                   )}
                                 </Menu.Item>
@@ -106,28 +106,13 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
                                 <Menu.Item>
                                   {({ active }) => (
                                     <a
-                                      href={`/api/templates/${template.id}/export?format=json`}
+                                      href={`/api/templates/${template.id}/export`}
                                       className={`${
                                         active ? 'bg-teal-700 text-white' : 'text-white'
                                       } block px-4 py-2 text-sm flex gap-2`}
                                     >
                                       <DocumentArrowDownIcon className="w-5 h-5" />
-                                      Download .json
-                                    </a>
-                                  )}
-                                </Menu.Item>
-                              ) : null}
-                              {exportTemplate ? (
-                                <Menu.Item>
-                                  {({ active }) => (
-                                    <a
-                                      href={`/api/templates/${template.id}/export?format=zip`}
-                                      className={`${
-                                        active ? 'bg-teal-700 text-white' : 'text-white'
-                                      } block px-4 py-2 text-sm flex gap-2`}
-                                    >
-                                      <DocumentArrowDownIcon className="w-5 h-5" />
-                                      Download .zip
+                                      Download
                                     </a>
                                   )}
                                 </Menu.Item>
