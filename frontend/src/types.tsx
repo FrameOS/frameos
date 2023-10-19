@@ -40,6 +40,14 @@ export interface TemplateType {
   }
 }
 
+export interface RepositoryType {
+  id?: string
+  name: string
+  url: string
+  last_updated_at?: string
+  templates?: TemplateType[]
+}
+
 export interface LogType {
   id: number
   timestamp: string

@@ -1,6 +1,4 @@
 import { TemplateType } from '../../../../types'
-import { templatesModel } from '../../../../models/templatesModel'
-import { frameLogic } from '../../frameLogic'
 import { H6 } from '../../../../components/H6'
 import { Button } from '../../../../components/Button'
 import { Menu } from '@headlessui/react'
@@ -159,14 +157,16 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
               onClick={() => {
                 if (
                   confirm(
-                    `Replace the frame's contents with the template "${template.name}"? You will still need to save and deploy.`
+                    template.id
+                      ? `Replace the frame's contents with the template "${template.name}"? You will still need to save and deploy.`
+                      : `This will add the template to your list of local templates, after which you can install it.`
                   )
                 ) {
                   applyTemplate(template as TemplateType)
                 }
               }}
             >
-              <ArrowDownTrayIcon className="w-4 h-4" /> Install
+              <ArrowDownTrayIcon className="w-4 h-4" /> {template.id ? 'Install' : 'Download'}
             </Button>
           </div>
         </div>

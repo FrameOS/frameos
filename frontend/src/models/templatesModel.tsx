@@ -2,7 +2,7 @@ import { actions, afterMount, kea, listeners, path, reducers, selectors } from '
 
 import type { templatesModelType } from './templatesModelType'
 import { loaders } from 'kea-loaders'
-import { App, TemplateType } from '../types'
+import { TemplateType } from '../types'
 
 export const templatesModel = kea<templatesModelType>([
   path(['src', 'models', 'templatesModel']),

@@ -2,9 +2,10 @@ import { actions, kea, reducers, path, key, props, connect, listeners } from 'ke
 import { forms } from 'kea-forms'
 
 import type { templatesLogicType } from './templatesLogicType'
-import { TemplateType } from '../../../../types'
+import { RepositoryType, TemplateType } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { templatesModel } from '../../../../models/templatesModel'
+import { repositoriesModel } from '../../../../models/repositoriesModel'
 
 export interface TemplateLogicProps {
   id: number
@@ -16,12 +17,13 @@ export const templatesLogic = kea<templatesLogicType>([
   key((props) => props.id),
   connect((props: TemplateLogicProps) => ({
     values: [frameLogic(props), ['frame']],
-    actions: [templatesModel, ['updateTemplate']],
+    actions: [templatesModel, ['updateTemplate'], repositoriesModel, ['updateRepository']],
   })),
   actions({
     saveAsNewTemplate: true,
     editLocalTemplate: (template: TemplateType) => ({ template }),
     hideModal: true,
+    applyRemoteTemplate: (repository: RepositoryType, template: TemplateType) => ({ repository, template }),
   }),
   forms(({ actions, values, props }) => ({
     templateForm: {
@@ -124,6 +126,34 @@ export const templatesLogic = kea<templatesLogicType>([
         actions.resetUploadTemplateForm()
       },
     },
+    addRepositoryForm: {
+      defaults: {
+        name: '',
+        url: '',
+      } as { name: string; url: string },
+      errors: (formValues) => ({
+        name: !formValues.name ? 'Name is required' : null,
+        url: !formValues.url ? 'URL is required' : null,
+      }),
+      submit: async (formValues) => {
+        const request = {
+          name: formValues.name,
+          url: formValues.url,
+        }
+        const response = await fetch(`/api/repositories`, {
+          method: 'POST',
+          body: JSON.stringify(request),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        })
+        if (!response.ok) {
+          throw new Error('Failed to update frame')
+        }
+        actions.updateRepository(await response.json())
+        actions.resetAddRepositoryForm()
+      },
+    },
   })),
   reducers({
     showingModal: [
@@ -143,4 +173,17 @@ export const templatesLogic = kea<templatesLogicType>([
       }),
     },
   }),
+  listeners(({ actions, values, props }) => ({
+    applyRemoteTemplate: async ({ template, repository }) => {
+      if ('zip' in template) {
+        let zipPath = (template as any).zip
+        if (zipPath.startsWith('./')) {
+          const repositoryPath = repository.url.replace(/\/[^/]+$/, '')
+          zipPath = `${repositoryPath}/${zipPath.slice(2)}`
+        }
+        actions.setAddTemplateUrlFormValues({ url: zipPath })
+        actions.submitAddTemplateUrlForm()
+      }
+    },
+  })),
 ])

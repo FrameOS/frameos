@@ -9,7 +9,7 @@ import string
 from flask import jsonify, request, send_from_directory, send_file, Response, redirect, url_for, render_template, flash
 from flask_login import login_user, logout_user, login_required, current_user
 from . import db, app, tasks, models, redis
-from .models import User, get_settings_dict, Template
+from .models import User, get_settings_dict, Template, Repository
 from .forms import LoginForm, RegisterForm
 from PIL import Image
 
@@ -393,6 +393,67 @@ def delete_template(template_id):
     db.session.delete(template)
     db.session.commit()
     return jsonify({"message": "Template deleted successfully"}), 200
+
+
+
+# Create (POST)
+@app.route("/api/repositories", methods=["POST"])
+@login_required
+def create_repository():
+    data = request.json
+    new_repository = Repository(
+        name=data.get('name'),
+        url=data.get('url'),
+    )
+    db.session.add(new_repository)
+    db.session.commit()
+    new_repository.update_templates()
+    return jsonify(new_repository.to_dict()), 201
+
+# Read (GET) for all templates
+@app.route("/api/repositories", methods=["GET"])
+@login_required
+def get_repositories():
+    repositories = [repository.to_dict() for repository in Repository.query.all()]
+    return jsonify(repositories)
+
+# Read (GET) for a specific repository
+@app.route("/api/repositories/<repository_id>", methods=["GET"])
+@login_required
+def get_repository(repository_id):
+    repository = Repository.query.get(repository_id)
+    if not repository:
+        return jsonify({"error": "Repository not found"}), 404
+    return jsonify(repository.to_dict())
+
+# Update (PUT)
+@app.route("/api/repositories/<repository_id>", methods=["PATCH"])
+@login_required
+def update_repository(repository_id):
+    repository = Repository.query.get(repository_id)
+    if not repository:
+        return jsonify({"error": "Repository not found"}), 404
+    data = request.json
+    if 'name' in data:
+        repository.name = data.get('name', repository.name)
+    if 'url' in data:
+        repository.url = data.get('url', repository.url)
+    db.session.commit()
+    repository.update_templates()
+    return jsonify(repository.to_dict())
+
+# Delete (DELETE)
+@app.route("/api/repositories/<repository_id>", methods=["DELETE"])
+@login_required
+def delete_repository(repository_id):
+    repository = Repository.query.get(repository_id)
+    if not repository:
+        return jsonify({"error": "Repository not found"}), 404
+    db.session.delete(repository)
+    db.session.commit()
+    return jsonify({"message": "Repository deleted successfully"}), 200
+
+
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():

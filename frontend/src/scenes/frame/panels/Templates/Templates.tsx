@@ -3,22 +3,26 @@ import { Form } from 'kea-forms'
 import { H6 } from '../../../../components/H6'
 import { frameLogic } from '../../frameLogic'
 import { Button } from '../../../../components/Button'
-import globalTemplates from '../../../../templates.json'
 import { templatesLogic } from './templatesLogic'
 import { templatesModel } from '../../../../models/templatesModel'
-import { TemplateType } from '../../../../types'
 import { Template } from './Template'
 import { EditTemplate } from './EditTemplate'
 import { Box } from '../../../../components/Box'
 import { Field } from '../../../../components/Field'
 import { TextInput } from '../../../../components/TextInput'
+import { repositoriesModel } from '../../../../models/repositoriesModel'
+import { TrashIcon, ArrowPathIcon } from '@heroicons/react/24/solid'
+import React from 'react'
 
 export function Templates() {
   const { applyTemplate } = useActions(frameLogic)
   const { id } = useValues(frameLogic)
   const { templates } = useValues(templatesModel)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
-  const { saveAsNewTemplate, editLocalTemplate } = useActions(templatesLogic({ id }))
+  const { saveAsNewTemplate, editLocalTemplate, applyRemoteTemplate } = useActions(templatesLogic({ id }))
+  const { repositories } = useValues(repositoriesModel)
+  const { removeRepository, refreshRepository } = useActions(repositoriesModel)
+
   return (
     <>
       <div className="space-y-2 float-right">
@@ -86,11 +90,49 @@ export function Templates() {
             </Form>
           </Box>
         </div>
+        {(repositories ?? []).map((repository) => (
+          <div className="space-y-2">
+            <div className="flex gap-2 items-start justify-between">
+              <H6>{repository.name}</H6>
+              <div className="flex gap-2">
+                <Button size="small" onClick={() => repository.id && removeRepository(repository.id)}>
+                  <TrashIcon className="w-5 h-5" />
+                </Button>
+                <Button size="small" onClick={() => repository.id && refreshRepository(repository.id)}>
+                  <ArrowPathIcon className="w-5 h-5" />
+                </Button>
+              </div>
+            </div>
+            <div className="text-sm break-words">{repository.url}</div>
+            {(repository.templates || []).map((template) => (
+              <Template template={template} applyTemplate={(template) => applyRemoteTemplate(repository, template)} />
+            ))}
+            {repository.templates?.length === 0 ? (
+              <div className="text-muted">This repository has no templates.</div>
+            ) : null}
+          </div>
+        ))}
         <div className="space-y-2">
-          <H6>Official templates</H6>
-          {(globalTemplates as TemplateType[]).map((template) => (
-            <Template template={template} applyTemplate={applyTemplate} />
-          ))}
+          <H6>Add repository</H6>
+          <Box className="p-4 space-y-2 bg-gray-900">
+            <Form
+              logic={templatesLogic}
+              props={{ id }}
+              formKey="addRepositoryForm"
+              enableFormOnSubmit
+              className="space-y-2"
+            >
+              <Field label="" name="name">
+                <TextInput placeholder="Official goods" />
+              </Field>
+              <Field label="" name="url">
+                <TextInput placeholder="https://url/to/templates.json" />
+              </Field>
+              <Button type="submit" color="light-gray">
+                Add repository
+              </Button>
+            </Form>
+          </Box>
         </div>
       </div>
     </>

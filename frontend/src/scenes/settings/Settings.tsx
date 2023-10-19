@@ -68,16 +68,6 @@ export function Settings() {
                     </Field>
                   </Box>
                 </Group>
-                <Group name="repositories">
-                  <Box className="p-2 mb-4 space-y-2">
-                    <H6>App & Template Repositories</H6>
-                    {[...(savedSettings?.repositories ?? []), '+'].map((repo: string, index: number) => (
-                      <Field name={index} label="Repository URL" key={index}>
-                        <TextArea rows={4} />
-                      </Field>
-                    ))}
-                  </Box>
-                </Group>
               </Form>
             </div>
           </Panel>
