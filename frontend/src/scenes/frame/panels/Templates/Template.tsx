@@ -15,18 +15,19 @@ import {
   TrashIcon,
 } from '@heroicons/react/24/solid'
 import { usePopper } from 'react-popper'
+import ReactDOM from 'react-dom'
 
 interface TemplateProps {
   template: TemplateType
   applyTemplate: (template: TemplateType) => void
-  exportTemplate?: (id: string) => void
+  exportTemplate?: (id: string, format?: string) => void
   removeTemplate?: (id: string) => void
   editTemplate?: (template: TemplateType) => void
 }
 export function Template({ template, exportTemplate, removeTemplate, applyTemplate, editTemplate }: TemplateProps) {
   let [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   let [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
-  let { styles, attributes } = usePopper(referenceElement, popperElement)
+  let { styles, attributes } = usePopper(referenceElement, popperElement, { strategy: 'fixed' })
 
   return (
     <div
@@ -63,91 +64,104 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
                       >
                         <EllipsisVerticalIcon className="w-5 h-5" aria-label="Menu" />
                       </Menu.Button>
-                      <Transition
-                        show={open}
-                        enter="transition ease-out duration-100"
-                        enterFrom="transform opacity-0 scale-95"
-                        enterTo="transform opacity-100 scale-100"
-                        leave="transition ease-in duration-75"
-                        leaveFrom="transform opacity-100 scale-100"
-                        leaveTo="transform opacity-0 scale-95"
-                      >
-                        <Menu.Items
-                          static
-                          className="absolute right-0 w-56 mt-2 origin-top-right bg-gray-600 divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
-                          ref={setPopperElement}
-                          style={styles.popper}
-                          {...attributes.popper}
+                      {ReactDOM.createPortal(
+                        <Transition
+                          show={open}
+                          enter="transition ease-out duration-100"
+                          enterFrom="transform opacity-0 scale-95"
+                          enterTo="transform opacity-100 scale-100"
+                          leave="transition ease-in duration-75"
+                          leaveFrom="transform opacity-100 scale-100"
+                          leaveTo="transform opacity-0 scale-95"
                         >
-                          <div className="py-1">
-                            {editTemplate ? (
-                              <Menu.Item>
-                                {({ active }) => (
-                                  <a
-                                    href="#"
-                                    className={`${
-                                      active ? 'bg-teal-700 text-white' : 'text-white'
-                                    } block px-4 py-2 text-sm flex gap-2`}
-                                    onClick={(e) => {
-                                      e.preventDefault()
-                                      editTemplate(template)
-                                      close()
-                                    }}
-                                  >
-                                    <PencilSquareIcon className="w-5 h-5" />
-                                    Edit template
-                                  </a>
-                                )}
-                              </Menu.Item>
-                            ) : null}
-                            {exportTemplate ? (
-                              <Menu.Item>
-                                {({ active }) => (
-                                  <a
-                                    href="#"
-                                    className={`${
-                                      active ? 'bg-teal-700 text-white' : 'text-white'
-                                    } block px-4 py-2 text-sm flex gap-2`}
-                                    onClick={(e) => {
-                                      e.preventDefault()
-                                      template.id && exportTemplate(template.id)
-                                      close()
-                                    }}
-                                  >
-                                    <DocumentArrowDownIcon className="w-5 h-5" />
-                                    Download JSON
-                                  </a>
-                                )}
-                              </Menu.Item>
-                            ) : null}
-                            {removeTemplate ? (
-                              <Menu.Item>
-                                {({ active }) => (
-                                  <a
-                                    href="#"
-                                    className={`${
-                                      active ? 'bg-teal-700 text-white' : 'text-white'
-                                    } block px-4 py-2 text-sm flex gap-2`}
-                                    onClick={(e) => {
-                                      e.preventDefault()
-                                      if (
-                                        template.id &&
-                                        confirm(`Are you sure you want to delete the template "${template.name}"?`)
-                                      ) {
-                                        removeTemplate(template.id)
+                          <Menu.Items
+                            static
+                            className="absolute right-0 w-56 mt-2 origin-top-right bg-gray-600 divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+                            ref={setPopperElement}
+                            style={styles.popper}
+                            {...attributes.popper}
+                          >
+                            <div className="py-1">
+                              {editTemplate ? (
+                                <Menu.Item>
+                                  {({ active }) => (
+                                    <a
+                                      href="#"
+                                      className={`${
+                                        active ? 'bg-teal-700 text-white' : 'text-white'
+                                      } block px-4 py-2 text-sm flex gap-2`}
+                                      onClick={(e) => {
+                                        e.preventDefault()
+                                        editTemplate(template)
                                         close()
-                                      }
-                                    }}
-                                  >
-                                    <TrashIcon className="w-5 h-5" />
-                                    Delete
-                                  </a>
-                                )}
-                              </Menu.Item>
-                            ) : null}
-                          </div>
-                        </Menu.Items>
-                      </Transition>
+                                      }}
+                                    >
+                                      <PencilSquareIcon className="w-5 h-5" />
+                                      Edit template
+                                    </a>
+                                  )}
+                                </Menu.Item>
+                              ) : null}
+                              {exportTemplate ? (
+                                <Menu.Item>
+                                  {({ active }) => (
+                                    <a
+                                      href={`/api/templates/${template.id}/export?format=json`}
+                                      className={`${
+                                        active ? 'bg-teal-700 text-white' : 'text-white'
+                                      } block px-4 py-2 text-sm flex gap-2`}
+                                    >
+                                      <DocumentArrowDownIcon className="w-5 h-5" />
+                                      Download .json
+                                    </a>
+                                  )}
+                                </Menu.Item>
+                              ) : null}
+                              {exportTemplate ? (
+                                <Menu.Item>
+                                  {({ active }) => (
+                                    <a
+                                      href={`/api/templates/${template.id}/export?format=zip`}
+                                      className={`${
+                                        active ? 'bg-teal-700 text-white' : 'text-white'
+                                      } block px-4 py-2 text-sm flex gap-2`}
+                                    >
+                                      <DocumentArrowDownIcon className="w-5 h-5" />
+                                      Download .zip
+                                    </a>
+                                  )}
+                                </Menu.Item>
+                              ) : null}
+                              {removeTemplate ? (
+                                <Menu.Item>
+                                  {({ active }) => (
+                                    <a
+                                      href="#"
+                                      className={`${
+                                        active ? 'bg-teal-700 text-white' : 'text-white'
+                                      } block px-4 py-2 text-sm flex gap-2`}
+                                      onClick={(e) => {
+                                        e.preventDefault()
+                                        if (
+                                          template.id &&
+                                          confirm(`Are you sure you want to delete the template "${template.name}"?`)
+                                        ) {
+                                          removeTemplate(template.id)
+                                          close()
+                                        }
+                                      }}
+                                    >
+                                      <TrashIcon className="w-5 h-5" />
+                                      Delete
+                                    </a>
+                                  )}
+                                </Menu.Item>
+                              ) : null}
+                            </div>
+                          </Menu.Items>
+                        </Transition>,
+                        document.querySelector('#popper')!
+                      )}
                     </>
                   )}
                 </Menu>

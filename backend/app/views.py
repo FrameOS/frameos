@@ -1,6 +1,10 @@
 import base64
 import gzip
 import io
+import zipfile
+import requests
+import json
+import string
 
 from flask import jsonify, request, send_from_directory, send_file, Response, redirect, url_for, render_template, flash
 from flask_login import login_user, logout_user, login_required, current_user
@@ -8,8 +12,6 @@ from . import db, app, tasks, models, redis
 from .models import User, get_settings_dict, Template
 from .forms import LoginForm, RegisterForm
 from PIL import Image
-import requests
-import json
 
 
 @app.before_request
@@ -301,10 +303,28 @@ def export_template(template_id):
     template = Template.query.get(template_id)
     if not template:
         return jsonify({"error": "Template not found"}), 404
+    template_name = template.name
+    safe_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
+    template_name = ''.join(c for c in template_name if c in safe_chars) or 'Template'
+
     template_dict = template.to_dict()
-    base64_image = base64.b64encode(template.image).decode('utf-8') if template.image else None
-    template_dict['image'] = f"data:image/jpeg;base64,{base64_image}"
-    return jsonify(template_dict)
+    template_dict.pop('id')
+    if request.args.get('format', None) == 'zip':
+        in_memory = io.BytesIO()
+        with zipfile.ZipFile(in_memory, 'a', zipfile.ZIP_DEFLATED) as zf:
+            scenes = template_dict.pop('scenes')
+            template_dict['scenes'] = './scenes.json'
+            template_dict['image'] = './image.jpg'
+            zf.writestr(f"{template_name}/scenes.json", json.dumps(scenes, indent=2))
+            zf.writestr(f"{template_name}/template.json", json.dumps(template_dict, indent=2))
+            zf.writestr(f"{template_name}/image.jpg", template.image)
+        in_memory.seek(0)
+        return Response(in_memory.getvalue(), content_type='application/zip', headers={"Content-Disposition": f"attachment; filename={template_name}.zip"})
+
+    else: # json
+        base64_image = base64.b64encode(template.image).decode('utf-8') if template.image else None
+        template_dict['image'] = f"data:image/jpeg;base64,{base64_image}"
+        return Response(json.dumps(template_dict, indent=2), content_type='application/json', headers={"Content-Disposition": f"attachment; filename={template_name}.json"})
 
 # Update (PUT)
 @app.route("/api/templates/<template_id>", methods=["PATCH"])

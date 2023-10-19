@@ -9,7 +9,7 @@ export const templatesModel = kea<templatesModelType>([
   actions({
     updateTemplate: (template: TemplateType) => ({ template }),
     removeTemplate: (id: string) => ({ id }),
-    exportTemplate: (id: string) => ({ id }),
+    exportTemplate: (id: string, format?: string) => ({ id, format }),
   }),
   loaders(({ values }) => ({
     templates: [
@@ -55,18 +55,18 @@ export const templatesModel = kea<templatesModelType>([
     },
   }),
   listeners(() => ({
-    exportTemplate: async ({ id }) => {
-      const response = await fetch(`/api/templates/${id}/export`)
+    exportTemplate: async ({ id, format }) => {
+      const response = await fetch(`/api/templates/${id}/export${format ? `?format=${format}` : ''}`)
       if (!response.ok) {
         throw new Error('Failed to export template')
       }
       const jsonData = await response.json()
       const jsonString: string = JSON.stringify(jsonData, null, 2)
-      const blob = new Blob([jsonString], { type: 'application/json' })
+      const blob = new Blob([jsonString], { type: format === 'zip' ? 'application/zip' : 'application/json' })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${jsonData.name || 'Exported Template'}.json`
+      a.download = `${jsonData.name || 'Exported Template'}.${format ?? 'json'}`
       document.body.appendChild(a)
       a.click()
       a.remove()
