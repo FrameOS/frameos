@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import { Form } from 'kea-forms'
 import { H6 } from '../../../../components/H6'
 import { frameLogic } from '../../frameLogic'
 import { Button } from '../../../../components/Button'
@@ -8,6 +9,9 @@ import { templatesModel } from '../../../../models/templatesModel'
 import { TemplateType } from '../../../../types'
 import { Template } from './Template'
 import { EditTemplate } from './EditTemplate'
+import { Box } from '../../../../components/Box'
+import { Field } from '../../../../components/Field'
+import { TextInput } from '../../../../components/TextInput'
 
 export function Templates() {
   const { applyTemplate } = useActions(frameLogic)
@@ -36,6 +40,23 @@ export function Templates() {
             />
           ))}
           {templates.length === 0 ? <div className="text-muted">You have no local templates.</div> : null}
+          <Box className="p-4 space-y-2 bg-gray-900">
+            <H6>Add template from URL</H6>
+            <Form
+              logic={templatesLogic}
+              props={{ id }}
+              formKey="addTemplateUrlForm"
+              enableFormOnSubmit
+              className="space-y-2"
+            >
+              <Field label="" name="url">
+                <TextInput placeholder="https://url/to/template.zip" />
+              </Field>
+              <Button type="submit" color="light-gray">
+                Add template
+              </Button>
+            </Form>
+          </Box>
         </div>
         <div className="space-y-2">
           <H6>Official templates</H6>

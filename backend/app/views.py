@@ -246,14 +246,43 @@ def api_log():
 @login_required
 def create_template():
     data = request.json
-    new_template = Template(
-        name=data.get('name'),
-        description=data.get('description'),
-        scenes=data.get('scenes'),
-        config=data.get('config')
-    )
-    db.session.add(new_template)
-    db.session.commit()
+
+    if data.get('url'):
+        zip_file = requests.get(data.get('url'))
+        zip_file = zipfile.ZipFile(io.BytesIO(zip_file.content))
+
+        folder_name = ''
+        for name in zip_file.namelist():
+            print(name)
+            if name == 'template.json':
+                folder_name = ''
+                break
+            elif name.endswith('/template.json'):
+                if folder_name == '' or len(name) < len(folder_name):
+                    folder_name = name[:-len('template.json')]
+
+        template_json = zip_file.read(f'{folder_name}template.json')
+        scenes_json = zip_file.read(f'{folder_name}scenes.json')
+
+        data = json.loads(template_json)
+        data['scenes'] = json.loads(scenes_json)
+
+        image = data.get('image', '')
+        if image.startswith('data:image/'):
+            image = image[len('data:image/'):].split(';base64,')[1]
+            image = base64.b64decode(image)
+        elif image.startswith('./'):
+            image = image[len('./'):]
+            image = zip_file.read(f'{folder_name}{image}')
+        elif image.startswith('http:') or image.startswith('https:'):
+            image = requests.get(image).content
+        else:
+            image = None
+        data['image'] = image
+        if image:
+            img = Image.open(io.BytesIO(image))
+            data['image_width'] = img.width
+            data['image_height'] = img.height
 
     if data.get('from_frame_id'):
         frame_id = data.get('from_frame_id')
@@ -261,13 +290,25 @@ def create_template():
         if last_image:
             try:
                 image = Image.open(io.BytesIO(last_image))
-                new_template.image = last_image
-                new_template.image_width = image.width
-                new_template.image_height = image.height
-                db.session.commit()
+                data['image'] = last_image
+                data['image_width'] = image.width
+                data['image_height'] = image.height
             except Exception as e:
                 print(e)
                 pass
+
+    new_template = Template(
+        name=data.get('name'),
+        description=data.get('description'),
+        scenes=data.get('scenes'),
+        config=data.get('config'),
+        image=data.get('image'),
+        image_width=data.get('image_width'),
+        image_height=data.get('image_height'),
+    )
+    db.session.add(new_template)
+    db.session.commit()
+
 
     return jsonify(new_template.to_dict()), 201
 

@@ -78,6 +78,31 @@ export const templatesLogic = kea<templatesLogicType>([
         showErrorsOnTouch: true,
       },
     },
+    addTemplateUrlForm: {
+      defaults: {
+        url: '',
+      } as { url: string },
+      errors: (addTemplateUrlForm) => ({
+        url: !addTemplateUrlForm.url ? 'URL is required' : null,
+      }),
+      submit: async (formValues) => {
+        const request = {
+          url: formValues.url,
+        }
+        const response = await fetch(`/api/templates`, {
+          method: 'POST',
+          body: JSON.stringify(request),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        })
+        if (!response.ok) {
+          throw new Error('Failed to update frame')
+        }
+        actions.updateTemplate(await response.json())
+        actions.resetAddTemplateUrlForm()
+      },
+    },
   })),
   reducers({
     showingModal: [
