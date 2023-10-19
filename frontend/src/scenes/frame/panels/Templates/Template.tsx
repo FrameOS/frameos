@@ -37,7 +37,7 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
               backgroundImage: `url("${template.image}")`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
-              aspectRatio: `${template.image_width} / ${template.image_height}`,
+              // aspectRatio: `${template.image_width} / ${template.image_height}`,
             }
           : {}
       }
