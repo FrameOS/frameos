@@ -305,7 +305,8 @@ def export_template(template_id):
         return jsonify({"error": "Template not found"}), 404
     template_name = template.name
     safe_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
-    template_name = ''.join(c for c in template_name if c in safe_chars) or 'Template'
+    template_name = ''.join(c if c in safe_chars else ' ' for c in template_name).strip()
+    template_name = ' '.join(template_name.split()) or 'Template'
 
     template_dict = template.to_dict()
     template_dict.pop('id')
