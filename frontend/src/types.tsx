@@ -25,7 +25,7 @@ export interface FrameType {
 }
 
 export interface TemplateType {
-  id?: number
+  id?: string
   name: string
   description?: string
   scenes?: FrameScene[]

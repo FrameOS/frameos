@@ -19,8 +19,8 @@ import { usePopper } from 'react-popper'
 interface TemplateProps {
   template: TemplateType
   applyTemplate: (template: TemplateType) => void
-  exportTemplate?: (id: number) => void
-  removeTemplate?: (id: number) => void
+  exportTemplate?: (id: string) => void
+  removeTemplate?: (id: string) => void
   editTemplate?: (template: TemplateType) => void
 }
 export function Template({ template, exportTemplate, removeTemplate, applyTemplate, editTemplate }: TemplateProps) {

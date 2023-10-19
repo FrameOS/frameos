@@ -8,8 +8,8 @@ export const templatesModel = kea<templatesModelType>([
   path(['src', 'models', 'templatesModel']),
   actions({
     updateTemplate: (template: TemplateType) => ({ template }),
-    removeTemplate: (id: number) => ({ id }),
-    exportTemplate: (id: number) => ({ id }),
+    removeTemplate: (id: string) => ({ id }),
+    exportTemplate: (id: string) => ({ id }),
   }),
   loaders(({ values }) => ({
     templates: [
