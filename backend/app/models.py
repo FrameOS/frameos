@@ -357,6 +357,5 @@ class Repository(db.Model):
                         template['image'] = urljoin(self.url, template['image'])
                     if template.get('zip', '').startswith('./'):
                         template['zip'] = urljoin(self.url, template['zip'])
-                db.session.commit()
         except:
             pass

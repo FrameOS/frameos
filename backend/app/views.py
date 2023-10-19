@@ -9,10 +9,11 @@ import string
 from flask import jsonify, request, send_from_directory, send_file, Response, redirect, url_for, render_template, flash
 from flask_login import login_user, logout_user, login_required, current_user
 from . import db, app, tasks, models, redis
-from .models import User, get_settings_dict, Template, Repository
+from .models import User, get_settings_dict, Template, Repository, Settings
 from .forms import LoginForm, RegisterForm
 from PIL import Image
 
+FRAMEOS_REPOSITORY_URL = "https://repo.frameos.net/versions/0/templates.json"
 
 @app.before_request
 def before_request():
@@ -405,15 +406,27 @@ def create_repository():
         name=data.get('name'),
         url=data.get('url'),
     )
+    new_repository.update_templates()
     db.session.add(new_repository)
     db.session.commit()
-    new_repository.update_templates()
     return jsonify(new_repository.to_dict()), 201
 
 # Read (GET) for all templates
 @app.route("/api/repositories", methods=["GET"])
 @login_required
 def get_repositories():
+    try:
+        setting = models.Settings.query.filter_by(key="@system/repository_init_done").first()
+        if not setting:
+            repository = Repository(name="FrameOS Official Templates", url=FRAMEOS_REPOSITORY_URL)
+            repository.update_templates()
+            db.session.add(repository)
+            setting = models.Settings(key="@system/repository_init_done", value="true")
+            db.session.add(setting)
+            db.session.commit()
+    except Exception as e:
+        print(e)
+
     repositories = [repository.to_dict() for repository in Repository.query.all()]
     return jsonify(repositories)
 
@@ -438,8 +451,9 @@ def update_repository(repository_id):
         repository.name = data.get('name', repository.name)
     if 'url' in data:
         repository.url = data.get('url', repository.url)
-    db.session.commit()
     repository.update_templates()
+    db.session.add(repository)
+    db.session.commit()
     return jsonify(repository.to_dict())
 
 # Delete (DELETE)
