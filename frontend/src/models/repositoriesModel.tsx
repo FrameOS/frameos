@@ -19,7 +19,7 @@ export const repositoriesModel = kea<repositoriesModelType>([
           try {
             const response = await fetch('/api/repositories')
             if (!response.ok) {
-              throw new Error('Failed to fetch frames')
+              throw new Error('Failed to fetch repositories')
             }
             const data = await response.json()
             return data as RepositoryType[]

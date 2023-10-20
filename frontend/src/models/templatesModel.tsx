@@ -19,7 +19,7 @@ export const templatesModel = kea<templatesModelType>([
           try {
             const response = await fetch('/api/templates')
             if (!response.ok) {
-              throw new Error('Failed to fetch frames')
+              throw new Error('Failed to fetch templates')
             }
             const data = await response.json()
             return data as TemplateType[]

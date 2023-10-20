@@ -21,7 +21,7 @@ export const appsModel = kea<appsModelType>([
           try {
             const response = await fetch('/api/apps')
             if (!response.ok) {
-              throw new Error('Failed to fetch frames')
+              throw new Error('Failed to fetch apps')
             }
             const data = await response.json()
             return data.apps as Record<string, App>

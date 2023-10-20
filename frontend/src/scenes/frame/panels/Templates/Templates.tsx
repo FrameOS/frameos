@@ -11,8 +11,10 @@ import { Box } from '../../../../components/Box'
 import { Field } from '../../../../components/Field'
 import { TextInput } from '../../../../components/TextInput'
 import { repositoriesModel } from '../../../../models/repositoriesModel'
-import { TrashIcon, ArrowPathIcon } from '@heroicons/react/24/solid'
+import { TrashIcon, ArrowPathIcon, ClipboardIcon } from '@heroicons/react/24/solid'
 import React from 'react'
+import { DropdownMenu } from '../../../../components/DropdownMenu'
+import copy from 'copy-to-clipboard'
 
 export function Templates() {
   const { applyTemplate } = useActions(frameLogic)
@@ -95,15 +97,30 @@ export function Templates() {
             <div className="flex gap-2 items-start justify-between">
               <H6>{repository.name}</H6>
               <div className="flex gap-2">
-                <Button size="small" onClick={() => repository.id && removeRepository(repository.id)}>
-                  <TrashIcon className="w-5 h-5" />
-                </Button>
-                <Button size="small" onClick={() => repository.id && refreshRepository(repository.id)}>
-                  <ArrowPathIcon className="w-5 h-5" />
-                </Button>
+                <DropdownMenu
+                  items={[
+                    {
+                      label: 'Refresh',
+                      onClick: () => repository.id && refreshRepository(repository.id),
+                      icon: <ArrowPathIcon className="w-5 h-5" />,
+                      title: `Last refresh: ${repository.last_updated_at}`,
+                    },
+                    {
+                      label: 'Copy repository URL',
+                      title: repository.url,
+                      onClick: async () => repository.url && copy(repository.url),
+                      icon: <ClipboardIcon className="w-5 h-5" />,
+                    },
+                    {
+                      label: 'Remove',
+                      onClick: () => repository.id && removeRepository(repository.id),
+                      icon: <TrashIcon className="w-5 h-5" />,
+                    },
+                  ]}
+                />
               </div>
             </div>
-            <div className="text-sm break-words">{repository.url}</div>
+            <div className="text-sm whitespace-nowrap p-2 overflow-x-auto bg-black text-white">{repository.url}</div>
             {(repository.templates || []).map((template) => (
               <Template template={template} applyTemplate={(template) => applyRemoteTemplate(repository, template)} />
             ))}
