@@ -24,8 +24,19 @@
       "name": "scaling_factor",
       "type": "string",
       "value": "1",
-      "required": true,
       "label": "Scaling factor"
+    },
+    {
+      "name": "wait_selector",
+      "type": "string",
+      "value": "",
+      "label": "Wait for CSS selector"
+    },
+    {
+      "name": "wait_delay",
+      "type": "string",
+      "value": "0",
+      "label": "Extra Seconds to wait"
     }
   ]
 }
