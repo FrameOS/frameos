@@ -10,6 +10,7 @@ import { TextInput } from '../../components/TextInput'
 import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
+import { Code } from '../../components/Code'
 
 export function Settings() {
   const { savedSettings, savedSettingsLoading, settingsChanged } = useValues(settingsLogic)
@@ -74,11 +75,18 @@ export function Settings() {
                     <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
                       <TextArea autoFocus={!!savedSettings?.ssh_keys?.default} />
                     </Field>
-                    <p>The default key will be used on all frames that don't have a password</p>
-                    <p>
-                      To generate a key, run <code>ssh-keygen -f keyfile</code>, then copy the contents of{' '}
-                      <code>keyfile</code>
-                      here, and copy <code>keyfile.pub</code> to the remote host's <code>~/.ssh/authorized_keys</code>
+                    <p className="text-sm leading-loose">
+                      This key will be used on all frames that don't have a password.
+                    </p>
+                    <p className="text-sm leading-loose">
+                      To generate a key:
+                      <br />
+                      1. run <Code>ssh-keygen -f keyfile</Code>
+                      <br />
+                      2. copy <Code>keyfile</Code> here
+                      <br />
+                      3. copy <Code>keyfile.pub</Code> to the remote host's <Code>~/.ssh/authorized_keys</Code>, or to
+                      the Raspberry Pi Installer
                     </p>
                   </Box>
                 </Group>
