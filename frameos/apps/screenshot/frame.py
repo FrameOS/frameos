@@ -51,31 +51,24 @@ class ScreenshotApp(App):
         if browser == 'firefox':
             # TODO: fails with:
             # "OSError: [Errno 8] Exec format error: '/home/raam/.wdm/drivers/geckodriver/linux64/v0.33.0/geckodriver'"
+            # TODO: How to get a ARM geckodriver?
 
-            self.log("Checking for firefox. Installing via apt if missing.")
-            self.shell("dpkg -l | grep -q \"^ii  firefox-esr\" || (sudo apt -y update && sudo apt install -y firefox-esr)")
-
-            self.log("Trying to create firefox web driver...")
+            self.log("Creating firefox web driver...")
             from selenium import webdriver
             from selenium.webdriver.firefox.service import Service as FirefoxService
             from webdriver_manager.firefox import GeckoDriverManager
             self.driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()))
-            self.log(f"Success! {self.driver}")
+            self.log(f"Success! {self.driver.session_id}")
 
         elif browser == 'chromium':
-            self.log("Checking for chromium. Installing via apt if missing.")
-            self.shell("dpkg -l | grep -q \"^ii  chromium-browser\" || "
-                       "(sudo apt -y update && "
-                       "sudo apt install -y chromium-browser xvfb chromium-chromedriver)")
-
-            self.log("Trying to create chromium web driver...")
+            scaling_factor = str(float(self.config.get('scaling_factor', 1)))
+            self.log(f"Creating chromium web driver with scaling factor {scaling_factor}")
             from selenium.webdriver.chrome.options import Options
             from selenium import webdriver
             from selenium.webdriver.chrome.service import Service as ChromiumService
 
             options = Options()
             options.headless = True
-            scaling_factor = str(float(self.config.get('scaling_factor', 1)))
             options.add_argument(f"--force-device-scale-factor={scaling_factor}")
             options.add_argument("--use-gl=swiftshader")
             options.add_argument("--disable-software-rasterizer")
@@ -84,7 +77,7 @@ class ScreenshotApp(App):
             options.add_argument("--disable-gpu")
             options.add_argument("--disable-dev-shm-usage")
             self.driver = webdriver.Chrome(service=ChromiumService("/usr/bin/chromedriver"), options=options)
-            self.log(f"Success! session_id: {self.driver.session_id}")
+            self.log(f"Success! {self.driver.session_id}")
         else:
             raise ValueError(f"Browser {browser} not supported")
 
@@ -93,17 +86,33 @@ class ScreenshotApp(App):
         if not url:
             raise ValueError("URL not provided in app config")
 
-        self.init_driver()
+        if self.driver is None:
+            self.init_driver()
         if not self.driver:
             raise ValueError("Selenium driver not initialized")
 
-        self.log(f"Fetching: {url}")
-        scaling_factor = str(float(self.config.get('scaling_factor', 1)))
-        self.driver.set_window_size(context.image.width / scaling_factor, context.image.height / scaling_factor)
-        self.driver.get(url)
+        scaling_factor = float(self.config.get('scaling_factor', 1))
+        width, height = int(context.image.width / scaling_factor), int(context.image.height / scaling_factor)
+        self.log(f"Fetching {url} at {width}x{height} @{scaling_factor}x")
+        self.driver.set_window_size(width, height)
+
+        # if driver's url is url, refresh, otherwise set url
+        if self.driver.current_url == url:
+            self.log(f"Refreshing url: {self.driver.current_url}")
+            self.driver.refresh()
+        else:
+            self.log(f"Current url: {self.driver.current_url}")
+            self.driver.get("data:,")
+            self.log(f"Current url: {self.driver.current_url}")
+            self.driver.refresh()
+            self.driver.get(url)
+            self.log(f"Current url: {self.driver.current_url}")
         self.log(f"Saving screenshot")
+
         content = self.driver.get_screenshot_as_png()
-        self.driver.quit()
+        try:
+            self.log(f"Screenshot taken, size: {len(content)} bytes")
+        except TypeError as e:
+            self.log(f"Screenshot size error! Type: {type(content)}. Error: {e}")
 
         context.image = Image.open(io.BytesIO(content))
-
