@@ -4,7 +4,7 @@ import os
 from zipfile import ZipFile
 
 from app import huey, app
-from app.models import new_log as log, Frame, update_frame, get_apps_from_scenes, get_settings_dict
+from app.models import new_log as log, Frame, update_frame, get_apps_from_scenes, get_settings_dict, get_app_configs
 from paramiko import RSAKey, SSHClient, AutoAddPolicy
 from io import StringIO
 from gevent import sleep
@@ -108,7 +108,37 @@ def get_frame_json(frame: Frame) -> dict:
     frame_json.pop("ssh_pass", None)
     frame_json.pop("ssh_port", None)
     frame_json.pop("status", None)
-    frame_json['settings'] = get_settings_dict() # TODO: might not want to save all settings on all frames
+
+    setting_keys = set()
+    app_configs = get_app_configs()
+    for scene in frame.scenes:
+        for node in scene.get('nodes', []):
+            if node.get('type', None) == 'app':
+                sources = node.get('data', {}).get('sources', None)
+                if sources and len(sources) > 0:
+                    try:
+                        config = sources.get('config.json', '{}')
+                        config = json.loads(config)
+                        settings = config.get('settings', [])
+                        for key in settings:
+                            setting_keys.add(key)
+                    except:
+                        pass
+                else:
+                    keyword = node.get('data', {}).get('keyword', None)
+                    if keyword:
+                        app_config = app_configs.get(keyword, None)
+                        if app_config:
+                            settings = app_config.get('settings', [])
+                            for key in settings:
+                                setting_keys.add(key)
+
+    all_settings = get_settings_dict()
+    final_settings = {}
+    for key in setting_keys:
+        final_settings[key] = all_settings.get(key, None)
+
+    frame_json['settings'] = final_settings
     return frame_json
 
 

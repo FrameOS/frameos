@@ -16,15 +16,18 @@ from werkzeug.security import generate_password_hash, check_password_hash
 def get_app_configs() -> Dict[str, Dict]:
     local_apps_path = "../frameos/apps"
     configs = {}
-    for app_name in os.listdir(local_apps_path):
-        local_app_path = os.path.join(local_apps_path, app_name)
+    for keyword in os.listdir(local_apps_path):
+        local_app_path = os.path.join(local_apps_path, keyword)
         if os.path.isdir(local_app_path):
             config_path = os.path.join(local_app_path, "config.json")
             if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    config = json.load(f)
-                    if 'name' in config:
-                        configs[app_name] = config
+                try:
+                    with open(config_path, 'r') as f:
+                        config = json.load(f)
+                        if 'name' in config:
+                            configs[keyword] = config
+                except Exception as e:
+                    print(f"Error loading config for {keyword}: {e}")
     return configs
 
 def get_one_app_sources(keyword: str) -> Optional[Dict[str, str]]:
@@ -270,7 +273,7 @@ def create_default_scene() -> Dict:
                     "y": 412.8192307692308
                 },
                 "data": {
-                    "keyword": "boilerplate",
+                    "keyword": "unsplash",
                     "config": {}
                 },
                 "width": 133,

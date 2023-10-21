@@ -3,6 +3,7 @@
   "description": "Random AI generated art",
   "category": "image",
   "version": "1.0.0",
+  "settings": ["openai"],
   "fields": [
     {
       "name": "prompt",
