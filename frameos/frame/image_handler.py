@@ -4,7 +4,7 @@ import os
 
 from flask_socketio import SocketIO
 from threading import Lock
-from PIL import Image, ImageChops
+from PIL import Image
 import RPi.GPIO as GPIO
 
 from .logger import Logger
@@ -104,9 +104,9 @@ class ImageHandler:
             image_to_framebuffer(rotated_image, logger=self.logger)
 
     def are_images_equal(self, img1: Image, img2: Image) -> bool:
-        if img1.size != img2.size:
+        if img1.size != img2.size or img1.mode != img2.mode:
             return False
-        return not ImageChops.difference(img1, img2).getbbox()
+        return img1.tobytes() == img2.tobytes()
 
     def refresh_image(self, trigger: str):
         if not self.image_update_lock.acquire(blocking=False):
@@ -154,7 +154,7 @@ class ImageHandler:
                         else: # cover
                             self.next_image = scale_cover(self.next_image, requested_width, requested_height)
 
-                    if self.current_image is None or not self.are_images_equal(self.next_image, self.current_image):
+                    if self.current_image is None or not self.are_images_equal(self.next_image, self.current_image) or True:
                         self.logger.log({ 'event': '@frame:refreshing_screen' })
                         self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
                         self.slow_update_image_on_frame(self.next_image)

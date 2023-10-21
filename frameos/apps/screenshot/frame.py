@@ -97,16 +97,13 @@ class ScreenshotApp(App):
         self.driver.set_window_size(width, height)
 
         # if driver's url is url, refresh, otherwise set url
+        self.log(f"Current url: {self.driver.current_url}")
         if self.driver.current_url == url:
-            self.log(f"Refreshing url: {self.driver.current_url}")
+            self.log(f"Refreshing url: {url}")
             self.driver.refresh()
         else:
-            self.log(f"Current url: {self.driver.current_url}")
-            self.driver.get("data:,")
-            self.log(f"Current url: {self.driver.current_url}")
-            self.driver.refresh()
+            self.log(f"Setting url: {url}")
             self.driver.get(url)
-            self.log(f"Current url: {self.driver.current_url}")
         self.log(f"Saving screenshot")
 
         content = self.driver.get_screenshot_as_png()
