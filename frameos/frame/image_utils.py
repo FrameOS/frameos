@@ -111,6 +111,8 @@ def image_to_framebuffer(img: Image, fb_path='/dev/fb0', logger: Optional[Logger
 
     if img.mode == 'RGB' and bpp == 16:
         pixels = rgb_to_rgb565(img)
+    elif img.mode == 'RGBA' and bpp == 16:
+        pixels = rgba_to_rgb565(img)
     elif img.mode == 'RGB' and bpp == 32:
         pixels = rgb_to_rgbx(img, color_mode)
     else:
@@ -185,7 +187,7 @@ def rgb_to_rgbx(img, color_mode = 'RGBX'):
     return np.stack(channels, axis=-1).tobytes()
 
 
-def rgb_to_rgb565(img, color_mode = 'RGBX'):
+def rgb_to_rgb565(img):
     """Convert a PIL.Image (in RGB mode) to RGB565 mode."""
     r, g, b = img.split()
 
@@ -202,6 +204,23 @@ def rgb_to_rgb565(img, color_mode = 'RGBX'):
     # Combine and return as bytes
     return (r565 | g565 | b565).tobytes()
 
+
+def rgba_to_rgb565(img):
+    """Convert a PIL.Image (in RGBA mode) to RGB565 mode."""
+    r, g, b, a = img.split()
+
+    # Convert channels to arrays
+    r = np.asarray(r).astype(np.uint16)
+    g = np.asarray(g).astype(np.uint16)
+    b = np.asarray(b).astype(np.uint16)
+
+    # Perform the bit-wise operations for RGB565 conversion
+    r565 = (r >> 3) << 11
+    g565 = (g >> 2) << 5
+    b565 = b >> 3
+
+    # Combine and return as bytes
+    return (r565 | g565 | b565).tobytes()
 
 def try_to_disable_cursor_blinking():
     subprocess.run('sudo sh -c "setterm -cursor off > /dev/tty0"', shell=True)

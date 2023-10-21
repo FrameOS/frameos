@@ -126,9 +126,9 @@ def deploy_frame(id: int):
 
             ssh = get_ssh_connection(frame)                
 
-            # exec_command(frame, ssh, "sudo apt -y install libopenjp2-7")
+            # exec_command(frame, ssh, "sudo apt -y update")
             exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libopenjp2-7\" || sudo apt -y install libopenjp2-7")
-            exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libatlas-base-dev\" || sudo apt -y install libatlas-base-dev")
+            exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libopenblas-dev\" || sudo apt -y install libopenblas-dev")
             exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-pip\" || sudo apt -y install python3-pip")
             exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  fonts-dejavu\" || sudo apt -y install fonts-dejavu")
             
@@ -186,8 +186,8 @@ def deploy_frame(id: int):
             exec_command(frame, ssh, "sudo mv /srv/frameos/frameos.service /etc/systemd/system/frameos.service")
             exec_command(frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
             exec_command(frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")
-
-            exec_command(frame, ssh, "cd /srv/frameos && (sha256sum -c requirements.txt.sha256sum 2>/dev/null || (pip3 install -r requirements.txt && sha256sum requirements.txt > requirements.txt.sha256sum))")
+            exec_command(frame, ssh, "sudo rm -rf /usr/lib/python3.11/EXTERNALLY-MANAGED")
+            exec_command(frame, ssh, "cd /srv/frameos && (sha256sum -c requirements.txt.sha256sum 2>/dev/null || (echo '> pip3 install -r requirements.txt' && pip3 install -r requirements.txt && sha256sum requirements.txt > requirements.txt.sha256sum))")
 
             # Reload systemd, stop any existing service, enable and restart the new service
             exec_command(frame, ssh, "sudo systemctl daemon-reload")

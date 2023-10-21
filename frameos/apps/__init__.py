@@ -1,4 +1,5 @@
 import re
+import subprocess
 from dataclasses import dataclass
 from typing import Dict, Optional, Any, Callable, List, Union, TYPE_CHECKING
 from PIL.Image import Image
@@ -147,3 +148,10 @@ class App:
     def dispatch(self, event: str, payload: Optional[Dict] = None, image: Optional[Image] = None) -> ExecutionContext:
         self._log({ "event": f"{self.keyword}:{event}", "payload": payload, "image": bool(image) })
         return self.app_handler.dispatch_event(event, payload, image)
+
+    def shell(self, command: str):
+        with subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True) as proc:
+            for line in proc.stdout:
+                self.log(line.rstrip("\n"))
+            for line in proc.stderr:
+                self.error(line.rstrip("\n"))
