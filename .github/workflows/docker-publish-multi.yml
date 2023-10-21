@@ -48,7 +48,7 @@ jobs:
 
       # Build each platform without pushing
       - name: Build (without push) for ${{ matrix.platform }}
-        uses: depot/build-push-action@v2
+        uses: depot/build-push-action@v1
         with:
           project: rsbh2wrlkj
           token: ${{ secrets.DEPOT_TOKEN }}
@@ -91,7 +91,7 @@ jobs:
 
       # Push all built platforms as a multi-arch image
       - name: Push multi-arch image
-        uses: depot/build-push-action@v2
+        uses: depot/build-push-action@v1
         with:
           project: rsbh2wrlkj
           token: ${{ secrets.DEPOT_TOKEN }}
