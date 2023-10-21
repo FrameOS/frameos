@@ -5,8 +5,11 @@ import Editor from '@monaco-editor/react'
 import { AppNodeData, PanelWithMetadata } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import schema from '../../../../../schema/config_json.json'
+import type { editor as importedEditor } from 'monaco-editor'
+import { Monaco } from '@monaco-editor/react'
+import clsx from 'clsx'
 
 interface EditAppProps {
   panel: PanelWithMetadata
@@ -25,16 +28,27 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
     keyword: nodeData.keyword,
     sources: nodeData.sources,
   }
-  const { sources, sourcesLoading, activeFile, hasChanges, changedFiles, configJson } = useValues(
-    editAppLogic(logicProps)
+  const logic = editAppLogic(logicProps)
+  const { sources, sourcesLoading, activeFile, hasChanges, changedFiles, configJson, modelMarkers } = useValues(logic)
+  const { saveChanges, setActiveFile, updateFile } = useActions(logic)
+  const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
+    [null, null]
   )
-  const { saveChanges, setActiveFile, updateFile } = useActions(editAppLogic(logicProps))
 
   useEffect(() => {
-    persistUntilClosed(panel, editAppLogic(logicProps))
+    persistUntilClosed(panel, logic)
   }, [])
 
-  function beforeMount(monaco: any) {
+  useEffect(() => {
+    if (monaco && editor && activeFile) {
+      const model = editor.getModel()
+      if (model) {
+        monaco.editor.setModelMarkers(model, 'owner', modelMarkers[activeFile] || [])
+      }
+    }
+  }, [monaco, activeFile, modelMarkers])
+
+  function beforeMount(monaco: Monaco) {
     monaco.editor.defineTheme('darkframe', {
       base: 'vs-dark',
       inherit: true,
@@ -79,9 +93,17 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
             <div key={file} className="w-min">
               <Button
                 size="small"
-                color={activeFile === file ? 'teal' : 'none'}
+                color={activeFile === file ? (modelMarkers[file]?.length ? 'red' : 'teal') : 'none'}
                 onClick={() => setActiveFile(file)}
-                className="whitespace-nowrap"
+                className={clsx(
+                  'whitespace-nowrap',
+                  modelMarkers[file]?.length ? (activeFile === file ? 'text-red-200' : 'text-red-500') : ''
+                )}
+                title={
+                  modelMarkers[file]?.length
+                    ? `line ${modelMarkers[file][0].startLineNumber}, col ${modelMarkers[file][0].startColumn}: ${modelMarkers[file][0].message}`
+                    : undefined
+                }
               >
                 {changedFiles[file] ? '* ' : ''}
                 {file}
@@ -97,6 +119,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
             value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
             theme="darkframe"
             beforeMount={beforeMount}
+            onMount={(editor, monaco) => setMonacoAndEditor([monaco, editor])}
             onChange={(value) => updateFile(activeFile, value ?? '')}
             options={{ minimap: { enabled: false } }}
           />
