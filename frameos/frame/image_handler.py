@@ -1,3 +1,4 @@
+import time
 import traceback
 import os
 
@@ -117,6 +118,7 @@ class ImageHandler:
 
         def do_update():
             try:
+                start = time.time()
                 self.logger.log({ 'event': '@frame:refresh_image', 'trigger': trigger })
                 self.image_update_in_progress = True
 
@@ -128,9 +130,8 @@ class ImageHandler:
                 )
                 context = self.app_handler.dispatch_event('render', image=self.next_image)
                 self.next_image, apps_ran, apps_errored = context.image, context.apps_ran, context.apps_errored
-                
                 if self.next_image is None:
-                    self.logger.log({ 'event': '@frame:refresh_skipped', 'reason': 'no_image', 'apps_ran': apps_ran })
+                    self.logger.log({ 'event': '@frame:refresh_skipped', 'seconds': round(time.time() - start, 2), 'reason': 'no_image', 'apps_ran': apps_ran })
                 else:
                     if self.config.width != self.next_image.width or self.config.height != self.next_image.height:
                         self.logger.log({ 
@@ -159,11 +160,11 @@ class ImageHandler:
                         self.slow_update_image_on_frame(self.next_image)
                         self.current_image = self.next_image
                         self.next_image = None
-                        self.logger.log({ 'event': '@frame:refresh_done', 'apps_ran': apps_ran, **({'apps_errored': apps_errored} if len(apps_errored) > 0 else {}) })
+                        self.logger.log({ 'event': '@frame:refresh_done', 'seconds': round(time.time() - start, 2), 'apps_ran': apps_ran, **({'apps_errored': apps_errored} if len(apps_errored) > 0 else {}) })
                     else:
-                        self.logger.log({ 'event': '@frame:refresh_skipped', 'reason': 'no_change', 'apps_ran': apps_ran, **({'apps_errored': apps_errored} if len(apps_errored) > 0 else {}) })
+                        self.logger.log({ 'event': '@frame:refresh_skipped', 'seconds': round(time.time() - start, 2), 'reason': 'no_change', 'apps_ran': apps_ran, **({'apps_errored': apps_errored} if len(apps_errored) > 0 else {}) })
             except Exception as e:
-                self.logger.log({ 'event': '@frame:refresh_error', 'error': str(e), 'stacktrace': traceback.format_exc()  })
+                self.logger.log({ 'event': '@frame:refresh_error', 'error': str(e), 'stacktrace': traceback.format_exc(), 'seconds': round(time.time() - start, 2)  })
             finally:
                 self.image_update_in_progress = False
                 self.image_update_lock.release()

@@ -52,6 +52,8 @@ class Server:
                 image = self.image_handler.next_image or self.image_handler.current_image or self.saved_image
                 if image is None:
                     return "No image"
+                if image.size[0] == 0 or image.size[1] == 0:
+                    return "No image"
                 
                 if image != self.saved_image or self.saved_bytes is None:
                     self.saved_bytes = io.BytesIO()
