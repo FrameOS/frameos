@@ -13,6 +13,7 @@ function setDefaultSettings(settings: Record<string, any>): Record<string, any> 
     github: settings.github ?? {},
     openai: settings.openai ?? {},
     repositories: settings.repositories ?? [],
+    ssh_keys: settings.ssh_keys ?? {},
   }
 }
 
@@ -66,14 +67,6 @@ export const settingsLogic = kea<settingsLogicType>([
       },
     },
   })),
-  reducers({
-    settings: {
-      setSettingsValue: (state, { name, value }) =>
-        Array.isArray(name) && name.length == 2 && name[0] === 'repositories' && name[1] >= state.length
-          ? setDefaultSettings({ ...state, respositories: [...state.repositories, value] })
-          : state,
-    },
-  }),
   afterMount(({ actions }) => {
     actions.loadSettings()
   }),

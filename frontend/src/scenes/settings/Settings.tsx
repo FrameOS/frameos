@@ -49,14 +49,14 @@ export function Settings() {
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>Home Assistant</H6>
                     <Field name="url" label="Home assistant URL">
-                      <TextInput name="url" placeholder="http://homeassistant.local:8123" />
+                      <TextInput placeholder="http://homeassistant.local:8123" />
                     </Field>
                     <Field
                       name="access_token"
                       label="Access token"
                       secret={!!savedSettings?.home_assistant?.access_token}
                     >
-                      <TextInput name="access_token" autoFocus={!!savedSettings?.home_assistant?.access_token} />
+                      <TextInput autoFocus={!!savedSettings?.home_assistant?.access_token} />
                     </Field>
                   </Box>
                 </Group>
@@ -64,8 +64,22 @@ export function Settings() {
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>Github</H6>
                     <Field name="api_key" label="API key" secret={!!savedSettings?.github?.api_key}>
-                      <TextInput name="api_key" autoFocus={!!savedSettings?.github?.api_key} />
+                      <TextInput autoFocus={!!savedSettings?.github?.api_key} />
                     </Field>
+                  </Box>
+                </Group>
+                <Group name="ssh_keys">
+                  <Box className="p-2 mb-4 space-y-2">
+                    <H6>SSH Keys</H6>
+                    <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
+                      <TextArea autoFocus={!!savedSettings?.ssh_keys?.default} />
+                    </Field>
+                    <p>The default key will be used on all frames that don't have a password</p>
+                    <p>
+                      To generate a key, run <code>ssh-keygen -f keyfile</code>, then copy the contents of{' '}
+                      <code>keyfile</code>
+                      here, and copy <code>keyfile.pub</code> to the remote host's <code>~/.ssh/authorized_keys</code>
+                    </p>
                   </Box>
                 </Group>
               </Form>

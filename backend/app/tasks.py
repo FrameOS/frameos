@@ -4,7 +4,8 @@ import os
 from zipfile import ZipFile
 
 from app import huey, app
-from app.models import new_log as log, Frame, update_frame, get_apps_from_scenes, get_settings_dict, get_app_configs
+from app.models import new_log as log, Frame, update_frame, get_apps_from_scenes, get_settings_dict, get_app_configs, \
+    Settings
 from paramiko import RSAKey, SSHClient, AutoAddPolicy
 from io import StringIO
 from gevent import sleep
@@ -59,7 +60,8 @@ def reset_frame(id: int):
         log(id, "admin", "Resetting frame status to 'uninitialized'")
 
 def get_ssh_connection(frame: Frame) -> SSHClient:
-    log(frame.id, "stdinfo", f"Connecting via SSH to {frame.ssh_user}@{frame.frame_host}")
+    ssh_type = '(password)' if frame.ssh_pass else '(keypair)'
+    log(frame.id, "stdinfo", f"Connecting via SSH to {frame.ssh_user}@{frame.frame_host} {ssh_type}")
     ssh = SSHClient()
     ssh_connections.add(ssh)
     ssh.set_missing_host_key_policy(AutoAddPolicy())
@@ -67,14 +69,15 @@ def get_ssh_connection(frame: Frame) -> SSHClient:
     if frame.ssh_pass:
         ssh.connect(frame.frame_host, username=frame.ssh_user, password=frame.ssh_pass, timeout=10)
     else:
-        key_path = os.path.expanduser('~/.ssh/id_rsa')
-        if os.path.exists(key_path):
-            with open(key_path, 'r') as f:
-                ssh_key = f.read()
-            ssh_key_obj = RSAKey.from_private_key(StringIO(ssh_key))
+        ssh_keys = Settings.query.filter_by(key="ssh_keys").first()
+        default_key = None
+        if ssh_keys and ssh_keys.value:
+            default_key = ssh_keys.value.get("default", None)
+        if default_key:
+            ssh_key_obj = RSAKey.from_private_key(StringIO(default_key))
             ssh.connect(frame.frame_host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=10)
         else:
-            raise Exception(f"SSH key file does not exist at {key_path}")
+            raise Exception(f"Set up SSH keys in the settings page, or provide a password for the frame")
     log(frame.id, "stdinfo", f"Connected via SSH to {frame.ssh_user}@{frame.frame_host}")
     return ssh
 
