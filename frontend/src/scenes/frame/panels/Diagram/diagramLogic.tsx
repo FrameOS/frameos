@@ -94,6 +94,8 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
     selectedNode: [(s) => [s.nodes], (nodes) => nodes.find((node) => node.selected) ?? null],
     selectedNodeId: [(s) => [s.selectedNode], (node) => node?.id ?? null],
+    selectedEdge: [(s) => [s.edges], (edges) => edges.find((edge) => edge.selected) ?? null],
+    selectedEdgeId: [(s) => [s.selectedEdge], (edge) => edge?.id ?? null],
     edgesForNode: [
       (s) => [s.edges],
       (edges: Edge[]): Record<string, Edge[]> => {
@@ -147,7 +149,8 @@ export const diagramLogic = kea<diagramLogicType>([
         actions.setFrameFormValues({
           scenes: values.editingFrame.scenes?.map((scene) =>
             scene.id === props.sceneId && !equal(scene.nodes, nodes)
-              ? { ...scene, nodes: nodes.map((n) => (n.selected ? { ...n, selected: false } : n)) }
+              ? // set the nodes on the scene's form, and remove the selected flag from all
+                { ...scene, nodes: nodes.map((n) => (n.selected ? { ...n, selected: false } : n)) }
               : scene
           ),
         })
@@ -159,7 +162,8 @@ export const diagramLogic = kea<diagramLogicType>([
         actions.setFrameFormValues({
           scenes: values.editingFrame.scenes?.map((scene) =>
             scene.id === props.sceneId && !equal(scene.edges, edges)
-              ? { ...scene, edges: edges.map((e) => (e.selected ? { ...e, selected: false } : e)) }
+              ? // set the edges on the scene's form, and remove the selected flag from all
+                { ...scene, edges: edges.map((e) => (e.selected ? { ...e, selected: false } : e)) }
               : scene
           ),
         })
@@ -167,10 +171,14 @@ export const diagramLogic = kea<diagramLogicType>([
     },
     scene: (scene: FrameScene, oldScene: FrameScene) => {
       if (scene && !equal(scene.nodes, oldScene?.nodes)) {
-        actions.setNodes(scene.nodes)
+        // nodes changed on the form, update our local state, but retain the selected flag
+        const selectedNodeId = values.selectedNodeId
+        actions.setNodes(scene.nodes.map((n) => (n.id === selectedNodeId ? { ...n, selected: true } : n)))
       }
       if (scene && !equal(scene.edges, oldScene?.edges)) {
-        actions.setEdges(scene.edges)
+        // edges changed on the form, update our local state, but retain the selected flag
+        const selectedEdgeId = values.selectedEdgeId
+        actions.setEdges(scene.edges.map((e) => (e.id === selectedEdgeId ? { ...e, selected: true } : e)))
       }
     },
   })),

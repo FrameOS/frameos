@@ -8,7 +8,7 @@ import { panelsLogic } from '../panelsLogic'
 import { useEffect, useState } from 'react'
 import schema from '../../../../../schema/config_json.json'
 import type { editor as importedEditor } from 'monaco-editor'
-import { Monaco } from '@monaco-editor/react'
+import type { Monaco } from '@monaco-editor/react'
 import clsx from 'clsx'
 
 interface EditAppProps {
