@@ -22,6 +22,7 @@ class ImageHandler:
         self.socketio = socketio
         self.current_image: Image = None
         self.next_image: Image = None
+        self.kiosk_image: Image = None
         self.image_update_lock: Lock = Lock()
         self.image_update_in_progress: bool = False
         self.config: Config = config
@@ -158,6 +159,8 @@ class ImageHandler:
                             self.next_image = scale_center(self.next_image, requested_width, requested_height, self.config.background_color)
                         else: # cover
                             self.next_image = scale_cover(self.next_image, requested_width, requested_height)
+
+                    self.kiosk_image = self.next_image.copy()
 
                     if self.current_image is None or not self.are_images_equal(self.next_image, self.current_image) or True:
                         self.logger.log({ 'event': '@frame:refreshing_screen' })

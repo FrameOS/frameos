@@ -49,7 +49,7 @@ class Server:
         @self.app.route('/image')
         def image():
             try:
-                image = self.image_handler.next_image or self.image_handler.current_image or self.saved_image
+                image = self.image_handler.kiosk_image
                 if image is None:
                     return "No image"
                 if image.size[0] == 0 or image.size[1] == 0:
@@ -59,6 +59,7 @@ class Server:
                     self.saved_bytes = io.BytesIO()
                     self.saved_format = image.format or 'png'
                     image.save(self.saved_bytes, format=self.saved_format)
+                    self.saved_image = image
 
                 self.saved_bytes.seek(0)
                 return send_file(self.saved_bytes, mimetype=f'image/{self.saved_format.lower()}', as_attachment=False)
