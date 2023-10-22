@@ -152,7 +152,7 @@ def deploy_frame(id: int):
         try:
             frame = Frame.query.get_or_404(id)
             if frame.status == 'deploying':
-                raise Exception(f"Can not deploy while already deploying")
+                raise Exception(f"Already deploying, will not deploy again. Request again to force deploy.")
 
             frame.status = 'deploying'
             update_frame(frame)
