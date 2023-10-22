@@ -28,6 +28,7 @@ class ImageHandler:
         self.app_handler: AppHandler = app_handler
         self.inky = None # inky frames
         self.ws: WaveShare = None
+        self.is_display_on = True
 
         self.verify_device()
 
@@ -177,6 +178,7 @@ class ImageHandler:
     def display_on(self):
         if self.config.device == 'pimoroni.hyperpixel2r':
             GPIO.cleanup()
+        self.is_display_on = True
 
     def display_off(self):
         if self.config.device == 'pimoroni.hyperpixel2r':
@@ -186,3 +188,10 @@ class ImageHandler:
             pwm = GPIO.PWM(pin, 1000)
             pwm.start(0)
             pwm.stop()
+        self.is_display_on = False
+
+    def display_toggle(self):
+        if self.is_display_on:
+            self.display_off()
+        else:
+            self.display_on()
