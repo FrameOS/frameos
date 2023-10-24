@@ -139,7 +139,7 @@ class ImageHandler:
                 if self.next_image is None:
                     self.logger.log({ 'event': '@frame:refresh_skipped', 'seconds': round(time.time() - start, 2), 'reason': 'no_image', 'apps_ran': apps_ran })
                 else:
-                    if self.config.width != self.next_image.width or self.config.height != self.next_image.height:
+                    if requested_width != self.next_image.width or requested_height != self.next_image.height:
                         self.logger.log({ 
                             'event': '@frame:resizing_image', 
                             'trigger': trigger,
