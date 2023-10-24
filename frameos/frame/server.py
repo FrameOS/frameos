@@ -81,7 +81,7 @@ class Server:
             return "off"
 
         @self.app.route('/display_toggle')
-        def display_off():
+        def display_toggle():
             on = self.image_handler.display_toggle()
             return "on" if on else "off"
 
