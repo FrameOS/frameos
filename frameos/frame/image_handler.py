@@ -193,8 +193,10 @@ class ImageHandler:
             pwm.stop()
         self.is_display_on = False
 
-    def display_toggle(self):
+    def display_toggle(self) -> bool:
         if self.is_display_on:
             self.display_off()
+            return True
         else:
             self.display_on()
+            return False
