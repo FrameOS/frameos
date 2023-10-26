@@ -1,3 +1,4 @@
+import subprocess
 import time
 import traceback
 import os
@@ -181,6 +182,9 @@ class ImageHandler:
     def display_on(self):
         if self.config.device == 'pimoroni.hyperpixel2r':
             GPIO.cleanup()
+        elif self.config.device == 'framebuffer':
+            subprocess.run(['vcgencmd', 'display_power', '1'])
+
         self.is_display_on = True
 
     def display_off(self):
@@ -191,6 +195,8 @@ class ImageHandler:
             pwm = GPIO.PWM(pin, 1000)
             pwm.start(0)
             pwm.stop()
+        elif self.config.device == 'framebuffer':
+            subprocess.run(['vcgencmd', 'display_power', '0'])
         self.is_display_on = False
 
     def display_toggle(self) -> bool:
