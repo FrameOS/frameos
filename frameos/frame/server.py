@@ -10,6 +10,7 @@ from .logger import Logger
 from .app_handler import AppHandler
 from .image_handler import ImageHandler
 from .button_handler import ButtonHandler
+from .metrics_logger import MetricsLogger
 from .scheduler import Scheduler
 from .touch_click_handler import TouchClickHandler
 
@@ -54,15 +55,17 @@ class Server:
                     return "No image"
                 if image.size[0] == 0 or image.size[1] == 0:
                     return "No image"
-                
-                if image != self.saved_image or self.saved_bytes is None:
-                    self.saved_bytes = io.BytesIO()
-                    self.saved_format = image.format or 'png'
-                    image.save(self.saved_bytes, format=self.saved_format)
-                    self.saved_image = image
 
-                self.saved_bytes.seek(0)
-                return send_file(self.saved_bytes, mimetype=f'image/{self.saved_format.lower()}', as_attachment=False)
+                if image != self.saved_image or self.saved_bytes is None:
+                    bytes_buffer = io.BytesIO()
+                    self.saved_format = image.format or 'png'
+                    image.save(bytes_buffer, format=self.saved_format)
+                    self.saved_image = image
+                    self.saved_bytes = bytes_buffer.getvalue()
+                else:
+                    bytes_buffer = io.BytesIO(self.saved_bytes)
+
+                return send_file(bytes_buffer, mimetype=f'image/{self.saved_format.lower()}', as_attachment=False)
             except Exception as e:
                 self.logger.log({ 'event': '@frame/kiosk:error_serving_image', 'error': str(e), 'stacktrace': traceback.format_exc() })
 
@@ -100,7 +103,10 @@ class Server:
         touch_handler = TouchClickHandler(self.logger, self.image_handler, self.app_handler)
         touch_handler.start()
         reset_event: Event = Event()
-        scheduler: Scheduler = Scheduler(image_handler=self.image_handler, reset_event=reset_event, logger=self.logger, config=self.config)
+
+        Scheduler(image_handler=self.image_handler, reset_event=reset_event, logger=self.logger, config=self.config)
+        MetricsLogger(image_handler=self.image_handler, reset_event=reset_event, logger=self.logger, config=self.config)
+
         self.image_handler.refresh_image('bootup')
         self.logger.log({'event': '@frame/kiosk:start', 'message': 'Starting web kiosk server on port 8999'})
         self.socketio.run(self.app, host='0.0.0.0', port=8999, allow_unsafe_werkzeug=True)

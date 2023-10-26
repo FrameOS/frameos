@@ -47,6 +47,8 @@ numpy==1.26.1
     #   inky
 pillow==9.5.0
     # via -r requirements.in
+psutil==5.9.6
+    # via -r requirements.in
 python-engineio==4.5.1
     # via python-socketio
 python-socketio==5.8.0
