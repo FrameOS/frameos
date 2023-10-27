@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import datetime
 from urllib.parse import urljoin
 
@@ -226,15 +227,55 @@ def process_log(frame: Frame, log: dict):
     if event == '@frame:config':
         if frame.status != 'ready':
             changes['status'] = 'ready'
-
         for key in ['width', 'height', 'device', 'color', 'interval', 'scaling_mode', 'rotate', 'background_color']:
             if key in log and log[key] is not None and log[key] != getattr(frame, key):
                 changes[key] = log[key]
-
     if len(changes) > 0:
         for key, value in changes.items():
             setattr(frame, key, value)
         update_frame(frame)
+
+    if event == '@frame:metrics':
+        metrics_dict = deepcopy(log)
+        del metrics_dict['event']
+        new_metrics(frame.id, metrics_dict)
+
+
+class Metrics(db.Model):
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    timestamp = db.Column(db.DateTime, nullable=False, default=db.func.current_timestamp())
+    frame_id = db.Column(db.Integer, db.ForeignKey('frame.id'), nullable=False)
+    metrics = db.Column(JSON, nullable=False)
+
+    frame = db.relationship('Frame', backref=db.backref('logs', lazy=True))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'timestamp': self.timestamp.isoformat(),
+            'frame_id': self.frame_id,
+            'metrics': self.metrics,
+        }
+
+
+def new_metrics(frame_id: int, metrics: Dict) -> Metrics:
+    metrics = Metrics(frame_id=frame_id, metrics=metrics)
+    db.session.add(metrics)
+    db.session.commit()
+    metrics_count = Metrics.query.filter_by(frame_id=frame_id).count()
+    if metrics_count > 1100:
+        oldest_metrics = (Metrics.query
+                       .filter_by(frame_id=frame_id)
+                       .order_by(Metrics.timestamp)
+                       .limit(100)
+                       .all())
+        for old_metric in oldest_metrics:
+            db.session.delete(old_metric)
+        db.session.commit()
+
+    socketio.emit('new_metrics', {**metrics.to_dict(), 'timestamp': str(metrics.timestamp)})
+    return metrics
+
 
 def create_default_scene() -> Dict:
     event_uuid = str(uuid.uuid4())
