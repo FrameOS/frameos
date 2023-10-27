@@ -6,6 +6,7 @@ import struct
 import fcntl
 import subprocess
 
+from apps import ExecutionContext
 from .logger import Logger
 
 def scale_cover(image: Image.Image, target_width: int, target_height: int) -> Image.Image:
@@ -79,6 +80,20 @@ def scale_center(image: Image.Image, target_width: int, target_height: int, back
     background.paste(image, offset)
     
     return background
+
+def scale_image(image: Image.Image, context: ExecutionContext, scaling_mode: str, background_color: str) -> Image.Image:
+    if image.width == context.image.width and image.height == context.image.height:
+        returned_image = image
+    else:
+        if scaling_mode == 'contain':
+            returned_image = scale_contain(image, context.image.width, context.image.height, background_color)
+        elif scaling_mode == 'stretch':
+            returned_image = scale_stretch(image, context.image.width, context.image.height)
+        elif scaling_mode == 'center':
+            returned_image = scale_center(image, context.image.width, context.image.height, background_color)
+        else:  # cover
+            returned_image = scale_cover(image, context.image.width, context.image.height)
+    return returned_image
 
 def draw_text_with_border(draw, position, text, font, font_color, border_color, border_width=1, align='left'):
     x, y = position

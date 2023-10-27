@@ -1,10 +1,13 @@
-from PIL import Image, UnidentifiedImageError
-from apps import App, ExecutionContext
 import requests
-from requests.exceptions import RequestException
 import io
 import json
-from frame.image_utils import scale_cover, scale_contain, scale_stretch, scale_center
+
+from PIL import Image, UnidentifiedImageError
+from requests.exceptions import RequestException
+
+from apps import App, ExecutionContext
+from frame.image_utils import scale_image
+
 
 class OpenAIApp(App):
     def run(self, context: ExecutionContext):
@@ -35,19 +38,7 @@ class OpenAIApp(App):
             openai_image = Image.open(io.BytesIO(image_response.content))
             scaling_mode = self.get_config('scaling_mode', 'cover')
             self.log(f"Image: {openai_image.width}x{openai_image.height} {openai_image.format} {openai_image.mode}. Scaling mode: {scaling_mode}")
-
-            if openai_image.width == context.image.width and openai_image.height == context.image.height:
-                context.image = openai_image
-            else:
-                if scaling_mode == 'contain':
-                    context.image = scale_contain(openai_image, context.image.width, context.image.height, self.frame_config.background_color)
-                elif scaling_mode == 'stretch':
-                    context.image = scale_stretch(openai_image, context.image.width, context.image.height)
-                elif scaling_mode == 'center':
-                    context.image = scale_center(openai_image, context.image.width, context.image.height, self.frame_config.background_color)
-                else:  # cover
-                    context.image = scale_cover(openai_image, context.image.width, context.image.height)
-
+            context.image = scale_image(openai_image, context, scaling_mode, self.frame_config.background_color)
 
         except RequestException as e:
             raise Exception(f"Error fetching image from DALL·E 2 API. Error: {e}")

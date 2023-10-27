@@ -3,6 +3,8 @@ import requests
 from requests.exceptions import RequestException
 import io
 from apps import App, ExecutionContext
+from frame.image_utils import scale_image
+
 
 class DownloadApp(App):
     def run(self, context: ExecutionContext):
@@ -16,8 +18,11 @@ class DownloadApp(App):
         try:
             response = requests.get(image_url)
             response.raise_for_status()
-            context.image = Image.open(io.BytesIO(response.content))
-            self.log(f"Downloaded image: {context.image.width}x{context.image.height} {context.image.format} {context.image.mode}")
+            downloaded = Image.open(io.BytesIO(response.content))
+            scaling_mode = self.get_config('scaling_mode', 'cover')
+            self.log(f"Image: {downloaded.width}x{downloaded.height} {downloaded.format} {downloaded.mode}. Scaling mode: {scaling_mode}")
+            context.image = scale_image(downloaded, context, scaling_mode, self.frame_config.background_color)
+
         except RequestException as e:
             raise Exception(f"Error fetching image from {image_url}. Error: {e}")
         except UnidentifiedImageError:
