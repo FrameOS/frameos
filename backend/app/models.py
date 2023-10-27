@@ -69,6 +69,7 @@ class Frame(db.Model):
     device = db.Column(db.String(256), nullable=True)
     color = db.Column(db.String(256), nullable=True)
     interval = db.Column(db.Double, default=300)
+    metrics_interval = db.Column(db.Double, default=60)
     scaling_mode = db.Column(db.String(64), nullable=True) # cover (default), contain, stretch, center
     background_color = db.Column(db.String(64), nullable=True)
     rotate = db.Column(db.Integer, nullable=True)
