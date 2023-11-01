@@ -247,8 +247,7 @@ class Metrics(db.Model):
     timestamp = db.Column(db.DateTime, nullable=False, default=db.func.current_timestamp())
     frame_id = db.Column(db.Integer, db.ForeignKey('frame.id'), nullable=False)
     metrics = db.Column(JSON, nullable=False)
-
-    frame = db.relationship('Frame', backref=db.backref('logs', lazy=True))
+    frame = db.relationship('Frame', backref=db.backref('metrics', lazy=True))
 
     def to_dict(self):
         return {
