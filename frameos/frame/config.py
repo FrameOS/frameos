@@ -18,6 +18,7 @@ class Config:
         self.device: str = self._data.get('device', "web_only")
         self.color: Optional[str] = self._data.get('color', None)
         self.interval: Optional[int] = self._data.get('interval', 300)
+        self.metrics_interval: Optional[int] = self._data.get('metrics_interval', 60)
         self.scaling_mode: Optional[str] = self._data.get('scaling_mode', 'cover')
         self.rotate: Optional[int] = self._data.get('rotate', 0)
         self.background_color: Optional[str] = self._data.get('background_color', 'white')
@@ -40,6 +41,7 @@ class Config:
             'device': self.device,
             'color': self.color,
             'interval': self.interval,
+            'metrics_interval': self.metrics_interval,
             'scaling_mode': self.scaling_mode,
             'rotate': self.rotate,
             'background_color': self.background_color,

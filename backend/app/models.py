@@ -99,6 +99,7 @@ class Frame(db.Model):
             'device': self.device,
             'color': self.color,
             'interval': self.interval,
+            'metrics_interval': self.metrics_interval,
             'scaling_mode': self.scaling_mode,
             'rotate': self.rotate,
             'background_color': self.background_color,
@@ -228,7 +229,7 @@ def process_log(frame: Frame, log: dict):
     if event == '@frame:config':
         if frame.status != 'ready':
             changes['status'] = 'ready'
-        for key in ['width', 'height', 'device', 'color', 'interval', 'scaling_mode', 'rotate', 'background_color']:
+        for key in ['width', 'height', 'device', 'color', 'interval', 'metrics_interval', 'scaling_mode', 'rotate', 'background_color']:
             if key in log and log[key] is not None and log[key] != getattr(frame, key):
                 changes[key] = log[key]
     if len(changes) > 0:
@@ -239,6 +240,7 @@ def process_log(frame: Frame, log: dict):
     if event == '@frame:metrics':
         metrics_dict = deepcopy(log)
         del metrics_dict['event']
+        del metrics_dict['timestamp']
         new_metrics(frame.id, metrics_dict)
 
 
@@ -263,11 +265,11 @@ def new_metrics(frame_id: int, metrics: Dict) -> Metrics:
     db.session.add(metrics)
     db.session.commit()
     metrics_count = Metrics.query.filter_by(frame_id=frame_id).count()
-    if metrics_count > 1100:
+    if metrics_count > 110:
         oldest_metrics = (Metrics.query
                        .filter_by(frame_id=frame_id)
                        .order_by(Metrics.timestamp)
-                       .limit(100)
+                       .limit(10)
                        .all())
         for old_metric in oldest_metrics:
             db.session.delete(old_metric)

@@ -18,6 +18,7 @@ export interface FrameType {
   device?: string
   color?: string
   interval: number
+  metrics_interval: number
   scaling_mode: string
   rotate?: number
   background_color: string

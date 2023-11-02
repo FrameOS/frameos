@@ -6,7 +6,6 @@ import os
 from flask_socketio import SocketIO
 from threading import Lock
 from PIL import Image
-import RPi.GPIO as GPIO
 
 from .logger import Logger
 from .config import Config
@@ -181,6 +180,7 @@ class ImageHandler:
 
     def display_on(self):
         if self.config.device == 'pimoroni.hyperpixel2r':
+            import RPi.GPIO as GPIO
             GPIO.cleanup()
         elif self.config.device == 'framebuffer':
             subprocess.run(['vcgencmd', 'display_power', '1'])
@@ -189,6 +189,7 @@ class ImageHandler:
 
     def display_off(self):
         if self.config.device == 'pimoroni.hyperpixel2r':
+            import RPi.GPIO as GPIO
             GPIO.setmode(GPIO.BCM)
             pin = 19
             GPIO.setup(pin, GPIO.OUT)

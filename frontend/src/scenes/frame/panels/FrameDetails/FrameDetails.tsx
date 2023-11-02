@@ -81,6 +81,10 @@ export function FrameDetails({ className }: DetailsProps) {
                 <td className="truncate">{frame.interval} seconds</td>
               </tr>
               <tr>
+                <td className="text-blue-200 text-right">Metric reporting interval:</td>
+                <td className="truncate">{frame.metrics_interval} seconds</td>
+              </tr>
+              <tr>
                 <td className="text-blue-200 text-right">Scaling mode:</td>
                 <td className="truncate">{frame.scaling_mode}</td>
               </tr>

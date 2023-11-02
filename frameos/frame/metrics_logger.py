@@ -8,12 +8,15 @@ from .image_handler import ImageHandler
 
 class MetricsLogger:
     def __init__(self, image_handler: ImageHandler, reset_event: Event, logger: Logger, config: Config):
+        if config.metrics_interval == 0:
+            logger.log({'event': '@frame:metrics_logger', 'state': 'disabled'})
+            return
         self.logger = logger
         self.config = config
         self.image_handler = image_handler
         self.reset_event = reset_event
         self.thread: Thread = Thread(target=self.send_metrics)
-        logger.log({ 'event': '@frame:metrics_logger', 'interval': self.config.interval })
+        logger.log({ 'event': '@frame:metrics_logger', 'state': 'enabled', 'interval': self.config.metrics_interval })
         self.thread.start()
 
     def get_load_average(self):
@@ -51,6 +54,6 @@ class MetricsLogger:
 
     def send_metrics(self):
         while True:
-            self.reset_event.wait(self.config.interval)
+            self.reset_event.wait(self.config.metrics_interval or 60)
             self.send_metrics_once()
             self.reset_event.clear()
