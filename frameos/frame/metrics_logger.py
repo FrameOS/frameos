@@ -54,6 +54,6 @@ class MetricsLogger:
 
     def send_metrics(self):
         while True:
-            self.reset_event.wait(self.config.metrics_interval or 60)
             self.send_metrics_once()
+            self.reset_event.wait(self.config.metrics_interval or 60)
             self.reset_event.clear()

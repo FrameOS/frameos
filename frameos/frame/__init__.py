@@ -7,3 +7,6 @@ from .scheduler import Scheduler
 from .server import Server
 from .webhook import Webhook
 from .image_utils import scale_cover, scale_contain, scale_stretch, scale_center
+
+# Check server.py for the actual app startup routine,
+# or ../run.py for the CLI entrypoint.

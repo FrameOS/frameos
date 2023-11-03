@@ -11,7 +11,7 @@ from .logger import Logger
 from .config import Config
 from .app_handler import AppHandler
 from .image_utils import scale_cover, scale_contain, scale_stretch, scale_center, \
-    image_to_framebuffer, get_framebuffer_info, try_to_disable_cursor_blinking
+    image_to_framebuffer, get_framebuffer_info, try_to_disable_cursor_blinking, scale_image
 from .waveshare import WaveShare
 
 FRAMEBUFFER_DRIVERS = ['framebuffer', 'pimoroni.hyperpixel2r']
@@ -114,10 +114,10 @@ class ImageHandler:
             return False
         return img1.tobytes() == img2.tobytes()
 
-    def refresh_image(self, trigger: str):
+    def render_image(self, trigger: str):
         if not self.image_update_lock.acquire(blocking=False):
             self.logger.log({
-                'event': '@frame:refresh_ignored_already_in_progress', 
+                'event': '@frame:render_ignored_already_in_progress',
                 'trigger': trigger,
             })
             return
@@ -125,7 +125,7 @@ class ImageHandler:
         def do_update():
             try:
                 start = time.time()
-                self.logger.log({ 'event': '@frame:refresh_image', 'trigger': trigger })
+                self.logger.log({ 'event': '@frame:render', 'trigger': trigger })
                 self.image_update_in_progress = True
 
                 requested_width = self.config.height if self.config.rotate in [90,270] else self.config.width
@@ -137,7 +137,7 @@ class ImageHandler:
                 context = self.app_handler.dispatch_event('render', image=self.next_image)
                 self.next_image, apps_ran, apps_errored = context.image, context.apps_ran, context.apps_errored
                 if self.next_image is None:
-                    self.logger.log({ 'event': '@frame:refresh_skipped', 'seconds': round(time.time() - start, 2), 'reason': 'no_image', 'apps_ran': apps_ran })
+                    self.logger.log({ 'event': '@frame:render_skipped', 'seconds': round(time.time() - start, 2), 'reason': 'no_image', 'apps_ran': apps_ran })
                 else:
                     if requested_width != self.next_image.width or requested_height != self.next_image.height:
                         self.logger.log({ 
@@ -151,28 +151,21 @@ class ImageHandler:
                             'rotate': self.config.rotate,
                             'background_color': self.config.background_color,
                         })
-                        if self.config.scaling_mode == 'contain':
-                            self.next_image = scale_contain(self.next_image, requested_width, requested_height, self.config.background_color)
-                        elif self.config.scaling_mode == 'stretch':
-                            self.next_image = scale_stretch(self.next_image, requested_width, requested_height)
-                        elif self.config.scaling_mode == 'center':
-                            self.next_image = scale_center(self.next_image, requested_width, requested_height, self.config.background_color)
-                        else: # cover
-                            self.next_image = scale_cover(self.next_image, requested_width, requested_height)
+                        self.next_image = scale_image(self.next_image, requested_width, requested_height, self.config.scaling_mode, self.config.background_color)
 
                     self.kiosk_image = self.next_image.copy()
 
                     if self.current_image is None or not self.are_images_equal(self.next_image, self.current_image) or True:
-                        self.logger.log({ 'event': '@frame:refreshing_screen' })
+                        self.logger.log({ 'event': '@frame:render_screen' })
                         self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
                         self.slow_update_image_on_frame(self.next_image)
                         self.current_image = self.next_image
                         self.next_image = None
-                        self.logger.log({ 'event': '@frame:refresh_done', 'seconds': round(time.time() - start, 2), 'apps_ran': apps_ran, **({'apps_errored': apps_errored} if len(apps_errored) > 0 else {}) })
+                        self.logger.log({ 'event': '@frame:render_done', 'seconds': round(time.time() - start, 2), 'apps_ran': apps_ran, **({'apps_errored': apps_errored} if len(apps_errored) > 0 else {}) })
                     else:
-                        self.logger.log({ 'event': '@frame:refresh_skipped', 'seconds': round(time.time() - start, 2), 'reason': 'no_change', 'apps_ran': apps_ran, **({'apps_errored': apps_errored} if len(apps_errored) > 0 else {}) })
+                        self.logger.log({ 'event': '@frame:render_skipped', 'seconds': round(time.time() - start, 2), 'reason': 'no_change', 'apps_ran': apps_ran, **({'apps_errored': apps_errored} if len(apps_errored) > 0 else {}) })
             except Exception as e:
-                self.logger.log({ 'event': '@frame:refresh_error', 'error': str(e), 'stacktrace': traceback.format_exc(), 'seconds': round(time.time() - start, 2)  })
+                self.logger.log({ 'event': '@frame:render_error', 'error': str(e), 'stacktrace': traceback.format_exc(), 'seconds': round(time.time() - start, 2)  })
             finally:
                 self.image_update_in_progress = False
                 self.image_update_lock.release()

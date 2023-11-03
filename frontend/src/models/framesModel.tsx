@@ -15,7 +15,7 @@ export const framesModel = kea<framesModelType>([
     loadFrame: (id: number) => ({ id }),
     redeployFrame: (id: number) => ({ id }),
     restartFrame: (id: number) => ({ id }),
-    refreshFrame: (id: number) => ({ id }),
+    renderFrame: (id: number) => ({ id }),
     updateFrameImage: (id: number) => ({ id }),
     deleteFrame: (id: number) => ({ id }),
   }),
@@ -93,11 +93,11 @@ export const framesModel = kea<framesModelType>([
     actions.loadFrames()
   }),
   listeners(({ props, actions }) => ({
-    redeployFrame: async ({ id }) => {
-      await fetch(`/api/frames/${id}/initialize`, { method: 'POST' })
+    renderFrame: async ({ id }) => {
+      await fetch(`/api/frames/${id}/event/render`, { method: 'POST' })
     },
-    refreshFrame: async ({ id }) => {
-      await fetch(`/api/frames/${id}/refresh`, { method: 'POST' })
+    redeployFrame: async ({ id }) => {
+      await fetch(`/api/frames/${id}/redeploy`, { method: 'POST' })
     },
     restartFrame: async ({ id }) => {
       await fetch(`/api/frames/${id}/restart`, { method: 'POST' })
@@ -111,7 +111,7 @@ export const framesModel = kea<framesModelType>([
     [socketLogic.actionTypes.newLog]: ({ log }) => {
       if (log.type === 'webhook') {
         const parsed = JSON.parse(log.line)
-        if (parsed.event == '@frame:refreshing_screen') {
+        if (parsed.event == '@frame:render_screen') {
           actions.updateFrameImage(log.frame_id)
         }
       }

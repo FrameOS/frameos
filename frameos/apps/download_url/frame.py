@@ -21,7 +21,7 @@ class DownloadApp(App):
             downloaded = Image.open(io.BytesIO(response.content))
             scaling_mode = self.get_config('scaling_mode', 'cover')
             self.log(f"Image: {downloaded.width}x{downloaded.height} {downloaded.format} {downloaded.mode}. Scaling mode: {scaling_mode}")
-            context.image = scale_image(downloaded, context, scaling_mode, self.frame_config.background_color)
+            context.image = scale_image(downloaded, context.image.width, context.image.height, scaling_mode, self.frame_config.background_color)
 
         except RequestException as e:
             raise Exception(f"Error fetching image from {image_url}. Error: {e}")

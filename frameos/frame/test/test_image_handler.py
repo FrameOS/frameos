@@ -65,7 +65,7 @@ class TestImageHandler(unittest.TestCase):
     #     self.mock_config.width = 800
     #     self.mock_config.height = 600
     #
-    #     self.image_handler.refresh_image('test_trigger')
+    #     self.image_handler.render_image('test_trigger')
     #     self.mock_logger.log.assert_called_with({
     #         'event': '@frame:resizing_image',
     #         'trigger': 'test_trigger',
@@ -83,7 +83,7 @@ class TestImageHandler(unittest.TestCase):
         self.image_handler.image_update_lock.acquire()
 
         # Trigger another image refresh
-        self.image_handler.refresh_image('test_trigger')
+        self.image_handler.render_image('test_trigger')
 
         # Logger should state the refresh was ignored due to ongoing process
         self.mock_logger.log.assert_called_with({
@@ -91,11 +91,11 @@ class TestImageHandler(unittest.TestCase):
             'trigger': 'test_trigger',
         })
 
-    # def test_refresh_image_error_handling(self):
+    # def test_render_image_error_handling(self):
     #     # Introduce an exception when rendering the image
     #     self.mock_app_handler.render.side_effect = Exception("Test error")
     #
-    #     self.image_handler.refresh_image('test_trigger')
+    #     self.image_handler.render_image('test_trigger')
     #
     #     self.mock_logger.log.assert_called_with({
     #         'event': '@frame:refresh_error',
@@ -168,14 +168,14 @@ class TestImageHandler(unittest.TestCase):
 
     def test_image_update_lock_respected(self):
         self.image_handler.image_update_lock.acquire()
-        self.image_handler.refresh_image('test_trigger')
+        self.image_handler.render_image('test_trigger')
         self.mock_logger.log.assert_called_with({
-            'event': '@frame:refresh_ignored_already_in_progress',
+            'event': '@frame:render_ignored_already_in_progress',
             'trigger': 'test_trigger',
         })
 
-    def test_background_task_initiated_on_refresh(self):
-        self.image_handler.refresh_image('test_trigger')
+    def test_background_task_initiated_on_render(self):
+        self.image_handler.render_image('test_trigger')
         self.image_handler.socketio.start_background_task.assert_called_once()
 
     # def test_scaling_mode_contain(self):

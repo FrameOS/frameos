@@ -18,5 +18,5 @@ class Scheduler:
     def update_image_on_schedule(self):
         while True:
             self.reset_event.wait(self.config.interval)  
-            self.image_handler.refresh_image('schedule')
+            self.image_handler.render_image('schedule')
             self.reset_event.clear()  

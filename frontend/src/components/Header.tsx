@@ -6,10 +6,10 @@ interface HeaderProps {
   title: React.ReactNode
   subtitle?: string
   right?: React.ReactNode | string
-  buttons?: React.ReactElement[]
+  buttons?: React.ReactElement
 }
 
-export function Header({ title, subtitle, right, buttons = [] }: HeaderProps) {
+export function Header({ title, subtitle, right, buttons }: HeaderProps) {
   return (
     <div
       className="bg-gray-800 text-white h-full w-full space-x-2 p-2 pt-3 px-4 flex justify-between items-center"
@@ -26,7 +26,7 @@ export function Header({ title, subtitle, right, buttons = [] }: HeaderProps) {
       </H5>
       <div className="flex space-x-2">
         {right && <div>{right}</div>}
-        {buttons.map((button, idx) => React.cloneElement(button, { key: idx }))}
+        {buttons}
       </div>
     </div>
   )

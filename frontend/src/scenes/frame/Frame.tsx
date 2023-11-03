@@ -14,7 +14,7 @@ export function Frame(props: FrameSceneProps) {
   const id = parseInt(props.id)
   const frameLogicProps = { id }
   const { frame, frameChanged } = useValues(frameLogic(frameLogicProps))
-  const { saveFrame, refreshFrame, restartFrame, redeployFrame } = useActions(frameLogic(frameLogicProps))
+  const { saveFrame, renderFrame, restartFrame, deployFrame } = useActions(frameLogic(frameLogicProps))
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -23,35 +23,38 @@ export function Frame(props: FrameSceneProps) {
           <Header
             title="FrameOS"
             subtitle={!frame ? `Loading frame ${props.id}...` : frame.name || frameHost(frame)}
-            buttons={[
-              <Button color={frameChanged ? 'teal' : 'light-gray'} type="button" onClick={() => saveFrame()}>
-                Save
-              </Button>,
-              <Button
-                color="light-gray"
-                type="button"
-                onClick={() => refreshFrame()}
-                title="Refresh the frame with its _old_ config. Save any unsaved changes, but don't apply them."
-              >
-                &&nbsp;Refresh
-              </Button>,
-              <Button
-                color="light-gray"
-                type="button"
-                onClick={() => restartFrame()}
-                title="Restart the frame with the new config."
-              >
-                &&nbsp;Restart
-              </Button>,
-              <Button
-                color="light-gray"
-                type="button"
-                onClick={() => redeployFrame()}
-                title="Redeploy FrameOS onto the frame."
-              >
-                &&nbsp;Redeploy
-              </Button>,
-            ]}
+            buttons={
+              <>
+                <Button
+                  color="light-gray"
+                  type="button"
+                  onClick={() => renderFrame()}
+                  title="Refresh the frame with its _old_ config. Save any unsaved changes, but don't apply them."
+                >
+                  Re-Render
+                </Button>
+                &nbsp; - &nbsp;
+                <Button color={frameChanged ? 'teal' : 'light-gray'} type="button" onClick={() => saveFrame()}>
+                  Save
+                </Button>
+                <Button
+                  color="light-gray"
+                  type="button"
+                  onClick={() => restartFrame()}
+                  title="Restart the frame with the new config."
+                >
+                  Save&nbsp;&&nbsp;Restart
+                </Button>
+                <Button
+                  color="light-gray"
+                  type="button"
+                  onClick={() => deployFrame()}
+                  title="Deploy FrameOS onto the frame."
+                >
+                  Save&nbsp;&&nbsp;Redeploy
+                </Button>
+              </>
+            }
           />
           <Panels />
         </div>

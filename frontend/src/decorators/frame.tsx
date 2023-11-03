@@ -8,7 +8,7 @@ export function frameHost(frame: FrameType): string {
   return `${frame.ssh_user}@${frame.frame_host}`
 }
 
-export const frameStatusWithSpinner = ['deploying', 'fetching', 'refreshing', 'restarting', 'starting']
+export const frameStatusWithSpinner = ['deploying', 'preparing', 'rendering', 'restarting', 'starting']
 
 export function frameStatus(frame: FrameType): JSX.Element {
   return (

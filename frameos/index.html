@@ -84,7 +84,7 @@
 
     socket.on('log_event', (data) => {
         if (data.log) {
-            if (data.log.event == '@frame:refreshing_screen') {
+            if (data.log.event === '@frame:render_screen') {
                 refreshImage()
             }
             addLog(data.log);
@@ -96,7 +96,7 @@
     });
 
     document.getElementById('refreshButton').addEventListener('click', () => {
-        fetch("/refresh");
+        fetch("/event/render");
     });
 </script>
 </body>

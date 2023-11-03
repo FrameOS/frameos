@@ -38,7 +38,7 @@ class OpenAIApp(App):
             openai_image = Image.open(io.BytesIO(image_response.content))
             scaling_mode = self.get_config('scaling_mode', 'cover')
             self.log(f"Image: {openai_image.width}x{openai_image.height} {openai_image.format} {openai_image.mode}. Scaling mode: {scaling_mode}")
-            context.image = scale_image(openai_image, context, scaling_mode, self.frame_config.background_color)
+            context.image = scale_image(openai_image, context.image.width, context.image.height, scaling_mode, self.frame_config.background_color)
 
         except RequestException as e:
             raise Exception(f"Error fetching image from DALL·E 2 API. Error: {e}")

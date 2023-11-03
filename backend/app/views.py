@@ -121,11 +121,11 @@ def get_image(id: int):
             return Response(last_image, content_type='image/png')
         return jsonify({"error": "Unable to fetch image"}), response.status_code
 
-@app.route('/api/frames/<int:id>/refresh', methods=['POST'])
+@app.route('/api/frames/<int:id>/event/render', methods=['POST'])
 @login_required
-def refresh_frame(id: int):
+def event_render(id: int):
     frame = models.Frame.query.get_or_404(id)
-    response = requests.get(f'http://{frame.frame_host}:{frame.frame_port}/refresh')
+    response = requests.get(f'http://{frame.frame_host}:{frame.frame_port}/event/render')
         
     if response.status_code == 200:
         return "OK", 200
@@ -144,7 +144,7 @@ def restart_frame(id: int):
     tasks.restart_frame(id)
     return 'Success', 200
 
-@app.route('/api/frames/<int:id>/initialize', methods=['POST'])
+@app.route('/api/frames/<int:id>/deploy', methods=['POST'])
 @login_required
 def deploy_frame(id: int):
     tasks.deploy_frame(id)
@@ -198,10 +198,8 @@ def update_frame(id: int):
 
     if request.form.get('next_action') == 'restart':
         tasks.restart_frame(frame.id)
-    elif request.form.get('next_action') == 'redeploy':
+    elif request.form.get('next_action') == 'deploy':
         tasks.deploy_frame(frame.id)
-    elif request.form.get('next_action') == 'refresh':
-        refresh_frame(frame.id)
 
     return 'Success', 200
 

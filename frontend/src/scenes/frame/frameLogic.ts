@@ -1,4 +1,4 @@
-import { actions, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { framesModel } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
@@ -34,13 +34,14 @@ export const frameLogic = kea<frameLogicType>([
   path(['src', 'scenes', 'frame', 'frameLogic']),
   props({} as FrameLogicProps),
   key((props) => props.id),
+  connect({ values: [framesModel, ['frames']] }),
   actions({
     updateScene: (sceneId: string, scene: Partial<FrameScene>) => ({ sceneId, scene }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Record<string, any>) => ({ sceneId, nodeId, nodeData }),
     saveFrame: true,
-    refreshFrame: true,
+    renderFrame: true,
     restartFrame: true,
-    redeployFrame: true,
+    deployFrame: true,
     applyTemplate: (template: TemplateType) => ({ template }),
   }),
   forms(({ actions, values }) => ({
@@ -76,18 +77,18 @@ export const frameLogic = kea<frameLogicType>([
   reducers({
     currentScene: ['default', {}],
     nextAction: [
-      null as string | null,
+      null as 'render' | 'restart' | 'deploy' | null,
       {
         saveFrame: () => null,
-        refreshFrame: () => 'refresh',
+        renderFrame: () => 'render',
         restartFrame: () => 'restart',
-        redeployFrame: () => 'redeploy',
+        deployFrame: () => 'deploy',
       },
     ],
   }),
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
-    frame: [(s) => [framesModel.selectors.frames, s.id], (frames, id) => frames[id] || null],
+    frame: [(s) => [s.frames, s.id], (frames, id) => frames[id] || null],
     frameChanged: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm) =>
@@ -103,10 +104,10 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
   })),
-  listeners(({ actions, values }) => ({
+  listeners(({ actions, values, props }) => ({
+    renderFrame: () => framesModel.actions.renderFrame(props.id),
     saveFrame: () => actions.submitFrameForm(),
-    refreshFrame: () => actions.submitFrameForm(),
-    redeployFrame: () => actions.submitFrameForm(),
+    deployFrame: () => actions.submitFrameForm(),
     restartFrame: () => actions.submitFrameForm(),
     updateScene: ({ sceneId, scene }) => {
       const { frame } = values

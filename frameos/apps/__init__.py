@@ -102,7 +102,7 @@ class App:
         pass
 
     def rerender(self, trigger = None):
-        self.app_handler.image_handler.refresh_image(self.keyword if trigger is None else trigger)
+        self.app_handler.image_handler.render_image(self.keyword if trigger is None else trigger)
 
     def is_rendering(self):
         return self.app_handler.image_handler.image_update_in_progress

@@ -30,9 +30,9 @@ class TestModelsLog(BaseTestCase):
         self.assertEqual(logs_count, 1001)  # 1101 - 100 = 1001
 
     def test_process_log(self):
-        process_log(self.frame, {'event': '@frame:refresh_image'})
-        self.assertEqual(self.frame.status, "fetching")
-        process_log(self.frame, {'event': '@frame:refresh_done'})
+        process_log(self.frame, {'event': '@frame:render'})
+        self.assertEqual(self.frame.status, "preparing")
+        process_log(self.frame, {'event': '@frame:render_done'})
         self.assertEqual(self.frame.status, "ready")
 
     def test_log_without_frame(self):
@@ -51,10 +51,10 @@ class TestModelsLog(BaseTestCase):
 
     def test_process_log_events(self):
         events = [
-            ('@frame:refresh_image', 'fetching'),
-            ('@frame:refreshing_screen', 'refreshing'),
-            ('@frame:refresh_done', 'ready'),
-            ('@frame:refresh_skipped', 'ready'),
+            ('@frame:render', 'preparing'),
+            ('@frame:render_screen', 'rendering'),
+            ('@frame:render_done', 'ready'),
+            ('@frame:render_skipped', 'ready'),
             ('@frame:config', 'ready')  # Assuming the frame was not 'ready' before
         ]
 

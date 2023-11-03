@@ -81,18 +81,18 @@ def scale_center(image: Image.Image, target_width: int, target_height: int, back
     
     return background
 
-def scale_image(image: Image.Image, context: ExecutionContext, scaling_mode: str, background_color: str) -> Image.Image:
-    if image.width == context.image.width and image.height == context.image.height:
+def scale_image(image: Image.Image, requested_width: int, requested_height: int, scaling_mode: str, background_color: str) -> Image.Image:
+    if image.width == requested_width and image.height == requested_height:
         returned_image = image
     else:
         if scaling_mode == 'contain':
-            returned_image = scale_contain(image, context.image.width, context.image.height, background_color)
+            returned_image = scale_contain(image, requested_width, requested_height, background_color)
         elif scaling_mode == 'stretch':
-            returned_image = scale_stretch(image, context.image.width, context.image.height)
+            returned_image = scale_stretch(image, requested_width, requested_height)
         elif scaling_mode == 'center':
-            returned_image = scale_center(image, context.image.width, context.image.height, background_color)
+            returned_image = scale_center(image, requested_width, requested_height, background_color)
         else:  # cover
-            returned_image = scale_cover(image, context.image.width, context.image.height)
+            returned_image = scale_cover(image, requested_width, requested_height)
     return returned_image
 
 def draw_text_with_border(draw, position, text, font, font_color, border_color, border_width=1, align='left'):

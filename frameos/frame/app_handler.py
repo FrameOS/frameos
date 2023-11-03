@@ -75,7 +75,7 @@ class SceneHandler:
         elif node.type == 'event':
             keyword = node.data.get('keyword', None)
             if keyword == 'render':
-                self.app_handler.image_handler.refresh_image('dispatch:render')
+                self.app_handler.image_handler.render_image('dispatch:render')
             else:
                 raise Exception(f"Can't yet dispatch events with keyword: {keyword}")
         else:

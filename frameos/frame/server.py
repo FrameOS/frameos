@@ -1,4 +1,5 @@
 import io
+import time
 import traceback
 from flask import Flask, send_file
 from flask_socketio import SocketIO, emit
@@ -50,32 +51,39 @@ class Server:
         @self.app.route('/image')
         def image():
             try:
-                image = self.image_handler.kiosk_image
+                self.logger.log(
+                    {'event': '@frame:http_get_image'})
+                image = self.image_handler.kiosk_image.copy()
                 if image is None:
-                    return "No image"
+                    raise ValueError("No image to render. Image is None.")
                 if image.size[0] == 0 or image.size[1] == 0:
-                    return "No image"
+                    raise ValueError("No image to render. Image width and height are zero.")
 
                 if image != self.saved_image or self.saved_bytes is None:
+                    export_start = time.time()
                     bytes_buffer = io.BytesIO()
                     self.saved_format = image.format or 'png'
+                    self.logger.log(
+                        {'event': '@frame:export_image', 'format': self.saved_format})
                     image.save(bytes_buffer, format=self.saved_format)
                     self.saved_image = image
                     self.saved_bytes = bytes_buffer.getvalue()
-                else:
-                    bytes_buffer = io.BytesIO(self.saved_bytes)
+                    self.logger.log(
+                        {'event': '@frame:export_image_done', 'format': self.saved_format, 'seconds': round(time.time() - export_start, 2)})
+
+                bytes_buffer = io.BytesIO(self.saved_bytes)
 
                 return send_file(bytes_buffer, mimetype=f'image/{self.saved_format.lower()}', as_attachment=False)
             except Exception as e:
-                self.logger.log({ 'event': '@frame/kiosk:error_serving_image', 'error': str(e), 'stacktrace': traceback.format_exc() })
+                self.logger.log({ 'event': '@frame:error_serving_image', 'error': str(e), 'stacktrace': traceback.format_exc() })
 
         @self.app.route('/logs')
         def logs():
             return self.logger.get()
 
-        @self.app.route('/refresh')
-        def refresh():
-            self.image_handler.refresh_image('http trigger')
+        @self.app.route('/event/render')
+        def event_render():
+            self.image_handler.render_image('http trigger')
             return "OK"
 
         @self.app.route('/display_off')
@@ -107,6 +115,6 @@ class Server:
         Scheduler(image_handler=self.image_handler, reset_event=reset_event, logger=self.logger, config=self.config)
         MetricsLogger(image_handler=self.image_handler, reset_event=reset_event, logger=self.logger, config=self.config)
 
-        self.image_handler.refresh_image('bootup')
-        self.logger.log({'event': '@frame/kiosk:start', 'message': 'Starting web kiosk server on port 8999'})
+        self.image_handler.render_image('bootup')
+        self.logger.log({'event': '@frame:server_start', 'message': 'Starting web kiosk server on port 8999'})
         self.socketio.run(self.app, host='0.0.0.0', port=8999, allow_unsafe_werkzeug=True)
