@@ -24,7 +24,7 @@ export function Frame(props: FrameSceneProps) {
             title="FrameOS"
             subtitle={!frame ? `Loading frame ${props.id}...` : frame.name || frameHost(frame)}
             buttons={
-              <>
+              <div className="flex divide-x divide-gray-700 space-x-2">
                 <Button
                   color="light-gray"
                   type="button"
@@ -33,27 +33,28 @@ export function Frame(props: FrameSceneProps) {
                 >
                   Re-Render
                 </Button>
-                &nbsp; - &nbsp;
-                <Button color={frameChanged ? 'teal' : 'light-gray'} type="button" onClick={() => saveFrame()}>
-                  Save
-                </Button>
-                <Button
-                  color="light-gray"
-                  type="button"
-                  onClick={() => restartFrame()}
-                  title="Restart the frame with the new config."
-                >
-                  Save&nbsp;&&nbsp;Restart
-                </Button>
-                <Button
-                  color="light-gray"
-                  type="button"
-                  onClick={() => deployFrame()}
-                  title="Deploy FrameOS onto the frame."
-                >
-                  Save&nbsp;&&nbsp;Redeploy
-                </Button>
-              </>
+                <div className="flex pl-2 space-x-2">
+                  <Button color={frameChanged ? 'teal' : 'light-gray'} type="button" onClick={() => saveFrame()}>
+                    Save
+                  </Button>
+                  <Button
+                    color="light-gray"
+                    type="button"
+                    onClick={() => restartFrame()}
+                    title="Restart the frame with the new config."
+                  >
+                    Save&nbsp;&&nbsp;Restart
+                  </Button>
+                  <Button
+                    color="light-gray"
+                    type="button"
+                    onClick={() => deployFrame()}
+                    title="Deploy FrameOS onto the frame."
+                  >
+                    Save&nbsp;&&nbsp;Redeploy
+                  </Button>
+                </div>
+              </div>
             }
           />
           <Panels />
