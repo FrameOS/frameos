@@ -11,7 +11,7 @@ import io
 class UnsplashApp(App):
     def __post_init__(self):
         self.cached_content: Optional[bytes] = None
-        self.cache_seconds = float(self.config.get('cache_seconds', '60'))
+        self.cache_seconds = float(self.get_config('cache_seconds', '60'))
         self.cache_url: Optional[str] = None
         self.cache_expires_at: Optional[datetime] = None
 

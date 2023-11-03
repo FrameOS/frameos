@@ -6,9 +6,9 @@ import colorsys
 
 class Colorapp(App):
     def run(self, context: ExecutionContext):
-        color = self.config.get('color', '#FFFFFF')  # default to white if no color is specified
+        color = self.get_config('color', '#FFFFFF')  # default to white if no color is specified
         width, height = context.image.size
-        if self.config.get('effect', 'none') == 'pastel-time-rainbow':
+        if self.get_config('effect', 'none') == 'pastel-time-rainbow':
             color = self.get_pastel_hue_ring_color()
 
         context.image = Image.new("RGB", (width, height), color)

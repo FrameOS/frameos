@@ -8,7 +8,7 @@ from frame.image_utils import scale_image
 
 class DownloadApp(App):
     def run(self, context: ExecutionContext):
-        image_url = self.config.get('url', None)
+        image_url = self.get_config('url', None)
         if not image_url:
             raise ValueError("URL not provided in app config")
         width, height = context.image.size

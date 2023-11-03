@@ -9,7 +9,7 @@ from apps import App, ExecutionContext
 
 class GooglePhotosApp(App):
     def run(self, context: ExecutionContext):
-        photos_url = self.config.get('photos_url', None)
+        photos_url = self.get_config('photos_url', None)
         if not photos_url:
             raise ValueError("Photos URL is not provided in app config")
 

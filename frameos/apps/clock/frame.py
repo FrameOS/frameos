@@ -7,17 +7,17 @@ class ClockApp(App):
     def run(self, context: ExecutionContext):
         width, height = context.image.size
         # Get the current time
-        format = self.config.get('format', '%H:%M:%S')
+        format = self.get_config('format', '%H:%M:%S')
         if format == 'custom':
-            format = self.config.get('format_custom', '%H:%M:%S')
+            format = self.get_config('format_custom', '%H:%M:%S')
         current_time = datetime.now().strftime(format)
         
         # Get the config settings
-        font_color = self.config.get('font_color', 'black')
-        font_size = int(self.config.get('font_size', 20))
-        position = self.config.get('position', 'center-center')
-        border_color = self.config.get('border_color', 'white')
-        border_width = int(self.config.get('border_width', 1))
+        font_color = self.get_config('font_color', 'black')
+        font_size = int(self.get_config('font_size', 20))
+        position = self.get_config('position', 'center-center')
+        border_color = self.get_config('border_color', 'white')
+        border_width = int(self.get_config('border_width', 1))
         
         # Prepare to draw the text
         draw = ImageDraw.Draw(context.image)

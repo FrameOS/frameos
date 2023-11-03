@@ -7,9 +7,9 @@ class ResizeApp(App):
             return
         
         # Get scale factors from config
-        width = int(self.config.get('width', 1))
-        height = int(self.config.get('height', 1))
-        scaling_mode = self.config.get('scaling_mode')
+        width = int(self.get_config('width', 1))
+        height = int(self.get_config('height', 1))
+        scaling_mode = self.get_config('scaling_mode')
         current_width = context.image.width
         current_height = context.image.height
 

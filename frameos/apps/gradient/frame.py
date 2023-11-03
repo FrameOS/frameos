@@ -4,9 +4,9 @@ import math
 
 class GradientBackgroundApp(App):
     def run(self, context: ExecutionContext):
-        start_color = tuple(int(self.config.get('start_color')[i:i+2], 16) for i in (1, 3, 5))
-        end_color = tuple(int(self.config.get('end_color')[i:i+2], 16) for i in (1, 3, 5))
-        angle = float(self.config.get('angle', 0))  # default angle is 0 (vertical)
+        start_color = tuple(int(self.get_config('start_color')[i:i+2], 16) for i in (1, 3, 5))
+        end_color = tuple(int(self.get_config('end_color')[i:i+2], 16) for i in (1, 3, 5))
+        angle = float(self.get_config('angle', 0))  # default angle is 0 (vertical)
         width, height = context.image.size
 
         # Calculate the diagonal length
