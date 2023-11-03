@@ -156,7 +156,7 @@ class ImageHandler:
                     self.kiosk_image = self.next_image.copy()
 
                     if self.current_image is None or not self.are_images_equal(self.next_image, self.current_image) or True:
-                        self.logger.log({ 'event': '@frame:render_screen' })
+                        self.logger.log({ 'event': '@frame:render_update_screen' })
                         self.socketio.sleep(0)  # Yield to the event loop to allow the message to be sent
                         self.slow_update_image_on_frame(self.next_image)
                         self.current_image = self.next_image

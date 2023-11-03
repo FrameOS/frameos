@@ -111,10 +111,10 @@ class App:
         raise BreakExecution(message)
 
     def log(self, message: str):
-        self._log({ "event": f"{self.keyword}:log", "message": message })
+        self._log({ "event": f"app:{self.keyword}", "message": message })
         
     def error(self, message: str):
-        self._log({ "event": f"{self.keyword}:error", "message": message })
+        self._log({ "event": f"app:{self.keyword}:error", "message": message })
 
     def run(self, payload: ExecutionContext):
         pass

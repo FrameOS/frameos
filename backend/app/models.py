@@ -222,7 +222,7 @@ def process_log(frame: Frame, log: dict):
     event = log.get('event', 'log')
     if event == '@frame:render':
         changes['status'] = 'preparing'
-    if event == '@frame:render_screen':
+    if event == '@frame:render_update_screen':
         changes['status'] = 'rendering'
     if event == '@frame:render_done' or event == '@frame:render_skipped':
         changes['status'] = 'ready'

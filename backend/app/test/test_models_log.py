@@ -52,7 +52,7 @@ class TestModelsLog(BaseTestCase):
     def test_process_log_events(self):
         events = [
             ('@frame:render', 'preparing'),
-            ('@frame:render_screen', 'rendering'),
+            ('@frame:render_update_screen', 'rendering'),
             ('@frame:render_done', 'ready'),
             ('@frame:render_skipped', 'ready'),
             ('@frame:config', 'ready')  # Assuming the frame was not 'ready' before
