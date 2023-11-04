@@ -10,14 +10,13 @@ import schema from '../../../../../schema/config_json.json'
 import type { editor as importedEditor } from 'monaco-editor'
 import type { Monaco } from '@monaco-editor/react'
 import clsx from 'clsx'
-import { BeakerIcon, XMarkIcon } from '@heroicons/react/24/solid'
+import { BeakerIcon } from '@heroicons/react/24/solid'
 import { Spinner } from '../../../../components/Spinner'
 import remarkGfm from 'remark-gfm'
 import Markdown from 'react-markdown'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { dark } from 'react-syntax-highlighter/dist/esm/styles/prism'
-import { TextInput } from '../../../../components/TextInput'
 import { TextArea } from '../../../../components/TextArea'
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism'
 
 interface EditAppProps {
   panel: PanelWithMetadata
@@ -176,7 +175,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
                     <SyntaxHighlighter
                       {...rest}
                       children={String(children).replace(/\n$/, '')}
-                      style={dark}
+                      style={vscDarkPlus}
                       language={match[1]}
                       PreTag="div"
                     />
