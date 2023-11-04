@@ -35,6 +35,8 @@ export const editAppLogic = kea<editAppLogicType>([
     setInitialSources: (sources: Record<string, string>) => ({ sources }),
     validateSource: (file: string, source: string, initial: boolean = false) => ({ file, source, initial }),
     setSourceErrors: (file: string, errors: SourceError[]) => ({ file, errors }),
+    enhance: true,
+    resetEnhanceSuggestion: true,
   }),
   loaders(({ props, values }) => ({
     sources: [
@@ -49,17 +51,45 @@ export const editAppLogic = kea<editAppLogicType>([
         },
       },
     ],
+    enhanceSuggestion: [
+      null as string | null,
+      {
+        enhance: async () => {
+          const source = values.sources['frame.py']
+          const prompt = window.prompt('Enter question for OpenAI to answer', 'Fix this code')
+          const response = await fetch(`/api/enhance_source`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, source }),
+          })
+          const { suggestion, error } = await response.json()
+          if (error) {
+            window.alert(error)
+            return error
+          }
+          console.log({ suggestion })
+          return suggestion
+        },
+      },
+    ],
   })),
   reducers(({ props }) => ({
     activeFile: [
       'frame.py' as string,
       {
         setActiveFile: (state, { file }) => file,
+        resetEnhanceSuggestion: (state) => (state === 'frame.py/suggestion' ? 'frame.py' : state),
       },
     ],
     sources: {
       updateFile: (state, { file, source }) => ({ ...state, [file]: source }),
     },
+    enhanceSuggestion: [
+      null as string | null,
+      {
+        resetEnhanceSuggestion: () => null,
+      },
+    ],
     initialSources: [
       props.sources ? structuredClone(props.sources) : ({} as Record<string, string>),
       {
@@ -147,6 +177,9 @@ export const editAppLogic = kea<editAppLogicType>([
         breakpoint()
       }
       actions.setSourceErrors(file, errors || [])
+    },
+    enhanceSuccess: () => {
+      actions.setActiveFile('frame.py/suggestion')
     },
   })),
   afterMount(({ actions, props }) => {

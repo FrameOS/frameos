@@ -1,17 +1,8 @@
 import { TemplateType } from '../../../../types'
 import { H6 } from '../../../../components/H6'
-import { Button } from '../../../../components/Button'
-import { Menu } from '@headlessui/react'
 
 import React, { useState } from 'react'
-import { Transition } from '@headlessui/react'
-import {
-  ArrowDownTrayIcon,
-  DocumentArrowDownIcon,
-  EllipsisVerticalIcon,
-  PencilSquareIcon,
-  TrashIcon,
-} from '@heroicons/react/24/solid'
+import { ArrowDownTrayIcon, DocumentArrowDownIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 
 interface TemplateProps {

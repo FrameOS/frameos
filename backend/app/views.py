@@ -529,6 +529,94 @@ def validate_python_frame_source():
     else:
         return jsonify({"errors": []}), 200
 
+@app.route("/api/enhance_source", methods=["POST"])
+@login_required
+def enhance_python_frame_source():
+    data = request.json
+    print('______________')
+    print(data)
+    source = data.get('source')
+    prompt = data.get('prompt')
+    api_key = get_settings_dict().get('openai', {}).get('api_key', None)
+
+    if api_key is None:
+        return jsonify({"error": "OpenAI API key not set"}), 400
+
+    ai_context = f"""
+    You are helping a python developer write ea FrameOS application. You are editing frame.py, the main file in FrameOS.
+    This controls an e-ink display and runs on a Raspberry Pi. Help the user with their changes. 
+        
+    This is what we inherit from:
+    ```python
+    class FrameConfig:
+        status: str
+        version: str
+        width: int
+        height: int
+        device: str
+        color: str
+        interval: float
+        scaling_mode: str
+        background_color: str
+        rotate: int
+        scenes: List[FrameConfigScene]
+        settings: Dict
+    class ExecutionContext:
+        event: str
+        payload: Dict
+        image: Optional[Image]
+        state: Dict
+        apps_ran: List[str]
+        apps_errored: List[str]
+    class App:
+        def __post_init__(self):
+        def rerender(self, trigger = None):
+        def is_rendering(self):
+        def break_execution(self, message: Optional[str] = None):
+        def log(self, message: str):
+        def error(self, message: str):
+        def get_config(self, key: str, default = None):
+        def get_setting(self, key: Union[str, List[str]], default = None):
+        def parse_str(self, text: str, state: Dict):
+        def dispatch(self, event: str, payload: Optional[Dict] = None, image: Optional[Image] = None) -> ExecutionContext:
+        def shell(self, command: str):
+        def run(self, payload: ExecutionContext):
+            # code goes here, does not need to call super
+    ```
+    
+    This is the current source of frame.py:
+    ```python
+    {source}
+    ```
+    """
+
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": ai_context
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "model": "gpt-4",
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    response = requests.post("https://api.openai.com/v1/chat/completions", json=payload, headers=headers)
+    result = response.json()
+    error = result.get('error', None)
+    suggestion = result['choices'][0]['message']['content'] if 'choices' in result else None
+    if error:
+        return jsonify({"error": error}), 500
+    else:
+        return jsonify({"suggestion": suggestion}), 200
+
 def validate_python(source):
     try:
         ast.parse(source)

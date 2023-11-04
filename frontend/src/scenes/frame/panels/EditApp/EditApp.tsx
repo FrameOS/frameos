@@ -10,6 +10,12 @@ import schema from '../../../../../schema/config_json.json'
 import type { editor as importedEditor } from 'monaco-editor'
 import type { Monaco } from '@monaco-editor/react'
 import clsx from 'clsx'
+import { BeakerIcon, XMarkIcon } from '@heroicons/react/24/solid'
+import { Spinner } from '../../../../components/Spinner'
+import remarkGfm from 'remark-gfm'
+import Markdown from 'react-markdown'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { dark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
 interface EditAppProps {
   panel: PanelWithMetadata
@@ -29,8 +35,18 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
     sources: nodeData.sources,
   }
   const logic = editAppLogic(logicProps)
-  const { sources, sourcesLoading, activeFile, hasChanges, changedFiles, configJson, modelMarkers } = useValues(logic)
-  const { saveChanges, setActiveFile, updateFile } = useActions(logic)
+  const {
+    sources,
+    sourcesLoading,
+    activeFile,
+    hasChanges,
+    changedFiles,
+    configJson,
+    modelMarkers,
+    enhanceSuggestion,
+    enhanceSuggestionLoading,
+  } = useValues(logic)
+  const { saveChanges, setActiveFile, updateFile, enhance, resetEnhanceSuggestion } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
@@ -72,6 +88,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
   }
 
   const name = configJson?.name || nodeData.keyword
+  const filenames = Object.keys(sources)
 
   return (
     <div className="flex flex-col gap-2 max-h-full h-full max-w-full w-full">
@@ -88,42 +105,103 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
         </div>
       ) : null}
       <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
-        <div className="max-w-40 space-y-1">
-          {Object.entries(sources).map(([file, source]) => (
-            <div key={file} className="w-min">
-              <Button
-                size="small"
-                color={activeFile === file ? (modelMarkers[file]?.length ? 'red' : 'teal') : 'none'}
-                onClick={() => setActiveFile(file)}
-                className={clsx(
-                  'whitespace-nowrap',
-                  modelMarkers[file]?.length ? (activeFile === file ? 'text-red-200' : 'text-red-500') : ''
-                )}
-                title={
-                  modelMarkers[file]?.length
-                    ? `line ${modelMarkers[file][0].startLineNumber}, col ${modelMarkers[file][0].startColumn}: ${modelMarkers[file][0].message}`
-                    : undefined
-                }
-              >
-                {changedFiles[file] ? '* ' : ''}
-                {file}
-              </Button>
+        <div className="max-w-40">
+          <div className="flex flex-col justify-between gap-2 h-full">
+            <div className="space-y-1">
+              {filenames.map((file) => (
+                <div key={file} className="w-min">
+                  <Button
+                    size="small"
+                    color={activeFile === file ? (modelMarkers[file]?.length ? 'red' : 'teal') : 'none'}
+                    onClick={() => setActiveFile(file)}
+                    className={clsx(
+                      'whitespace-nowrap',
+                      modelMarkers[file]?.length ? (activeFile === file ? 'text-red-200' : 'text-red-500') : ''
+                    )}
+                    title={
+                      modelMarkers[file]?.length
+                        ? `line ${modelMarkers[file][0].startLineNumber}, col ${modelMarkers[file][0].startColumn}: ${modelMarkers[file][0].message}`
+                        : undefined
+                    }
+                  >
+                    {changedFiles[file] ? '* ' : ''}
+                    {file}
+                  </Button>
+                </div>
+              ))}
             </div>
-          ))}
+            <div>
+              {activeFile === 'frame.py' || enhanceSuggestion ? (
+                <div className={'flex gap-2'}>
+                  <Button
+                    color={activeFile === 'frame.py/suggestion' ? 'teal' : 'gray'}
+                    size="small"
+                    title={enhanceSuggestion ? 'Show enhanced version' : 'Enhance with OpenAI'}
+                    onClick={enhanceSuggestion ? () => setActiveFile('frame.py/suggestion') : enhance}
+                  >
+                    {enhanceSuggestionLoading ? <Spinner /> : <BeakerIcon className="w-5 h-5 my-1" />}
+                  </Button>
+                  {enhanceSuggestion ? (
+                    <Button color="gray" size="small" title="Reset" onClick={resetEnhanceSuggestion}>
+                      <span className="text-xs">
+                        <XMarkIcon className="w-5 h-5" />
+                      </span>
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
         </div>
-        <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full">
-          <Editor
-            height="100%"
-            path={`${nodeId}/${activeFile}`}
-            language={activeFile.endsWith('.json') ? 'json' : 'python'}
-            value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
-            theme="darkframe"
-            beforeMount={beforeMount}
-            onMount={(editor, monaco) => setMonacoAndEditor([monaco, editor])}
-            onChange={(value) => updateFile(activeFile, value ?? '')}
-            options={{ minimap: { enabled: false } }}
-          />
-        </div>
+
+        {activeFile === 'frame.py/suggestion' ? (
+          <div className="p-4 bg-gray-700 text-sm overflow-y-auto overflow-x-auto w-full">
+            <Markdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                a({ node, ...props }) {
+                  return <a {...props} className="text-blue-400 hover:underline" />
+                },
+                p({ node, ...props }) {
+                  return <p {...props} className="mb-4" />
+                },
+                code(props) {
+                  const { children, className, node, ref, ...rest } = props
+                  const match = /language-(\w+)/.exec(className || '')
+                  return match ? (
+                    <SyntaxHighlighter
+                      {...rest}
+                      children={String(children).replace(/\n$/, '')}
+                      style={dark}
+                      language={match[1]}
+                      PreTag="div"
+                    />
+                  ) : (
+                    <code {...rest} className={className}>
+                      {children}
+                    </code>
+                  )
+                },
+              }}
+            >
+              {`Don't forget to keep an eye on your OpenAI billing! https://platform.openai.com/account/usage\n\n${enhanceSuggestion}`}
+            </Markdown>
+          </div>
+        ) : (
+          <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full">
+            <Editor
+              height="100%"
+              path={`${nodeId}/${activeFile}`}
+              language={activeFile.endsWith('.json') ? 'json' : 'python'}
+              value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
+              theme="darkframe"
+              beforeMount={beforeMount}
+              onMount={(editor, monaco) => setMonacoAndEditor([monaco, editor])}
+              onChange={(value) => updateFile(activeFile, value ?? '')}
+              options={{ minimap: { enabled: false } }}
+            />
+          </div>
+        )}
       </div>
     </div>
   )
