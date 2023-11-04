@@ -16,6 +16,8 @@ import remarkGfm from 'remark-gfm'
 import Markdown from 'react-markdown'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { dark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { TextInput } from '../../../../components/TextInput'
+import { TextArea } from '../../../../components/TextArea'
 
 interface EditAppProps {
   panel: PanelWithMetadata
@@ -45,8 +47,9 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
     modelMarkers,
     enhanceSuggestion,
     enhanceSuggestionLoading,
+    prompt,
   } = useValues(logic)
-  const { saveChanges, setActiveFile, updateFile, enhance, resetEnhanceSuggestion } = useActions(logic)
+  const { saveChanges, setActiveFile, updateFile, enhance, resetEnhanceSuggestion, setPrompt } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
@@ -91,73 +94,74 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
   const filenames = Object.keys(sources)
 
   return (
-    <div className="flex flex-col gap-2 max-h-full h-full max-w-full w-full">
-      {!nodeData.sources && !hasChanges ? (
-        <div className="bg-gray-950 p-2">
-          You're editing a read-only system app <strong>{name}</strong>. Changes will be saved on a copy on the scene.
-        </div>
-      ) : hasChanges ? (
-        <div className="bg-gray-900 p-2">
-          You have changes.{' '}
-          <Button size="small" onClick={saveChanges}>
-            Click here to save them
-          </Button>
-        </div>
-      ) : null}
-      <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
-        <div className="max-w-40">
-          <div className="flex flex-col justify-between gap-2 h-full">
-            <div className="space-y-1">
-              {filenames.map((file) => (
-                <div key={file} className="w-min">
-                  <Button
-                    size="small"
-                    color={activeFile === file ? (modelMarkers[file]?.length ? 'red' : 'teal') : 'none'}
-                    onClick={() => setActiveFile(file)}
-                    className={clsx(
-                      'whitespace-nowrap',
-                      modelMarkers[file]?.length ? (activeFile === file ? 'text-red-200' : 'text-red-500') : ''
-                    )}
-                    title={
-                      modelMarkers[file]?.length
-                        ? `line ${modelMarkers[file][0].startLineNumber}, col ${modelMarkers[file][0].startColumn}: ${modelMarkers[file][0].message}`
-                        : undefined
-                    }
-                  >
-                    {changedFiles[file] ? '* ' : ''}
-                    {file}
-                  </Button>
-                </div>
-              ))}
-            </div>
-            <div>
-              {activeFile === 'frame.py' || enhanceSuggestion ? (
-                <div className={'flex gap-2'}>
-                  <Button
-                    color={activeFile === 'frame.py/suggestion' ? 'teal' : 'gray'}
-                    size="small"
-                    title={enhanceSuggestion ? 'Show enhanced version' : 'Enhance with OpenAI'}
-                    onClick={enhanceSuggestion ? () => setActiveFile('frame.py/suggestion') : enhance}
-                  >
-                    {enhanceSuggestionLoading ? <Spinner /> : <BeakerIcon className="w-5 h-5 my-1" />}
-                  </Button>
-                  {enhanceSuggestion ? (
-                    <Button color="gray" size="small" title="Reset" onClick={resetEnhanceSuggestion}>
-                      <span className="text-xs">
-                        <XMarkIcon className="w-5 h-5" />
-                      </span>
-                    </Button>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
+    <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
+      <div className="w-auto max-w-60 max-h-full h-full overflow-x-auto space-y-1">
+        {filenames.map((file) => (
+          <div key={file} className="w-min flex gap-2">
+            <Button
+              size="small"
+              color={activeFile === file ? (modelMarkers[file]?.length ? 'red' : 'teal') : 'none'}
+              onClick={() => setActiveFile(file)}
+              className={clsx(
+                'whitespace-nowrap',
+                modelMarkers[file]?.length ? (activeFile === file ? 'text-red-200' : 'text-red-500') : ''
+              )}
+              title={
+                modelMarkers[file]?.length
+                  ? `line ${modelMarkers[file][0].startLineNumber}, col ${modelMarkers[file][0].startColumn}: ${modelMarkers[file][0].message}`
+                  : undefined
+              }
+            >
+              {changedFiles[file] ? '* ' : ''}
+              {file}
+            </Button>
+            {file === 'frame.py' && (
+              <Button
+                color={activeFile === 'frame.py/suggestion' ? 'teal' : 'gray'}
+                size="small"
+                title={'Talk to ChatGPT'}
+                onClick={() => setActiveFile('frame.py/suggestion')}
+              >
+                {enhanceSuggestionLoading ? <Spinner className="text-white" /> : <BeakerIcon className="w-5 h-5" />}
+              </Button>
+            )}
           </div>
-        </div>
+        ))}
+      </div>
 
+      <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
+        {!nodeData.sources && !hasChanges ? (
+          <div className="bg-gray-950 p-2">
+            You're editing a read-only system app <strong>{name}</strong>. Changes will be saved on a copy on the scene.
+          </div>
+        ) : hasChanges ? (
+          <div className="bg-gray-900 p-2">
+            You have changes.{' '}
+            <Button size="small" onClick={saveChanges}>
+              Click here to save them
+            </Button>
+          </div>
+        ) : null}
         {activeFile === 'frame.py/suggestion' ? (
-          <div className="p-4 bg-gray-700 text-sm overflow-y-auto overflow-x-auto w-full">
+          <div className="p-4 bg-gray-700 text-md overflow-y-auto overflow-x-auto w-full space-y-4">
+            <p>
+              Ask a question about <code>frame.py</code> from GPT-4. Keep an eye on your{' '}
+              <a
+                href="https://platform.openai.com/account/usage"
+                className="text-blue-400 hover:underline"
+                rel="noreferrer noopener"
+              >
+                billing
+              </a>
+              !
+            </p>
+            <TextArea value={prompt} onChange={setPrompt} rows={3} />
+            <Button onClick={enhanceSuggestionLoading ? () => {} : enhance}>
+              {enhanceSuggestionLoading ? <Spinner className="text-white" /> : 'Ask'}
+            </Button>
             <Markdown
               remarkPlugins={[remarkGfm]}
+              className="space-y-4"
               components={{
                 a({ node, ...props }) {
                   return <a {...props} className="text-blue-400 hover:underline" />
@@ -177,18 +181,18 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
                       PreTag="div"
                     />
                   ) : (
-                    <code {...rest} className={className}>
+                    <code {...rest} className={clsx('bg-black', className)}>
                       {children}
                     </code>
                   )
                 },
               }}
             >
-              {`Don't forget to keep an eye on your OpenAI billing! https://platform.openai.com/account/usage\n\n${enhanceSuggestion}`}
+              {enhanceSuggestion}
             </Markdown>
           </div>
         ) : (
-          <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full">
+          <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full flex-1">
             <Editor
               height="100%"
               path={`${nodeId}/${activeFile}`}

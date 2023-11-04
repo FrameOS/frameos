@@ -36,6 +36,7 @@ export const editAppLogic = kea<editAppLogicType>([
     validateSource: (file: string, source: string, initial: boolean = false) => ({ file, source, initial }),
     setSourceErrors: (file: string, errors: SourceError[]) => ({ file, errors }),
     enhance: true,
+    setPrompt: (prompt: string) => ({ prompt }),
     resetEnhanceSuggestion: true,
   }),
   loaders(({ props, values }) => ({
@@ -56,7 +57,7 @@ export const editAppLogic = kea<editAppLogicType>([
       {
         enhance: async () => {
           const source = values.sources['frame.py']
-          const prompt = window.prompt('Enter question for OpenAI to answer', 'Fix this code')
+          const prompt = values.prompt
           const response = await fetch(`/api/enhance_source`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -79,6 +80,12 @@ export const editAppLogic = kea<editAppLogicType>([
       {
         setActiveFile: (state, { file }) => file,
         resetEnhanceSuggestion: (state) => (state === 'frame.py/suggestion' ? 'frame.py' : state),
+      },
+    ],
+    prompt: [
+      'What can I improve here?' as string,
+      {
+        setPrompt: (_, { prompt }) => prompt,
       },
     ],
     sources: {
