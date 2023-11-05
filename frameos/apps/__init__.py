@@ -155,3 +155,6 @@ class App:
                 self.log(line.rstrip("\n"))
             for line in proc.stderr:
                 self.error(line.rstrip("\n"))
+
+    def apt(self, package: str):
+        self.shell(f"dpkg -l | grep -q \"^ii  {package}\" || sudo apt -y install {package}")

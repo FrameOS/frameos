@@ -580,9 +580,18 @@ def enhance_python_frame_source():
         def parse_str(self, text: str, state: Dict):
         def dispatch(self, event: str, payload: Optional[Dict] = None, image: Optional[Image] = None) -> ExecutionContext:
         def shell(self, command: str):
+        def apt(self, package: str):
         def run(self, payload: ExecutionContext):
             # code goes here, does not need to call super
     ```
+    
+    From image_utils you can import:
+    scale_image(image: Image.Image, requested_width: int, requested_height: int, scaling_mode: 'cover' | 'contain' | 'center' | 'stretch', background_color: str) -> image.Image
+    draw_text_with_border(draw, position, text, font, font_color, border_color, border_width=1, align='left'):
+    
+    Pip packages can be installed with code like self.shell("pip3 install selenium==4.14.0") in __post_init__().
+
+    Currently available:  bidict==0.22.1 certifi==2023.7.22 charset-normalizer==3.2.0 click==8.1.6 dacite==1.8.1 evdev==1.6.1 flask==2.2.5 flask-socketio==5.3.4 idna==3.4 importlib-metadata==6.7.0 inky==1.5.0 itsdangerous==2.1.2 jinja2==3.1.2 markupsafe==2.1.3 numpy==1.26.1 pillow==9.5.0 psutil==5.9.6 python-engineio==4.5.1 python-socketio==5.8.0 requests==2.31.0 rpi-gpio==0.7.1 smbus2==0.4.2 spidev==3.6 urllib3==2.0.4 werkzeug==2.2.3 zipp==3.15.0 
     
     This is the current source of frame.py:
     ```python
