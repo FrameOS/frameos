@@ -108,6 +108,9 @@ class ImageHandler:
             self.inky.show()
         elif self.config.device in FRAMEBUFFER_DRIVERS:
             image_to_framebuffer(rotated_image, logger=self.logger)
+        else:
+            self.logger.log({ 'event': '@frame:slow_update_image_on_frame', 'error': 'no device found' })
+
 
     def are_images_equal(self, img1: Image, img2: Image) -> bool:
         if img1.size != img2.size or img1.mode != img2.mode:
