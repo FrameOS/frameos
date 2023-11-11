@@ -6,14 +6,15 @@ import { RevealDots } from '../../../../components/Reveal'
 import { diagramLogic } from './diagramLogic'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { TextArea } from '../../../../components/TextArea'
 import { PencilSquare } from '../../../../icons/icons'
 import { panelsLogic } from '../panelsLogic'
+import { DropdownMenu } from '../../../../components/DropdownMenu'
 
 export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JSX.Element {
   const { apps, frameId, selectedNodeId, sceneId } = useValues(diagramLogic)
-  const { updateNodeConfig } = useActions(diagramLogic)
+  const { updateNodeConfig, copyAppJSON } = useActions(diagramLogic)
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
   const { editApp } = useActions(panelsLogic({ id: frameId }))
 
@@ -50,9 +51,21 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
           {app?.name}
           {isCustomApp ? ' (edited)' : ''}
         </div>
-        <div className="cursor-pointer hover:text-blue-400" onClick={() => editApp(sceneId, id, data)}>
-          <PencilSquare />
-        </div>
+        <DropdownMenu
+          className="w-fit"
+          items={[
+            {
+              label: 'Edit App',
+              onClick: () => editApp(sceneId, id, data),
+              icon: <PencilSquare />,
+            },
+            {
+              label: 'Copy as JSON',
+              onClick: () => copyAppJSON(id),
+              icon: <PencilSquare />,
+            },
+          ]}
+        />
       </div>
       <div className="p-1">
         <div className="flex justify-between">

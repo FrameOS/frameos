@@ -15,6 +15,7 @@ import { AppNodeData, EventNodeData, FrameScene } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { arrangeNodes } from '../../../../utils/arrangeNodes'
+import copy from 'copy-to-clipboard'
 
 export interface DiagramLogicProps {
   frameId: number
@@ -40,6 +41,7 @@ export const diagramLogic = kea<diagramLogicType>([
     fitDiagramView: true,
     keywordDropped: (keyword: string, type: string, position: XYPosition) => ({ keyword, type, position }),
     updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
+    copyAppJSON: (nodeId: string) => ({ nodeId }),
   }),
   reducers({
     nodes: [
@@ -210,6 +212,13 @@ export const diagramLogic = kea<diagramLogicType>([
     },
     applyTemplate: () => {
       window.setTimeout(() => actions.fitDiagramView(), 50)
+    },
+    copyAppJSON: ({ nodeId }) => {
+      const { nodes } = values
+      const app = nodes.find((n) => n.id === nodeId)
+      if (app) {
+        copy(JSON.stringify(app))
+      }
     },
   })),
   afterMount(({ actions }) => {

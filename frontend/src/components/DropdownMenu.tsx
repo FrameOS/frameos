@@ -3,6 +3,7 @@ import { EllipsisVerticalIcon } from '@heroicons/react/24/solid'
 import ReactDOM from 'react-dom'
 import React, { useState } from 'react'
 import { usePopper } from 'react-popper'
+import clsx from 'clsx'
 
 export interface DropdownMenuItem {
   label: string
@@ -14,9 +15,10 @@ export interface DropdownMenuItem {
 
 export interface DropdownMenuProps {
   items: DropdownMenuItem[]
+  className?: string
 }
 
-export function DropdownMenu({ items }: DropdownMenuProps) {
+export function DropdownMenu({ items, className }: DropdownMenuProps) {
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
   const { styles, attributes } = usePopper(referenceElement, popperElement, { strategy: 'fixed' })
@@ -27,7 +29,10 @@ export function DropdownMenu({ items }: DropdownMenuProps) {
         <>
           <Menu.Button
             ref={setReferenceElement}
-            className="bg-teal-700 hover:bg-teal-600 focus:ring-teal-600 inline-flex justify-center w-full px-1 py-1 text-sm font-medium text-white rounded-md focus:outline-none rounded-md shadow-sm"
+            className={clsx(
+              'bg-teal-700 hover:bg-teal-600 focus:ring-teal-600 inline-flex justify-center px-1 py-1 text-sm font-medium text-white rounded-md focus:outline-none rounded-md shadow-sm',
+              className
+            )}
           >
             <EllipsisVerticalIcon className="w-5 h-5" aria-label="Menu" />
           </Menu.Button>
