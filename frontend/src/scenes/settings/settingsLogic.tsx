@@ -23,6 +23,7 @@ export const settingsLogic = kea<settingsLogicType>([
   connect({ logic: [socketLogic] }),
   actions({
     updateSavedSettings: (settings: Record<string, any>) => ({ settings }),
+    newKey: true,
   }),
   loaders(({ values }) => ({
     savedSettings: [
@@ -77,6 +78,22 @@ export const settingsLogic = kea<settingsLogicType>([
     [socketLogic.actionTypes.updateSettings]: ({ settings }) => {
       actions.updateSavedSettings(setDefaultSettings(settings))
       actions.resetSettings(setDefaultSettings({ ...values.savedSettings, ...settings }))
+    },
+    newKey: async () => {
+      if (values.savedSettings.ssh_keys?.default) {
+        if (!confirm('Are you sure you want to generate a new key? You might lose access to existing frames.')) {
+          return
+        }
+      }
+      const response = await fetch(`/api/generate_ssh_keys`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        throw new Error('Failed to generate new key')
+      }
+      const data = await response.json()
+      actions.setSettingsValue(['ssh_keys', 'default'], data.private)
+      actions.setSettingsValue(['ssh_keys', 'default_public'], `${data.public} frameos@${window.location.hostname}`)
     },
   })),
 ])

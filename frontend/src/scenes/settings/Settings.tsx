@@ -10,11 +10,10 @@ import { TextInput } from '../../components/TextInput'
 import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
-import { Code } from '../../components/Code'
 
 export function Settings() {
   const { savedSettings, savedSettingsLoading, settingsChanged } = useValues(settingsLogic)
-  const { submitSettings } = useActions(settingsLogic)
+  const { submitSettings, newKey } = useActions(settingsLogic)
   return (
     <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">
       <PanelGroup direction="vertical" units="pixels">
@@ -41,6 +40,7 @@ export function Settings() {
                 <Group name="openai">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>OpenAI</H6>
+                    The OpenAI API key is used within OpenAI apps, and for GPT4 coding assistance.
                     <Field name="api_key" label="API key" secret={!!savedSettings?.openai?.api_key}>
                       <TextInput name="api_key" autoFocus={!!savedSettings?.openai?.api_key} />
                     </Field>
@@ -72,22 +72,18 @@ export function Settings() {
                 <Group name="ssh_keys">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>SSH Keys</H6>
+                    <p className="text-sm leading-loose">
+                      This SSH key will be used on all frames that don't have a password set for SSH.
+                    </p>
                     <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
                       <TextArea autoFocus={!!savedSettings?.ssh_keys?.default} />
                     </Field>
-                    <p className="text-sm leading-loose">
-                      This key will be used on all frames that don't have a password.
-                    </p>
-                    <p className="text-sm leading-loose">
-                      To generate a key:
-                      <br />
-                      1. run <Code>ssh-keygen -f keyfile</Code>
-                      <br />
-                      2. copy <Code>keyfile</Code> here
-                      <br />
-                      3. copy <Code>keyfile.pub</Code> to the remote host's <Code>~/.ssh/authorized_keys</Code>, or to
-                      the Raspberry Pi Installer
-                    </p>
+                    <Field name="default_public" label="Default public SSH key (use this in the RPi Imager)">
+                      <TextArea autoFocus={!!savedSettings?.ssh_keys?.default_public} />
+                    </Field>
+                    <Button onClick={newKey} color={savedSettings?.ssh_keys?.default ? 'light-gray' : 'teal'}>
+                      Generate new keypair
+                    </Button>
                   </Box>
                 </Group>
               </Form>

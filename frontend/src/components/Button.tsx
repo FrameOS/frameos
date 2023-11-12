@@ -33,6 +33,7 @@ export function Button({ size, color, children, className, disabled, full, ...pr
     <button
       className={clsx(sizeClassName, colorClassName, full && 'w-full', disabled && 'opacity-30', className)}
       disabled={disabled}
+      type={props.type || 'button'}
       {...props}
     >
       {children}
