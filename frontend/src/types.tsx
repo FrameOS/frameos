@@ -135,6 +135,7 @@ export enum Panel {
   Events = 'Events',
   EditApp = 'EditApp',
   Templates = 'Templates',
+  Terminal = 'Terminal',
 }
 
 export type PanelWithMetadata = {
