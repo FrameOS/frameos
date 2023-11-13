@@ -61,6 +61,21 @@ export function Settings() {
                     </Field>
                   </Box>
                 </Group>
+                <Group name="frameos">
+                  <Box className="p-2 mb-4 space-y-2">
+                    <H6>FrameOS Gallery</H6>
+                    <p>
+                      Sign up to the premium{' '}
+                      <a className="text-blue-400 hover:underline" target="_blank" href="https://gallery.frameos.net/">
+                        FrameOS galleries
+                      </a>{' '}
+                      and support this project.
+                    </p>
+                    <Field name="api_key" label="API key" secret={!!savedSettings?.frameos?.api_key}>
+                      <TextInput autoFocus={!!savedSettings?.frameos?.api_key} />
+                    </Field>
+                  </Box>
+                </Group>
                 <Group name="github">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>Github</H6>

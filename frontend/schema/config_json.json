@@ -15,6 +15,7 @@
           "type": "string"
         },
         "fields": {
+          "description": "Fields for app in diagram editor",
           "items": {
             "anyOf": [
               {
@@ -30,6 +31,13 @@
         "name": {
           "description": "Name for this app",
           "type": "string"
+        },
+        "settings": {
+          "description": "List of top level settings exported for this app",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "version": {
           "description": "Version for this app",

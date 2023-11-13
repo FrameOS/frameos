@@ -10,7 +10,8 @@ from dacite import from_dict
 from typing import Optional, List, Dict, Type, Any, TYPE_CHECKING
 from PIL.Image import Image
 
-from apps import AppConfig, App, Node, Edge, FrameConfigScene, ExecutionContext, BreakExecution
+from apps import AppConfig, App, Node, Edge, FrameConfigScene, ExecutionContext, BreakExecution, MarkdownField, \
+    ConfigField
 from .config import Config
 from .logger import Logger
 
@@ -162,10 +163,21 @@ class AppHandler:
         try:
             with zipfile.ZipFile(f'apps/{app_id}.zip', 'r') as zip_ref:
                 with zip_ref.open(f'config.json') as file:
-                    config = from_dict(data_class=AppConfig, data={
-                        **json.load(file),
-                        'keyword': app_id
-                    })
+                    json_data = json.load(file)
+                    config = AppConfig(
+                        keyword=app_id,
+                        name=json_data.get('name', app_id),
+                        description=json_data.get('description', ''),
+                        version=json_data.get('version', '0.0.0'),
+                        settings=json_data.get('settings', None),
+                        fields=[]
+                    )
+                    for field in json_data.get('fields', []):
+                        if 'markdown' in field and 'name' not in field:
+                            config.fields.append(MarkdownField(markdown=field['markdown']))
+                        else:
+                            config.fields.append(ConfigField(**field))
+
             importer = zipimport.zipimporter(f'apps/{app_id}.zip')
             frame_module = importer.load_module(f'frame')
             for name, obj in inspect.getmembers(frame_module):
@@ -195,10 +207,11 @@ class AppHandler:
         AppClass = self.app_classes[name]
         config = {}
         for field in app_config.fields:
-            if node_config and field.name in node_config:
-                config[field.name] = node_config[field.name]
-            else:
-                config[field.name] = field.value
+            if isinstance(field, ConfigField):
+                if node_config and field.name in node_config:
+                    config[field.name] = node_config[field.name]
+                else:
+                    config[field.name] = field.value
 
         return AppClass(
             keyword=name,

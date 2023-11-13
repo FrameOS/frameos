@@ -93,7 +93,9 @@ export interface App {
   description?: string
   /** Version for this app */
   version?: string
-
+  /** List of top level settings exported for this app */
+  settings?: string[]
+  /** Fields for app in diagram editor */
   fields?: (ConfigField | MarkdownField)[]
 }
 

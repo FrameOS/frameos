@@ -22,13 +22,17 @@ class ConfigField:
     placeholder: Optional[str] = None
 
 @dataclass
+class MarkdownField:
+    markdown: str
+
+@dataclass
 class AppConfig:
     keyword: str
     name: Optional[str]
-    config: Optional[Dict]
     description: Optional[str]
     version: Optional[str]
-    fields: Optional[List[ConfigField]]
+    settings: Optional[List[str]]
+    fields: Optional[List[Union[ConfigField, MarkdownField]]]
 
 @dataclass
 class Edge:
@@ -127,7 +131,8 @@ class App:
         key_list = (key if isinstance(key, list) else [key])
         start = self.frame_config.settings
         for i, k in enumerate(key_list):
-            start = start.get(k, default if i == len(key_list) - 1 else {})
+            if start is not None:
+                start = start.get(k, default if i == len(key_list) - 1 else {})
         return start
 
     def parse_str(self, text: str, state: Dict):
