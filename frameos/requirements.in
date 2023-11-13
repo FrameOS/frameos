@@ -16,3 +16,4 @@ werkzeug==2.2.3
 evdev==1.6.1
 requests==2.31.0
 psutil==5.9.6
+sentry-sdk[flask]

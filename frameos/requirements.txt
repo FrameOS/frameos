@@ -9,8 +9,12 @@
 
 bidict==0.22.1
     # via python-socketio
+blinker==1.7.0
+    # via sentry-sdk
 certifi==2023.7.22
-    # via requests
+    # via
+    #   requests
+    #   sentry-sdk
 charset-normalizer==3.2.0
     # via requests
 click==8.1.6
@@ -23,6 +27,7 @@ flask==2.2.5
     # via
     #   -r requirements.in
     #   flask-socketio
+    #   sentry-sdk
 flask-socketio==5.3.4
     # via -r requirements.in
 idna==3.4
@@ -40,6 +45,7 @@ jinja2==3.1.2
 markupsafe==2.1.3
     # via
     #   jinja2
+    #   sentry-sdk
     #   werkzeug
 numpy==1.26.1
     # via
@@ -57,12 +63,16 @@ requests==2.31.0
     # via -r requirements.in
 rpi-gpio==0.7.1
     # via -r requirements.in
+sentry-sdk[flask]==1.35.0
+    # via -r requirements.in
 smbus2==0.4.2
     # via inky
 spidev==3.6
     # via inky
 urllib3==2.0.4
-    # via requests
+    # via
+    #   requests
+    #   sentry-sdk
 werkzeug==2.2.3
     # via
     #   -r requirements.in

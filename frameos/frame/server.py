@@ -1,6 +1,7 @@
 import io
 import time
 import traceback
+import sentry_sdk
 from flask import Flask, send_file
 from flask_socketio import SocketIO, emit
 from typing import Optional, Any
@@ -21,11 +22,15 @@ class Server:
         self.config = config
         self.logger = logger
 
+        frame_dsn = self.config.settings.get('sentry', {}).get('frame_dsn', None)
+        if frame_dsn:
+            sentry_sdk.init(dsn=frame_dsn, traces_sample_rate=1.0, profiles_sample_rate=1.0)
+
         self.app: Flask = Flask(__name__)
         self.app.config['SECRET_KEY'] = 'secret!'
         self.socketio: SocketIO = SocketIO(self.app, async_mode='threading')
         self.logger.set_socketio(self.socketio)
-        self.logger.log({ 'event': '@frame:startup' })
+        self.logger.log({ 'event': '@frame:startup', **({'sentry': True} if frame_dsn else {}) })
 
         self.app_handler: AppHandler = AppHandler(self.config, self.logger)
         self.image_handler: ImageHandler = ImageHandler(self.logger, self.socketio, self.config, self.app_handler)

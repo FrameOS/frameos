@@ -50,11 +50,7 @@ try:
         settings = models.get_settings_dict()
         dsn = settings.get('sentry', {}).get('controller_dsn', None)
         if dsn:
-            sentry_sdk.init(
-                dsn=dsn,
-                traces_sample_rate=1.0,
-                profiles_sample_rate=1.0,
-            )
+            sentry_sdk.init(dsn=dsn, traces_sample_rate=1.0, profiles_sample_rate=1.0)
 except Exception as e:
     print(e)
     pass

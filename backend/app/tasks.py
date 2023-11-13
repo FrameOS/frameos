@@ -141,6 +141,9 @@ def get_frame_json(frame: Frame) -> dict:
     for key in setting_keys:
         final_settings[key] = all_settings.get(key, None)
 
+    frame_dsn = all_settings.get('sentry', {}).get('frame_dsn', None)
+    final_settings['sentry'] = { 'frame_dsn': frame_dsn }
+
     frame_json['settings'] = final_settings
     return frame_json
 
