@@ -12,6 +12,7 @@ function setDefaultSettings(settings: Record<string, any>): Record<string, any> 
     home_assistant: settings.home_assistant ?? {},
     frameos: settings.frameos ?? {},
     github: settings.github ?? {},
+    sentry: settings.sentry ?? {},
     openai: settings.openai ?? {},
     repositories: settings.repositories ?? [],
     ssh_keys: settings.ssh_keys ?? {},

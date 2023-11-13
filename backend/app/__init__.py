@@ -1,7 +1,9 @@
 import secrets
 
 from gevent import monkey
+
 monkey.patch_all()
+import sentry_sdk
 import os
 from flask import Flask
 from flask_login import LoginManager
@@ -42,3 +44,17 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 from . import models, views, tasks
+
+try:
+    with app.app_context():
+        settings = models.get_settings_dict()
+        dsn = settings.get('sentry', {}).get('controller_dsn', None)
+        if dsn:
+            sentry_sdk.init(
+                dsn=dsn,
+                traces_sample_rate=1.0,
+                profiles_sample_rate=1.0,
+            )
+except Exception as e:
+    print(e)
+    pass

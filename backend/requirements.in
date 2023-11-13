@@ -20,3 +20,4 @@ flask_wtf
 email_validator
 ipdb
 pillow==9.5.0
+sentry-sdk[flask]
