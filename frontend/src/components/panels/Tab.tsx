@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { Button } from '../Button'
-import { CloseIcon } from '../../icons/icons'
+import { XMarkIcon } from '@heroicons/react/24/solid'
 
 interface TabProps {
   active?: boolean
@@ -28,7 +28,7 @@ export function Tab({ children, active, className, onClick, onDoubleClick, onClo
       <div className="truncate">{children}</div>
       {closable ? (
         <Button size="tiny" color="none-gray" className="text-sm text-white" onClick={onClose}>
-          <CloseIcon />
+          <XMarkIcon className="w-4 h-4" />
         </Button>
       ) : null}
     </div>
