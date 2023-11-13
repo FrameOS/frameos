@@ -105,7 +105,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                 <React.Fragment key={i}>
                   {'markdown' in field ? (
                     <tr>
-                      <td className={clsx('font-sm text-indigo-200')}>
+                      <td className={clsx('font-sm text-indigo-200')} colSpan={2}>
                         <Markdown value={field.markdown} />
                       </td>
                     </tr>

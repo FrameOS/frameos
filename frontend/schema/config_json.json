@@ -16,7 +16,14 @@
         },
         "fields": {
           "items": {
-            "$ref": "#/definitions/ConfigField"
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ConfigField"
+              },
+              {
+                "$ref": "#/definitions/MarkdownField"
+              }
+            ]
           },
           "type": "array"
         },
@@ -76,6 +83,17 @@
         }
       },
       "required": ["name", "label", "type"],
+      "type": "object"
+    },
+    "MarkdownField": {
+      "additionalProperties": false,
+      "properties": {
+        "markdown": {
+          "description": "Block of markdown text to display between fields",
+          "type": "string"
+        }
+      },
+      "required": ["markdown"],
       "type": "object"
     }
   }
