@@ -11,6 +11,7 @@ import { TextArea } from '../../../../components/TextArea'
 import { PencilSquare } from '../../../../icons/icons'
 import { panelsLogic } from '../panelsLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { Markdown } from '../../../../components/Markdown'
 
 export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JSX.Element {
   const { apps, frameId, selectedNodeId, sceneId } = useValues(diagramLogic)
@@ -101,49 +102,61 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5">
             <tbody>
               {app?.fields.map((field, i) => (
-                <tr key={i}>
-                  <td
-                    className={clsx(
-                      'font-sm text-indigo-200',
-                      field.name in data.config && data.config[field.name] !== field.value ? 'underline font-bold' : ''
-                    )}
-                    title={
-                      field.name in data.config && data.config[field.name] !== field.value
-                        ? `${field.name} has been modified`
-                        : undefined
-                    }
-                  >
-                    {field.label ?? field.name}
-                  </td>
-                  <td className="cursor-text">
-                    {field.secret && !secretRevealed[field.name] ? (
-                      <RevealDots onClick={() => setSecretRevealed({ ...secretRevealed, [field.name]: true })} />
-                    ) : field.type === 'select' ? (
-                      <Select
-                        theme="node"
-                        placeholder={field.placeholder}
-                        value={field.name in data.config ? data.config[field.name] : field.value}
-                        options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
-                        onChange={(value) => updateNodeConfig(id, field.name, value)}
-                      />
-                    ) : field.type === 'text' ? (
-                      <TextArea
-                        theme="node"
-                        placeholder={field.placeholder}
-                        value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
-                        onChange={(value) => updateNodeConfig(id, field.name, value)}
-                        rows={field.rows ?? 3}
-                      />
-                    ) : (
-                      <TextInput
-                        theme="node"
-                        placeholder={field.placeholder}
-                        value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
-                        onChange={(value) => updateNodeConfig(id, field.name, value)}
-                      />
-                    )}
-                  </td>
-                </tr>
+                <React.Fragment key={i}>
+                  {'markdown' in field ? (
+                    <tr>
+                      <td className={clsx('font-sm text-indigo-200')}>
+                        <Markdown value={field.markdown} />
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr>
+                      <td
+                        className={clsx(
+                          'font-sm text-indigo-200',
+                          field.name in data.config && data.config[field.name] !== field.value
+                            ? 'underline font-bold'
+                            : ''
+                        )}
+                        title={
+                          field.name in data.config && data.config[field.name] !== field.value
+                            ? `${field.name} has been modified`
+                            : undefined
+                        }
+                      >
+                        {field.label ?? field.name}
+                      </td>
+                      <td className="cursor-text">
+                        {field.secret && !secretRevealed[field.name] ? (
+                          <RevealDots onClick={() => setSecretRevealed({ ...secretRevealed, [field.name]: true })} />
+                        ) : field.type === 'select' ? (
+                          <Select
+                            theme="node"
+                            placeholder={field.placeholder}
+                            value={field.name in data.config ? data.config[field.name] : field.value}
+                            options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
+                            onChange={(value) => updateNodeConfig(id, field.name, value)}
+                          />
+                        ) : field.type === 'text' ? (
+                          <TextArea
+                            theme="node"
+                            placeholder={field.placeholder}
+                            value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
+                            onChange={(value) => updateNodeConfig(id, field.name, value)}
+                            rows={field.rows ?? 3}
+                          />
+                        ) : (
+                          <TextInput
+                            theme="node"
+                            placeholder={field.placeholder}
+                            value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
+                            onChange={(value) => updateNodeConfig(id, field.name, value)}
+                          />
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>

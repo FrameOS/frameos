@@ -5,18 +5,15 @@ import Editor from '@monaco-editor/react'
 import { AppNodeData, PanelWithMetadata } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import schema from '../../../../../schema/config_json.json'
 import type { editor as importedEditor } from 'monaco-editor'
 import type { Monaco } from '@monaco-editor/react'
 import clsx from 'clsx'
 import { BeakerIcon } from '@heroicons/react/24/solid'
 import { Spinner } from '../../../../components/Spinner'
-import remarkGfm from 'remark-gfm'
-import Markdown from 'react-markdown'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { TextArea } from '../../../../components/TextArea'
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism'
+import { Markdown } from '../../../../components/Markdown'
 
 interface EditAppProps {
   panel: PanelWithMetadata
@@ -158,37 +155,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
             <Button onClick={enhanceSuggestionLoading ? () => {} : enhance}>
               {enhanceSuggestionLoading ? <Spinner className="text-white" /> : 'Ask'}
             </Button>
-            <Markdown
-              remarkPlugins={[remarkGfm]}
-              className="space-y-4"
-              components={{
-                a({ node, ...props }) {
-                  return <a {...props} className="text-blue-400 hover:underline" />
-                },
-                p({ node, ...props }) {
-                  return <p {...props} className="mb-4" />
-                },
-                code(props) {
-                  const { children, className, node, ref, ...rest } = props
-                  const match = /language-(\w+)/.exec(className || '')
-                  return match ? (
-                    <SyntaxHighlighter
-                      {...rest}
-                      children={String(children).replace(/\n$/, '')}
-                      style={vscDarkPlus}
-                      language={match[1]}
-                      PreTag="div"
-                    />
-                  ) : (
-                    <code {...rest} className={clsx('bg-black', className)}>
-                      {children}
-                    </code>
-                  )
-                },
-              }}
-            >
-              {enhanceSuggestion}
-            </Markdown>
+            <Markdown value={enhanceSuggestion ?? ''} />
           </div>
         ) : (
           <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full flex-1">

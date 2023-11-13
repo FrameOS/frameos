@@ -78,6 +78,11 @@ export interface ConfigField {
   rows?: number
 }
 
+export interface MarkdownField {
+  /** Block of markdown text to display between fields */
+  markdown: string
+}
+
 /** config.json schema */
 export interface App {
   /** Name for this app */
@@ -89,7 +94,7 @@ export interface App {
   /** Version for this app */
   version?: string
 
-  fields?: ConfigField[]
+  fields?: (ConfigField | MarkdownField)[]
 }
 
 export interface AppNodeData {
