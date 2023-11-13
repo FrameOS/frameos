@@ -15,7 +15,7 @@ export function Markdown({ value }: MarkdownProps) {
       className="space-y-4"
       components={{
         a({ node, ...props }) {
-          return <a {...props} className="text-blue-400 hover:underline" />
+          return <a target="_blank" {...props} className="text-blue-400 hover:underline" />
         },
         p({ node, ...props }) {
           return <p {...props} className="mb-4" />
