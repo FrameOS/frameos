@@ -8,14 +8,14 @@ import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import React, { useState } from 'react'
 import { TextArea } from '../../../../components/TextArea'
-import { PencilSquare } from '../../../../icons/icons'
 import { panelsLogic } from '../panelsLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Markdown } from '../../../../components/Markdown'
+import { ClipboardDocumentIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
 
 export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JSX.Element {
   const { apps, frameId, selectedNodeId, sceneId } = useValues(diagramLogic)
-  const { updateNodeConfig, copyAppJSON } = useActions(diagramLogic)
+  const { updateNodeConfig, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
   const { editApp } = useActions(panelsLogic({ id: frameId }))
 
@@ -58,12 +58,17 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
             {
               label: 'Edit App',
               onClick: () => editApp(sceneId, id, data),
-              icon: <PencilSquare />,
+              icon: <PencilSquareIcon className="w-5 h-5" />,
             },
             {
               label: 'Copy as JSON',
               onClick: () => copyAppJSON(id),
-              icon: <PencilSquare />,
+              icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+            },
+            {
+              label: 'Delete App',
+              onClick: () => deleteApp(id),
+              icon: <TrashIcon className="w-5 h-5" />,
             },
           ]}
         />

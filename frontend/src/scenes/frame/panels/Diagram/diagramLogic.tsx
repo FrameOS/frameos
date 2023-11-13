@@ -42,6 +42,7 @@ export const diagramLogic = kea<diagramLogicType>([
     keywordDropped: (keyword: string, type: string, position: XYPosition) => ({ keyword, type, position }),
     updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
     copyAppJSON: (nodeId: string) => ({ nodeId }),
+    deleteApp: (id: string) => ({ id }),
   }),
   reducers({
     nodes: [
@@ -64,6 +65,10 @@ export const diagramLogic = kea<diagramLogicType>([
           )
           return equal(state, newNodes) ? state : newNodes
         },
+        deleteApp: (state, { id }) => {
+          const newNodes = state.filter((node) => node.id !== id)
+          return equal(state, newNodes) ? state : newNodes
+        },
       },
     ],
     edges: [
@@ -76,6 +81,10 @@ export const diagramLogic = kea<diagramLogicType>([
         },
         addEdge: (state, { edge }) => {
           const newEdges = addEdge({ id: uuidv4(), ...edge }, state)
+          return equal(state, newEdges) ? state : newEdges
+        },
+        deleteApp: (state, { id }) => {
+          const newEdges = state.filter((edge) => edge.source !== id && edge.target !== id)
           return equal(state, newEdges) ? state : newEdges
         },
       },

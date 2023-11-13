@@ -2,7 +2,6 @@ import { useActions, useValues } from 'kea'
 import { appsModel, categoryLabels } from '../../../../models/appsModel'
 import { Box } from '../../../../components/Box'
 import { H6 } from '../../../../components/H6'
-import { PencilSquare } from '../../../../icons/icons'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
 
