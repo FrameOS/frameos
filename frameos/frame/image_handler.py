@@ -87,7 +87,12 @@ class ImageHandler:
                 return
             except Exception as e:
                 self.inky = None
-                self.logger.log({'event': '@frame:device_error', "device": 'pimoroni.inky_impression', 'error': str(e), })
+                self.logger.log({
+                    'event': '@frame:device_error',
+                    "device": 'pimoroni.inky_impression',
+                    'error': str(e),
+                    'suggestion': "SSH onto the frame and run \"curl https://get.pimoroni.com/inky | bash\" to install the Inky library."
+                })
 
         self.logger.log({'event': '@frame:device', "device": 'web_only', 'info': "Starting in WEB only mode."})
 
