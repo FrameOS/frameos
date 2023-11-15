@@ -125,9 +125,6 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
     else:
         user, password = user_pass, None
 
-    if password is None and user == 'pi':
-        password = 'raspberry'
-
     if ':' in server_host:
         server_host, server_port = server_host.split(':')
     else:
