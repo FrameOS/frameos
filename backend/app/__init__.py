@@ -43,7 +43,7 @@ def load_user(user_id):
     from .models import User
     return User.query.get(int(user_id))
 
-from . import models, views, tasks
+from . import models, api, tasks
 
 try:
     with app.app_context():
