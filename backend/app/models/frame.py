@@ -1,8 +1,13 @@
+import json
 import uuid
 import secrets
 from app import db, socketio
 from typing import Dict, Optional
 from sqlalchemy.dialects.sqlite import JSON
+
+from app.models.apps import get_app_configs
+from app.models.settings import get_settings_dict
+
 
 # NB! Update frontend/src/types.tsx if you change this
 class Frame(db.Model):
@@ -175,3 +180,47 @@ def create_default_scene() -> Dict:
         ]
     }
 
+
+def get_frame_json(frame: Frame) -> dict:
+    frame_json = frame.to_dict()
+    frame_json.pop("frame_host", None)
+    frame_json.pop("frame_port", None)
+    frame_json.pop("ssh_user", None)
+    frame_json.pop("ssh_pass", None)
+    frame_json.pop("ssh_port", None)
+    frame_json.pop("status", None)
+
+    setting_keys = set()
+    app_configs = get_app_configs()
+    for scene in frame.scenes:
+        for node in scene.get('nodes', []):
+            if node.get('type', None) == 'app':
+                sources = node.get('data', {}).get('sources', None)
+                if sources and len(sources) > 0:
+                    try:
+                        config = sources.get('config.json', '{}')
+                        config = json.loads(config)
+                        settings = config.get('settings', [])
+                        for key in settings:
+                            setting_keys.add(key)
+                    except:
+                        pass
+                else:
+                    keyword = node.get('data', {}).get('keyword', None)
+                    if keyword:
+                        app_config = app_configs.get(keyword, None)
+                        if app_config:
+                            settings = app_config.get('settings', [])
+                            for key in settings:
+                                setting_keys.add(key)
+
+    all_settings = get_settings_dict()
+    final_settings = {}
+    for key in setting_keys:
+        final_settings[key] = all_settings.get(key, None)
+
+    frame_dsn = all_settings.get('sentry', {}).get('frame_dsn', None)
+    final_settings['sentry'] = { 'frame_dsn': frame_dsn }
+
+    frame_json['settings'] = final_settings
+    return frame_json

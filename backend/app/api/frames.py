@@ -3,12 +3,13 @@ import json
 
 from flask import jsonify, request, Response
 from flask_login import login_required
-from app import app, tasks, redis
+from app import app, redis
 from app.models.frame import Frame, new_frame, delete_frame, update_frame
+from app.tasks import deploy_frame, restart_frame
 
 @app.route("/api/frames", methods=["GET"])
 @login_required
-def frames():
+def api_frames():
     frames = Frame.query.all()
     frames_list = [frame.to_dict() for frame in frames]
     return jsonify(frames=frames_list)
@@ -16,14 +17,14 @@ def frames():
 
 @app.route('/api/frames/<int:id>', methods=['GET'])
 @login_required
-def get_frame(id: int):
+def api_frame_get(id: int):
     frame = Frame.query.get_or_404(id)
     return jsonify(frame=frame.to_dict())
 
 
 @app.route('/api/frames/<int:id>/logs', methods=['GET'])
 @login_required
-def get_logs(id: int):
+def api_frame_get_logs(id: int):
     frame = Frame.query.get_or_404(id)
     logs = [log.to_dict() for log in frame.logs]
     logs = logs[-1000:]
@@ -32,7 +33,7 @@ def get_logs(id: int):
 
 @app.route('/api/frames/<int:id>/image', methods=['GET'])
 @login_required
-def get_image(id: int):
+def api_frame_get_image(id: int):
     frame = Frame.query.get_or_404(id)
 
     if request.args.get('t') == '-1':
@@ -53,7 +54,7 @@ def get_image(id: int):
 
 @app.route('/api/frames/<int:id>/event/render', methods=['POST'])
 @login_required
-def event_render(id: int):
+def api_frame_render_event(id: int):
     frame = Frame.query.get_or_404(id)
     response = requests.get(f'http://{frame.frame_host}:{frame.frame_port}/event/render')
 
@@ -65,28 +66,28 @@ def event_render(id: int):
 
 @app.route('/api/frames/<int:id>/reset', methods=['POST'])
 @login_required
-def reset_frame(id: int):
-    tasks.reset_frame(id)
+def api_frame_reset_event(id: int):
+    reset_frame(id)
     return 'Success', 200
 
 
 @app.route('/api/frames/<int:id>/restart', methods=['POST'])
 @login_required
-def restart_frame(id: int):
-    tasks.restart_frame(id)
+def api_frame_restart_event(id: int):
+    restart_frame(id)
     return 'Success', 200
 
 
 @app.route('/api/frames/<int:id>/deploy', methods=['POST'])
 @login_required
-def deploy_frame(id: int):
-    tasks.deploy_frame(id)
+def api_frame_deploy_event(id: int):
+    deploy_frame(id)
     return 'Success', 200
 
 
 @app.route('/api/frames/<int:id>', methods=['POST'])
 @login_required
-def update_frame(id: int):
+def api_frame_update(id: int):
     frame = Frame.query.get_or_404(id)
     # I have many years of engineering experience
     if 'scenes' in request.form:
@@ -135,16 +136,16 @@ def update_frame(id: int):
     update_frame(frame)
 
     if request.form.get('next_action') == 'restart':
-        tasks.restart_frame(frame.id)
+        restart_frame(frame.id)
     elif request.form.get('next_action') == 'deploy':
-        tasks.deploy_frame(frame.id)
+        deploy_frame(frame.id)
 
     return 'Success', 200
 
 
 @app.route("/api/frames/new", methods=["POST"])
 @login_required
-def new_frame():
+def api_frame_new():
     name = request.form['name']
     frame_host = request.form['frame_host']
     server_host = request.form['server_host']
@@ -155,7 +156,7 @@ def new_frame():
 
 @app.route('/api/frames/<int:frame_id>', methods=['DELETE'])
 @login_required
-def delete_frame_route(frame_id):
+def api_frame_delete(frame_id):
     success = delete_frame(frame_id)
     if success:
         return jsonify({'message': 'Frame deleted successfully'}), 200

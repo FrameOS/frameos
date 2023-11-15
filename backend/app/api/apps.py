@@ -11,12 +11,12 @@ from app.models.settings import get_settings_dict
 
 @app.route("/api/apps", methods=["GET"])
 @login_required
-def apps():
+def api_apps():
     return jsonify(apps=get_app_configs())
 
 @app.route("/api/apps/source/<string:keyword>", methods=["GET"])
 @login_required
-def builtin_app(keyword: str):
+def api_apps_source(keyword: str):
     return jsonify(get_one_app_sources(keyword))
 
 

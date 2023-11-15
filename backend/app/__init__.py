@@ -16,7 +16,6 @@ from urllib.parse import urlparse
 from redis import Redis
 
 
-# Get the Redis URL
 redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 parsed_url = urlparse(redis_url)
 redis_host = parsed_url.hostname
