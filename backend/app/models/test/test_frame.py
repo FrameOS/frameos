@@ -1,5 +1,6 @@
 import unittest
-from app.models import Frame, new_frame, update_frame, delete_frame, new_log, Log
+
+from app.models.frame import Frame, new_frame, update_frame, delete_frame
 from app.test.base import BaseTestCase
 
 class TestModelsFrame(BaseTestCase):
