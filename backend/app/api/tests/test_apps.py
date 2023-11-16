@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 from flask import json
-from app.test.base import BaseTestCase
+from app.tests.base import BaseTestCase
 
 class TestViews(BaseTestCase):
 

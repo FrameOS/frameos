@@ -1,7 +1,7 @@
 import unittest
 
 from app.models.frame import Frame, new_frame, update_frame, delete_frame
-from app.test.base import BaseTestCase
+from app.tests.base import BaseTestCase
 
 class TestModelsFrame(BaseTestCase):
     def test_frame_creation(self):

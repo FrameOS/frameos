@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 from flask import json
 from app import models
-from app.test.base import BaseTestCase
+from app.tests.base import BaseTestCase
 
 class TestViews(BaseTestCase):
 

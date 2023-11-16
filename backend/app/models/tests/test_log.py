@@ -1,7 +1,8 @@
 import unittest
 
-from app.models import new_frame, process_log, new_log, Log
-from app.test.base import BaseTestCase
+from app.models.frame import new_frame
+from app.models.log import process_log, new_log, Log
+from app.tests.base import BaseTestCase
 from sqlalchemy.exc import IntegrityError
 
 class TestModelsLog(BaseTestCase):
