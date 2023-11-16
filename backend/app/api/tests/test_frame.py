@@ -50,7 +50,7 @@ class TestViews(BaseTestCase):
         mock_response = MagicMock(status_code=200)
         mock_requests.return_value = mock_response
 
-        response = self.client.post('/api/frames/1/refresh')
+        response = self.client.post('/api/frames/1/event/render')
         self.assertEqual(response.status_code, 200)
 
     @patch('app.models.frame.new_frame')

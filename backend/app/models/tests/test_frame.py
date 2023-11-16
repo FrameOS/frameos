@@ -40,7 +40,7 @@ class TestModelsFrame(BaseTestCase):
         self.assertEqual(frame_dict['frame_host'], "192.168.1.1")
         self.assertEqual(frame_dict['frame_port'], 8999)
         self.assertEqual(frame_dict['ssh_user'], "pi")
-        self.assertEqual(frame_dict['ssh_pass'], "raspberry")
+        self.assertEqual(frame_dict['ssh_pass'], None)
         self.assertEqual(frame_dict['ssh_port'], 22)
         self.assertEqual(frame_dict['server_host'], "server_host.com")
         self.assertEqual(frame_dict['server_port'], 8999)

@@ -20,6 +20,8 @@ blinker==1.6.2
     # via
     #   flask
     #   sentry-sdk
+build==1.0.3
+    # via pip-tools
 certifi==2023.7.22
     # via
     #   requests
@@ -31,7 +33,9 @@ cffi==1.15.1
 charset-normalizer==3.2.0
     # via requests
 click==8.1.6
-    # via flask
+    # via
+    #   flask
+    #   pip-tools
 cryptography==41.0.3
     # via paramiko
 dacite==1.8.1
@@ -109,7 +113,9 @@ markupsafe==2.1.3
 matplotlib-inline==0.1.6
     # via ipython
 packaging==23.2
-    # via pytest
+    # via
+    #   build
+    #   pytest
 paramiko==3.3.1
     # via
     #   -r requirements.in
@@ -121,6 +127,8 @@ pexpect==4.8.0
 pickleshare==0.7.5
     # via ipython
 pillow==9.5.0
+    # via -r requirements.in
+pip-tools==7.3.0
     # via -r requirements.in
 pluggy==1.3.0
     # via pytest
@@ -136,7 +144,11 @@ pygments==2.16.1
     # via ipython
 pynacl==1.5.0
     # via paramiko
+pyproject-hooks==1.0.0
+    # via build
 pytest==7.4.3
+    # via -r requirements.in
+pytest-watcher==0.3.4
     # via -r requirements.in
 python-engineio==4.5.1
     # via python-socketio
@@ -171,12 +183,16 @@ urllib3==2.0.4
     # via
     #   requests
     #   sentry-sdk
+watchdog==3.0.0
+    # via pytest-watcher
 wcwidth==0.2.6
     # via prompt-toolkit
 werkzeug==2.3.6
     # via
     #   flask
     #   flask-login
+wheel==0.41.3
+    # via pip-tools
 wtforms==3.0.1
     # via
     #   -r requirements.in
@@ -187,4 +203,5 @@ zope-interface==6.0
     # via gevent
 
 # The following packages are considered to be unsafe in a requirements file:
+# pip
 # setuptools
