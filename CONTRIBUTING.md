@@ -46,4 +46,4 @@ docker build -t frameos . && docker run -t -i frameos python3 test.py
 
 # TODO
 
-Tracked here: https://github.com/mariusandra/frameos/issues/1
+Tracked here: https://github.com/FrameOS/frameos/issues/1
