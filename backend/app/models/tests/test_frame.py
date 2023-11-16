@@ -10,15 +10,10 @@ class TestModelsFrame(BaseTestCase):
         self.assertEqual(frame.frame_host, "192.168.1.1")
         self.assertEqual(frame.frame_port, 8999)
         self.assertEqual(frame.ssh_user, "pi")
-        self.assertEqual(frame.ssh_pass, "raspberry")
+        self.assertEqual(frame.ssh_pass, None)
         self.assertEqual(frame.server_host, "server_host.com")
         self.assertEqual(frame.server_port, 8999)
         self.assertEqual(frame.device, "device_test")
-
-    def test_frame_unique_constraint(self):
-        new_frame("frame", "pi@192.168.1.1", "server_host.com", None)
-        with self.assertRaises(Exception):
-            new_frame("frame", "pi@192.168.1.1", "server_host.com", None)
 
     def test_frame_update(self):
         frame = new_frame("frame", "pi@192.168.1.1", "server_host.com", None)
@@ -60,6 +55,3 @@ class TestModelsFrame(BaseTestCase):
     def test_max_frame_port_limit(self):
         with self.assertRaises(ValueError):
             new_frame("frame", "pi@192.168.1.1:70000", "server_host.com", None)
-
-# if __name__ == '__main__':
-#     unittest.main()

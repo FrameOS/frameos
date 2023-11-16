@@ -24,8 +24,24 @@ redis = Redis(host=redis_host, port=redis_port)
 
 os.makedirs('../db', exist_ok=True)
 
+TEST=0
+DEBUG=0
+
 app = Flask(__name__, static_folder='../../frontend/dist', static_url_path='/', template_folder='../templates')
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///../../db/frameos.db'
+
+if os.getenv('TEST', '').lower() in ['true', '1']:
+    TEST=1
+    # TODO: should this just be disabled? we're api first essentially
+    app.config['WTF_CSRF_ENABLED'] = False
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+elif os.getenv('DEBUG', '').lower() in ['true', '1']:
+    DEBUG=1
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///../../db/frameos-dev.db'
+else:
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///../../db/frameos.db'
+    if not os.getenv('SECRET_KEY'):
+        raise Exception('SECRET_KEY environment variable must be set in production')
+
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY') or secrets.token_hex(32)
 
 socketio = SocketIO(app, async_mode='gevent', cors_allowed_origins="*", message_queue=redis_url)

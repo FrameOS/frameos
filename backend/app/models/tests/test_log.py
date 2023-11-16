@@ -62,7 +62,3 @@ class TestModelsLog(BaseTestCase):
         for event, expected_status in events:
             process_log(self.frame, {'event': event})
             self.assertEqual(self.frame.status, expected_status)
-
-
-# if __name__ == '__main__':
-#     unittest.main()

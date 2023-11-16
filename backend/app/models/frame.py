@@ -69,7 +69,7 @@ class Frame(db.Model):
         }
 
 
-def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str]) -> Frame:
+def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str] = None) -> Frame:
     if '@' in frame_host:
         user_pass, frame_host = frame_host.split('@')
     else:

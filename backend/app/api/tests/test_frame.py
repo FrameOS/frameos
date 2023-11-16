@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 from flask import json
 from app import models
+from app.models import new_frame
 from app.tests.base import BaseTestCase
 
 class TestViews(BaseTestCase):
@@ -58,21 +59,17 @@ class TestViews(BaseTestCase):
         frame = models.Frame(frame_host='localhost', server_host='localhost', device='web_only')
         mock_new_frame.return_value = frame
 
-        response = self.client.post('/api/frames/new', data={'frame_host': 'localhost', 'server_host': 'localhost'})
+        response = self.client.post('/api/frames/new', data={'name': 'Frame', 'frame_host': 'localhost', 'server_host': 'localhost'})
         data = json.loads(response.data)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(data['frame']['name'], 'Frame')
         self.assertEqual(data['frame']['frame_host'], 'localhost')
         self.assertEqual(data['frame']['server_host'], 'localhost')
         self.assertEqual(data['frame']['device'], 'web_only')
 
-    @patch('app.models.frame.delete_frame')
-    def test_delete_frame_route(self, mock_delete_frame):
-        mock_delete_frame.return_value = True
-
-        response = self.client.delete('/api/frames/1')
+    def test_delete_frame_route(self):
+        frame = new_frame('Frame', 'localhost', 'localhost')
+        response = self.client.delete(f'/api/frames/{frame.id}')
         data = json.loads(response.data)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(data['message'], 'Frame deleted successfully')
-
-# if __name__ == '__main__':
-#     unittest.main()

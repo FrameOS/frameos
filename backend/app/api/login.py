@@ -1,7 +1,7 @@
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, BooleanField, SubmitField
 from wtforms.validators import DataRequired
-from flask import redirect, url_for, render_template, flash
+from flask import redirect, url_for, render_template, flash, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
 
 from app import app
@@ -29,6 +29,17 @@ def login():
         login_user(user, remember=form.remember_me.data)
         return redirect(url_for('index'))
     return render_template('login.html', title='Sign In', form=form)
+
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    form = LoginForm()
+    if form.validate():
+        user = User.query.filter_by(username=form.username.data).first()
+        if user is None or not user.check_password(form.password.data):
+            return jsonify({'error': 'Invalid username or password'}), 401
+        login_user(user, remember=form.remember_me.data)
+        return jsonify({'success': 'Logged in successfully'}), 200
+    return jsonify({'error': form.errors}), 401
 
 @app.route('/logout')
 @login_required
