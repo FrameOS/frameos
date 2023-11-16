@@ -19,14 +19,17 @@ jobs:
 
       - name: Install dependencies
         run: |
+          cd backend
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Run Pytest
-        run: pytest # Add additional commands for other tests
+        run: |
+          cd backend
+          TEST=1 pytest
 
   build:
-    needs: test # This job depends on the 'test' job
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       matrix:
