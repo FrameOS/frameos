@@ -32,10 +32,10 @@ jobs:
       matrix:
         include:
           - platform: linux/amd64
-              dockerfile: Dockerfile
-                - platform: linux/arm64/v8
-                  dockerfile: Dockerfile
-            fail-fast: false
+            dockerfile: Dockerfile
+          - platform: linux/arm64/v8
+            dockerfile: Dockerfile
+      fail-fast: false
 
     steps:
       - name: Set up QEMU
