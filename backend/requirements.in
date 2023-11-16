@@ -1,4 +1,4 @@
---no-binary gevent
+# --no-binary gevent
 
 gevent==23.7.0
 gevent-websocket
@@ -14,10 +14,11 @@ paramiko
 scp
 requests
 dacite
-Flask-Login
+Flask-Login==0.6.3
 wtforms
-flask_wtf
+flask_wtf==1.2.1
 email_validator
 ipdb
 pillow==9.5.0
 sentry-sdk[flask]
+pytest

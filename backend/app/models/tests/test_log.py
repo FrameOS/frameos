@@ -64,5 +64,5 @@ class TestModelsLog(BaseTestCase):
             self.assertEqual(self.frame.status, expected_status)
 
 
-if __name__ == '__main__':
-    unittest.main()
+# if __name__ == '__main__':
+#     unittest.main()

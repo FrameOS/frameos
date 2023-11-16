@@ -8,7 +8,7 @@ class TestViews(BaseTestCase):
     def setUp(self):
         super().setUp()
 
-    @patch('app.views.models.get_app_configs')
+    @patch('app.models.apps.get_app_configs')
     def test_apps(self, mock_get_app_configs):
         mock_data = [{"name": "app1"}, {"name": "app2"}]
         mock_get_app_configs.return_value = mock_data
@@ -18,5 +18,5 @@ class TestViews(BaseTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(data, {"apps": mock_data})
 
-if __name__ == '__main__':
-    unittest.main()
+# if __name__ == '__main__':
+#     unittest.main()

@@ -61,5 +61,5 @@ class TestModelsFrame(BaseTestCase):
         with self.assertRaises(ValueError):
             new_frame("frame", "pi@192.168.1.1:70000", "server_host.com", None)
 
-if __name__ == '__main__':
-    unittest.main()
+# if __name__ == '__main__':
+#     unittest.main()
