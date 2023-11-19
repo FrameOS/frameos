@@ -3,7 +3,8 @@ from wtforms import StringField, PasswordField, SubmitField
 from wtforms.validators import DataRequired, ValidationError, Email, EqualTo
 from flask import redirect, url_for, render_template, flash
 
-from app import db, app
+from app import db
+from . import api
 from app.models.user import User
 
 class RegisterForm(FlaskForm):
@@ -24,7 +25,8 @@ class RegisterForm(FlaskForm):
         if user is not None:
             raise ValidationError('Please use a different email address.')
 
-@app.route('/register', methods=['GET', 'POST'])
+## TODO: move out of /api
+@api.route('/register', methods=['GET', 'POST'])
 def register():
     if User.query.first() is not None:
         flash('Only one user is allowed. Please login!')

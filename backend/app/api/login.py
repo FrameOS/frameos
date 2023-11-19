@@ -4,7 +4,7 @@ from wtforms.validators import DataRequired
 from flask import redirect, url_for, render_template, flash, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
 
-from app import app
+from . import api
 from app.models.user import User
 
 class LoginForm(FlaskForm):
@@ -13,7 +13,19 @@ class LoginForm(FlaskForm):
     remember_me = BooleanField('Remember Me')
     submit = SubmitField('Sign In')
 
-@app.route('/login', methods=['GET', 'POST'])
+@api.route('/login', methods=['POST'])
+def api_login():
+    form = LoginForm()
+    if form.validate():
+        user = User.query.filter_by(username=form.username.data).first()
+        if user is None or not user.check_password(form.password.data):
+            return jsonify({'error': 'Invalid username or password'}), 401
+        login_user(user, remember=form.remember_me.data)
+        return jsonify({'success': 'Logged in successfully'}), 200
+    return jsonify({'error': form.errors}), 401
+
+## TODO: move out of /api
+@api.route('/login', methods=['GET', 'POST'])
 def login():
     if User.query.first() is None:
         flash('Please register the first user!')
@@ -30,18 +42,8 @@ def login():
         return redirect(url_for('index'))
     return render_template('login.html', title='Sign In', form=form)
 
-@app.route('/api/login', methods=['POST'])
-def api_login():
-    form = LoginForm()
-    if form.validate():
-        user = User.query.filter_by(username=form.username.data).first()
-        if user is None or not user.check_password(form.password.data):
-            return jsonify({'error': 'Invalid username or password'}), 401
-        login_user(user, remember=form.remember_me.data)
-        return jsonify({'success': 'Logged in successfully'}), 200
-    return jsonify({'error': form.errors}), 401
-
-@app.route('/logout')
+## TODO: move out of /api
+@api.route('/logout')
 @login_required
 def logout():
     logout_user()

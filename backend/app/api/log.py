@@ -1,9 +1,9 @@
 from flask import request
-from app import app
+from . import api
 from app.models.frame import Frame
 from app.models.log import process_log
 
-@app.route('/api/log', methods=["POST"])
+@api.route('/log', methods=["POST"])
 def api_log():
     auth_header = request.headers.get('Authorization')
     server_api_key = auth_header.split(' ')[1]

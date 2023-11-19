@@ -7,12 +7,13 @@ import string
 
 from flask import jsonify, request, send_file, Response
 from flask_login import login_required
-from app import db, app, redis
+from . import api
+from app import db, redis
 from app.models.template import Template
 from PIL import Image
 
 # Create (POST)
-@app.route("/api/templates", methods=["POST"])
+@api.route("/templates", methods=["POST"])
 @login_required
 def create_template():
     if 'file' in request.files:
@@ -89,14 +90,14 @@ def create_template():
     return jsonify(new_template.to_dict()), 201
 
 # Read (GET) for all templates
-@app.route("/api/templates", methods=["GET"])
+@api.route("/templates", methods=["GET"])
 @login_required
 def get_templates():
     templates = [template.to_dict() for template in Template.query.all()]
     return jsonify(templates)
 
 # Read (GET) for a specific template
-@app.route("/api/templates/<template_id>", methods=["GET"])
+@api.route("/templates/<template_id>", methods=["GET"])
 @login_required
 def get_template(template_id):
     template = Template.query.get(template_id)
@@ -105,7 +106,7 @@ def get_template(template_id):
     return jsonify(template.to_dict())
 
 # Read (GET) for a specific template
-@app.route("/api/templates/<template_id>/image", methods=["GET"])
+@api.route("/templates/<template_id>/image", methods=["GET"])
 @login_required
 def get_template_image(template_id):
     template = Template.query.get(template_id)
@@ -114,7 +115,7 @@ def get_template_image(template_id):
     return send_file(io.BytesIO(template.image), mimetype='image/jpeg')
 
 # Export (GET) for a specific template
-@app.route("/api/templates/<template_id>/export", methods=["GET"])
+@api.route("/templates/<template_id>/export", methods=["GET"])
 @login_required
 def export_template(template_id):
     template = Template.query.get(template_id)
@@ -139,7 +140,7 @@ def export_template(template_id):
     return Response(in_memory.getvalue(), content_type='application/zip', headers={"Content-Disposition": f"attachment; filename={template_name}.zip"})
 
 # Update (PUT)
-@app.route("/api/templates/<template_id>", methods=["PATCH"])
+@api.route("/templates/<template_id>", methods=["PATCH"])
 @login_required
 def update_template(template_id):
     template = Template.query.get(template_id)
@@ -154,7 +155,7 @@ def update_template(template_id):
     return jsonify(template.to_dict())
 
 # Delete (DELETE)
-@app.route("/api/templates/<template_id>", methods=["DELETE"])
+@api.route("/templates/<template_id>", methods=["DELETE"])
 @login_required
 def delete_template(template_id):
     template = Template.query.get(template_id)

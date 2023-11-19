@@ -1,13 +1,14 @@
 from flask import jsonify, request
 from flask_login import login_required
-from app import db, app
+from app import db
+from . import api
 from app.models.settings import Settings
 from app.models.repository import Repository
 
 FRAMEOS_REPOSITORY_URL = "https://repo.frameos.net/versions/0/templates.json"
 
 # Create (POST)
-@app.route("/api/repositories", methods=["POST"])
+@api.route("/repositories", methods=["POST"])
 @login_required
 def create_repository():
     data = request.json
@@ -21,7 +22,7 @@ def create_repository():
     return jsonify(new_repository.to_dict()), 201
 
 # Read (GET) for all templates
-@app.route("/api/repositories", methods=["GET"])
+@api.route("/repositories", methods=["GET"])
 @login_required
 def get_repositories():
     try:
@@ -40,7 +41,7 @@ def get_repositories():
     return jsonify(repositories)
 
 # Read (GET) for a specific repository
-@app.route("/api/repositories/<repository_id>", methods=["GET"])
+@api.route("/repositories/<repository_id>", methods=["GET"])
 @login_required
 def get_repository(repository_id):
     repository = Repository.query.get(repository_id)
@@ -49,7 +50,7 @@ def get_repository(repository_id):
     return jsonify(repository.to_dict())
 
 # Update (PUT)
-@app.route("/api/repositories/<repository_id>", methods=["PATCH"])
+@api.route("/repositories/<repository_id>", methods=["PATCH"])
 @login_required
 def update_repository(repository_id):
     repository = Repository.query.get(repository_id)
@@ -66,7 +67,7 @@ def update_repository(repository_id):
     return jsonify(repository.to_dict())
 
 # Delete (DELETE)
-@app.route("/api/repositories/<repository_id>", methods=["DELETE"])
+@api.route("/repositories/<repository_id>", methods=["DELETE"])
 @login_required
 def delete_repository(repository_id):
     repository = Repository.query.get(repository_id)

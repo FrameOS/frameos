@@ -1,14 +1,15 @@
 from flask import jsonify, request
 from flask_login import login_required
-from app import db, app
+from app import db
+from . import api
 from app.models.settings import get_settings_dict, Settings
 
-@app.route("/api/settings", methods=["GET"])
+@api.route("/settings", methods=["GET"])
 @login_required
 def settings():
     return jsonify(get_settings_dict())
 
-@app.route("/api/settings", methods=["POST"])
+@api.route("/settings", methods=["POST"])
 @login_required
 def set_settings():
     current_settings = get_settings_dict()
@@ -29,7 +30,7 @@ def set_settings():
 
     return jsonify(get_settings_dict())
 
-@app.route("/api/generate_ssh_keys", methods=["POST"])
+@api.route("/generate_ssh_keys", methods=["POST"])
 @login_required
 def generate_ssh_keys():
     from cryptography.hazmat.primitives.asymmetric import rsa

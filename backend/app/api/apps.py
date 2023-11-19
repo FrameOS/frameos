@@ -5,22 +5,22 @@ import json
 from flask import jsonify, request
 from flask_login import login_required
 
-from app import app
+from . import api
 from app.models.apps import get_app_configs, get_one_app_sources
 from app.models.settings import get_settings_dict
 
-@app.route("/api/apps", methods=["GET"])
+@api.route("/apps", methods=["GET"])
 @login_required
 def api_apps():
     return jsonify(apps=get_app_configs())
 
-@app.route("/api/apps/source/<string:keyword>", methods=["GET"])
+@api.route("/apps/source/<string:keyword>", methods=["GET"])
 @login_required
 def api_apps_source(keyword: str):
     return jsonify(get_one_app_sources(keyword))
 
 
-@app.route("/api/validate_source", methods=["POST"])
+@api.route("/validate_source", methods=["POST"])
 @login_required
 def validate_python_frame_source():
     data = request.json
@@ -41,7 +41,7 @@ def validate_python_frame_source():
         return jsonify({"errors": []}), 200
 
 
-@app.route("/api/enhance_source", methods=["POST"])
+@api.route("/enhance_source", methods=["POST"])
 @login_required
 def enhance_python_frame_source():
     data = request.json
