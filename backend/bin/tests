@@ -1,2 +1,2 @@
 #!/bin/bash
-nodemon -w ./app --ext py --exec "TEST=1 pytest --durations-min=2.0 ${MIGRATIONS} -s $*"
+npx nodemon -w ./app --ext py --exec "TEST=1 pytest --durations-min=2.0 ${MIGRATIONS} -s $*"
