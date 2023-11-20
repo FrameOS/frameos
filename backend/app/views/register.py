@@ -4,7 +4,7 @@ from wtforms.validators import DataRequired, ValidationError, Email, EqualTo
 from flask import redirect, url_for, render_template, flash
 
 from app import db
-from . import api
+from . import views
 from app.models.user import User
 
 class RegisterForm(FlaskForm):
@@ -26,11 +26,11 @@ class RegisterForm(FlaskForm):
             raise ValidationError('Please use a different email address.')
 
 ## TODO: move out of /api
-@api.route('/register', methods=['GET', 'POST'])
+@views.route('/register', methods=['GET', 'POST'])
 def register():
     if User.query.first() is not None:
         flash('Only one user is allowed. Please login!')
-        return redirect(url_for('login'))
+        return redirect(url_for('views.login'))
     form = RegisterForm()
     if form.validate_on_submit():
         user = User(username=form.username.data, email=form.email.data)
@@ -38,7 +38,7 @@ def register():
         db.session.add(user)
         db.session.commit()
         flash('Congratulations, you are now a registered user!')
-        return redirect(url_for('login'))
+        return redirect(url_for('views.login'))
     elif len(form.errors) > 0:
         flash(form.errors)
     return render_template('register.html', title='Register', form=form)

@@ -3,13 +3,14 @@ import json
 from io import StringIO
 from scp import SCPClient
 
-from app import huey, app
+from app import huey, create_app
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection
 
 @huey.task()
 def restart_frame(id: int):
+    app = create_app()
     with app.app_context():
         ssh = None
         try:

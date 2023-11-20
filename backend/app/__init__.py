@@ -1,159 +1,103 @@
-import secrets
+import gzip
+import io
+import json
+from typing import Optional
 
 from gevent import monkey
-
 monkey.patch_all()
+
 import sentry_sdk
 import os
-from flask import Flask
-from flask_login import LoginManager
+from sqlalchemy.exc import OperationalError
+
+from flask import Flask, current_app, flash, redirect, url_for, request
+from flask_login import current_user, LoginManager
+from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_socketio import SocketIO
-from flask_sqlalchemy import SQLAlchemy
+from config import Config, get_config
 from huey import RedisHuey
 from urllib.parse import urlparse
-
 from redis import Redis
 
-
-redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-parsed_url = urlparse(redis_url)
-redis_host = parsed_url.hostname
-redis_port = parsed_url.port or 6379
-redis = Redis(host=redis_host, port=redis_port)
-
-os.makedirs('../db', exist_ok=True)
-
-TEST=0
-DEBUG=0
-
-app = Flask(__name__, static_folder='../../frontend/dist', static_url_path='/', template_folder='../templates')
-
-if os.getenv('TEST', '').lower() in ['true', '1']:
-    TEST=1
-    # TODO: should this just be disabled? we're api first essentially
-    app.config['WTF_CSRF_ENABLED'] = False
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
-elif os.getenv('DEBUG', '').lower() in ['true', '1']:
-    DEBUG=1
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///../../db/frameos-dev.db'
-else:
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///../../db/frameos.db'
-    if not os.getenv('SECRET_KEY'):
-        raise Exception('SECRET_KEY environment variable must be set in production')
-
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY') or secrets.token_hex(32)
-
-socketio = SocketIO(app, async_mode='gevent', cors_allowed_origins="*", message_queue=redis_url)
-db = SQLAlchemy(app)
-migrate = Migrate(app, db)
-huey = RedisHuey('fcp', host=redis_host, port=redis_port)
-
+# Initialize extensions
+db = SQLAlchemy()
 login_manager = LoginManager()
-login_manager.login_view = 'login'
-login_manager.init_app(app)
+login_manager.login_view = 'views.login'
+migrate = Migrate()
+socketio = SocketIO(async_mode='gevent')
 
-@login_manager.user_loader
-def load_user(user_id):
-    from .models import User
-    return User.query.get(int(user_id))
+# Redis setup
+def create_redis_connection():
+    redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+    parsed_url = urlparse(redis_url)
+    redis_host = parsed_url.hostname
+    redis_port = parsed_url.port or 6379
+    return Redis(host=redis_host, port=redis_port)
 
-@app.route("/", methods=["GET"])
-def index():
-    return app.send_static_file('index.html')
+redis = create_redis_connection()
+huey = RedisHuey('fcp', connection_pool=redis.connection_pool)
 
-from . import models, api, tasks
+# Sentry setup
+def initialize_sentry(app):
+    with app.app_context():
+        from .models import get_settings_dict
+        try:
+            settings = get_settings_dict()
+            dsn = settings.get('sentry', {}).get('controller_dsn', None)
+        except OperationalError:
+            print("Could not get settings dict, db not initialized.")
+            return
+        if dsn:
+            sentry_sdk.init(dsn=dsn, traces_sample_rate=1.0, profiles_sample_rate=1.0)
 
+def create_app(config: Optional[Config] = None):
+    config = config or get_config()
+    app = Flask(__name__, static_folder='../../frontend/dist', static_url_path='/', template_folder='../templates')
+    app.config.from_object(config)
 
+    db.init_app(app)
+    with app.app_context():
+        os.makedirs('../db', exist_ok=True)
 
-# try:
-#     with app.app_context():
-#         settings = models.get_settings_dict()
-#         dsn = settings.get('sentry', {}).get('controller_dsn', None)
-#         if dsn:
-#             sentry_sdk.init(dsn=dsn, traces_sample_rate=1.0, profiles_sample_rate=1.0)
-# except Exception as e:
-#     print(e)
-#     pass
+        db.create_all()
+    login_manager.init_app(app)
+    migrate.init_app(app, db)
+    socketio.init_app(app, cors_allowed_origins="*", message_queue=os.environ.get('REDIS_URL'))
+    initialize_sentry(app)
 
+    from .api import api as api_blueprint
+    app.register_blueprint(api_blueprint, url_prefix='/api')
 
+    from .views import views as views_blueprint
+    app.register_blueprint(views_blueprint, url_prefix='/')
 
+    @login_manager.user_loader
+    def load_user(user_id):
+        from .models import User
+        return User.query.get(int(user_id))
 
+    @app.errorhandler(404)
+    def not_found(e):
+        from app.models import User  # Import here to avoid circular dependencies
+        if User.query.first() is None:
+            flash('Please register the first user!')
+            return redirect(url_for('views.register.register'))
+        if current_user.is_authenticated:
+            return current_app.send_static_file('index.html')
+        else:
+            flash('Please login!')
+            return redirect(url_for('views.login'))
 
+    @app.before_request
+    def before_request():
+        """
+        Check if the incoming request is gzipped and decompress it if it is.
+        """
+        if request.headers.get('Content-Encoding') == 'gzip':
+            compressed_data = io.BytesIO(request.get_data(cache=False))
+            decompressed_data = gzip.GzipFile(fileobj=compressed_data, mode='rb').read()
+            request._cached_data = decompressed_data
+            request.get_json = lambda cache=False: json.loads(decompressed_data.decode('utf-8'))
 
-# # app/__init__.py
-# from gevent import monkey
-#
-# monkey.patch_all()
-# import sentry_sdk
-# import os
-# from sqlalchemy.exc import OperationalError
-#
-# from flask import Flask
-# from flask_sqlalchemy import SQLAlchemy
-# from flask_login import LoginManager
-# from flask_migrate import Migrate
-# from flask_socketio import SocketIO
-# from config import Config
-# from huey import RedisHuey
-# from urllib.parse import urlparse
-# from redis import Redis
-#
-# # Initialize extensions
-# db = SQLAlchemy()
-# login_manager = LoginManager()
-# login_manager.login_view = 'login'
-# migrate = Migrate()
-# socketio = SocketIO(async_mode='gevent')
-#
-# # Redis setup
-# def create_redis_connection():
-#     redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-#     parsed_url = urlparse(redis_url)
-#     redis_host = parsed_url.hostname
-#     redis_port = parsed_url.port or 6379
-#     return Redis(host=redis_host, port=redis_port)
-#
-# # Sentry setup
-# def initialize_sentry(app):
-#     with app.app_context():
-#         from .models import get_settings_dict
-#         try:
-#             settings = get_settings_dict()
-#             dsn = settings.get('sentry', {}).get('controller_dsn', None)
-#         except OperationalError:
-#             print("Could not get settings dict, db not initialized.")
-#             return
-#         if dsn:
-#             sentry_sdk.init(dsn=dsn, traces_sample_rate=1.0, profiles_sample_rate=1.0)
-#
-# # Application Factory
-# def create_app(config_class: Config = Config):
-#     app = Flask(__name__, static_folder='../../frontend/dist', static_url_path='/', template_folder='../templates')
-#     app.config.from_object(config_class)
-#
-#     db.init_app(app)
-#     with app.app_context():
-#         # os.makedirs('../db', exist_ok=True)
-#
-#         db.create_all()
-#     login_manager.init_app(app)
-#     migrate.init_app(app, db)
-#     socketio.init_app(app, cors_allowed_origins="*", message_queue=os.environ.get('REDIS_URL'))
-#     initialize_sentry(app)
-#
-#     redis = create_redis_connection()
-#     huey = RedisHuey('fcp', connection_pool=redis.connection_pool)
-#
-#     from .api import api as api_blueprint
-#     app.register_blueprint(api_blueprint, url_prefix='/api')
-#
-#     from .main import main as main_blueprint
-#     app.register_blueprint(main_blueprint)
-#
-#     @login_manager.user_loader
-#     def load_user(user_id):
-#         from .models import User
-#         return User.query.get(int(user_id))
-#
-#     return app
+    return app

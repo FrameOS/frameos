@@ -1,5 +1,7 @@
 import os
 import secrets
+from typing import cast
+
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
@@ -22,3 +24,8 @@ configs = {
     "production": ProductionConfig,
     "default": DevelopmentConfig
 }
+
+def get_config() -> Config:
+    config_name = os.getenv('FLASK_CONFIG') or 'default'
+    config_class = configs.get(config_name)
+    return config_class or cast(Config, configs['default'])

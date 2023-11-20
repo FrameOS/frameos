@@ -22,9 +22,12 @@ export function Settings() {
             title="FrameOS"
             subtitle="Settings"
             right={
-              <Button color={settingsChanged ? 'teal' : 'light-gray'} onClick={submitSettings}>
-                Save
-              </Button>
+              <div className='flex gap-2'>
+                <Button onClick={() => location.href = '/logout'}>Logout</Button>
+                <Button color={settingsChanged ? 'teal' : 'light-gray'} onClick={submitSettings}>
+                  Save
+                </Button>
+              </div>
             }
           />
         </Panel>
@@ -37,6 +40,21 @@ export function Settings() {
               className="max-h-full overflow-auto p-4 columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4"
             >
               <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings}>
+                <Group name="frameos">
+                  <Box className="p-2 mb-4 space-y-2">
+                    <H6>FrameOS Gallery</H6>
+                    <p>
+                      Sign up to the premium{' '}
+                      <a className="text-blue-400 hover:underline" target="_blank" href="https://gallery.frameos.net/">
+                        FrameOS galleries
+                      </a>{' '}
+                      and support this project.
+                    </p>
+                    <Field name="api_key" label="API key" secret={!!savedSettings?.frameos?.api_key}>
+                      <TextInput autoFocus={!!savedSettings?.frameos?.api_key} />
+                    </Field>
+                  </Box>
+                </Group>
                 <Group name="openai">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>OpenAI</H6>
@@ -58,21 +76,6 @@ export function Settings() {
                       secret={!!savedSettings?.home_assistant?.access_token}
                     >
                       <TextInput autoFocus={!!savedSettings?.home_assistant?.access_token} />
-                    </Field>
-                  </Box>
-                </Group>
-                <Group name="frameos">
-                  <Box className="p-2 mb-4 space-y-2">
-                    <H6>FrameOS Gallery</H6>
-                    <p>
-                      Sign up to the premium{' '}
-                      <a className="text-blue-400 hover:underline" target="_blank" href="https://gallery.frameos.net/">
-                        FrameOS galleries
-                      </a>{' '}
-                      and support this project.
-                    </p>
-                    <Field name="api_key" label="API key" secret={!!savedSettings?.frameos?.api_key}>
-                      <TextInput autoFocus={!!savedSettings?.frameos?.api_key} />
                     </Field>
                   </Box>
                 </Group>
@@ -102,15 +105,15 @@ export function Settings() {
                     <p className="text-sm leading-loose">
                       This SSH key will be used on all frames that don't have a password set for SSH.
                     </p>
+                    <Button onClick={newKey} color={savedSettings?.ssh_keys?.default ? 'light-gray' : 'teal'} size='small'>
+                      Generate new keypair
+                    </Button>
                     <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
                       <TextArea autoFocus={!!savedSettings?.ssh_keys?.default} />
                     </Field>
                     <Field name="default_public" label="Default public SSH key (use this in the RPi Imager)">
                       <TextArea autoFocus={!!savedSettings?.ssh_keys?.default_public} />
                     </Field>
-                    <Button onClick={newKey} color={savedSettings?.ssh_keys?.default ? 'light-gray' : 'teal'}>
-                      Generate new keypair
-                    </Button>
                   </Box>
                 </Group>
               </Form>

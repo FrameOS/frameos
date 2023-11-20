@@ -4,9 +4,10 @@ import os
 
 from zipfile import ZipFile
 from io import StringIO
+
 from scp import SCPClient
 
-from app import huey, app
+from app import huey, create_app
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json
 from app.models.apps import get_apps_from_scenes
@@ -14,6 +15,7 @@ from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_con
 
 @huey.task()
 def deploy_frame(id: int):
+    app = create_app()
     with app.app_context():
         ssh = None
         try:
