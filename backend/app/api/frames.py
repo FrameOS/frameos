@@ -1,3 +1,5 @@
+import json
+
 import requests
 
 from http import HTTPStatus
@@ -36,18 +38,19 @@ def api_frame_get_logs(id: int):
 @login_required
 def api_frame_get_image(id: int):
     frame = Frame.query.get_or_404(id)
+    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
 
     if request.args.get('t') == '-1':
-        last_image = redis.get(f'frame:{id}:image')
+        last_image = redis.get(cache_key)
         if last_image:
             return Response(last_image, content_type='image/png')
 
     response = requests.get(f'http://{frame.frame_host}:{frame.frame_port}/image')
     if response.status_code == 200:
-        redis.set(f'frame:{id}:image', response.content, ex=86400 * 30)
+        redis.set(cache_key, response.content, ex=86400 * 30)
         return Response(response.content, content_type='image/png')
     else:
-        last_image = redis.get(f'frame:{id}:image')
+        last_image = redis.get(cache_key)
         if last_image:
             return Response(last_image, content_type='image/png')
         return jsonify({"error": "Unable to fetch image"}), response.status_code
@@ -94,16 +97,21 @@ def api_frame_update(id: int):
               'server_port', 'server_api_key', 'width', 'height', 'rotate', 'color', 'interval', 'metrics_interval',
               'scaling_mode', 'background_color', 'device']
     defaults = {'frame_port': 8999, 'ssh_port': 22}
-    for field in fields:
-        if field in request.form:
-            value = request.form[field]
-            if value == '' or value == 'null':
-                value = defaults.get(field, None)
-            elif field in ['frame_port', 'ssh_port', 'width', 'height', 'rotate']:
-                value = int(value)
-            elif field in ['interval', 'metrics_interval']:
-                value = float(value)
-            setattr(frame, field, value)
+    try:
+        for field in fields:
+            if field in request.form:
+                value = request.form[field]
+                if value == '' or value == 'null':
+                    value = defaults.get(field, None)
+                elif field in ['frame_port', 'ssh_port', 'width', 'height', 'rotate']:
+                    value = int(value)
+                elif field in ['interval', 'metrics_interval']:
+                    value = float(value)
+                elif field in ['scenes']:
+                    value = json.loads(value) if value is not None else None
+                setattr(frame, field, value)
+    except ValueError as e:
+        return jsonify({'error': 'Invalid input', 'message': str(e)}), HTTPStatus.BAD_REQUEST
 
     update_frame(frame)
 
