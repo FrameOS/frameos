@@ -65,10 +65,8 @@ export const editAppLogic = kea<editAppLogicType>([
           })
           const { suggestion, error } = await response.json()
           if (error) {
-            window.alert(error)
-            return error
+            return error.message || String(error)
           }
-          console.log({ suggestion })
           return suggestion
         },
       },

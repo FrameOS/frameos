@@ -1,4 +1,5 @@
-from app import huey, create_app
+from app import create_app
+from app.huey import huey
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame
 

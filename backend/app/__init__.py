@@ -16,7 +16,6 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_socketio import SocketIO
 from config import Config, get_config
-from huey import RedisHuey
 from urllib.parse import urlparse
 from redis import Redis
 
@@ -36,7 +35,6 @@ def create_redis_connection():
     return Redis(host=redis_host, port=redis_port)
 
 redis = create_redis_connection()
-huey = RedisHuey('fcp', connection_pool=redis.connection_pool)
 
 # Sentry setup
 def initialize_sentry(app):

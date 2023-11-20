@@ -1,6 +1,6 @@
 from huey.signals import SIGNAL_ERROR, SIGNAL_LOCKED
 
-from app import huey
+from app.huey import huey
 
 from .deploy_frame import deploy_frame
 from .reset_frame import reset_frame
