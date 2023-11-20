@@ -19,6 +19,8 @@ class BaseTestCase(unittest.TestCase):
         db.drop_all()
         db.create_all()
         self.create_user("tester", "test@example.com", "testpassword")
+        login_response = self.login("tester", "testpassword")
+        assert login_response.status_code == 200, (login_response.status_code, login_response.data)
 
     def tearDown(self):
         self.app_context.pop()
@@ -34,7 +36,7 @@ class BaseTestCase(unittest.TestCase):
             raise
 
     def login(self, username, password):
-        return self.client.post('/api/login', data=dict(
+        return self.client.post('/login', data=dict(
             username=username,
             password=password
         ), follow_redirects=True)
