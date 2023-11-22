@@ -22,6 +22,11 @@ jobs:
         with:
           node-version: '16.x'
 
+      - name: Set up Redis
+        uses: redis-actions/setup-redis@v1
+        with:
+          redis-version: '6.2.6'
+
       - name: Install python dependencies
         run: |
           cd backend
