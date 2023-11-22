@@ -76,12 +76,12 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         user_pass, frame_host = 'pi', frame_host
 
     if ':' in frame_host:
-        frame_host, frame_port = frame_host.split(':')
-        frame_port = int(frame_port or '8999')
-        if int(frame_port) > 65535 or int(frame_port) < 0:
+        frame_host, ssh_port = frame_host.split(':')
+        ssh_port = int(ssh_port or '22')
+        if int(ssh_port) > 65535 or int(ssh_port) < 0:
             raise ValueError("Invalid frame port")
     else:
-        frame_port = 8999
+        ssh_port = 22
 
     if ':' in user_pass:
         user, password = user_pass.split(':')
@@ -98,7 +98,7 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         ssh_user=user,
         ssh_pass=password,
         frame_host=frame_host,
-        frame_port=frame_port,
+        ssh_port=ssh_port,
         server_host=server_host,
         server_port=int(server_port),
         server_api_key=secrets.token_hex(32),
