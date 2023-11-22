@@ -102,14 +102,22 @@ class TestFrames(BaseTestCase):
             assert response.status_code == 500
 
     def test_api_frame_reset_event(self):
-        pass
+        with mock.patch('app.tasks.reset_frame', return_value=True):
+            response = self.client.post(f'/api/frames/{self.frame.id}/reset')
+            assert response.status_code == 200
+            assert response.data == b'Success'
 
     def test_api_frame_restart_event(self):
-        pass
+        with mock.patch('app.tasks.restart_frame', return_value=True):
+            response = self.client.post(f'/api/frames/{self.frame.id}/restart')
+            assert response.status_code == 200
+            assert response.data == b'Success'
 
     def test_api_frame_deploy_event(self):
-        pass
-
+        with mock.patch('app.tasks.deploy_frame', return_value=True):
+            response = self.client.post(f'/api/frames/{self.frame.id}/deploy')
+            assert response.status_code == 200
+            assert response.data == b'Success'
 
     def test_api_frame_update_name(self):
         response = self.client.post(f'/api/frames/{self.frame.id}', data={'name': 'Updated Name'})
@@ -168,10 +176,16 @@ class TestFrames(BaseTestCase):
         assert response.status_code == 400
 
     def test_api_frame_update_next_action_restart(self):
-        pass
+        with mock.patch('app.tasks.restart_frame') as mock_restart:
+            response = self.client.post(f'/api/frames/{self.frame.id}', data={'next_action': 'restart'})
+            mock_restart.assert_called_once_with(self.frame.id)
+            assert response.status_code == 200
 
     def test_api_frame_update_next_action_deploy(self):
-        pass
+        with mock.patch('app.tasks.deploy_frame') as mock_deploy:
+            response = self.client.post(f'/api/frames/{self.frame.id}', data={'next_action': 'deploy'})
+            mock_deploy.assert_called_once_with(self.frame.id)
+            assert response.status_code == 200
 
     def test_api_frame_new(self):
         response = self.client.post('/api/frames/new', data={'name': 'Frame', 'frame_host': 'localhost', 'server_host': 'localhost'})
@@ -218,8 +232,49 @@ class TestFrames(BaseTestCase):
         response = self.client.delete('/api/frames/99999999')
         assert response.status_code == 404
 
-    def test_api_frames_unauthorized(self):
-        pass
 
-    def test_api_frame_get_unauthorized(self):
-        pass
+    def test_unauthorized_access(self):
+        self.client.get(f'/logout')
+        endpoints = [
+            ('/api/frames', 'GET'),
+            ('/api/frames/1', 'GET'),
+            ('/api/frames/1/logs', 'GET'),
+            ('/api/frames/1/image', 'GET'),
+            ('/api/frames/1/event/render', 'POST'),
+            ('/api/frames/1/reset', 'POST'),
+            ('/api/frames/1/restart', 'POST'),
+            ('/api/frames/1/deploy', 'POST'),
+            ('/api/frames/1', 'POST'),
+            ('/api/frames/new', 'POST'),
+            ('/api/frames/1', 'DELETE')
+        ]
+        for endpoint, method in endpoints:
+            response = self.client.open(endpoint, method=method)
+            # TODO: should convert to a better response
+            assert response.status_code == 302, (endpoint, method, response.status_code)
+
+    def test_frame_update_invalid_json_scenes(self):
+        response = self.client.post(f'/api/frames/{self.frame.id}', data={'scenes': 'invalid json'})
+        assert response.status_code == 400
+
+    def test_frame_update_incorrect_data_types(self):
+        response = self.client.post(f'/api/frames/{self.frame.id}', data={'width': 'non-integer'})
+        assert response.status_code == 400
+        response = self.client.post(f'/api/frames/{self.frame.id}', data={'interval': 'non-float'})
+        assert response.status_code == 400
+
+    def test_frame_deploy_reset_restart_failure(self):
+        # make app.tasks.deploy_frame throw
+        with mock.patch('app.tasks.deploy_frame', side_effect=Exception("Deploy error")):
+            response = self.client.post(f'/api/frames/{self.frame.id}/deploy')
+            assert response.status_code == 500
+        with mock.patch('app.tasks.reset_frame', side_effect=Exception("Reset error")):
+            response = self.client.post(f'/api/frames/{self.frame.id}/reset')
+            assert response.status_code == 500
+        with mock.patch('app.tasks.restart_frame', side_effect=Exception("Restart error")):
+            response = self.client.post(f'/api/frames/{self.frame.id}/restart')
+            assert response.status_code == 500
+
+    def test_frame_creation_missing_required_fields(self):
+        response = self.client.post('/api/frames/new', data={'name': 'Frame'})
+        assert response.status_code == 500

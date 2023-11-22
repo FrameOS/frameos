@@ -7,7 +7,6 @@ from flask_login import login_required
 from . import api
 from app import redis
 from app.models.frame import Frame, new_frame, delete_frame, update_frame
-from app.tasks import deploy_frame, restart_frame, reset_frame
 
 @api.route("/frames", methods=["GET"])
 @login_required
@@ -80,6 +79,7 @@ def api_frame_render_event(id: int):
 @login_required
 def api_frame_reset_event(id: int):
     try:
+        from app.tasks import reset_frame
         reset_frame(id)
         return 'Success', 200
     except Exception as e:
@@ -89,6 +89,7 @@ def api_frame_reset_event(id: int):
 @login_required
 def api_frame_restart_event(id: int):
     try:
+        from app.tasks import restart_frame
         restart_frame(id)
         return 'Success', 200
     except Exception as e:
@@ -98,6 +99,7 @@ def api_frame_restart_event(id: int):
 @login_required
 def api_frame_deploy_event(id: int):
     try:
+        from app.tasks import deploy_frame
         deploy_frame(id)
         return 'Success', 200
     except Exception as e:
@@ -127,8 +129,10 @@ def api_frame_update(id: int):
         update_frame(frame)
 
         if request.form.get('next_action') == 'restart':
+            from app.tasks import restart_frame
             restart_frame(frame.id)
         elif request.form.get('next_action') == 'deploy':
+            from app.tasks import deploy_frame
             deploy_frame(frame.id)
 
         return jsonify({'message': 'Frame updated successfully'}), HTTPStatus.OK
