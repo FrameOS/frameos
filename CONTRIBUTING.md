@@ -28,7 +28,14 @@ flask db migrate -m "something changed"
 flask db upgrade
 ```
 
-## FrameOS device software
+## Running tests
+
+```bash
+cd backend
+bin/tests
+```
+
+## FrameOS on-device software
 
 Running it natively on a Mac will fail with
 

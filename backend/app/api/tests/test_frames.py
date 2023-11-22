@@ -1,7 +1,10 @@
+from unittest import mock
+
 from flask import json
-from app import models
+from app import models, redis
 from app.models import new_frame, new_log
-from app.tests.base import BaseTestCase
+from app.tests.base import BaseTestCase, MockResponse
+
 
 class TestFrames(BaseTestCase):
 
@@ -51,22 +54,15 @@ class TestFrames(BaseTestCase):
 
 
     def test_api_frame_update_scenes_json_format(self):
-        # Create a frame for testing
         frame = self._create_frame()
 
-        # Prepare valid JSON data for 'scenes'
         valid_scenes_json = json.dumps([{"sceneName": "Scene1"}, {"sceneName": "Scene2"}])
-
-        # Test updating with valid JSON data
         response = self.client.post(f'/api/frames/{frame.id}', data={'scenes': valid_scenes_json})
         self.assertEqual(response.status_code, 200)
         updated_frame = models.Frame.query.get(frame.id)
         self.assertEqual(updated_frame.scenes, json.loads(valid_scenes_json))
 
-        # Prepare invalid JSON data for 'scenes'
         invalid_scenes_json = "Not a valid JSON"
-
-        # Test updating with invalid JSON data
         response = self.client.post(f'/api/frames/{frame.id}', data={'scenes': invalid_scenes_json})
         self.assertEqual(response.status_code, 400)
         error_data = json.loads(response.data)
@@ -80,25 +76,48 @@ class TestFrames(BaseTestCase):
         pass
 
     def test_get_frame_not_found(self):
-        pass
+        response = self.client.get('/api/frames/9999')  # Use an ID that doesn't exist
+        assert response.status_code == 404
 
     def test_delete_frame_not_found(self):
-        pass
+        response = self.client.delete('/api/frames/9999')
+        assert response.status_code == 404
 
     def test_get_image_last_image(self):
-        pass
+        redis.set(f'frame:{self.frame.frame_host}:{self.frame.frame_port}:image', 'cached_image_data')
+        response = self.client.get(f'/api/frames/{self.frame.id}/image?t=-1')
+        assert response.status_code == 200
+        assert response.data == b'cached_image_data'
 
     def test_get_image_external_service_error(self):
-        pass
+        response = self.client.post(f'/api/frames/{self.frame.id}', data={'name': "NoName", "frame_host": "999.999.999.999"})
+
+        with mock.patch('requests.get', return_value=MockResponse(status_code=500)):
+            response = self.client.get(f'/api/frames/{self.frame.id}/image?t=-1')
+            assert response.status_code == 500
+            assert json.loads(response.data) == { "error": "Unable to fetch image" }
 
     def test_get_image_redis_cache_scenario(self):
-        pass
+        # Ensure the cache is empty initially
+        redis.delete(f'frame:{self.frame.frame_host}:{self.frame.frame_port}:image')
+        # Mock external service response
+        with mock.patch('requests.get', return_value=MockResponse(status_code=200, content=b'image_data')):
+            response = self.client.get(f'/api/frames/{self.frame.id}/image')
+            assert response.status_code == 200
+            assert response.data == b'image_data'
+            # Check if image is cached now
+            cached_image = redis.get(f'frame:{self.frame.frame_host}:{self.frame.frame_port}:image')
+            assert cached_image == b'image_data'
 
     def test_api_frame_render_event_success(self):
-        pass
+        with mock.patch('requests.get', return_value=MockResponse(status_code=200)):
+            response = self.client.post(f'/api/frames/{self.frame.id}/event/render')
+            assert response.status_code == 200
 
     def test_api_frame_render_event_failure(self):
-        pass
+        with mock.patch('requests.get', return_value=MockResponse(status_code=500)):
+            response = self.client.post(f'/api/frames/{self.frame.id}/event/render')
+            assert response.status_code == 500
 
     def test_api_frame_reset_event(self):
         pass
@@ -110,10 +129,14 @@ class TestFrames(BaseTestCase):
         pass
 
     def test_api_frame_update_success(self):
-        pass
+        response = self.client.post(f'/api/frames/{self.frame.id}', data={'name': 'Updated Name'})
+        assert response.status_code == 200
+        updated_frame = models.Frame.query.get(self.frame.id)
+        assert updated_frame.name == 'Updated Name'
 
     def test_api_frame_update_invalid_data(self):
-        pass
+        response = self.client.post(f'/api/frames/{self.frame.id}', data={'width': 'invalid'})
+        assert response.status_code == 400
 
     def test_api_frame_update_with_next_action(self):
         pass

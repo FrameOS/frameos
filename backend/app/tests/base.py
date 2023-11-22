@@ -43,3 +43,11 @@ class BaseTestCase(unittest.TestCase):
 
     def logout(self):
         return self.client.get('/logout', follow_redirects=True)
+
+class MockResponse:
+    def __init__(self, status_code, content=None):
+        self.status_code = status_code
+        self.content = content
+
+    def json(self):
+        return self.content
