@@ -20,7 +20,7 @@ def api_apps_source(keyword: str):
     return jsonify(get_one_app_sources(keyword))
 
 
-@api.route("/validate_source", methods=["POST"])
+@api.route("/apps/validate_source", methods=["POST"])
 @login_required
 def validate_python_frame_source():
     data = request.json
@@ -41,12 +41,10 @@ def validate_python_frame_source():
         return jsonify({"errors": []}), 200
 
 
-@api.route("/enhance_source", methods=["POST"])
+@api.route("/apps/enhance_source", methods=["POST"])
 @login_required
 def enhance_python_frame_source():
     data = request.json
-    print('______________')
-    print(data)
     source = data.get('source')
     prompt = data.get('prompt')
     api_key = get_settings_dict().get('openai', {}).get('api_key', None)

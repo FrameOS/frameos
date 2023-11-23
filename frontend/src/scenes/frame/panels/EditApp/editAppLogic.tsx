@@ -58,7 +58,7 @@ export const editAppLogic = kea<editAppLogicType>([
         enhance: async () => {
           const source = values.sources['frame.py']
           const prompt = values.prompt
-          const response = await fetch(`/api/enhance_source`, {
+          const response = await fetch(`/api/apps/enhance_source`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt, source }),
@@ -172,7 +172,7 @@ export const editAppLogic = kea<editAppLogicType>([
       if (!initial) {
         await breakpoint(300)
       }
-      const response = await fetch(`/api/validate_source`, {
+      const response = await fetch(`/api/apps/validate_source`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file, source }),
