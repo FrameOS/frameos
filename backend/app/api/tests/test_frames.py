@@ -10,11 +10,7 @@ class TestFrames(BaseTestCase):
 
     def setUp(self):
         super().setUp()
-        self.frame = self._create_frame()
-
-    def _create_frame(self) -> models.Frame:
-        frame = new_frame('Frame', 'localhost', 'localhost')
-        return frame
+        self.frame = new_frame('Frame', 'localhost', 'localhost')
 
     def test_api_frames(self):
         response = self.client.get('/api/frames')
@@ -156,7 +152,7 @@ class TestFrames(BaseTestCase):
         assert updated_frame.scenes == [{"sceneName": "Scene1"}, {"sceneName": "Scene2"}]
 
     def test_api_frame_update_scenes_json_format(self):
-        frame = self._create_frame()
+        frame = new_frame('Frame', 'localhost', 'localhost')
 
         valid_scenes_json = json.dumps([{"sceneName": "Scene1"}, {"sceneName": "Scene2"}])
         response = self.client.post(f'/api/frames/{frame.id}', data={'scenes': valid_scenes_json})
