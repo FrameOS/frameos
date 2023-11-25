@@ -10,7 +10,7 @@ import sentry_sdk
 import os
 from sqlalchemy.exc import OperationalError
 
-from flask import Flask, current_app, flash, redirect, url_for, request
+from flask import Flask, current_app, flash, redirect, url_for, request, jsonify
 from flask_login import current_user, LoginManager
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -74,6 +74,10 @@ def create_app(config: Optional[Config] = None):
     def load_user(user_id):
         from .models import User
         return User.query.get(int(user_id))
+
+    @login_manager.unauthorized_handler
+    def unauthorized():
+        return jsonify({'error': 'Unauthorized'}), 401
 
     @app.errorhandler(404)
     def not_found(e):
