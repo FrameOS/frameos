@@ -16,7 +16,7 @@ export function Header({ title, subtitle, right, buttons }: HeaderProps) {
       style={{ height: 60 }}
     >
       <H5 className="truncate">
-        <A href="/">{title}</A>
+        <A href="/"> <img src='/mark-white.svg' className="w-6 h-6 inline-block mr-2 align-baseline" /> {!subtitle ?  title : null}</A>
         {subtitle && (
           <>
             {' '}
