@@ -246,8 +246,7 @@ class TestFrames(BaseTestCase):
         ]
         for endpoint, method in endpoints:
             response = self.client.open(endpoint, method=method)
-            # TODO: should convert to a better response
-            assert response.status_code == 302, (endpoint, method, response.status_code)
+            assert response.status_code == 401, (endpoint, method, response.status_code)
 
     def test_frame_update_invalid_json_scenes(self):
         response = self.client.post(f'/api/frames/{self.frame.id}', data={'scenes': 'invalid json'})
