@@ -19,8 +19,7 @@ export function Settings() {
       <PanelGroup direction="vertical" units="pixels">
         <Panel minSize={60} maxSize={60}>
           <Header
-            title="FrameOS"
-            subtitle="Settings"
+            title="Settings"
             right={
               <div className='flex gap-2'>
                 <Button onClick={() => location.href = '/logout'}>Logout</Button>

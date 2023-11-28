@@ -21,8 +21,7 @@ export function Frame(props: FrameSceneProps) {
       {frame ? (
         <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute flex flex-col">
           <Header
-            title="FrameOS"
-            subtitle={!frame ? `Loading frame ${props.id}...` : frame.name || frameHost(frame)}
+            title={!frame ? `Loading frame ${props.id}...` : frame.name || frameHost(frame)}
             buttons={
               <div className="flex divide-x divide-gray-700 space-x-2">
                 <Button
