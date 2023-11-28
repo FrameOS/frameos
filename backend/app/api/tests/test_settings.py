@@ -54,7 +54,3 @@ class TestSettingsAPI(BaseTestCase):
             response = self.client.post('/api/generate_ssh_keys')
             self.assertEqual(response.status_code, 500)
 
-
-if __name__ == '__main__':
-    import unittest
-    unittest.main()
