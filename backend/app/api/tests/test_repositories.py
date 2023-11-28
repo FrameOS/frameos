@@ -147,7 +147,3 @@ class TestRepositoryAPI(BaseTestCase):
             self.assertEqual(response.status_code, 200)
             mock_update_templates.assert_called_once()
 
-
-if __name__ == '__main__':
-    import unittest
-    unittest.main()

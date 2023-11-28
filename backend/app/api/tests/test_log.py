@@ -62,8 +62,3 @@ class TestLogAPI(BaseTestCase):
         data = {'logs': [{'event': 'log', 'message': 'banana'}] * 30}
         self.client.post('/api/log', json=data, headers=headers)
         assert Log.query.filter_by(frame=self.frame).count() == 1020
-
-
-if __name__ == '__main__':
-    import unittest
-    unittest.main()
