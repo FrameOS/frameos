@@ -4,14 +4,34 @@ import { H5 } from '../../components/H5'
 import { Box } from '../../components/Box'
 import { frameHost, frameStatus } from '../../decorators/frame'
 import { Image } from './Image'
+import { DropdownMenu } from '../../components/DropdownMenu'
+import { ArrowPathIcon, ClipboardIcon, TrashIcon } from '@heroicons/react/24/solid'
+import copy from 'copy-to-clipboard'
+import React from 'react'
+import { useActions } from 'kea'
+import { framesModel } from '../../models/framesModel'
 
 interface FrameProps {
   frame: FrameType
 }
 
 export function Frame({ frame }: FrameProps): JSX.Element {
+  const { deleteFrame } = useActions(framesModel)
   return (
-    <Box id={`frame-${frame.id}`}>
+    <Box id={`frame-${frame.id}`} className="relative">
+      <div className="flex gap-2 absolute z-10 right-2 top-2">
+        <DropdownMenu
+          buttonColor="none"
+          items={[
+            {
+              label: 'Delete',
+              onClick: () =>
+                window.confirm(`Are you sure you want to delete the frame "${frame.name}"?`) && deleteFrame(frame.id),
+              icon: <TrashIcon className="w-5 h-5" />,
+            },
+          ]}
+        />
+      </div>
       <A href={`/frames/${frame.id}`}>
         <Image id={frame.id} />
       </A>
