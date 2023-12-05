@@ -1,4 +1,4 @@
-import { LazyExoticComponent, Suspense } from 'react'
+import { LazyExoticComponent, Suspense, useEffect, useState } from 'react'
 import { useMountedLogic, useValues } from 'kea'
 import { sceneLogic } from './sceneLogic'
 import { scenes } from './scenes'
@@ -6,6 +6,18 @@ import { socketLogic } from './socketLogic'
 import { framesModel } from '../models/framesModel'
 import { appsModel } from '../models/appsModel'
 import { templatesModel } from '../models/templatesModel'
+
+export function DelayedLoading() {
+  const [delayed, setDelayed] = useState(false)
+  useEffect(() => {
+    const timeout = setTimeout(() => setDelayed(true), 1000)
+    return () => clearTimeout(timeout)
+  }, [])
+  if (!delayed) {
+    return <div />
+  }
+  return <div className="w-full h-screen flex items-center justify-center">Loading...</div>
+}
 
 export function App() {
   useMountedLogic(socketLogic)
@@ -18,7 +30,7 @@ export function App() {
     scenes[scene as keyof typeof scenes] || scenes.error404
 
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense fallback={<DelayedLoading />}>
       <SceneComponent {...params} />
     </Suspense>
   )
