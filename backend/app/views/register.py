@@ -25,7 +25,6 @@ class RegisterForm(FlaskForm):
         if user is not None:
             raise ValidationError('Please use a different email address.')
 
-## TODO: move out of /api
 @views.route('/register', methods=['GET', 'POST'])
 def register():
     if User.query.first() is not None:

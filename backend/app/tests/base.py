@@ -1,3 +1,4 @@
+import secrets
 import unittest
 
 from flask import Flask
@@ -18,9 +19,17 @@ class BaseTestCase(unittest.TestCase):
         self.app_context.push()
         db.drop_all()
         db.create_all()
+        self.app.config['SECRET_KEY'] = secrets.token_hex(32)
+        self.init_user()
+        self.init_tests()
+
+    def init_user(self):
         self.create_user("tester", "test@example.com", "testpassword")
         login_response = self.login("tester", "testpassword")
         assert login_response.status_code == 200, (login_response.status_code, login_response.data)
+
+    def init_tests(self):
+        pass
 
     def tearDown(self):
         self.app_context.pop()
@@ -36,13 +45,13 @@ class BaseTestCase(unittest.TestCase):
             raise
 
     def login(self, username, password):
-        return self.client.post('/login', data=dict(
+        return self.client.post('/api/login', json=dict(
             username=username,
             password=password
         ), follow_redirects=True)
 
     def logout(self):
-        return self.client.get('/logout', follow_redirects=True)
+        return self.client.post('/api/logout', follow_redirects=True)
 
 class MockResponse:
     def __init__(self, status_code, content=None):

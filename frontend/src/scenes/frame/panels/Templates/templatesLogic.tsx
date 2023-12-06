@@ -63,10 +63,8 @@ export const templatesLogic = kea<templatesLogicType>([
           }
           const response = await fetch(`/api/templates`, {
             method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(request),
-            headers: {
-              'Content-Type': 'application/json',
-            },
           })
           if (!response.ok) {
             throw new Error('Failed to update frame')
@@ -93,10 +91,8 @@ export const templatesLogic = kea<templatesLogicType>([
         }
         const response = await fetch(`/api/templates`, {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(request),
-          headers: {
-            'Content-Type': 'application/json',
-          },
         })
         if (!response.ok) {
           throw new Error('Failed to update frame')
@@ -142,10 +138,8 @@ export const templatesLogic = kea<templatesLogicType>([
         }
         const response = await fetch(`/api/repositories`, {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(request),
-          headers: {
-            'Content-Type': 'application/json',
-          },
         })
         if (!response.ok) {
           throw new Error('Failed to update frame')

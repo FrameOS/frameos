@@ -5,10 +5,12 @@ export const scenes = {
   frames: lazy(() => import('./frames/Frames')),
   frame: lazy(() => import('./frame/Frame')),
   settings: lazy(() => import('./settings/Settings')),
+  login: lazy(() => import('./login/Login')),
 }
 
 export const routes = {
   '/': 'frames',
   '/frames/:id': 'frame',
   '/settings': 'settings',
+  '/login': 'login',
 }

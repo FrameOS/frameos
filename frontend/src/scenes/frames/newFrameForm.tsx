@@ -34,14 +34,9 @@ export const newFrameForm = kea<newFrameFormType>([
       }),
       submit: async (frame) => {
         try {
-          const formData = new FormData()
-          Object.keys(frame).forEach((key) => {
-            formData.append(key, (frame as any)[key])
-          })
-
           const response = await fetch('/api/frames/new', {
             method: 'POST',
-            body: formData,
+            body: JSON.stringify(frame),
           })
 
           if (!response.ok) {

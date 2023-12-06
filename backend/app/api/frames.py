@@ -115,8 +115,8 @@ def api_frame_update(id: int):
     defaults = {'frame_port': 8999, 'ssh_port': 22}
     try:
         for field in fields:
-            if field in request.form:
-                value = request.form[field]
+            if field in request.json:
+                value = request.json[field]
                 if value == '' or value == 'null':
                     value = defaults.get(field, None)
                 elif field in ['frame_port', 'ssh_port', 'width', 'height', 'rotate']:
@@ -128,10 +128,10 @@ def api_frame_update(id: int):
                 setattr(frame, field, value)
         update_frame(frame)
 
-        if request.form.get('next_action') == 'restart':
+        if request.json.get('next_action') == 'restart':
             from app.tasks import restart_frame
             restart_frame(frame.id)
-        elif request.form.get('next_action') == 'deploy':
+        elif request.json.get('next_action') == 'deploy':
             from app.tasks import deploy_frame
             deploy_frame(frame.id)
 
@@ -145,10 +145,10 @@ def api_frame_update(id: int):
 @login_required
 def api_frame_new():
     try:
-        name = request.form['name']
-        frame_host = request.form['frame_host']
-        server_host = request.form['server_host']
-        device = request.form.get('device', 'web_only')
+        name = request.json['name']
+        frame_host = request.json['frame_host']
+        server_host = request.json['server_host']
+        device = request.json.get('device', 'web_only')
         frame = new_frame(name, frame_host, server_host, device)
         return jsonify(frame=frame.to_dict())
     except Exception as e:

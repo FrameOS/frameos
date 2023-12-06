@@ -1,11 +1,7 @@
-from unittest import mock
 from flask import json
 from app.tests.base import BaseTestCase
 
-class TestViews(BaseTestCase):
-
-    def setUp(self):
-        super().setUp()
+class TestApps(BaseTestCase):
 
     def test_api_apps(self):
         response = self.client.get('/api/apps')

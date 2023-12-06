@@ -64,42 +64,13 @@ def create_app(config: Optional[Config] = None):
     socketio.init_app(app, cors_allowed_origins="*", message_queue=os.environ.get('REDIS_URL'))
     initialize_sentry(app)
 
-    from .api import api as api_blueprint
+    from app.views.base import setup_base_routes
+    setup_base_routes(app)
+
+    from app.api import api as api_blueprint
     app.register_blueprint(api_blueprint, url_prefix='/api')
 
-    from .views import views as views_blueprint
+    from app.views import views as views_blueprint
     app.register_blueprint(views_blueprint, url_prefix='/')
-
-    @login_manager.user_loader
-    def load_user(user_id):
-        from .models import User
-        return User.query.get(int(user_id))
-
-    @login_manager.unauthorized_handler
-    def unauthorized():
-        return jsonify({'error': 'Unauthorized'}), 401
-
-    @app.errorhandler(404)
-    def not_found(e):
-        from app.models import User  # Import here to avoid circular dependencies
-        if User.query.first() is None:
-            flash('Please register the first user!')
-            return redirect(url_for('views.register.register'))
-        if current_user.is_authenticated:
-            return current_app.send_static_file('index.html')
-        else:
-            flash('Please login!')
-            return redirect(url_for('views.login'))
-
-    @app.before_request
-    def before_request():
-        """
-        Check if the incoming request is gzipped and decompress it if it is.
-        """
-        if request.headers.get('Content-Encoding') == 'gzip':
-            compressed_data = io.BytesIO(request.get_data(cache=False))
-            decompressed_data = gzip.GzipFile(fileobj=compressed_data, mode='rb').read()
-            request._cached_data = decompressed_data
-            request.get_json = lambda cache=False: json.loads(decompressed_data.decode('utf-8'))
 
     return app

@@ -1,4 +1,4 @@
-import { actions, kea, path, reducers } from 'kea'
+import { actions, kea, listeners, path, reducers } from 'kea'
 
 import type { sceneLogicType } from './sceneLogicType'
 import { urlToAction } from 'kea-router'
@@ -8,6 +8,7 @@ export const sceneLogic = kea<sceneLogicType>([
   path(['src', 'sceneLogic']),
   actions({
     setScene: (scene, params) => ({ scene, params }),
+    logout: true,
   }),
   reducers({
     scene: [
@@ -30,4 +31,10 @@ export const sceneLogic = kea<sceneLogicType>([
       })
     )
   }),
+  listeners(({ actions }) => ({
+    logout: async () => {
+      await fetch('/api/logout', { method: 'POST' })
+      location.href = '/login'
+    },
+  })),
 ])

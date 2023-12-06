@@ -8,8 +8,7 @@ from app.tests.base import BaseTestCase, MockResponse
 
 class TestFrames(BaseTestCase):
 
-    def setUp(self):
-        super().setUp()
+    def init_tests(self):
         self.frame = new_frame('Frame', 'localhost', 'localhost')
 
     def test_api_frames(self):
@@ -79,7 +78,7 @@ class TestFrames(BaseTestCase):
             assert cached_image == b'image_data'
 
     def test_api_frame_get_image_external_service_error(self):
-        self.client.post(f'/api/frames/{self.frame.id}', data={'name': "NoName", "frame_host": "999.999.999.999"})
+        self.client.post(f'/api/frames/{self.frame.id}', json={'name': "NoName", "frame_host": "999.999.999.999"})
 
         with mock.patch('requests.get', return_value=MockResponse(status_code=500)):
             response = self.client.get(f'/api/frames/{self.frame.id}/image?t=-1')
@@ -116,13 +115,13 @@ class TestFrames(BaseTestCase):
             assert response.data == b'Success'
 
     def test_api_frame_update_name(self):
-        response = self.client.post(f'/api/frames/{self.frame.id}', data={'name': 'Updated Name'})
+        response = self.client.post(f'/api/frames/{self.frame.id}', json={'name': 'Updated Name'})
         assert response.status_code == 200
         updated_frame = models.Frame.query.get(self.frame.id)
         assert updated_frame.name == 'Updated Name'
 
     def test_api_frame_update_a_lot(self):
-        response = self.client.post(f'/api/frames/{self.frame.id}', data={
+        response = self.client.post(f'/api/frames/{self.frame.id}', json={
             'name': 'Updated Name',
             'frame_host': 'penguin',
             'ssh_user': 'tux',
@@ -155,36 +154,36 @@ class TestFrames(BaseTestCase):
         frame = new_frame('Frame', 'localhost', 'localhost')
 
         valid_scenes_json = json.dumps([{"sceneName": "Scene1"}, {"sceneName": "Scene2"}])
-        response = self.client.post(f'/api/frames/{frame.id}', data={'scenes': valid_scenes_json})
+        response = self.client.post(f'/api/frames/{frame.id}', json={'scenes': valid_scenes_json})
         self.assertEqual(response.status_code, 200)
         updated_frame = models.Frame.query.get(frame.id)
         self.assertEqual(updated_frame.scenes, json.loads(valid_scenes_json))
 
         invalid_scenes_json = "Not a valid JSON"
-        response = self.client.post(f'/api/frames/{frame.id}', data={'scenes': invalid_scenes_json})
+        response = self.client.post(f'/api/frames/{frame.id}', json={'scenes': invalid_scenes_json})
         self.assertEqual(response.status_code, 400)
         error_data = json.loads(response.data)
         self.assertIn('error', error_data)
         self.assertIn('Invalid input', error_data['error'])
 
     def test_api_frame_update_invalid_data(self):
-        response = self.client.post(f'/api/frames/{self.frame.id}', data={'width': 'invalid'})
+        response = self.client.post(f'/api/frames/{self.frame.id}', json={'width': 'invalid'})
         assert response.status_code == 400
 
     def test_api_frame_update_next_action_restart(self):
         with mock.patch('app.tasks.restart_frame') as mock_restart:
-            response = self.client.post(f'/api/frames/{self.frame.id}', data={'next_action': 'restart'})
+            response = self.client.post(f'/api/frames/{self.frame.id}', json={'next_action': 'restart'})
             mock_restart.assert_called_once_with(self.frame.id)
             assert response.status_code == 200
 
     def test_api_frame_update_next_action_deploy(self):
         with mock.patch('app.tasks.deploy_frame') as mock_deploy:
-            response = self.client.post(f'/api/frames/{self.frame.id}', data={'next_action': 'deploy'})
+            response = self.client.post(f'/api/frames/{self.frame.id}', json={'next_action': 'deploy'})
             mock_deploy.assert_called_once_with(self.frame.id)
             assert response.status_code == 200
 
     def test_api_frame_new(self):
-        response = self.client.post('/api/frames/new', data={'name': 'Frame', 'frame_host': 'localhost', 'server_host': 'localhost'})
+        response = self.client.post('/api/frames/new', json={'name': 'Frame', 'frame_host': 'localhost', 'server_host': 'localhost'})
         data = json.loads(response.data)
         assert response.status_code == 200
         assert data['frame']['name'] == 'Frame'
@@ -196,7 +195,7 @@ class TestFrames(BaseTestCase):
         assert data['frame']['device'] == 'web_only'
 
     def test_api_frame_new_parsed(self):
-        response = self.client.post('/api/frames/new', data={'name': 'Frame', 'frame_host': 'user:pass@localhost', 'server_host': 'localhost', 'device': 'framebuffer'})
+        response = self.client.post('/api/frames/new', json={'name': 'Frame', 'frame_host': 'user:pass@localhost', 'server_host': 'localhost', 'device': 'framebuffer'})
         data = json.loads(response.data)
         assert response.status_code == 200
         assert data['frame']['name'] == 'Frame'
@@ -230,7 +229,7 @@ class TestFrames(BaseTestCase):
 
 
     def test_unauthorized_access(self):
-        self.client.get(f'/logout')
+        self.logout()
         endpoints = [
             ('/api/frames', 'GET'),
             ('/api/frames/1', 'GET'),
@@ -249,13 +248,13 @@ class TestFrames(BaseTestCase):
             assert response.status_code == 401, (endpoint, method, response.status_code)
 
     def test_frame_update_invalid_json_scenes(self):
-        response = self.client.post(f'/api/frames/{self.frame.id}', data={'scenes': 'invalid json'})
+        response = self.client.post(f'/api/frames/{self.frame.id}', json={'scenes': 'invalid json'})
         assert response.status_code == 400
 
     def test_frame_update_incorrect_data_types(self):
-        response = self.client.post(f'/api/frames/{self.frame.id}', data={'width': 'non-integer'})
+        response = self.client.post(f'/api/frames/{self.frame.id}', json={'width': 'non-integer'})
         assert response.status_code == 400
-        response = self.client.post(f'/api/frames/{self.frame.id}', data={'interval': 'non-float'})
+        response = self.client.post(f'/api/frames/{self.frame.id}', json={'interval': 'non-float'})
         assert response.status_code == 400
 
     def test_frame_deploy_reset_restart_failure(self):
@@ -271,5 +270,5 @@ class TestFrames(BaseTestCase):
             assert response.status_code == 500
 
     def test_frame_creation_missing_required_fields(self):
-        response = self.client.post('/api/frames/new', data={'name': 'Frame'})
+        response = self.client.post('/api/frames/new', json={'name': 'Frame'})
         assert response.status_code == 500

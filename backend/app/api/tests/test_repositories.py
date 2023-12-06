@@ -7,10 +7,6 @@ from app import db
 from app.models import Repository
 
 class TestRepositoryAPI(BaseTestCase):
-
-    def setUp(self):
-        super().setUp()
-
     def test_create_repository(self):
         # Test the POST /repositories endpoint
         data = {

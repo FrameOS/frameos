@@ -59,9 +59,7 @@ export const settingsLogic = kea<settingsLogicType>([
         const response = await fetch(`/api/settings`, {
           method: 'POST',
           body: JSON.stringify(formValues),
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
         })
         if (!response.ok) {
           throw new Error('Failed to update frame')

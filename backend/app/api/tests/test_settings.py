@@ -3,10 +3,6 @@ from unittest.mock import patch
 from app.tests.base import BaseTestCase
 
 class TestSettingsAPI(BaseTestCase):
-
-    def setUp(self):
-        super().setUp()
-
     def test_get_settings(self):
         # Test the GET /settings endpoint
         response = self.client.get('/api/settings')

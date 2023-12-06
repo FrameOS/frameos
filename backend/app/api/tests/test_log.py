@@ -3,8 +3,7 @@ from app.models import new_frame, update_frame, Log
 
 
 class TestLogAPI(BaseTestCase):
-    def setUp(self):
-        super().setUp()
+    def init_tests(self):
         self.frame = new_frame('Frame', 'localhost', 'localhost')
         self.frame.server_api_key = 'testkey'
         update_frame(self.frame)

@@ -18,8 +18,8 @@ from PIL import Image
 def create_template():
     if 'file' in request.files:
         zip_file = request.files['file'].read()
-    elif 'url' in request.form:
-        zip_file = requests.get(request.form['url']).content
+    elif 'url' in request.json:
+        zip_file = requests.get(request.json['url']).content
     else:
         data = request.json
         zip_file = None

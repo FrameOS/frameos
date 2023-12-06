@@ -10,10 +10,13 @@ import { TextInput } from '../../components/TextInput'
 import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
+import { sceneLogic } from '../sceneLogic'
 
 export function Settings() {
   const { savedSettings, savedSettingsLoading, settingsChanged } = useValues(settingsLogic)
   const { submitSettings, newKey } = useActions(settingsLogic)
+  const { logout } = useActions(sceneLogic)
+
   return (
     <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">
       <PanelGroup direction="vertical" units="pixels">
@@ -21,8 +24,8 @@ export function Settings() {
           <Header
             title="Settings"
             right={
-              <div className='flex gap-2'>
-                <Button onClick={() => location.href = '/logout'}>Logout</Button>
+              <div className="flex gap-2">
+                <Button onClick={logout}>Logout</Button>
                 <Button color={settingsChanged ? 'teal' : 'light-gray'} onClick={submitSettings}>
                   Save
                 </Button>
@@ -104,7 +107,11 @@ export function Settings() {
                     <p className="text-sm leading-loose">
                       This SSH key will be used on all frames that don't have a password set for SSH.
                     </p>
-                    <Button onClick={newKey} color={savedSettings?.ssh_keys?.default ? 'light-gray' : 'teal'} size='small'>
+                    <Button
+                      onClick={newKey}
+                      color={savedSettings?.ssh_keys?.default ? 'light-gray' : 'teal'}
+                      size="small"
+                    >
                       Generate new keypair
                     </Button>
                     <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
