@@ -33,7 +33,7 @@ export function Frame(props: FrameSceneProps) {
                   Re-Render
                 </Button>
                 <div className="flex pl-2 space-x-2">
-                  <Button color={frameChanged ? 'teal' : 'light-gray'} type="button" onClick={() => saveFrame()}>
+                  <Button color={frameChanged ? 'primary' : 'light-gray'} type="button" onClick={() => saveFrame()}>
                     Save
                   </Button>
                   <Button

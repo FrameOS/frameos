@@ -63,7 +63,7 @@ export function DropdownMenu({ items, className, buttonColor: _buttonColor }: Dr
                         <a
                           href="#"
                           className={`${
-                            active && !!item.onClick ? 'bg-teal-700 text-white' : 'text-white'
+                            active && !!item.onClick ? 'bg-[#4a4b8c] text-white' : 'text-white'
                           } block px-4 py-2 text-sm flex gap-2`}
                           title={item.title}
                           onClick={

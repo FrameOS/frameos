@@ -3,7 +3,7 @@ import { clsx } from 'clsx'
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   size?: 'normal' | 'small' | 'tiny'
-  color?: 'blue' | 'teal' | 'gray' | 'red' | 'light-gray' | 'none' | 'none-gray'
+  color?: 'blue' | 'teal' | 'gray' | 'red' | 'light-gray' | 'none' | 'none-gray' | 'primary'
   full?: boolean
 }
 
@@ -17,10 +17,12 @@ export function buttonColor(color: ButtonProps['color']): string {
     : color === 'light-gray'
     ? 'bg-gray-600 hover:bg-gray-500 focus:ring-gray-500'
     : color === 'none'
-    ? 'hover:bg-teal-800 focus:ring-teal-800'
+    ? 'hover:bg-[#484984] focus:ring-[#484984]'
     : color === 'none-gray'
     ? 'hover:bg-gray-950 focus:ring-gray-950'
-    : 'bg-teal-700 hover:bg-teal-600 focus:ring-teal-600'
+    : color === 'teal'
+    ? 'bg-teal-700 hover:bg-teal-600 focus:ring-teal-600'
+    : 'bg-[#4a4b8c] hover:bg-[#484984] focus:ring-[#484984]'
 }
 
 export function Button({ size, color, children, className, disabled, full, ...props }: ButtonProps) {

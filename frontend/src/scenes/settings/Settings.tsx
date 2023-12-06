@@ -26,7 +26,7 @@ export function Settings() {
             right={
               <div className="flex gap-2">
                 <Button onClick={logout}>Logout</Button>
-                <Button color={settingsChanged ? 'teal' : 'light-gray'} onClick={submitSettings}>
+                <Button color={settingsChanged ? 'primary' : 'light-gray'} onClick={submitSettings}>
                   Save
                 </Button>
               </div>
@@ -109,7 +109,7 @@ export function Settings() {
                     </p>
                     <Button
                       onClick={newKey}
-                      color={savedSettings?.ssh_keys?.default ? 'light-gray' : 'teal'}
+                      color={savedSettings?.ssh_keys?.default ? 'light-gray' : 'primary'}
                       size="small"
                     >
                       Generate new keypair

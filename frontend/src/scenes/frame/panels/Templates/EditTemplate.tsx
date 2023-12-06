@@ -27,7 +27,7 @@ export function EditTemplate() {
                 <Button color="none" onClick={hideModal}>
                   Close
                 </Button>
-                <Button color="teal" onClick={submitTemplateForm}>
+                <Button color="primary" onClick={submitTemplateForm}>
                   Save Changes
                 </Button>
               </div>

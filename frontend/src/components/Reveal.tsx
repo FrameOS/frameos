@@ -9,11 +9,11 @@ interface RevealProps {
 export function RevealDots(props: React.HTMLProps<HTMLDivElement>) {
   return (
     <div className="flex items-center justify-start space-x-1" {...props}>
-      <div className="w-2 h-2 bg-teal-700 rounded-full" />
-      <div className="w-2 h-2 bg-teal-700 rounded-full" />
-      <div className="w-2 h-2 bg-teal-700 rounded-full" />
-      <div className="w-2 h-2 bg-teal-700 rounded-full" />
-      <div className="w-2 h-2 bg-teal-700 rounded-full" />
+      <div className="w-2 h-2 bg-[#4a4b8c] rounded-full" />
+      <div className="w-2 h-2 bg-[#4a4b8c] rounded-full" />
+      <div className="w-2 h-2 bg-[#4a4b8c] rounded-full" />
+      <div className="w-2 h-2 bg-[#4a4b8c] rounded-full" />
+      <div className="w-2 h-2 bg-[#4a4b8c] rounded-full" />
     </div>
   )
 }

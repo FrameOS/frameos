@@ -96,7 +96,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
           <div key={file} className="w-min flex gap-2">
             <Button
               size="small"
-              color={activeFile === file ? (modelMarkers[file]?.length ? 'red' : 'teal') : 'none'}
+              color={activeFile === file ? (modelMarkers[file]?.length ? 'red' : 'primary') : 'none'}
               onClick={() => setActiveFile(file)}
               className={clsx(
                 'whitespace-nowrap',
@@ -113,7 +113,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
             </Button>
             {file === 'frame.py' && (
               <Button
-                color={activeFile === 'frame.py/suggestion' ? 'teal' : 'gray'}
+                color={activeFile === 'frame.py/suggestion' ? 'primary' : 'gray'}
                 size="small"
                 title={'Talk to ChatGPT'}
                 onClick={() => setActiveFile('frame.py/suggestion')}
