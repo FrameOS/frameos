@@ -18,7 +18,7 @@ export const loginForm = kea<loginFormType>([
         password: '',
       } as LoginFormForm,
       options: {
-        showErrorsOnTouch: false,
+        showErrorsOnTouch: true,
         canSubmitWithErrors: true,
       },
       errors: (frame: Partial<LoginFormForm>) => ({
