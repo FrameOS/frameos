@@ -47,7 +47,7 @@ docker run -d \
     --name watchtower \
     -v /var/run/docker.sock:/var/run/docker.sock \
     containrrr/watchtower \
-    --interval 86400
+    --interval 86400 \
     frameos
 
 # one time update
