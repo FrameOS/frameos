@@ -8,8 +8,8 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '../../../../components/Button'
 
 export function Logs() {
-  const { id } = useValues(frameLogic)
-  const { logs, logsLoading } = useValues(logsLogic({ id }))
+  const { frameId } = useValues(frameLogic)
+  const { logs, logsLoading } = useValues(logsLogic({ frameId }))
   const [atBottom, setAtBottom] = useState(false)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
 

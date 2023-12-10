@@ -12,18 +12,17 @@ import { Field } from '../../../../components/Field'
 
 export interface DetailsProps {
   className?: string
-  id: number
 }
 
 export function FrameSettings({ className }: DetailsProps) {
-  const { id, frame, frameFormTouches } = useValues(frameLogic)
+  const { frameId, frame, frameFormTouches } = useValues(frameLogic)
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
 
   return (
     <div className={clsx('space-y-4', className)}>
       {!frame ? (
-        `Loading frame ${id}...`
+        `Loading frame ${frameId}...`
       ) : (
         <>
           <div className="flex space-x-2">
@@ -96,7 +95,7 @@ export function FrameSettings({ className }: DetailsProps) {
               Delete frame
             </Button>
           </div>
-          <Form formKey="frameForm" logic={frameLogic} props={{ id }} className="space-y-4" enableFormOnSubmit>
+          <Form formKey="frameForm" logic={frameLogic} props={{ frameId }} className="space-y-4" enableFormOnSubmit>
             <Field name="name" label="Name">
               <TextInput name="name" placeholder="Hallway frame" required />
             </Field>

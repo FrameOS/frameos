@@ -11,8 +11,8 @@ interface FrameSceneProps {
 }
 
 export function Frame(props: FrameSceneProps) {
-  const id = parseInt(props.id)
-  const frameLogicProps = { id }
+  const frameId = parseInt(props.id)
+  const frameLogicProps = { frameId }
   const { frame, frameChanged } = useValues(frameLogic(frameLogicProps))
   const { saveFrame, renderFrame, restartFrame, deployFrame } = useActions(frameLogic(frameLogicProps))
 

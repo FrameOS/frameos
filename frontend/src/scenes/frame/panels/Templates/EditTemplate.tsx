@@ -10,14 +10,14 @@ import { TextArea } from '../../../../components/TextArea'
 import { Image } from '../Image/Image'
 
 export function EditTemplate() {
-  const { id } = useValues(frameLogic)
-  const { showingModal, templateForm } = useValues(templatesLogic({ id }))
-  const { hideModal, submitTemplateForm } = useActions(templatesLogic({ id }))
+  const { frameId } = useValues(frameLogic)
+  const { showingModal, templateForm } = useValues(templatesLogic({ frameId }))
+  const { hideModal, submitTemplateForm } = useActions(templatesLogic({ frameId }))
   const newTemplate = !templateForm.id
   return (
     <>
       {showingModal ? (
-        <Form logic={templatesLogic} props={{ id }} formKey="templateForm">
+        <Form logic={templatesLogic} props={{ frameId }} formKey="templateForm">
           <Modal
             title={newTemplate ? <>Save as new template</> : <>Edit template</>}
             onClose={hideModal}

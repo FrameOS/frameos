@@ -12,29 +12,21 @@ import { panelsLogic } from '../panelsLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Markdown } from '../../../../components/Markdown'
 import { ClipboardDocumentIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { appNodeLogic } from './appNodeLogic'
 
 export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JSX.Element {
-  const { apps, frameId, selectedNodeId, sceneId } = useValues(diagramLogic)
+  const { frameId, sceneId } = useValues(diagramLogic)
   const { updateNodeConfig, copyAppJSON, deleteApp } = useActions(diagramLogic)
+  const { editApp } = useActions(panelsLogic)
+  const appNodeLogicProps = { frameId, sceneId, nodeId: id }
+  const { app, appFields, isCustomApp, configJsonError, isSelected, node } = useValues(appNodeLogic(appNodeLogicProps))
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
-  const { editApp } = useActions(panelsLogic({ id: frameId }))
-
-  const sourceConfigJson = data?.sources?.['config.json']
-  let configJson: App | null = null
-  let configJsonError: string | null = null
-  try {
-    configJson = JSON.parse(sourceConfigJson || 'null')
-  } catch (e) {
-    configJsonError = e instanceof Error ? e.message : String(e)
-  }
-  const app: App | undefined = configJson || apps[data.keyword]
-  const isCustomApp = !!data?.sources
 
   return (
     <div
       className={clsx(
         'shadow-lg border border-2',
-        selectedNodeId === id
+        isSelected
           ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
           : isCustomApp
           ? 'bg-black bg-opacity-70 border-teal-900 shadow-teal-700/50 '
@@ -44,7 +36,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
       <div
         className={clsx(
           'text-xl p-1 gap-1',
-          selectedNodeId === id ? 'bg-indigo-900' : isCustomApp ? 'bg-teal-900' : 'bg-sky-900',
+          isSelected ? 'bg-indigo-900' : isCustomApp ? 'bg-teal-900' : 'bg-sky-900',
           'flex w-full justify-between items-center'
         )}
       >
@@ -103,10 +95,10 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
             {configJsonError}
           </div>
         ) : null}
-        {app?.fields ? (
+        {appFields ? (
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5">
             <tbody>
-              {app?.fields.map((field, i) => (
+              {appFields.map((field, i) => (
                 <React.Fragment key={i}>
                   {'markdown' in field ? (
                     <tr>
@@ -131,7 +123,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                       >
                         {field.label ?? field.name}
                       </td>
-                      <td className="cursor-text">
+                      <td className="cursor-text" colSpan={field.type === 'node' ? 1 : 2}>
                         {field.secret && !secretRevealed[field.name] ? (
                           <RevealDots onClick={() => setSecretRevealed({ ...secretRevealed, [field.name]: true })} />
                         ) : field.type === 'select' ? (
@@ -159,6 +151,17 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                           />
                         )}
                       </td>
+                      {field.type === 'node' ? (
+                        <td className="cursor-text">
+                          <Handle
+                            type="source"
+                            position={Position.Right}
+                            id={`next-${field.name}`}
+                            style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
+                            isConnectable={isConnectable}
+                          />
+                        </td>
+                      ) : null}
                     </tr>
                   )}
                 </React.Fragment>

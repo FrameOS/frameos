@@ -8,13 +8,13 @@ import { templatesModel } from '../../../../models/templatesModel'
 import { repositoriesModel } from '../../../../models/repositoriesModel'
 
 export interface TemplateLogicProps {
-  id: number
+  frameId: number
 }
 
 export const templatesLogic = kea<templatesLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Templates', 'templatesLogic']),
   props({} as TemplateLogicProps),
-  key((props) => props.id),
+  key((props) => props.frameId),
   connect((props: TemplateLogicProps) => ({
     values: [frameLogic(props), ['frame']],
     actions: [templatesModel, ['updateTemplate'], repositoriesModel, ['updateRepository']],
@@ -59,7 +59,7 @@ export const templatesLogic = kea<templatesLogicType>([
               scaling_mode: values.frame.scaling_mode,
               rotate: values.frame.rotate,
             },
-            from_frame_id: props.id,
+            from_frame_id: props.frameId,
           }
           const response = await fetch(`/api/templates`, {
             method: 'POST',

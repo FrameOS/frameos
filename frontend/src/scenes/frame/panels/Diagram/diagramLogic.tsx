@@ -26,9 +26,9 @@ export const diagramLogic = kea<diagramLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Diagram', 'diagramLogic']),
   props({} as DiagramLogicProps),
   key((props) => `${props.frameId}/${props.sceneId}`),
-  connect((props: DiagramLogicProps) => ({
-    values: [frameLogic({ id: props.frameId }), ['frame', 'frameForm'], appsModel, ['apps']],
-    actions: [frameLogic({ id: props.frameId }), ['setFrameFormValues', 'applyTemplate']],
+  connect(({ frameId }: DiagramLogicProps) => ({
+    values: [frameLogic({ frameId }), ['frame', 'frameForm'], appsModel, ['apps']],
+    actions: [frameLogic({ frameId }), ['setFrameFormValues', 'applyTemplate']],
   })),
   actions({
     setNodes: (nodes: Node[]) => ({ nodes }),

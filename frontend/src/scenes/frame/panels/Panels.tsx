@@ -7,8 +7,8 @@ import { PanelArea } from './PanelArea'
 import { panelsLogic } from './panelsLogic'
 
 export function Panels() {
-  const { id, frame } = useValues(frameLogic)
-  const logicProps = { id }
+  const { frameId, frame } = useValues(frameLogic)
+  const logicProps = { frameId }
   const { panelsWithConditions: panels } = useValues(panelsLogic(logicProps))
   const { setPanel, closePanel, toggleFullScreenPanel } = useActions(panelsLogic(logicProps))
 

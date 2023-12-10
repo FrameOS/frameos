@@ -11,14 +11,14 @@ export interface ImageProps extends React.HTMLAttributes<HTMLDivElement> {
 export function Image({ className, ...props }: ImageProps) {
   const { getFrameImage, frames } = useValues(framesModel)
   const { updateFrameImage } = useActions(framesModel)
-  const { id } = useValues(frameLogic)
+  const { frameId } = useValues(frameLogic)
 
   const [isLoading, setIsLoading] = useState(true)
   useEffect(() => {
     setIsLoading(true)
-  }, [getFrameImage(id)])
+  }, [getFrameImage(frameId)])
 
-  const visiblyLoading = (isLoading || frames[id]?.status !== 'ready') && frames[id]?.interval > 5
+  const visiblyLoading = (isLoading || frames[frameId]?.status !== 'ready') && frames[frameId]?.interval > 5
 
   return (
     <div
@@ -28,23 +28,23 @@ export function Image({ className, ...props }: ImageProps) {
         visiblyLoading ? 'cursor-wait' : 'cursor-pointer',
         className
       )}
-      onClick={() => updateFrameImage(id)}
+      onClick={() => updateFrameImage(frameId)}
       title="Click to refresh"
       {...props}
     >
-      {frames[id] ? (
+      {frames[frameId] ? (
         <img
           className={clsx('rounded-lg rounded-tl-none max-w-full max-h-full')}
-          src={getFrameImage(id)}
+          src={getFrameImage(frameId)}
           onLoad={() => setIsLoading(false)}
           onError={() => setIsLoading(false)}
           style={{
-            ...(frames[id].width && frames[id].height
+            ...(frames[frameId].width && frames[frameId].height
               ? {
                   aspectRatio:
-                    frames[id].rotate === 90 || frames[id].rotate === 270
-                      ? `${frames[id].height} / ${frames[id].width}`
-                      : `${frames[id].width} / ${frames[id].height}`,
+                    frames[frameId].rotate === 90 || frames[frameId].rotate === 270
+                      ? `${frames[frameId].height} / ${frames[frameId].width}`
+                      : `${frames[frameId].width} / ${frames[frameId].height}`,
                   maxWidth: '100%',
                   maxHeight: '100%',
                 }

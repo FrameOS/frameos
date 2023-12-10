@@ -6,7 +6,7 @@ import { AppNodeData, Area, Panel, PanelWithMetadata } from '../../../types'
 import type { panelsLogicType } from './panelsLogicType'
 
 export interface PanelsLogicProps {
-  id: number
+  frameId: number
 }
 
 export interface AnyBuiltLogic extends BuiltLogic {}
@@ -35,7 +35,7 @@ function panelsEqual(panel1: PanelWithMetadata, panel2: PanelWithMetadata) {
 export const panelsLogic = kea<panelsLogicType>([
   path(['src', 'scenes', 'frame', 'panelsLogic']),
   props({} as PanelsLogicProps),
-  key((props) => props.id),
+  key((props) => props.frameId),
   actions({
     setPanel: (area: Area, panel: PanelWithMetadata) => ({ area, panel }),
     closePanel: (panel: PanelWithMetadata) => ({ panel }),

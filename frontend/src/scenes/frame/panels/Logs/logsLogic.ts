@@ -7,7 +7,7 @@ import { socketLogic } from '../../../socketLogic'
 import type { logsLogicType } from './logsLogicType'
 
 export interface logsLogicProps {
-  id: number
+  frameId: number
 }
 const MAX_LOG_LINES = 100000
 
@@ -15,14 +15,14 @@ export const logsLogic = kea<logsLogicType>([
   path(['src', 'scenes', 'frame', 'logsLogic']),
   props({} as logsLogicProps),
   connect({ logic: [socketLogic] }),
-  key((props) => props.id),
+  key((props) => props.frameId),
   loaders(({ props }) => ({
     logs: [
       [] as LogType[],
       {
         loadLogs: async () => {
           try {
-            const response = await fetch(`/api/frames/${props.id}/logs`)
+            const response = await fetch(`/api/frames/${props.frameId}/logs`)
             if (!response.ok) {
               throw new Error('Failed to fetch logs')
             }
@@ -39,7 +39,7 @@ export const logsLogic = kea<logsLogicType>([
   reducers(({ props }) => ({
     logs: {
       [socketLogic.actionTypes.newLog]: (state, { log }) =>
-        log.frame_id === props.id ? [...state, log].slice(-MAX_LOG_LINES) : state,
+        log.frame_id === props.frameId ? [...state, log].slice(-MAX_LOG_LINES) : state,
     },
   })),
   afterMount(({ actions, cache }) => {

@@ -10,7 +10,6 @@ export interface ModalProps {
 
 export function Modal({ open, children, title, footer, onClose }: ModalProps): JSX.Element {
   const isOpen = open === undefined || open
-  console.log({ open, isOpen })
   return (
     <Dialog open={isOpen} onClose={onClose} className="relative z-50">
       <div className="justify-center items-center flex overflow-x-hidden overflow-y-auto fixed inset-0 z-50 outline-none focus:outline-none">

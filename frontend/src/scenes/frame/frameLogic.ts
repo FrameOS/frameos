@@ -7,7 +7,7 @@ import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
 
 export interface FrameLogicProps {
-  id: number
+  frameId: number
 }
 const FRAME_KEYS = [
   'name',
@@ -33,7 +33,7 @@ const FRAME_KEYS = [
 export const frameLogic = kea<frameLogicType>([
   path(['src', 'scenes', 'frame', 'frameLogic']),
   props({} as FrameLogicProps),
-  key((props) => props.id),
+  key((props) => props.frameId),
   connect({ values: [framesModel, ['frames']] }),
   actions({
     updateScene: (sceneId: string, scene: Partial<FrameScene>) => ({ sceneId, scene }),
@@ -58,7 +58,7 @@ export const frameLogic = kea<frameLogicType>([
         if (values.nextAction) {
           json['next_action'] = values.nextAction
         }
-        const response = await fetch(`/api/frames/${values.id}`, {
+        const response = await fetch(`/api/frames/${values.frameId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(json),
@@ -83,8 +83,8 @@ export const frameLogic = kea<frameLogicType>([
     ],
   }),
   selectors(() => ({
-    id: [() => [(_, props) => props.id], (id) => id],
-    frame: [(s) => [s.frames, s.id], (frames, id) => frames[id] || null],
+    frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
+    frame: [(s) => [s.frames, s.frameId], (frames, frameId) => frames[frameId] || null],
     frameChanged: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm) =>
@@ -101,7 +101,7 @@ export const frameLogic = kea<frameLogicType>([
     },
   })),
   listeners(({ actions, values, props }) => ({
-    renderFrame: () => framesModel.actions.renderFrame(props.id),
+    renderFrame: () => framesModel.actions.renderFrame(props.frameId),
     saveFrame: () => actions.submitFrameForm(),
     deployFrame: () => actions.submitFrameForm(),
     restartFrame: () => actions.submitFrameForm(),

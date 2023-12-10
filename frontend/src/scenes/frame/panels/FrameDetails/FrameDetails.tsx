@@ -10,12 +10,12 @@ export interface DetailsProps {
 }
 
 export function FrameDetails({ className }: DetailsProps) {
-  const { id, frame } = useValues(frameLogic)
+  const { frameId, frame } = useValues(frameLogic)
 
   return (
     <div className={clsx('space-y-4', className)}>
       {!frame ? (
-        `Loading frame ${id}...`
+        `Loading frame ${frameId}...`
       ) : (
         <>
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5">

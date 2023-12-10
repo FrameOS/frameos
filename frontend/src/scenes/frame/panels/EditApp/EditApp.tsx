@@ -23,7 +23,7 @@ interface EditAppProps {
 }
 
 export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
-  const { id: frameId } = useValues(frameLogic)
+  const { frameId } = useValues(frameLogic)
   const { persistUntilClosed } = useActions(panelsLogic)
   const logicProps: EditAppLogicProps = {
     frameId,
@@ -177,7 +177,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
   )
 }
 EditApp.PanelTitle = function EditAppPanelTitle({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
-  const { id: frameId } = useValues(frameLogic)
+  const { frameId } = useValues(frameLogic)
   const logicProps: EditAppLogicProps = {
     frameId,
     sceneId,

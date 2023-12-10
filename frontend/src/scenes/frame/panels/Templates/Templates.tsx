@@ -18,10 +18,10 @@ import copy from 'copy-to-clipboard'
 
 export function Templates() {
   const { applyTemplate } = useActions(frameLogic)
-  const { id } = useValues(frameLogic)
+  const { frameId } = useValues(frameLogic)
   const { templates } = useValues(templatesModel)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
-  const { saveAsNewTemplate, editLocalTemplate, applyRemoteTemplate } = useActions(templatesLogic({ id }))
+  const { saveAsNewTemplate, editLocalTemplate, applyRemoteTemplate } = useActions(templatesLogic({ frameId }))
   const { repositories } = useValues(repositoriesModel)
   const { removeRepository, refreshRepository } = useActions(repositoriesModel)
 
@@ -50,7 +50,7 @@ export function Templates() {
             <H6>Add template from URL</H6>
             <Form
               logic={templatesLogic}
-              props={{ id }}
+              props={{ frameId }}
               formKey="addTemplateUrlForm"
               enableFormOnSubmit
               className="space-y-2"
@@ -67,7 +67,7 @@ export function Templates() {
             <H6>Upload template</H6>
             <Form
               logic={templatesLogic}
-              props={{ id }}
+              props={{ frameId }}
               formKey="uploadTemplateForm"
               enableFormOnSubmit
               className="space-y-2"
@@ -134,7 +134,7 @@ export function Templates() {
           <Box className="p-4 space-y-2 bg-gray-900">
             <Form
               logic={templatesLogic}
-              props={{ id }}
+              props={{ frameId }}
               formKey="addRepositoryForm"
               enableFormOnSubmit
               className="space-y-2"

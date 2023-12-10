@@ -25,8 +25,8 @@ export const editAppLogic = kea<editAppLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'EditApp', 'editAppLogic']),
   props({} as EditAppLogicProps),
   key((props) => `${props.frameId}:${props.sceneId}.${props.nodeId}.${props.keyword}`),
-  connect((props: EditAppLogicProps) => ({
-    actions: [frameLogic({ id: props.frameId }), ['updateNodeData']],
+  connect(({ frameId }: EditAppLogicProps) => ({
+    actions: [frameLogic({ frameId }), ['updateNodeData']],
   })),
   actions({
     setActiveFile: (file: string) => ({ file }),

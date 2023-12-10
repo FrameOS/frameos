@@ -23,7 +23,7 @@ interface DiagramProps {
 export function Diagram({ sceneId }: DiagramProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
-  const { id: frameId } = useValues(frameLogic)
+  const { frameId } = useValues(frameLogic)
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
   const { nodes, edges, fitViewCounter } = useValues(diagramLogic(diagramLogicProps))
   const { onEdgesChange, onNodesChange, setNodes, addEdge, rearrangeCurrentScene, fitDiagramView, keywordDropped } =
@@ -90,7 +90,7 @@ export function Diagram({ sceneId }: DiagramProps) {
 }
 
 Diagram.PanelTitle = function DiagramPanelTitle({ sceneId }: DiagramProps) {
-  const { id: frameId } = useValues(frameLogic)
+  const { frameId } = useValues(frameLogic)
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
   const { hasChanges } = useValues(diagramLogic(diagramLogicProps))
 
