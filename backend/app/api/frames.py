@@ -114,9 +114,10 @@ def api_frame_update(id: int):
               'scaling_mode', 'background_color', 'device']
     defaults = {'frame_port': 8999, 'ssh_port': 22}
     try:
+        payload = request.json
         for field in fields:
-            if field in request.json:
-                value = request.json[field]
+            if field in payload:
+                value = payload[field]
                 if value == '' or value == 'null':
                     value = defaults.get(field, None)
                 elif field in ['frame_port', 'ssh_port', 'width', 'height', 'rotate']:
@@ -124,14 +125,15 @@ def api_frame_update(id: int):
                 elif field in ['interval', 'metrics_interval']:
                     value = float(value)
                 elif field in ['scenes']:
-                    value = json.loads(value) if value is not None else None
+                    if type(value) == str:
+                        value = json.loads(value) if value is not None else None
                 setattr(frame, field, value)
         update_frame(frame)
 
-        if request.json.get('next_action') == 'restart':
+        if payload.get('next_action') == 'restart':
             from app.tasks import restart_frame
             restart_frame(frame.id)
-        elif request.json.get('next_action') == 'deploy':
+        elif payload.get('next_action') == 'deploy':
             from app.tasks import deploy_frame
             deploy_frame(frame.id)
 

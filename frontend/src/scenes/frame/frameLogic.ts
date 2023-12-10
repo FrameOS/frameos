@@ -51,21 +51,17 @@ export const frameLogic = kea<frameLogicType>([
       },
       defaults: {} as FrameType,
       submit: async (frame, breakpoint) => {
-        const formData = new FormData()
+        const json: Record<string, any> = {}
         for (const key of FRAME_KEYS) {
-          const value = frame[key as keyof typeof frame]
-          if (typeof value === 'string') {
-            formData.append(key, value)
-          } else if (value !== undefined && value !== null) {
-            formData.append(key, JSON.stringify(frame[key as keyof typeof frame]))
-          }
+          json[key] = frame[key as keyof typeof frame]
         }
         if (values.nextAction) {
-          formData.append('next_action', values.nextAction)
+          json['next_action'] = values.nextAction
         }
         const response = await fetch(`/api/frames/${values.id}`, {
           method: 'POST',
-          body: formData,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(json),
         })
         if (!response.ok) {
           throw new Error('Failed to update frame')

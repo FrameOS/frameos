@@ -27,6 +27,8 @@ def setup_base_routes(app: Flask):
 
     @app.errorhandler(404)
     def not_found(e):
+        if request.is_json or request.path.startswith('/api/'):
+            return jsonify({'error': 'Not found'}), 404
         if not current_user.is_authenticated and not request.path.startswith('/login'):
             return redirect('/login')
         return current_app.send_static_file('index.html')
