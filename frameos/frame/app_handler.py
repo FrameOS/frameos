@@ -72,7 +72,7 @@ class SceneHandler:
             try:
                 app._last_context = context
                 app.run(context)
-                context.apps_ran.append(node.id)
+                context.apps_ran.add(node.id)
             except BreakExecution as e:
                 self.app_handler.logger.log(
                     {'event': f'@frame:break_execution', 'info': "Execution halted", 'app': node.id, 'message': str(e)})
@@ -253,7 +253,7 @@ class AppHandler:
             event=event,
             payload=payload or {},
             image=image,
-            apps_ran=[],
+            apps_ran=set(),
             apps_errored=[],
             state={},
         )

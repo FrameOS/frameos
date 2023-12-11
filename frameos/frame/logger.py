@@ -5,6 +5,19 @@ from typing import Optional, List, Dict, Any
 from .config import Config
 from .webhook import Webhook
 
+def convert_to_json_serializable(data):
+    """
+    Recursively converts non-JSON serializable objects like sets into JSON serializable formats.
+    """
+    if isinstance(data, set):
+        return list(data)
+    elif isinstance(data, dict):
+        return {k: convert_to_json_serializable(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [convert_to_json_serializable(elem) for elem in data]
+    else:
+        return data
+
 class Logger:
     def __init__(self, config: Config, limit: int, socketio: Optional[SocketIO] = None):
         self.config = config
@@ -18,6 +31,8 @@ class Logger:
 
     def log(self, payload: Dict[str, Any]):
         payload = {'timestamp': datetime.now().isoformat(), **payload}
+        payload = convert_to_json_serializable(payload)
+
         self.logs.append(payload)
         if self.socketio:
             self.socketio.emit('log_event', {'log': payload})
