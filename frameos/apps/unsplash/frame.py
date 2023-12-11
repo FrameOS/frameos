@@ -8,6 +8,9 @@ import requests
 from requests.exceptions import RequestException
 import io
 
+from frame.image_utils import scale_image
+
+
 class UnsplashApp(App):
     def __post_init__(self):
         self.cached_content: Optional[bytes] = None
@@ -39,7 +42,10 @@ class UnsplashApp(App):
             self.cached_content = response.content
             self.cache_expires_at = datetime.now() + timedelta(seconds=self.cache_seconds)
             self.cache_url = image_url
-            context.image = Image.open(io.BytesIO(response.content))
+            new_image = Image.open(io.BytesIO(response.content))
+            scaling_mode = self.get_config('scaling_mode', 'cover')
+            context.image = scale_image(new_image, width, height, scaling_mode, self.frame_config.background_color)
+
         except RequestException as e:
             raise Exception(f"Error fetching image from Unsplash. Error: {e}")
         except UnidentifiedImageError:

@@ -128,7 +128,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                             <Handle
                               type="source"
                               position={Position.Right}
-                              id={`next-${field.name}`}
+                              id={`field/${field.name}`}
                               style={{
                                 position: 'relative',
                                 transform: 'none',

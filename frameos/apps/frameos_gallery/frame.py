@@ -8,6 +8,8 @@ import requests
 from requests.exceptions import RequestException
 import io
 
+from frame.image_utils import scale_image
+
 
 class FrameOSGalleryApp(App):
     BASE_URL: str = 'https://gallery.frameos.net/image'
@@ -22,12 +24,14 @@ class FrameOSGalleryApp(App):
         self.cache_expires_at: Optional[datetime] = None
 
     def run(self, context: ExecutionContext):
+        self.context = context
         image_url = self.generate_url(context)
-
         if self.is_cache_valid(image_url):
-            context.image = self.get_image_from_cache()
+            new_image = self.get_image_from_cache()
         else:
-            context.image = self.fetch_image(image_url)
+            new_image = self.fetch_image(image_url)
+        scaling_mode = self.get_config('scaling_mode', 'cover')
+        context.image = scale_image(new_image, context.image.width, context.image.height, scaling_mode, self.frame_config.background_color)
 
     def generate_url(self, context):
         api_key = self.get_setting(['frameos', 'api_key'], None)
@@ -50,7 +54,6 @@ class FrameOSGalleryApp(App):
         return Image.open(io.BytesIO(self.cached_content))
 
     def fetch_image(self, url):
-        self.log(f"Fetching image from FrameOS Gallery: {url}")
         try:
             response = self.get_response(url)
             self.validate_response(response)

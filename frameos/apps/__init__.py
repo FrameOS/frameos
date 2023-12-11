@@ -120,7 +120,7 @@ class App:
     def error(self, message: str):
         self._log({ "event": f"app:{self.keyword}:error", "message": message })
 
-    def run(self, payload: ExecutionContext):
+    def run(self, context: ExecutionContext):
         pass
 
     def get_config(self, key: str, default = None):
@@ -153,6 +153,9 @@ class App:
     def dispatch(self, event: str, payload: Optional[Dict] = None, image: Optional[Image] = None) -> ExecutionContext:
         self._log({ "event": f"{self.keyword}:{event}", "payload": payload, "image": bool(image) })
         return self.app_handler.dispatch_event(event, payload, image)
+
+    def render_node(self, node_id: str, context: ExecutionContext):
+        self.app_handler.run_node(node_id, context)
 
     def shell(self, command: str):
         with subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True) as proc:

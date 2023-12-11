@@ -26,7 +26,12 @@ class SceneHandler:
         self.nodes: List[Node] = frame_config_scene.nodes
         self.edges: List[Edge] = frame_config_scene.edges
         self.nodes_dict: Dict[str, Node] = {node.id: node for node in self.nodes}
-        self.edges_dict: Dict[str, Node] = {edge.source: edge.target for edge in self.edges}
+        self.next_edge: Dict[str, Node] = {edge.source: edge.target for edge in self.edges if edge.sourceHandle == 'next' and edge.targetHandle == 'prev'}
+        self.node_edges: Dict[str, Dict[str, Edge]] = {}
+        for edge in self.edges:
+            if edge.source not in self.node_edges:
+                self.node_edges[edge.source] = {}
+            self.node_edges[edge.source][edge.sourceHandle] = edge
         self.apps_dict: Dict[str, App] = app_handler.apps
         self.event_start_nodes: Dict[str, List[str]] = {}
         self.state = {}
@@ -39,24 +44,27 @@ class SceneHandler:
                         self.event_start_nodes[keyword] = []
                     self.event_start_nodes[keyword].append(node.id)
 
-    def run(self, context: ExecutionContext):
+    def run_event(self, context: ExecutionContext):
+        context.state = self.state
+        if context.event in self.event_start_nodes:
+            for node_id in self.event_start_nodes[context.event]:
+                self.run_node(node_id, context)
+
+    def run_node(self, node_id: str, context: ExecutionContext) -> List[Node]:
         try:
-            context.state = self.state
-            if context.event in self.event_start_nodes:
-                for node_id in self.event_start_nodes[context.event]:
-                    start_node = self.nodes_dict[node_id]
-                    node = start_node
-                    while node is not None:
-                        if node != start_node and (node.type == 'app' or node.type == 'event'):
-                            self.run_node(node, context)
-                        if node.id in self.edges_dict:
-                            node = self.nodes_dict[self.edges_dict[node.id]]
-                        else:
-                            break
+            start_node = self.nodes_dict[node_id]
+            node = start_node
+            while node is not None:
+                if node.type == 'app' or node.type == 'event':
+                    self.run_one_node(node, context)
+                if node.id in self.next_edge:
+                    node = self.nodes_dict[self.next_edge[node.id]]
+                else:
+                    break
         except BreakExecution as e:
             return
 
-    def run_node(self, node: Node, context: ExecutionContext):
+    def run_one_node(self, node: Node, context: ExecutionContext):
         if node.type == 'app':
             if not node.id in self.apps_dict:
                 raise Exception(f'App with id {node.id} not initialized')
@@ -221,7 +229,15 @@ class AppHandler:
             node=node,
         )
 
-    def run(self, context: ExecutionContext) -> ExecutionContext:
+    def run_event(self, context: ExecutionContext) -> ExecutionContext:
+        self.current_scene_handler().run_event(context)
+        return context
+
+    def run_node(self, node_id: str, context: ExecutionContext) -> ExecutionContext:
+        self.current_scene_handler().run_node(node_id, context)
+        return context
+
+    def current_scene_handler(self) -> SceneHandler:
         if self.current_scene_id is None:
             if len(self.scene_handlers) == 0:
                 raise Exception('No scenes registered')
@@ -229,8 +245,8 @@ class AppHandler:
         current_scene = self.scene_handlers[self.current_scene_id]
         if current_scene is None:
             raise Exception(f'Scene {self.current_scene_id} not found')
-        current_scene.run(context)
-        return context
+        return current_scene
+
 
     def dispatch_event(self, event: str, payload: Optional[Dict] = None, image: Optional[Image] = None):
         context = ExecutionContext(
@@ -241,7 +257,7 @@ class AppHandler:
             apps_errored=[],
             state={},
         )
-        self.run(context)
+        self.run_event(context)
         return context
 
     def register_image_handler(self, image_handler: "ImageHandler"):
