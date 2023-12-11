@@ -120,46 +120,55 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                             ? `${field.name} has been modified`
                             : undefined
                         }
+                        colSpan={field.type === 'node' ? 2 : 1}
                       >
-                        {field.label ?? field.name}
+                        <div className="flex justify-between items-center gap-2">
+                          <div>{field.label ?? field.name}</div>
+                          {field.type === 'node' ? (
+                            <Handle
+                              type="source"
+                              position={Position.Right}
+                              id={`next-${field.name}`}
+                              style={{
+                                position: 'relative',
+                                transform: 'none',
+                                right: 0,
+                                top: 0,
+                                background: '#cccccc',
+                              }}
+                              isConnectable={isConnectable}
+                            />
+                          ) : null}
+                        </div>
                       </td>
-                      <td className="cursor-text" colSpan={field.type === 'node' ? 1 : 2}>
-                        {field.secret && !secretRevealed[field.name] ? (
-                          <RevealDots onClick={() => setSecretRevealed({ ...secretRevealed, [field.name]: true })} />
-                        ) : field.type === 'select' ? (
-                          <Select
-                            theme="node"
-                            placeholder={field.placeholder}
-                            value={field.name in data.config ? data.config[field.name] : field.value}
-                            options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
-                            onChange={(value) => updateNodeConfig(id, field.name, value)}
-                          />
-                        ) : field.type === 'text' ? (
-                          <TextArea
-                            theme="node"
-                            placeholder={field.placeholder}
-                            value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
-                            onChange={(value) => updateNodeConfig(id, field.name, value)}
-                            rows={field.rows ?? 3}
-                          />
-                        ) : (
-                          <TextInput
-                            theme="node"
-                            placeholder={field.placeholder}
-                            value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
-                            onChange={(value) => updateNodeConfig(id, field.name, value)}
-                          />
-                        )}
-                      </td>
-                      {field.type === 'node' ? (
+                      {field.type !== 'node' ? (
                         <td className="cursor-text">
-                          <Handle
-                            type="source"
-                            position={Position.Right}
-                            id={`next-${field.name}`}
-                            style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
-                            isConnectable={isConnectable}
-                          />
+                          {field.secret && !secretRevealed[field.name] ? (
+                            <RevealDots onClick={() => setSecretRevealed({ ...secretRevealed, [field.name]: true })} />
+                          ) : field.type === 'select' ? (
+                            <Select
+                              theme="node"
+                              placeholder={field.placeholder}
+                              value={field.name in data.config ? data.config[field.name] : field.value}
+                              options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
+                              onChange={(value) => updateNodeConfig(id, field.name, value)}
+                            />
+                          ) : field.type === 'text' ? (
+                            <TextArea
+                              theme="node"
+                              placeholder={field.placeholder}
+                              value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
+                              onChange={(value) => updateNodeConfig(id, field.name, value)}
+                              rows={field.rows ?? 3}
+                            />
+                          ) : (
+                            <TextInput
+                              theme="node"
+                              placeholder={field.placeholder}
+                              value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
+                              onChange={(value) => updateNodeConfig(id, field.name, value)}
+                            />
+                          )}
                         </td>
                       ) : null}
                     </tr>
