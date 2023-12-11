@@ -5,14 +5,6 @@
   "version": "1.0.0",
   "fields": [
     {
-      "name": "effect",
-      "type": "select",
-      "options": ["none", "pastel-time-rainbow"],
-      "value": "none",
-      "required": true,
-      "label": "Effect"
-    },
-    {
       "name": "color",
       "type": "string",
       "value": "white",
