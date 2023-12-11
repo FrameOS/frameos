@@ -10,6 +10,8 @@ if TYPE_CHECKING:
 # NOTE: This file is read by both the frame and the controller. Don't import anything too exotic here.
 # NOTE2: The API in this file is not yet stable. Expect breaking changes and at least one complete rewrite before 1.0.
 
+DEFAULT_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
 @dataclass
 class ConfigField:
     name: str

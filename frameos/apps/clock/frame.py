@@ -1,6 +1,6 @@
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
-from apps import App, ExecutionContext
+from apps import App, ExecutionContext, DEFAULT_FONT
 from frame.image_utils import draw_text_with_border
 
 class ClockApp(App):
@@ -21,7 +21,7 @@ class ClockApp(App):
         
         # Prepare to draw the text
         draw = ImageDraw.Draw(context.image)
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+        font = ImageFont.truetype(DEFAULT_FONT, font_size)
         text_width, text_height = draw.textsize(current_time, font=font)
         text_width += border_width * 2
         text_height += border_width * 2

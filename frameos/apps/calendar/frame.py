@@ -1,6 +1,6 @@
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
-from apps import App, ExecutionContext
+from apps import App, ExecutionContext, DEFAULT_FONT
 import calendar
 from frame.image_utils import draw_text_with_border
 
@@ -26,19 +26,19 @@ class CalendarApp(App):
         calendar_width_percentage = float(self.get_config('calendar_width_percentage', '80')) / 100
         calendar_height_percentage = float(self.get_config('calendar_height_percentage', '80')) / 100
         position = self.get_config('position', 'center-center')
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+        font = ImageFont.truetype(DEFAULT_FONT, font_size)
 
         title_font_color = self.get_config('title_font_color', 'black')
         title_font_size = int(self.get_config('title_font_size', 50))
         title_border_color = self.get_config('title_border_color', 'white')
         title_border_width = int(self.get_config('title_border_width', 2))
-        title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", title_font_size)
+        title_font = ImageFont.truetype(DEFAULT_FONT, title_font_size)
 
         today_font_color = self.get_config('today_font_color', 'red')
         today_font_size = int(self.get_config('today_font_size', 60))
         today_border_color = self.get_config('today_border_color', 'black')
         today_border_width = int(self.get_config('today_border_width', 2))
-        today_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", today_font_size)
+        today_font = ImageFont.truetype(DEFAULT_FONT, today_font_size)
 
         draw = ImageDraw.Draw(context.image)
         

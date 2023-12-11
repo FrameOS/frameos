@@ -2,7 +2,7 @@ import io
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
-from apps import App, ExecutionContext
+from apps import App, ExecutionContext, DEFAULT_FONT
 from frame.image_utils import draw_text_with_border
 
 class BoilerplateApp(App):
@@ -28,7 +28,7 @@ class BoilerplateApp(App):
             # Draw some text on it
             text = f"FrameOS is {my_name}"
             draw = ImageDraw.Draw(context.image)
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 48 if width > 500 else 24)
+            font = ImageFont.truetype(DEFAULT_FONT, 48 if width > 500 else 24)
             text_width, text_height = draw.textsize(text, font=font)
             x, y = (width - text_width) / 2, (height - text_height) / 2
             # draw.text((x, y), text, fill='white', font=font) # boring
