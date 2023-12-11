@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from apps import App, ExecutionContext
 
 
@@ -6,9 +8,22 @@ class SplitApp(App):
         pass
 
     def run(self, context: ExecutionContext):
-        image_width, image_height = context.image.size
         rows = int(self.get_config('rows', '1'))
         columns = int(self.get_config('columns', '1'))
+
+        margin = self.get_config('margin', '0').split(' ')
+        margin_top = int(margin[0]) if len(margin[0]) > 0 else 0
+        margin_right = int(margin[1]) if len(margin) > 1 else margin_top
+        margin_bottom = int(margin[2]) if len(margin) > 2 else margin_top
+        margin_left = int(margin[3]) if len(margin) > 3 else margin_right
+
+        gap = self.get_config('gap', '0').split(' ')
+        gap_horizontal = int(gap[0]) if len(gap[0]) > 0 else 0
+        gap_vertical = int(gap[1]) if len(gap) > 1 else gap_horizontal
+
+        context_width, context_height = context.image.size
+        image_width = context_width - margin_left - margin_right - (gap_horizontal * (columns - 1))
+        image_height = context_height - margin_top - margin_bottom - (gap_vertical * (rows - 1))
 
         edges = self.app_handler.current_scene_handler().node_edges.get(self.node.id, {})
         render_edge = edges.get('field/render_function', None)
@@ -26,8 +41,8 @@ class SplitApp(App):
 
                     width = int(image_width / columns)
                     height = int(image_height / rows)
-                    top = height * row
-                    left = width * column
+                    top = height * row + margin_top + (gap_vertical * row)
+                    left = width * column + margin_left + (gap_horizontal * column)
                     if row == rows - 1:
                         height = image_height - (height * (rows - 1))
                     if column == columns - 1:
@@ -35,10 +50,11 @@ class SplitApp(App):
 
                     new_image = context.image.crop((left, top, left + width, top + height))
                     new_context = ExecutionContext(
+                        parent=context,
                         event=context.event,
-                        payload={**context.payload.copy(), 'row': row + 1, 'column': column + 1},
+                        payload=deepcopy(context.payload),
                         image=new_image,
-                        state=context.state,
+                        state={**deepcopy(context.state), 'row': row + 1, 'column': column + 1},
                         apps_ran=context.apps_ran,
                         apps_errored=context.apps_errored
                     )

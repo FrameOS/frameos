@@ -1,7 +1,7 @@
 import re
 import subprocess
 from dataclasses import dataclass
-from typing import Dict, Optional, Any, Callable, List, Union, TYPE_CHECKING
+from typing import Dict, Optional, Any, Callable, List, Union, TYPE_CHECKING, Set
 from PIL.Image import Image
 
 if TYPE_CHECKING:
@@ -79,8 +79,9 @@ class ExecutionContext:
     payload: Dict
     image: Optional[Image]
     state: Dict
-    apps_ran: List[str]
+    apps_ran: Set[str]
     apps_errored: List[str]
+    parent: Optional["ExecutionContext"] = None
 
 class BreakExecution(Exception):
     pass
