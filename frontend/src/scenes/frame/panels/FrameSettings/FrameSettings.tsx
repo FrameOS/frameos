@@ -143,7 +143,7 @@ export function FrameSettings({ className }: DetailsProps) {
             <Field name="interval" label="Refresh interval in seconds">
               <TextInput name="interval" placeholder="300" />
             </Field>
-            <Field name="metrics_interval" label="Metric reporting interval in seconds, 0 to disable">
+            <Field name="metrics_interval" label="Metrics reporting interval in seconds, 0 to disable">
               <TextInput name="metrics_interval" placeholder="60" />
             </Field>
             <Field name="device" label="Device">

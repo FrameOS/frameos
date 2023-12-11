@@ -24,6 +24,7 @@ const FRAME_KEYS = [
   'color',
   'device',
   'interval',
+  'metrics_interval',
   'scaling_mode',
   'rotate',
   'background_color',
