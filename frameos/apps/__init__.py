@@ -7,7 +7,8 @@ from PIL.Image import Image
 if TYPE_CHECKING:
     from frameos.frame.app_handler import AppHandler
 
-# NOTE: This file is read by both the frame and the controller. Don't import anything too funky.
+# NOTE: This file is read by both the frame and the controller. Don't import anything too exotic here.
+# NOTE2: The API in this file is not yet stable. Expect breaking changes and at least one complete rewrite before 1.0.
 
 @dataclass
 class ConfigField:
@@ -84,6 +85,7 @@ class ExecutionContext:
 class BreakExecution(Exception):
     pass
 
+# NOTE: The API for this class is not yet stable. Expect breaking changes.
 class App:
     def __init__(
             self,
