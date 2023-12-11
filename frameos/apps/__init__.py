@@ -126,9 +126,13 @@ class App:
     def run(self, context: ExecutionContext):
         pass
 
-    def get_config(self, key: str, default = None):
-        text = self.config.get(key, default)
-        return self.parse_str(text, self._last_context.state if self._last_context else {})
+    def get_config(self, key: str, default = '') -> Any:
+        value = self.config.get(key, default)
+        if value is None:
+            value = default
+        if isinstance(value, str):
+            return self.parse_str(value, self._last_context.state if self._last_context else {})
+        return value
 
     def get_setting(self, key: Union[str, List[str]], default = None):
         key_list = (key if isinstance(key, list) else [key])

@@ -25,6 +25,31 @@ class SplitApp(App):
         image_width = context_width - margin_left - margin_right - (gap_horizontal * (columns - 1))
         image_height = context_height - margin_top - margin_bottom - (gap_vertical * (rows - 1))
 
+        width_ratio_input = self.get_config('width_ratios', '1').split(' ')
+        height_ratio_input = self.get_config('height_ratios', '1').split(' ')
+
+        width_ratios = []
+        for i in range(columns):
+            try:
+                width_ratios.append(int(width_ratio_input[i % len(width_ratio_input)] or '1'))
+            except ValueError:
+                width_ratios.append(1)
+        height_ratios = []
+        for i in range(rows):
+            try:
+                height_ratios.append(int(height_ratio_input[i % len(height_ratio_input)] or '1'))
+            except ValueError:
+                height_ratios.append(1)
+
+        width_ratio_sum = sum(width_ratios)
+        height_ratio_sum = sum(height_ratios)
+
+        cell_widths = [int(image_width * (float(ratio) / width_ratio_sum)) for ratio in width_ratios]
+        cell_heights = [int(image_height * (float(ratio) / height_ratio_sum)) for ratio in height_ratios]
+
+        cell_widths[-1] = image_width - sum(cell_widths[:-1])
+        cell_heights[-1] = image_height - sum(cell_heights[:-1])
+
         edges = self.app_handler.current_scene_handler().node_edges.get(self.node.id, {})
         render_edge = edges.get('field/render_function', None)
         node_id = render_edge.target if render_edge is not None else None
@@ -39,14 +64,10 @@ class SplitApp(App):
                 for column in range(columns):
                     self.log(f"Rendering row {row + 1}, column {column + 1}")
 
-                    width = int(image_width / columns)
-                    height = int(image_height / rows)
-                    top = height * row + margin_top + (gap_vertical * row)
-                    left = width * column + margin_left + (gap_horizontal * column)
-                    if row == rows - 1:
-                        height = image_height - (height * (rows - 1))
-                    if column == columns - 1:
-                        width = image_width - (width * (columns - 1))
+                    width = cell_widths[column]
+                    height = cell_heights[row]
+                    top = sum(cell_heights[0:row]) + margin_top + (gap_vertical * row)
+                    left = sum(cell_widths[0:column]) + margin_left + (gap_horizontal * column)
 
                     new_image = context.image.crop((left, top, left + width, top + height))
                     new_context = ExecutionContext(

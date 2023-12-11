@@ -45,6 +45,18 @@
             "name": "margin",
             "placeholder": "0",
             "type": "string"
+        },
+        {
+            "label": "Widths",
+            "name": "width_ratios",
+            "placeholder": "1 2 1",
+            "type": "string"
+        },
+        {
+            "label": "Heights",
+            "name": "height_ratios",
+            "placeholder": "1 2 1",
+            "type": "string"
         }
     ]
 }
