@@ -20,16 +20,6 @@
             "required": true
         },
         {
-            "label": "Render",
-            "name": "render_type",
-            "value": "repeating",
-            "type": "select",
-            "options": [
-                "repeating"
-            ],
-            "required": true
-        },
-        {
             "label": "Render {row} x {column}",
             "name": "render_function",
             "type": "node"
