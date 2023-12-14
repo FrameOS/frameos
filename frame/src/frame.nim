@@ -2,6 +2,7 @@
 # uses this file as the main entry point of the application.
 
 import pixie
+import os
 
 proc createImage(width, height: int): Image =
   let image = newImage(width, height)
@@ -27,5 +28,8 @@ proc createImage(width, height: int): Image =
 
 when isMainModule:
   let image = createImage(400, 400)
-  image.writeFile("text_spans.png")
+  let dir = "tmp"
+  if not existsDir(dir):
+      createDir(dir)
+  image.writeFile("tmp/text_spans.png")
   echo("Hello, World!")
