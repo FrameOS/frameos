@@ -12,3 +12,4 @@ bin           = @["frame"]
 
 requires "nim >= 2.0.0"
 requires "pixie >= 5.0.6"
+requires "jester >= 0.6.0"
