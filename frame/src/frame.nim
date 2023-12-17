@@ -3,6 +3,7 @@
 
 import pixie
 import os
+import assets
 import asyncdispatch, jester, strutils
 from net import Port
 import options
@@ -32,24 +33,12 @@ proc createImage(width, height: int): Image =
   image.fillText(typeset(spans, vec2(180, 180)), translate(vec2(10, 10)))
   return image
 
-var globalImage: Image
-
-proc match(request: Request): Future[ResponseData] {.async.} =
+proc match(request: Request): ResponseData =
   block route:
     case request.pathInfo
     of "/":
-      resp """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>FrameOS</title>
-</head>
-<body>
-    <h1>Welcome to FrameOS</h1>
-    <img src="/image" alt="Image">
-</body>
-</html>
-"""
+      {.cast(gcsafe).}:
+        resp Http200, assets.getAsset("assets/index.html")
     of "/image":
       let image = createImage(400, 400)
       resp Http200, {"Content-Type": "image/png"}, image.encodeImage(PngFormat)
@@ -68,7 +57,7 @@ proc main() =
   elif target == "web":
     let port = 8787.Port # paramStr(1).parseInt().Port
     let settings = newSettings(port=port)
-    var jester = initJester(match, settings=settings)
+    var jester = initJester(matcher=match.MatchProcSync, settings=settings)
     jester.serve()
   else:
     echo("Unknown target: " & target)
