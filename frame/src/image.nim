@@ -1,8 +1,23 @@
 import pixie
 import assets/fonts as fontAssets
+import httpclient
+import std/strformat
+
+proc downloadImage(url: string): Image =
+  let client = newHttpClient()
+  try:
+    let content = client.getContent(url)
+    result = decodeImage(content)
+  finally:
+    client.close()
 
 proc createImage(width, height: int): Image =
   let image = newImage(width, height)
+  let keyword = "random"
+  let url = &"https://source.unsplash.com/random/{width}x{height}/?{keyword}"
+  let background = downloadImage(url)
+  image.draw(background)
+
   let typeface = parseTtf(fontAssets.getAsset("assets/fonts/Ubuntu-Regular_1.ttf"))
 
   proc newFont(typeface: Typeface, size: float32, color: Color): Font =

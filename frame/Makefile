@@ -2,7 +2,7 @@ all:
 	nimble build -y
 
 
-raspberry_source:
+toormoos:
 	nim c --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:tmp/build_1 src/frame.nim
 	cp /opt/homebrew/Cellar/nim/2.0.0_1/nim/lib/nimbase.h tmp/build_1/nimbase.h
 	awk 'NR==FNR{total=NR; next} {printf "echo Compiling %d/%d\n", NR - total, total; print}' tmp/build_1/compile_frame.sh tmp/build_1/compile_frame.sh > tmp/build_1/compile_frame.sh.awk && mv tmp/build_1/compile_frame.sh.awk tmp/build_1/compile_frame.sh
