@@ -1,3 +1,5 @@
+# TODO: translated by chatgpt. fix it!
+
 import times
 # Import equivalent Nim libraries for SocketIO and other functionalities
 from config import Config

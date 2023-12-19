@@ -1,5 +1,4 @@
 import pixie
-import os
 
 proc createImage(width, height: int): Image =
   let image = newImage(width, height)
@@ -21,3 +20,5 @@ proc createImage(width, height: int): Image =
 
   image.fillText(typeset(spans, vec2(180, 180)), translate(vec2(10, 10)))
   return image
+
+export createImage
