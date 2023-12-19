@@ -1,4 +1,2 @@
-assets:
-	nimble assets
 all:
-	nimble install
+	nimble build

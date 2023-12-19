@@ -26,7 +26,8 @@ type
     webhook: Webhook
 
 proc initLogger(config: Config, limit: int, socketio: SocketIO = nil): Logger =
-  return Logger(config: config, logs: @[], limit: limit, socketio: socketio, webhook: initWebhook(config))
+  return Logger(config: config, logs: @[], limit: limit, socketio: socketio,
+      webhook: initWebhook(config))
 
 proc setSocketio(self: var Logger, socketio: SocketIO) =
   self.socketio = socketio

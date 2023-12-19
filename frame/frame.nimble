@@ -5,7 +5,8 @@ author        = "Marius Andra"
 description   = "A new awesome nimble package"
 license       = "Apache-2.0"
 srcDir        = "src"
-bin           = @["frame"]
+binDir        = "build"
+bin           = @["frame"]  
 
 
 # Dependencies
@@ -17,8 +18,8 @@ requires "wiringpinim >= 0.1.0"
 taskRequires "assets", "nimassets >= 0.2.4"
 
 task assets, "Create assets":
-  exec "~/.nimble/bin/nimassets -d=assets -o=src/assets.nim"
+  exec "~/.nimble/bin/nimassets -d=assets/web -o=src/assets/web.nim"
+  exec "~/.nimble/bin/nimassets -d=assets/fonts -o=src/assets/fonts.nim"
 
 before build:
   exec "nimble assets"
-  

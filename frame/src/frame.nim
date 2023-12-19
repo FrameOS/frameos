@@ -20,7 +20,7 @@ proc main() =
     initServer()
   else:
     echo("Unknown target: " & target)
-    
+
   echo("Hello, World!")
 
 when isMainModule:

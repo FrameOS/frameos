@@ -1,8 +1,9 @@
 import pixie
+import assets/fonts as fontAssets
 
 proc createImage(width, height: int): Image =
   let image = newImage(width, height)
-  let typeface = readTypeface("fonts/Ubuntu-Regular_1.ttf")
+  let typeface = parseTtf(fontAssets.getAsset("assets/fonts/Ubuntu-Regular_1.ttf"))
 
   proc newFont(typeface: Typeface, size: float32, color: Color): Font =
     result = newFont(typeface)
