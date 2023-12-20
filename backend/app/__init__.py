@@ -26,9 +26,11 @@ login_manager.login_view = 'views.login'
 migrate = Migrate()
 socketio = SocketIO(async_mode='gevent')
 
+DEFAULT_REDIS_URL = 'redis://localhost:6379/0'
+
 # Redis setup
 def create_redis_connection():
-    redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+    redis_url = os.environ.get('REDIS_URL', DEFAULT_REDIS_URL)
     parsed_url = urlparse(redis_url)
     redis_host = parsed_url.hostname
     redis_port = parsed_url.port or 6379
@@ -61,7 +63,7 @@ def create_app(config: Optional[Config] = None):
         db.create_all()
     login_manager.init_app(app)
     migrate.init_app(app, db)
-    socketio.init_app(app, cors_allowed_origins="*", message_queue=os.environ.get('REDIS_URL'))
+    socketio.init_app(app, cors_allowed_origins="*", message_queue=os.environ.get('REDIS_URL', DEFAULT_REDIS_URL))
     initialize_sentry(app)
 
     from app.views.base import setup_base_routes
