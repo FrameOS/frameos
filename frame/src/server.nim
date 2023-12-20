@@ -21,7 +21,7 @@ proc match(request: Request): ResponseData =
         resp Http404, "Not found!"
 
 proc initServer() =
-  let port = 8787.Port # paramStr(1).parseInt().Port
+  let port = 8999.Port # paramStr(1).parseInt().Port
   let settings = newSettings(port = port)
   var jester = initJester(matcher = match.MatchProcSync, settings = settings)
   jester.serve()

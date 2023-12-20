@@ -1,0 +1,12 @@
+[Unit]
+Description=FrameOS Service
+After=network.target
+
+[Service]
+User=%I
+WorkingDirectory=/srv/frameos/current
+ExecStart=/srv/frameos/current/frameos
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

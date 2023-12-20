@@ -5,13 +5,14 @@ from ./image import createImage
 from ./server import initServer
 from ./config import loadConfig
 
-let target = os.getenv("TARGET", "file")
+let target = os.getenv("TARGET", "web")
 echo target
 
 proc main() =
   let config = loadConfig()
   let width = config.width
   let height = config.height
+
   if target == "file":
     let image = createImage(width, height)
     let dir = "tmp"

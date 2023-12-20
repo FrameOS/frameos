@@ -1,6 +1,8 @@
 import atexit
 import signal
+import subprocess
 from io import StringIO
+from typing import Optional
 
 from paramiko import RSAKey, SSHClient, AutoAddPolicy
 from gevent import sleep
@@ -76,3 +78,30 @@ def exec_command(frame: Frame, ssh: SSHClient, command: str) -> int:
 
     return exit_status
 
+
+def exec_local_command(frame: Frame, command: str, generate_log = True) -> (int, Optional[str], Optional[str]):
+    if generate_log:
+        log(frame.id, "stdout", f"# {command}")
+    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    errors = []
+    outputs = []
+
+    while True:
+        output = process.stdout.readline()
+        if output:
+            log(frame.id, "stdout", output)
+            outputs.append(output)
+        error = process.stderr.readline()
+        if error:
+            log(frame.id, "stderr", error)
+            errors.append(error)
+        if process.poll() is not None:
+            break
+        sleep(0.1)
+
+    exit_status = process.returncode
+
+    if exit_status != 0:
+        log(frame.id, "exit_status", f"The command exited with status {exit_status}")
+
+    return (exit_status, ''.join(outputs) if len(outputs) > 0 else None, ''.join(errors) if len(errors) > 0 else None)
