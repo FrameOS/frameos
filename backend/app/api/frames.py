@@ -120,9 +120,9 @@ def api_frame_update(id: int):
                 value = payload[field]
                 if value == '' or value == 'null':
                     value = defaults.get(field, None)
-                elif field in ['frame_port', 'ssh_port', 'width', 'height', 'rotate']:
+                elif field in ['frame_port', 'ssh_port', 'width', 'height', 'rotate'] and value is not None:
                     value = int(value)
-                elif field in ['interval', 'metrics_interval']:
+                elif field in ['interval', 'metrics_interval'] and value is not None:
                     value = float(value)
                 elif field in ['scenes']:
                     if type(value) == str:
