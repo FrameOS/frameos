@@ -3,13 +3,15 @@ import os
 from net import Port
 from ./image import createImage
 from ./server import initServer
+from ./config import loadConfig
 
 let target = os.getenv("TARGET", "file")
 echo target
 
 proc main() =
-  let width = 400
-  let height = 400
+  let config = loadConfig()
+  let width = config.width
+  let height = config.height
   if target == "file":
     let image = createImage(width, height)
     let dir = "tmp"
