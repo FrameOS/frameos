@@ -115,7 +115,7 @@ def deploy_frame(id: int):
                         print(service_contents)
                     with SCPClient(ssh.get_transport()) as scp:
                         scp.putfo(StringIO(service_contents), f"/srv/frameos/releases/release_{build_id}/frameos.service")
-                    exec_command(frame, ssh, f"sudo mv /srv/frameos/releases/release_{build_id}/frameos.service /etc/systemd/system/frameos.service")
+                    exec_command(frame, ssh, f"sudo cp /srv/frameos/releases/release_{build_id}/frameos.service /etc/systemd/system/frameos.service")
                     exec_command(frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
                     exec_command(frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")
 

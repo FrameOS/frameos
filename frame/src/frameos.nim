@@ -1,15 +1,20 @@
 import pixie
 import os
+import json
 from net import Port
 from ./image import createImage
 from ./server import initServer
 from ./config import loadConfig
+from ./logger import newLogger, log
 
 let target = os.getenv("TARGET", "web")
 echo target
 
 proc main() =
   let config = loadConfig()
+  let logger = newLogger(config)
+  logger.log(%*{"event": "bootstrap", "message": "Hello, World!"})
+
   let width = config.width
   let height = config.height
 
@@ -20,7 +25,7 @@ proc main() =
       createDir(dir)
     image.writeFile("tmp/text_spans.png")
   elif target == "web":
-    initServer()
+    initServer(config, logger)
   else:
     echo("Unknown target: " & target)
 

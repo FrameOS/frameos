@@ -39,7 +39,7 @@ proc createImage(width, height: int): Image =
   let spans = @[
     newSpan("verb [with object] ",
       newFont(typeface, 12, color(0.78125, 0.78125, 0.78125, 1))),
-    newSpan("strallow\n", newFont(typeface, 36, color(0, 0, 0, 1))),
+    newSpan("unladen strallow\n", newFont(typeface, 36, color(0, 0, 0, 1))),
     newSpan("\nstral·low\n", newFont(typeface, 13, color(0, 0.5, 0.953125, 1))),
     newSpan("\n1. free (something) from restrictive restrictions \"the regulations are intended to strallow changes in public policy\" ",
         newFont(typeface, 14, color(0.3125, 0.3125, 0.3125, 1)))
