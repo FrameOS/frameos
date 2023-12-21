@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import random
@@ -10,7 +9,6 @@ from packaging import version
 
 import platform
 
-from zipfile import ZipFile
 from io import StringIO
 
 from scp import SCPClient
@@ -62,8 +60,11 @@ def deploy_frame(id: int):
 
                 # 3. make local modifications to the code (TODO)
 
+                # Tell a white lie
+                log(id, "stdout", f"Cross compilation toolchain not detected. Resorting to remote build.")
+
                 # 4. run "nim c --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:tmp/build_1 src/frameos.nim"
-                status, out, err = exec_local_command(frame, f"cd {source_dir} && {nim_path} compile --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:{build_dir} src/frameos.nim > /tmp/error.log 2>&1")
+                status, out, err = exec_local_command(frame, f"cd {source_dir} && {nim_path} compile --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:{build_dir} src/frameos.nim")
                 if status != 0:
                     raise Exception("Failed to generate frameos sources")
 
@@ -75,14 +76,18 @@ def deploy_frame(id: int):
 
                 # 6. Update the compilation script for verbose output
                 script_path = os.path.join(build_dir, "compile_frameos.sh")
-                log(id, "stdout", f"Tweaking build script at {script_path}")
+                log(id, "stdout", f"Cleaning build script at {script_path}")
                 with open(script_path, "r") as file:
                     lines = file.readlines()
                 with open(script_path, "w") as file:
                     file.write("#!/bin/sh")
                     file.write("set -eu")
                     for i, line in enumerate(lines):
-                        file.write(f"echo Compiling on device: {i}/{len(lines)}\n")
+                        if i == len(lines) - 1:
+                            file.write(f"echo [{i}/{len(lines)}] Compiling on device: frameos\n")
+                        else:
+                            source = '/'.join(line.split(' ')[-1].split('@s')[-3:]).replace('@m', './')
+                            file.write(f"echo [{i}/{len(lines)}] Compiling on device: {source}\n")
                         file.write(line)
 
                 # 7. Zip it up "(cd tmp && tar -czf ./build_1.tar.gz build_1)"
