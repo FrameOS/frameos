@@ -16,7 +16,7 @@ proc match(request: Request): ResponseData =
   {.cast(gcsafe).}: # TODO: is this correct? https://forum.nim-lang.org/t/10474
     block route:
       case request.pathInfo
-      of "/":
+      of "/", "/kiosk":
         resp Http200, webAssets.getAsset("assets/web/index.html")
       of "/image":
         let image = createImage(400, 400)
@@ -32,6 +32,6 @@ proc initServer(config: Config, logger: Logger) =
   var jester = initJester(matcher = match.MatchProcSync, settings = settings)
   logger.log(%*{"event": "@frame:server_start",
       "message": "Starting web server on port " & $port.int})
-  jester.serve()
+  jester.serve() # blocks forever
 
 export initServer

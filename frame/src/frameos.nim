@@ -7,12 +7,11 @@ from ./config import loadConfig
 from ./logger import newLogger, log
 
 let target = os.getenv("TARGET", "web")
-echo target
 
 proc startFrameOS() =
   let config = loadConfig()
   let logger = newLogger(config)
-  initServer(config, logger)
+  initServer(config, logger) # blocks forever
 
 proc renderOnce() =
   let config = loadConfig()
@@ -24,16 +23,13 @@ proc renderOnce() =
     createDir(dir)
   image.writeFile("tmp/frame.png")
 
-
 proc main() =
   if target == "file":
     renderOnce()
   elif target == "web":
-    startFrameOS()
+    startFrameOS() # blocks forever
   else:
     echo("Unknown target: " & target)
-
-  echo("Hello, World!")
 
 when isMainModule:
   main()
