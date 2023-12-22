@@ -27,7 +27,7 @@ proc match(request: Request): ResponseData =
 
 proc initServer(config: Config, logger: Logger) =
   globalLogger = logger
-  let port = 8999.Port # paramStr(1).parseInt().Port
+  let port = (config.framePort or 8787).Port
   let settings = newSettings(port = port)
   var jester = initJester(matcher = match.MatchProcSync, settings = settings)
   jester.serve()

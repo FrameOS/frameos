@@ -15,6 +15,6 @@ RUN apt-get remove -y build-essential libffi-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* 
 
-EXPOSE 8999
+EXPOSE 8787
 
 CMD ["sh", "-c", "python3 run.py"]

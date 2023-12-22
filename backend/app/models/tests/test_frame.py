@@ -5,14 +5,14 @@ from app.tests.base import BaseTestCase
 
 class TestModelsFrame(BaseTestCase):
     def test_frame_creation(self):
-        frame = new_frame("frame2", "pi@192.168.1.1:8999", "server_host.com", "device_test")
+        frame = new_frame("frame2", "pi@192.168.1.1:8787", "server_host.com", "device_test")
         self.assertEqual(frame.name, "frame2")
         self.assertEqual(frame.frame_host, "192.168.1.1")
-        self.assertEqual(frame.frame_port, 8999)
+        self.assertEqual(frame.frame_port, 8787)
         self.assertEqual(frame.ssh_user, "pi")
         self.assertEqual(frame.ssh_pass, None)
         self.assertEqual(frame.server_host, "server_host.com")
-        self.assertEqual(frame.server_port, 8999)
+        self.assertEqual(frame.server_port, 8989)
         self.assertEqual(frame.device, "device_test")
 
     def test_frame_update(self):
@@ -33,12 +33,12 @@ class TestModelsFrame(BaseTestCase):
         frame = new_frame("frame", "pi@192.168.1.1", "server_host.com", None)
         frame_dict = frame.to_dict()
         self.assertEqual(frame_dict['frame_host'], "192.168.1.1")
-        self.assertEqual(frame_dict['frame_port'], 8999)
+        self.assertEqual(frame_dict['frame_port'], 8787)
         self.assertEqual(frame_dict['ssh_user'], "pi")
         self.assertEqual(frame_dict['ssh_pass'], None)
         self.assertEqual(frame_dict['ssh_port'], 22)
         self.assertEqual(frame_dict['server_host'], "server_host.com")
-        self.assertEqual(frame_dict['server_port'], 8999)
+        self.assertEqual(frame_dict['server_port'], 8989)
         self.assertEqual(frame_dict['device'], 'web_only')
 
     def test_get_frame_by_host(self):

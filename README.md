@@ -40,7 +40,7 @@ Read more in [the documentation](https://frameos.net/installation/controller).
 ```bash
 # running the latest release
 SECRET_KEY=$(openssl rand -base64 32)
-docker run -d -p 8999:8999 -v ./db:/app/db --name frameos --restart always -e SECRET_KEY="$SECRET_KEY" frameos/frameos
+docker run -d -p 8989:8989 -v ./db:/app/db --name frameos --restart always -e SECRET_KEY="$SECRET_KEY" frameos/frameos
 
 # update daily to the latest release
 docker run -d \

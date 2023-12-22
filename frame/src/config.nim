@@ -5,6 +5,7 @@ type
     serverHost*: string
     serverPort*: int
     serverApiKey*: string
+    framePort*: int
     width*: int
     height*: int
     device*: string
@@ -22,6 +23,7 @@ proc loadConfig(filename: string = "frame.json"): Config =
     serverHost: data{"server_host"}.getStr(),
     serverPort: data{"server_port"}.getInt(),
     serverApiKey: data{"server_api_key"}.getStr(),
+    framePort: data{"frame_port"}.getInt(8787),
     width: data{"width"}.getInt(1920),
     height: data{"height"}.getInt(1080),
     device: data{"device"}.getStr("web_only"),

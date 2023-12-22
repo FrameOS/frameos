@@ -112,7 +112,7 @@ def api_frame_update(id: int):
     fields = ['scenes', 'name', 'frame_host', 'frame_port', 'ssh_user', 'ssh_pass', 'ssh_port', 'server_host',
               'server_port', 'server_api_key', 'width', 'height', 'rotate', 'color', 'interval', 'metrics_interval',
               'scaling_mode', 'background_color', 'device']
-    defaults = {'frame_port': 8999, 'ssh_port': 22}
+    defaults = {'frame_port': 8787, 'ssh_port': 22}
     try:
         payload = request.json
         for field in fields:

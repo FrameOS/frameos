@@ -1,6 +1,6 @@
 {
     "server_host": "127.0.0.1",
-    "server_port": 8999,
+    "server_port": 8989,
     "server_api_key": "test-api-key",
     "version": null,
     "width": 800,

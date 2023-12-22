@@ -15,13 +15,13 @@ class Frame(db.Model):
     name = db.Column(db.String(256), nullable=False)
     # sending commands to frame
     frame_host = db.Column(db.String(256), nullable=False)
-    frame_port = db.Column(db.Integer, default=8999)
+    frame_port = db.Column(db.Integer, default=8787)
     ssh_user = db.Column(db.String(50), nullable=True)
     ssh_pass = db.Column(db.String(50), nullable=True)
     ssh_port = db.Column(db.Integer, default=22)
     # receiving logs, connection from frame to us
     server_host = db.Column(db.String(256), nullable=True)
-    server_port = db.Column(db.Integer, default=8999)
+    server_port = db.Column(db.Integer, default=8989)
     server_api_key = db.Column(db.String(64), nullable=True)
     # frame metadata
     status = db.Column(db.String(15), nullable=False)
@@ -91,7 +91,7 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
     if ':' in server_host:
         server_host, server_port = server_host.split(':')
     else:
-        server_port = 8999
+        server_port = 8989
 
     frame = Frame(
         name=name,
@@ -182,9 +182,9 @@ def create_default_scene() -> Dict:
 
 
 def get_frame_json(frame: Frame) -> dict:
+    # TODO: switch to an allowlist instead
     frame_json = frame.to_dict()
     frame_json.pop("frame_host", None)
-    frame_json.pop("frame_port", None)
     frame_json.pop("ssh_user", None)
     frame_json.pop("ssh_pass", None)
     frame_json.pop("ssh_port", None)
