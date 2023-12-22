@@ -30,8 +30,8 @@ proc initServer(config: Config, logger: Logger) =
   let port = (config.framePort or 8787).Port
   let settings = newSettings(port = port)
   var jester = initJester(matcher = match.MatchProcSync, settings = settings)
+  logger.log(%*{"event": "@frame:server_start",
+      "message": "Starting web server on port " & $port.int})
   jester.serve()
-
-  echo("Hello, World!")
 
 export initServer

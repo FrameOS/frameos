@@ -1,6 +1,5 @@
 import pixie
 import os
-import json
 from net import Port
 from ./image import createImage
 from ./server import initServer
@@ -10,22 +9,27 @@ from ./logger import newLogger, log
 let target = os.getenv("TARGET", "web")
 echo target
 
-proc main() =
+proc startFrameOS() =
   let config = loadConfig()
   let logger = newLogger(config)
-  logger.log(%*{"event": "bootstrap", "message": "Hello, World!"})
+  initServer(config, logger)
 
+proc renderOnce() =
+  let config = loadConfig()
   let width = config.width
   let height = config.height
+  let image = createImage(width, height)
+  let dir = "tmp"
+  if not dirExists(dir):
+    createDir(dir)
+  image.writeFile("tmp/frame.png")
 
+
+proc main() =
   if target == "file":
-    let image = createImage(width, height)
-    let dir = "tmp"
-    if not dirExists(dir):
-      createDir(dir)
-    image.writeFile("tmp/text_spans.png")
+    renderOnce()
   elif target == "web":
-    initServer(config, logger)
+    startFrameOS()
   else:
     echo("Unknown target: " & target)
 
