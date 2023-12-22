@@ -2,6 +2,12 @@
 import json, httpclient, zippy # , queues, threading, times
 from ./config import Config
 
+# TODO:
+# - Batched sending
+# - Send on a background thread
+# - Retry on failure
+# - Stop on shutdown
+
 type
   Webhook* = ref object
     config: Config

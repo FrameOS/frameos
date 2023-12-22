@@ -3,6 +3,9 @@ from json import JsonNode
 from config import Config
 from webhook import Webhook, newWebhook, addLog, stopWebhook
 
+# TODO:
+# - Keep a limited list of logs in memory
+
 type
   Logger* = ref object
     config: Config

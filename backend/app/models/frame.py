@@ -189,6 +189,10 @@ def get_frame_json(frame: Frame) -> dict:
     frame_json.pop("ssh_pass", None)
     frame_json.pop("ssh_port", None)
     frame_json.pop("status", None)
+    frame_json.pop("id", None)
+    frame_json.pop("name", None)
+    frame_json.pop("scenes", None)
+    frame_json.pop("version", None)
 
     setting_keys = set()
     app_configs = get_app_configs()

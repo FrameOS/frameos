@@ -1,0 +1,20 @@
+{
+    "server_host": "127.0.0.1",
+    "server_port": 8999,
+    "server_api_key": "test-api-key",
+    "version": null,
+    "width": 800,
+    "height": 480,
+    "device": "web_only",
+    "color": null,
+    "interval": 300.0,
+    "metrics_interval": 60.0,
+    "scaling_mode": "cover",
+    "rotate": 0,
+    "background_color": "blue",
+    "settings": {
+        "sentry": {
+            "frame_dsn": null
+        }
+    }
+}
