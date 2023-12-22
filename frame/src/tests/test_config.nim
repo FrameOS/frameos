@@ -2,7 +2,7 @@ import std/json
 from ../config import Config, loadConfig
 
 block test_load_config:
-    let config = loadConfig("./src/tests/assets/frame.json")
+    let config = loadConfig("./frame.json")
     doAssert config.serverHost == "127.0.0.1"
     doAssert config.serverPort == 8999
     doAssert config.serverApiKey == "test-api-key"

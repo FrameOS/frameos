@@ -1,6 +1,8 @@
-all:
-	nimble build -y
+run:
+	nimble build -y && ./build/frameos
 
+test:
+	nimble test
 
 toormoos:
 	nim c --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:tmp/build_1 src/frameos.nim

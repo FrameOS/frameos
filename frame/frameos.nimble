@@ -6,7 +6,7 @@ description   = "A new awesome nimble package"
 license       = "Apache-2.0"
 srcDir        = "src"
 binDir        = "build"
-bin           = @["frame"]  
+bin           = @["frameos"]  
 
 
 # Dependencies
