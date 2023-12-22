@@ -3,8 +3,9 @@ from ../config import Config, loadConfig
 
 block test_load_config:
     let config = loadConfig("./frame.json")
+    doAssert config.framePort == 8787
     doAssert config.serverHost == "127.0.0.1"
-    doAssert config.serverPort == 8999
+    doAssert config.serverPort == 8989
     doAssert config.serverApiKey == "test-api-key"
     doAssert config.width == 800
     doAssert config.height == 480
