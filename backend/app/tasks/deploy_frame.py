@@ -216,7 +216,7 @@ def make_local_modifications(frame, source_dir):
                     event_nodes[event].append(node)
 
         imports = """
-import apps/unsplash/frame as unsplashApp
+import apps/unsplash/app as unsplashApp
 """
         scene_apps = """
   app_1: unsplashApp.App
