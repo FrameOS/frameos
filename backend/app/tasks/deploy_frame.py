@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import re
 import shutil
 import string
 import subprocess
@@ -234,7 +235,7 @@ import pixie
 import assets/fonts as fontAssets
 import times
 
-from frameos/config import Config
+from frameos/types import Config
 {imports}
 
 type Scene = object
@@ -269,6 +270,23 @@ def create_local_build_archive(build_dir, build_id, frame, nim_path, source_dir,
         f"cd {source_dir} && {nim_path} compile --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:{build_dir} src/frameos.nim"
     )
     if status != 0:
+        last_line = [line for line in err.split("\n") if line != ''][-1]
+        if match := re.match(r'^(.*\.nim)\((\d+), (\d+)\),*', last_line):
+            filename = match.group(1)
+            line = int(match.group(2))
+            column = int(match.group(3))
+            source_path = os.path.realpath(source_dir)
+            final_path = os.path.realpath(os.path.join(source_dir, filename))
+            if os.path.commonprefix([final_path, source_path]) == source_path:
+                filename = final_path[len(source_path) + 1:]
+                with open(final_path, "r") as file:
+                    lines = file.readlines()
+                log(frame.id, "stdout", f"Error in {filename}:{line}:{column}")
+                log(frame.id, "stdout", f"Line {line}: {lines[line - 1]}")
+                log(frame.id, "stdout", f".......{'.' * (column - 1 + len(str(line)))}^")
+            else:
+                log(frame.id, "stdout", f"Error in {filename}:{line}:{column}")
+
         raise Exception("Failed to generate frameos sources")
 
     # 5. Copy the file "nimbase.h" to "build_1/nimbase.h"

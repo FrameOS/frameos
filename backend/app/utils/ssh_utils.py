@@ -81,7 +81,7 @@ def exec_command(frame: Frame, ssh: SSHClient, command: str) -> int:
 
 def exec_local_command(frame: Frame, command: str, generate_log = True) -> (int, Optional[str], Optional[str]):
     if generate_log:
-        log(frame.id, "stdout", f"# {command}")
+        log(frame.id, "stdout", f"-> {command}")
     process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     errors = []
     outputs = []
