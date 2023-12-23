@@ -85,18 +85,19 @@ def exec_local_command(frame: Frame, command: str, generate_log = True) -> (int,
     process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     errors = []
     outputs = []
+    break_next = False
 
     while True:
-        output = process.stdout.readline()
-        if output:
+        while output := process.stdout.readline():
             log(frame.id, "stdout", output)
             outputs.append(output)
-        error = process.stderr.readline()
-        if error:
+        while error := process.stderr.readline():
             log(frame.id, "stderr", error)
             errors.append(error)
-        if process.poll() is not None:
+        if break_next:
             break
+        if process.poll() is not None:
+            break_next = True
         sleep(0.1)
 
     exit_status = process.returncode
