@@ -56,10 +56,12 @@ def process_log(frame: Frame, log: dict):
     if event == '@frame:config':
         if frame.status != 'ready':
             changes['status'] = 'ready'
-        for key in ['width', 'height', 'device', 'color', 'interval', 'metrics_interval', 'scaling_mode', 'rotate',
+        for key in ['frame_port', 'width', 'height', 'device', 'color', 'interval', 'metrics_interval', 'scaling_mode', 'rotate',
                     'background_color']:
             if key in log and log[key] is not None and log[key] != getattr(frame, key):
                 changes[key] = log[key]
+            if 'config' in log and key in log['config'] and log['config'][key] is not None and log['config'][key] != getattr(frame, key):
+                changes[key] = log['config'][key]
     if len(changes) > 0:
         for key, value in changes.items():
             setattr(frame, key, value)
