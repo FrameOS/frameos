@@ -1,14 +1,12 @@
 import pixie
 
-from frameos/types import Config
+from frameos/types import Config, FrameScene
 import apps/unsplash/app as unsplashApp
 import apps/text/app as textApp
 
-type Scene = object
-  config: Config
+type Scene* = ref object of FrameScene
   app_1: unsplashApp.App
   app_2: textApp.App
-  typeface: Typeface
 
 proc init*(config: Config): Scene =
   result = Scene(config: config)

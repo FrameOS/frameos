@@ -24,10 +24,21 @@ type
     url*: string
 
 type
+  FrameScene* = ref object of RootObj
+    config*: Config
+
+type
+  Renderer* = ref object
+    config*: Config
+    logger*: Logger
+    scene*: FrameScene
+
+type
   Server* = ref object
     config*: Config
     logger*: Logger
     jester*: Jester
+    renderer*: Renderer
     url*: string
 
 type
@@ -35,3 +46,4 @@ type
     config*: Config
     logger*: Logger
     server*: Server
+    renderer*: Renderer
