@@ -19,6 +19,7 @@ from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json
 from app.models.apps import get_apps_from_scenes
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection, exec_local_command
+from apps import FrameConfigScene
 
 
 @huey.task()
@@ -34,66 +35,19 @@ def deploy_frame(id: int):
             frame.status = 'deploying'
             update_frame(frame)
 
-            # 0. add the concept of "build"-s or "deply"-s into the backend (TODO)
-
+            # TODO: add the concept of builds into the backend (track each build in the database)
             build_id = ''.join(random.choice(string.ascii_lowercase) for i in range(12))
             log(id, "stdout", f"Deploying frame {frame.name} with build id {build_id}")
 
-            # Example usage
-            nim_path = find_nim_executable()
-            if not nim_path:
-                raise Exception("Nim executable not found")
-            nim_version = get_nim_version(nim_path)
-            if not nim_version or nim_version < version.parse("2.0.0"):
-                raise Exception("Nim version 2.0.0 or higher is required")
+            nim_path = find_nim_v2()
 
             with tempfile.TemporaryDirectory() as temp_dir:
-                build_dir = os.path.join(temp_dir, f"build_{build_id}")
-                source_dir = os.path.join(temp_dir, "frameos")
-
-                # 1. copy the frameos folder to the temp folder
-                os.makedirs(source_dir, exist_ok=True)
-                shutil.copytree("../frame", source_dir, dirs_exist_ok=True)
-
-                # 2. make a new build folder with the build_id
-                os.makedirs(build_dir, exist_ok=True)
-
-                # 3. make local modifications to the code (TODO)
-
-                # Tell a white lie
-                log(id, "stdout", f"Cross compilation toolchain not detected. Resorting to remote build.")
-
-                # 4. run "nim c --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:tmp/build_1 src/frameos.nim"
-                status, out, err = exec_local_command(frame, f"cd {source_dir} && {nim_path} compile --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:{build_dir} src/frameos.nim")
-                if status != 0:
-                    raise Exception("Failed to generate frameos sources")
-
-                # 5. Copy the file "nimbase.h" to "build_1/nimbase.h"
-                nimbase_path = find_nimbase_file(nim_path)
-                if not nimbase_path:
-                    raise Exception("nimbase.h not found")
-                shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
-
-                # 6. Update the compilation script for verbose output
-                script_path = os.path.join(build_dir, "compile_frameos.sh")
-                log(id, "stdout", f"Cleaning build script at {script_path}")
-                with open(script_path, "r") as file:
-                    lines = file.readlines()
-                with open(script_path, "w") as file:
-                    file.write("#!/bin/sh")
-                    file.write("set -eu")
-                    for i, line in enumerate(lines):
-                        if i == len(lines) - 1:
-                            file.write(f"echo [{i}/{len(lines)}] Compiling on device: frameos\n")
-                        else:
-                            source = '/'.join(line.split(' ')[-1].split('@s')[-3:]).replace('@m', './')
-                            file.write(f"echo [{i}/{len(lines)}] Compiling on device: {source}\n")
-                        file.write(line)
-
-                # 7. Zip it up "(cd tmp && tar -czf ./build_1.tar.gz build_1)"
-                zip_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")
-                zip_base_path = os.path.join(temp_dir, f"build_{build_id}")
-                shutil.make_archive(zip_base_path, 'gztar', temp_dir, f"build_{build_id}")
+                log(id, "stdout", f"- Copying build folders")
+                build_dir, source_dir = create_build_folders(temp_dir, build_id)
+                log(id, "stdout", f"- Applying local modifications")
+                make_local_modifications(frame, source_dir)
+                log(id, "stdout", f"- Creating build archive")
+                archive_path = create_local_build_archive(build_dir, build_id, frame, nim_path, source_dir, temp_dir)
 
                 # 8. Copy to the server "scp -r tmp/build_1.tar.gz toormoos:"
                 ssh = get_ssh_connection(frame)
@@ -101,7 +55,7 @@ def deploy_frame(id: int):
                     exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  build-essential\" || sudo apt -y install build-essential")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/build/")
                     log(id, "stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
-                    scp.put(zip_path, f"/srv/frameos/build/build_{build_id}.tar.gz")
+                    scp.put(archive_path, f"/srv/frameos/build/build_{build_id}.tar.gz")
                     exec_command(frame, ssh, f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz")
                     exec_command(frame, ssh, f"cd /srv/frameos/build/build_{build_id} && sh ./compile_frameos.sh")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/releases/release_{build_id}")
@@ -218,6 +172,132 @@ def deploy_frame(id: int):
                 log(frame.id, "stdinfo", "SSH connection closed")
                 remove_ssh_connection(ssh)
 
+
+def find_nim_v2():
+    nim_path = find_nim_executable()
+    if not nim_path:
+        raise Exception("Nim executable not found")
+    nim_version = get_nim_version(nim_path)
+    if not nim_version or nim_version < version.parse("2.0.0"):
+        raise Exception("Nim version 2.0.0 or higher is required")
+    return nim_path
+
+
+def create_build_folders(temp_dir, build_id):
+    build_dir = os.path.join(temp_dir, f"build_{build_id}")
+    source_dir = os.path.join(temp_dir, "frameos")
+    # 1. copy the frameos folder to the temp folder
+    os.makedirs(source_dir, exist_ok=True)
+    shutil.copytree("../frame", source_dir, dirs_exist_ok=True)
+    # 2. make a new build folder with the build_id
+    os.makedirs(build_dir, exist_ok=True)
+    return build_dir, source_dir
+
+
+def make_local_modifications(frame, source_dir):
+    shutil.rmtree(os.path.join(source_dir, "src", "scenes"), ignore_errors=True)
+    os.makedirs(os.path.join(source_dir, "src", "scenes"), exist_ok=True)
+
+    for scene in frame.scenes:
+        id = scene.get('id', 'default')
+        log(frame.id, "stdout", f"- Generating scene: {id}")
+        nodes = scene.get('nodes', [])
+        nodes_by_id = {n['id']: n for n in nodes}
+
+        edges = scene.get('edges', [])
+        event_nodes = {}
+        for node in nodes:
+            if node.get('type') == 'event':
+                event = node.get('data', {}).get('keyword', None)
+                if event:
+                    if not event_nodes.get(event):
+                        event_nodes[event] = []
+                    event_nodes[event].append(node)
+
+        imports = """
+import apps/unsplash/frame as unsplashApp
+"""
+        scene_apps = """
+  app_1: unsplashApp.App
+"""
+
+        init_apps = """
+  result.app_1 = unsplashApp.init(config, unsplashApp.AppConfig(keyword: "random"))
+"""
+
+        render_apps = """
+  self.app_1.render(image)
+"""
+
+        scene = f"""
+import pixie
+import assets/fonts as fontAssets
+import times
+
+from frameos/config import Config
+{imports}
+
+type Scene = object
+  config: Config
+  image: Image
+{scene_apps}
+
+proc init*(config: Config): Scene =
+  result = Scene()
+  result.config = config
+  result.image = newImage(config.width, config.height)
+{init_apps}
+
+proc render*(self: Scene): Image =
+  let image = newImage(self.image.width, self.image.height)
+{render_apps}
+  return image
+"""
+
+        # Write scene to scene.nim
+        with open(os.path.join(source_dir, "src", "scenes", f"{id}.nim"), "w") as file:
+            file.write(scene)
+
+
+def create_local_build_archive(build_dir, build_id, frame, nim_path, source_dir, temp_dir):
+    # Tell a white lie
+    log(frame.id, "stdout", f"- No cross compilation support. Building on frame.")
+
+    # 4. run "nim c --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:tmp/build_1 src/frameos.nim"
+    status, out, err = exec_local_command(
+        frame,
+        f"cd {source_dir} && {nim_path} compile --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:{build_dir} src/frameos.nim"
+    )
+    if status != 0:
+        raise Exception("Failed to generate frameos sources")
+
+    # 5. Copy the file "nimbase.h" to "build_1/nimbase.h"
+    nimbase_path = find_nimbase_file(nim_path)
+    if not nimbase_path:
+        raise Exception("nimbase.h not found")
+    shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
+
+    # 6. Update the compilation script for verbose output
+    script_path = os.path.join(build_dir, "compile_frameos.sh")
+    log(frame.id, "stdout", f"Cleaning build script at {script_path}")
+    with open(script_path, "r") as file:
+        lines = file.readlines()
+    with open(script_path, "w") as file:
+        file.write("#!/bin/sh")
+        file.write("set -eu")
+        for i, line in enumerate(lines):
+            if i == len(lines) - 1:
+                file.write(f"echo [{i}/{len(lines)}] Compiling on device: frameos\n")
+            else:
+                source = '/'.join(line.split(' ')[-1].split('@s')[-3:]).replace('@m', './')
+                file.write(f"echo [{i}/{len(lines)}] Compiling on device: {source}\n")
+            file.write(line)
+
+    # 7. Zip it up "(cd tmp && tar -czf ./build_1.tar.gz build_1)"
+    archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")
+    zip_base_path = os.path.join(temp_dir, f"build_{build_id}")
+    shutil.make_archive(zip_base_path, 'gztar', temp_dir, f"build_{build_id}")
+    return archive_path
 
 def find_nim_executable():
     # Common paths for nim executable based on the operating system

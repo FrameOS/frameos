@@ -6,9 +6,9 @@ import assets/web as webAssets
 import asyncdispatch, jester
 from net import Port
 import options
-import scenes/default as defaultScene
 from frameos/config import Config
 from frameos/logger import Logger, log
+from frameos/render import render
 
 var globalLogger: Logger
 var globalConfig: Config
@@ -21,8 +21,7 @@ proc match(request: Request): ResponseData =
         resp Http200, webAssets.getAsset("assets/web/index.html")
       of "/image":
         globalLogger.log(%*{"event": "http", "path": "/image"})
-        let scene = defaultScene.init(globalConfig)
-        let image = scene.render()
+        let image = render(globalConfig)
         resp Http200, {"Content-Type": "image/png"}, image.encodeImage(PngFormat)
       else:
         resp Http404, "Not found!"

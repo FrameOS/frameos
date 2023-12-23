@@ -4,7 +4,7 @@ from net import Port
 from frameos/server import initServer
 from frameos/config import loadConfig
 from frameos/logger import newLogger, log
-import scenes/default as defaultScene
+from frameos/render import render
 
 let target = os.getenv("TARGET", "web")
 
@@ -14,9 +14,7 @@ proc startFrameOS() =
   initServer(config, logger) # blocks forever
 
 proc renderOnce() =
-  let config = loadConfig()
-  let scene = defaultScene.init(config)
-  let image = scene.render()
+  let image = render(loadConfig())
   let dir = "tmp"
   if not dirExists(dir):
     createDir(dir)
