@@ -1,7 +1,7 @@
 import pixie
 import assets/fonts as fontAssets
 import times
-from frameos/config import Config
+from frameos/types import Config
 
 type AppConfig* = object
   text*: string

@@ -1,6 +1,6 @@
 import httpclient, zippy, json
 
-from config import Config
+from frameos/types import Config, Logger
 
 # TODO:
 # - Keep a limited list of logs in memory
@@ -10,25 +10,22 @@ from config import Config
 # - Retry on failure
 # - Stop on shutdown
 
-type
-  Logger* = ref object
-    config: Config
-    client: HttpClient
-    url: string
-
 proc newLogger*(config: Config): Logger =
-  new(result)
-  result.config = config
-  result.client = newHttpClient(timeout = 10000)
-  result.client.headers = newHttpHeaders([
+  var client = newHttpClient(timeout = 10000)
+  client.headers = newHttpHeaders([
       ("Authorization", "Bearer " & config.serverApiKey),
       ("Content-Type", "application/json"),
       ("Content-Encoding", "gzip")
   ])
-  let protocol = if config.serverPort mod 1000 ==
+  var protocol = if config.serverPort mod 1000 ==
       443: "https" else: "http"
-  result.url = protocol & "://" & config.serverHost & ":" &
+  var url = protocol & "://" & config.serverHost & ":" &
       $config.serverPort & "/api/log"
+  result = Logger(
+    config: config,
+    client: client,
+    url: url
+  )
 
 
 method log*(self: Logger, payload: JsonNode) {.base.} =

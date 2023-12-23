@@ -1,5 +1,5 @@
 run:
-	nimble build -y && ./build/frameos
+	nimble build -y --verbose && ./build/frameos
 
 test:
 	nimble test

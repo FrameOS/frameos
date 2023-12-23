@@ -2,7 +2,7 @@ import pixie
 import std/strformat
 import times
 from frameos/image_utils import downloadImage
-from frameos/config import Config
+from frameos/types import Config
 
 type AppConfig* = object
   keyword*: string

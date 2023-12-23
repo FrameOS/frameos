@@ -6,8 +6,8 @@ import assets/web as webAssets
 import asyncdispatch, jester
 from net import Port
 import options
-from frameos/config import Config
-from frameos/logger import Logger, log
+from frameos/types import Config, Logger, Server
+from frameos/logger import log
 from frameos/render import render
 
 var globalLogger: Logger
@@ -26,14 +26,18 @@ proc match(request: Request): ResponseData =
       else:
         resp Http404, "Not found!"
 
-proc initServer(config: Config, logger: Logger) =
+proc newServer*(config: Config, logger: Logger): Server =
   globalConfig = config
   globalLogger = logger
+
   let port = (config.framePort or 8787).Port
   let settings = newSettings(port = port)
   var jester = initJester(matcher = match.MatchProcSync, settings = settings)
-  logger.log(%*{"event": "@frame:server_start",
-      "message": "Starting web server on port " & $port.int})
-  jester.serve() # blocks forever
+  var server = Server(config: config, logger: logger, jester: jester)
+  return server
 
-export initServer
+
+proc startServer*(self: Server) =
+  self.logger.log(%*{"event": "@frame:server_start",
+      "message": "Starting web server"})
+  self.jester.serve() # blocks forever

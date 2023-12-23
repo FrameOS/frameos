@@ -1,6 +1,6 @@
 import pixie
 
-from frameos/config import Config
+from frameos/types import Config
 import apps/unsplash/app as unsplashApp
 import apps/text/app as textApp
 
@@ -19,6 +19,15 @@ proc init*(config: Config): Scene =
 
 proc render*(self: Scene): Image =
   var image = newImage(self.config.width, self.config.height)
-  self.app_1.render(image)
-  self.app_2.render(image)
+  var nextNode = 1
+  while nextNode != -1:
+    case nextNode:
+    of 1:
+      self.app_1.render(image)
+      nextNode = 2
+    of 2:
+      self.app_2.render(image)
+      nextNode = -1
+    else:
+      nextNode = -1
   return image

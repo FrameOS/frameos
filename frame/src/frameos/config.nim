@@ -1,23 +1,7 @@
 import json
+from frameos/types import Config
 
-type
-  Config* = object
-    serverHost*: string
-    serverPort*: int
-    serverApiKey*: string
-    framePort*: int
-    width*: int
-    height*: int
-    device*: string
-    color*: string
-    interval*: int
-    metricsInterval*: int
-    rotate*: int
-    scalingMode*: string
-    backgroundColor*: string
-    settings*: JsonNode
-
-proc setDefaults(config: var Config) =
+proc setConfigDefaults*(config: var Config) =
   if config.serverPort == 0: config.serverPort = 8989
   if config.width == 0: config.width = 1920
   if config.height == 0: config.height = 1080
@@ -30,7 +14,7 @@ proc setDefaults(config: var Config) =
   if config.backgroundColor == "": config.backgroundColor = "white"
   if config.framePort == 0: config.framePort = 8787
 
-proc loadConfig(filename: string = "frame.json"): Config =
+proc loadConfig*(filename: string = "frame.json"): Config =
   let data = parseFile(filename)
   result = Config(
     serverHost: data{"server_host"}.getStr(),
@@ -48,7 +32,4 @@ proc loadConfig(filename: string = "frame.json"): Config =
     backgroundColor: data{"background_color"}.getStr(),
     settings: data{"settings"},
   )
-  setDefaults(result)
-
-
-export loadConfig, Config
+  setConfigDefaults(result)

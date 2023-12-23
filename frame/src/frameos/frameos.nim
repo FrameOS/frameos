@@ -1,29 +1,21 @@
-import pixie
-import os
-from net import Port
-from frameos/server import initServer
+from frameos/types import FrameOS, Server
 from frameos/config import loadConfig
-from frameos/logger import newLogger, log
-from frameos/render import render
+from frameos/logger import newLogger
+from frameos/server import newServer, startServer
 
-let target = os.getenv("TARGET", "web")
+proc newFrameOS*(): FrameOS =
+  var config = loadConfig()
+  var logger = newLogger(config)
+  var server: Server = newServer(config, logger)
+  result = FrameOS(
+    config: config,
+    logger: logger,
+    server: server,
+  )
 
-proc startFrameOS() =
-  let config = loadConfig()
-  let logger = newLogger(config)
-  initServer(config, logger) # blocks forever
+proc start*(self: FrameOS) =
+  self.server.startServer()
 
-proc renderOnce() =
-  let image = render(loadConfig())
-  let dir = "tmp"
-  if not dirExists(dir):
-    createDir(dir)
-  image.writeFile("tmp/frame.png")
-
-proc main*() =
-  if target == "file":
-    renderOnce()
-  elif target == "web":
-    startFrameOS() # blocks forever
-  else:
-    echo("Unknown target: " & target)
+proc startFrameOS*() =
+  var frameOS = newFrameOS()
+  frameOS.start()

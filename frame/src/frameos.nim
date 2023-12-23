@@ -1,4 +1,4 @@
-from ./frameos/frameos import main
+from ./frameos/frameos import startFrameOS
 
 when isMainModule:
-  main()
+  startFrameOS() # blocks forever
