@@ -6,11 +6,12 @@ import assets/web as webAssets
 import asyncdispatch, jester
 from net import Port
 import options
-from ./image import createImage
-from ./config import Config
-from ./logger import Logger, log
+import scenes/default as defaultScene
+from frameos/config import Config
+from frameos/logger import Logger, log
 
 var globalLogger: Logger
+var globalConfig: Config
 
 proc match(request: Request): ResponseData =
   {.cast(gcsafe).}: # TODO: is this correct? https://forum.nim-lang.org/t/10474
@@ -19,13 +20,15 @@ proc match(request: Request): ResponseData =
       of "/", "/kiosk":
         resp Http200, webAssets.getAsset("assets/web/index.html")
       of "/image":
-        let image = createImage(400, 400)
         globalLogger.log(%*{"event": "http", "path": "/image"})
+        let scene = defaultScene.init(globalConfig)
+        let image = scene.render()
         resp Http200, {"Content-Type": "image/png"}, image.encodeImage(PngFormat)
       else:
         resp Http404, "Not found!"
 
 proc initServer(config: Config, logger: Logger) =
+  globalConfig = config
   globalLogger = logger
   let port = (config.framePort or 8787).Port
   let settings = newSettings(port = port)
