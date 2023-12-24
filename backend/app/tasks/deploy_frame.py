@@ -16,11 +16,10 @@ from scp import SCPClient
 
 from app import create_app
 from app.huey import huey
+from app.models import get_local_frame_apps
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json
-from app.models.apps import get_apps_from_scenes
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection, exec_local_command
-from apps import FrameConfigScene
 
 
 @huey.task()
@@ -199,63 +198,112 @@ def make_local_modifications(frame, source_dir):
     shutil.rmtree(os.path.join(source_dir, "src", "scenes"), ignore_errors=True)
     os.makedirs(os.path.join(source_dir, "src", "scenes"), exist_ok=True)
 
+    available_apps = get_local_frame_apps()
+
+    # only one scene called "default" for now
     for scene in frame.scenes:
         id = scene.get('id', 'default')
         log(frame.id, "stdout", f"- Generating scene: {id}")
         nodes = scene.get('nodes', [])
         nodes_by_id = {n['id']: n for n in nodes}
 
+        imports = [
+            # "import apps/unsplash/app as unsplashApp"
+        ]
+        scene_apps = [
+            # "app_1: unsplashApp.App"
+        ]
+        init_apps = [
+            # "result.app_1 = unsplashApp.init(config, unsplashApp.AppConfig(keyword: \"random\"))"
+        ]
+        render_nodes = [
+            # "of 1:",
+            # "  self.app_1.render(context)",
+            # "  nextNode = 2",
+        ]
+        event_lines = [
+            # "of \"render\":",
+            # "  self.runNode(\"1\", context)",
+        ]
+
         edges = scene.get('edges', [])
         event_nodes = {}
+        next_nodes = {}
+        for edge in edges:
+            source = edge.get('source', None)
+            target = edge.get('target', None)
+            source_handle = edge.get('sourceHandle', None)
+            target_handle = edge.get('targetHandle', None)
+            if source and target and source_handle == 'next' and target_handle == 'prev':
+                next_nodes = {source: target}
+
         for node in nodes:
+            node_id = node['id']
             if node.get('type') == 'event':
                 event = node.get('data', {}).get('keyword', None)
                 if event:
                     if not event_nodes.get(event):
                         event_nodes[event] = []
                     event_nodes[event].append(node)
+            elif node.get('type') == 'app':
+                name = node.get('data', {}).get('keyword', None)
+                if name in available_apps:
+                    log(frame.id, "stdout", f"- Generating app: {name}")
+                    app_import = f"import apps/{name}/app as {name}App"
+                    if app_import not in imports:
+                        imports += [app_import]
+                    app_id = "app_" + node_id.replace('-', '_')
+                    scene_apps += [f"{app_id}: {name}App.App"]
+                    init_apps += [f"result.{app_id} = {name}App.init(config, {name}App.AppConfig())"]
+                    render_nodes += [f"of \"{node_id}\":", f"  self.{app_id}.render(context)", f"  nextNode = \"{next_nodes.get(node_id, '-1')}\""]
+                else:
+                    log(frame.id, "stderr", f"- ERROR: App not found: {name}")
 
-        imports = """
-import apps/unsplash/app as unsplashApp
-"""
-        scene_apps = """
-  app_1: unsplashApp.App
-"""
+        for event, nodes in event_nodes.items():
+            event_lines += [f"of \"{event}\":",]
+            for node in nodes:
+                next_node = next_nodes.get(node['id'], '-1')
+                event_lines += [f"  self.runNode(\"{next_node}\", context)"]
 
-        init_apps = """
-  result.app_1 = unsplashApp.init(config, unsplashApp.AppConfig(keyword: "random"))
-"""
-
-        render_apps = """
-  self.app_1.render(image)
-"""
-
+        newline = "\n"
         scene = f"""
-import pixie
-import assets/fonts as fontAssets
-import times
+import pixie, json
 
-from frameos/types import Config
-{imports}
+from frameos/types import Config, FrameScene, ExecutionContext
+{newline.join(imports)}
 
-type Scene = object
-  config: Config
-  image: Image
-{scene_apps}
+type Scene* = ref object of FrameScene
+  state: JsonNode
+  {(newline + "  ").join(scene_apps)}
 
 proc init*(config: Config): Scene =
-  result = Scene()
-  result.config = config
-  result.image = newImage(config.width, config.height)
-{init_apps}
+  result = Scene(config: config)
+  {(newline + "  ").join(init_apps)}
+
+proc runNode*(self: Scene, nodeId: string,
+    context: var ExecutionContext) =
+  var nextNode = nodeId
+  while nextNode != "-1":
+    case nextNode:
+    {(newline + "    ").join(render_nodes)}
+    else:
+      nextNode = "-1"
+
+proc dispatchEvent*(self: Scene, event: string, eventPayload:
+    JsonNode): ExecutionContext =
+  var context = ExecutionContext(scene: self, event: event,
+      eventPayload: eventPayload)
+  if event == "render":
+    context.image = newImage(self.config.width, self.config.height)
+  case event:
+  {(newline + "  ").join(event_lines)}
+  result = context
 
 proc render*(self: Scene): Image =
-  let image = newImage(self.image.width, self.image.height)
-{render_apps}
-  return image
+  var context = dispatchEvent(self, "render", %*{{"json": "True"}})
+  return context.image
 """
-
-        # Write scene to scene.nim
+        log(frame.id, "stdout", f"Scene: {scene}")
         with open(os.path.join(source_dir, "src", "scenes", f"{id}.nim"), "w") as file:
             file.write(scene)
 

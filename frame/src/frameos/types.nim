@@ -1,4 +1,4 @@
-import httpclient, json, jester
+import httpclient, json, jester, pixie
 
 type
   Config* = ref object
@@ -26,6 +26,14 @@ type
 type
   FrameScene* = ref object of RootObj
     config*: Config
+
+type ExecutionContext* = ref object
+  scene*: FrameScene
+  image*: Image
+  event*: string
+  eventPayload*: JsonNode
+  parent*: ExecutionContext
+
 
 type
   Renderer* = ref object

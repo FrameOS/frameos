@@ -2,7 +2,7 @@ import pixie
 import std/strformat
 import times
 from frameos/image_utils import downloadImage
-from frameos/types import Config
+from frameos/types import Config, ExecutionContext
 
 type AppConfig* = object
   keyword*: string
@@ -18,7 +18,8 @@ proc init*(config: Config, appConfig: AppConfig): App =
   if result.appConfig.keyword == "":
     result.appConfig.keyword = "random"
 
-proc render*(self: App, image: Image) =
+proc render*(self: App, context: ExecutionContext) =
+  let image = context.image
   let url = &"https://source.unsplash.com/random/{image.width}x{image.height}/?{self.appConfig.keyword}"
 
   let downloadTimer = epochTime()

@@ -1,7 +1,7 @@
 import pixie
 import assets/fonts as fontAssets
 import times
-from frameos/types import Config
+from frameos/types import Config, ExecutionContext
 
 type AppConfig* = object
   text*: string
@@ -17,7 +17,8 @@ proc init*(config: Config, appConfig: AppConfig): App =
   result.typeface = parseTtf(fontAssets.getAsset("assets/fonts/Ubuntu-Regular_1.ttf"))
   echo "Time taken to parse ttf: ", (epochTime() - parseTtfTimer) * 1000, " ms"
 
-proc render*(self: App, image: Image) =
+proc render*(self: App, context: ExecutionContext) =
+  let image = context.image
   proc newFont(typeface: Typeface, size: float32, color: Color): Font =
     result = newFont(typeface)
     result.size = size

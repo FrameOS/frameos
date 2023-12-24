@@ -21,6 +21,20 @@ def get_app_configs() -> Dict[str, Dict]:
     return configs
 
 
+def get_local_frame_apps() -> List[str]:
+    local_apps_path = "../frame/src/apps"
+    apps = os.listdir(local_apps_path)
+    clean_apps: List[str] = []
+    for keyword in apps:
+        local_app_path = os.path.join(local_apps_path, keyword)
+        app_path = os.path.join(local_app_path, "app.nim")
+        config_path = os.path.join(local_app_path, "config.json")
+        if os.path.exists(app_path) and os.path.exists(config_path):
+            clean_apps.append(keyword)
+    return clean_apps
+
+
+
 def get_one_app_sources(keyword: str) -> Optional[Dict[str, str]]:
     local_apps_path = "../frameos/apps"
     apps = os.listdir(local_apps_path)
@@ -46,4 +60,5 @@ def get_apps_from_scenes(scenes: List[Dict]) -> Dict[str, Dict]:
             if node['type'] == 'app' and node.get('data', {}).get('sources', None) is not None:
                 apps[node['id']] = node['data']['sources']
     return apps
+
 
