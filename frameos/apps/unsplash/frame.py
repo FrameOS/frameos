@@ -42,9 +42,7 @@ class UnsplashApp(App):
             self.cached_content = response.content
             self.cache_expires_at = datetime.now() + timedelta(seconds=self.cache_seconds)
             self.cache_url = image_url
-            new_image = Image.open(io.BytesIO(response.content))
-            scaling_mode = self.get_config('scaling_mode', 'cover')
-            context.image = scale_image(new_image, width, height, scaling_mode, self.frame_config.background_color)
+            context.image = Image.open(io.BytesIO(response.content))
 
         except RequestException as e:
             raise Exception(f"Error fetching image from Unsplash. Error: {e}")

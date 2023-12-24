@@ -43,6 +43,7 @@ def api_frame_get_logs(id: int):
 def api_frame_get_image(id: int):
     frame = Frame.query.get_or_404(id)
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    url = f'http://{frame.frame_host}:{frame.frame_port}/image'
 
     try:
         if request.args.get('t') == '-1':
@@ -50,7 +51,7 @@ def api_frame_get_image(id: int):
             if last_image:
                 return Response(last_image, content_type='image/png')
 
-        response = requests.get(f'http://{frame.frame_host}:{frame.frame_port}/image')
+        response = requests.get(url, timeout=15)
         if response.status_code == 200:
             redis.set(cache_key, response.content, ex=86400 * 30)  # cache for 30 days
             return Response(response.content, content_type='image/png')
@@ -59,6 +60,8 @@ def api_frame_get_image(id: int):
             if last_image:
                 return Response(last_image, content_type='image/png')
             return jsonify({"error": "Unable to fetch image"}), response.status_code
+    except requests.exceptions.Timeout:
+        return jsonify({'error': f'Request Timeout to {url}'}), HTTPStatus.REQUEST_TIMEOUT
     except Exception as e:
         return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
 

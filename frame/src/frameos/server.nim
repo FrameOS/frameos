@@ -15,6 +15,7 @@ var globalFrameConfig: FrameConfig
 var globalRenderer: Renderer
 
 proc match(request: Request): ResponseData =
+  echo "GET " & request.pathInfo
   {.cast(gcsafe).}: # TODO: is this correct? https://forum.nim-lang.org/t/10474
     block route:
       case request.pathInfo

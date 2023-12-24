@@ -7,7 +7,6 @@ from frameos/types import FrameConfig, ExecutionContext
 type AppConfig* = object
   keyword*: string
   cache_seconds*: string
-  scaling_mode*: string
 
 type App* = object
   appConfig: AppConfig

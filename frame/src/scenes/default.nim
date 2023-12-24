@@ -20,6 +20,7 @@ proc init*(frameConfig: FrameConfig): Scene =
 proc runNode*(self: Scene, nodeId: string,
     context: var ExecutionContext) =
   var nextNode = nodeId
+  echo "Running node: " & nodeId
   while nextNode != "-1":
     case nextNode:
     of "1":
@@ -35,6 +36,7 @@ proc dispatchEvent*(self: Scene, event: string, eventPayload:
     JsonNode): ExecutionContext =
   var context = ExecutionContext(scene: self, event: event,
       eventPayload: eventPayload)
+  echo "Dispatching event: " & event
   if event == "render":
     context.image = newImage(self.frameConfig.width, self.frameConfig.height)
   case event:

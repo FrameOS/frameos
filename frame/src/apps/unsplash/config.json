@@ -19,14 +19,6 @@
             "required": false,
             "label": "Seconds to cache the result",
             "placeholder": "Default: 60. Use 0 for no cache"
-        },
-        {
-          "name": "scaling_mode",
-          "type": "select",
-          "options": ["cover", "contain", "stretch", "center"],
-          "value": "cover",
-          "required": true,
-          "label": "Scaling mode"
         }
     ]
 }

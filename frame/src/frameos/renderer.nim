@@ -12,5 +12,6 @@ proc newRenderer*(frameConfig: FrameConfig, logger: Logger): Renderer =
   )
 
 proc renderScene*(self: Renderer): Image =
+  echo "Rendering scene: default'"
   type DefaultScene = defaultScene.Scene
   result = defaultScene.render(self.scene.DefaultScene)

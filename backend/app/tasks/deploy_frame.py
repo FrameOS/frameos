@@ -340,7 +340,7 @@ proc render*(self: Scene): Image =
 
 def create_local_build_archive(build_dir, build_id, frame, nim_path, source_dir, temp_dir):
     # Tell a white lie
-    log(frame.id, "stdout", f"- No cross compilation support. Building on frame.")
+    log(frame.id, "stdout", f"- No cross compilation. Generating source code for compilation on frame.")
 
     # 4. run "nim c --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:tmp/build_1 src/frameos.nim"
     status, out, err = exec_local_command(
