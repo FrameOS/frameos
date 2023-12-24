@@ -5,6 +5,13 @@ from frameos/types import FrameConfig, ExecutionContext
 
 type AppConfig* = object
   text*: string
+  position*: string
+  offset_x*: string
+  offset_y*: string
+  font_color*: string
+  font_size*: string
+  border_color*: string
+  border_width*: string
 
 type App* = object
   appConfig: AppConfig

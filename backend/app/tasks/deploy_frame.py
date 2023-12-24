@@ -52,6 +52,7 @@ def deploy_frame(id: int):
                 # 8. Copy to the server "scp -r tmp/build_1.tar.gz toormoos:"
                 ssh = get_ssh_connection(frame)
                 with SCPClient(ssh.get_transport()) as scp:
+                    # build the release
                     exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  build-essential\" || sudo apt -y install build-essential")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/build/")
                     log(id, "stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
@@ -60,26 +61,27 @@ def deploy_frame(id: int):
                     exec_command(frame, ssh, f"cd /srv/frameos/build/build_{build_id} && sh ./compile_frameos.sh")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/releases/release_{build_id}")
                     exec_command(frame, ssh, f"cp /srv/frameos/build/build_{build_id}/frameos /srv/frameos/releases/release_{build_id}/frameos")
-
                     log(id, "stdout", f"> add /srv/frameos/releases/release_{build_id}/frame.json")
                     scp.putfo(StringIO(json.dumps(get_frame_json(frame), indent=4) + "\n"), f"/srv/frameos/releases/release_{build_id}/frame.json")
 
+                    # add frameos.service
                     with open("../frame/frameos.service", "r") as file:
                         service_contents = file.read().replace("%I", frame.ssh_user)
-                        print(service_contents)
                     with SCPClient(ssh.get_transport()) as scp:
                         scp.putfo(StringIO(service_contents), f"/srv/frameos/releases/release_{build_id}/frameos.service")
                     exec_command(frame, ssh, f"sudo cp /srv/frameos/releases/release_{build_id}/frameos.service /etc/systemd/system/frameos.service")
                     exec_command(frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
                     exec_command(frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")
 
-                    exec_command(frame, ssh, f"rm -rf /srv/frameos/current && ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current")
+                # swap out the release
+                exec_command(frame, ssh, f"rm -rf /srv/frameos/current && ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current")
 
-                    exec_command(frame, ssh, "sudo systemctl daemon-reload")
-                    exec_command(frame, ssh, "sudo systemctl stop frameos.service || true")
-                    exec_command(frame, ssh, "sudo systemctl enable frameos.service")
-                    exec_command(frame, ssh, "sudo systemctl start frameos.service")
-                    exec_command(frame, ssh, "sudo systemctl status frameos.service")
+                # restart
+                exec_command(frame, ssh, "sudo systemctl daemon-reload")
+                exec_command(frame, ssh, "sudo systemctl stop frameos.service || true")
+                exec_command(frame, ssh, "sudo systemctl enable frameos.service")
+                exec_command(frame, ssh, "sudo systemctl start frameos.service")
+                exec_command(frame, ssh, "sudo systemctl status frameos.service")
 
             # get temp folder
             # temp_path =
@@ -253,9 +255,37 @@ def make_local_modifications(frame, source_dir):
                     if app_import not in imports:
                         imports += [app_import]
                     app_id = "app_" + node_id.replace('-', '_')
-                    scene_apps += [f"{app_id}: {name}App.App"]
-                    init_apps += [f"result.{app_id} = {name}App.init(config, {name}App.AppConfig())"]
-                    render_nodes += [f"of \"{node_id}\":", f"  self.{app_id}.render(context)", f"  nextNode = \"{next_nodes.get(node_id, '-1')}\""]
+                    scene_apps += [
+                        f"{app_id}: {name}App.App"
+                    ]
+
+                    app_config = node.get('data').get('config', {}).copy()
+                    config_path = os.path.join("../frame/src/apps", name, "config.json")
+                    if os.path.exists(config_path):
+                        with open(config_path, 'r') as file:
+                            config = json.load(file)
+                            for conf in config.get('fields'):
+                                key = conf.get('name', None)
+                                value = conf.get('value', None)
+                                if (key not in app_config or app_config.get(key) is None) and value is not None:
+                                    app_config[key] = value
+
+                    app_config_pairs = []
+                    for key, value in app_config.items():
+                        # TODO: sanitize
+                        if isinstance(value, str):
+                            app_config_pairs += [f"{key}: \"{value}\""]
+                        else:
+                            app_config_pairs += [f"{key}: {value}"]
+
+                    init_apps += [
+                        f"result.{app_id} = {name}App.init(frameConfig, {name}App.AppConfig({', '.join(app_config_pairs)}))"
+                    ]
+                    render_nodes += [
+                        f"of \"{node_id}\":",
+                        f"  self.{app_id}.render(context)",
+                        f"  nextNode = \"{next_nodes.get(node_id, '-1')}\""
+                    ]
                 else:
                     log(frame.id, "stderr", f"- ERROR: App not found: {name}")
 
@@ -269,15 +299,15 @@ def make_local_modifications(frame, source_dir):
         scene = f"""
 import pixie, json
 
-from frameos/types import Config, FrameScene, ExecutionContext
+from frameos/types import FrameConfig, FrameScene, ExecutionContext
 {newline.join(imports)}
 
 type Scene* = ref object of FrameScene
   state: JsonNode
   {(newline + "  ").join(scene_apps)}
 
-proc init*(config: Config): Scene =
-  result = Scene(config: config)
+proc init*(frameConfig: FrameConfig): Scene =
+  result = Scene(frameConfig: frameConfig)
   {(newline + "  ").join(init_apps)}
 
 proc runNode*(self: Scene, nodeId: string,
@@ -294,7 +324,7 @@ proc dispatchEvent*(self: Scene, event: string, eventPayload:
   var context = ExecutionContext(scene: self, event: event,
       eventPayload: eventPayload)
   if event == "render":
-    context.image = newImage(self.config.width, self.config.height)
+    context.image = newImage(self.frameConfig.width, self.frameConfig.height)
   case event:
   {(newline + "  ").join(event_lines)}
   result = context
