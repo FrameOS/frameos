@@ -13,7 +13,7 @@
             "placeholder": "e.g. pineapple, nature, birds, power"
         },
         {
-            "name": "cache_seconds",
+            "name": "cacheSeconds",
             "type": "string",
             "value": "0",
             "required": false,

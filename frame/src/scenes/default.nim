@@ -10,11 +10,14 @@ type Scene* = ref object of FrameScene
   app_2: textApp.App
 
 proc init*(frameConfig: FrameConfig): Scene =
-  result = Scene(frameConfig: frameConfig, state: %*{})
-  result.app_1 = unsplashApp.init(frameConfig, unsplashApp.AppConfig(
-      keyword: "random"))
-  result.app_2 = textApp.init(frameConfig, textApp.AppConfig(
-      text: "Hello"))
+  result = Scene(
+    frameConfig: frameConfig,
+    state: %*{},
+    app_1: unsplashApp.init(frameConfig, unsplashApp.AppConfig(
+      keyword: "random", cacheSeconds: "10")),
+    app_2: textApp.init(frameConfig, textApp.AppConfig(
+      text: "Hello")),
+  )
   result.state["bla"] = %*"bla"
 
 proc runNode*(self: Scene, nodeId: string,
