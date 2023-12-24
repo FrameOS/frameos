@@ -6,6 +6,8 @@ import shutil
 import string
 import subprocess
 import tempfile
+from typing import Set
+
 from packaging import version
 
 import platform
@@ -261,17 +263,22 @@ def make_local_modifications(frame, source_dir):
 
                     app_config = node.get('data').get('config', {}).copy()
                     config_path = os.path.join("../frame/src/apps", name, "config.json")
+                    config_keys: Set[str] = set()
                     if os.path.exists(config_path):
                         with open(config_path, 'r') as file:
                             config = json.load(file)
                             for conf in config.get('fields'):
                                 key = conf.get('name', None)
                                 value = conf.get('value', None)
+                                config_keys.add(key)
                                 if (key not in app_config or app_config.get(key) is None) and value is not None:
                                     app_config[key] = value
 
                     app_config_pairs = []
                     for key, value in app_config.items():
+                        if key not in config_keys:
+                            log(frame.id, "stderr", f"- ERROR: Config key \"{key}\" not found for app \"{name}\", node \"{node_id}\"")
+                            continue
                         # TODO: sanitize
                         if isinstance(value, str):
                             app_config_pairs += [f"{key}: \"{value}\""]
