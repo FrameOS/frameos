@@ -235,7 +235,7 @@ def make_local_modifications(frame, source_dir):
             source_handle = edge.get('sourceHandle', None)
             target_handle = edge.get('targetHandle', None)
             if source and target and source_handle == 'next' and target_handle == 'prev':
-                next_nodes = {source: target}
+                next_nodes[source] = target
 
         for node in nodes:
             node_id = node['id']
