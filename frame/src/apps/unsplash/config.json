@@ -15,7 +15,7 @@
         {
             "name": "cacheSeconds",
             "type": "string",
-            "value": "0",
+            "value": "60",
             "required": false,
             "label": "Seconds to cache the result",
             "placeholder": "Default: 60. Use 0 for no cache"
