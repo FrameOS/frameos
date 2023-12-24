@@ -345,7 +345,7 @@ def create_local_build_archive(build_dir, build_id, frame, nim_path, source_dir,
     # 4. run "nim c --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:tmp/build_1 src/frameos.nim"
     status, out, err = exec_local_command(
         frame,
-        f"cd {source_dir} && {nim_path} compile --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:{build_dir} src/frameos.nim"
+        f"cd {source_dir} && {nim_path} compile --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:{build_dir} src/frameos.nim 2>&1"
     )
     if status != 0:
         last_line = [line for line in err.split("\n") if line != ''][-1]

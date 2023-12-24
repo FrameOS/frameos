@@ -58,7 +58,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
               icon: <ClipboardDocumentIcon className="w-5 h-5" />,
             },
             {
-              label: 'Delete App',
+              label: 'Delete Node',
               onClick: () => deleteApp(id),
               icon: <TrashIcon className="w-5 h-5" />,
             },
