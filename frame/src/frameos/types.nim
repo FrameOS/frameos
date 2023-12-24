@@ -1,7 +1,7 @@
 import httpclient, json, jester, pixie
 
 type
-  Config* = ref object
+  FrameConfig* = ref object
     serverHost*: string
     serverPort*: int
     serverApiKey*: string
@@ -19,13 +19,13 @@ type
 
 type
   Logger* = ref object
-    config*: Config
+    frameConfig*: FrameConfig
     client*: HttpClient
     url*: string
 
 type
   FrameScene* = ref object of RootObj
-    config*: Config
+    frameConfig*: FrameConfig
 
 type ExecutionContext* = ref object
   scene*: FrameScene
@@ -37,13 +37,13 @@ type ExecutionContext* = ref object
 
 type
   Renderer* = ref object
-    config*: Config
+    frameConfig*: FrameConfig
     logger*: Logger
     scene*: FrameScene
 
 type
   Server* = ref object
-    config*: Config
+    frameConfig*: FrameConfig
     logger*: Logger
     jester*: Jester
     renderer*: Renderer
@@ -51,7 +51,7 @@ type
 
 type
   FrameOS* = ref object
-    config*: Config
+    frameConfig*: FrameConfig
     logger*: Logger
     server*: Server
     renderer*: Renderer

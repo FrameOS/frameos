@@ -1,6 +1,6 @@
 import pixie, json
 
-from frameos/types import Config, FrameScene, ExecutionContext
+from frameos/types import FrameConfig, FrameScene, ExecutionContext
 import apps/unsplash/app as unsplashApp
 import apps/text/app as textApp
 
@@ -9,11 +9,11 @@ type Scene* = ref object of FrameScene
   app_1: unsplashApp.App
   app_2: textApp.App
 
-proc init*(config: Config): Scene =
-  result = Scene(config: config, state: %*{})
-  result.app_1 = unsplashApp.init(config, unsplashApp.AppConfig(
+proc init*(frameConfig: FrameConfig): Scene =
+  result = Scene(frameConfig: frameConfig, state: %*{})
+  result.app_1 = unsplashApp.init(frameConfig, unsplashApp.AppConfig(
       keyword: "random"))
-  result.app_2 = textApp.init(config, textApp.AppConfig(
+  result.app_2 = textApp.init(frameConfig, textApp.AppConfig(
       text: "Hello"))
   result.state["bla"] = %*"bla"
 
@@ -36,7 +36,7 @@ proc dispatchEvent*(self: Scene, event: string, eventPayload:
   var context = ExecutionContext(scene: self, event: event,
       eventPayload: eventPayload)
   if event == "render":
-    context.image = newImage(self.config.width, self.config.height)
+    context.image = newImage(self.frameConfig.width, self.frameConfig.height)
   case event:
   of "render":
     self.runNode("1", context)

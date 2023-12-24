@@ -1,18 +1,18 @@
 import pixie
 import assets/fonts as fontAssets
 import times
-from frameos/types import Config, ExecutionContext
+from frameos/types import FrameConfig, ExecutionContext
 
 type AppConfig* = object
   text*: string
 
 type App* = object
   appConfig: AppConfig
-  config: Config
+  frameConfig: FrameConfig
   typeface: Typeface
 
-proc init*(config: Config, appConfig: AppConfig): App =
-  result = App(config: config, appConfig: appConfig)
+proc init*(frameConfig: FrameConfig, appConfig: AppConfig): App =
+  result = App(frameConfig: frameConfig, appConfig: appConfig)
   let parseTtfTimer = epochTime()
   result.typeface = parseTtf(fontAssets.getAsset("assets/fonts/Ubuntu-Regular_1.ttf"))
   echo "Time taken to parse ttf: ", (epochTime() - parseTtfTimer) * 1000, " ms"

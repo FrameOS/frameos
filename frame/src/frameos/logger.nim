@@ -1,6 +1,6 @@
 import httpclient, zippy, json
 
-from frameos/types import Config, Logger
+from frameos/types import FrameConfig, Logger
 
 # TODO:
 # - Keep a limited list of logs in memory
@@ -10,19 +10,19 @@ from frameos/types import Config, Logger
 # - Retry on failure
 # - Stop on shutdown
 
-proc newLogger*(config: Config): Logger =
+proc newLogger*(frameConfig: FrameConfig): Logger =
   var client = newHttpClient(timeout = 10000)
   client.headers = newHttpHeaders([
-      ("Authorization", "Bearer " & config.serverApiKey),
+      ("Authorization", "Bearer " & frameConfig.serverApiKey),
       ("Content-Type", "application/json"),
       ("Content-Encoding", "gzip")
   ])
-  var protocol = if config.serverPort mod 1000 ==
+  var protocol = if frameConfig.serverPort mod 1000 ==
       443: "https" else: "http"
-  var url = protocol & "://" & config.serverHost & ":" &
-      $config.serverPort & "/api/log"
+  var url = protocol & "://" & frameConfig.serverHost & ":" &
+      $frameConfig.serverPort & "/api/log"
   result = Logger(
-    config: config,
+    frameConfig: frameConfig,
     client: client,
     url: url
   )

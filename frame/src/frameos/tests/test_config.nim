@@ -1,5 +1,5 @@
 import std/json
-from ../config import Config, loadConfig
+from ../config import FrameConfig, loadConfig
 
 block test_load_config:
     let config = loadConfig("./frame.json")

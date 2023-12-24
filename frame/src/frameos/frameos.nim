@@ -7,12 +7,12 @@ from frameos/server import newServer, startServer
 from frameos/renderer import newRenderer
 
 proc newFrameOS*(): FrameOS =
-  var config = loadConfig()
-  var logger = newLogger(config)
-  var renderer = newRenderer(config, logger)
-  var server = newServer(config, logger, renderer)
+  var frameConfig = loadConfig()
+  var logger = newLogger(frameConfig)
+  var renderer = newRenderer(frameConfig, logger)
+  var server = newServer(frameConfig, logger, renderer)
   result = FrameOS(
-    config: config,
+    frameConfig: frameConfig,
     logger: logger,
     renderer: renderer,
     server: server,
@@ -20,16 +20,16 @@ proc newFrameOS*(): FrameOS =
 
 proc start*(self: FrameOS) =
   var message = %*{"event": "@frame:config", "config": {
-    "framePort": self.config.framePort,
-    "width": self.config.width,
-    "height": self.config.height,
-    "device": self.config.device,
-    "color": self.config.color,
-    "interval": self.config.interval,
-    "metrics_interval": self.config.metricsInterval,
-    "scaling_mode": self.config.scalingMode,
-    "rotate": self.config.rotate,
-    "background_color": self.config.backgroundColor,
+    "framePort": self.frameConfig.framePort,
+    "width": self.frameConfig.width,
+    "height": self.frameConfig.height,
+    "device": self.frameConfig.device,
+    "color": self.frameConfig.color,
+    "interval": self.frameConfig.interval,
+    "metrics_interval": self.frameConfig.metricsInterval,
+    "scaling_mode": self.frameConfig.scalingMode,
+    "rotate": self.frameConfig.rotate,
+    "background_color": self.frameConfig.backgroundColor,
   }}
   self.logger.log(message)
   self.server.startServer()

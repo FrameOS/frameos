@@ -1,12 +1,12 @@
 import pixie
 import scenes/default as defaultScene
 
-from frameos/types import Config, FrameScene, Renderer, Logger
+from frameos/types import FrameConfig, FrameScene, Renderer, Logger
 
-proc newRenderer*(config: Config, logger: Logger): Renderer =
-  var scene = defaultScene.init(config)
+proc newRenderer*(frameConfig: FrameConfig, logger: Logger): Renderer =
+  var scene = defaultScene.init(frameConfig)
   result = Renderer(
-    config: config,
+    frameConfig: frameConfig,
     logger: logger,
     scene: scene,
   )

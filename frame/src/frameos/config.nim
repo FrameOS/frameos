@@ -1,7 +1,7 @@
 import json
-from frameos/types import Config
+from frameos/types import FrameConfig
 
-proc setConfigDefaults*(config: var Config) =
+proc setConfigDefaults*(config: var FrameConfig) =
   if config.serverPort == 0: config.serverPort = 8989
   if config.width == 0: config.width = 1920
   if config.height == 0: config.height = 1080
@@ -14,9 +14,9 @@ proc setConfigDefaults*(config: var Config) =
   if config.backgroundColor == "": config.backgroundColor = "white"
   if config.framePort == 0: config.framePort = 8787
 
-proc loadConfig*(filename: string = "frame.json"): Config =
+proc loadConfig*(filename: string = "frame.json"): FrameConfig =
   let data = parseFile(filename)
-  result = Config(
+  result = FrameConfig(
     serverHost: data{"server_host"}.getStr(),
     serverPort: data{"server_port"}.getInt(),
     serverApiKey: data{"server_api_key"}.getStr(),

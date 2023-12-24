@@ -2,7 +2,7 @@ import pixie
 import std/strformat
 import times
 from frameos/image_utils import downloadImage
-from frameos/types import Config, ExecutionContext
+from frameos/types import FrameConfig, ExecutionContext
 
 type AppConfig* = object
   keyword*: string
@@ -11,10 +11,10 @@ type AppConfig* = object
 
 type App* = object
   appConfig: AppConfig
-  config: Config
+  frameConfig: FrameConfig
 
-proc init*(config: Config, appConfig: AppConfig): App =
-  result = App(config: config, appConfig: appConfig)
+proc init*(frameConfig: FrameConfig, appConfig: AppConfig): App =
+  result = App(frameConfig: frameConfig, appConfig: appConfig)
   if result.appConfig.keyword == "":
     result.appConfig.keyword = "random"
 
