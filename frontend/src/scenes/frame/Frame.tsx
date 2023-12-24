@@ -24,32 +24,17 @@ export function Frame(props: FrameSceneProps) {
             title={!frame ? `Loading frame ${props.id}...` : frame.name || frameHost(frame)}
             buttons={
               <div className="flex divide-x divide-gray-700 space-x-2">
-                <Button
-                  color="light-gray"
-                  type="button"
-                  onClick={() => renderFrame()}
-                  title="Refresh the frame with its _old_ config. Save any unsaved changes, but don't apply them."
-                >
+                <Button color="light-gray" type="button" onClick={() => renderFrame()}>
                   Re-Render
+                </Button>
+                <Button color="light-gray" type="button" onClick={() => restartFrame()}>
+                  Restart
                 </Button>
                 <div className="flex pl-2 space-x-2">
                   <Button color={frameChanged ? 'primary' : 'light-gray'} type="button" onClick={() => saveFrame()}>
                     Save
                   </Button>
-                  <Button
-                    color="light-gray"
-                    type="button"
-                    onClick={() => restartFrame()}
-                    title="Restart the frame with the new config."
-                  >
-                    Save&nbsp;&&nbsp;Restart
-                  </Button>
-                  <Button
-                    color="light-gray"
-                    type="button"
-                    onClick={() => deployFrame()}
-                    title="Deploy FrameOS onto the frame."
-                  >
+                  <Button color="light-gray" type="button" onClick={() => deployFrame()}>
                     Save&nbsp;&&nbsp;Redeploy
                   </Button>
                 </div>
