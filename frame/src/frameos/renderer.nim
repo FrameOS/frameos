@@ -1,8 +1,10 @@
+import json
 import pixie
 import times
 import scenes/default as defaultScene
 
 from frameos/types import FrameConfig, FrameScene, Renderer, Logger
+from frameos/logger import log
 
 proc newRenderer*(frameConfig: FrameConfig, logger: Logger): Renderer =
   var scene = defaultScene.init(frameConfig).FrameScene
@@ -17,4 +19,4 @@ proc renderScene*(self: Renderer): Image =
   echo "Rendering scene: default'"
   type DefaultScene = defaultScene.Scene
   result = defaultScene.render(self.scene.DefaultScene)
-  echo "Rendered scene in: ", (epochTime() - sceneTimer) * 1000, " ms"
+  self.logger.log(%*{"event": "renderScene", "ms": (epochTime() - sceneTimer) * 1000})
