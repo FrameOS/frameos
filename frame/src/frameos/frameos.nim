@@ -4,7 +4,7 @@ from frameos/types import FrameOS, Server
 from frameos/config import loadConfig
 from frameos/logger import newLogger, log
 from frameos/server import newServer, startServer
-from frameos/renderer import newRenderer
+from frameos/renderer import newRenderer, renderScene
 
 proc newFrameOS*(): FrameOS =
   var frameConfig = loadConfig()
@@ -30,6 +30,7 @@ proc start*(self: FrameOS) =
     "background_color": self.frameConfig.backgroundColor,
   }}
   self.logger.log(message)
+  discard self.renderer.renderScene()
   self.server.startServer()
 
 proc startFrameOS*() =

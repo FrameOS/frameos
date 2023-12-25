@@ -47,13 +47,11 @@ proc init*(frameOS: FrameOS, appConfig: AppConfig): App =
   )
 
 proc `==`(obj1, obj2: RenderData): bool =
-  echo "Running RenderData comparison"
   obj1.text == obj2.text and obj1.position == obj2.position and
       obj1.width == obj2.width and obj1.height == obj2.height and
       obj1.padding == obj2.padding and obj1.fontColor == obj2.fontColor and
       obj1.fontSize == obj2.fontSize and obj1.borderColor ==
           obj2.borderColor and obj1.borderWidth == obj2.borderWidth
-
 
 proc generateTypeset(typeface: Typeface, renderData: RenderData,
     border: bool): Arrangement =
@@ -81,7 +79,6 @@ proc generateTypeset(typeface: Typeface, renderData: RenderData,
   )
 
 proc render*(self: App, context: ExecutionContext) =
-  echo "Rendering app"
   let renderData = RenderData(
     text: self.appConfig.text,
     position: self.appConfig.position,
@@ -95,7 +92,6 @@ proc render*(self: App, context: ExecutionContext) =
   )
 
   let cacheMatch = self.cachedRender.isSome and self.cachedRender.get().renderData == renderData
-  echo "Cache match: ", cacheMatch
   let textTypeset = if cacheMatch: self.cachedRender.get().typeset
     else: generateTypeset(self.typeface, renderData, false)
   let borderTypeset = if renderData.borderWidth > 0:
