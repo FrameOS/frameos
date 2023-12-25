@@ -16,7 +16,7 @@ proc newRenderer*(frameOS: FrameOS): Renderer =
 
 proc renderScene*(self: Renderer): Image =
   type DefaultScene = defaultScene.Scene
-  self.logger.log(%*{"event": "renderScene:start"})
+  self.logger.log(%*{"event": "renderScene"})
   let sceneTimer = epochTime()
   result = defaultScene.render(self.scene.DefaultScene)
   self.logger.log(%*{"event": "renderScene:done", "ms": (epochTime() -
