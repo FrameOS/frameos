@@ -14,7 +14,7 @@
         },
         {
             "name": "cacheSeconds",
-            "type": "string",
+            "type": "float",
             "value": "60",
             "required": false,
             "label": "Seconds to cache the result",

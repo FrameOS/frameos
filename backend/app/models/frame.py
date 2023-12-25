@@ -293,10 +293,10 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                 if os.path.exists(config_path):
                     with open(config_path, 'r') as file:
                         config = json.load(file)
-                        for conf in config.get('fields'):
-                            key = conf.get('name', None)
-                            value = conf.get('value', None)
-                            config_types[key] = config.get('type', 'string')
+                        for field in config.get('fields'):
+                            key = field.get('name', None)
+                            value = field.get('value', None)
+                            config_types[key] = field.get('type', 'string')
                             if (key not in app_config or app_config.get(key) is None) and value is not None:
                                 app_config[key] = value
 

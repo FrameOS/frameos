@@ -33,7 +33,7 @@
     },
     {
       "name": "offsetX",
-      "type": "string",
+      "type": "float",
       "value": "0",
       "required": true,
       "label": "Offset X",
@@ -41,7 +41,7 @@
     },
     {
       "name": "offsetY",
-      "type": "string",
+      "type": "float",
       "value": "0",
       "required": true,
       "label": "Offset Y",
@@ -49,7 +49,7 @@
     },
     {
       "name": "padding",
-      "type": "string",
+      "type": "float",
       "value": "10",
       "required": true,
       "label": "Padding",
@@ -57,15 +57,15 @@
     },
     {
       "name": "fontColor",
-      "type": "string",
-      "value": "black",
+      "type": "color",
+      "value": "#ffffff",
       "required": true,
       "label": "Font Color",
-      "placeholder": "black"
+      "placeholder": "#ffffff"
     },
     {
       "name": "fontSize",
-      "type": "string",
+      "type": "float",
       "value": "32",
       "required": true,
       "label": "Font Size",
@@ -73,15 +73,15 @@
     },
     {
       "name": "borderColor",
-      "type": "string",
-      "value": "white",
+      "type": "color",
+      "value": "#000000",
       "required": true,
       "label": "Border Color",
-      "placeholder": "white"
+      "placeholder": "#000000"
     },
     {
       "name": "borderWidth",
-      "type": "string",
+      "type": "integer",
       "value": "1",
       "required": true,
       "label": "Border width",

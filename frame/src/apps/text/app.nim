@@ -6,13 +6,13 @@ from frameos/utils/font import getDefaultTypeface, newFont
 type AppConfig* = object
   text*: string
   position*: string
-  offsetX*: string
-  offsetY*: string
-  padding*: string
-  fontColor*: string
-  fontSize*: string
-  borderColor*: string
-  borderWidth*: string
+  offsetX*: float
+  offsetY*: float
+  padding*: float
+  fontColor*: Color
+  fontSize*: float
+  borderColor*: Color
+  borderWidth*: int
 
 type App* = object
   appConfig: AppConfig
@@ -28,14 +28,13 @@ proc init*(frameOS: FrameOS, appConfig: AppConfig): App =
   )
 
 proc render*(self: App, context: ExecutionContext) =
-  let size = try: parseFloat(self.appConfig.fontSize) except ValueError: 32.0
-  let borderWidth = try: parseInt(self.appConfig.borderWidth) except ValueError: 1
-  let color = try: parseHtmlColor(self.appConfig.fontColor) except ValueError: color(
-      0, 0, 0, 1)
+  let size = self.appConfig.fontSize
+  let borderWidth = self.appConfig.borderWidth
+  let color = self.appConfig.fontColor
   let font = newFont(self.typeface, size, color)
-  let padding = try: parseFloat(self.appConfig.padding) except ValueError: 10.0
-  let offsetX = try: parseFloat(self.appConfig.offsetX) except ValueError: 0.0
-  let offsetY = try: parseFloat(self.appConfig.offsetY) except ValueError: 0.0
+  let padding = self.appConfig.padding
+  let offsetX = self.appConfig.offsetX
+  let offsetY = self.appConfig.offsetY
   let hAlign = case self.appConfig.position:
     of "top-right", "center-right", "bottom-right": RightAlign
     of "top-left", "center-left", "bottom-left": LeftAlign
@@ -46,9 +45,8 @@ proc render*(self: App, context: ExecutionContext) =
     else: MiddleAlign
 
   if borderWidth > 0:
-    let color = try: parseHtmlColor(self.appConfig.borderColor) except ValueError: color(
-        255, 255, 255, 1)
-    let borderFont = newFont(self.typeface, size, color)
+    let borderColor = self.appConfig.borderColor
+    let borderFont = newFont(self.typeface, size, borderColor)
     let typeset = typeset(
         spans = [newSpan(self.appConfig.text, borderFont)],
         bounds = vec2(context.image.width.toFloat() - 2 * padding,
@@ -56,6 +54,7 @@ proc render*(self: App, context: ExecutionContext) =
         hAlign = hAlign,
         vAlign = vAlign,
     )
+    # TODO: This is ridiculously inefficient
     for dx in (-borderWidth)..(borderWidth):
       for dy in (-borderWidth)..(borderWidth):
         context.image.fillText(

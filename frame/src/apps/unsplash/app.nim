@@ -8,14 +8,13 @@ from frameos/types import FrameOS, FrameConfig, ExecutionContext
 
 type AppConfig* = object
   keyword*: string
-  cacheSeconds*: string
+  cacheSeconds*: float
 
 type App* = ref object
   appConfig: AppConfig
   frameConfig: FrameConfig
 
   cacheExpiry: float
-  cacheSeconds: float
   cachedImage: Option[Image]
   cachedUrl: string
 
@@ -25,8 +24,6 @@ proc init*(frameOS: FrameOS, appConfig: AppConfig): App =
     appConfig: appConfig,
     cachedImage: none(Image),
     cacheExpiry: 0.0,
-    cacheSeconds: if appConfig.cacheSeconds ==
-        "": 0.0 else: appConfig.cacheSeconds.parseFloat(),
     cachedUrl: "",
   )
   if result.appConfig.keyword == "":
@@ -37,14 +34,14 @@ proc render*(self: App, context: ExecutionContext) =
   let url = &"https://source.unsplash.com/random/{image.width}x{image.height}/?{self.appConfig.keyword}"
 
   var unsplashImage: Option[Image] = none(Image)
-  if self.cacheSeconds > 0 and self.cachedImage.isSome and self.cacheExpiry >
-      epochTime() and self.cachedUrl == url:
+  if self.appConfig.cacheSeconds > 0 and self.cachedImage.isSome and
+      self.cacheExpiry > epochTime() and self.cachedUrl == url:
     unsplashImage = self.cachedImage
   else:
     unsplashImage = some(downloadImage(url))
-    if self.cacheSeconds > 0:
+    if self.appConfig.cacheSeconds > 0:
       self.cachedImage = unsplashImage
       self.cachedUrl = url
-      self.cacheExpiry = epochTime() + self.cacheSeconds
+      self.cacheExpiry = epochTime() + self.appConfig.cacheSeconds
 
   image.draw(unsplashImage.get())
