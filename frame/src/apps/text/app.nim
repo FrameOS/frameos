@@ -1,23 +1,41 @@
-import pixie, strutils
+import pixie, options
 
 from frameos/types import FrameOS, FrameConfig, ExecutionContext
 from frameos/utils/font import getDefaultTypeface, newFont
 
-type AppConfig* = object
-  text*: string
-  position*: string
-  offsetX*: float
-  offsetY*: float
-  padding*: float
-  fontColor*: Color
-  fontSize*: float
-  borderColor*: Color
-  borderWidth*: int
+type
+  AppConfig* = object
+    text*: string
+    position*: string
+    offsetX*: float
+    offsetY*: float
+    padding*: float
+    fontColor*: Color
+    fontSize*: float
+    borderColor*: Color
+    borderWidth*: int
 
-type App* = object
-  appConfig: AppConfig
-  frameConfig: FrameConfig
-  typeface: Typeface
+  RenderData* = object
+    text*: string
+    position*: string
+    width*: int
+    height*: int
+    padding*: float
+    fontColor*: Color
+    fontSize*: float
+    borderColor*: Color
+    borderWidth*: int
+
+  CachedRender* = ref object
+    renderData*: RenderData
+    typeset*: Arrangement
+    borderTypeset*: Option[Arrangement]
+
+  App* = ref object
+    appConfig*: AppConfig
+    frameConfig*: FrameConfig
+    typeface*: Typeface
+    cachedRender*: Option[CachedRender]
 
 proc init*(frameOS: FrameOS, appConfig: AppConfig): App =
   let typeface = getDefaultTypeface()
@@ -25,52 +43,86 @@ proc init*(frameOS: FrameOS, appConfig: AppConfig): App =
     frameConfig: frameOS.frameConfig,
     appConfig: appConfig,
     typeface: typeface,
+    cachedRender: none(CachedRender),
   )
 
-proc render*(self: App, context: ExecutionContext) =
-  let size = self.appConfig.fontSize
-  let borderWidth = self.appConfig.borderWidth
-  let color = self.appConfig.fontColor
-  let padding = self.appConfig.padding
-  let offsetX = self.appConfig.offsetX
-  let offsetY = self.appConfig.offsetY
-  let hAlign = case self.appConfig.position:
+proc `==`(obj1, obj2: RenderData): bool =
+  echo "Running RenderData comparison"
+  obj1.text == obj2.text and obj1.position == obj2.position and
+      obj1.width == obj2.width and obj1.height == obj2.height and
+      obj1.padding == obj2.padding and obj1.fontColor == obj2.fontColor and
+      obj1.fontSize == obj2.fontSize and obj1.borderColor ==
+          obj2.borderColor and obj1.borderWidth == obj2.borderWidth
+
+
+proc generateTypeset(typeface: Typeface, renderData: RenderData,
+    border: bool): Arrangement =
+
+  let font = if border:
+    newFont(typeface, renderData.fontSize, renderData.borderColor)
+  else:
+    newFont(typeface, renderData.fontSize, renderData.fontColor)
+
+  let hAlign = case renderData.position:
     of "top-right", "center-right", "bottom-right": RightAlign
     of "top-left", "center-left", "bottom-left": LeftAlign
     else: CenterAlign
-  let vAlign = case self.appConfig.position:
+  let vAlign = case renderData.position:
     of "top-left", "top-center", "top-right": TopAlign
     of "bottom-left", "bottom-center", "bottom-right": BottomAlign
     else: MiddleAlign
 
-  if borderWidth > 0:
-    let borderColor = self.appConfig.borderColor
-    let borderFont = newFont(self.typeface, size, borderColor)
-    let typeset = typeset(
-        spans = [newSpan(self.appConfig.text, borderFont)],
-        bounds = vec2(context.image.width.toFloat() - 2 * padding,
-            context.image.height.toFloat() - 2 * padding),
-        hAlign = hAlign,
-        vAlign = vAlign,
-    )
-    # TODO: This is ridiculously inefficient
-    for dx in (-borderWidth)..(borderWidth):
-      for dy in (-borderWidth)..(borderWidth):
+  result = typeset(
+      spans = [newSpan(renderData.text, font)],
+      bounds = vec2(renderData.width.toFloat() - 2 * renderData.padding,
+          renderData.height.toFloat() - 2 * renderData.padding),
+      hAlign = hAlign,
+      vAlign = vAlign,
+  )
+
+proc render*(self: App, context: ExecutionContext) =
+  echo "Rendering app"
+  let renderData = RenderData(
+    text: self.appConfig.text,
+    position: self.appConfig.position,
+    width: context.image.width,
+    height: context.image.height,
+    padding: self.appConfig.padding,
+    fontColor: self.appConfig.fontColor,
+    fontSize: self.appConfig.fontSize,
+    borderColor: self.appConfig.borderColor,
+    borderWidth: self.appConfig.borderWidth,
+  )
+
+  let cacheMatch = self.cachedRender.isSome and self.cachedRender.get().renderData == renderData
+  echo "Cache match: ", cacheMatch
+  let textTypeset = if cacheMatch: self.cachedRender.get().typeset
+    else: generateTypeset(self.typeface, renderData, false)
+  let borderTypeset = if renderData.borderWidth > 0:
+      if cacheMatch:
+        self.cachedRender.get().borderTypeset
+      else: some(generateTypeset(self.typeface, renderData, true))
+      else: none(Arrangement)
+
+  if not cacheMatch:
+    self.cachedRender = some(CachedRender(
+      renderData: renderData,
+      typeset: textTypeset,
+      borderTypeset: borderTypeset,
+    ))
+
+  if renderData.borderWidth > 0 and borderTypeset.isSome:
+    for dx in (-renderData.borderWidth)..(renderData.borderWidth):
+      for dy in (-renderData.borderWidth)..(renderData.borderWidth):
         context.image.fillText(
-          typeset,
+          borderTypeset.get(),
           translate(vec2(
-            padding + offsetX + dx.toFloat(),
-            padding + offsetY + dy.toFloat()))
+            renderData.padding + self.appConfig.offsetX + dx.toFloat(),
+            renderData.padding + self.appConfig.offsetY + dy.toFloat()))
         )
 
-  let font = newFont(self.typeface, size, color)
   context.image.fillText(
-    typeset(
-        spans = [newSpan(self.appConfig.text, font)],
-        bounds = vec2(context.image.width.toFloat() - 2 * padding,
-            context.image.height.toFloat() - 2 * padding),
-        hAlign = hAlign,
-        vAlign = vAlign,
-    ),
-    translate(vec2(padding + offsetX, padding + offsetY))
+    textTypeset,
+    translate(vec2(renderData.padding + self.appConfig.offsetX,
+        renderData.padding + self.appConfig.offsetY))
   )
