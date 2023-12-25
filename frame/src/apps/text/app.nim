@@ -1,8 +1,7 @@
-import pixie
-import times
+import pixie, std/strutils
 
 from frameos/types import FrameOS, FrameConfig, ExecutionContext
-from frameos/fontUtils import getDefaultTypeface, newFont
+from frameos/utils/font import getDefaultTypeface, newFont
 
 type AppConfig* = object
   text*: string
@@ -22,10 +21,12 @@ type App* = object
   span: Span
 
 proc init*(frameOS: FrameOS, appConfig: AppConfig): App =
-  var typeface = getDefaultTypeface()
-  let makeFontTimer = epochTime()
-  var font = newFont(typeface, 32, color(0.78125, 0.78125, 0.78125, 1))
-  echo "Time taken to make new font: ", (epochTime() - makeFontTimer) * 1000, " ms"
+  let typeface = getDefaultTypeface()
+  let font = newFont(
+    typeface,
+    try: parseFloat(appConfig.font_size) except ValueError: 32.0,
+    color(0.78125, 0.78125, 0.78125, 1)
+  )
   result = App(
     frameConfig: frameOS.frameConfig,
     appConfig: appConfig,
@@ -34,6 +35,24 @@ proc init*(frameOS: FrameOS, appConfig: AppConfig): App =
     span: newSpan(appConfig.text, font)
   )
 
-
 proc render*(self: App, context: ExecutionContext) =
-  context.image.fillText(typeset([self.span], vec2(180, 180)), translate(vec2(10, 10)))
+  let padding = 10.0
+  let hAlign = case self.appConfig.position:
+    of "top-right", "center-right", "bottom-right": RightAlign
+    of "top-left", "center-left", "bottom-left": LeftAlign
+    else: CenterAlign
+  let vAlign = case self.appConfig.position:
+    of "top-left", "top-center", "top-right": TopAlign
+    of "bottom-left", "bottom-center", "bottom-right": BottomAlign
+    else: MiddleAlign
+
+  context.image.fillText(
+    typeset(
+        spans = [self.span],
+        bounds = vec2(context.image.width.toFloat() - 2 * padding,
+            context.image.height.toFloat() - 2 * padding),
+        hAlign = hAlign,
+        vAlign = vAlign,
+    ),
+    translate(vec2(padding, padding))
+  )

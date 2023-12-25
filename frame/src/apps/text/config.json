@@ -58,10 +58,10 @@
     {
       "name": "font_size",
       "type": "string",
-      "value": "20",
+      "value": "32",
       "required": true,
       "label": "Font Size",
-      "placeholder": "20"
+      "placeholder": "32"
     },
     {
       "name": "border_color",

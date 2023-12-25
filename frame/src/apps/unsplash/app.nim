@@ -3,7 +3,7 @@ import std/strformat
 import times
 import strutils
 import options
-from frameos/imageUtils import downloadImage
+from frameos/utils/image import downloadImage
 from frameos/types import FrameOS, FrameConfig, ExecutionContext
 
 type AppConfig* = object
