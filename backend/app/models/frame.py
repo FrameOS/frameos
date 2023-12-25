@@ -338,27 +338,36 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
             event_lines += [f"  self.runNode(\"{next_node}\", context)"]
     newline = "\n"
     scene_source = f"""
-import pixie, json
+import pixie, json, times
 
 from frameos/types import FrameOS, FrameScene, ExecutionContext
+from frameos/logger import log
 {newline.join(imports)}
+
+let DEBUG = false
 
 type Scene* = ref object of FrameScene
   state: JsonNode
   {(newline + "  ").join(scene_apps)}
 
 proc init*(frameOS: FrameOS): Scene =
-  result = Scene(frameConfig: frameOS.frameConfig)
+  result = Scene(frameOS: frameOS, frameConfig: frameOS.frameConfig, logger: frameOS.logger, state: %*{{}})
   {(newline + "  ").join(init_apps)}
 
 proc runNode*(self: Scene, nodeId: string,
     context: var ExecutionContext) =
   var nextNode = nodeId
+  var currentNode = nodeId
+  var timer = epochTime()
   while nextNode != "-1":
+    currentNode = nextNode
+    timer = epochTime()
     case nextNode:
     {(newline + "    ").join(render_nodes)}
     else:
       nextNode = "-1"
+    if DEBUG:
+      self.logger.log(%*{{"event": "runApp", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
 
 proc dispatchEvent*(self: Scene, event: string, eventPayload:
     JsonNode): ExecutionContext =

@@ -23,7 +23,9 @@ type
     url*: string
 
   FrameScene* = ref object of RootObj
+    frameOS*: FrameOS
     frameConfig*: FrameConfig
+    logger*: Logger
 
   ExecutionContext* = ref object
     scene*: FrameScene
@@ -33,10 +35,10 @@ type
     parent*: ExecutionContext
 
   Renderer* = ref object
+    frameOS*: FrameOS
     frameConfig*: FrameConfig
     logger*: Logger
     scene*: FrameScene
-    frameOS*: FrameOS
 
   Server* = ref object
     frameConfig*: FrameConfig
