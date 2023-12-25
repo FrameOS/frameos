@@ -32,15 +32,15 @@
       "placeholder": "center-center"
     },
     {
-      "name": "offset_x",
+      "name": "offsetX",
       "type": "string",
       "value": "0",
       "required": true,
       "label": "Offset X",
       "placeholder": "0"
     },
-      {
-      "name": "offset_y",
+    {
+      "name": "offsetY",
       "type": "string",
       "value": "0",
       "required": true,
@@ -48,7 +48,15 @@
       "placeholder": "0"
     },
     {
-      "name": "font_color",
+      "name": "padding",
+      "type": "string",
+      "value": "10",
+      "required": true,
+      "label": "Padding",
+      "placeholder": "10"
+    },
+    {
+      "name": "fontColor",
       "type": "string",
       "value": "black",
       "required": true,
@@ -56,7 +64,7 @@
       "placeholder": "black"
     },
     {
-      "name": "font_size",
+      "name": "fontSize",
       "type": "string",
       "value": "32",
       "required": true,
@@ -64,7 +72,7 @@
       "placeholder": "32"
     },
     {
-      "name": "border_color",
+      "name": "borderColor",
       "type": "string",
       "value": "white",
       "required": true,
@@ -72,12 +80,12 @@
       "placeholder": "white"
     },
     {
-      "name": "border_width",
+      "name": "borderWidth",
       "type": "string",
       "value": "1",
       "required": true,
       "label": "Border width",
-      "placeholder": "0"
+      "placeholder": "1"
     }
   ]
 }

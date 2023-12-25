@@ -13,7 +13,7 @@ proc getDefaultTypeface*(): Typeface =
     echo "Time taken to parse ttf: ", (epochTime() - parseTtfTimer) * 1000, " ms"
   return typeface.get()
 
-proc newFont*(typeface: Typeface, size: float32, color: Color): Font =
+proc newFont*(typeface: Typeface, size: float, color: Color): Font =
   result = newFont(typeface)
   result.size = size
   result.paint.color = color
