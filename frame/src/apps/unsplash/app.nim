@@ -4,7 +4,7 @@ import times
 import strutils
 import options
 from frameos/imageUtils import downloadImage
-from frameos/types import FrameConfig, ExecutionContext
+from frameos/types import FrameOS, FrameConfig, ExecutionContext
 
 type AppConfig* = object
   keyword*: string
@@ -19,9 +19,9 @@ type App* = ref object
   cachedImage: Option[Image]
   cachedUrl: string
 
-proc init*(frameConfig: FrameConfig, appConfig: AppConfig): App =
+proc init*(frameOS: FrameOS, appConfig: AppConfig): App =
   result = App(
-    frameConfig: frameConfig,
+    frameConfig: frameOS.frameConfig,
     appConfig: appConfig,
     cachedImage: none(Image),
     cacheExpiry: 0.0,

@@ -9,14 +9,12 @@ from frameos/renderer import newRenderer
 proc newFrameOS*(): FrameOS =
   var frameConfig = loadConfig()
   var logger = newLogger(frameConfig)
-  var renderer = newRenderer(frameConfig, logger)
-  var server = newServer(frameConfig, logger, renderer)
   result = FrameOS(
     frameConfig: frameConfig,
     logger: logger,
-    renderer: renderer,
-    server: server,
   )
+  result.renderer = newRenderer(result)
+  result.server = newServer(result)
 
 proc start*(self: FrameOS) =
   var message = %*{"event": "@frame:config", "config": {

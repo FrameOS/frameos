@@ -286,7 +286,7 @@ def make_local_modifications(frame, source_dir):
                             app_config_pairs += [f"{key}: {value}"]
 
                     init_apps += [
-                        f"result.{app_id} = {name}App.init(frameConfig, {name}App.AppConfig({', '.join(app_config_pairs)}))"
+                        f"result.{app_id} = {name}App.init(frameOS, {name}App.AppConfig({', '.join(app_config_pairs)}))"
                     ]
                     render_nodes += [
                         f"of \"{node_id}\":",
@@ -306,15 +306,15 @@ def make_local_modifications(frame, source_dir):
         scene = f"""
 import pixie, json
 
-from frameos/types import FrameConfig, FrameScene, ExecutionContext
+from frameos/types import FrameOS, FrameScene, ExecutionContext
 {newline.join(imports)}
 
 type Scene* = ref object of FrameScene
   state: JsonNode
   {(newline + "  ").join(scene_apps)}
 
-proc init*(frameConfig: FrameConfig): Scene =
-  result = Scene(frameConfig: frameConfig)
+proc init*(frameOS: FrameOS): Scene =
+  result = Scene(frameConfig: frameOS.frameConfig)
   {(newline + "  ").join(init_apps)}
 
 proc runNode*(self: Scene, nodeId: string,

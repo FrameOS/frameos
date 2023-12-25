@@ -4,7 +4,7 @@ import os
 
 
 def get_app_configs() -> Dict[str, Dict]:
-    local_apps_path = "../frame/apps"
+    local_apps_path = "../frame/src/apps"
     configs = {}
     for keyword in os.listdir(local_apps_path):
         local_app_path = os.path.join(local_apps_path, keyword)
@@ -36,7 +36,7 @@ def get_local_frame_apps() -> List[str]:
 
 
 def get_one_app_sources(keyword: str) -> Optional[Dict[str, str]]:
-    local_apps_path = "../frame/apps"
+    local_apps_path = "../frame/src/apps"
     apps = os.listdir(local_apps_path)
     sources: Dict[str, str] = {}
     if keyword in apps:

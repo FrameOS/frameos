@@ -1,7 +1,7 @@
 import pixie
 import times
 
-from frameos/types import FrameConfig, ExecutionContext
+from frameos/types import FrameOS, FrameConfig, ExecutionContext
 from frameos/fontUtils import getDefaultTypeface, newFont
 
 type AppConfig* = object
@@ -21,13 +21,13 @@ type App* = object
   font: Font
   span: Span
 
-proc init*(frameConfig: FrameConfig, appConfig: AppConfig): App =
+proc init*(frameOS: FrameOS, appConfig: AppConfig): App =
   var typeface = getDefaultTypeface()
   let makeFontTimer = epochTime()
   var font = newFont(typeface, 32, color(0.78125, 0.78125, 0.78125, 1))
   echo "Time taken to make new font: ", (epochTime() - makeFontTimer) * 1000, " ms"
   result = App(
-    frameConfig: frameConfig,
+    frameConfig: frameOS.frameConfig,
     appConfig: appConfig,
     typeface: typeface,
     font: font,

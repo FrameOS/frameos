@@ -1,6 +1,6 @@
 import pixie, json, times, strformat
 
-from frameos/types import FrameConfig, FrameScene, ExecutionContext
+from frameos/types import FrameOS, FrameConfig, FrameScene, ExecutionContext
 import apps/unsplash/app as unsplashApp
 import apps/text/app as textApp
 
@@ -9,13 +9,13 @@ type Scene* = ref object of FrameScene
   app_1: unsplashApp.App
   app_2: textApp.App
 
-proc init*(frameConfig: FrameConfig): Scene =
+proc init*(frameOS: FrameOS): Scene =
   result = Scene(
-    frameConfig: frameConfig,
+    frameConfig: frameOS.frameConfig,
     state: %*{},
-    app_1: unsplashApp.init(frameConfig, unsplashApp.AppConfig(
+    app_1: unsplashApp.init(frameOS, unsplashApp.AppConfig(
       keyword: "random", cacheSeconds: "10")),
-    app_2: textApp.init(frameConfig, textApp.AppConfig(
+    app_2: textApp.init(frameOS, textApp.AppConfig(
       text: "Hello")),
   )
   result.state["bla"] = %*"bla"

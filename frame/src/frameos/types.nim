@@ -17,31 +17,27 @@ type
     backgroundColor*: string
     settings*: JsonNode
 
-type
   Logger* = ref object
     frameConfig*: FrameConfig
     client*: HttpClient
     url*: string
 
-type
   FrameScene* = ref object of RootObj
     frameConfig*: FrameConfig
 
-type ExecutionContext* = ref object
-  scene*: FrameScene
-  image*: Image
-  event*: string
-  eventPayload*: JsonNode
-  parent*: ExecutionContext
+  ExecutionContext* = ref object
+    scene*: FrameScene
+    image*: Image
+    event*: string
+    eventPayload*: JsonNode
+    parent*: ExecutionContext
 
-
-type
   Renderer* = ref object
     frameConfig*: FrameConfig
     logger*: Logger
     scene*: FrameScene
+    frameOS*: FrameOS
 
-type
   Server* = ref object
     frameConfig*: FrameConfig
     logger*: Logger
@@ -49,7 +45,6 @@ type
     renderer*: Renderer
     url*: string
 
-type
   FrameOS* = ref object
     frameConfig*: FrameConfig
     logger*: Logger
