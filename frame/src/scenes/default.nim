@@ -1,4 +1,4 @@
-import pixie, json
+import pixie, json, times, strformat
 
 from frameos/types import FrameConfig, FrameScene, ExecutionContext
 import apps/unsplash/app as unsplashApp
@@ -23,8 +23,11 @@ proc init*(frameConfig: FrameConfig): Scene =
 proc runNode*(self: Scene, nodeId: string,
     context: var ExecutionContext) =
   var nextNode = nodeId
-  echo "Running node: " & nodeId
+  var currentNode = nodeId
+  var nodeTimer = 0.0
   while nextNode != "-1":
+    nodeTimer = epochTime()
+    currentNode = nextNode
     case nextNode:
     of "1":
       self.app_1.render(context)
@@ -34,6 +37,7 @@ proc runNode*(self: Scene, nodeId: string,
       nextNode = "-1"
     else:
       nextNode = "-1"
+    echo &"Time taken to run app {currentNode}: {(epochTime() - nodeTimer) * 1000} ms"
 
 proc dispatchEvent*(self: Scene, event: string, eventPayload:
     JsonNode): ExecutionContext =

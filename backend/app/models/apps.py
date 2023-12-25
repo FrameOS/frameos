@@ -4,7 +4,7 @@ import os
 
 
 def get_app_configs() -> Dict[str, Dict]:
-    local_apps_path = "../frameos/apps"
+    local_apps_path = "../frame/apps"
     configs = {}
     for keyword in os.listdir(local_apps_path):
         local_app_path = os.path.join(local_apps_path, keyword)
@@ -36,15 +36,15 @@ def get_local_frame_apps() -> List[str]:
 
 
 def get_one_app_sources(keyword: str) -> Optional[Dict[str, str]]:
-    local_apps_path = "../frameos/apps"
+    local_apps_path = "../frame/apps"
     apps = os.listdir(local_apps_path)
     sources: Dict[str, str] = {}
     if keyword in apps:
         local_app_path = os.path.join(local_apps_path, keyword)
-        app_path = os.path.join(local_app_path, "frame.py")
+        app_path = os.path.join(local_app_path, "app.nim")
         if os.path.exists(app_path):
             with open(app_path, 'r') as f:
-                sources['frame.py'] = f.read()
+                sources['app.nim'] = f.read()
         config_path = os.path.join(local_app_path, "config.json")
         if os.path.exists(config_path):
             with open(config_path, 'r') as f:

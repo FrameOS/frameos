@@ -15,8 +15,7 @@ proc newRenderer*(frameConfig: FrameConfig, logger: Logger): Renderer =
   )
 
 proc renderScene*(self: Renderer): Image =
-  let sceneTimer = epochTime()
-  echo "Rendering scene: default'"
   type DefaultScene = defaultScene.Scene
+  let sceneTimer = epochTime()
   result = defaultScene.render(self.scene.DefaultScene)
   self.logger.log(%*{"event": "renderScene", "ms": (epochTime() - sceneTimer) * 1000})

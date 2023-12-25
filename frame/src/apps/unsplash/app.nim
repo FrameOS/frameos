@@ -47,6 +47,4 @@ proc render*(self: App, context: ExecutionContext) =
       self.cachedUrl = url
       self.cacheExpiry = epochTime() + self.cacheSeconds
 
-  let drawTimer = epochTime()
   image.draw(unsplashImage.get())
-  echo "Time taken to draw background: ", (epochTime() - drawTimer) * 1000, " ms"
