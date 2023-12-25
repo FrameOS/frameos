@@ -45,6 +45,6 @@ proc newServer*(frameOS: FrameOS): Server =
 
 
 proc startServer*(self: Server) =
-  self.logger.log(%*{"event": "@frame:server_start",
+  self.logger.log(%*{"event": "http:start",
       "message": "Starting web server"})
   self.jester.serve() # blocks forever

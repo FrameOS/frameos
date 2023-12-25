@@ -17,7 +17,7 @@ proc newFrameOS*(): FrameOS =
   result.server = newServer(result)
 
 proc start*(self: FrameOS) =
-  var message = %*{"event": "@frame:config", "config": {
+  var message = %*{"event": "bootup", "config": {
     "framePort": self.frameConfig.framePort,
     "width": self.frameConfig.width,
     "height": self.frameConfig.height,

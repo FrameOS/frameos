@@ -47,13 +47,13 @@ def process_log(frame: Frame, log: dict):
 
     changes = {}
     event = log.get('event', 'log')
-    if event == '@frame:render':
+    if event == 'renderScene:start':
         changes['status'] = 'preparing'
-    if event == '@frame:render_update_screen':
-        changes['status'] = 'rendering'
-    if event == '@frame:render_done' or event == '@frame:render_skipped':
+    # if event == 'renderScene:render':
+    #     changes['status'] = 'rendering'
+    if event == 'renderScene:done':
         changes['status'] = 'ready'
-    if event == '@frame:config':
+    if event == 'bootup':
         if frame.status != 'ready':
             changes['status'] = 'ready'
         for key in ['frame_port', 'width', 'height', 'device', 'color', 'interval', 'metrics_interval', 'scaling_mode', 'rotate',
