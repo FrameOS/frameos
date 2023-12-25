@@ -39,6 +39,8 @@ type
     frameConfig*: FrameConfig
     logger*: Logger
     scene*: FrameScene
+    lastImage*: Option[Image]
+    lastRenderAt*: float
 
   Server* = ref object
     frameConfig*: FrameConfig

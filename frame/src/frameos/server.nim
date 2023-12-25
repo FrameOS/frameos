@@ -8,7 +8,7 @@ from net import Port
 import options
 from frameos/types import FrameOS, FrameConfig, Logger, Server, Renderer
 from frameos/logger import log
-from frameos/renderer import renderScene
+from frameos/renderer import lastRender
 
 var globalLogger: Logger
 var globalFrameConfig: FrameConfig
@@ -23,8 +23,7 @@ proc match(request: Request): ResponseData =
         resp Http200, webAssets.getAsset("assets/web/index.html")
       of "/image":
         globalLogger.log(%*{"event": "http", "path": "/image"})
-        let image = globalRenderer.renderScene()
-        resp Http200, {"Content-Type": "image/png"}, image.encodeImage(PngFormat)
+        resp Http200, {"Content-Type": "image/png"}, globalRenderer.lastRender().encodeImage(PngFormat)
       else:
         resp Http404, "Not found!"
 
