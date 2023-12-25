@@ -6,7 +6,8 @@ from flask import jsonify, request, Response
 from flask_login import login_required
 from . import api
 from app import redis
-from app.models.frame import Frame, new_frame, delete_frame, update_frame
+from app.models.frame import Frame, new_frame, delete_frame, update_frame, generate_scene_nim_source
+
 
 @api.route("/frames", methods=["GET"])
 @login_required
@@ -77,6 +78,15 @@ def api_frame_render_event(id: int):
             return jsonify({"error": "Unable to refresh frame"}), response.status_code
     except Exception as e:
         return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+@api.route('/frames/<int:id>/scene_source/<scene>', methods=['GET'])
+@login_required
+def api_frame_scene_source(id: int, scene: str):
+    frame = Frame.query.get_or_404(id)
+    scene = [scene for scene in frame.scenes if scene.get('id') == 'default'][0]
+    if not scene:
+        return jsonify({'error': f'Scene {scene} not found'}), HTTPStatus.NOT_FOUND
+    return jsonify({'source': generate_scene_nim_source(frame, scene)})
 
 @api.route('/frames/<int:id>/reset', methods=['POST'])
 @login_required

@@ -1,11 +1,12 @@
 import json
+import os
 import uuid
 import secrets
 from app import db, socketio
 from typing import Dict, Optional
 from sqlalchemy.dialects.sqlite import JSON
 
-from app.models.apps import get_app_configs
+from app.models.apps import get_app_configs, get_local_frame_apps
 from app.models.settings import get_settings_dict
 
 
@@ -228,3 +229,150 @@ def get_frame_json(frame: Frame) -> dict:
 
     frame_json['settings'] = final_settings
     return frame_json
+
+
+
+def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
+    from app.models.log import new_log as log
+    available_apps = get_local_frame_apps()
+    scene_id = scene.get('id', 'default')
+    log(frame.id, "stdout", f"- Generating scene: {scene_id}")
+    nodes = scene.get('nodes', [])
+    nodes_by_id = {n['id']: n for n in nodes}
+    imports = [
+        # "import apps/unsplash/app as unsplashApp"
+    ]
+    scene_apps = [
+        # "app_1: unsplashApp.App"
+    ]
+    init_apps = [
+        # "result.app_1 = unsplashApp.init(config, unsplashApp.AppConfig(keyword: \"random\"))"
+    ]
+    render_nodes = [
+        # "of 1:",
+        # "  self.app_1.render(context)",
+        # "  nextNode = 2",
+    ]
+    event_lines = [
+        # "of \"render\":",
+        # "  self.runNode(\"1\", context)",
+    ]
+    edges = scene.get('edges', [])
+    event_nodes = {}
+    next_nodes = {}
+    for edge in edges:
+        source = edge.get('source', None)
+        target = edge.get('target', None)
+        source_handle = edge.get('sourceHandle', None)
+        target_handle = edge.get('targetHandle', None)
+        if source and target and source_handle == 'next' and target_handle == 'prev':
+            next_nodes[source] = target
+    for node in nodes:
+        node_id = node['id']
+        if node.get('type') == 'event':
+            event = node.get('data', {}).get('keyword', None)
+            if event:
+                if not event_nodes.get(event):
+                    event_nodes[event] = []
+                event_nodes[event].append(node)
+        elif node.get('type') == 'app':
+            name = node.get('data', {}).get('keyword', None)
+            if name in available_apps:
+                log(frame.id, "stdout", f"- Generating app: {name}")
+                app_import = f"import apps/{name}/app as {name}App"
+                if app_import not in imports:
+                    imports += [app_import]
+                app_id = "app_" + node_id.replace('-', '_')
+                scene_apps += [
+                    f"{app_id}: {name}App.App"
+                ]
+
+                app_config = node.get('data').get('config', {}).copy()
+                config_path = os.path.join("../frame/src/apps", name, "config.json")
+                config_types: Dict[str, str] = {}
+                if os.path.exists(config_path):
+                    with open(config_path, 'r') as file:
+                        config = json.load(file)
+                        for conf in config.get('fields'):
+                            key = conf.get('name', None)
+                            value = conf.get('value', None)
+                            config_types[key] = config.get('type', 'string')
+                            if (key not in app_config or app_config.get(key) is None) and value is not None:
+                                app_config[key] = value
+
+                app_config_pairs = []
+                for key, value in app_config.items():
+                    if key not in config_types:
+                        log(frame.id, "stderr",
+                            f"- ERROR: Config key \"{key}\" not found for app \"{name}\", node \"{node_id}\"")
+                        continue
+                    type = config_types[key]
+
+                    # TODO: sanitize
+                    if isinstance(value, str):
+                        if type == "integer":
+                            app_config_pairs += [f"{key}: {int(value)}"]
+                        elif type == "float":
+                            app_config_pairs += [f"{key}: {float(value)}"]
+                        elif type == "color":
+                            app_config_pairs += [f"{key}: parseHtmlColor(\"{value}\")"]
+                        else:
+                            app_config_pairs += [f"{key}: \"{value}\""]
+                    else:
+                        app_config_pairs += [f"{key}: {value}"]
+
+                init_apps += [
+                    f"result.{app_id} = {name}App.init(frameOS, {name}App.AppConfig({', '.join(app_config_pairs)}))"
+                ]
+                render_nodes += [
+                    f"of \"{node_id}\":",
+                    f"  self.{app_id}.render(context)",
+                    f"  nextNode = \"{next_nodes.get(node_id, '-1')}\""
+                ]
+            else:
+                log(frame.id, "stderr", f"- ERROR: App not found: {name}")
+    for event, nodes in event_nodes.items():
+        event_lines += [f"of \"{event}\":", ]
+        for node in nodes:
+            next_node = next_nodes.get(node['id'], '-1')
+            event_lines += [f"  self.runNode(\"{next_node}\", context)"]
+    newline = "\n"
+    scene_source = f"""
+import pixie, json
+
+from frameos/types import FrameOS, FrameScene, ExecutionContext
+{newline.join(imports)}
+
+type Scene* = ref object of FrameScene
+  state: JsonNode
+  {(newline + "  ").join(scene_apps)}
+
+proc init*(frameOS: FrameOS): Scene =
+  result = Scene(frameConfig: frameOS.frameConfig)
+  {(newline + "  ").join(init_apps)}
+
+proc runNode*(self: Scene, nodeId: string,
+    context: var ExecutionContext) =
+  var nextNode = nodeId
+  while nextNode != "-1":
+    case nextNode:
+    {(newline + "    ").join(render_nodes)}
+    else:
+      nextNode = "-1"
+
+proc dispatchEvent*(self: Scene, event: string, eventPayload:
+    JsonNode): ExecutionContext =
+  var context = ExecutionContext(scene: self, event: event,
+      eventPayload: eventPayload)
+  if event == "render":
+    context.image = newImage(self.frameConfig.width, self.frameConfig.height)
+  case event:
+  {(newline + "  ").join(event_lines)}
+  result = context
+
+proc render*(self: Scene): Image =
+  var context = dispatchEvent(self, "render", %*{{"json": "True"}})
+  return context.image
+"""
+    return scene_source
+
