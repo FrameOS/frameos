@@ -31,7 +31,6 @@ proc render*(self: App, context: ExecutionContext) =
   let size = self.appConfig.fontSize
   let borderWidth = self.appConfig.borderWidth
   let color = self.appConfig.fontColor
-  let font = newFont(self.typeface, size, color)
   let padding = self.appConfig.padding
   let offsetX = self.appConfig.offsetX
   let offsetY = self.appConfig.offsetY
@@ -64,6 +63,7 @@ proc render*(self: App, context: ExecutionContext) =
             padding + offsetY + dy.toFloat()))
         )
 
+  let font = newFont(self.typeface, size, color)
   context.image.fillText(
     typeset(
         spans = [newSpan(self.appConfig.text, font)],
