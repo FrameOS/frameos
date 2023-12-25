@@ -390,10 +390,10 @@ def create_local_build_archive(build_dir, build_id, frame, nim_path, source_dir,
         file.write("set -eu")
         for i, line in enumerate(lines):
             if i == len(lines) - 1:
-                file.write(f"echo [{i}/{len(lines)}] Compiling on device: frameos\n")
+                file.write(f"echo [{i}/{len(lines) - 1}] Compiling on device: frameos\n")
             else:
                 source = '/'.join(line.split(' ')[-1].split('@s')[-3:]).replace('@m', './')
-                file.write(f"echo [{i}/{len(lines)}] Compiling on device: {source}\n")
+                file.write(f"echo [{i}/{len(lines) - 1}] Compiling on device: {source}\n")
             file.write(line)
 
     # 7. Zip it up "(cd tmp && tar -czf ./build_1.tar.gz build_1)"
