@@ -62,7 +62,7 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
                   theme="node"
                   placeholder="Inlined nim code"
                   value={data.code ?? ''}
-                  onChange={(value) => updateNodeData(id, { code: value })}
+                  onChange={(value) => updateNodeData(id, { code: value.replaceAll('\n', '') })}
                   rows={3}
                 />
               </td>
