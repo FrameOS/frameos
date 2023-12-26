@@ -19,7 +19,9 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
   const { updateNodeConfig, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const { editApp } = useActions(panelsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { app, appFields, isCustomApp, configJsonError, isSelected, node } = useValues(appNodeLogic(appNodeLogicProps))
+  const { app, appFields, isCustomApp, configJsonError, isSelected, codeFields } = useValues(
+    appNodeLogic(appNodeLogicProps)
+  )
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
 
   return (
@@ -154,6 +156,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                               value={field.name in data.config ? data.config[field.name] : field.value}
                               options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
                               onChange={(value) => updateNodeConfig(id, field.name, value)}
+                              disabled={codeFields.includes(field.name)}
                             />
                           ) : field.type === 'text' ? (
                             <TextArea
@@ -162,6 +165,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                               value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
                               onChange={(value) => updateNodeConfig(id, field.name, value)}
                               rows={field.rows ?? 3}
+                              disabled={codeFields.includes(field.name)}
                             />
                           ) : (
                             <TextInput
@@ -169,6 +173,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                               placeholder={field.placeholder}
                               value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
                               onChange={(value) => updateNodeConfig(id, field.name, value)}
+                              disabled={codeFields.includes(field.name)}
                               type={
                                 field.type === 'integer' || field.type === 'float'
                                   ? 'tel'

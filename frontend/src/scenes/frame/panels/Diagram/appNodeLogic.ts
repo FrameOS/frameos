@@ -5,6 +5,7 @@ import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { appsModel } from '../../../../models/appsModel'
 import type { Node } from '@reactflow/core/dist/esm/types/nodes'
 import { App } from '../../../../types'
+import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 
 export interface AppNodeLogicProps extends DiagramLogicProps {
   nodeId: string
@@ -22,7 +23,14 @@ export const appNodeLogic = kea<appNodeLogicType>([
     node: [(s) => [s.nodes, s.nodeId], (nodes: Node[], nodeId: string) => nodes?.find((n) => n.id === nodeId) ?? null],
     nodeEdges: [
       (s) => [s.edges, s.nodeId],
-      (edges, nodeId) => edges?.filter((e) => e.source === nodeId || e.target === nodeId) ?? [],
+      (edges: Edge[], nodeId): Edge[] => edges?.filter((e) => e.source === nodeId || e.target === nodeId) ?? [],
+    ],
+    codeFields: [
+      (s) => [s.nodeEdges],
+      (nodeEdges) =>
+        nodeEdges
+          .filter((edge) => edge.sourceHandle === 'next' && edge.targetHandle?.startsWith('fieldInput/'))
+          .map((edge) => edge.targetHandle?.replace('fieldInput/', '') ?? ''),
     ],
     isSelected: [(s) => [s.selectedNodeId, s.nodeId], (selectedNodeId, nodeId) => selectedNodeId === nodeId],
     sources: [
