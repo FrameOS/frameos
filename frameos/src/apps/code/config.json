@@ -3,5 +3,13 @@
   "description": "Clean starter",
   "category": "boilerplate",
   "version": "1.0.0",
-  "fields": []
+  "fields": [
+    {
+      "name": "keyword",
+      "label": "Keyword",
+      "type": "string",
+      "value": "",
+      "required": false
+    }
+  ]
 }

@@ -4,23 +4,28 @@ import times
 import strutils
 import options
 from frameos/utils/image import downloadImage
-from frameos/types import FrameOS, FrameConfig, ExecutionContext
+from frameos/types import FrameScene, FrameConfig, ExecutionContext
 
-type AppConfig* = object
-  keyword*: string
-  cacheSeconds*: float
+type
+  AppConfig* = object
+    keyword*: string
+    cacheSeconds*: float
 
-type App* = ref object
-  appConfig: AppConfig
-  frameConfig: FrameConfig
+  App* = ref object
+    nodeId*: string
+    scene*: FrameScene
+    appConfig*: AppConfig
+    frameConfig*: FrameConfig
 
-  cacheExpiry: float
-  cachedImage: Option[Image]
-  cachedUrl: string
+    cacheExpiry: float
+    cachedImage: Option[Image]
+    cachedUrl: string
 
-proc init*(frameOS: FrameOS, appConfig: AppConfig): App =
+proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
-    frameConfig: frameOS.frameConfig,
+    nodeId: nodeId,
+    scene: scene,
+    frameConfig: scene.frameConfig,
     appConfig: appConfig,
     cachedImage: none(Image),
     cacheExpiry: 0.0,

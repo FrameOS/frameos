@@ -111,12 +111,12 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
               {changedFiles[file] ? '* ' : ''}
               {file}
             </Button>
-            {file === 'frame.py' && (
+            {file === 'app.nim' && (
               <Button
-                color={activeFile === 'frame.py/suggestion' ? 'primary' : 'gray'}
+                color={activeFile === 'app.nim/suggestion' ? 'primary' : 'gray'}
                 size="small"
                 title={'Talk to ChatGPT'}
-                onClick={() => setActiveFile('frame.py/suggestion')}
+                onClick={() => setActiveFile('app.nim/suggestion')}
               >
                 {enhanceSuggestionLoading ? <Spinner className="text-white" /> : <BeakerIcon className="w-5 h-5" />}
               </Button>
@@ -138,10 +138,10 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
             </Button>
           </div>
         ) : null}
-        {activeFile === 'frame.py/suggestion' ? (
+        {activeFile === 'app.nim/suggestion' ? (
           <div className="p-4 bg-gray-700 text-md overflow-y-auto overflow-x-auto w-full space-y-4">
             <p>
-              Ask a question about <code>frame.py</code> from GPT-4. Keep an eye on your{' '}
+              Ask a question about <code>app.nim</code> from GPT-4. Keep an eye on your{' '}
               <a
                 href="https://platform.openai.com/account/usage"
                 className="text-blue-400 hover:underline"

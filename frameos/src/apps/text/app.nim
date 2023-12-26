@@ -1,6 +1,6 @@
 import pixie, options
 
-from frameos/types import FrameOS, FrameConfig, ExecutionContext
+from frameos/types import FrameScene, FrameConfig, ExecutionContext
 from frameos/utils/font import getDefaultTypeface, newFont
 
 type
@@ -32,15 +32,19 @@ type
     borderTypeset*: Option[Arrangement]
 
   App* = ref object
+    nodeId*: string
+    scene*: FrameScene
     appConfig*: AppConfig
     frameConfig*: FrameConfig
     typeface*: Typeface
     cachedRender*: Option[CachedRender]
 
-proc init*(frameOS: FrameOS, appConfig: AppConfig): App =
+proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
   let typeface = getDefaultTypeface()
   result = App(
-    frameConfig: frameOS.frameConfig,
+    nodeId: nodeId,
+    scene: scene,
+    frameConfig: scene.frameConfig,
     appConfig: appConfig,
     typeface: typeface,
     cachedRender: none(CachedRender),
@@ -90,6 +94,7 @@ proc render*(self: App, context: ExecutionContext) =
     borderColor: self.appConfig.borderColor,
     borderWidth: self.appConfig.borderWidth,
   )
+
 
   let cacheMatch = self.cachedRender.isSome and self.cachedRender.get().renderData == renderData
   let textTypeset = if cacheMatch: self.cachedRender.get().typeset

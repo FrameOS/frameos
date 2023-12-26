@@ -26,6 +26,7 @@ type
     frameOS*: FrameOS
     frameConfig*: FrameConfig
     logger*: Logger
+    state*: JsonNode
 
   ExecutionContext* = ref object
     scene*: FrameScene

@@ -268,7 +268,7 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
         target_handle = edge.get('targetHandle', None)
         if source and target and source_handle == 'next' and target_handle == 'prev':
             next_nodes[source] = target
-        if source and target and source_handle == 'next' and target_handle.startswith('fieldInput/'):
+        if source and target and source_handle == 'fieldOutput' and target_handle.startswith('fieldInput/'):
             field = target_handle.replace('fieldInput/', '')
             if not field_inputs.get(target):
                 field_inputs[target] = {}
@@ -317,17 +317,6 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                                 app_config[key] = value
 
                 field_inputs_for_node = field_inputs.get(node_id, {})
-                for key, code in field_inputs_for_node.items():
-                    type = config_types[key]
-                    if type == "integer":
-                        scene_object_fields += [f"{app_id}_{key}: int"]
-                    elif type == "float":
-                        scene_object_fields += [f"{app_id}_{key}: float"]
-                    elif type == "color":
-                        scene_object_fields += [f"{app_id}_{key}: Color"]
-                    else:
-                        scene_object_fields += [f"{app_id}_{key}: string"]
-                    init_apps += [f"scene.{app_id}_{key} = {code}"]
 
                 app_config_pairs = []
                 for key, value in app_config.items():
@@ -339,7 +328,7 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
 
                     # TODO: sanitize
                     if key in field_inputs_for_node:
-                        app_config_pairs += [f"{key}: result.{app_id}_{key}"]
+                        app_config_pairs += [f"{key}: {field_inputs_for_node[key]}"]
                     elif isinstance(value, str):
                         if type == "integer":
                             app_config_pairs += [f"{key}: {int(value)}"]
@@ -355,18 +344,18 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                 if len(sources) > 0:
                     node_app_id = "nodeapp_" + node_id.replace('-', '_')
                     init_apps += [
-                        f"scene.{app_id} = {node_app_id}App.init(frameOS, {node_app_id}App.AppConfig({', '.join(app_config_pairs)}))"
+                        f"scene.{app_id} = {node_app_id}App.init(\"{node_id}\", scene, {node_app_id}App.AppConfig({', '.join(app_config_pairs)}))"
                     ]
                 else:
                     init_apps += [
-                        f"scene.{app_id} = {name}App.init(frameOS, {name}App.AppConfig({', '.join(app_config_pairs)}))"
+                        f"scene.{app_id} = {name}App.init(\"{node_id}\", scene, {name}App.AppConfig({', '.join(app_config_pairs)}))"
                     ]
 
                 render_nodes += [
                     f"of \"{node_id}\":",
                 ]
                 for key, code in field_inputs_for_node.items():
-                    render_nodes += [f"  self.{app_id}_{key} = {code}"]
+                    render_nodes += [f"  self.{app_id}.appConfig.{key} = {code}"]
 
                 render_nodes += [
                     f"  self.{app_id}.render(context)",
@@ -381,7 +370,7 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
             event_lines += [f"  self.runNode(\"{next_node}\", context)"]
     newline = "\n"
     scene_source = f"""
-import pixie, json, times
+import pixie, json, times, strformat
 
 from frameos/types import FrameOS, FrameScene, ExecutionContext
 from frameos/logger import log
@@ -390,17 +379,9 @@ from frameos/logger import log
 let DEBUG = false
 
 type Scene* = ref object of FrameScene
-  state: JsonNode
   {(newline + "  ").join(scene_object_fields)}
 
-proc init*(frameOS: FrameOS): Scene =
-  var state = %*{{}}
-  let frameConfig = frameOS.frameConfig
-  let logger = frameOS.logger
-  let scene = Scene(frameOS: frameOS, frameConfig: frameConfig, logger: logger, state: state)
-  result = scene
-  {(newline + "  ").join(init_apps)}
-
+{{.push hint[XDeclaredButNotUsed]: off.}}
 proc runNode*(self: Scene, nodeId: string,
     context: var ExecutionContext) =
   let scene = self
@@ -419,20 +400,33 @@ proc runNode*(self: Scene, nodeId: string,
       nextNode = "-1"
     if DEBUG:
       self.logger.log(%*{{"event": "runApp", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
-
-proc dispatchEvent*(self: Scene, event: string, eventPayload:
-    JsonNode): ExecutionContext =
-  var context = ExecutionContext(scene: self, event: event,
-      eventPayload: eventPayload)
-  if event == "render":
-    context.image = newImage(self.frameConfig.width, self.frameConfig.height)
-  case event:
+      
+proc dispatchEvent*(self: Scene, context: var ExecutionContext) =
+  case context.event:
   {(newline + "  ").join(event_lines)}
-  result = context
+  else: discard
+
+proc init*(frameOS: FrameOS): Scene =
+  var state = %*{{}}
+  let frameConfig = frameOS.frameConfig
+  let logger = frameOS.logger
+  let scene = Scene(frameOS: frameOS, frameConfig: frameConfig, logger: logger, state: state)
+  let self = scene
+  var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{{}}, image: newImage(1, 1))
+  result = scene
+  {(newline + "  ").join(init_apps)}
+  dispatchEvent(scene, context)
 
 proc render*(self: Scene): Image =
-  var context = dispatchEvent(self, "render", %*{{"json": "True"}})
+  var context = ExecutionContext(
+    scene: self,
+    event: "render",
+    eventPayload: %*{{}},
+    image: newImage(self.frameConfig.width, self.frameConfig.height)
+  )
+  dispatchEvent(self, context)
   return context.image
+{{.pop.}}
 """
     return scene_source
 

@@ -1,31 +1,40 @@
+import json, strformat
 import pixie
-from frameos/types import FrameOS, FrameConfig, ExecutionContext
+from frameos/types import FrameScene, FrameConfig, ExecutionContext, Logger
+from frameos/logger import log
 
-type AppConfig* = object
-  keyword*: string
-  cacheSeconds*: float
+type
+  AppConfig* = object
+    keyword*: string
 
-type App* = ref object
-  appConfig: AppConfig
-  frameConfig: FrameConfig
+  App* = ref object
+    nodeId*: string
+    scene*: FrameScene
+    appConfig*: AppConfig
 
-proc init*(frameOS: FrameOS, appConfig: AppConfig): App =
+proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
-    frameConfig: frameOS.frameConfig,
+    nodeId: nodeId,
+    scene: scene,
     appConfig: appConfig,
   )
 
+proc log*(self: App, message: string) =
+  self.scene.logger.log(%*{"event": &"{self.node_id}:log", "message": message})
+
 proc render*(self: App, context: ExecutionContext) =
-  let image = context.image
-  image.fillPath(
-    """
-      M 20 60
-      A 40 40 90 0 1 100 60
-      A 40 40 90 0 1 180 60
-      Q 180 120 100 180
-      Q 20 120 20 60
-      z
-    """,
-    parseHtmlColor("#FC427B").rgba
-  )
+  self.log(&"Hello from {context.event} {self.appConfig.keyword}")
+
+  if context.event == "render":
+    context.image.fillPath(
+      """
+        M 20 60
+        A 40 40 90 0 1 100 60
+        A 40 40 90 0 1 180 60
+        Q 180 120 100 180
+        Q 20 120 20 60
+        z
+      """,
+      parseHtmlColor("#FC427B").rgba
+    )
 

@@ -7,6 +7,7 @@ import ReactFlow, {
   Connection,
   OnConnectStartParams,
 } from 'reactflow'
+import type { Node } from '@reactflow/core/dist/esm/types/nodes'
 import { frameLogic } from '../../frameLogic'
 import {
   MouseEvent as ReactMouseEvent,
@@ -104,12 +105,15 @@ export function Diagram({ sceneId }: DiagramProps) {
         const position = reactFlowInstance?.project(inputCoords) ?? { x: 0, y: 0 }
         position.x -= 200
         position.y -= 80
-        const newNode = {
+        const newNode: Node = {
           id,
           position: position,
           type: 'code',
-          data: { scope: `connectedVar` },
-          origin: [0.5, 0.0],
+          data: {},
+          style: {
+            width: 300,
+            height: 130,
+          },
         }
         setNodes([...nodes, newNode])
         addEdge({
@@ -117,7 +121,7 @@ export function Diagram({ sceneId }: DiagramProps) {
           target: connectingNodeId.current,
           targetHandle: connectingNodeHandle.current,
           source: id,
-          sourceHandle: 'next',
+          sourceHandle: 'fieldOutput',
         })
       }
     },
