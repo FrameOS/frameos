@@ -60,7 +60,7 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
               <td className="cursor-text">
                 <TextArea
                   theme="node"
-                  placeholder="Inlined nim code"
+                  placeholder="state{'something'} + frameConfig.width"
                   value={data.code ?? ''}
                   onChange={(value) => updateNodeData(id, { code: value.replaceAll('\n', '') })}
                   rows={3}

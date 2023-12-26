@@ -246,7 +246,7 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
         # "app_1: unsplashApp.App"
     ]
     init_apps = [
-        # "result.app_1 = unsplashApp.init(config, unsplashApp.AppConfig(keyword: \"random\"))"
+        # "scene.app_1 = unsplashApp.init(config, unsplashApp.AppConfig(keyword: \"random\"))"
     ]
     render_nodes = [
         # "of 1:",
@@ -285,14 +285,23 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                     event_nodes[event] = []
                 event_nodes[event].append(node)
         elif node.get('type') == 'app':
+            sources = node.get('data', {}).get('sources', {})
             name = node.get('data', {}).get('keyword', None)
-            if name in available_apps:
-                log(frame.id, "stdout", f"- Generating app: {name}")
-                app_import = f"import apps/{name}/app as {name}App"
+            app_id = "app_" + node_id.replace('-', '_')
+
+            if name in available_apps or len(sources) > 0:
+                if len(sources) > 0:
+                    log(frame.id, "stdout", f"- Generating source app: {node_id}")
+                    node_app_id = "nodeapp_" + node_id.replace('-', '_')
+                    app_import = f"import apps/{node_app_id}/app as {node_app_id}App"
+                    scene_object_fields += [f"{app_id}: {node_app_id}App.App"]
+                else:
+                    log(frame.id, "stdout", f"- Generating app: {node_id} ({name})")
+                    app_import = f"import apps/{name}/app as {name}App"
+                    scene_object_fields += [f"{app_id}: {name}App.App"]
+
                 if app_import not in imports:
                     imports += [app_import]
-                app_id = "app_" + node_id.replace('-', '_')
-                scene_object_fields += [f"{app_id}: {name}App.App"]
 
                 app_config = node.get('data').get('config', {}).copy()
                 config_path = os.path.join(local_apps_path, name, "config.json")
@@ -318,7 +327,7 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                         scene_object_fields += [f"{app_id}_{key}: Color"]
                     else:
                         scene_object_fields += [f"{app_id}_{key}: string"]
-                    init_apps += [f"result.{app_id}_{key} = {code}"]
+                    init_apps += [f"scene.{app_id}_{key} = {code}"]
 
                 app_config_pairs = []
                 for key, value in app_config.items():
@@ -343,9 +352,16 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                     else:
                         app_config_pairs += [f"{key}: {value}"]
 
-                init_apps += [
-                    f"result.{app_id} = {name}App.init(frameOS, {name}App.AppConfig({', '.join(app_config_pairs)}))"
-                ]
+                if len(sources) > 0:
+                    node_app_id = "nodeapp_" + node_id.replace('-', '_')
+                    init_apps += [
+                        f"scene.{app_id} = {node_app_id}App.init(frameOS, {node_app_id}App.AppConfig({', '.join(app_config_pairs)}))"
+                    ]
+                else:
+                    init_apps += [
+                        f"scene.{app_id} = {name}App.init(frameOS, {name}App.AppConfig({', '.join(app_config_pairs)}))"
+                    ]
+
                 render_nodes += [
                     f"of \"{node_id}\":",
                 ]
@@ -378,11 +394,19 @@ type Scene* = ref object of FrameScene
   {(newline + "  ").join(scene_object_fields)}
 
 proc init*(frameOS: FrameOS): Scene =
-  result = Scene(frameOS: frameOS, frameConfig: frameOS.frameConfig, logger: frameOS.logger, state: %*{{}})
+  var state = %*{{}}
+  let frameConfig = frameOS.frameConfig
+  let logger = frameOS.logger
+  let scene = Scene(frameOS: frameOS, frameConfig: frameConfig, logger: logger, state: state)
+  result = scene
   {(newline + "  ").join(init_apps)}
 
 proc runNode*(self: Scene, nodeId: string,
     context: var ExecutionContext) =
+  let scene = self
+  let frameOS = scene.frameOS
+  let frameConfig = frameOS.frameConfig
+  let state = scene.state
   var nextNode = nodeId
   var currentNode = nodeId
   var timer = epochTime()

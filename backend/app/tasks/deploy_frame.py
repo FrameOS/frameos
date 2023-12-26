@@ -17,6 +17,7 @@ from scp import SCPClient
 
 from app import create_app
 from app.huey import huey
+from app.models import get_apps_from_scenes
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json, generate_scene_nim_source
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection, exec_local_command
@@ -140,7 +141,7 @@ def create_build_folders(temp_dir, build_id):
     source_dir = os.path.join(temp_dir, "frameos")
     # 1. copy the frameos folder to the temp folder
     os.makedirs(source_dir, exist_ok=True)
-    shutil.copytree("../frame", source_dir, dirs_exist_ok=True)
+    shutil.copytree("../frameos", source_dir, dirs_exist_ok=True)
     # 2. make a new build folder with the build_id
     os.makedirs(build_dir, exist_ok=True)
     return build_dir, source_dir
@@ -149,6 +150,15 @@ def create_build_folders(temp_dir, build_id):
 def make_local_modifications(frame: Frame, source_dir: str):
     shutil.rmtree(os.path.join(source_dir, "src", "scenes"), ignore_errors=True)
     os.makedirs(os.path.join(source_dir, "src", "scenes"), exist_ok=True)
+
+    # write all source apps
+    for node_id, sources in get_apps_from_scenes(frame.scenes).items():
+        app_id = "nodeapp_" + node_id.replace('-', '_')
+        app_dir = os.path.join(source_dir, "src", "apps", app_id)
+        os.makedirs(app_dir, exist_ok=True)
+        for file, source in sources.items():
+            with open(os.path.join(app_dir, file), "w") as file:
+                file.write(source)
 
     # only one scene called "default" for now
     for scene in frame.scenes:
