@@ -10,8 +10,8 @@ type
     height*: int
     device*: string
     color*: string
-    interval*: int
-    metricsInterval*: int
+    interval*: float
+    metricsInterval*: float
     rotate*: int
     scalingMode*: string
     backgroundColor*: string

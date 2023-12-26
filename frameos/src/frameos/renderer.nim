@@ -25,8 +25,8 @@ proc renderScene*(self: Renderer): Image =
       sceneTimer) * 1000})
 
 proc lastRender*(self: Renderer): Image =
-  if self.lastImage.isSome and self.lastRenderAt +
-      self.frameConfig.interval.toFloat < epochTime():
+  if self.lastImage.isSome and self.frameConfig.interval != 0 and
+      self.lastRenderAt + self.frameConfig.interval > epochTime():
     result = self.lastImage.get()
   else:
     result = self.renderScene()
