@@ -13,15 +13,18 @@ type Scene* = ref object of FrameScene
   state: JsonNode
   app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200: unsplashApp.App
   app_b94c5793_aeb1_4f3a_b273_c2305c12096e: textApp.App
+  app_b94c5793_aeb1_4f3a_b273_c2305c12096e_position: string
 
 proc init*(frameOS: FrameOS): Scene =
   result = Scene(frameOS: frameOS, frameConfig: frameOS.frameConfig,
       logger: frameOS.logger, state: %*{})
   result.app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200 = unsplashApp.init(frameOS,
       unsplashApp.AppConfig(keyword: "birds", cacheSeconds: 60.0))
+  result.app_b94c5793_aeb1_4f3a_b273_c2305c12096e_position = "top-left"
   result.app_b94c5793_aeb1_4f3a_b273_c2305c12096e = textApp.init(frameOS,
       textApp.AppConfig(borderWidth: 2, fontColor: parseHtmlColor("#ffffff"),
-      fontSize: 64.0, text: "Welcome to FrameOS!", position: "center-center",
+      fontSize: 64.0, text: "Welcome to FrameOS!",
+      position: result.app_b94c5793_aeb1_4f3a_b273_c2305c12096e_position,
       offsetX: 0.0, offsetY: 0.0, padding: 10.0, borderColor: parseHtmlColor("#000000")))
 
 proc runNode*(self: Scene, nodeId: string,
@@ -37,6 +40,7 @@ proc runNode*(self: Scene, nodeId: string,
       self.app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200.render(context)
       nextNode = "b94c5793-aeb1-4f3a-b273-c2305c12096e"
     of "b94c5793-aeb1-4f3a-b273-c2305c12096e":
+      self.app_b94c5793_aeb1_4f3a_b273_c2305c12096e_position = "top-left"
       self.app_b94c5793_aeb1_4f3a_b273_c2305c12096e.render(context)
       nextNode = "-1"
     else:

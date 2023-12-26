@@ -242,7 +242,7 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
     imports = [
         # "import apps/unsplash/app as unsplashApp"
     ]
-    scene_apps = [
+    scene_object_fields = [
         # "app_1: unsplashApp.App"
     ]
     init_apps = [
@@ -260,6 +260,7 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
     edges = scene.get('edges', [])
     event_nodes = {}
     next_nodes = {}
+    field_inputs: Dict[str, Dict[str, str]] = {}
     for edge in edges:
         source = edge.get('source', None)
         target = edge.get('target', None)
@@ -267,6 +268,14 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
         target_handle = edge.get('targetHandle', None)
         if source and target and source_handle == 'next' and target_handle == 'prev':
             next_nodes[source] = target
+        if source and target and source_handle == 'next' and target_handle.startswith('fieldInput/'):
+            field = target_handle.replace('fieldInput/', '')
+            if not field_inputs.get(target):
+                field_inputs[target] = {}
+            code_node = nodes_by_id.get(source)
+            if code_node:
+                field_inputs[target][field] = code_node.get('data', {}).get('code', "")
+
     for node in nodes:
         node_id = node['id']
         if node.get('type') == 'event':
@@ -283,9 +292,7 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                 if app_import not in imports:
                     imports += [app_import]
                 app_id = "app_" + node_id.replace('-', '_')
-                scene_apps += [
-                    f"{app_id}: {name}App.App"
-                ]
+                scene_object_fields += [f"{app_id}: {name}App.App"]
 
                 app_config = node.get('data').get('config', {}).copy()
                 config_path = os.path.join("../frame/src/apps", name, "config.json")
@@ -300,6 +307,19 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                             if (key not in app_config or app_config.get(key) is None) and value is not None:
                                 app_config[key] = value
 
+                field_inputs_for_node = field_inputs.get(node_id, {})
+                for key, code in field_inputs_for_node.items():
+                    type = config_types[key]
+                    if type == "integer":
+                        scene_object_fields += [f"{app_id}_{key}: int"]
+                    elif type == "float":
+                        scene_object_fields += [f"{app_id}_{key}: float"]
+                    elif type == "color":
+                        scene_object_fields += [f"{app_id}_{key}: Color"]
+                    else:
+                        scene_object_fields += [f"{app_id}_{key}: string"]
+                    init_apps += [f"result.{app_id}_{key} = {code}"]
+
                 app_config_pairs = []
                 for key, value in app_config.items():
                     if key not in config_types:
@@ -309,7 +329,9 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                     type = config_types[key]
 
                     # TODO: sanitize
-                    if isinstance(value, str):
+                    if key in field_inputs_for_node:
+                        app_config_pairs += [f"{key}: result.{app_id}_{key}"]
+                    elif isinstance(value, str):
                         if type == "integer":
                             app_config_pairs += [f"{key}: {int(value)}"]
                         elif type == "float":
@@ -326,6 +348,11 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                 ]
                 render_nodes += [
                     f"of \"{node_id}\":",
+                ]
+                for key, code in field_inputs_for_node.items():
+                    render_nodes += [f"  self.{app_id}_{key} = {code}"]
+
+                render_nodes += [
                     f"  self.{app_id}.render(context)",
                     f"  nextNode = \"{next_nodes.get(node_id, '-1')}\""
                 ]
@@ -348,7 +375,7 @@ let DEBUG = false
 
 type Scene* = ref object of FrameScene
   state: JsonNode
-  {(newline + "  ").join(scene_apps)}
+  {(newline + "  ").join(scene_object_fields)}
 
 proc init*(frameOS: FrameOS): Scene =
   result = Scene(frameOS: frameOS, frameConfig: frameOS.frameConfig, logger: frameOS.logger, state: %*{{}})
