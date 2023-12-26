@@ -6,7 +6,7 @@ from app import db, socketio
 from typing import Dict, Optional
 from sqlalchemy.dialects.sqlite import JSON
 
-from app.models.apps import get_app_configs, get_local_frame_apps
+from app.models.apps import get_app_configs, get_local_frame_apps, local_apps_path
 from app.models.settings import get_settings_dict
 
 
@@ -295,7 +295,7 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                 scene_object_fields += [f"{app_id}: {name}App.App"]
 
                 app_config = node.get('data').get('config', {}).copy()
-                config_path = os.path.join("../frame/src/apps", name, "config.json")
+                config_path = os.path.join(local_apps_path, name, "config.json")
                 config_types: Dict[str, str] = {}
                 if os.path.exists(config_path):
                     with open(config_path, 'r') as file:

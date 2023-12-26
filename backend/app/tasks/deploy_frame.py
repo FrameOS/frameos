@@ -65,7 +65,7 @@ def deploy_frame(id: int):
                     scp.putfo(StringIO(json.dumps(get_frame_json(frame), indent=4) + "\n"), f"/srv/frameos/releases/release_{build_id}/frame.json")
 
                     # add frameos.service
-                    with open("../frame/frameos.service", "r") as file:
+                    with open("../frameos/frameos.service", "r") as file:
                         service_contents = file.read().replace("%I", frame.ssh_user)
                     with SCPClient(ssh.get_transport()) as scp:
                         scp.putfo(StringIO(service_contents), f"/srv/frameos/releases/release_{build_id}/frameos.service")
@@ -83,11 +83,6 @@ def deploy_frame(id: int):
                 exec_command(frame, ssh, "sudo systemctl start frameos.service")
                 exec_command(frame, ssh, "sudo systemctl status frameos.service")
 
-            # get temp folder
-            # temp_path =
-            #
-            #
-            # # exec_command(frame, ssh, "sudo apt -y update")
             # exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libopenjp2-7\" || sudo apt -y install libopenjp2-7")
             # exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libopenblas-dev\" || sudo apt -y install libopenblas-dev")
             # exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-pip\" || sudo apt -y install python3-pip")
@@ -101,26 +96,7 @@ def deploy_frame(id: int):
             # exec_command(frame, ssh, 'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1" && { sudo raspi-config nonint do_i2c 0; echo "I2C is now enabled"; }')
             # # enable spi
             # exec_command(frame, ssh, 'sudo raspi-config nonint do_spi 0')
-            #
-            # exec_command(frame, ssh, "sudo mkdir -p /srv/frameos")
-            # exec_command(frame, ssh, f"sudo chown -R {frame.ssh_user} /srv/frameos")
-            #
-            # with SCPClient(ssh.get_transport()) as scp:
-            #     log(id, "stdout", "> add /srv/frameos/frame.json")
-            #     scp.putfo(StringIO(json.dumps(get_frame_json(frame), indent=4) + "\n"), "/srv/frameos/frame.json")
-            #
-            #     log(id, "stdout", "> add /srv/frameos/run.py")
-            #     scp.put("../frameos/run.py", "/srv/frameos/run.py")
-            #
-            #     log(id, "stdout", "> add /srv/frameos/version.py")
-            #     scp.put("../frameos/version.py", "/srv/frameos/version.py")
-            #
-            #     log(id, "stdout", "> add /srv/frameos/frame/*")
-            #     scp.put("../frameos/frame", "/srv/frameos/", recursive=True)
-            #
-            #     log(id, "stdout", "> add /srv/frameos/apps/*")
-            #     scp.put("../frameos/apps", "/srv/frameos/", recursive=True)
-            #
+
             #     for node_id, sources in get_apps_from_scenes(frame.scenes).items():
             #         app_id = "node_" + node_id.replace('-', '_')
             #         log(id, "stdout", f"> add /srv/frameos/apps/{app_id}.zip")
@@ -134,32 +110,6 @@ def deploy_frame(id: int):
             #     if 'waveshare.' in frame.device:
             #         log(id, "stdout", "> add /srv/frameos/lib/*")
             #         scp.put("../frameos/lib", "/srv/frameos/", recursive=True)
-            #
-            #     log(id, "stdout", "> add /srv/frameos/index.html")
-            #     scp.put("../frameos/index.html", "/srv/frameos/index.html")
-            #
-            #     log(id, "stdout", "> add /srv/frameos/requirements.txt")
-            #     scp.put("../frameos/requirements.txt", "/srv/frameos/requirements.txt")
-            #
-            #     with open("../frameos/frameos.service", "r") as file:
-            #         service_contents = file.read().replace("%I", frame.ssh_user)
-            #         print(service_contents)
-            #     with SCPClient(ssh.get_transport()) as scp:
-            #         scp.putfo(StringIO(service_contents), "/srv/frameos/frameos.service")
-            #
-            # # Move service file to the appropriate location and set permissions
-            # exec_command(frame, ssh, "sudo mv /srv/frameos/frameos.service /etc/systemd/system/frameos.service")
-            # exec_command(frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
-            # exec_command(frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")
-            # exec_command(frame, ssh, "sudo rm -rf /usr/lib/python3.11/EXTERNALLY-MANAGED")
-            # exec_command(frame, ssh, "cd /srv/frameos && (sha256sum -c requirements.txt.sha256sum 2>/dev/null || (echo '> pip3 install -r requirements.txt' && pip3 install -r requirements.txt && sha256sum requirements.txt > requirements.txt.sha256sum))")
-            #
-            # # Reload systemd, stop any existing service, enable and restart the new service
-            # exec_command(frame, ssh, "sudo systemctl daemon-reload")
-            # exec_command(frame, ssh, "sudo systemctl stop frameos.service || true")
-            # exec_command(frame, ssh, "sudo systemctl enable frameos.service")
-            # exec_command(frame, ssh, "sudo systemctl start frameos.service")
-            # exec_command(frame, ssh, "sudo systemctl status frameos.service")
 
             frame.status = 'starting'
             update_frame(frame)
