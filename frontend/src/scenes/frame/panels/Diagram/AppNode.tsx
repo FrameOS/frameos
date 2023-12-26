@@ -102,12 +102,29 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                 <React.Fragment key={i}>
                   {'markdown' in field ? (
                     <tr>
-                      <td className={clsx('font-sm text-indigo-200')} colSpan={2}>
+                      <td className={clsx('font-sm text-indigo-200')} colSpan={4}>
                         <Markdown value={field.markdown} />
                       </td>
                     </tr>
                   ) : (
                     <tr>
+                      <td>
+                        <Handle
+                          type="target"
+                          position={Position.Left}
+                          id={`fieldInput/${field.name}`}
+                          style={{
+                            position: 'relative',
+                            transform: 'none',
+                            left: 0,
+                            top: 0,
+                            background: 'black',
+                            borderColor: 'white',
+                          }}
+                          onConnect={(params) => console.log('handle onConnect', params)}
+                          isConnectable
+                        />
+                      </td>
                       <td
                         className={clsx(
                           'font-sm text-indigo-200',
@@ -124,21 +141,6 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                       >
                         <div className="flex justify-between items-center gap-2">
                           <div>{field.label ?? field.name}</div>
-                          {field.type === 'node' ? (
-                            <Handle
-                              type="source"
-                              position={Position.Right}
-                              id={`field/${field.name}`}
-                              style={{
-                                position: 'relative',
-                                transform: 'none',
-                                right: 0,
-                                top: 0,
-                                background: '#cccccc',
-                              }}
-                              isConnectable={isConnectable}
-                            />
-                          ) : null}
                         </div>
                       </td>
                       {field.type !== 'node' ? (
@@ -178,6 +180,23 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                           )}
                         </td>
                       ) : null}
+                      <td>
+                        {field.type === 'node' ? (
+                          <Handle
+                            type="source"
+                            position={Position.Right}
+                            id={`field/${field.name}`}
+                            style={{
+                              position: 'relative',
+                              transform: 'none',
+                              right: 0,
+                              top: 0,
+                              background: '#cccccc',
+                            }}
+                            isConnectable={isConnectable}
+                          />
+                        ) : null}
+                      </td>
                     </tr>
                   )}
                 </React.Fragment>

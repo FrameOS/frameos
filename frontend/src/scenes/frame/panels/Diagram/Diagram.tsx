@@ -1,16 +1,32 @@
 import 'reactflow/dist/base.css'
 import { useActions, useValues, BindLogic } from 'kea'
-import ReactFlow, { Background, BackgroundVariant, ReactFlowInstance } from 'reactflow'
+import ReactFlow, {
+  Background,
+  BackgroundVariant,
+  ReactFlowInstance,
+  Connection,
+  OnConnectStartParams,
+} from 'reactflow'
 import { frameLogic } from '../../frameLogic'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  MouseEvent as ReactMouseEvent,
+  TouchEvent as ReactTouchEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import { AppNode } from './AppNode'
+import { CodeNode } from './CodeNode'
 import { RenderNode } from './RenderNode'
 import { EventNode } from './EventNode'
 import { Button } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
+import { v4 as uuidv4 } from 'uuid'
 
 const nodeTypes = {
   app: AppNode,
+  code: CodeNode,
   source: AppNode,
   render: RenderNode,
   event: EventNode,
@@ -50,6 +66,63 @@ export function Diagram({ sceneId }: DiagramProps) {
     },
     [reactFlowInstance, nodes]
   )
+  const connectingNodeId = useRef<string | null>(null)
+  const connectingNodeHandle = useRef<string | null>(null)
+
+  const onConnect = useCallback((connection: Connection) => {
+    connectingNodeId.current = null
+    connectingNodeHandle.current = null
+    addEdge(connection)
+  }, [])
+
+  const onConnectStart = useCallback((_: ReactMouseEvent | ReactTouchEvent, params: OnConnectStartParams) => {
+    const { nodeId, handleId, handleType } = params
+    if (handleType === 'target' && handleId?.startsWith('fieldInput/')) {
+      connectingNodeId.current = nodeId
+      connectingNodeHandle.current = handleId
+    }
+  }, [])
+
+  const onConnectEnd = useCallback(
+    (event: MouseEvent | TouchEvent) => {
+      if (!connectingNodeId.current) return
+      if (!connectingNodeHandle.current) return
+
+      event.preventDefault()
+
+      const targetIsPane = (event.target as HTMLElement).classList.contains('react-flow__pane')
+      const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
+
+      if (targetIsPane) {
+        const id = uuidv4()
+        const inputCoords = {
+          x: 'clientX' in event ? event.clientX : event.touches[0].clientX,
+          y: 'clientY' in event ? event.clientY : event.touches[0].clientY,
+        }
+        inputCoords.x -= reactFlowBounds?.left ?? 0
+        inputCoords.y -= reactFlowBounds?.top ?? 0
+        const position = reactFlowInstance?.project(inputCoords) ?? { x: 0, y: 0 }
+        position.x -= 200
+        position.y -= 80
+        const newNode = {
+          id,
+          position: position,
+          type: 'code',
+          data: { scope: `connectedVar` },
+          origin: [0.5, 0.0],
+        }
+        setNodes([...nodes, newNode])
+        addEdge({
+          id,
+          target: connectingNodeId.current,
+          targetHandle: connectingNodeHandle.current,
+          source: id,
+          sourceHandle: 'next',
+        })
+      }
+    },
+    [reactFlowInstance, nodes, edges]
+  )
 
   useEffect(() => {
     if (fitViewCounter > 0) {
@@ -66,7 +139,9 @@ export function Diagram({ sceneId }: DiagramProps) {
           onInit={setReactFlowInstance}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
-          onConnect={addEdge}
+          onConnect={onConnect}
+          onConnectStart={onConnectStart}
+          onConnectEnd={onConnectEnd}
           onDrop={onDrop}
           onDragOver={onDragOver}
           minZoom={0.2}

@@ -105,6 +105,9 @@ export interface AppNodeData {
   config: Record<string, any>
   sources?: Record<string, string>
 }
+export interface CodeNodeData {
+  code: string
+}
 
 export interface EventNodeData {
   keyword: string

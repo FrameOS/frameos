@@ -20,6 +20,10 @@ export const appNodeLogic = kea<appNodeLogicType>([
   selectors({
     nodeId: [() => [(_, props) => props.nodeId], (nodeId): string => nodeId],
     node: [(s) => [s.nodes, s.nodeId], (nodes: Node[], nodeId: string) => nodes?.find((n) => n.id === nodeId) ?? null],
+    nodeEdges: [
+      (s) => [s.edges, s.nodeId],
+      (edges, nodeId) => edges?.filter((e) => e.source === nodeId || e.target === nodeId) ?? [],
+    ],
     isSelected: [(s) => [s.selectedNodeId, s.nodeId], (selectedNodeId, nodeId) => selectedNodeId === nodeId],
     sources: [
       (s) => [s.apps, s.node],
