@@ -55,6 +55,7 @@ def deploy_frame(id: int):
                 with SCPClient(ssh.get_transport()) as scp:
                     # build the release
                     exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  build-essential\" || sudo apt -y install build-essential")
+                    exec_command(frame, ssh, "if [ ! -d /srv/frameos/ ]; then sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; fi")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/build/")
                     log(id, "stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
                     scp.put(archive_path, f"/srv/frameos/build/build_{build_id}.tar.gz")
