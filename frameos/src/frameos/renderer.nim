@@ -33,14 +33,16 @@ proc renderError*(frameConfig: FrameConfig, message: string): Image =
     translate(vec2(padding, padding))
   )
 
-proc renderScene*(self: Renderer): Image =
-  type DefaultScene = defaultScene.Scene
-  self.logger.log(%*{"event": "renderScene"})
+proc renderScene*(self: Renderer) =
+  self.logger.log(%*{"event": "render"})
   let sceneTimer = epochTime()
-  result = defaultScene.render(self.scene.DefaultScene)
-  self.lastImage = some(result)
+  try:
+    type DefaultScene = defaultScene.Scene
+    self.lastImage = some(defaultScene.render(self.scene.DefaultScene))
+  except:
+    self.logger.log(%*{"event": "render:error"})
   self.lastRenderAt = epochTime()
-  self.logger.log(%*{"event": "renderScene:done", "ms": (epochTime() -
+  self.logger.log(%*{"event": "render:done", "ms": (epochTime() -
       sceneTimer) * 1000})
 
 proc lastRender*(self: Renderer): Image =
@@ -53,20 +55,22 @@ proc lastRender*(self: Renderer): Image =
 proc startLoop*(self: Renderer): Future[void] {.async.} =
   self.logger.log(%*{"event": "startLoop"})
   var timer = 0.0
-  var renderDuration = 0.0
   var sleepDuration = 0.0
   while true:
     timer = epochTime()
-    discard self.renderScene()
-    renderDuration = (epochTime() - timer)
-    sleepDuration = max((self.frameConfig.interval - renderDuration) * 1000, 0.1)
+    self.renderScene()
+    sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) *
+        1000, 0.1)
     self.logger.log(%*{"event": "sleeping", "ms": sleepDuration})
+    # Calculate once more to subtract the time it took to log the message
+    sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) *
+        1000, 0.1)
     let future = sleepAsync(sleepDuration)
     self.sleepFuture = some(future)
     await future
     self.sleepFuture = none(Future[void])
 
 proc triggerRender*(self: Renderer): void =
-  self.logger.log(%*{"event": "triggerRender"})
+  self.logger.log(%*{"event": "event:render"})
   if self.sleepFuture.isSome:
     self.sleepFuture.get().complete()

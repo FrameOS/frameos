@@ -47,11 +47,11 @@ def process_log(frame: Frame, log: dict):
 
     changes = {}
     event = log.get('event', 'log')
-    if event == 'renderScene':
+    if event == 'render':
         changes['status'] = 'preparing'
-    # if event == 'renderScene:render':
+    # if event == 'render:render':
     #     changes['status'] = 'rendering'
-    if event == 'renderScene:done':
+    if event == 'render:done':
         changes['status'] = 'ready'
     if event == 'bootup':
         if frame.status != 'ready':

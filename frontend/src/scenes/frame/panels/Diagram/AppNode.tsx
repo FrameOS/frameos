@@ -68,7 +68,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
         />
       </div>
       <div className="p-1">
-        <div className="flex justify-between">
+        <div className="flex justify-between pl-[0.333rem]">
           <div className="flex items-center space-x-1">
             <Handle
               type="target"
