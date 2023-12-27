@@ -11,6 +11,9 @@
         "name": "format",
         "type": "select",
         "options": [
+            "yyyy-MM-dd",
+            "yyyy-MM-dd HH:mm:ss",
+            "HH:mm:ss:fff",
             "HH:mm:ss",
             "HH:mm",
             "custom"
