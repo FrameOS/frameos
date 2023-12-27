@@ -34,7 +34,7 @@ proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
   if result.appConfig.keyword == "":
     result.appConfig.keyword = "random"
 
-proc render*(self: App, context: ExecutionContext) =
+proc run*(self: App, context: ExecutionContext) =
   let image = context.image
   let url = &"https://source.unsplash.com/random/{image.width}x{image.height}/?{self.appConfig.keyword}"
 

@@ -239,24 +239,11 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
     log(frame.id, "stdout", f"- Generating scene: {scene_id}")
     nodes = scene.get('nodes', [])
     nodes_by_id = {n['id']: n for n in nodes}
-    imports = [
-        # "import apps/unsplash/app as unsplashApp"
-    ]
-    scene_object_fields = [
-        # "app_1: unsplashApp.App"
-    ]
-    init_apps = [
-        # "scene.app_1 = unsplashApp.init(config, unsplashApp.AppConfig(keyword: \"random\"))"
-    ]
-    render_nodes = [
-        # "of 1:",
-        # "  self.app_1.render(context)",
-        # "  nextNode = 2",
-    ]
-    event_lines = [
-        # "of \"render\":",
-        # "  self.runNode(\"1\", context)",
-    ]
+    imports = []
+    scene_object_fields = []
+    init_apps = []
+    render_nodes = []
+    event_lines = []
     edges = scene.get('edges', [])
     event_nodes = {}
     next_nodes = {}
@@ -358,7 +345,7 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                     render_nodes += [f"  self.{app_id}.appConfig.{key} = {code}"]
 
                 render_nodes += [
-                    f"  self.{app_id}.render(context)",
+                    f"  self.{app_id}.run(context)",
                     f"  nextNode = \"{next_nodes.get(node_id, '-1')}\""
                 ]
             else:

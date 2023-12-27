@@ -22,7 +22,7 @@ proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
 proc log*(self: App, message: string) =
   self.scene.logger.log(%*{"event": &"{self.node_id}:log", "message": message})
 
-proc render*(self: App, context: ExecutionContext) =
+proc run*(self: App, context: ExecutionContext) =
   self.log(&"Hello from {context.event} {self.appConfig.keyword}")
   self.scene.state["count"] = %*(self.scene.state{"count"}.getInt(0) + 1)
 

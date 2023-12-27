@@ -82,7 +82,7 @@ proc generateTypeset(typeface: Typeface, renderData: RenderData,
       vAlign = vAlign,
   )
 
-proc render*(self: App, context: ExecutionContext) =
+proc run*(self: App, context: ExecutionContext) =
   let renderData = RenderData(
     text: self.appConfig.text,
     position: self.appConfig.position,
@@ -94,7 +94,6 @@ proc render*(self: App, context: ExecutionContext) =
     borderColor: self.appConfig.borderColor,
     borderWidth: self.appConfig.borderWidth,
   )
-
 
   let cacheMatch = self.cachedRender.isSome and self.cachedRender.get().renderData == renderData
   let textTypeset = if cacheMatch: self.cachedRender.get().typeset
