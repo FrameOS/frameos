@@ -8,7 +8,7 @@ from net import Port
 import options
 from frameos/types import FrameOS, FrameConfig, Logger, Server, Renderer
 from frameos/logger import log
-from frameos/renderer import lastRender
+from frameos/renderer import lastRender, triggerRender
 
 var globalLogger: Logger
 var globalFrameConfig: FrameConfig
@@ -21,9 +21,12 @@ proc match(request: Request): Future[ResponseData] {.async.} =
       case request.pathInfo
       of "/", "/kiosk":
         resp Http200, webAssets.getAsset("assets/web/index.html")
+      of "/event/render":
+        globalRenderer.triggerRender()
+        resp Http200, {"Content-Type": "application/json"}, $(%*{
+            "status": "ok"})
       of "/image":
         globalLogger.log(%*{"event": "http", "path": "/image"})
-        # TODO: await if rendering
         resp Http200, {"Content-Type": "image/png"}, globalRenderer.lastRender().encodeImage(PngFormat)
       else:
         resp Http404, "Not found!"

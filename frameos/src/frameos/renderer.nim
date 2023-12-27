@@ -3,6 +3,7 @@ import scenes/default as defaultScene
 
 from frameos/types import FrameOS, FrameConfig, FrameScene, Renderer, Logger
 from frameos/logger import log
+from frameos/utils/font import getDefaultTypeface, newFont
 
 proc newRenderer*(frameOS: FrameOS): Renderer =
   var scene = defaultScene.init(frameOS).FrameScene
@@ -11,7 +12,25 @@ proc newRenderer*(frameOS: FrameOS): Renderer =
     logger: frameOS.logger,
     scene: scene,
     lastImage: none(Image),
-    lastRenderAt: 0
+    lastRenderAt: 0,
+    sleepFuture: none(Future[void]),
+  )
+
+proc renderError*(frameConfig: FrameConfig, message: string): Image =
+  let typeface = getDefaultTypeface()
+  let font = newFont(typeface, 32, parseHtmlColor("#ffffff"))
+  let padding = 10.0
+  result = newImage(frameConfig.width, frameConfig.height)
+  result.fill(parseHtmlColor("#000000"))
+  result.fillText(
+    typeset(
+      spans = [newSpan(message, font)],
+      bounds = vec2(frameConfig.width.toFloat() - 2 * padding,
+          frameConfig.height.toFloat() - 2 * padding),
+      hAlign = CenterAlign,
+      vAlign = MiddleAlign,
+    ),
+    translate(vec2(padding, padding))
   )
 
 proc renderScene*(self: Renderer): Image =
@@ -29,7 +48,7 @@ proc lastRender*(self: Renderer): Image =
       self.lastRenderAt + self.frameConfig.interval > epochTime():
     result = self.lastImage.get()
   else:
-    result = self.renderScene()
+    result = renderError(self.frameConfig, "Error: No image rendered yet")
 
 proc startLoop*(self: Renderer): Future[void] {.async.} =
   self.logger.log(%*{"event": "startLoop"})
@@ -42,4 +61,12 @@ proc startLoop*(self: Renderer): Future[void] {.async.} =
     renderDuration = (epochTime() - timer)
     sleepDuration = max((self.frameConfig.interval - renderDuration) * 1000, 0.1)
     self.logger.log(%*{"event": "sleeping", "ms": sleepDuration})
-    await sleepAsync(sleepDuration)
+    let future = sleepAsync(sleepDuration)
+    self.sleepFuture = some(future)
+    await future
+    self.sleepFuture = none(Future[void])
+
+proc triggerRender*(self: Renderer): void =
+  self.logger.log(%*{"event": "triggerRender"})
+  if self.sleepFuture.isSome:
+    self.sleepFuture.get().complete()

@@ -42,6 +42,7 @@ type
     scene*: FrameScene
     lastImage*: Option[Image]
     lastRenderAt*: float
+    sleepFuture*: Option[Future[void]]
 
   Server* = ref object
     frameConfig*: FrameConfig
