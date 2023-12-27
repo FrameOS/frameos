@@ -7,6 +7,7 @@ from frameos/logger import log
 import apps/unsplash/app as unsplashApp
 import apps/text/app as textApp
 import apps/code/app as nodeapp_d25623be_36d3_4053_b02f_bebe189bc858App
+import apps/clock/app as clockApp
 
 let DEBUG = false
 
@@ -14,6 +15,7 @@ type Scene* = ref object of FrameScene
   app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200: unsplashApp.App
   app_b94c5793_aeb1_4f3a_b273_c2305c12096e: textApp.App
   app_d25623be_36d3_4053_b02f_bebe189bc858: nodeapp_d25623be_36d3_4053_b02f_bebe189bc858App.App
+  app_1c9414bd_8bc4_4249_8ffb_1b3094715a06: clockApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
 proc runNode*(self: Scene, nodeId: string,
@@ -37,9 +39,12 @@ proc runNode*(self: Scene, nodeId: string,
           scene.state{"magic"}.getStr()
       self.app_b94c5793_aeb1_4f3a_b273_c2305c12096e.appConfig.position = "top-left"
       self.app_b94c5793_aeb1_4f3a_b273_c2305c12096e.run(context)
-      nextNode = "-1"
+      nextNode = "1c9414bd-8bc4-4249-8ffb-1b3094715a06"
     of "d25623be-36d3-4053-b02f-bebe189bc858":
       self.app_d25623be_36d3_4053_b02f_bebe189bc858.run(context)
+      nextNode = "-1"
+    of "1c9414bd-8bc4-4249-8ffb-1b3094715a06":
+      self.app_1c9414bd_8bc4_4249_8ffb_1b3094715a06.run(context)
       nextNode = "-1"
     else:
       nextNode = "-1"
@@ -66,7 +71,7 @@ proc init*(frameOS: FrameOS): Scene =
   result = scene
   scene.app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200 = unsplashApp.init(
       "cbef1661-d2f5-4ef8-b0cf-458c3ae11200", scene, unsplashApp.AppConfig(
-      keyword: "birds", cacheSeconds: 60.0))
+      cacheSeconds: 1.0, keyword: "birds"))
   scene.app_b94c5793_aeb1_4f3a_b273_c2305c12096e = textApp.init(
       "b94c5793-aeb1-4f3a-b273-c2305c12096e", scene, textApp.AppConfig(
       borderWidth: 2, fontColor: parseHtmlColor("#ffffff"), fontSize: 64.0,
@@ -76,6 +81,12 @@ proc init*(frameOS: FrameOS): Scene =
   scene.app_d25623be_36d3_4053_b02f_bebe189bc858 = nodeapp_d25623be_36d3_4053_b02f_bebe189bc858App.init(
       "d25623be-36d3-4053-b02f-bebe189bc858", scene,
       nodeapp_d25623be_36d3_4053_b02f_bebe189bc858App.AppConfig(keyword: ""))
+  scene.app_1c9414bd_8bc4_4249_8ffb_1b3094715a06 = clockApp.init(
+      "1c9414bd-8bc4-4249-8ffb-1b3094715a06", scene, clockApp.AppConfig(
+      position: "bottom-center", format: "HH:mm:ss", formatCustom: "",
+      offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontColor: parseHtmlColor(
+      "#ffffff"), fontSize: 32.0, borderColor: parseHtmlColor("#000000"),
+      borderWidth: 1))
   dispatchEvent(scene, context)
 
 proc render*(self: Scene): Image =
