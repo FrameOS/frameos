@@ -1,4 +1,4 @@
-import json, pixie, times, options
+import json, pixie, times, options, asyncdispatch
 import scenes/default as defaultScene
 
 from frameos/types import FrameOS, FrameConfig, FrameScene, Renderer, Logger
@@ -30,3 +30,16 @@ proc lastRender*(self: Renderer): Image =
     result = self.lastImage.get()
   else:
     result = self.renderScene()
+
+proc startLoop*(self: Renderer): Future[void] {.async.} =
+  self.logger.log(%*{"event": "startLoop"})
+  var timer = 0.0
+  var renderDuration = 0.0
+  var sleepDuration = 0.0
+  while true:
+    timer = epochTime()
+    discard self.renderScene()
+    renderDuration = (epochTime() - timer)
+    sleepDuration = max((self.frameConfig.interval - renderDuration) * 1000, 0.1)
+    self.logger.log(%*{"event": "sleeping", "ms": sleepDuration})
+    await sleepAsync(sleepDuration)
