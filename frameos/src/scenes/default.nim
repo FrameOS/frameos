@@ -33,7 +33,8 @@ proc runNode*(self: Scene, nodeId: string,
       self.app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200.run(context)
       nextNode = "b94c5793-aeb1-4f3a-b273-c2305c12096e"
     of "b94c5793-aeb1-4f3a-b273-c2305c12096e":
-      self.app_b94c5793_aeb1_4f3a_b273_c2305c12096e.appConfig.text = &"Welcome to FrameOS!\nResolution: {context.image.width} x {context.image.height} .. " & scene.state{"magic"}.getStr()
+      self.app_b94c5793_aeb1_4f3a_b273_c2305c12096e.appConfig.text = &"Welcome to FrameOS!\nResolution: {context.image.width} x {context.image.height} .. " &
+          scene.state{"magic"}.getStr()
       self.app_b94c5793_aeb1_4f3a_b273_c2305c12096e.appConfig.position = "top-left"
       self.app_b94c5793_aeb1_4f3a_b273_c2305c12096e.run(context)
       nextNode = "-1"
@@ -43,7 +44,8 @@ proc runNode*(self: Scene, nodeId: string,
     else:
       nextNode = "-1"
     if DEBUG:
-      self.logger.log(%*{"event": "runApp", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      self.logger.log(%*{"event": "runApp", "node": currentNode, "ms": (-timer +
+          epochTime()) * 1000})
 
 proc dispatchEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:
@@ -59,11 +61,21 @@ proc init*(frameOS: FrameOS): Scene =
   let logger = frameOS.logger
   let scene = Scene(frameOS: frameOS, frameConfig: frameConfig, logger: logger, state: state)
   let self = scene
-  var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{}, image: newImage(1, 1))
+  var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{},
+      image: newImage(1, 1))
   result = scene
-  scene.app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200 = unsplashApp.init("cbef1661-d2f5-4ef8-b0cf-458c3ae11200", scene, unsplashApp.AppConfig(keyword: "birds", cacheSeconds: 60.0))
-  scene.app_b94c5793_aeb1_4f3a_b273_c2305c12096e = textApp.init("b94c5793-aeb1-4f3a-b273-c2305c12096e", scene, textApp.AppConfig(borderWidth: 2, fontColor: parseHtmlColor("#ffffff"), fontSize: 64.0, text: &"Welcome to FrameOS!\nResolution: {context.image.width} x {context.image.height} .. " & scene.state{"magic"}.getStr(), position: "top-left", offsetX: 0.0, offsetY: 0.0, padding: 10.0, borderColor: parseHtmlColor("#000000")))
-  scene.app_d25623be_36d3_4053_b02f_bebe189bc858 = nodeapp_d25623be_36d3_4053_b02f_bebe189bc858App.init("d25623be-36d3-4053-b02f-bebe189bc858", scene, nodeapp_d25623be_36d3_4053_b02f_bebe189bc858App.AppConfig(keyword: ""))
+  scene.app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200 = unsplashApp.init(
+      "cbef1661-d2f5-4ef8-b0cf-458c3ae11200", scene, unsplashApp.AppConfig(
+      keyword: "birds", cacheSeconds: 60.0))
+  scene.app_b94c5793_aeb1_4f3a_b273_c2305c12096e = textApp.init(
+      "b94c5793-aeb1-4f3a-b273-c2305c12096e", scene, textApp.AppConfig(
+      borderWidth: 2, fontColor: parseHtmlColor("#ffffff"), fontSize: 64.0,
+      text: &"Welcome to FrameOS!\nResolution: {context.image.width} x {context.image.height} .. " &
+      scene.state{"magic"}.getStr(), position: "top-left", offsetX: 0.0,
+      offsetY: 0.0, padding: 10.0, borderColor: parseHtmlColor("#000000")))
+  scene.app_d25623be_36d3_4053_b02f_bebe189bc858 = nodeapp_d25623be_36d3_4053_b02f_bebe189bc858App.init(
+      "d25623be-36d3-4053-b02f-bebe189bc858", scene,
+      nodeapp_d25623be_36d3_4053_b02f_bebe189bc858App.AppConfig(keyword: ""))
   dispatchEvent(scene, context)
 
 proc render*(self: Scene): Image =

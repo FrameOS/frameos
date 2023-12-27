@@ -14,7 +14,7 @@ var globalLogger: Logger
 var globalFrameConfig: FrameConfig
 var globalRenderer: Renderer
 
-proc match(request: Request): ResponseData =
+proc match(request: Request): Future[ResponseData] {.async.} =
   echo "GET " & request.pathInfo
   {.cast(gcsafe).}: # TODO: is this correct? https://forum.nim-lang.org/t/10474
     block route:
@@ -23,9 +23,11 @@ proc match(request: Request): ResponseData =
         resp Http200, webAssets.getAsset("assets/web/index.html")
       of "/image":
         globalLogger.log(%*{"event": "http", "path": "/image"})
+        # TODO: await if rendering
         resp Http200, {"Content-Type": "image/png"}, globalRenderer.lastRender().encodeImage(PngFormat)
       else:
         resp Http404, "Not found!"
+
 
 proc newServer*(frameOS: FrameOS): Server =
   globalFrameConfig = frameOS.frameConfig
@@ -34,7 +36,8 @@ proc newServer*(frameOS: FrameOS): Server =
 
   let port = (frameOS.frameConfig.framePort or 8787).Port
   let settings = newSettings(port = port)
-  var jester = initJester(matcher = match.MatchProcSync, settings = settings)
+  var jester = initJester(matcher = match.MatchProc, settings = settings)
+
   result = Server(
     frameConfig: frameOS.frameConfig,
     logger: frameOS.logger,
@@ -43,7 +46,7 @@ proc newServer*(frameOS: FrameOS): Server =
   )
 
 
-proc startServer*(self: Server) =
+proc startServer*(self: Server) {.async.} =
   self.logger.log(%*{"event": "http:start",
       "message": "Starting web server"})
   self.jester.serve() # blocks forever

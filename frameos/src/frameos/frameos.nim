@@ -1,4 +1,4 @@
-import json
+import json, asyncdispatch
 
 from frameos/types import FrameOS, Server
 from frameos/config import loadConfig
@@ -16,7 +16,7 @@ proc newFrameOS*(): FrameOS =
   result.renderer = newRenderer(result)
   result.server = newServer(result)
 
-proc start*(self: FrameOS) =
+proc start*(self: FrameOS) {.async.} =
   var message = %*{"event": "bootup", "config": {
     "framePort": self.frameConfig.framePort,
     "width": self.frameConfig.width,
@@ -33,6 +33,6 @@ proc start*(self: FrameOS) =
   discard self.renderer.renderScene()
   self.server.startServer()
 
-proc startFrameOS*() =
+proc startFrameOS*() {.async.} =
   var frameOS = newFrameOS()
-  frameOS.start()
+  await frameOS.start()

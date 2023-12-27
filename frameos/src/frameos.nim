@@ -1,4 +1,5 @@
+import asyncdispatch
 from ./frameos/frameos import startFrameOS
 
 when isMainModule:
-  startFrameOS() # blocks forever
+  waitFor startFrameOS() # blocks forever
