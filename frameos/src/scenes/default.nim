@@ -71,7 +71,7 @@ proc init*(frameOS: FrameOS): Scene =
   result = scene
   scene.app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200 = unsplashApp.init(
       "cbef1661-d2f5-4ef8-b0cf-458c3ae11200", scene, unsplashApp.AppConfig(
-      cacheSeconds: 1.0, keyword: "birds"))
+      cacheSeconds: 60.0, keyword: "birds"))
   scene.app_b94c5793_aeb1_4f3a_b273_c2305c12096e = textApp.init(
       "b94c5793-aeb1-4f3a-b273-c2305c12096e", scene, textApp.AppConfig(
       borderWidth: 2, fontColor: parseHtmlColor("#ffffff"), fontSize: 64.0,
