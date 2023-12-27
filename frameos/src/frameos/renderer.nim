@@ -65,7 +65,7 @@ proc startLoop*(self: Renderer): Future[void] {.async.} =
     driverTimer = epochTime()
     drivers.render(self.frameOS, self.lastRender())
     self.logger.log(%*{"event": "render:driver",
-        "driver": self.frameConfig.device, "ms": (epochTime() - driverTimer)})
+        "driver": self.frameConfig.device, "s": (epochTime() - driverTimer)})
 
     # Sleep until the next frame
     sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) *

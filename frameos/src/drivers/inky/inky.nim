@@ -6,13 +6,13 @@ from frameos/logger import log
 proc init*(frameOS: FrameOS) =
   discard
 
-proc safeLog(logger: Logger, message: string) =
+proc safeLog(logger: Logger, message: string): JsonNode =
   try:
-    let parsed = parseJson(message)
-    parsed["event"] = %*("driver:inky")
-    logger.log(parsed)
+    result = parseJson(message)
+    result["event"] = %*("driver:inky")
   except:
-    logger.log(%*{"event": "driver:inky", "log": message})
+    result = %*{"event": "driver:inky", "log": message}
+  logger.log(result)
 
 proc render*(frameOS: FrameOS, image: Image) =
   let imageData = image.encodeImage(BmpFormat)
@@ -21,21 +21,33 @@ proc render*(frameOS: FrameOS, image: Image) =
   let pOut = process.outputStream()
   let pIn = process.inputStream()
   var line = ""
-  frameOS.logger.safeLog("Logging")
+  discard frameOS.logger.safeLog("Logging")
 
-  while pOut.readLine(line):
-    frameOS.logger.safeLog(line)
+  var i = 0
+  block toploop:
+    while process.running:
+      while pOut.readLine(line):
+        let json = frameOS.logger.safeLog(line)
+        if json{"inky"}.getBool(false): # block until we get inky=true
+          break toploop
+      sleep(100)
+      i += 1
+      if i > 100:
+        discard frameOS.logger.safeLog("Looped for 10s! Breaking!")
+        break toploop
 
+  discard frameOS.logger.safeLog("Writing output")
   for x in imageData:
     pIn.write x
+  discard frameOS.logger.safeLog("Wrote output")
 
   pIn.flush
   pIn.close() # NOTE **Essential** - This prevents hanging/freezing when reading stdout below
 
   while process.running:
     while pOut.readLine(line):
-      frameOS.logger.safeLog(line)
+      discard frameOS.logger.safeLog(line)
     sleep(100)
   while pOut.readLine(line):
-    frameOS.logger.safeLog(line)
+    discard frameOS.logger.safeLog(line)
   process.close()

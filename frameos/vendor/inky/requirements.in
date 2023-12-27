@@ -6,3 +6,4 @@
 inky==1.5.0
 numpy==1.26.1
 pillow==9.5.0
+RPi.GPIO==0.7.1
