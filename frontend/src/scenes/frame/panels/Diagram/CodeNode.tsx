@@ -62,7 +62,7 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
                 <TextArea
                   theme="node"
                   className="w-full h-full font-mono"
-                  placeholder={`&"{context.image.width} or {scene.state{'my_val'}}" # nim oneliner`}
+                  placeholder={`&"{context.image.width} x ..." & $scene.state{"magic3"}.getStr() # nim oneliner`}
                   value={data.code ?? ''}
                   rows={3}
                   onChange={(value) => updateNodeData(id, { code: value.replaceAll('\n', '') })}

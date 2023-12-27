@@ -24,6 +24,7 @@ proc log*(self: App, message: string) =
 
 proc render*(self: App, context: ExecutionContext) =
   self.log(&"Hello from {context.event} {self.appConfig.keyword}")
+  self.scene.state["count"] = %*(self.scene.state{"count"}.getInt(0) + 1)
 
   if context.event == "render":
     context.image.fillPath(
