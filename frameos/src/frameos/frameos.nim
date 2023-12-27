@@ -5,6 +5,7 @@ from frameos/config import loadConfig
 from frameos/logger import newLogger, log
 from frameos/server import newServer, startServer
 from frameos/renderer import newRenderer, renderScene, startLoop
+import drivers/drivers as drivers
 
 proc newFrameOS*(): FrameOS =
   var frameConfig = loadConfig()
@@ -13,6 +14,7 @@ proc newFrameOS*(): FrameOS =
     frameConfig: frameConfig,
     logger: logger,
   )
+  drivers.init(result)
   result.renderer = newRenderer(result)
   result.server = newServer(result)
 

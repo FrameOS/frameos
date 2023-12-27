@@ -5,16 +5,18 @@ from frameos/types import FrameOS, FrameConfig, FrameScene, Renderer, Logger
 from frameos/logger import log
 from frameos/utils/font import getDefaultTypeface, newFont
 
+import drivers/drivers as drivers
+
 proc newRenderer*(frameOS: FrameOS): Renderer =
   var scene = defaultScene.init(frameOS).FrameScene
   result = Renderer(
+    frameOS: frameOS,
     frameConfig: frameOS.frameConfig,
     logger: frameOS.logger,
     scene: scene,
     lastImage: none(Image),
     lastRenderAt: 0,
-    sleepFuture: none(Future[void]),
-  )
+    sleepFuture: none(Future[void]), )
 
 proc renderError*(frameConfig: FrameConfig, message: string): Image =
   let typeface = getDefaultTypeface()
@@ -46,8 +48,7 @@ proc renderScene*(self: Renderer) =
       sceneTimer) * 1000})
 
 proc lastRender*(self: Renderer): Image =
-  if self.lastImage.isSome and self.frameConfig.interval != 0 and
-      self.lastRenderAt + self.frameConfig.interval > epochTime():
+  if self.lastImage.isSome:
     result = self.lastImage.get()
   else:
     result = renderError(self.frameConfig, "Error: No image rendered yet")
@@ -55,13 +56,21 @@ proc lastRender*(self: Renderer): Image =
 proc startLoop*(self: Renderer): Future[void] {.async.} =
   self.logger.log(%*{"event": "startLoop"})
   var timer = 0.0
+  var driverTimer = 0.0
   var sleepDuration = 0.0
   while true:
     timer = epochTime()
     self.renderScene()
+
+    driverTimer = epochTime()
+    drivers.render(self.frameOS, self.lastRender())
+    self.logger.log(%*{"event": "render:driver",
+        "driver": self.frameConfig.device, "ms": (epochTime() - driverTimer)})
+
+    # Sleep until the next frame
     sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) *
         1000, 0.1)
-    self.logger.log(%*{"event": "sleeping", "ms": sleepDuration})
+    self.logger.log(%*{"event": "sleep", "s": sleepDuration / 1000})
     # Calculate once more to subtract the time it took to log the message
     sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) *
         1000, 0.1)

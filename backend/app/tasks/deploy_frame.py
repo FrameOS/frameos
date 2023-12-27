@@ -48,7 +48,7 @@ def deploy_frame(id: int):
                 log(id, "stdout", f"- Applying local modifications")
                 make_local_modifications(frame, source_dir)
                 log(id, "stdout", f"- Creating build archive")
-                archive_path = create_local_build_archive(build_dir, build_id, frame, nim_path, source_dir, temp_dir)
+                archive_path = create_local_build_archive(frame, build_dir, build_id, nim_path, source_dir, temp_dir)
 
                 # 8. Copy to the server "scp -r tmp/build_1.tar.gz toormoos:"
                 ssh = get_ssh_connection(frame)
@@ -65,6 +65,12 @@ def deploy_frame(id: int):
                     exec_command(frame, ssh, f"cp /srv/frameos/build/build_{build_id}/frameos /srv/frameos/releases/release_{build_id}/frameos")
                     log(id, "stdout", f"> add /srv/frameos/releases/release_{build_id}/frame.json")
                     scp.putfo(StringIO(json.dumps(get_frame_json(frame), indent=4) + "\n"), f"/srv/frameos/releases/release_{build_id}/frame.json")
+
+                    if frame.device == "pimoroni.inky_impression":
+                        exec_command(frame, ssh, f"cp -r /srv/frameos/build/build_{build_id}/vendor /srv/frameos/releases/release_{build_id}/vendor")
+                        exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-pip\" || sudo apt -y install python3-pip")
+                        exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-venv\" || sudo apt -y install python3-venv")
+                        exec_command(frame, ssh, f"cd /srv/frameos/releases/release_{build_id}/vendor/inky && python3 -m venv env && env/bin/pip3 install -r requirements.txt")
 
                     # add frameos.service
                     with open("../frameos/frameos.service", "r") as file:
@@ -164,12 +170,43 @@ def make_local_modifications(frame: Frame, source_dir: str):
     # only one scene called "default" for now
     for scene in frame.scenes:
         scene_source = generate_scene_nim_source(frame, scene)
-        log(frame.id, "stdout", f"Scene: {scene}")
         with open(os.path.join(source_dir, "src", "scenes", f"{scene.get('id')}.nim"), "w") as file:
             file.write(scene_source)
 
+    with open(os.path.join(source_dir, "src", "drivers", "driver.nim"), "w") as file:
+        imports = []
+        init_drivers = []
+        render_drivers = []
+        if frame.device == "pimoroni.inky_impression":
+            imports.append("import inky/inky as inkyDriver")
+            init_drivers.append("inkyDriver.init(frameOS)")
+            render_drivers.append("inkyDriver.render(frameOS, image)")
 
-def create_local_build_archive(build_dir, build_id, frame, nim_path, source_dir, temp_dir):
+        if len(init_drivers) == 0:
+            init_drivers.append("discard")
+        if len(render_drivers) == 0:
+            render_drivers.append("discard")
+
+        newline = "\n"
+        file.write(f"""
+import pixie
+{newline.join(imports)}
+
+proc init*(frameOS: FrameOS) =
+  {(newline + '  ').join(init_drivers)}
+
+proc render*(frameOS: FrameOS, image: Image) =
+  {(newline + '  ').join(render_drivers)}
+""")
+     
+
+def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_path: str, source_dir: str, temp_dir: str):
+    if frame.device == "pimoroni.inky_impression":
+        os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
+        shutil.copytree("../frameos/vendor/inky/", os.path.join(build_dir, "vendor", "inky"), dirs_exist_ok=True)
+        shutil.rmtree(os.path.join(build_dir, "vendor", "inky", "env"), ignore_errors=True)
+        shutil.rmtree(os.path.join(build_dir, "vendor", "inky", "__pycache__"), ignore_errors=True)
+
     # Tell a white lie
     log(frame.id, "stdout", f"- No cross compilation. Generating source code for compilation on frame.")
 

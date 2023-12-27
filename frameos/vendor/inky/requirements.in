@@ -1,0 +1,8 @@
+# pip install pip-tools
+# pip-compile requirements.in
+-i https://piwheels.org/simple
+--extra-index-url https://pypi.org/simple
+
+inky==1.5.0
+numpy==1.26.1
+pillow==9.5.0
