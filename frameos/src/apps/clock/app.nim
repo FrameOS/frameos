@@ -88,8 +88,6 @@ proc run*(self: App, context: ExecutionContext) =
     of "custom": self.appConfig.formatCustom
     else: self.appConfig.format)
 
-  echo "Rendering text: ", text
-
   let renderData = RenderData(
     text: text,
     position: self.appConfig.position,
