@@ -409,7 +409,9 @@ proc render*(self: Scene): Image =
     scene: self,
     event: "render",
     eventPayload: %*{{}},
-    image: newImage(self.frameConfig.width, self.frameConfig.height)
+    image: case self.frameConfig.rotate:
+    of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
+    else: newImage(self.frameConfig.width, self.frameConfig.height)
   )
   dispatchEvent(self, context)
   return context.image

@@ -22,13 +22,20 @@ proc renderError*(frameConfig: FrameConfig, message: string): Image =
   let typeface = getDefaultTypeface()
   let font = newFont(typeface, 32, parseHtmlColor("#ffffff"))
   let padding = 10.0
-  result = newImage(frameConfig.width, frameConfig.height)
+  result = case frameConfig.rotate:
+    of 90, 270:
+      newImage(frameConfig.height, frameConfig.width)
+    else:
+      newImage(frameConfig.width, frameConfig.height)
   result.fill(parseHtmlColor("#000000"))
   result.fillText(
     typeset(
       spans = [newSpan(message, font)],
-      bounds = vec2(frameConfig.width.toFloat() - 2 * padding,
-          frameConfig.height.toFloat() - 2 * padding),
+      bounds = case frameConfig.rotate:
+    of 90, 270: vec2(frameConfig.height.toFloat() - 2 * padding,
+      frameConfig.width.toFloat() - 2 * padding)
+    else: vec2(frameConfig.width.toFloat() - 2 * padding,
+      frameConfig.height.toFloat() - 2 * padding),
       hAlign = CenterAlign,
       vAlign = MiddleAlign,
     ),

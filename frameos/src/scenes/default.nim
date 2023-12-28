@@ -72,7 +72,7 @@ proc init*(frameOS: FrameOS): Scene =
   let scene = Scene(frameOS: frameOS, frameConfig: frameConfig, logger: logger, state: state)
   let self = scene
   var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{
-      }, image: newImage(1, 1))
+    }, image: newImage(1, 1))
   result = scene
   scene.app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200 = unsplashApp.init(
       "cbef1661-d2f5-4ef8-b0cf-458c3ae11200", scene, unsplashApp.AppConfig(
@@ -102,7 +102,9 @@ proc render*(self: Scene): Image =
     scene: self,
     event: "render",
     eventPayload: %*{},
-    image: newImage(self.frameConfig.width, self.frameConfig.height)
+    image: case self.frameConfig.rotate:
+    of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
+    else: newImage(self.frameConfig.width, self.frameConfig.height)
   )
   dispatchEvent(self, context)
   return context.image
