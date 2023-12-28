@@ -41,7 +41,7 @@ def get_ssh_connection(frame: Frame) -> SSHClient:
     ssh.set_missing_host_key_policy(AutoAddPolicy())
 
     if frame.ssh_pass:
-        ssh.connect(frame.frame_host, username=frame.ssh_user, password=frame.ssh_pass, timeout=10)
+        ssh.connect(frame.frame_host, username=frame.ssh_user, password=frame.ssh_pass, timeout=30)
     else:
         ssh_keys = Settings.query.filter_by(key="ssh_keys").first()
         default_key = None
@@ -49,7 +49,7 @@ def get_ssh_connection(frame: Frame) -> SSHClient:
             default_key = ssh_keys.value.get("default", None)
         if default_key:
             ssh_key_obj = RSAKey.from_private_key(StringIO(default_key))
-            ssh.connect(frame.frame_host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=10)
+            ssh.connect(frame.frame_host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=30)
         else:
             raise Exception(f"Set up SSH keys in the settings page, or provide a password for the frame")
     log(frame.id, "stdinfo", f"Connected via SSH to {frame.ssh_user}@{frame.frame_host}")
