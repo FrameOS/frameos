@@ -173,7 +173,7 @@ def make_local_modifications(frame: Frame, source_dir: str):
         with open(os.path.join(source_dir, "src", "scenes", f"{scene.get('id')}.nim"), "w") as file:
             file.write(scene_source)
 
-    with open(os.path.join(source_dir, "src", "drivers", "driver.nim"), "w") as file:
+    with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as file:
         imports = []
         init_drivers = []
         render_drivers = []
