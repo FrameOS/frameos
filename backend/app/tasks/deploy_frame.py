@@ -73,7 +73,7 @@ def deploy_frame(id: int):
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/build/")
                     log(id, "stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
                     scp.put(archive_path, f"/srv/frameos/build/build_{build_id}.tar.gz")
-                    exec_command(frame, ssh, f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz")
+                    exec_command(frame, ssh, f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz")
                     exec_command(frame, ssh, f"cd /srv/frameos/build/build_{build_id} && sh ./compile_frameos.sh")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/releases/release_{build_id}")
                     exec_command(frame, ssh, f"cp /srv/frameos/build/build_{build_id}/frameos /srv/frameos/releases/release_{build_id}/frameos")
