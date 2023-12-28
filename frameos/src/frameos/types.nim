@@ -1,4 +1,5 @@
-import httpclient, json, jester, pixie
+import json, jester, pixie
+import std/locks
 
 type
   FrameConfig* = ref object
@@ -19,8 +20,11 @@ type
 
   Logger* = ref object
     frameConfig*: FrameConfig
-    client*: HttpClient
-    url*: string
+    lock*: Lock
+    thread*: Thread[FrameConfig]
+    channel*: Channel[JsonNode]
+    # client*: HttpClient
+    # url*: string
 
   FrameScene* = ref object of RootObj
     frameOS*: FrameOS

@@ -44,8 +44,8 @@ proc renderScene*(self: Renderer) =
   except:
     self.logger.log(%*{"event": "render:error"})
   self.lastRenderAt = epochTime()
-  self.logger.log(%*{"event": "render:done", "ms": (epochTime() -
-      sceneTimer) * 1000})
+  self.logger.log(%*{"event": "render:done", "ms": round((epochTime() -
+      sceneTimer) * 1000, 3)})
 
 proc lastRender*(self: Renderer): Image =
   if self.lastImage.isSome:
@@ -65,12 +65,13 @@ proc startLoop*(self: Renderer): Future[void] {.async.} =
     driverTimer = epochTime()
     drivers.render(self.frameOS, self.lastRender())
     self.logger.log(%*{"event": "render:driver",
-        "driver": self.frameConfig.device, "s": (epochTime() - driverTimer)})
+        "driver": self.frameConfig.device, "ms": round((epochTime() -
+            driverTimer) * 1000, 3)})
 
     # Sleep until the next frame
     sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) *
         1000, 0.1)
-    self.logger.log(%*{"event": "sleep", "s": sleepDuration / 1000})
+    self.logger.log(%*{"event": "sleep", "ms": round(sleepDuration, 3)})
     # Calculate once more to subtract the time it took to log the message
     sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) *
         1000, 0.1)
