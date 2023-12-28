@@ -45,6 +45,7 @@ type
     logger*: Logger
     scene*: FrameScene
     lastImage*: Option[Image]
+    lastRotatedImage*: Option[Image]
     lastRenderAt*: float
     sleepFuture*: Option[Future[void]]
 

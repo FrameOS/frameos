@@ -4,6 +4,7 @@ import scenes/default as defaultScene
 from frameos/types import FrameOS, FrameConfig, FrameScene, Renderer, Logger
 from frameos/logger import log
 from frameos/utils/font import getDefaultTypeface, newFont
+from frameos/utils/image import rotate90Degrees, rotate180Degrees, rotate270Degrees
 
 import drivers/drivers as drivers
 
@@ -15,6 +16,7 @@ proc newRenderer*(frameOS: FrameOS): Renderer =
     logger: frameOS.logger,
     scene: scene,
     lastImage: none(Image),
+    lastRotatedImage: none(Image),
     lastRenderAt: 0,
     sleepFuture: none(Future[void]), )
 
@@ -47,7 +49,17 @@ proc renderScene*(self: Renderer) =
   let sceneTimer = epochTime()
   try:
     type DefaultScene = defaultScene.Scene
-    self.lastImage = some(defaultScene.render(self.scene.DefaultScene))
+    let image = defaultScene.render(self.scene.DefaultScene)
+    self.lastImage = some(image)
+    case self.frameConfig.rotate:
+      of 90:
+        self.lastRotatedImage = some(image.rotate90Degrees())
+      of 180:
+        self.lastRotatedImage = some(image.rotate180Degrees())
+      of 270:
+        self.lastRotatedImage = some(image.rotate270Degrees())
+      else:
+        self.lastRotatedImage = self.lastImage
   except:
     self.logger.log(%*{"event": "render:error"})
   self.lastRenderAt = epochTime()
@@ -60,6 +72,21 @@ proc lastRender*(self: Renderer): Image =
   else:
     result = renderError(self.frameConfig, "Error: No image rendered yet")
 
+proc lastRotatedRender*(self: Renderer): Image =
+  if self.lastRotatedImage.isSome:
+    result = self.lastRotatedImage.get()
+  else:
+    result = renderError(self.frameConfig, "Error: No image rendered yet")
+    case self.frameConfig.rotate:
+      of 90:
+        result = result.rotate90Degrees()
+      of 180:
+        result = result.rotate180Degrees()
+      of 270:
+        result = result.rotate270Degrees()
+      else:
+        discard
+
 proc startLoop*(self: Renderer): Future[void] {.async.} =
   self.logger.log(%*{"event": "startLoop"})
   var timer = 0.0
@@ -70,9 +97,9 @@ proc startLoop*(self: Renderer): Future[void] {.async.} =
     self.renderScene()
 
     driverTimer = epochTime()
-    drivers.render(self.frameOS, self.lastRender())
+    drivers.render(self.frameOS, self.lastRotatedRender())
     self.logger.log(%*{"event": "render:driver",
-        "driver": self.frameConfig.device, "ms": round((epochTime() -
+        "device": self.frameConfig.device, "ms": round((epochTime() -
             driverTimer) * 1000, 3)})
 
     # Sleep until the next frame
