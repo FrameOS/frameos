@@ -21,7 +21,7 @@ proc render*(frameOS: FrameOS, image: Image) =
   let pOut = process.outputStream()
   let pIn = process.inputStream()
   var line = ""
-  discard frameOS.logger.safeLog("Logging")
+  discard frameOS.logger.safeLog("Executing")
 
   var i = 0
   block toploop:

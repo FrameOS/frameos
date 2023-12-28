@@ -181,6 +181,10 @@ def make_local_modifications(frame: Frame, source_dir: str):
             imports.append("import inky/inky as inkyDriver")
             init_drivers.append("inkyDriver.init(frameOS)")
             render_drivers.append("inkyDriver.render(frameOS, image)")
+        if frame.device == "framebuffer":
+            imports.append("import framebuffer/framebuffer as framebufferDriver")
+            init_drivers.append("framebufferDriver.init(frameOS)")
+            render_drivers.append("framebufferDriver.render(frameOS, image)")
 
         if len(init_drivers) == 0:
             init_drivers.append("discard")
