@@ -2,7 +2,7 @@ import atexit
 import signal
 import subprocess
 from io import StringIO
-from typing import Optional
+from typing import Optional, List
 
 from paramiko import RSAKey, SSHClient, AutoAddPolicy
 from gevent import sleep
@@ -56,15 +56,19 @@ def get_ssh_connection(frame: Frame) -> SSHClient:
     return ssh
 
 
-def exec_command(frame: Frame, ssh: SSHClient, command: str) -> int:
+def exec_command(frame: Frame, ssh: SSHClient, command: str, output: Optional[List[str]] = None) -> int:
     log(frame.id, "stdout", f"> {command}")
     _stdin, stdout, stderr = ssh.exec_command(command)
     exit_status = None
     while exit_status is None:
         while line := stdout.readline():
             log(frame.id, "stdout", line)
+            if output is not None:
+                output.append(line)
         while line := stderr.readline():
             log(frame.id, "stderr", line)
+            if output is not None:
+                output.append(line)
 
         # Check if the command has finished running
         if stdout.channel.exit_status_ready():

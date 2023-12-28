@@ -18,6 +18,7 @@ from scp import SCPClient
 from app import create_app
 from app.huey import huey
 from app.models import get_apps_from_scenes
+from app.models.drivers import drivers_for_device, write_drivers_nim
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json, generate_scene_nim_source
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection, exec_local_command
@@ -43,15 +44,28 @@ def deploy_frame(id: int):
             nim_path = find_nim_v2()
 
             with tempfile.TemporaryDirectory() as temp_dir:
+                ssh = get_ssh_connection(frame)
+                log(id, "stdout", f"- Getting target architecture")
+                uname_output = []
+                exec_command(frame, ssh, f"uname -m", uname_output)
+                arch = "".join(uname_output).strip()
+                if arch == "aarch64":
+                    cpu = "arm64"
+                elif arch == "armv6l":
+                    cpu = "arm"
+                elif arch == "i386":
+                    cpu = "i386"
+                else:
+                    cpu = "x86_64"
+
                 log(id, "stdout", f"- Copying build folders")
                 build_dir, source_dir = create_build_folders(temp_dir, build_id)
                 log(id, "stdout", f"- Applying local modifications")
                 make_local_modifications(frame, source_dir)
                 log(id, "stdout", f"- Creating build archive")
-                archive_path = create_local_build_archive(frame, build_dir, build_id, nim_path, source_dir, temp_dir)
+                archive_path = create_local_build_archive(frame, build_dir, build_id, nim_path, source_dir, temp_dir, cpu)
 
                 # 8. Copy to the server "scp -r tmp/build_1.tar.gz toormoos:"
-                ssh = get_ssh_connection(frame)
                 with SCPClient(ssh.get_transport()) as scp:
                     # build the release
                     exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  build-essential\" || sudo apt -y install build-essential")
@@ -174,38 +188,11 @@ def make_local_modifications(frame: Frame, source_dir: str):
             file.write(scene_source)
 
     with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as file:
-        imports = []
-        init_drivers = []
-        render_drivers = []
-        if frame.device == "pimoroni.inky_impression":
-            imports.append("import inky/inky as inkyDriver")
-            init_drivers.append("inkyDriver.init(frameOS)")
-            render_drivers.append("inkyDriver.render(frameOS, image)")
-        if frame.device == "framebuffer":
-            imports.append("import framebuffer/framebuffer as framebufferDriver")
-            init_drivers.append("framebufferDriver.init(frameOS)")
-            render_drivers.append("framebufferDriver.render(frameOS, image)")
+        drivers_nim = write_drivers_nim(drivers_for_device(frame.device))
+        file.write(drivers_nim)
 
-        if len(init_drivers) == 0:
-            init_drivers.append("discard")
-        if len(render_drivers) == 0:
-            render_drivers.append("discard")
 
-        newline = "\n"
-        file.write(f"""
-import pixie
-import frameos/types
-{newline.join(imports)}
-
-proc init*(frameOS: FrameOS) =
-  {(newline + '  ').join(init_drivers)}
-
-proc render*(frameOS: FrameOS, image: Image) =
-  {(newline + '  ').join(render_drivers)}
-""")
-     
-
-def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_path: str, source_dir: str, temp_dir: str):
+def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_path: str, source_dir: str, temp_dir: str, cpu: str):
     if frame.device == "pimoroni.inky_impression":
         os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
         shutil.copytree("../frameos/vendor/inky/", os.path.join(build_dir, "vendor", "inky"), dirs_exist_ok=True)
@@ -218,7 +205,7 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
     # 4. run "nim c --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:tmp/build_1 src/frameos.nim"
     status, out, err = exec_local_command(
         frame,
-        f"cd {source_dir} && {nim_path} compile --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:{build_dir} src/frameos.nim 2>&1"
+        f"cd {source_dir} && {nim_path} compile --os:linux --cpu:{cpu} --compileOnly --genScript --nimcache:{build_dir} src/frameos.nim 2>&1"
     )
     if status != 0:
         last_line = [line for line in err.split("\n") if line != ''][-1]

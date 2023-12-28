@@ -4,6 +4,7 @@ from frameos/types import FrameOS, FrameConfig, Logger
 from frameos/logger import log
 
 proc init*(frameOS: FrameOS) =
+  # TODO: check for display
   discard
 
 proc safeLog(logger: Logger, message: string): JsonNode =
