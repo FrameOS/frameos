@@ -194,6 +194,7 @@ def make_local_modifications(frame: Frame, source_dir: str):
         newline = "\n"
         file.write(f"""
 import pixie
+import frameos/types
 {newline.join(imports)}
 
 proc init*(frameOS: FrameOS) =
