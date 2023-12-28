@@ -239,15 +239,32 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
     with open(script_path, "r") as file:
         lines = file.readlines()
     with open(script_path, "w") as file:
-        file.write("#!/bin/sh")
-        file.write("set -eu")
+        file.write("#!/bin/sh\n")
+        file.write("set -eu\n")
+        file.write("mkdir -p ../cache\n") # make sure we have the cache folder
+        file.write("cached_files_count=0\n")  # Initialize cached files counter
         for i, line in enumerate(lines):
-            if i == len(lines) - 1:
-                file.write(f"echo [{i}/{len(lines) - 1}] Compiling on device: frameos\n")
+            if line.startswith("gcc -c") and line.strip().endswith(".nim.c"):
+                source_file = line.split(' ')[-1].strip()
+                source_cleaned = '/'.join(source_file.split('@s')[-3:]).replace('@m', './')
+
+                # take the md5sum of the source file <source>.c
+                file.write(f"md5sum=$(md5sum {source_file} | awk '{{print $1}}')\n")
+                # check if there's a file in the cache folder called <md5sum>.c.o
+                file.write(f"if [ -f ../cache/${{md5sum}}.{cpu}.c.o ]; then\n")
+                # if there is, make a symlink to the build folder with the name <source>.o
+                file.write(f"    cached_files_count=$((cached_files_count + 1))\n")
+                file.write(f"    ln -s ../cache/${{md5sum}}.{cpu}.c.o {source_file}.o\n")
+                file.write("else\n")
+                # if not, run the command in "line" and then copy the <source>.c.o into the build folder as <md5sum>.c.o
+                file.write(f"    echo [{i + 1}/{len(lines) - 1}] Compiling on device: {source_cleaned}\n")
+                file.write(f"    {line.strip()}\n")
+                file.write(f"    cp {source_file}.o ../cache/${{md5sum}}.{cpu}.c.o\n")
+                file.write("fi\n")
             else:
-                source = '/'.join(line.split(' ')[-1].split('@s')[-3:]).replace('@m', './')
-                file.write(f"echo [{i}/{len(lines) - 1}] Compiling on device: {source}\n")
-            file.write(line)
+                file.write(f"echo [{i + 1}/{len(lines) - 1}] Compiling on device: frameos\n")
+                file.write(line)
+        file.write("echo \"Used $cached_files_count cached files\"\n")
 
     # 7. Zip it up "(cd tmp && tar -czf ./build_1.tar.gz build_1)"
     archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")
