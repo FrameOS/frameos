@@ -174,6 +174,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                               value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
                               onChange={(value) => updateNodeConfig(id, field.name, value)}
                               disabled={codeFields.includes(field.name)}
+                              className={field.type === 'color' ? 'min-w-[50px]' : ''}
                               type={
                                 field.type === 'integer' || field.type === 'float'
                                   ? 'tel'
