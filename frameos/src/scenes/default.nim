@@ -94,7 +94,8 @@ proc init*(frameOS: FrameOS): Scene =
       borderWidth: 1))
   scene.app_ddbd3753_ea6a_4a80_98b4_455fb623ef6b = downloadImageApp.init(
       "ddbd3753-ea6a-4a80-98b4-455fb623ef6b", scene, downloadImageApp.AppConfig(
-      url: "http://10.4.0.11:4999/", scalingMode: "cover", cacheSeconds: 60.0))
+      url: "http://10.4.0.11:4999/", scalingMode: "cover",
+      cacheSeconds: 60.0))
   dispatchEvent(scene, context)
 
 proc render*(self: Scene): Image =

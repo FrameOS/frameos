@@ -1,7 +1,7 @@
 import pixie
 import times
 import options
-from frameos/utils/image import downloadImage
+from frameos/utils/image import downloadImage, scaleAndDrawImage
 from frameos/types import FrameScene, FrameConfig, ExecutionContext
 
 type
@@ -46,6 +46,4 @@ proc run*(self: App, context: ExecutionContext) =
       self.cachedUrl = url
       self.cacheExpiry = epochTime() + self.appConfig.cacheSeconds
 
-  # TODO: scalingMode
-
-  image.draw(downloadedImage.get())
+  scaleAndDrawImage(image, downloadedImage.get(), self.appConfig.scalingMode)
