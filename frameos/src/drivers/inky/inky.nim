@@ -7,7 +7,7 @@ proc init*(frameOS: FrameOS) =
   # TODO: check for display
   discard
 
-var lastImageData: string
+var lastImageData: seq[ColorRGBX]
 
 proc safeLog(logger: Logger, message: string): JsonNode =
   try:
@@ -18,12 +18,12 @@ proc safeLog(logger: Logger, message: string): JsonNode =
   logger.log(result)
 
 proc render*(frameOS: FrameOS, image: Image) =
-  let imageData = image.encodeImage(BmpFormat)
-  if lastImageData == imageData:
+  if lastImageData == image.data:
     discard frameOS.logger.safeLog("Skipping render. Identical to last render.")
     echo "Skipping render"
     return
-  lastImageData = imageData
+  lastImageData = image.data
+  let imageData = image.encodeImage(BmpFormat)
 
   let process = startProcess(workingDir = "./vendor/inky",
       command = "./env/bin/python3", args = ["run.py"], options = {poStdErrToStdOut})
