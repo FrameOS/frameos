@@ -172,7 +172,7 @@ export function FrameSettings({ className }: DetailsProps) {
               />
             </Field>
             <Field name="background_color" label="Background color">
-              <TextInput name="background_color" placeholder="white" />
+              <TextInput type="color" name="background_color" className="p-0" placeholder="white" />
             </Field>
           </Form>
         </>

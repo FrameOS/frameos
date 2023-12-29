@@ -71,8 +71,8 @@ proc scaleAndDrawImage*(targetImage: Image, srcImage: Image,
       let yOffset = (scaledHeight - targetImage.height.float32) / 2
       targetImage.draw(
         srcImage,
-        scale(vec2(scaleRatio, scaleRatio)) * translate(vec2(-xOffset,
-            -yOffset)),
+        translate(vec2(-xOffset, -yOffset)) * scale(vec2(scaleRatio,
+            scaleRatio)),
         OverwriteBlend
       )
 
@@ -104,4 +104,5 @@ proc scaleAndDrawImage*(targetImage: Image, srcImage: Image,
     else:
       let xOffset = (targetImage.width - srcImage.width) div 2
       let yOffset = (targetImage.height - srcImage.height) div 2
-      targetImage.draw(srcImage, translate(vec2(xOffset.float, yOffset.float)))
+      targetImage.draw(srcImage, translate(vec2(xOffset.float32,
+          yOffset.float32)))

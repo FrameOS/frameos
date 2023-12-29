@@ -3,7 +3,7 @@ import scenes/default as defaultScene
 
 from frameos/types import FrameOS, FrameConfig, FrameScene, Renderer, Logger
 from frameos/logger import log
-from frameos/utils/image import rotateDegrees, renderError
+from frameos/utils/image import rotateDegrees, renderError, scaleAndDrawImage
 
 import drivers/drivers as drivers
 
@@ -25,9 +25,19 @@ proc renderScene*(self: Renderer) =
   try:
     type DefaultScene = defaultScene.Scene
     let image = defaultScene.render(self.scene.DefaultScene)
-    self.lastImage = some(image)
-    self.lastRotatedImage = some(image.rotateDegrees(
-        self.frameConfig.rotate))
+
+    if image.width != self.frameConfig.width or image.height !=
+        self.frameConfig.height:
+      let resizedImage = newImage(self.frameConfig.width,
+          self.frameConfig.height)
+      resizedImage.scaleAndDrawImage(image, self.frameConfig.scalingMode)
+      self.lastImage = some(resizedImage)
+      self.lastRotatedImage = some(resizedImage.rotateDegrees(
+          self.frameConfig.rotate))
+    else:
+      self.lastImage = some(image)
+      self.lastRotatedImage = some(image.rotateDegrees(
+          self.frameConfig.rotate))
   except Exception as e:
     self.logger.log(%*{"event": "render:error", "error": $e.msg,
         "stacktrace": e.getStackTrace()})
