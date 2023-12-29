@@ -9,12 +9,14 @@ type
     nodeId*: string
     scene*: FrameScene
     appConfig*: AppConfig
+    frameConfig*: FrameConfig
 
 proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
     nodeId: nodeId,
     scene: scene,
     appConfig: appConfig,
+    frameConfig: scene.frameConfig,
   )
 
 proc run*(self: App, context: ExecutionContext) =
