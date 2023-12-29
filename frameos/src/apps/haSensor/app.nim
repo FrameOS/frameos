@@ -1,4 +1,4 @@
-import json, strformat, httpclient, options
+import json, strformat, httpclient, options, times
 from frameos/types import FrameScene, FrameConfig, ExecutionContext, Logger
 from frameos/logger import log
 
@@ -13,7 +13,8 @@ type
     scene*: FrameScene
     appConfig*: AppConfig
     frameConfig*: FrameConfig
-    lastRenderAt*: float
+    lastFetchAt*: float
+    json: Option[JsonNode]
 
 proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
@@ -21,6 +22,8 @@ proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
     scene: scene,
     appConfig: appConfig,
     frameConfig: scene.frameConfig,
+    lastFetchAt: 0,
+    json: none(JsonNode),
   )
 
 proc log*(self: App, message: string) =
@@ -48,22 +51,24 @@ proc run*(self: App, context: ExecutionContext) =
   ])
   let url = &"{haUrl}/api/states/{self.appConfig.entityId}"
 
-  var json: Option[JsonNode] = none(JsonNode)
-  try:
-    let response = client.request(url)
-    if response.code != Http200:
-      self.error "Error fetching Home Assistant status: HTTP " &
-          $response.status
+  if self.json.isNone or self.lastFetchAt == 0 or self.lastFetchAt +
+      self.appConfig.cacheSeconds < epochTime():
+    try:
+      let response = client.request(url)
+      if response.code != Http200:
+        self.error "Error fetching Home Assistant status: HTTP " &
+            $response.status
+        return
+      self.json = some(parseJson(response.body))
+      self.lastFetchAt = epochTime()
+    except CatchableError as e:
+      self.error "Error fetching Home Assistant status: " & $e.msg
       return
 
-    json = some(parseJson(response.body))
-
-  except CatchableError as e:
-    self.error "Error fetching Home Assistant status: " & $e.msg
-    return
-
-  let stateKey = if self.appConfig.stateKey ==
-      "": "state" else: self.appConfig.stateKey
-
-  self.scene.state[stateKey] = json.get()
-  self.log($self.scene.state[stateKey])
+  if self.json.isSome:
+    let stateKey = if self.appConfig.stateKey ==
+        "": "state" else: self.appConfig.stateKey
+    self.scene.state[stateKey] = self.json.get()
+    self.log($self.scene.state[stateKey])
+  else:
+    self.error "No JSON response from Home Assistant"

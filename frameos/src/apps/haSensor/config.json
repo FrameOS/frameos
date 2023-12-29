@@ -6,6 +6,9 @@
     "settings": ["homeAssistant"],
     "fields": [
         {
+          "markdown": "Find the [entity id here](http://homeassistant.local:8123/config/entities). Then use code like:\n\nscene.state{\"water_heater\"}{\"state\"}.getStr"
+        },
+        {
           "name": "entityId",
           "type": "text",
           "required": true,
