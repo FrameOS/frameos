@@ -3,7 +3,6 @@ import scenes/default as defaultScene
 
 from frameos/types import FrameOS, FrameConfig, FrameScene, Renderer, Logger
 from frameos/logger import log
-from frameos/utils/font import getDefaultTypeface, newFont
 from frameos/utils/image import rotateDegrees, renderError
 
 import drivers/drivers as drivers
@@ -29,8 +28,8 @@ proc renderScene*(self: Renderer) =
     self.lastImage = some(image)
     self.lastRotatedImage = some(image.rotateDegrees(
         self.frameConfig.rotate))
-  except:
-    self.logger.log(%*{"event": "render:error"})
+  except Exception as e:
+    self.logger.log(%*{"event": "render:error", "error": $e.msg})
   self.lastRenderAt = epochTime()
   self.logger.log(%*{"event": "render:done", "ms": round((epochTime() -
       sceneTimer) * 1000, 3)})

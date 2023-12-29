@@ -257,12 +257,12 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
                 file.write(f"    ln -s ../cache/${{md5sum}}.{cpu}.c.o {source_file}.o\n")
                 file.write("else\n")
                 # if not, run the command in "line" and then copy the <source>.c.o into the build folder as <md5sum>.c.o
-                file.write(f"    echo [{i + 1}/{len(lines) - 1}] Compiling on device: {source_cleaned}\n")
+                file.write(f"    echo [{i + 1}/{len(lines)}] Compiling on device: {source_cleaned}\n")
                 file.write(f"    {line.strip()}\n")
                 file.write(f"    cp {source_file}.o ../cache/${{md5sum}}.{cpu}.c.o\n")
                 file.write("fi\n")
             else:
-                file.write(f"echo [{i + 1}/{len(lines) - 1}] Compiling on device: frameos\n")
+                file.write(f"echo [{i + 1}/{len(lines)}] Compiling on device: frameos\n")
                 file.write(line)
         file.write("echo \"Used $cached_files_count cached files\"\n")
 
