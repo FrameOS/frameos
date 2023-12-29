@@ -125,7 +125,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                       <td
                         className={clsx(
                           'font-sm text-indigo-200',
-                          field.name in data.config && data.config[field.name] !== field.value
+                          codeFields.includes(field.name) ||
+                            (field.name in data.config && data.config[field.name] !== field.value)
                             ? 'underline font-bold'
                             : ''
                         )}
@@ -155,7 +156,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                           ) : null}
                         </div>
                       </td>
-                      {field.type !== 'node' ? (
+                      {field.type !== 'node' && !codeFields.includes(field.name) ? (
                         <td className="cursor-text">
                           {field.secret && !secretRevealed[field.name] ? (
                             <RevealDots onClick={() => setSecretRevealed({ ...secretRevealed, [field.name]: true })} />
@@ -166,7 +167,6 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                               value={field.name in data.config ? data.config[field.name] : field.value}
                               options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
                               onChange={(value) => updateNodeConfig(id, field.name, value)}
-                              disabled={codeFields.includes(field.name)}
                             />
                           ) : field.type === 'text' ? (
                             <TextArea
@@ -175,7 +175,6 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                               value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
                               onChange={(value) => updateNodeConfig(id, field.name, value)}
                               rows={field.rows ?? 3}
-                              disabled={codeFields.includes(field.name)}
                             />
                           ) : field.type === 'bool' ? (
                             <input
@@ -189,7 +188,6 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                               placeholder={field.placeholder}
                               value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
                               onChange={(value) => updateNodeConfig(id, field.name, value)}
-                              disabled={codeFields.includes(field.name)}
                               className={field.type === 'color' ? 'min-w-[50px]' : ''}
                               type={
                                 field.type === 'integer' || field.type === 'float'
