@@ -31,6 +31,7 @@ type
     frameConfig*: FrameConfig
     logger*: Logger
     state*: JsonNode
+    execNode*: proc(nodeId: string, context: var ExecutionContext)
 
   ExecutionContext* = ref object
     scene*: FrameScene

@@ -1,0 +1,26 @@
+{
+    "name": "If-Else",
+    "description": "If Condition Then Node Else Node",
+    "category": "util",
+    "version": "1.0.0",
+    "settings": [],
+    "fields": [
+        {
+            "label": "Condition",
+            "name": "condition",
+            "value": "true",
+            "type": "bool",
+            "required": true
+        },
+        {
+            "label": "Then",
+            "name": "thenNode",
+            "type": "node"
+        },
+        {
+            "label": "Else",
+            "name": "elseNode",
+            "type": "node"
+        }
+    ]
+}

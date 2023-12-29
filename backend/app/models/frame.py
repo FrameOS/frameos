@@ -248,20 +248,27 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
     event_nodes = {}
     next_nodes = {}
     field_inputs: Dict[str, Dict[str, str]] = {}
+    node_fields: Dict[str, Dict[str, str]] = {}
     for edge in edges:
         source = edge.get('source', None)
         target = edge.get('target', None)
         source_handle = edge.get('sourceHandle', None)
         target_handle = edge.get('targetHandle', None)
-        if source and target and source_handle == 'next' and target_handle == 'prev':
-            next_nodes[source] = target
-        if source and target and source_handle == 'fieldOutput' and target_handle.startswith('fieldInput/'):
-            field = target_handle.replace('fieldInput/', '')
-            if not field_inputs.get(target):
-                field_inputs[target] = {}
-            code_node = nodes_by_id.get(source)
-            if code_node:
-                field_inputs[target][field] = code_node.get('data', {}).get('code', "")
+        if source and target:
+            if source_handle == 'next' and target_handle == 'prev':
+                next_nodes[source] = target
+            if source_handle == 'fieldOutput' and target_handle.startswith('fieldInput/'):
+                field = target_handle.replace('fieldInput/', '')
+                if not field_inputs.get(target):
+                    field_inputs[target] = {}
+                code_node = nodes_by_id.get(source)
+                if code_node:
+                    field_inputs[target][field] = code_node.get('data', {}).get('code', "")
+            if source_handle.startswith('field/') and target_handle == 'prev':
+                field = source_handle.replace('field/', '')
+                if not node_fields.get(source):
+                    node_fields[source] = {}
+                node_fields[source][field] = target                
 
     for node in nodes:
         node_id = node['id']
@@ -299,11 +306,13 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                         for field in config.get('fields'):
                             key = field.get('name', None)
                             value = field.get('value', None)
+                            field_type = field.get('type', None)
                             config_types[key] = field.get('type', 'string')
-                            if (key not in app_config or app_config.get(key) is None) and value is not None:
+                            if (key not in app_config or app_config.get(key) is None) and (value is not None or field_type == 'node'):
                                 app_config[key] = value
 
                 field_inputs_for_node = field_inputs.get(node_id, {})
+                node_fields_for_node = node_fields.get(node_id, {})
 
                 app_config_pairs = []
                 for key, value in app_config.items():
@@ -316,17 +325,20 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                     # TODO: sanitize
                     if key in field_inputs_for_node:
                         app_config_pairs += [f"{key}: {field_inputs_for_node[key]}"]
-                    elif isinstance(value, str):
-                        if type == "integer":
-                            app_config_pairs += [f"{key}: {int(value)}"]
-                        elif type == "float":
-                            app_config_pairs += [f"{key}: {float(value)}"]
-                        elif type == "color":
-                            app_config_pairs += [f"{key}: parseHtmlColor(\"{value}\")"]
-                        else:
-                            app_config_pairs += [f"{key}: \"{value}\""]
+                    elif key in node_fields_for_node and type == "node":
+                        app_config_pairs += [f"{key}: \"{node_fields_for_node[key]}\""]
+                    elif type == "integer":
+                        app_config_pairs += [f"{key}: {int(value)}"]
+                    elif type == "float":
+                        app_config_pairs += [f"{key}: {float(value)}"]
+                    elif type == "bool":
+                        app_config_pairs += [f"{key}: {'true' if value == 'true' else 'false'}"]
+                    elif type == "color":
+                        app_config_pairs += [f"{key}: parseHtmlColor(\"{value}\")"]
+                    elif type == "node":
+                        app_config_pairs += [f"{key}: \"-1\""]
                     else:
-                        app_config_pairs += [f"{key}: {value}"]
+                        app_config_pairs += [f"{key}: \"{value}\""]
 
                 if len(sources) > 0:
                     node_app_id = "nodeapp_" + node_id.replace('-', '_')
@@ -401,6 +413,7 @@ proc init*(frameOS: FrameOS): Scene =
   let self = scene
   var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{{}}, image: newImage(1, 1))
   result = scene
+  scene.execNode = (proc(nodeId: string, context: var ExecutionContext) = self.runNode(nodeId, context))
   {(newline + "  ").join(init_apps)}
   dispatchEvent(scene, context)
 

@@ -167,6 +167,12 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                               rows={field.rows ?? 3}
                               disabled={codeFields.includes(field.name)}
                             />
+                          ) : field.type === 'bool' ? (
+                            <input
+                              type="checkbox"
+                              checked={(field.name in data.config ? data.config[field.name] : field.value) == 'true'}
+                              onChange={(e) => updateNodeConfig(id, field.name, e.target.checked ? 'true' : 'false')}
+                            />
                           ) : (
                             <TextInput
                               theme="node"
