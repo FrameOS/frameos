@@ -29,7 +29,8 @@ proc renderScene*(self: Renderer) =
     self.lastRotatedImage = some(image.rotateDegrees(
         self.frameConfig.rotate))
   except Exception as e:
-    self.logger.log(%*{"event": "render:error", "error": $e.msg})
+    self.logger.log(%*{"event": "render:error", "error": $e.msg,
+        "stacktrace": e.getStackTrace()})
   self.lastRenderAt = epochTime()
   self.logger.log(%*{"event": "render:done", "ms": round((epochTime() -
       sceneTimer) * 1000, 3)})

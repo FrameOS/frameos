@@ -7,7 +7,7 @@
     "height": 480,
     "device": "web_only",
     "color": null,
-    "interval": 5.0,
+    "interval": 30.0,
     "metrics_interval": 60.0,
     "scaling_mode": "cover",
     "rotate": 0,

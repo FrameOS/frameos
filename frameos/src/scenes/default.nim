@@ -10,6 +10,7 @@ import apps/clock/app as clockApp
 import apps/downloadImage/app as downloadImageApp
 import apps/frameOSGallery/app as frameOSGalleryApp
 import apps/ifElse/app as ifElseApp
+import apps/split/app as splitApp
 
 let DEBUG = false
 
@@ -23,6 +24,8 @@ type Scene* = ref object of FrameScene
   app_89732431_feb1_497b_8cc5_052676852d48: textApp.App
   app_7eae2352_afaf_4a97_97c0_467c359dbeea: textApp.App
   app_70980e99_9fff_45b4_adcd_9ca9985d4fb5: ifElseApp.App
+  app_caa0e562_49c7_47ba_9bfb_c6d1a837e414: splitApp.App
+  app_af43bfef_9f59_4a37_912b_8138c07ff9d3: unsplashApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
 proc runNode*(self: Scene, nodeId: string,
@@ -64,11 +67,17 @@ proc runNode*(self: Scene, nodeId: string,
       nextNode = "-1"
     of "7eae2352-afaf-4a97-97c0-467c359dbeea":
       self.app_7eae2352_afaf_4a97_97c0_467c359dbeea.run(context)
-      nextNode = "-1"
+      nextNode = "caa0e562-49c7-47ba-9bfb-c6d1a837e414"
     of "70980e99-9fff-45b4-adcd-9ca9985d4fb5":
       self.app_70980e99_9fff_45b4_adcd_9ca9985d4fb5.appConfig.condition = false
       self.app_70980e99_9fff_45b4_adcd_9ca9985d4fb5.run(context)
       nextNode = "7eae2352-afaf-4a97-97c0-467c359dbeea"
+    of "caa0e562-49c7-47ba-9bfb-c6d1a837e414":
+      self.app_caa0e562_49c7_47ba_9bfb_c6d1a837e414.run(context)
+      nextNode = "-1"
+    of "af43bfef-9f59-4a37-912b-8138c07ff9d3":
+      self.app_af43bfef_9f59_4a37_912b_8138c07ff9d3.run(context)
+      nextNode = "-1"
     else:
       nextNode = "-1"
     if DEBUG:
@@ -133,6 +142,13 @@ proc init*(frameOS: FrameOS): Scene =
       "70980e99-9fff-45b4-adcd-9ca9985d4fb5", scene, ifElseApp.AppConfig(
       condition: false, thenNode: "89732431-feb1-497b-8cc5-052676852d48",
       elseNode: "9e11eaae-117e-4851-81ad-b3a1b07e6f15"))
+  scene.app_caa0e562_49c7_47ba_9bfb_c6d1a837e414 = splitApp.init(
+      "caa0e562-49c7-47ba-9bfb-c6d1a837e414", scene, splitApp.AppConfig(
+      columns: 3, gap: "10", margin: "5", rows: 2,
+      render_function: "af43bfef-9f59-4a37-912b-8138c07ff9d3"))
+  scene.app_af43bfef_9f59_4a37_912b_8138c07ff9d3 = unsplashApp.init(
+      "af43bfef-9f59-4a37-912b-8138c07ff9d3", scene, unsplashApp.AppConfig(
+      keyword: "nature", cacheSeconds: 60.0))
   dispatchEvent(scene, context)
 
 proc render*(self: Scene): Image =
