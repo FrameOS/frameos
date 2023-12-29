@@ -7,6 +7,7 @@ type
     entityId*: string
     stateKey*: string
     cacheSeconds*: float
+    debug*: bool
 
   App* = ref object
     nodeId*: string
@@ -28,9 +29,9 @@ proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
 
 proc log*(self: App, message: string) =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
+
 proc error*(self: App, message: string) =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
-
 
 proc run*(self: App, context: ExecutionContext) =
   let haUrl = self.frameConfig.settings{"homeAssistant"}{"url"}.getStr
@@ -69,6 +70,7 @@ proc run*(self: App, context: ExecutionContext) =
     let stateKey = if self.appConfig.stateKey ==
         "": "state" else: self.appConfig.stateKey
     self.scene.state[stateKey] = self.json.get()
-    self.log($self.scene.state[stateKey])
+    if self.appConfig.debug:
+      self.log($self.scene.state[stateKey])
   else:
     self.error "No JSON response from Home Assistant"

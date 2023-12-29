@@ -306,8 +306,8 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                         for field in config.get('fields'):
                             key = field.get('name', None)
                             value = field.get('value', None)
-                            field_type = field.get('type', None)
-                            config_types[key] = field.get('type', 'string')
+                            field_type = field.get('type', 'string')
+                            config_types[key] = field_type
                             if (key not in app_config or app_config.get(key) is None) and (value is not None or field_type == 'node'):
                                 app_config[key] = value
 
