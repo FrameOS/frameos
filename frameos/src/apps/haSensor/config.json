@@ -1,0 +1,32 @@
+{
+    "name": "HA Sensor",
+    "description": "Store the state of a Home Assistant entity in the scene's state",
+    "category": "util",
+    "version": "1.0.0",
+    "settings": ["homeAssistant"],
+    "fields": [
+        {
+          "name": "entityId",
+          "type": "text",
+          "required": true,
+          "label": "Entity ID",
+          "placeholder": "Home Assistant entity name. Example: sensor.home_solar_percentage or water_heater.hot_water"
+        },
+        {
+          "name": "stateKey",
+          "type": "text",
+          "required": true,
+          "label": "State key to store the json in",
+          "value": "sensor",
+          "placeholder": ""
+        },
+        {
+            "name": "cacheSeconds",
+            "type": "float",
+            "value": "60",
+            "required": false,
+            "label": "Seconds to cache the result",
+            "placeholder": "Default: 60. Use 0 for no cache"
+        }
+    ]
+}

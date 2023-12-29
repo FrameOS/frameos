@@ -66,18 +66,14 @@ export function Settings() {
                     </Field>
                   </Box>
                 </Group>
-                <Group name="home_assistant">
+                <Group name="homeAssistant">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>Home Assistant</H6>
                     <Field name="url" label="Home assistant URL">
                       <TextInput placeholder="http://homeassistant.local:8123" />
                     </Field>
-                    <Field
-                      name="access_token"
-                      label="Access token"
-                      secret={!!savedSettings?.home_assistant?.access_token}
-                    >
-                      <TextInput autoFocus={!!savedSettings?.home_assistant?.access_token} />
+                    <Field name="accessToken" label="Access token" secret={!!savedSettings?.homeAssistant?.accessToken}>
+                      <TextInput autoFocus={!!savedSettings?.homeAssistant?.accessToken} />
                     </Field>
                   </Box>
                 </Group>

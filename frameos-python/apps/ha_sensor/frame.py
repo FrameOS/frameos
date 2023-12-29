@@ -5,10 +5,10 @@ from apps import App, ExecutionContext
 class SensorApp(App):
     def run(self, context: ExecutionContext):
         self.log("sensor app")
-        ha_url = self.get_setting(['home_assistant', 'url'], None)
+        ha_url = self.get_setting(['homeAssistant', 'url'], None)
         if not ha_url:
             raise ValueError("Please provide a Home Assistant URL in the settings.")
-        access_token = self.get_setting(['home_assistant', 'access_token'], None)
+        access_token = self.get_setting(['homeAssistant', 'accessToken'], None)
         if not access_token:
             raise ValueError("Please provide a Home Assistant access token in the settings.")
 

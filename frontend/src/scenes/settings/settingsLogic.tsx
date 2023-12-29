@@ -9,7 +9,7 @@ import { forms } from 'kea-forms'
 function setDefaultSettings(settings: Record<string, any>): Record<string, any> {
   return {
     ...settings,
-    home_assistant: settings.home_assistant ?? {},
+    homeAssistant: settings.homeAssistant ?? {},
     frameos: settings.frameos ?? {},
     github: settings.github ?? {},
     sentry: settings.sentry ?? {},
