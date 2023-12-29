@@ -1,0 +1,36 @@
+{
+    "name": "FrameOS Gallery",
+    "description": "Random image from the FrameOS gallery",
+    "category": "image",
+    "version": "1.0.0",
+    "settings": ["frameos"],
+    "fields": [
+        {
+            "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries."
+        },
+        {
+            "name": "category",
+            "type": "select",
+            "options": ["building-art-styles", "cute", "cyberpunk-europe", "masterpieces", "space-gallery", "space-odyssey"],
+            "value": "cute",
+            "required": false,
+            "label": "Category"
+        },
+        {
+            "name": "scalingMode",
+            "type": "select",
+            "options": ["cover", "contain", "stretch", "center"],
+            "value": "cover",
+            "required": true,
+            "label": "Scaling mode"
+        },
+        {
+            "name": "cacheSeconds",
+            "type": "float",
+            "value": "60",
+            "required": false,
+            "label": "Seconds to cache the result",
+            "placeholder": "Default: 60. Use 0 for no cache"
+        }
+    ]
+}

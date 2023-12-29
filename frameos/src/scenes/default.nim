@@ -9,6 +9,7 @@ import apps/text/app as textApp
 import apps/code/app as nodeapp_d25623be_36d3_4053_b02f_bebe189bc858App
 import apps/clock/app as clockApp
 import apps/downloadImage/app as downloadImageApp
+import apps/frameOSGallery/app as frameOSGalleryApp
 
 let DEBUG = false
 
@@ -18,6 +19,7 @@ type Scene* = ref object of FrameScene
   app_d25623be_36d3_4053_b02f_bebe189bc858: nodeapp_d25623be_36d3_4053_b02f_bebe189bc858App.App
   app_1c9414bd_8bc4_4249_8ffb_1b3094715a06: clockApp.App
   app_ddbd3753_ea6a_4a80_98b4_455fb623ef6b: downloadImageApp.App
+  app_a8093aa9_a284_4d77_832f_ba0b8471da1e: frameOSGalleryApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
 proc runNode*(self: Scene, nodeId: string,
@@ -50,6 +52,9 @@ proc runNode*(self: Scene, nodeId: string,
       nextNode = "-1"
     of "ddbd3753-ea6a-4a80-98b4-455fb623ef6b":
       self.app_ddbd3753_ea6a_4a80_98b4_455fb623ef6b.run(context)
+      nextNode = "-1"
+    of "a8093aa9-a284-4d77-832f-ba0b8471da1e":
+      self.app_a8093aa9_a284_4d77_832f_ba0b8471da1e.run(context)
       nextNode = "b94c5793-aeb1-4f3a-b273-c2305c12096e"
     else:
       nextNode = "-1"
@@ -60,7 +65,7 @@ proc runNode*(self: Scene, nodeId: string,
 proc dispatchEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:
   of "render":
-    self.runNode("ddbd3753-ea6a-4a80-98b4-455fb623ef6b", context)
+    self.runNode("a8093aa9-a284-4d77-832f-ba0b8471da1e", context)
   of "init":
     self.runNode("d25623be-36d3-4053-b02f-bebe189bc858", context)
   else: discard
@@ -71,8 +76,8 @@ proc init*(frameOS: FrameOS): Scene =
   let logger = frameOS.logger
   let scene = Scene(frameOS: frameOS, frameConfig: frameConfig, logger: logger, state: state)
   let self = scene
-  var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{
-    }, image: newImage(1, 1))
+  var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{},
+      image: newImage(1, 1))
   result = scene
   scene.app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200 = unsplashApp.init(
       "cbef1661-d2f5-4ef8-b0cf-458c3ae11200", scene, unsplashApp.AppConfig(
@@ -94,7 +99,10 @@ proc init*(frameOS: FrameOS): Scene =
       borderWidth: 1))
   scene.app_ddbd3753_ea6a_4a80_98b4_455fb623ef6b = downloadImageApp.init(
       "ddbd3753-ea6a-4a80-98b4-455fb623ef6b", scene, downloadImageApp.AppConfig(
-      url: "http://10.4.0.11:4999/", scalingMode: "cover",
+      url: "http://10.4.0.11:4999/", scalingMode: "cover", cacheSeconds: 60.0))
+  scene.app_a8093aa9_a284_4d77_832f_ba0b8471da1e = frameOSGalleryApp.init(
+      "a8093aa9-a284-4d77-832f-ba0b8471da1e", scene,
+      frameOSGalleryApp.AppConfig(category: "cute", scalingMode: "cover",
       cacheSeconds: 60.0))
   dispatchEvent(scene, context)
 
