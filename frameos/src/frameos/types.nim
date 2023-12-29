@@ -39,6 +39,8 @@ type
     event*: string
     eventPayload*: JsonNode
     parent*: ExecutionContext
+    loopIndex*: int
+    loopKey*: string
 
   Renderer* = ref object
     frameOS*: FrameOS

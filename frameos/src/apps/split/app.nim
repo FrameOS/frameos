@@ -1,6 +1,5 @@
 import strutils
 import pixie
-import json
 
 from frameos/types import FrameScene, FrameConfig, ExecutionContext, Logger
 
@@ -122,8 +121,8 @@ proc run*(self: App, context: var ExecutionContext) =
   let
     cellDims = splitDimensions(context.image.width, context.image.height,
       self.appConfig)
-    (marginTop, marginRight, marginBottom, marginLeft) = extractMargins(
-        self.appConfig.margin)
+    (marginTop, marginRight {.used.}, marginBottom {.used.},
+        marginLeft) = extractMargins(self.appConfig.margin)
     (gapHorizontal, gapVertical) = extractGaps(self.appConfig.gap)
 
   # Loop through each cell defined by rows and columns
@@ -133,14 +132,15 @@ proc run*(self: App, context: var ExecutionContext) =
     for column in 0..<columns:
       let (cellWidth, cellHeight) = cellDims[row * columns + column]
       let image = context.image.subImage(cellX.toInt, cellY.toInt, cellWidth, cellHeight)
-      echo (cellX, cellY, cellWidth, cellHeight)
       if renderFunction != "":
         var cellContext = ExecutionContext(
             scene: context.scene,
             image: image,
             event: context.event,
-            eventPayload: copy(context.eventPayload),
+            eventPayload: context.eventPayload,
             parent: context,
+            loopIndex: row * columns + column,
+            loopKey: context.loopKey & "/" & $(row * columns + column)
         )
         self.scene.execNode(renderFunction, cellContext)
       context.image.draw(

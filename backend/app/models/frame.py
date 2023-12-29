@@ -411,7 +411,7 @@ proc init*(frameOS: FrameOS): Scene =
   let logger = frameOS.logger
   let scene = Scene(frameOS: frameOS, frameConfig: frameConfig, logger: logger, state: state)
   let self = scene
-  var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{{}}, image: newImage(1, 1))
+  var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{{}}, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
   scene.execNode = (proc(nodeId: string, context: var ExecutionContext) = self.runNode(nodeId, context))
   {(newline + "  ").join(init_apps)}
@@ -424,7 +424,9 @@ proc render*(self: Scene): Image =
     eventPayload: %*{{}},
     image: case self.frameConfig.rotate:
     of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-    else: newImage(self.frameConfig.width, self.frameConfig.height)
+    else: newImage(self.frameConfig.width, self.frameConfig.height),
+    loopIndex: 0, 
+    loopKey: "."
   )
   dispatchEvent(self, context)
   return context.image

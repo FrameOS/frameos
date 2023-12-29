@@ -11,6 +11,7 @@ import apps/downloadImage/app as downloadImageApp
 import apps/frameOSGallery/app as frameOSGalleryApp
 import apps/ifElse/app as ifElseApp
 import apps/split/app as splitApp
+import apps/gradient/app as gradientApp
 
 let DEBUG = false
 
@@ -26,6 +27,8 @@ type Scene* = ref object of FrameScene
   app_70980e99_9fff_45b4_adcd_9ca9985d4fb5: ifElseApp.App
   app_caa0e562_49c7_47ba_9bfb_c6d1a837e414: splitApp.App
   app_af43bfef_9f59_4a37_912b_8138c07ff9d3: unsplashApp.App
+  app_bbe82c34_84f6_4afe_beb3_87baa54f02e7: ifElseApp.App
+  app_b5f06d55_8889_4869_b12e_f5207211fa05: gradientApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
 proc runNode*(self: Scene, nodeId: string,
@@ -78,6 +81,13 @@ proc runNode*(self: Scene, nodeId: string,
     of "af43bfef-9f59-4a37-912b-8138c07ff9d3":
       self.app_af43bfef_9f59_4a37_912b_8138c07ff9d3.run(context)
       nextNode = "-1"
+    of "bbe82c34-84f6-4afe-beb3-87baa54f02e7":
+      self.app_bbe82c34_84f6_4afe_beb3_87baa54f02e7.appConfig.condition = context.loopIndex mod 2 == 0
+      self.app_bbe82c34_84f6_4afe_beb3_87baa54f02e7.run(context)
+      nextNode = "-1"
+    of "b5f06d55-8889-4869-b12e-f5207211fa05":
+      self.app_b5f06d55_8889_4869_b12e_f5207211fa05.run(context)
+      nextNode = "-1"
     else:
       nextNode = "-1"
     if DEBUG:
@@ -97,7 +107,7 @@ proc init*(frameOS: FrameOS): Scene =
   let scene = Scene(frameOS: frameOS, frameConfig: frameConfig, logger: logger, state: state)
   let self = scene
   var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{},
-      image: newImage(1, 1))
+      image: newImage(1, 1), loopIndex: 0, loopKey: "0")
   result = scene
   scene.execNode = (proc(nodeId: string,
       context: var ExecutionContext) = self.runNode(nodeId, context))
@@ -145,10 +155,19 @@ proc init*(frameOS: FrameOS): Scene =
   scene.app_caa0e562_49c7_47ba_9bfb_c6d1a837e414 = splitApp.init(
       "caa0e562-49c7-47ba-9bfb-c6d1a837e414", scene, splitApp.AppConfig(
       columns: 3, gap: "10", margin: "5", rows: 2,
-      render_function: "af43bfef-9f59-4a37-912b-8138c07ff9d3"))
+      render_function: "bbe82c34-84f6-4afe-beb3-87baa54f02e7"))
   scene.app_af43bfef_9f59_4a37_912b_8138c07ff9d3 = unsplashApp.init(
       "af43bfef-9f59-4a37-912b-8138c07ff9d3", scene, unsplashApp.AppConfig(
       keyword: "nature", cacheSeconds: 60.0))
+  scene.app_bbe82c34_84f6_4afe_beb3_87baa54f02e7 = ifElseApp.init(
+      "bbe82c34-84f6-4afe-beb3-87baa54f02e7", scene, ifElseApp.AppConfig(
+      condition: context.loopIndex mod 2 == 0,
+      thenNode: "af43bfef-9f59-4a37-912b-8138c07ff9d3",
+      elseNode: "b5f06d55-8889-4869-b12e-f5207211fa05"))
+  scene.app_b5f06d55_8889_4869_b12e_f5207211fa05 = gradientApp.init(
+      "b5f06d55-8889-4869-b12e-f5207211fa05", scene, gradientApp.AppConfig(
+      startColor: parseHtmlColor("#800080"), endColor: parseHtmlColor(
+      "#ffc0cb"), angle: 45.0))
   dispatchEvent(scene, context)
 
 proc render*(self: Scene): Image =
@@ -158,7 +177,9 @@ proc render*(self: Scene): Image =
     eventPayload: %*{},
     image: case self.frameConfig.rotate:
     of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-    else: newImage(self.frameConfig.width, self.frameConfig.height)
+    else: newImage(self.frameConfig.width, self.frameConfig.height),
+    loopIndex: 0,
+    loopKey: "0"
   )
   dispatchEvent(self, context)
   return context.image
