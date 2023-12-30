@@ -5,7 +5,7 @@ import httpclient
 import frameos/utils/font
 
 proc downloadImage*(url: string): Image =
-  let client = newHttpClient()
+  let client = newHttpClient(timeout = 30000)
   try:
     let content = client.getContent(url)
     result = decodeImage(content)
