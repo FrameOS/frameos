@@ -53,6 +53,9 @@ type
     runner*: RunnerControl
     url*: string
 
+  FrameOSDriver* = ref object of RootObj
+    name*: string
+
   FrameOS* = ref object
     frameConfig*: FrameConfig
     logger*: Logger

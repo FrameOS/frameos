@@ -7,7 +7,6 @@ class Driver:
     name: str # camelCase, safe for nim code, unique within this file
     import_path: str
     vendor_folder: Optional[str] = None
-    has_init: bool = False
     has_render: bool = False
 
 drivers = {
@@ -15,13 +14,11 @@ drivers = {
         name="inkyPython",
         import_path="inkyPython/inkyPython",
         vendor_folder="inkyPython",
-        has_init=True,
         has_render=True,
     ),
     "frameBuffer": Driver(
         name="frameBuffer",
         import_path="frameBuffer/frameBuffer",
-        has_init=True,
         has_render=True,
     ),
 }
@@ -35,15 +32,16 @@ def drivers_for_device(device: str) -> Dict[str, Driver]:
 
 def write_drivers_nim(drivers: Dict[str, Driver]) -> str:
     imports = []
+    vars = []
     init_drivers = []
     render_drivers = []
 
     for driver in drivers.values():
         imports.append(f"import {driver.import_path} as {driver.name}Driver")
-        if driver.has_init:
-            init_drivers.append(f"{driver.name}Driver.init(logger)")
+        vars.append(f"var {driver.name}DriverInstance: {driver.name}Driver.Driver")
+        init_drivers.append(f"{driver.name}DriverInstance = {driver.name}Driver.init(logger)")
         if driver.has_render:
-            render_drivers.append(f"{driver.name}Driver.render(logger, image)")
+            render_drivers.append(f"{driver.name}DriverInstance.render(image)")
 
     if len(init_drivers) == 0:
         init_drivers.append("discard")
@@ -56,10 +54,11 @@ def write_drivers_nim(drivers: Dict[str, Driver]) -> str:
 import pixie
 import frameos/types
 {newline.join(imports)}
+{newline.join(vars)}
 
 proc init*(logger: Logger) =
   {(newline + '  ').join(init_drivers)}
 
-proc render*(logger: Logger, image: Image) =
+proc render*(image: Image) =
   {(newline + '  ').join(render_drivers)}
     """

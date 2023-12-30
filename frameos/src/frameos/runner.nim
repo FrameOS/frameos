@@ -86,7 +86,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     self.renderScene()
 
     driverTimer = epochTime()
-    drivers.render(self.logger, self.lastRotatedRender())
+    drivers.render(self.lastRotatedRender())
     self.logger.log(%*{"event": "render:driver",
         "device": self.frameConfig.device, "ms": round((epochTime() -
             driverTimer) * 1000, 3)})

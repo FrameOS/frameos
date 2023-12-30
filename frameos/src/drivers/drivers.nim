@@ -2,17 +2,20 @@
 # To add a new driver, make an entry in backend/app/models/drivers.py
 
 import pixie
-# import inky/inky as inkyDriver
+# import inkyPython/inkyPython as inkyDriver
 # import frameBuffer/frameBuffer as frameBufferDriver
 
 from frameos/types import Logger
 
+# var inkyDriverInstance: inkyDriver.Driver
+# var frameBufferDriverInstance: frameBufferDriver.Driver
+
 proc init*(logger: Logger) =
-  # inkyDriver.init(logger)
-  # frameBufferDriver.init(logger)
+  # inkyDriverInstance = inkyDriver.init(logger)
+  # frameBufferDriverInstance = frameBufferDriver.init(logger)
   discard
 
-proc render*(logger: Logger, image: Image) =
-  # inkyDriver.render(logger, image)
-  # frameBufferDriver.render(logger, image)
+proc render*(image: Image) =
+  # inkyDriverInstance.render(image)
+  # frameBufferDriverInstance.render(image)
   discard
