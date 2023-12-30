@@ -11,10 +11,10 @@ class Driver:
     has_render: bool = False
 
 drivers = {
-    "inky": Driver(
-        name="inky",
-        import_path="inky/inky",
-        vendor_folder="inky",
+    "inkyPython": Driver(
+        name="inkyPython",
+        import_path="inkyPython/inkyPython",
+        vendor_folder="inkyPython",
         has_init=True,
         has_render=True,
     ),
@@ -27,7 +27,7 @@ drivers = {
 
 def drivers_for_device(device: str) -> List[Driver]:
     if device == "pimoroni.inky_impression":
-        return [drivers["inky"]]
+        return [drivers["inkyPython"]]
     if device == "framebuffer":
         return [drivers["frameBuffer"]]
     return []
