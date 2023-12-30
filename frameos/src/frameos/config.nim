@@ -17,19 +17,19 @@ proc setConfigDefaults*(config: var FrameConfig) =
 proc loadConfig*(filename: string = "frame.json"): FrameConfig =
   let data = parseFile(filename)
   result = FrameConfig(
-    serverHost: data{"server_host"}.getStr(),
-    serverPort: data{"server_port"}.getInt(),
-    serverApiKey: data{"server_api_key"}.getStr(),
-    framePort: data{"frame_port"}.getInt(),
+    serverHost: data{"serverHost"}.getStr(),
+    serverPort: data{"serverPort"}.getInt(),
+    serverApiKey: data{"serverApiKey"}.getStr(),
+    framePort: data{"framePort"}.getInt(),
     width: data{"width"}.getInt(),
     height: data{"height"}.getInt(),
     device: data{"device"}.getStr(),
     color: data{"color"}.getStr(),
+    backgroundColor: data{"backgroundColor"}.getStr(),
     interval: data{"interval"}.getFloat(),
-    metricsInterval: data{"metrics_interval"}.getFloat(),
+    metricsInterval: data{"metricsInterval"}.getFloat(),
     rotate: data{"rotate"}.getInt(),
-    scalingMode: data{"scaling_mode"}.getStr(),
-    backgroundColor: data{"background_color"}.getStr(),
+    scalingMode: data{"scalingMode"}.getStr(),
     settings: data{"settings"},
   )
   setConfigDefaults(result)

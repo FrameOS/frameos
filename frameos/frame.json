@@ -1,17 +1,17 @@
 {
-    "server_host": "127.0.0.1",
-    "server_port": 8989,
-    "server_api_key": "test-api-key",
-    "version": null,
+    "framePort": 8787,
+    "serverHost": "mariuss-macbook-air",
+    "serverPort": 8989,
+    "serverApiKey": "test-api-key",
     "width": 800,
     "height": 480,
     "device": "web_only",
     "color": null,
+    "backgroundColor": "blue",
     "interval": 30.0,
-    "metrics_interval": 60.0,
-    "scaling_mode": "cover",
+    "metricsInterval": 60.0,
+    "scalingMode": "cover",
     "rotate": 0,
-    "background_color": "blue",
     "settings": {
         "sentry": {
             "frame_dsn": null

@@ -183,17 +183,21 @@ def create_default_scene() -> Dict:
 
 
 def get_frame_json(frame: Frame) -> dict:
-    # TODO: switch to an allowlist instead
-    frame_json = frame.to_dict()
-    frame_json.pop("frame_host", None)
-    frame_json.pop("ssh_user", None)
-    frame_json.pop("ssh_pass", None)
-    frame_json.pop("ssh_port", None)
-    frame_json.pop("status", None)
-    frame_json.pop("id", None)
-    frame_json.pop("name", None)
-    frame_json.pop("scenes", None)
-    frame_json.pop("version", None)
+    frame_json = {
+        "framePort": frame.frame_port or 8787,
+        "serverHost": frame.server_host or "localhost",
+        "serverPort": frame.server_port or 8989,
+        "serverApiKey": frame.server_api_key,
+        "width": frame.width,
+        "height": frame.height,
+        "device": frame.device or "web_only",
+        "color": frame.color or "black",
+        "backgroundColor": frame.background_color or "white",
+        "interval": frame.interval or 30.0,
+        "metricsInterval": frame.metrics_interval or 60.0,
+        "scalingMode": frame.scaling_mode or "cover",
+        "rotate": frame.rotate or 0,
+    }
 
     setting_keys = set()
     app_configs = get_app_configs()
