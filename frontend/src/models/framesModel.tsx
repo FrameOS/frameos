@@ -68,7 +68,8 @@ export const framesModel = kea<framesModelType>([
     frameImageTimestamps: [
       {} as Record<string, number>,
       {
-        updateFrameImage: (state, { id }) => ({ ...state, [id]: Date.now().valueOf() }),
+        updateFrameImage: (state, { id }) =>
+          state[id] === Math.floor(Date.now() / 1000) ? state : { ...state, [id]: Math.floor(Date.now() / 1000) },
       },
     ],
   })),
