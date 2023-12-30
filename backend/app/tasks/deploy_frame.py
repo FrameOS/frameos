@@ -58,6 +58,8 @@ def deploy_frame(id: int):
                 else:
                     cpu = "x86_64"
 
+                drivers = drivers_for_device(frame.device)
+
                 log(id, "stdout", f"- Copying build folders")
                 build_dir, source_dir = create_build_folders(temp_dir, build_id)
                 log(id, "stdout", f"- Applying local modifications")
@@ -80,11 +82,11 @@ def deploy_frame(id: int):
                     log(id, "stdout", f"> add /srv/frameos/releases/release_{build_id}/frame.json")
                     scp.putfo(StringIO(json.dumps(get_frame_json(frame), indent=4) + "\n"), f"/srv/frameos/releases/release_{build_id}/frame.json")
 
-                    if frame.device == "pimoroni.inky_impression":
+                    if inkyPython := drivers.get("inkyPython"):
                         exec_command(frame, ssh, f"cp -r /srv/frameos/build/build_{build_id}/vendor /srv/frameos/releases/release_{build_id}/vendor")
                         exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-pip\" || sudo apt -y install python3-pip")
                         exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-venv\" || sudo apt -y install python3-venv")
-                        exec_command(frame, ssh, f"cd /srv/frameos/releases/release_{build_id}/vendor/inky && python3 -m venv env && env/bin/pip3 install -r requirements.txt")
+                        exec_command(frame, ssh, f"cd /srv/frameos/releases/release_{build_id}/vendor/{inkyPython.vendor_folder} && python3 -m venv env && env/bin/pip3 install -r requirements.txt")
 
                     # add frameos.service
                     with open("../frameos/frameos.service", "r") as file:
@@ -193,11 +195,12 @@ def make_local_modifications(frame: Frame, source_dir: str):
 
 
 def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_path: str, source_dir: str, temp_dir: str, cpu: str):
-    if frame.device == "pimoroni.inky_impression":
+    drivers = drivers_for_device(frame.device)
+    if inkyPython := drivers.get('inkyPython'):
         os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
-        shutil.copytree("../frameos/vendor/inky/", os.path.join(build_dir, "vendor", "inky"), dirs_exist_ok=True)
-        shutil.rmtree(os.path.join(build_dir, "vendor", "inky", "env"), ignore_errors=True)
-        shutil.rmtree(os.path.join(build_dir, "vendor", "inky", "__pycache__"), ignore_errors=True)
+        shutil.copytree(f"../frameos/vendor/{inkyPython.vendor_folder}/", os.path.join(build_dir, "vendor", inkyPython.vendor_folder), dirs_exist_ok=True)
+        shutil.rmtree(os.path.join(build_dir, "vendor", inkyPython.vendor_folder, "env"), ignore_errors=True)
+        shutil.rmtree(os.path.join(build_dir, "vendor", inkyPython.vendor_folder, "__pycache__"), ignore_errors=True)
 
     # Tell a white lie
     log(frame.id, "stdout", f"- No cross compilation. Generating source code for compilation on frame.")

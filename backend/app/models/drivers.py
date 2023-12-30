@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional, Dict
 
 
 @dataclass
@@ -25,19 +25,19 @@ drivers = {
     ),
 }
 
-def drivers_for_device(device: str) -> List[Driver]:
+def drivers_for_device(device: str) -> Dict[str, Driver]:
     if device == "pimoroni.inky_impression":
-        return [drivers["inkyPython"]]
+        return {"inkyPython": drivers["inkyPython"]}
     if device == "framebuffer":
-        return [drivers["frameBuffer"]]
-    return []
+        return {"frameBuffer": drivers["frameBuffer"]}
+    return {}
 
-def write_drivers_nim(drivers: List[Driver]) -> str:
+def write_drivers_nim(drivers: Dict[str, Driver]) -> str:
     imports = []
     init_drivers = []
     render_drivers = []
 
-    for driver in drivers:
+    for driver in drivers.values():
         imports.append(f"import {driver.import_path} as {driver.name}Driver")
         if driver.has_init:
             init_drivers.append(f"{driver.name}Driver.init(frameOS)")
