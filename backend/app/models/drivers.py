@@ -21,6 +21,7 @@ drivers = {
     "frameBuffer": Driver(
         name="frameBuffer",
         import_path="frameBuffer/frameBuffer",
+        has_init=True,
         has_render=True,
     ),
 }
@@ -40,9 +41,9 @@ def write_drivers_nim(drivers: Dict[str, Driver]) -> str:
     for driver in drivers.values():
         imports.append(f"import {driver.import_path} as {driver.name}Driver")
         if driver.has_init:
-            init_drivers.append(f"{driver.name}Driver.init(frameOS)")
+            init_drivers.append(f"{driver.name}Driver.init(logger)")
         if driver.has_render:
-            render_drivers.append(f"{driver.name}Driver.render(frameOS, image)")
+            render_drivers.append(f"{driver.name}Driver.render(logger, image)")
 
     if len(init_drivers) == 0:
         init_drivers.append("discard")
@@ -56,9 +57,9 @@ import pixie
 import frameos/types
 {newline.join(imports)}
 
-proc init*(frameOS: FrameOS) =
+proc init*(logger: Logger) =
   {(newline + '  ').join(init_drivers)}
 
-proc render*(frameOS: FrameOS, image: Image) =
+proc render*(logger: Logger, image: Image) =
   {(newline + '  ').join(render_drivers)}
     """

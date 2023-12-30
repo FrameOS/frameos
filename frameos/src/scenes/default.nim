@@ -2,7 +2,7 @@
 
 import pixie, json, times, strformat
 
-from frameos/types import FrameOS, FrameScene, ExecutionContext
+from frameos/types import FrameOS, FrameConfig, Logger, FrameScene, ExecutionContext
 import apps/unsplash/app as unsplashApp
 import apps/text/app as textApp
 import apps/clock/app as clockApp
@@ -11,8 +11,6 @@ import apps/split/app as splitApp
 import apps/ifElse/app as ifElseApp
 import apps/gradient/app as gradientApp
 import apps/rotate/app as rotateApp
-
-let DEBUG = false
 
 type Scene* = ref object of FrameScene
   app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200: unsplashApp.App
@@ -30,8 +28,7 @@ type Scene* = ref object of FrameScene
 proc runNode*(self: Scene, nodeId: string,
     context: var ExecutionContext) =
   let scene = self
-  let frameOS = scene.frameOS
-  let frameConfig = frameOS.frameConfig
+  let frameConfig = scene.frameConfig
   let state = scene.state
   var nextNode = nodeId
   var currentNode = nodeId
@@ -76,9 +73,6 @@ proc runNode*(self: Scene, nodeId: string,
       nextNode = "-1"
     else:
       nextNode = "-1"
-    if DEBUG:
-      self.logger.log(%*{"event": "runApp", "node": currentNode, "ms": (-timer +
-          epochTime()) * 1000})
 
 proc dispatchEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:
@@ -86,14 +80,12 @@ proc dispatchEvent*(self: Scene, context: var ExecutionContext) =
     self.runNode("f4071b08-9afa-47c1-b890-0ca025849914", context)
   else: discard
 
-proc init*(frameOS: FrameOS): Scene =
+proc init*(frameConfig: FrameConfig, logger: Logger): Scene =
   var state = %*{}
-  let frameConfig = frameOS.frameConfig
-  let logger = frameOS.logger
-  let scene = Scene(frameOS: frameOS, frameConfig: frameConfig, logger: logger, state: state)
+  let scene = Scene(frameConfig: frameConfig, logger: logger, state: state)
   let self = scene
-  var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{},
-      image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+  var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{
+    }, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
   scene.execNode = (proc(nodeId: string,
       context: var ExecutionContext) = self.runNode(nodeId, context))

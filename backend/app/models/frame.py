@@ -375,7 +375,7 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
     scene_source = f"""
 import pixie, json, times, strformat
 
-from frameos/types import FrameOS, FrameScene, ExecutionContext
+from frameos/types import FrameOS, FrameConfig, Logger, FrameScene, ExecutionContext
 {newline.join(imports)}
 
 let DEBUG = false
@@ -387,8 +387,7 @@ type Scene* = ref object of FrameScene
 proc runNode*(self: Scene, nodeId: string,
     context: var ExecutionContext) =
   let scene = self
-  let frameOS = scene.frameOS
-  let frameConfig = frameOS.frameConfig
+  let frameConfig = scene.frameConfig
   let state = scene.state
   var nextNode = nodeId
   var currentNode = nodeId
@@ -408,11 +407,9 @@ proc dispatchEvent*(self: Scene, context: var ExecutionContext) =
   {(newline + "  ").join(event_lines)}
   else: discard
 
-proc init*(frameOS: FrameOS): Scene =
+proc init*(frameConfig: FrameConfig, logger: Logger): Scene =
   var state = %*{{}}
-  let frameConfig = frameOS.frameConfig
-  let logger = frameOS.logger
-  let scene = Scene(frameOS: frameOS, frameConfig: frameConfig, logger: logger, state: state)
+  let scene = Scene(frameConfig: frameConfig, logger: logger, state: state)
   let self = scene
   var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{{}}, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene

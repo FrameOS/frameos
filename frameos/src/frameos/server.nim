@@ -6,12 +6,12 @@ import assets/web as webAssets
 import asyncdispatch, jester
 from net import Port
 import options
-from frameos/types import FrameOS, FrameConfig, Logger, Server, Renderer
-from frameos/renderer import lastRender, triggerRender
+from frameos/types import FrameOS, FrameConfig, Logger, Server, RunnerControl
+from frameos/runner import lastRender, triggerRender, getLastImage
 
 var globalLogger: Logger
 var globalFrameConfig: FrameConfig
-var globalRenderer: Renderer
+var globalRunner: RunnerControl
 
 proc match(request: Request): Future[ResponseData] {.async.} =
   echo "GET " & request.pathInfo
@@ -21,12 +21,12 @@ proc match(request: Request): Future[ResponseData] {.async.} =
       of "/", "/kiosk":
         resp Http200, webAssets.getAsset("assets/web/index.html")
       of "/event/render":
-        globalRenderer.triggerRender()
+        globalRunner.triggerRender()
         resp Http200, {"Content-Type": "application/json"}, $(%*{
             "status": "ok"})
       of "/image":
         globalLogger.log(%*{"event": "http", "path": "/image"})
-        resp Http200, {"Content-Type": "image/png"}, globalRenderer.lastRender().encodeImage(PngFormat)
+        resp Http200, {"Content-Type": "image/png"}, globalRunner.getLastImage().encodeImage(PngFormat)
       else:
         resp Http404, "Not found!"
 
@@ -34,7 +34,7 @@ proc match(request: Request): Future[ResponseData] {.async.} =
 proc newServer*(frameOS: FrameOS): Server =
   globalFrameConfig = frameOS.frameConfig
   globalLogger = frameOS.logger
-  globalRenderer = frameOS.renderer
+  globalRunner = frameOS.runner
 
   let port = (frameOS.frameConfig.framePort or 8787).Port
   let settings = newSettings(port = port)
@@ -43,10 +43,9 @@ proc newServer*(frameOS: FrameOS): Server =
   result = Server(
     frameConfig: frameOS.frameConfig,
     logger: frameOS.logger,
-    renderer: frameOS.renderer,
+    runner: frameOS.runner,
     jester: jester,
   )
-
 
 proc startServer*(self: Server) {.async.} =
   self.logger.log(%*{"event": "http:start",

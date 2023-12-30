@@ -4,7 +4,7 @@ from frameos/types import FrameOS, Server
 from frameos/config import loadConfig
 from frameos/logger import newLogger
 from frameos/server import newServer, startServer
-from frameos/renderer import newRenderer, renderScene, startLoop
+from frameos/runner import newRunner
 import drivers/drivers as drivers
 
 proc newFrameOS*(): FrameOS =
@@ -14,8 +14,8 @@ proc newFrameOS*(): FrameOS =
     frameConfig: frameConfig,
     logger: logger,
   )
-  drivers.init(result)
-  result.renderer = newRenderer(result)
+  drivers.init(logger)
+  result.runner = newRunner(frameConfig, logger)
   result.server = newServer(result)
 
 proc start*(self: FrameOS) {.async.} =
@@ -32,7 +32,7 @@ proc start*(self: FrameOS) {.async.} =
     "background_color": self.frameConfig.backgroundColor,
   }}
   self.logger.log(message)
-  discard self.renderer.startLoop()
+  self.runner.start()
   self.server.startServer()
 
 proc startFrameOS*() {.async.} =

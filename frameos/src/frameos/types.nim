@@ -26,7 +26,6 @@ type
     log*: proc(payload: JsonNode)
 
   FrameScene* = ref object of RootObj
-    frameOS*: FrameOS
     frameConfig*: FrameConfig
     logger*: Logger
     state*: JsonNode
@@ -41,25 +40,21 @@ type
     loopIndex*: int
     loopKey*: string
 
-  Renderer* = ref object
-    frameOS*: FrameOS
-    frameConfig*: FrameConfig
+  RunnerControl* = ref object
     logger*: Logger
-    scene*: FrameScene
-    lastImage*: Option[Image]
-    lastRotatedImage*: Option[Image]
-    lastRenderAt*: float
-    sleepFuture*: Option[Future[void]]
+    frameConfig*: FrameConfig
+    sendEvent*: proc (event: string, data: JsonNode)
+    start*: proc()
 
   Server* = ref object
     frameConfig*: FrameConfig
     logger*: Logger
     jester*: Jester
-    renderer*: Renderer
+    runner*: RunnerControl
     url*: string
 
   FrameOS* = ref object
     frameConfig*: FrameConfig
     logger*: Logger
     server*: Server
-    renderer*: Renderer
+    runner*: RunnerControl
