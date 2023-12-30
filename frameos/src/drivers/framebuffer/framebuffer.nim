@@ -66,8 +66,9 @@ proc init*(frameOS: FrameOS): Driver =
     discard close(fd)
 
     # Update the frameOS config
-    frameOS.frameConfig.width = screenInfo.width.int
-    frameOS.frameConfig.height = screenInfo.height.int
+    if screenInfo.width > 0 and screenInfo.height > 0:
+      frameOS.frameConfig.width = screenInfo.width.int
+      frameOS.frameConfig.height = screenInfo.height.int
 
     result = Driver(
       name: "frameBuffer",
