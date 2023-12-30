@@ -3,7 +3,7 @@
     "description": "Random image from the FrameOS gallery",
     "category": "image",
     "version": "1.0.0",
-    "settings": ["frameos"],
+    "settings": ["frameOS"],
     "fields": [
         {
             "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries."

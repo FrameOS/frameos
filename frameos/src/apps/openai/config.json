@@ -15,12 +15,28 @@
       "placeholder": "e.g. pumpkin pyjama party, digital art"
     },
     {
-      "name": "scaling_mode",
+      "name": "model",
+      "type": "select",
+      "options": ["dalle2"],
+      "value": "dalle2",
+      "required": true,
+      "label": "Model"
+    },
+    {
+      "name": "scalingMode",
       "type": "select",
       "options": ["cover", "contain", "stretch", "center"],
       "value": "cover",
       "required": true,
       "label": "Scaling mode"
+    },
+    {
+      "name": "cacheSeconds",
+      "type": "float",
+      "value": "60",
+      "required": false,
+      "label": "Seconds to cache the result",
+      "placeholder": "Default: 60. Use 0 for no cache"
     }
   ]
 }

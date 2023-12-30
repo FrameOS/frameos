@@ -10,10 +10,10 @@ function setDefaultSettings(settings: Record<string, any>): Record<string, any> 
   return {
     ...settings,
     homeAssistant: settings.homeAssistant ?? {},
-    frameos: settings.frameos ?? {},
+    frameOS: settings.frameOS ?? {},
     github: settings.github ?? {},
     sentry: settings.sentry ?? {},
-    openai: settings.openai ?? {},
+    openAI: settings.openAI ?? {},
     repositories: settings.repositories ?? [],
     ssh_keys: settings.ssh_keys ?? {},
   }

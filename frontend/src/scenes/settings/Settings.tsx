@@ -42,7 +42,7 @@ export function Settings() {
               className="max-h-full overflow-auto p-4 columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4"
             >
               <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings}>
-                <Group name="frameos">
+                <Group name="frameOS">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>FrameOS Gallery</H6>
                     <p>
@@ -52,17 +52,17 @@ export function Settings() {
                       </a>{' '}
                       and support this project.
                     </p>
-                    <Field name="api_key" label="API key" secret={!!savedSettings?.frameos?.api_key}>
-                      <TextInput autoFocus={!!savedSettings?.frameos?.api_key} />
+                    <Field name="apiKey" label="API key" secret={!!savedSettings?.frameOS?.apiKey}>
+                      <TextInput autoFocus={!!savedSettings?.frameOS?.apiKey} />
                     </Field>
                   </Box>
                 </Group>
-                <Group name="openai">
+                <Group name="openAI">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>OpenAI</H6>
                     The OpenAI API key is used within OpenAI apps, and for GPT4 coding assistance.
-                    <Field name="api_key" label="API key" secret={!!savedSettings?.openai?.api_key}>
-                      <TextInput name="api_key" autoFocus={!!savedSettings?.openai?.api_key} />
+                    <Field name="apiKey" label="API key" secret={!!savedSettings?.openAI?.apiKey}>
+                      <TextInput name="apiKey" autoFocus={!!savedSettings?.openAI?.apiKey} />
                     </Field>
                   </Box>
                 </Group>
