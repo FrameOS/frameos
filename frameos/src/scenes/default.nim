@@ -11,7 +11,7 @@ import apps/downloadImage/app as downloadImageApp
 import apps/split/app as splitApp
 import apps/ifElse/app as ifElseApp
 import apps/gradient/app as gradientApp
-import apps/resize/app as resizeApp
+import apps/rotate/app as rotateApp
 
 let DEBUG = false
 
@@ -25,7 +25,7 @@ type Scene* = ref object of FrameScene
   app_bbe82c34_84f6_4afe_beb3_87baa54f02e7: ifElseApp.App
   app_b5f06d55_8889_4869_b12e_f5207211fa05: gradientApp.App
   app_f4071b08_9afa_47c1_b890_0ca025849914: unsplashApp.App
-  app_520e2abb_cf4e_4008_ba53_23e0d2f8100b: resizeApp.App
+  app_06d5af4b_069e_4550_bd1b_e636e1b8cc2b: rotateApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
 proc runNode*(self: Scene, nodeId: string,
@@ -52,7 +52,7 @@ proc runNode*(self: Scene, nodeId: string,
       nextNode = "1c9414bd-8bc4-4249-8ffb-1b3094715a06"
     of "1c9414bd-8bc4-4249-8ffb-1b3094715a06":
       self.app_1c9414bd_8bc4_4249_8ffb_1b3094715a06.run(context)
-      nextNode = "520e2abb-cf4e-4008-ba53-23e0d2f8100b"
+      nextNode = "06d5af4b-069e-4550-bd1b-e636e1b8cc2b"
     of "ddbd3753-ea6a-4a80-98b4-455fb623ef6b":
       self.app_ddbd3753_ea6a_4a80_98b4_455fb623ef6b.run(context)
       nextNode = "-1"
@@ -72,8 +72,8 @@ proc runNode*(self: Scene, nodeId: string,
     of "f4071b08-9afa-47c1-b890-0ca025849914":
       self.app_f4071b08_9afa_47c1_b890_0ca025849914.run(context)
       nextNode = "b94c5793-aeb1-4f3a-b273-c2305c12096e"
-    of "520e2abb-cf4e-4008-ba53-23e0d2f8100b":
-      self.app_520e2abb_cf4e_4008_ba53_23e0d2f8100b.run(context)
+    of "06d5af4b-069e-4550-bd1b-e636e1b8cc2b":
+      self.app_06d5af4b_069e_4550_bd1b_e636e1b8cc2b.run(context)
       nextNode = "-1"
     else:
       nextNode = "-1"
@@ -93,8 +93,8 @@ proc init*(frameOS: FrameOS): Scene =
   let logger = frameOS.logger
   let scene = Scene(frameOS: frameOS, frameConfig: frameConfig, logger: logger, state: state)
   let self = scene
-  var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{
-    }, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+  var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{},
+      image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
   scene.execNode = (proc(nodeId: string,
       context: var ExecutionContext) = self.runNode(nodeId, context))
@@ -135,9 +135,9 @@ proc init*(frameOS: FrameOS): Scene =
   scene.app_f4071b08_9afa_47c1_b890_0ca025849914 = unsplashApp.init(
       "f4071b08-9afa-47c1-b890-0ca025849914", scene, unsplashApp.AppConfig(
       cacheSeconds: 600.0, keyword: "nature"))
-  scene.app_520e2abb_cf4e_4008_ba53_23e0d2f8100b = resizeApp.init(
-      "520e2abb-cf4e-4008-ba53-23e0d2f8100b", scene, resizeApp.AppConfig(
-      width: 480, height: 480, scalingMode: "center"))
+  scene.app_06d5af4b_069e_4550_bd1b_e636e1b8cc2b = rotateApp.init(
+      "06d5af4b-069e-4550-bd1b-e636e1b8cc2b", scene, rotateApp.AppConfig(
+      rotationDegree: 45.0, scalingMode: "cover"))
   dispatchEvent(scene, context)
 
 proc render*(self: Scene): Image =

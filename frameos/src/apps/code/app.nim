@@ -22,7 +22,7 @@ proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
   )
 
 proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"{self.node_id}:log", "message": message})
+  self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
 
 proc run*(self: App, context: ExecutionContext) =
   self.log(&"Hello from {context.event} {self.appConfig.keyword}")
