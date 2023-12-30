@@ -234,7 +234,8 @@ def get_frame_json(frame: Frame) -> dict:
     frame_json['settings'] = final_settings
     return frame_json
 
-
+def sanitize_nim_string(string: str) -> str:
+    return string.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
 
 def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
     from app.models.log import new_log as log
@@ -330,7 +331,7 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                     if key in field_inputs_for_node:
                         app_config_pairs += [f"{key}: {field_inputs_for_node[key]}"]
                     elif key in node_fields_for_node and type == "node":
-                        app_config_pairs += [f"{key}: \"{node_fields_for_node[key]}\""]
+                        app_config_pairs += [f"{key}: \"{sanitize_nim_string(node_fields_for_node[key])}\""]
                     elif type == "integer":
                         app_config_pairs += [f"{key}: {int(value)}"]
                     elif type == "float":
@@ -338,11 +339,11 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                     elif type == "boolean":
                         app_config_pairs += [f"{key}: {'true' if value == 'true' else 'false'}"]
                     elif type == "color":
-                        app_config_pairs += [f"{key}: parseHtmlColor(\"{value}\")"]
+                        app_config_pairs += [f"{key}: parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"]
                     elif type == "node":
                         app_config_pairs += [f"{key}: \"-1\""]
                     else:
-                        app_config_pairs += [f"{key}: \"{value}\""]
+                        app_config_pairs += [f"{key}: \"{sanitize_nim_string(str(value))}\""]
 
                 if len(sources) > 0:
                     node_app_id = "nodeapp_" + node_id.replace('-', '_')

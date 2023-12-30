@@ -12,6 +12,8 @@ import apps/ifElse/app as ifElseApp
 import apps/gradient/app as gradientApp
 import apps/rotate/app as rotateApp
 
+const DEBUG = false
+
 type Scene* = ref object of FrameScene
   app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200: unsplashApp.App
   app_b94c5793_aeb1_4f3a_b273_c2305c12096e: textApp.App
@@ -73,6 +75,9 @@ proc runNode*(self: Scene, nodeId: string,
       nextNode = "-1"
     else:
       nextNode = "-1"
+    if DEBUG:
+      self.logger.log(%*{"event": "runApp", "node": currentNode, "ms": (-timer +
+          epochTime()) * 1000})
 
 proc dispatchEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:
@@ -85,7 +90,7 @@ proc init*(frameConfig: FrameConfig, logger: Logger): Scene =
   let scene = Scene(frameConfig: frameConfig, logger: logger, state: state)
   let self = scene
   var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{
-    }, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+      }, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
   scene.execNode = (proc(nodeId: string,
       context: var ExecutionContext) = self.runNode(nodeId, context))
