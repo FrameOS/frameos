@@ -31,11 +31,14 @@ proc renderScene*(self: RunnerThread) =
   try:
     type DefaultScene = defaultScene.Scene
     let image = defaultScene.render(self.scene.DefaultScene)
-
-    if image.width != self.frameConfig.width or image.height !=
-        self.frameConfig.height:
-      let resizedImage = newImage(self.frameConfig.width,
-          self.frameConfig.height)
+    let requiredWidth = case self.frameConfig.rotate:
+      of 90, 270: self.frameConfig.height
+      else: self.frameConfig.width
+    let requiredHeight = case self.frameConfig.rotate:
+      of 90, 270: self.frameConfig.width
+      else: self.frameConfig.height
+    if image.width != requiredWidth or image.height != requiredHeight:
+      let resizedImage = newImage(requiredWidth, requiredHeight)
       resizedImage.scaleAndDrawImage(image, self.frameConfig.scalingMode)
       withLock(globalLastImageLock):
         globalLastImage = some(resizedImage)
@@ -64,6 +67,7 @@ proc lastRender*(self: RunnerThread): Image =
         result = renderError(self.frameConfig.height, self.frameConfig.width, "Error: No image rendered yet")
       else:
         result = renderError(self.frameConfig.width, self.frameConfig.height, "Error: No image rendered yet")
+    self.lastImage = some(result)
 
 proc lastRotatedRender*(self: RunnerThread): Image =
   if self.lastRotatedImage.isSome:
@@ -75,6 +79,7 @@ proc lastRotatedRender*(self: RunnerThread): Image =
       else:
         result = renderError(self.frameConfig.width, self.frameConfig.height, "Error: No image rendered yet")
     result = result.rotateDegrees(self.frameConfig.rotate)
+    self.lastRotatedImage = some(result)
 
 proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   self.logger.log(%*{"event": "startRenderLoop"})

@@ -26,7 +26,6 @@ def init():
     except Exception as e:
         log({ "error": str(e) })
     sys.stdout.flush()
-    sys.exit(1)
 
 if __name__ == "__main__":
     inky = init()
@@ -39,7 +38,7 @@ if __name__ == "__main__":
     except ImportError:
         log({ "error": "PIL python module not installed" })
         sys.exit(1)
-            
+
     try:
         image = Image.open(io.BytesIO(data))
         inky.set_image(image, saturation=1)

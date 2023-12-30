@@ -1,4 +1,4 @@
-import osproc, os, streams, pixie, json, options
+import osproc, os, streams, pixie, json, options, strformat
 
 from frameos/types import FrameConfig, FrameOS, Logger, FrameOSDriver
 
@@ -12,20 +12,6 @@ type Driver* = ref object of FrameOSDriver
   logger: Logger
   lastImageData: seq[ColorRGBX]
 
-proc init*(frameOS: FrameOS): Driver =
-  # TODO: Read screen info from config
-  # frameOS.frameConfig.width = screenInfo.width.int
-  # frameOS.frameConfig.height = screenInfo.height.int
-  result = Driver(
-    name: "inkyPython",
-    screenInfo: ScreenInfo(
-      width: 800,
-      height: 480,
-      color: "multi"
-    ),
-    logger: frameOS.logger
-  )
-
 proc safeLog(logger: Logger, message: string): JsonNode =
   try:
     result = parseJson(message)
@@ -34,7 +20,53 @@ proc safeLog(logger: Logger, message: string): JsonNode =
     result = %*{"event": "driver:inky", "log": message}
   logger.log(result)
 
+proc init*(frameOS: FrameOS): Driver =
+  discard frameOS.logger.safeLog("Initializing Inky driver")
+
+  result = Driver(
+    name: "inkyPython",
+    screenInfo: ScreenInfo(
+      width: 0,
+      height: 0,
+      color: ""
+    ),
+    logger: frameOS.logger
+  )
+
+  let process = startProcess(workingDir = "./vendor/inkyPython",
+      command = "./env/bin/python3", args = ["check.py"], options = {poStdErrToStdOut})
+  let pOut = process.outputStream()
+  var line = ""
+  var i = 0
+  block toploop:
+    while process.running:
+      while pOut.readLine(line):
+        let json = frameOS.logger.safeLog(line)
+        if json{"inky"}.getBool(false):
+          if json{"width"}.getInt(-1) > 0 and json{"height"}.getInt(-1) > 0:
+            result.screenInfo.width = json{"width"}.getInt(-1)
+            result.screenInfo.height = json{"height"}.getInt(-1)
+            result.screenInfo.color = json{"color"}.getStr("")
+            frameOS.frameConfig.width = result.screenInfo.width
+            frameOS.frameConfig.height = result.screenInfo.height
+            frameOS.frameConfig.color = result.screenInfo.color
+          break toploop
+        if json{"error"}.getStr() != "": # block until we get error
+          # TODO: abort driver init
+          break toploop
+      sleep(100)
+      i += 1
+      if i > 100:
+        discard frameOS.logger.safeLog("Looped for 10s! Breaking!")
+          # TODO: abort driver init
+        break toploop
+
+  process.close()
+
+
+
 proc render*(self: Driver, image: Image) =
+  discard self.logger.safeLog(&"Image: {image.width}x{image.height}")
   if self.lastImageData == image.data:
     discard self.logger.safeLog("Skipping render. Identical to last render.")
     echo "Skipping render"

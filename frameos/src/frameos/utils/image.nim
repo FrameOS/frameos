@@ -14,7 +14,7 @@ proc downloadImage*(url: string): Image =
 
 
 proc rotateDegrees*(image: Image, degrees: int): Image {.raises: [PixieError].} =
-  case degrees:
+  case (degrees + 1080) mod 360: # TODO: yuck
   of 90:
     result = newImage(image.height, image.width)
     for y in 0 ..< result.height:
