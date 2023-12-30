@@ -17,8 +17,8 @@
     {
       "name": "model",
       "type": "select",
-      "options": ["dalle2"],
-      "value": "dalle2",
+      "options": ["dall-e-3", "dall-e-2"],
+      "value": "dall-e-3",
       "required": true,
       "label": "Model"
     },

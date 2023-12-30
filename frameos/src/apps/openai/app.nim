@@ -62,7 +62,8 @@ proc run*(self: App, context: ExecutionContext) =
         ("Authorization", "Bearer " & apiKey),
         ("Content-Type", "application/json"),
     ])
-    let body = %*{"prompt": prompt, "n": 1, "size": "1024x1024"}
+    let body = %*{"prompt": prompt, "n": 1, "size": "1024x1024",
+        "model": self.appConfig.model}
     try:
       let response = client.request("https://api.openai.com/v1/images/generations",
           httpMethod = HttpPost, body = $body)
