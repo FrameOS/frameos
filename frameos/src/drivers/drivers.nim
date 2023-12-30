@@ -5,14 +5,14 @@ import pixie
 # import inkyPython/inkyPython as inkyDriver
 # import frameBuffer/frameBuffer as frameBufferDriver
 
-from frameos/types import Logger
+from frameos/types import Logger, FrameOS
 
 # var inkyDriverInstance: inkyDriver.Driver
 # var frameBufferDriverInstance: frameBufferDriver.Driver
 
-proc init*(logger: Logger) =
-  # inkyDriverInstance = inkyDriver.init(logger)
-  # frameBufferDriverInstance = frameBufferDriver.init(logger)
+proc init*(frameOS: FrameOS) =
+  # inkyDriverInstance = inkyDriver.init(frameOS)
+  # frameBufferDriverInstance = frameBufferDriver.init(frameOS)
   discard
 
 proc render*(image: Image) =

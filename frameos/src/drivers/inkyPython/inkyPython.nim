@@ -1,6 +1,6 @@
 import osproc, os, streams, pixie, json, options
 
-from frameos/types import FrameConfig, Logger, FrameOSDriver
+from frameos/types import FrameConfig, FrameOS, Logger, FrameOSDriver
 
 type ScreenInfo* = object
   width*: int
@@ -12,8 +12,10 @@ type Driver* = ref object of FrameOSDriver
   logger: Logger
   lastImageData: seq[ColorRGBX]
 
-proc init*(logger: Logger): Driver =
+proc init*(frameOS: FrameOS): Driver =
   # TODO: Read screen info from config
+  # frameOS.frameConfig.width = screenInfo.width.int
+  # frameOS.frameConfig.height = screenInfo.height.int
   result = Driver(
     name: "inkyPython",
     screenInfo: ScreenInfo(
@@ -21,7 +23,7 @@ proc init*(logger: Logger): Driver =
       height: 480,
       color: "multi"
     ),
-    logger: logger
+    logger: frameOS.logger
   )
 
 proc safeLog(logger: Logger, message: string): JsonNode =

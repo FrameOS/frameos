@@ -39,7 +39,7 @@ def write_drivers_nim(drivers: Dict[str, Driver]) -> str:
     for driver in drivers.values():
         imports.append(f"import {driver.import_path} as {driver.name}Driver")
         vars.append(f"var {driver.name}DriverInstance: {driver.name}Driver.Driver")
-        init_drivers.append(f"{driver.name}DriverInstance = {driver.name}Driver.init(logger)")
+        init_drivers.append(f"{driver.name}DriverInstance = {driver.name}Driver.init(frameOS)")
         if driver.has_render:
             render_drivers.append(f"{driver.name}DriverInstance.render(image)")
 
@@ -56,7 +56,7 @@ import frameos/types
 {newline.join(imports)}
 {newline.join(vars)}
 
-proc init*(logger: Logger) =
+proc init*(frameOS: FrameOS) =
   {(newline + '  ').join(init_drivers)}
 
 proc render*(image: Image) =

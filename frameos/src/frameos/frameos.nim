@@ -14,7 +14,7 @@ proc newFrameOS*(): FrameOS =
     frameConfig: frameConfig,
     logger: logger,
   )
-  drivers.init(logger)
+  drivers.init(result)
   result.runner = newRunner(frameConfig, logger)
   result.server = newServer(result)
 

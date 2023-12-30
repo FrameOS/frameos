@@ -378,7 +378,7 @@ import pixie, json, times, strformat
 from frameos/types import FrameOS, FrameConfig, Logger, FrameScene, ExecutionContext
 {newline.join(imports)}
 
-let DEBUG = false
+const DEBUG = false
 
 type Scene* = ref object of FrameScene
   {(newline + "  ").join(scene_object_fields)}

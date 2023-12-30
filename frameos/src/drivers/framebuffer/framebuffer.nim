@@ -1,6 +1,6 @@
 import pixie, json, linuxfb, posix, strformat, sequtils, osproc
 
-from frameos/types import Logger, FrameOSDriver
+from frameos/types import FrameOS, Logger, FrameOSDriver
 
 const DEVICE = "/dev/fb0"
 
@@ -30,7 +30,8 @@ proc tryToDisableCursorBlinking() =
     except:
       discard # We tried
 
-proc init*(logger: Logger): Driver =
+proc init*(frameOS: FrameOS): Driver =
+  let logger = frameOS.logger
   try:
     var res: Stat
     discard stat(DEVICE, res)
@@ -58,11 +59,16 @@ proc init*(logger: Logger): Driver =
       transpOffset: var_info.transp.offset,
       transpLength: var_info.transp.length,
     )
-    logger.log(%*{
+    frameOS.logger.log(%*{
         "event": "driver:frameBuffer",
         "screenInfo": screenInfo,
     })
     discard close(fd)
+
+    # Update the frameOS config
+    frameOS.frameConfig.width = screenInfo.width.int
+    frameOS.frameConfig.height = screenInfo.height.int
+
     result = Driver(
       name: "frameBuffer",
       screenInfo: screenInfo,
