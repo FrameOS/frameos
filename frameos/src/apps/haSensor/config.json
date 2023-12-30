@@ -33,7 +33,7 @@
         },
         {
             "name": "debug",
-            "type": "bool",
+            "type": "boolean",
             "value": "false",
             "required": false,
             "label": "Debug logging"

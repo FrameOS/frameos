@@ -176,7 +176,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                               onChange={(value) => updateNodeConfig(id, field.name, value)}
                               rows={field.rows ?? 3}
                             />
-                          ) : field.type === 'bool' ? (
+                          ) : field.type === 'boolean' ? (
                             <input
                               type="checkbox"
                               checked={(field.name in data.config ? data.config[field.name] : field.value) == 'true'}

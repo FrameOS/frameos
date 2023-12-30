@@ -137,7 +137,7 @@ proc init*(frameOS: FrameOS): Scene =
       cacheSeconds: 600.0, keyword: "nature"))
   scene.app_06d5af4b_069e_4550_bd1b_e636e1b8cc2b = rotateApp.init(
       "06d5af4b-069e-4550-bd1b-e636e1b8cc2b", scene, rotateApp.AppConfig(
-      rotationDegree: 45.0, scalingMode: "cover"))
+      rotationDegree: 45.0, scalingMode: "stretch"))
   dispatchEvent(scene, context)
 
 proc render*(self: Scene): Image =

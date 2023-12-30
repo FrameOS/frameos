@@ -63,7 +63,7 @@ export interface ConfigField {
   /** Human readable label */
   label: string
   /** Type of the field, only 'string' is supported for now */
-  type: 'string' | 'text' | 'float' | 'integer' | 'bool' | 'color' | 'select' | 'node'
+  type: 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'node'
   /** List of options for the field, only used if type is 'select' */
   options?: string[]
   /** Whether the field is required */

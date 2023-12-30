@@ -9,7 +9,7 @@
             "label": "Condition",
             "name": "condition",
             "value": "true",
-            "type": "bool",
+            "type": "boolean",
             "required": true
         },
         {

@@ -331,7 +331,7 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                         app_config_pairs += [f"{key}: {int(value)}"]
                     elif type == "float":
                         app_config_pairs += [f"{key}: {float(value)}"]
-                    elif type == "bool":
+                    elif type == "boolean":
                         app_config_pairs += [f"{key}: {'true' if value == 'true' else 'false'}"]
                     elif type == "color":
                         app_config_pairs += [f"{key}: parseHtmlColor(\"{value}\")"]
