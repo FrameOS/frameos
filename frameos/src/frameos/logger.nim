@@ -11,14 +11,8 @@ type
     erroredLogs: seq[JsonNode]
     lastSendAt: float
 
-const LOG_FLUSH_INTERVAL = 1.0
+const LOG_FLUSH_SECONDS = 1.0
 
-# TODO:
-# - Keep a limited list of logs in memory
-# - Send logs to server if requested
-# - Batched sending
-# - Retry on failure
-# - Stop on shutdown
 var
   thread: Thread[FrameConfig]
   channel: Channel[JsonNode]
@@ -48,7 +42,7 @@ proc logInThread*(self: LoggerThread) =
 proc start(self: LoggerThread) =
   while true:
     let logCount = (self.logs.len + self.erroredLogs.len)
-    if logCount > 10 or (logCount > 0 and self.lastSendAt + LOG_FLUSH_INTERVAL <
+    if logCount > 10 or (logCount > 0 and self.lastSendAt + LOG_FLUSH_SECONDS <
         epochTime()):
       self.logInThread()
 
