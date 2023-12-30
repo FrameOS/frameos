@@ -3,7 +3,6 @@
 import pixie, json, times, strformat
 
 from frameos/types import FrameOS, FrameScene, ExecutionContext
-from frameos/logger import log
 import apps/unsplash/app as unsplashApp
 import apps/text/app as textApp
 import apps/clock/app as clockApp
@@ -93,8 +92,8 @@ proc init*(frameOS: FrameOS): Scene =
   let logger = frameOS.logger
   let scene = Scene(frameOS: frameOS, frameConfig: frameConfig, logger: logger, state: state)
   let self = scene
-  var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{},
-      image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+  var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{
+      }, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
   scene.execNode = (proc(nodeId: string,
       context: var ExecutionContext) = self.runNode(nodeId, context))

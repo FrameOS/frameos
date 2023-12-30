@@ -1,7 +1,6 @@
 import pixie, json
 
 from frameos/types import FrameOS, FrameConfig, Logger
-from frameos/logger import log
 
 proc render*(frameOS: FrameOS, image: Image) =
   let imageData = image.data

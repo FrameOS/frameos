@@ -23,8 +23,7 @@ type
     lock*: Lock
     thread*: Thread[FrameConfig]
     channel*: Channel[JsonNode]
-    # client*: HttpClient
-    # url*: string
+    log*: proc(payload: JsonNode)
 
   FrameScene* = ref object of RootObj
     frameOS*: FrameOS

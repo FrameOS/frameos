@@ -1,7 +1,6 @@
 import osproc, os, streams, pixie, json, options
 
 from frameos/types import FrameOS, FrameConfig, Logger
-from frameos/logger import log
 
 proc init*(frameOS: FrameOS) =
   # TODO: check for display

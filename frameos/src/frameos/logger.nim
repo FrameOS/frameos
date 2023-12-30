@@ -40,13 +40,14 @@ proc threadRunner(frameConfig: FrameConfig) {.thread.} =
     let payload = channel.recv()
     logInThread(frameConfig, payload, client, url)
 
+method log*(self: Logger, payload: JsonNode) {.base.} =
+  channel.send(payload)
+
 proc newLogger*(frameConfig: FrameConfig): Logger =
   createThread(thread, threadRunner, frameConfig)
   var logger = Logger(
     frameConfig: frameConfig,
     channel: channel,
+    log: proc(payload: JsonNode) = channel.send(payload)
   )
   result = logger
-
-method log*(self: Logger, payload: JsonNode) {.base.} =
-  channel.send(payload)

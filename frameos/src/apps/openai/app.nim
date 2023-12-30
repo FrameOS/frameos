@@ -7,7 +7,6 @@ import httpclient
 import zippy
 from frameos/utils/image import scaleAndDrawImage
 from frameos/types import FrameScene, FrameConfig, ExecutionContext
-from frameos/logger import log
 
 type
   AppConfig* = object

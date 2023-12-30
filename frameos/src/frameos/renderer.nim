@@ -2,7 +2,6 @@ import json, pixie, times, options, asyncdispatch
 import scenes/default as defaultScene
 
 from frameos/types import FrameOS, FrameConfig, FrameScene, Renderer, Logger
-from frameos/logger import log
 from frameos/utils/image import rotateDegrees, renderError, scaleAndDrawImage
 
 import drivers/drivers as drivers

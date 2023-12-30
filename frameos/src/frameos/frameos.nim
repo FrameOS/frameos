@@ -2,7 +2,7 @@ import json, asyncdispatch
 
 from frameos/types import FrameOS, Server
 from frameos/config import loadConfig
-from frameos/logger import newLogger, log
+from frameos/logger import newLogger
 from frameos/server import newServer, startServer
 from frameos/renderer import newRenderer, renderScene, startLoop
 import drivers/drivers as drivers

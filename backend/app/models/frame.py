@@ -376,7 +376,6 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
 import pixie, json, times, strformat
 
 from frameos/types import FrameOS, FrameScene, ExecutionContext
-from frameos/logger import log
 {newline.join(imports)}
 
 let DEBUG = false

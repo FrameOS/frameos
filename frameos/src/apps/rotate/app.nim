@@ -2,7 +2,6 @@ import pixie
 import json
 import strformat
 from frameos/types import FrameScene, FrameConfig, ExecutionContext, Logger
-from frameos/logger import log
 from frameos/utils/image import scaleAndDrawImage
 
 type

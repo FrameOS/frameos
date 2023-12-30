@@ -7,7 +7,6 @@ import asyncdispatch, jester
 from net import Port
 import options
 from frameos/types import FrameOS, FrameConfig, Logger, Server, Renderer
-from frameos/logger import log
 from frameos/renderer import lastRender, triggerRender
 
 var globalLogger: Logger
