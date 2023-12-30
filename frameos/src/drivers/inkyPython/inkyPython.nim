@@ -63,13 +63,9 @@ proc init*(frameOS: FrameOS): Driver =
 
   process.close()
 
-
-
 proc render*(self: Driver, image: Image) =
-  discard self.logger.safeLog(&"Image: {image.width}x{image.height}")
   if self.lastImageData == image.data:
     discard self.logger.safeLog("Skipping render. Identical to last render.")
-    echo "Skipping render"
     return
   self.lastImageData = image.data
   let imageData = image.encodeImage(BmpFormat)
