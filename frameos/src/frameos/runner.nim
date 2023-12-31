@@ -116,15 +116,23 @@ proc triggerRender*(self: RunnerThread): void =
         "error": "Render already in progress, ignoring."})
 
 proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
+  var waitTime = 10
   while true:
     let (success, message) = toRunner.tryRecv()
     if success:
+      waitTime = 1
       echo "Got message: " & $message
       case message{"event"}.getStr:
         of "render":
           self.triggerRender()
+        of "turnOn":
+          drivers.turnOn()
+        of "turnOff":
+          drivers.turnOff()
     else:
-      await sleepAsync(50)
+      await sleepAsync(waitTime)
+      if waitTime < 200:
+        waitTime += 5
 
 proc createThreadRunner*(args: (FrameConfig, Logger)) =
   {.cast(gcsafe).}: # TODO: is this a mistake?

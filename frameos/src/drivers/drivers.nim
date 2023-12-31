@@ -19,3 +19,9 @@ proc render*(image: Image) =
   # inkyDriverInstance.render(image)
   # frameBufferDriverInstance.render(image)
   discard
+
+proc turnOn*() =
+  discard
+
+proc turnOff*() =
+  discard

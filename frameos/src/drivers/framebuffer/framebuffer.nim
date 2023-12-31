@@ -22,13 +22,32 @@ type Driver* = ref object of FrameOSDriver
   logger: Logger
 
 proc tryToDisableCursorBlinking() =
-  try:
-    discard execCmd("echo 0 | sudo tee /sys/class/graphics/fbcon/cursor_blink")
-  except:
-    try:
-      discard execCmd("sudo sh -c 'setterm -cursor off > /dev/tty0'")
-    except:
-      discard # We tried
+  let status = execCmd("echo 0 | sudo tee /sys/class/graphics/fbcon/cursor_blink")
+  if status != 0:
+    discard execCmd("sudo sh -c 'setterm -cursor off > /dev/tty0'")
+
+proc getScreenInfo(logger: Logger): ScreenInfo =
+  let fd = open(DEVICE, O_RDWR)
+  var var_info: fb_var_screeninfo
+  discard ioctl(fd, FBIOGET_VSCREENINFO, addr var_info)
+  result = ScreenInfo(
+    width: var_info.xres,
+    height: var_info.yres,
+    bitsPerPixel: var_info.bits_per_pixel,
+    redOffset: var_info.red.offset,
+    redLength: var_info.red.length,
+    greenOffset: var_info.green.offset,
+    greenLength: var_info.green.length,
+    blueOffset: var_info.blue.offset,
+    blueLength: var_info.blue.length,
+    transpOffset: var_info.transp.offset,
+    transpLength: var_info.transp.length,
+  )
+  logger.log(%*{
+      "event": "driver:frameBuffer",
+      "screenInfo": result,
+  })
+  discard close(fd)
 
 proc init*(frameOS: FrameOS): Driver =
   let logger = frameOS.logger
@@ -40,30 +59,9 @@ proc init*(frameOS: FrameOS): Driver =
         "error": "Failed to initialize driver",
         "message": &"Framebuffer device {DEVICE} not found"})
 
-  tryToDisableCursorBlinking()
-
   try:
-    let fd = open(DEVICE, O_RDWR)
-    var var_info: fb_var_screeninfo
-    discard ioctl(fd, FBIOGET_VSCREENINFO, addr var_info)
-    let screenInfo = ScreenInfo(
-      width: var_info.xres,
-      height: var_info.yres,
-      bitsPerPixel: var_info.bits_per_pixel,
-      redOffset: var_info.red.offset,
-      redLength: var_info.red.length,
-      greenOffset: var_info.green.offset,
-      greenLength: var_info.green.length,
-      blueOffset: var_info.blue.offset,
-      blueLength: var_info.blue.length,
-      transpOffset: var_info.transp.offset,
-      transpLength: var_info.transp.length,
-    )
-    frameOS.logger.log(%*{
-        "event": "driver:frameBuffer",
-        "screenInfo": screenInfo,
-    })
-    discard close(fd)
+    tryToDisableCursorBlinking()
+    let screenInfo = getScreenInfo(logger)
 
     # Update the frameOS config
     if screenInfo.width > 0 and screenInfo.height > 0:
@@ -87,7 +85,6 @@ proc to16BitRGB(color: ColorRGBX): uint16 =
     b = uint16(color.b shr 3) # Scale down to 5 bits
   return (r shl 11) or (g shl 5) or b # Combine the channels
 
-
 proc render*(self: Driver, image: Image) =
   let imageData = image.data
   try:
@@ -106,3 +103,21 @@ proc render*(self: Driver, image: Image) =
   except:
     self.logger.log(%*{"event": "driver:frameBuffer",
         "error": "Failed to write image to /dev/fb0"})
+
+proc turnOn*(self: Driver) =
+  try:
+    let response = execCmd("vcgencmd display_power 1")
+    if response != 0:
+      discard execCmd("sudo sh -c 'echo 0 > /sys/class/graphics/fb0/blank'")
+  except:
+    self.logger.log(%*{"event": "driver:frameBuffer",
+        "error": "Failed to turn display on"})
+
+proc turnOff*(self: Driver) =
+  try:
+    let response = execCmd("vcgencmd display_power 0")
+    if response != 0:
+      discard execCmd("sudo sh -c 'echo 1 > /sys/class/graphics/fb0/blank'")
+  except:
+    self.logger.log(%*{"event": "driver:frameBuffer",
+        "error": "Failed to turn display off"})

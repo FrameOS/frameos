@@ -60,6 +60,7 @@ def deploy_frame(id: int):
 
                 drivers = drivers_for_device(frame.device)
 
+                # create a build .tar.gz
                 log(id, "stdout", f"- Copying build folders")
                 build_dir, source_dir = create_build_folders(temp_dir, build_id)
                 log(id, "stdout", f"- Applying local modifications")
@@ -67,9 +68,8 @@ def deploy_frame(id: int):
                 log(id, "stdout", f"- Creating build archive")
                 archive_path = create_local_build_archive(frame, build_dir, build_id, nim_path, source_dir, temp_dir, cpu)
 
-                # 8. Copy to the server "scp -r tmp/build_1.tar.gz toormoos:"
                 with SCPClient(ssh.get_transport()) as scp:
-                    # build the release
+                    # build the release on the server
                     exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  build-essential\" || sudo apt -y install build-essential")
                     exec_command(frame, ssh, "if [ ! -d /srv/frameos/ ]; then sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; fi")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/build/")
@@ -82,6 +82,7 @@ def deploy_frame(id: int):
                     log(id, "stdout", f"> add /srv/frameos/releases/release_{build_id}/frame.json")
                     scp.putfo(StringIO(json.dumps(get_frame_json(frame), indent=4) + "\n"), f"/srv/frameos/releases/release_{build_id}/frame.json")
 
+                    # TODO: abstract driver-specific install steps
                     if inkyPython := drivers.get("inkyPython"):
                         exec_command(frame, ssh, f"cp -r /srv/frameos/build/build_{build_id}/vendor /srv/frameos/releases/release_{build_id}/vendor")
                         exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-pip\" || sudo apt -y install python3-pip")
@@ -107,33 +108,11 @@ def deploy_frame(id: int):
                 exec_command(frame, ssh, "sudo systemctl start frameos.service")
                 exec_command(frame, ssh, "sudo systemctl status frameos.service")
 
-            # exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libopenjp2-7\" || sudo apt -y install libopenjp2-7")
-            # exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libopenblas-dev\" || sudo apt -y install libopenblas-dev")
-            # exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-pip\" || sudo apt -y install python3-pip")
-            # exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  fonts-dejavu\" || sudo apt -y install fonts-dejavu")
-            #
-            # exec_command(frame, ssh, 'version=$(python3 --version 2>&1) && [[ $version == *" 3.11"* ]] && echo Currently using: $version || '
-            #                          'echo "WARNING! FrameOS is built for Python 3.11. You\'re running $version. This may cause issues."')
-            #
             # # enable i2c
             # exec_command(frame, ssh, 'grep -q "^dtparam=i2c_vc=on$" /boot/config.txt || echo "dtparam=i2c_vc=on" | sudo tee -a /boot/config.txt')
             # exec_command(frame, ssh, 'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1" && { sudo raspi-config nonint do_i2c 0; echo "I2C is now enabled"; }')
             # # enable spi
             # exec_command(frame, ssh, 'sudo raspi-config nonint do_spi 0')
-
-            #     for node_id, sources in get_apps_from_scenes(frame.scenes).items():
-            #         app_id = "node_" + node_id.replace('-', '_')
-            #         log(id, "stdout", f"> add /srv/frameos/apps/{app_id}.zip")
-            #         zip_archive = io.BytesIO()
-            #         with ZipFile(zip_archive, "w") as new_archive:
-            #             for file, source in sources.items():
-            #                 new_archive.writestr(os.path.join(file), source.encode())
-            #         zip_archive.seek(0)
-            #         scp.putfo(zip_archive, f"/srv/frameos/apps/{app_id}.zip")
-            #
-            #     if 'waveshare.' in frame.device:
-            #         log(id, "stdout", "> add /srv/frameos/lib/*")
-            #         scp.put("../frameos/lib", "/srv/frameos/", recursive=True)
 
             frame.status = 'starting'
             update_frame(frame)
@@ -195,6 +174,7 @@ def make_local_modifications(frame: Frame, source_dir: str):
 
 
 def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_path: str, source_dir: str, temp_dir: str, cpu: str):
+    # TODO: abstract driver-specific vendor steps
     drivers = drivers_for_device(frame.device)
     if inkyPython := drivers.get('inkyPython'):
         os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
@@ -205,7 +185,7 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
     # Tell a white lie
     log(frame.id, "stdout", f"- No cross compilation. Generating source code for compilation on frame.")
 
-    # 4. run "nim c --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:tmp/build_1 src/frameos.nim"
+    # run "nim c --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:tmp/build_1 src/frameos.nim"
     status, out, err = exec_local_command(
         frame,
         f"cd {source_dir} && {nim_path} compile --os:linux --cpu:{cpu} --compileOnly --genScript --nimcache:{build_dir} src/frameos.nim 2>&1"
@@ -230,13 +210,13 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
 
         raise Exception("Failed to generate frameos sources")
 
-    # 5. Copy the file "nimbase.h" to "build_1/nimbase.h"
+    # Copy the file "nimbase.h" to "build_1/nimbase.h"
     nimbase_path = find_nimbase_file(nim_path)
     if not nimbase_path:
         raise Exception("nimbase.h not found")
     shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
 
-    # 6. Update the compilation script for verbose output
+    # Update the compilation script for verbose output
     script_path = os.path.join(build_dir, "compile_frameos.sh")
     log(frame.id, "stdout", f"Cleaning build script at {script_path}")
     with open(script_path, "r") as file:

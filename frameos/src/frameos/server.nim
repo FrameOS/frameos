@@ -24,6 +24,14 @@ proc match(request: Request): Future[ResponseData] {.async.} =
         globalRunner.triggerRender()
         resp Http200, {"Content-Type": "application/json"}, $(%*{
             "status": "ok"})
+      of "/event/turnOn":
+        globalRunner.sendEvent("turnOn", %*{})
+        resp Http200, {"Content-Type": "application/json"}, $(%*{
+            "status": "ok"})
+      of "/event/turnOff":
+        globalRunner.sendEvent("turnOff", %*{})
+        resp Http200, {"Content-Type": "application/json"}, $(%*{
+            "status": "ok"})
       of "/image":
         globalLogger.log(%*{"event": "http", "path": "/image"})
         resp Http200, {"Content-Type": "image/png"}, globalRunner.getLastImage().encodeImage(PngFormat)
