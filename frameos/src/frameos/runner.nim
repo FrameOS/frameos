@@ -86,6 +86,10 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   var timer = 0.0
   var driverTimer = 0.0
   var sleepDuration = 0.0
+  let fastScene = 0.3 # 300ms
+  var fastSceneCount = 0
+  var fastSceneResumeAt = 0.0
+
   while true:
     timer = epochTime()
     self.renderScene()
@@ -95,6 +99,24 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     self.logger.log(%*{"event": "render:driver",
         "device": self.frameConfig.device, "ms": round((epochTime() -
             driverTimer) * 1000, 3)})
+
+    if self.frameConfig.interval < 2:
+      if epochTime() - timer < fastScene:
+        fastSceneCount += 1
+        if fastSceneCount == 3:
+          self.logger.log(%*{"event": "pause",
+              "message": "Rendering fast. Pausing logging for 10s"})
+          self.logger.disable()
+          fastSceneResumeAt = epochTime() + 10
+        elif fastSceneResumeAt != 0.0 and epochTime() > fastSceneResumeAt:
+          fastSceneCount = 0
+          fastSceneResumeAt = 0.0
+          self.logger.enable()
+      else:
+        fastSceneCount = 0
+        fastSceneResumeAt = 0.0
+        self.logger.enable()
+
 
     # Sleep until the next frame
     sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) *

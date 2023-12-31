@@ -24,6 +24,9 @@ type
     thread*: Thread[FrameConfig]
     channel*: Channel[JsonNode]
     log*: proc(payload: JsonNode)
+    enabled*: bool
+    enable*: proc()
+    disable*: proc()
 
   FrameScene* = ref object of RootObj
     frameConfig*: FrameConfig

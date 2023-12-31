@@ -79,6 +79,13 @@ proc newLogger*(frameConfig: FrameConfig): Logger =
   var logger = Logger(
     frameConfig: frameConfig,
     channel: channel,
-    log: proc(payload: JsonNode) = channel.send(payload)
+    enabled: true,
   )
+  logger.log = proc(payload: JsonNode) =
+    if logger.enabled:
+      channel.send(payload)
+  logger.enable = proc() =
+    logger.enabled = true
+  logger.disable = proc() =
+    logger.enabled = false
   result = logger
