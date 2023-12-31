@@ -86,7 +86,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   var timer = 0.0
   var driverTimer = 0.0
   var sleepDuration = 0.0
-  let fastScene = 0.3 # 300ms
+  let fastScene = 0.5 # 500ms
   var fastSceneCount = 0
   var fastSceneResumeAt = 0.0
 

@@ -85,6 +85,14 @@ proc to16BitRGB(color: ColorRGBX): uint16 =
     b = uint16(color.b shr 3) # Scale down to 5 bits
   return (r shl 11) or (g shl 5) or b # Combine the channels
 
+proc to32bitBGR(color: ColorRGBX): uint32 =
+  let
+    r = uint32(color.r)
+    g = uint32(color.g)
+    b = uint32(color.b)
+    a = uint32(color.a)
+  return (b shl 0) or (g shl 8) or (r shl 16) or (a shl 24)
+
 proc render*(self: Driver, image: Image) =
   let imageData = image.data
   try:
@@ -97,11 +105,8 @@ proc render*(self: Driver, image: Image) =
       if self.screenInfo.blueOffset < self.screenInfo.greenOffset and
           self.screenInfo.greenOffset < self.screenInfo.redOffset and
           self.screenInfo.redOffset < self.screenInfo.alphaOffset:
-        for color in imageData:
-          discard fb.writeBuffer(addr color.b, sizeof(color.b))
-          discard fb.writeBuffer(addr color.g, sizeof(color.g))
-          discard fb.writeBuffer(addr color.r, sizeof(color.r))
-          discard fb.writeBuffer(addr color.a, sizeof(color.a))
+        for color in imageData.map(to32bitBGR):
+          discard fb.writeBuffer(addr color, sizeof(color))
       else:
         discard fb.writeBuffer(addr imageData, sizeof(imageData))
     else:
