@@ -28,6 +28,10 @@ type
     enable*: proc()
     disable*: proc()
 
+  MetricsLogger* = ref object
+    frameConfig*: FrameConfig
+    logger*: Logger
+
   FrameScene* = ref object of RootObj
     frameConfig*: FrameConfig
     logger*: Logger
@@ -62,5 +66,6 @@ type
   FrameOS* = ref object
     frameConfig*: FrameConfig
     logger*: Logger
+    metricsLogger*: MetricsLogger
     server*: Server
     runner*: RunnerControl

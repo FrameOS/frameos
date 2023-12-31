@@ -3,6 +3,7 @@ import json, asyncdispatch
 from frameos/types import FrameOS, Server
 from frameos/config import loadConfig
 from frameos/logger import newLogger
+from frameos/metrics import newMetricsLogger
 from frameos/server import newServer, startServer
 from frameos/runner import newRunner
 import drivers/drivers as drivers
@@ -10,9 +11,11 @@ import drivers/drivers as drivers
 proc newFrameOS*(): FrameOS =
   var frameConfig = loadConfig()
   var logger = newLogger(frameConfig)
+  var metricsLogger = newMetricsLogger(logger)
   result = FrameOS(
     frameConfig: frameConfig,
     logger: logger,
+    metricsLogger: metricsLogger
   )
   drivers.init(result)
   result.runner = newRunner(frameConfig, logger)
