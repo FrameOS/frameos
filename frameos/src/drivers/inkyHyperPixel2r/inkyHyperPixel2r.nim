@@ -1,4 +1,4 @@
-import pixie, json, osproc
+import pixie, osproc
 
 from frameos/types import FrameOS, Logger, FrameOSDriver
 
@@ -13,10 +13,7 @@ proc render*(self: Driver, image: Image) =
   frameBuffer.render(self, image)
 
 proc turnOn*(self: Driver) =
-  discard startProcess(workingDir = "./vendor/inkyHyperPixel2r",
-      command = "./env/bin/python3", args = ["turnOn.py"], options = {poStdErrToStdOut})
-
+  discard execCmd("cd ./vendor/inkyHyperPixel2r && ./env/bin/python3 turnOn.py")
 
 proc turnOff*(self: Driver) =
-  discard startProcess(workingDir = "./vendor/inkyHyperPixel2r",
-      command = "./env/bin/python3", args = ["turnOff.py"], options = {poStdErrToStdOut})
+  discard execCmd("cd ./vendor/inkyHyperPixel2r && ./env/bin/python3 turnOff.py")
