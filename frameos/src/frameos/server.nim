@@ -21,19 +21,22 @@ proc match(request: Request): Future[ResponseData] {.async.} =
       of "/", "/kiosk":
         resp Http200, webAssets.getAsset("assets/web/index.html")
       of "/event/render":
+        globalLogger.log(%*{"event": "http", "path": request.pathInfo})
         globalRunner.triggerRender()
         resp Http200, {"Content-Type": "application/json"}, $(%*{
             "status": "ok"})
       of "/event/turnOn":
+        globalLogger.log(%*{"event": "http", "path": request.pathInfo})
         globalRunner.sendEvent("turnOn", %*{})
         resp Http200, {"Content-Type": "application/json"}, $(%*{
             "status": "ok"})
       of "/event/turnOff":
+        globalLogger.log(%*{"event": "http", "path": request.pathInfo})
         globalRunner.sendEvent("turnOff", %*{})
         resp Http200, {"Content-Type": "application/json"}, $(%*{
             "status": "ok"})
       of "/image":
-        globalLogger.log(%*{"event": "http", "path": "/image"})
+        globalLogger.log(%*{"event": "http", "path": request.pathInfo})
         resp Http200, {"Content-Type": "image/png"}, globalRunner.getLastImage().encodeImage(PngFormat)
       else:
         resp Http404, "Not found!"

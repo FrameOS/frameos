@@ -23,12 +23,21 @@ drivers = {
         can_render=True,
         can_turn_on_off=True
     ),
+    "inkyHyperPixel2r": Driver(
+        name="inkyHyperPixel2r",
+        import_path="inkyHyperPixel2r/inkyHyperPixel2r",
+        vendor_folder="inkyHyperPixel2r",
+        can_render=True,
+        can_turn_on_off=True
+    ),
 }
 
 def drivers_for_device(device: str) -> Dict[str, Driver]:
     if device == "pimoroni.inky_impression":
         return {"inkyPython": drivers["inkyPython"]}
-    if device == "framebuffer":
+    elif device == "pimoroni.hyperpixel2r":
+        return {"inkyHyperPixel2r": drivers["inkyHyperPixel2r"]}
+    elif device == "framebuffer":
         return {"frameBuffer": drivers["frameBuffer"]}
     return {}
 

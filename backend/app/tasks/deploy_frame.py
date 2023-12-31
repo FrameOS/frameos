@@ -89,6 +89,12 @@ def deploy_frame(id: int):
                         exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-venv\" || sudo apt -y install python3-venv")
                         exec_command(frame, ssh, f"cd /srv/frameos/releases/release_{build_id}/vendor/{inkyPython.vendor_folder} && python3 -m venv env && env/bin/pip3 install -r requirements.txt")
 
+                    if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
+                        exec_command(frame, ssh, f"cp -r /srv/frameos/build/build_{build_id}/vendor /srv/frameos/releases/release_{build_id}/vendor")
+                        exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-pip\" || sudo apt -y install python3-pip")
+                        exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-venv\" || sudo apt -y install python3-venv")
+                        exec_command(frame, ssh, f"cd /srv/frameos/releases/release_{build_id}/vendor/{inkyHyperPixel2r.vendor_folder} && python3 -m venv env && env/bin/pip3 install -r requirements.txt")
+
                     # add frameos.service
                     with open("../frameos/frameos.service", "r") as file:
                         service_contents = file.read().replace("%I", frame.ssh_user)
@@ -181,6 +187,11 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
         shutil.copytree(f"../frameos/vendor/{inkyPython.vendor_folder}/", os.path.join(build_dir, "vendor", inkyPython.vendor_folder), dirs_exist_ok=True)
         shutil.rmtree(os.path.join(build_dir, "vendor", inkyPython.vendor_folder, "env"), ignore_errors=True)
         shutil.rmtree(os.path.join(build_dir, "vendor", inkyPython.vendor_folder, "__pycache__"), ignore_errors=True)
+    if inkyHyperPixel2r := drivers.get('inkyHyperPixel2r'):
+        os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
+        shutil.copytree(f"../frameos/vendor/{inkyHyperPixel2r.vendor_folder}/", os.path.join(build_dir, "vendor", inkyHyperPixel2r.vendor_folder), dirs_exist_ok=True)
+        shutil.rmtree(os.path.join(build_dir, "vendor", inkyHyperPixel2r.vendor_folder, "env"), ignore_errors=True)
+        shutil.rmtree(os.path.join(build_dir, "vendor", inkyHyperPixel2r.vendor_folder, "__pycache__"), ignore_errors=True)
 
     # Tell a white lie
     log(frame.id, "stdout", f"- No cross compilation. Generating source code for compilation on frame.")
