@@ -14,8 +14,8 @@ type ScreenInfo* = object
   greenLength*: uint32
   blueOffset*: uint32
   blueLength*: uint32
-  transpOffset*: uint32
-  transpLength*: uint32
+  alphaOffset*: uint32
+  alphaLength*: uint32
 
 type Driver* = ref object of FrameOSDriver
   screenInfo: ScreenInfo
@@ -40,8 +40,8 @@ proc getScreenInfo(logger: Logger): ScreenInfo =
     greenLength: var_info.green.length,
     blueOffset: var_info.blue.offset,
     blueLength: var_info.blue.length,
-    transpOffset: var_info.transp.offset,
-    transpLength: var_info.transp.length,
+    alphaOffset: var_info.transp.offset,
+    alphaLength: var_info.transp.length,
   )
   logger.log(%*{
       "event": "driver:frameBuffer",
@@ -94,7 +94,16 @@ proc render*(self: Driver, image: Image) =
       for color in imageData.map(to16BitRGB):
         discard fb.writeBuffer(addr color, sizeof(color))
     elif self.screenInfo.bitsPerPixel == 32:
-      discard fb.writeBuffer(addr imageData, sizeof(imageData))
+      if self.screenInfo.blueOffset < self.screenInfo.greenOffset and
+          self.screenInfo.greenOffset < self.screenInfo.redOffset and
+          self.screenInfo.redOffset < self.screenInfo.alphaOffset:
+        for color in imageData:
+          discard fb.writeBuffer(addr color.b, sizeof(color.b))
+          discard fb.writeBuffer(addr color.g, sizeof(color.g))
+          discard fb.writeBuffer(addr color.r, sizeof(color.r))
+          discard fb.writeBuffer(addr color.a, sizeof(color.a))
+      else:
+        discard fb.writeBuffer(addr imageData, sizeof(imageData))
     else:
       self.logger.log(%*{"event": "driver:frameBuffer",
           "error": "Unsupported bits per pixel",
