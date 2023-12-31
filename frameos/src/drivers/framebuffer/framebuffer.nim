@@ -17,6 +17,9 @@ type ScreenInfo* = object
   alphaOffset*: uint32
   alphaLength*: uint32
 
+type ColorBGRA = object
+  b, g, r, a: uint8
+
 type Driver* = ref object of FrameOSDriver
   screenInfo: ScreenInfo
   logger: Logger
@@ -78,37 +81,33 @@ proc init*(frameOS: FrameOS): Driver =
         "error": "Failed to initialize driver", "exception": e.msg,
         "stack": e.getStackTrace()})
 
-proc to16BitRGB(color: ColorRGBX): uint16 =
-  let
-    r = uint16(color.r shr 3) # Scale down to 5 bits
-    g = uint16(color.g shr 2) # Scale down to 6 bits
-    b = uint16(color.b shr 3) # Scale down to 5 bits
-  return (r shl 11) or (g shl 5) or b # Combine the channels
-
-proc to32bitBGR(color: ColorRGBX): uint32 =
-  let
-    r = uint32(color.r)
-    g = uint32(color.g)
-    b = uint32(color.b)
-    a = uint32(color.a)
-  return (b shl 0) or (g shl 8) or (r shl 16) or (a shl 24)
-
 proc render*(self: Driver, image: Image) =
   let imageData = image.data
   try:
     var fb = open(DEVICE, fmWrite, (self.screenInfo.width *
           self.screenInfo.height * self.screenInfo.bitsPerPixel div 8).int)
     if self.screenInfo.bitsPerPixel == 16:
-      for color in imageData.map(to16BitRGB):
-        discard fb.writeBuffer(addr color, sizeof(color))
+      var
+        buffer: seq[uint16] = newSeq[uint16](len(imageData))
+      for i, color in imageData:
+        buffer[i] = ((uint16(color.r) shr 3) shl 11) or ((uint16(
+            color.g) shr 2) shl 5) or (uint16(color.b) shr 3)
+      discard fb.writeBuffer(addr buffer[0], buffer.len * sizeof(uint16))
     elif self.screenInfo.bitsPerPixel == 32:
       if self.screenInfo.blueOffset < self.screenInfo.greenOffset and
           self.screenInfo.greenOffset < self.screenInfo.redOffset and
           self.screenInfo.redOffset < self.screenInfo.alphaOffset:
-        for color in imageData.map(to32bitBGR):
-          discard fb.writeBuffer(addr color, sizeof(color))
+        var
+          buffer: seq[uint8] = newSeq[uint8](len(imageData) * sizeof(ColorBGRA))
+        for i, color in imageData:
+          let j = i * 4
+          buffer[j] = color.b
+          buffer[j + 1] = color.g
+          buffer[j + 2] = color.r
+          buffer[j + 3] = color.a
+        discard fb.writeBytes(buffer, 0, len(buffer))
       else:
-        discard fb.writeBuffer(addr imageData, sizeof(imageData))
+        discard fb.writeBuffer(addr imageData[0], sizeof(imageData))
     else:
       self.logger.log(%*{"event": "driver:frameBuffer",
           "error": "Unsupported bits per pixel",
