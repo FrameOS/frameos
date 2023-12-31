@@ -69,7 +69,9 @@ def process_log(frame: Frame, log: dict):
 
     if event == 'metrics':
         metrics_dict = deepcopy(log)
-        del metrics_dict['event']
-        del metrics_dict['timestamp']
+        if 'event' in metrics_dict:
+            del metrics_dict['event']
+        if 'timestamp' in metrics_dict:
+            del metrics_dict['timestamp']
         new_metrics(frame.id, metrics_dict)
 

@@ -1,4 +1,4 @@
-import httpclient, zippy, json, sequtils, os, times, strformat
+import json, os, psutil, strutils, sequtils
 
 from frameos/types import FrameConfig, MetricsLogger, Logger
 
@@ -10,44 +10,43 @@ type
 var
   thread: Thread[Logger]
 
-  # def get_load_average(self):
-  #     return os.getloadavg()
+proc getLoadAverage(self: MetricsLoggerThread): seq[float] =
+  try:
+    let cpuTempLine = readFile("/proc/loadavg")
+    result = cpuTempLine.split(" ")[0..2].map(parseFloat)
+  except IOError:
+    result = @[]
 
-  # def get_cpu_temperature(self):
-  #     try:
-  #         with open("/sys/class/thermal/thermal_zone0/temp", "r") as temp_file:
-  #             cpu_temp = int(temp_file.read()) / 1000.0
-  #         return cpu_temp
-  #     except IOError:
-  #         return None
+proc getCPUTemperature(self: MetricsLoggerThread): float =
+  try:
+    let cpuTempLine = readFile("/sys/class/thermal/thermal_zone0/temp")
+    result = parseFloat(cpuTempLine.strip()) / 1000.0
+  except IOError:
+    result = 0.0
 
-  # def get_memory_usage(self):
-  #     memory_info = psutil.virtual_memory()
-  #     return {
-  #         "total": memory_info.total,
-  #         "used": memory_info.used,
-  #         "free": memory_info.free,
-  #         "percentage": memory_info.percent
-  #     }
+proc getMemoryUsage(self: MetricsLoggerThread): JsonNode =
+  let memoryInfo = psutil.virtualMemory()
+  result = %*{
+    "total": memoryInfo.total,
+    "available": memoryInfo.avail,
+    "percentage": memoryInfo.percent,
+    "used": memoryInfo.used,
+    "free": memoryInfo.free,
+    "active": memoryInfo.active,
+  }
 
-  # def get_cpu_usage(self):
-  #     return psutil.cpu_percent(interval=1)
-
-  # def send_metrics_once(self):
-  #     metrics = {
-  #         'event': '@frame:metrics',
-  #         'load': self.get_load_average(),
-  #         'cpu_temperature': self.get_cpu_temperature(),
-  #         'memory_usage': self.get_memory_usage(),
-  #         'cpu_usage': self.get_cpu_usage()
-  #     }
-  #     self.logger.log(metrics)
-
+proc getCPUUsage(self: MetricsLoggerThread): float =
+  result = psutil.cpuPercent(interval = 1)
 
 proc logMetrics(self: MetricsLoggerThread) =
-  discard
-  # {.gcsafe.}:
-  #   self.logger.log(%*{"event": "metrics"})
+  {.gcsafe.}:
+    self.logger.log(%*{
+      "event": "metrics",
+      "load": self.getLoadAverage(),
+      "cpuTemperature": self.getCPUTemperature(),
+      "memoryUsage": self.getMemoryUsage(),
+      "cpuUsage": self.getCPUUsage()
+    })
 
 proc start(self: MetricsLoggerThread) =
   let ms = (self.frameConfig.metricsInterval * 1000).int
@@ -56,9 +55,11 @@ proc start(self: MetricsLoggerThread) =
       self.logger.log(%*{"event": "metrics_logger", "state": "disabled"})
   else:
     {.gcsafe.}:
-      self.logger.log(%*{"event": "metrics_logger", "state": "enabled", "ms": ms})
+      self.logger.log(%*{"event": "metrics_logger", "state": "enabled",
+          "intervalMs": ms})
     while true:
       self.logMetrics()
+      echo "sleeping for ", ms, "ms"
       sleep(ms)
 
 proc createThreadRunner(logger: Logger) {.thread.} =
