@@ -52,14 +52,21 @@ proc start(self: MetricsLoggerThread) =
   let ms = (self.frameConfig.metricsInterval * 1000).int
   if ms == 0:
     {.gcsafe.}:
-      self.logger.log(%*{"event": "metrics_logger", "state": "disabled"})
+      self.logger.log(%*{"event": "metrics", "state": "disabled"})
   else:
     {.gcsafe.}:
-      self.logger.log(%*{"event": "metrics_logger", "state": "enabled",
+      self.logger.log(%*{"event": "metrics", "state": "enabled",
           "intervalMs": ms})
     while true:
-      self.logMetrics()
-      echo "sleeping for ", ms, "ms"
+      try:
+        self.logMetrics()
+      except Exception as e:
+        {.gcsafe.}:
+          self.logger.log(%*{
+            "event": "metrics",
+            "state": "error",
+            "error": e.msg,
+          })
       sleep(ms)
 
 proc createThreadRunner(logger: Logger) {.thread.} =
