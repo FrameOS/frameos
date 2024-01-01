@@ -70,6 +70,7 @@ def deploy_frame(id: int):
 
                 with SCPClient(ssh.get_transport()) as scp:
                     # build the release on the server
+                    exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  ntp\" || sudo apt -y install ntp")
                     exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  build-essential\" || sudo apt -y install build-essential")
                     exec_command(frame, ssh, "if [ ! -d /srv/frameos/ ]; then sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; fi")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/build/")
@@ -83,6 +84,7 @@ def deploy_frame(id: int):
                     scp.putfo(StringIO(json.dumps(get_frame_json(frame), indent=4) + "\n"), f"/srv/frameos/releases/release_{build_id}/frame.json")
 
                     # TODO: abstract driver-specific install steps
+                    # TODO: abstract vendor logic
                     if inkyPython := drivers.get("inkyPython"):
                         exec_command(frame, ssh, f"cp -r /srv/frameos/build/build_{build_id}/vendor /srv/frameos/releases/release_{build_id}/vendor")
                         exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-pip\" || sudo apt -y install python3-pip")
@@ -114,11 +116,12 @@ def deploy_frame(id: int):
                 exec_command(frame, ssh, "sudo systemctl start frameos.service")
                 exec_command(frame, ssh, "sudo systemctl status frameos.service")
 
-            # # enable i2c
-            # exec_command(frame, ssh, 'grep -q "^dtparam=i2c_vc=on$" /boot/config.txt || echo "dtparam=i2c_vc=on" | sudo tee -a /boot/config.txt')
-            # exec_command(frame, ssh, 'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1" && { sudo raspi-config nonint do_i2c 0; echo "I2C is now enabled"; }')
-            # # enable spi
-            # exec_command(frame, ssh, 'sudo raspi-config nonint do_spi 0')
+            if drivers.get("i2c"):
+                exec_command(frame, ssh, 'grep -q "^dtparam=i2c_vc=on$" /boot/config.txt || echo "dtparam=i2c_vc=on" | sudo tee -a /boot/config.txt')
+                exec_command(frame, ssh, 'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1" && { sudo raspi-config nonint do_i2c 0; echo "I2C is now enabled"; }')
+
+            if drivers.get("spi"):
+                exec_command(frame, ssh, 'sudo raspi-config nonint do_spi 0')
 
             frame.status = 'starting'
             update_frame(frame)
@@ -227,6 +230,12 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
         raise Exception("nimbase.h not found")
     shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
 
+    if waveshare := drivers.get('waveshare'):
+        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "DEV_Config.c"), os.path.join(build_dir, "DEV_Config.c"))
+        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "DEV_Config.h"), os.path.join(build_dir, "DEV_Config.h"))
+        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "EPD_7in5_V2.c"), os.path.join(build_dir, "EPD_7in5_V2.c"))
+        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "EPD_7in5_V2.h"), os.path.join(build_dir, "EPD_7in5_V2.h"))
+
     # Update the compilation script for verbose output
     script_path = os.path.join(build_dir, "compile_frameos.sh")
     log(frame.id, "stdout", f"Cleaning build script at {script_path}")
@@ -238,8 +247,9 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
         file.write("mkdir -p ../cache\n") # make sure we have the cache folder
         file.write("cached_files_count=0\n")  # Initialize cached files counter
         for i, line in enumerate(lines):
-            if line.startswith("gcc -c") and line.strip().endswith(".nim.c"):
+            if line.startswith("gcc -c") and line.strip().endswith(".c"):
                 source_file = line.split(' ')[-1].strip()
+                o_file = line.split(' ')[-2].strip()
                 source_cleaned = '/'.join(source_file.split('@s')[-3:]).replace('@m', './')
 
                 # take the md5sum of the source file <source>.c
@@ -248,12 +258,12 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
                 file.write(f"if [ -f ../cache/${{md5sum}}.{cpu}.c.o ]; then\n")
                 # if there is, make a symlink to the build folder with the name <source>.o
                 file.write(f"    cached_files_count=$((cached_files_count + 1))\n")
-                file.write(f"    ln -s ../cache/${{md5sum}}.{cpu}.c.o {source_file}.o\n")
+                file.write(f"    ln -s ../cache/${{md5sum}}.{cpu}.c.o {o_file}\n")
                 file.write("else\n")
                 # if not, run the command in "line" and then copy the <source>.c.o into the build folder as <md5sum>.c.o
                 file.write(f"    echo [{i + 1}/{len(lines)}] Compiling on device: {source_cleaned}\n")
                 file.write(f"    {line.strip()}\n")
-                file.write(f"    cp {source_file}.o ../cache/${{md5sum}}.{cpu}.c.o\n")
+                file.write(f"    cp {o_file} ../cache/${{md5sum}}.{cpu}.c.o\n")
                 file.write("fi\n")
             else:
                 file.write(f"echo [{i + 1}/{len(lines)}] Compiling on device: frameos\n")

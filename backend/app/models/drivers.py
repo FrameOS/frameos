@@ -5,7 +5,7 @@ from typing import Optional, Dict
 @dataclass
 class Driver:
     name: str # camelCase, safe for nim code, unique within this file
-    import_path: str # nim local import path for driver
+    import_path: Optional[str] = None # nim local import path for driver
     vendor_folder: Optional[str] = None # vendor/folder to be copied to the release folder
     can_render: bool = False # add render(image)
     can_turn_on_off: bool = False # add turnOn() and turnOff()
@@ -23,6 +23,11 @@ drivers = {
         can_render=True,
         can_turn_on_off=True
     ),
+    "waveshare": Driver(
+        name="waveshare",
+        import_path="waveshare/waveshare",
+        can_render=True,
+    ),
     "inkyHyperPixel2r": Driver(
         name="inkyHyperPixel2r",
         import_path="inkyHyperPixel2r/inkyHyperPixel2r",
@@ -30,15 +35,24 @@ drivers = {
         can_render=True,
         can_turn_on_off=True
     ),
+    "spi": Driver( # enables spi on deploy
+        name="spi",
+    ),
+    "i2c": Driver( # enables i2c on deploy
+        name="i2c",
+    ),
 }
 
 def drivers_for_device(device: str) -> Dict[str, Driver]:
     if device == "pimoroni.inky_impression":
-        return {"inkyPython": drivers["inkyPython"]}
+        return {"inkyPython": drivers["inkyPython"], "spi": drivers["spi"], "i2c": drivers["i2c"]}
     elif device == "pimoroni.hyperpixel2r":
         return {"inkyHyperPixel2r": drivers["inkyHyperPixel2r"]}
     elif device == "framebuffer":
         return {"frameBuffer": drivers["frameBuffer"]}
+    elif device.startswith("waveshare."):
+        # TODO: select specific version
+        return {"waveshare": drivers["waveshare"], "spi": drivers["spi"]}
     return {}
 
 def write_drivers_nim(drivers: Dict[str, Driver]) -> str:
@@ -50,14 +64,15 @@ def write_drivers_nim(drivers: Dict[str, Driver]) -> str:
     off_drivers = []
 
     for driver in drivers.values():
-        imports.append(f"import {driver.import_path} as {driver.name}Driver")
-        vars.append(f"var {driver.name}DriverInstance: {driver.name}Driver.Driver")
-        init_drivers.append(f"{driver.name}DriverInstance = {driver.name}Driver.init(frameOS)")
-        if driver.can_render:
-            render_drivers.append(f"{driver.name}DriverInstance.render(image)")
-        if driver.can_turn_on_off:
-            on_drivers.append(f"{driver.name}DriverInstance.turnOn()")
-            off_drivers.append(f"{driver.name}DriverInstance.turnOff()")
+        if driver.import_path:
+            imports.append(f"import {driver.import_path} as {driver.name}Driver")
+            vars.append(f"var {driver.name}DriverInstance: {driver.name}Driver.Driver")
+            init_drivers.append(f"{driver.name}DriverInstance = {driver.name}Driver.init(frameOS)")
+            if driver.can_render:
+                render_drivers.append(f"{driver.name}DriverInstance.render(image)")
+            if driver.can_turn_on_off:
+                on_drivers.append(f"{driver.name}DriverInstance.turnOn()")
+                off_drivers.append(f"{driver.name}DriverInstance.turnOff()")
 
     newline = "\n"
 
