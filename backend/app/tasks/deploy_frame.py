@@ -72,6 +72,9 @@ def deploy_frame(id: int):
                     # build the release on the server
                     exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  ntp\" || sudo apt -y install ntp")
                     exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  build-essential\" || sudo apt -y install build-essential")
+                    if drivers.get("evdev"):
+                        exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libevdev-dev\" || sudo apt -y install libevdev-dev")
+
                     exec_command(frame, ssh, "if [ ! -d /srv/frameos/ ]; then sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; fi")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/build/")
                     log(id, "stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")

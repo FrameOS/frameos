@@ -36,6 +36,10 @@ drivers = {
         can_render=True,
         can_turn_on_off=True
     ),
+    "evdev": Driver( # touch and mouse inputs
+        name="evdev",
+        import_path="evdev/evdev",
+    ),
     "spi": Driver( # enables spi on deploy
         name="spi",
     ),
@@ -67,17 +71,23 @@ waveshare_variants: Dict[str, WaveshareVariant] = {
 # ]
 
 def drivers_for_device(device: str) -> Dict[str, Driver]:
+    device_drivers: Dict[str, Driver] = {}
     if device == "pimoroni.inky_impression":
-        return {"inkyPython": drivers["inkyPython"], "spi": drivers["spi"], "i2c": drivers["i2c"]}
+        device_drivers = {"inkyPython": drivers["inkyPython"], "spi": drivers["spi"], "i2c": drivers["i2c"]}
     elif device == "pimoroni.hyperpixel2r":
-        return {"inkyHyperPixel2r": drivers["inkyHyperPixel2r"]}
+        device_drivers = {"inkyHyperPixel2r": drivers["inkyHyperPixel2r"]}
     elif device == "framebuffer":
-        return {"frameBuffer": drivers["frameBuffer"]}
+        device_drivers = {"frameBuffer": drivers["frameBuffer"]}
     elif device.startswith("waveshare."):
         waveshare = drivers["waveshare"]
         waveshare.variant = device.split(".")[1]
-        return {"waveshare": waveshare, "spi": drivers["spi"]}
-    return {}
+        device_drivers = {"waveshare": waveshare, "spi": drivers["spi"]}
+    
+    # Always enable evdev if not eink
+    if device != "pimoroni.inky_imporession" and not device.startswith("waveshare."):
+        device_drivers['evdev'] = drivers['evdev']
+
+    return device_drivers
 
 def write_drivers_nim(drivers: Dict[str, Driver]) -> str:
     imports = []

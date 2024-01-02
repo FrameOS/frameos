@@ -11,6 +11,7 @@ import drivers/drivers as drivers
 proc newFrameOS*(): FrameOS =
   var frameConfig = loadConfig()
   var logger = newLogger(frameConfig)
+  logger.log(%*{"event": "startup"})
   var metricsLogger = newMetricsLogger(logger)
   result = FrameOS(
     frameConfig: frameConfig,

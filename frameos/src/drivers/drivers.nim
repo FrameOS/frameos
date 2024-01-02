@@ -4,24 +4,24 @@
 import pixie
 # import inkyPython/inkyPython as inkyDriver
 # import frameBuffer/frameBuffer as frameBufferDriver
-import waveshare/waveshare as waveshareDriver
+# import waveshare/waveshare as waveshareDriver
 
 from frameos/types import Logger, FrameOS
 
 # var inkyDriverInstance: inkyDriver.Driver
 # var frameBufferDriverInstance: frameBufferDriver.Driver
-var waveshareDriverInstance: waveshareDriver.Driver
+# var waveshareDriverInstance: waveshareDriver.Driver
 
 proc init*(frameOS: FrameOS) =
   # inkyDriverInstance = inkyDriver.init(frameOS)
   # frameBufferDriverInstance = frameBufferDriver.init(frameOS)
-  waveshareDriverInstance = waveshareDriver.init(frameOS)
+  # waveshareDriverInstance = waveshareDriver.init(frameOS)
   discard
 
 proc render*(image: Image) =
   # inkyDriverInstance.render(image)
   # frameBufferDriverInstance.render(image)
-  waveshareDriverInstance.render(image)
+  # waveshareDriverInstance.render(image)
   discard
 
 proc turnOn*() =
