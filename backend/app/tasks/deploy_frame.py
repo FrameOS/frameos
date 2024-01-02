@@ -18,7 +18,7 @@ from scp import SCPClient
 from app import create_app
 from app.huey import huey
 from app.models import get_apps_from_scenes
-from app.models.drivers import drivers_for_device, write_drivers_nim
+from app.models.drivers import drivers_for_device, write_drivers_nim, write_waveshare_driver_nim
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json, generate_scene_nim_source
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection, exec_local_command
@@ -177,9 +177,14 @@ def make_local_modifications(frame: Frame, source_dir: str):
         with open(os.path.join(source_dir, "src", "scenes", f"{scene.get('id')}.nim"), "w") as file:
             file.write(scene_source)
 
+    drivers = drivers_for_device(frame.device)
     with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as file:
-        drivers_nim = write_drivers_nim(drivers_for_device(frame.device))
+        drivers_nim = write_drivers_nim(drivers)
         file.write(drivers_nim)
+    if drivers.get("waveshare"):
+        with open(os.path.join(source_dir, "src", "drivers", "waveshare", "driver.nim"), "w") as file:
+            drivers_nim = write_waveshare_driver_nim(drivers)
+            file.write(drivers_nim)
 
 
 def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_path: str, source_dir: str, temp_dir: str, cpu: str):
