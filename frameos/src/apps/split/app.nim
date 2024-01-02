@@ -137,7 +137,7 @@ proc run*(self: App, context: var ExecutionContext) =
             scene: context.scene,
             image: image,
             event: context.event,
-            eventPayload: context.eventPayload,
+            payload: context.payload,
             parent: context,
             loopIndex: row * columns + column,
             loopKey: context.loopKey & "/" & $(row * columns + column)

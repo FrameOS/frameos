@@ -33,16 +33,18 @@ type
     logger*: Logger
 
   FrameScene* = ref object of RootObj
+    isRendering*: bool
     frameConfig*: FrameConfig
     logger*: Logger
     state*: JsonNode
     execNode*: proc(nodeId: string, context: var ExecutionContext)
+    dispatchEvent*: proc(event: string, payload: JsonNode)
 
   ExecutionContext* = ref object
     scene*: FrameScene
     image*: Image
     event*: string
-    eventPayload*: JsonNode
+    payload*: JsonNode
     parent*: ExecutionContext
     loopIndex*: int
     loopKey*: string

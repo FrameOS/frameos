@@ -2,7 +2,8 @@ import json, pixie, times, options, asyncdispatch, locks, os
 import scenes/default as defaultScene
 
 import frameos/events
-from frameos/types import FrameOS, FrameConfig, FrameScene, Logger, RunnerControl
+from frameos/types import FrameOS, FrameConfig, FrameScene, Logger,
+    RunnerControl, ExecutionContext
 from frameos/utils/image import rotateDegrees, renderError, scaleAndDrawImage
 
 import drivers/drivers as drivers
@@ -21,11 +22,9 @@ type
 
 var
   thread: Thread[(FrameConfig, Logger)]
-  renderSceneLock: Lock
   globalLastImageLock: Lock
   globalLastImage: Option[Image]
 
-initLock(renderSceneLock)
 initLock(globalLastImageLock)
 
 proc renderScene*(self: RunnerThread) =
@@ -101,6 +100,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   while true:
     timer = epochTime()
     self.isRendering = true
+    self.scene.isRendering = true
     self.triggerRenderNext = false
     self.renderScene()
     driverTimer = epochTime()
@@ -131,6 +131,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     # Gives a chance for the gathered events to be collected
     await sleepAsync(0.001)
     self.isRendering = false
+    self.scene.isRendering = false
 
     # While we were rendering an event to trigger a render was dispatched
     if self.triggerRenderNext:
@@ -156,6 +157,18 @@ proc triggerRender*(self: RunnerThread): void =
     self.logger.log(%*{"event": "render",
         "error": "Render already in progress, ignoring."})
 
+proc dispatchSceneEvent*(self: RunnerThread, event: string, payload: JsonNode) =
+  var context = ExecutionContext(
+    scene: self.scene,
+    event: event,
+    payload: payload,
+    image: newImage(1, 1),
+    loopIndex: 0,
+    loopKey: "."
+  )
+  let scene = defaultScene.Scene(self.scene)
+  defaultScene.runEvent(scene, context)
+
 proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
   var waitTime = 10
 
@@ -163,23 +176,27 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
     let (success, (event, payload)) = eventChannel.tryRecv()
     if success:
       waitTime = 1
-      self.logger.log(%*{"event": "event:" & event, "payload": payload,
-          "rendering": self.isRendering})
       case event:
         of "render":
+          self.logger.log(%*{"event": "event:" & event})
           self.triggerRenderNext = true
         of "turnOn":
+          self.logger.log(%*{"event": "event:" & event})
           drivers.turnOn()
         of "turnOff":
+          self.logger.log(%*{"event": "event:" & event})
           drivers.turnOff()
         of "mouseMove":
-          discard
-        of "mouseUp", "mouseDown":
-          discard
-        of "keyUp", "keyDown":
-          discard
+          if self.frameConfig.width > 0 and self.frameConfig.height > 0:
+            payload["x"] = %*((self.frameConfig.width.float * payload[
+                "x"].getInt().float / 32767.0).int)
+            payload["y"] = %*((self.frameConfig.height.float * payload[
+                "y"].getInt().float / 32767.0).int)
+          self.dispatchSceneEvent(event, payload)
+        of "mouseUp", "mouseDown", "keyUp", "keyDown":
+          self.dispatchSceneEvent(event, payload)
         else:
-          discard
+          self.logger.log(%*{"event": "event:" & event, "payload": payload})
 
     # after we have processed all queued messages
     if not success:
@@ -193,7 +210,11 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
 
 proc createThreadRunner*(args: (FrameConfig, Logger)) =
   {.cast(gcsafe).}: # TODO: is this a mistake?
-    var scene = defaultScene.init(args[0], args[1]).FrameScene
+    var scene = defaultScene.init(
+      args[0],
+      args[1],
+      proc(event: string, payload: JsonNode) = eventChannel.send((event, payload))
+    ).FrameScene
     var runnerThread = RunnerThread(
       frameConfig: args[0],
       logger: args[1],

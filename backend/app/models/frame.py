@@ -411,33 +411,36 @@ proc runNode*(self: Scene, nodeId: string,
     if DEBUG:
       self.logger.log(%*{{"event": "runApp", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
       
-proc dispatchEvent*(self: Scene, context: var ExecutionContext) =
+proc runEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:
   {(newline + "  ").join(event_lines)}
   else: discard
 
-proc init*(frameConfig: FrameConfig, logger: Logger): Scene =
+proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(
+    event: string, payload: JsonNode)): Scene =
   var state = %*{{}}
-  let scene = Scene(frameConfig: frameConfig, logger: logger, state: state)
+  let scene = Scene(frameConfig: frameConfig, logger: logger, state: state,
+      dispatchEvent: dispatchEvent)
   let self = scene
-  var context = ExecutionContext(scene: scene, event: "init", eventPayload: %*{{}}, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+  var context = ExecutionContext(scene: scene, event: "init", payload: %*{{
+    }}, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
   scene.execNode = (proc(nodeId: string, context: var ExecutionContext) = self.runNode(nodeId, context))
   {(newline + "  ").join(init_apps)}
-  dispatchEvent(scene, context)
+  runEvent(scene, context)
 
 proc render*(self: Scene): Image =
   var context = ExecutionContext(
     scene: self,
     event: "render",
-    eventPayload: %*{{}},
+    payload: %*{{}},
     image: case self.frameConfig.rotate:
     of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
     else: newImage(self.frameConfig.width, self.frameConfig.height),
     loopIndex: 0, 
     loopKey: "."
   )
-  dispatchEvent(self, context)
+  runEvent(self, context)
   return context.image
 {{.pop.}}
 """
