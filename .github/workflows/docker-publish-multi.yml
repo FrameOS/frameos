@@ -3,7 +3,6 @@ name: Publish Docker Image to Docker Hub
 on:
   push:
     branches:
-      - main
       - legacy-python
 
 jobs:
@@ -138,4 +137,3 @@ jobs:
           platforms: linux/amd64,linux/arm64/v8
           tags: |
             frameos/frameos:${{ env.BRANCH_NAME }}-${{ github.sha }}
-            frameos/frameos:latest
