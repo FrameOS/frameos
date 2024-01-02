@@ -1,6 +1,6 @@
 import { useActions, useValues } from 'kea'
 import { NodeProps, Handle, Position } from 'reactflow'
-import { App, AppNodeData } from '../../../../types'
+import { AppNodeData } from '../../../../types'
 import clsx from 'clsx'
 import { RevealDots } from '../../../../components/Reveal'
 import { diagramLogic } from './diagramLogic'
@@ -19,7 +19,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
   const { updateNodeConfig, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const { editApp } = useActions(panelsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { app, appFields, isCustomApp, configJsonError, isSelected, codeFields } = useValues(
+  const { appName, appFields, isCustomApp, configJsonError, isSelected, codeFields } = useValues(
     appNodeLogic(appNodeLogicProps)
   )
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
@@ -43,7 +43,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
         )}
       >
         <div>
-          {app?.name}
+          {appName}
           {isCustomApp ? ' (edited)' : ''}
         </div>
         <DropdownMenu

@@ -34,7 +34,7 @@ export function Frame(props: FrameSceneProps) {
                   <Button color={frameChanged ? 'primary' : 'light-gray'} type="button" onClick={() => saveFrame()}>
                     Save
                   </Button>
-                  <Button color="light-gray" type="button" onClick={() => deployFrame()}>
+                  <Button color={frameChanged ? 'primary' : 'light-gray'} type="button" onClick={() => deployFrame()}>
                     Save&nbsp;&&nbsp;Redeploy
                   </Button>
                 </div>

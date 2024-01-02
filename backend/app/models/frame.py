@@ -333,8 +333,10 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                     # TODO: sanitize
                     if key in field_inputs_for_node:
                         app_config_pairs += [f"{key}: {field_inputs_for_node[key]}"]
-                    elif key in node_fields_for_node and type == "node":
+                    elif type == "node" and key in node_fields_for_node:
                         app_config_pairs += [f"{key}: \"{sanitize_nim_string(node_fields_for_node[key])}\""]
+                    elif type == "node" and key not in node_fields_for_node:
+                        app_config_pairs += [f"{key}: \"\""]
                     elif type == "integer":
                         app_config_pairs += [f"{key}: {int(value)}"]
                     elif type == "float":
@@ -383,6 +385,9 @@ from frameos/types import FrameOS, FrameConfig, Logger, FrameScene, ExecutionCon
 {newline.join(imports)}
 
 const DEBUG = false
+
+# This makes strformat available within the scene's inline code and avoids the "unused import" error
+let trashString = &""
 
 type Scene* = ref object of FrameScene
   {(newline + "  ").join(scene_object_fields)}
