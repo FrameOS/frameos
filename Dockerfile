@@ -1,5 +1,5 @@
 # Use the official Python 3.9 image as the base
-FROM python:3.9-slim-bullseye
+FROM python:3.11-slim-bullseye
 
 # Set the working directory
 WORKDIR /app
@@ -12,6 +12,23 @@ RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-s
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
     && apt-get update \
     && apt-get install -y nodejs
+
+# Install Nim
+RUN apt-get update && \
+  apt-get install -y curl xz-utils gcc openssl ca-certificates git # &&
+
+RUN mkdir -p /opt/nim && \
+    curl -L https://nim-lang.org/download/nim-2.0.2.tar.xz | tar -xJf - -C /opt/nim --strip-components=1 && \
+    cd /opt/nim && \
+    sh build.sh && \
+    bin/nim c koch && \
+    ./koch boot -d:release && \
+    ./koch tools
+
+ENV PATH="/opt/nim/bin:${PATH}"
+
+RUN nim --version \
+    nimble --version
 
 # Copy the requirements file and install using pip
 WORKDIR /app/backend
