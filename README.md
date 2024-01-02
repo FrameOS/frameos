@@ -6,9 +6,9 @@ To get started:
 
 1. Install the [FrameOS controller](/installation/controller), a dockerized python app, which is used to deploy apps onto individual frames via SSH.
 
-2. Read the [decice hardware guide](/devices) for your screen type. Typically you'll just need to connect the display to a Raspberry Pi, install the OS, and make sure it's reachable over the network. 
+2. Read the [device hardware guide](/devices) for your screen type. Typically you'll just need to connect the display to a Raspberry Pi, install the OS, and make sure it's reachable over the network. 
 
-3. Once connected, deploy our prebuilt [apps](/apps), or code your own directly inside the contrller.
+3. Once connected, deploy our prebuilt [apps](/apps), or code your own directly inside the controller.
 
 4. Finally, for a professional look, 3d print a case around your frame, or order one online.
 
