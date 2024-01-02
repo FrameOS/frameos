@@ -4,9 +4,8 @@ import { H6 } from '../../../../components/H6'
 const events = {
   init: 'Scene initialization. Triggered when the scene is loaded.',
   render: "Render the scene. Triggered according to the frame's refresh interval, or when explicitly requested.",
-  button_press: 'When a button is pressed',
-  touch_press: 'When a touch screen is pressed',
-  mouse_click: 'When a mouse is clicked',
+  keyboard: 'When a key is pressed or released on a keyboard',
+  mouse: 'When a mouse moves or a touchscreen is clicked',
 }
 
 export function Events() {
