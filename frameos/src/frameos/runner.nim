@@ -141,6 +141,7 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
     let (success, (event, payload)) = eventChannel.tryRecv()
     if success:
       waitTime = 1
+      self.logger.log(%*{"event": "event:" & event, "payload": payload})
       case event:
         of "render":
           self.triggerRender()
@@ -149,7 +150,7 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
         of "turnOff":
           drivers.turnOff()
         else:
-          self.logger.log(%*{"event": "event:" & event, "payload": payload})
+          discard
 
     if not success:
       await sleepAsync(waitTime)
