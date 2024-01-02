@@ -9,7 +9,7 @@ export const devices: Option[] = [
   { value: 'pimoroni.hyperpixel2r', label: 'Pimoroni HyperPixel 2.1" Round' },
   { value: 'waveshare.epd2in13_V3', label: 'Waveshare 2.13" 250×122 V3 Touch' },
   { value: 'waveshare.epd7in5_V2', label: 'Waveshare 7.5" 800×480 V2' },
-  { value: '-', label: '----- Unverified frames below -----' },
+  { value: '-', label: '----- Unverified devices below -----' },
   { value: 'waveshare.epd1in02', label: 'Waveshare 1.02" 128×80' },
   { value: 'waveshare.epd1in54', label: 'Waveshare 1.54" 200x200' },
   { value: 'waveshare.epd1in54_V2', label: 'Waveshare 1.54" 200x200 V2' },
