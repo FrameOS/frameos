@@ -63,7 +63,7 @@ export interface ConfigField {
   /** Human readable label */
   label: string
   /** Type of the field, only 'string' is supported for now */
-  type: 'string' | 'text' | 'select' | 'node'
+  type: 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'node'
   /** List of options for the field, only used if type is 'select' */
   options?: string[]
   /** Whether the field is required */
@@ -105,6 +105,9 @@ export interface AppNodeData {
   config: Record<string, any>
   sources?: Record<string, string>
 }
+export interface CodeNodeData {
+  code: string
+}
 
 export interface EventNodeData {
   keyword: string
@@ -143,6 +146,7 @@ export enum Panel {
   EditApp = 'EditApp',
   Templates = 'Templates',
   Terminal = 'Terminal',
+  SceneSource = 'SceneSource',
 }
 
 export type PanelWithMetadata = {

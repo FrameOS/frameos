@@ -83,7 +83,7 @@
         },
         "type": {
           "description": "Type of the field, only 'string' is supported for now",
-          "enum": ["string", "text", "select"],
+          "enum": ["string", "text", "float", "integer", "boolean", "color", "select", "node"],
           "type": "string"
         },
         "value": {

@@ -9,7 +9,7 @@ class TestModelsLog(BaseTestCase):
 
     def setUp(self):
         super().setUp()
-        self.frame = new_frame("frame", "pi@192.168.1.1:8999", "server_host.com", "device_test")
+        self.frame = new_frame("frame", "pi@192.168.1.1:8787", "server_host.com", "device_test")
 
     def test_log_creation(self):
         log = new_log(self.frame.id, "info", "This is a test log message.")

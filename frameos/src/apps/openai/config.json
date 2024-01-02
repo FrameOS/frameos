@@ -1,0 +1,42 @@
+{
+  "name": "OpenAI",
+  "description": "Random AI generated art",
+  "category": "image",
+  "version": "1.0.0",
+  "settings": ["openAI"],
+  "fields": [
+    {
+      "name": "prompt",
+      "type": "text",
+      "rows": 6,
+      "value": "",
+      "required": true,
+      "label": "Prompt",
+      "placeholder": "e.g. pumpkin pyjama party, digital art"
+    },
+    {
+      "name": "model",
+      "type": "select",
+      "options": ["dall-e-3", "dall-e-2"],
+      "value": "dall-e-3",
+      "required": true,
+      "label": "Model"
+    },
+    {
+      "name": "scalingMode",
+      "type": "select",
+      "options": ["cover", "contain", "stretch", "center"],
+      "value": "cover",
+      "required": true,
+      "label": "Scaling mode"
+    },
+    {
+      "name": "cacheSeconds",
+      "type": "float",
+      "value": "60",
+      "required": false,
+      "label": "Seconds to cache the result",
+      "placeholder": "Default: 60. Use 0 for no cache"
+    }
+  ]
+}

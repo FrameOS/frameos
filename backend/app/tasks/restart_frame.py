@@ -20,12 +20,7 @@ def restart_frame(id: int):
             frame.status = 'restarting'
             update_frame(frame)
 
-            ssh = get_ssh_connection(frame)                
-
-            log(id, "stdout", "> add /srv/frameos/frame.json")
-            with SCPClient(ssh.get_transport()) as scp:
-                scp.putfo(StringIO(json.dumps(get_frame_json(frame), indent=4) + "\n"), "/srv/frameos/frame.json")
-
+            ssh = get_ssh_connection(frame)
             exec_command(frame, ssh, "sudo systemctl stop frameos.service || true")
             exec_command(frame, ssh, "sudo systemctl enable frameos.service")
             exec_command(frame, ssh, "sudo systemctl start frameos.service")

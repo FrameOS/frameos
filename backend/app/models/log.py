@@ -47,27 +47,31 @@ def process_log(frame: Frame, log: dict):
 
     changes = {}
     event = log.get('event', 'log')
-    if event == '@frame:render':
+    if event == 'render':
         changes['status'] = 'preparing'
-    if event == '@frame:render_update_screen':
-        changes['status'] = 'rendering'
-    if event == '@frame:render_done' or event == '@frame:render_skipped':
+    # if event == 'render:render':
+    #     changes['status'] = 'rendering'
+    if event == 'render:done':
         changes['status'] = 'ready'
-    if event == '@frame:config':
+    if event == 'bootup':
         if frame.status != 'ready':
             changes['status'] = 'ready'
-        for key in ['width', 'height', 'device', 'color', 'interval', 'metrics_interval', 'scaling_mode', 'rotate',
+        for key in ['frame_port', 'width', 'height', 'device', 'color', 'interval', 'metrics_interval', 'scaling_mode', 'rotate',
                     'background_color']:
             if key in log and log[key] is not None and log[key] != getattr(frame, key):
                 changes[key] = log[key]
+            if 'config' in log and key in log['config'] and log['config'][key] is not None and log['config'][key] != getattr(frame, key):
+                changes[key] = log['config'][key]
     if len(changes) > 0:
         for key, value in changes.items():
             setattr(frame, key, value)
         update_frame(frame)
 
-    if event == '@frame:metrics':
+    if event == 'metrics':
         metrics_dict = deepcopy(log)
-        del metrics_dict['event']
-        del metrics_dict['timestamp']
+        if 'event' in metrics_dict:
+            del metrics_dict['event']
+        if 'timestamp' in metrics_dict:
+            del metrics_dict['timestamp']
         new_metrics(frame.id, metrics_dict)
 

@@ -1,6 +1,12 @@
 import ast
+import re
+import shutil
+
 import requests
 import json
+import tempfile
+import os
+import subprocess
 
 from flask import jsonify, request
 from flask_login import login_required
@@ -29,6 +35,8 @@ def validate_python_frame_source():
 
     if file.endswith('.py'):
         errors = validate_python(source)
+    elif file.endswith('.nim'):
+        errors = validate_nim(source)
     elif file.endswith('.json'):
         errors = validate_json(source)
     else:
@@ -53,58 +61,12 @@ def enhance_python_frame_source():
         return jsonify({"error": "OpenAI API key not set"}), 400
 
     ai_context = f"""
-    You are helping a python developer write ea FrameOS application. You are editing frame.py, the main file in FrameOS.
-    This controls an e-ink display and runs on a Raspberry Pi. Help the user with their changes. 
+    You are helping a python developer write ea FrameOS application. You are editing app.nim, the main file in FrameOS.
+    This controls an e-ink display and runs on a Raspberry Pi. Help the user with their changes. Be mindful of what
+    you do and do not know.
 
-    This is what we inherit from:
-    ```python
-    class FrameConfig:
-        status: str
-        version: str
-        width: int
-        height: int
-        device: str
-        color: str
-        interval: float
-        scaling_mode: str
-        background_color: str
-        rotate: int
-        scenes: List[FrameConfigScene]
-        settings: Dict
-    class ExecutionContext:
-        event: str
-        payload: Dict
-        image: Optional[Image]
-        state: Dict
-        apps_ran: List[str]
-        apps_errored: List[str]
-    class App:
-        def __post_init__(self):
-        def rerender(self, trigger = None):
-        def is_rendering(self):
-        def break_execution(self, message: Optional[str] = None):
-        def log(self, message: str):
-        def error(self, message: str):
-        def get_config(self, key: str, default = None):
-        def get_setting(self, key: Union[str, List[str]], default = None):
-        def parse_str(self, text: str, state: Dict):
-        def dispatch(self, event: str, payload: Optional[Dict] = None, image: Optional[Image] = None) -> ExecutionContext:
-        def shell(self, command: str):
-        def apt(self, package: str):
-        def run(self, payload: ExecutionContext):
-            # code goes here, does not need to call super
-    ```
-
-    From image_utils you can import:
-    scale_image(image: Image.Image, requested_width: int, requested_height: int, scaling_mode: 'cover' | 'contain' | 'center' | 'stretch', background_color: str) -> image.Image
-    draw_text_with_border(draw, position, text, font, font_color, border_color, border_width=1, align='left'):
-
-    Pip packages can be installed with code like self.shell("pip3 install selenium==4.14.0") in __post_init__().
-
-    Currently available:  bidict==0.22.1 certifi==2023.7.22 charset-normalizer==3.2.0 click==8.1.6 dacite==1.8.1 evdev==1.6.1 flask==2.2.5 flask-socketio==5.3.4 idna==3.4 importlib-metadata==6.7.0 inky==1.5.0 itsdangerous==2.1.2 jinja2==3.1.2 markupsafe==2.1.3 numpy==1.26.1 pillow==9.5.0 psutil==5.9.6 python-engineio==4.5.1 python-socketio==5.8.0 requests==2.31.0 rpi-gpio==0.7.1 smbus2==0.4.2 spidev==3.6 urllib3==2.0.4 werkzeug==2.2.3 zipp==3.15.0 
-
-    This is the current source of frame.py:
-    ```python
+    This is the current source of app.nim:
+    ```nim
     {source}
     ```
     """
@@ -145,6 +107,41 @@ def validate_python(source):
         return [{"line": e.lineno, "column": e.offset, "error": str(e)}]
 
 
+def validate_nim(source):
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # copy src/frameos/types.nim to temp_dir
+            target_path = os.path.join(temp_dir, "frameos")
+            os.makedirs(target_path, exist_ok=True)
+            shutil.copytree("../frameos/src/frameos", target_path, dirs_exist_ok=True)
+
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.nim', dir=temp_dir, delete=False)
+            temp_file_name = temp_file.name
+            temp_file_abs_name = os.path.realpath(temp_file_name)
+            temp_file.write(source)
+            temp_file.close()
+
+            result = subprocess.run(['nim', 'check', temp_file_name], capture_output=True, text=True)
+
+            errors = []
+            for line in result.stderr.split('\n'):
+                if line.startswith(temp_file_name) or line.startswith(temp_file_abs_name):
+                    # "tmps4sk1v2t.nim(22, 12) Error: expression 'scene' has no type (or is ambiguous)"
+                    if line.startswith(temp_file_name):
+                        line = line[len(temp_file_name):]
+                    elif line.startswith(temp_file_abs_name):
+                        line = line[len(temp_file_abs_name):]
+
+                    if "Error:" in line:
+                        match = re.search(r'\((\d+), (\d+)\) (Error: .+)', line)
+                        if match:
+                            line_no, column, error = int(match.group(1)), int(match.group(2)), match.group(3)
+                            errors.append({"line": line_no, "column": column, "error": error})
+            return errors
+
+    except Exception as e:
+        return [{"error": str(e)}]
+    
 def validate_json(source):
     try:
         json.loads(source)

@@ -1,0 +1,125 @@
+import io
+import time
+import traceback
+import sentry_sdk
+from flask import Flask, send_file
+from flask_socketio import SocketIO, emit
+from typing import Optional, Any
+from threading import Event
+
+from .config import Config
+from .logger import Logger
+from .app_handler import AppHandler
+from .image_handler import ImageHandler
+from .button_handler import ButtonHandler
+from .metrics_logger import MetricsLogger
+from .scheduler import Scheduler
+from .touch_click_handler import TouchClickHandler
+
+
+class Server:
+    def __init__(self, config: Config, logger: Logger):
+        self.config = config
+        self.logger = logger
+
+        frame_dsn = self.config.settings.get('sentry', {}).get('frame_dsn', None)
+        if frame_dsn:
+            sentry_sdk.init(dsn=frame_dsn, traces_sample_rate=1.0, profiles_sample_rate=1.0)
+
+        self.app: Flask = Flask(__name__)
+        self.app.config['SECRET_KEY'] = 'secret!'
+        self.socketio: SocketIO = SocketIO(self.app, async_mode='threading')
+        self.logger.set_socketio(self.socketio)
+        self.logger.log({ 'event': '@frame:startup', **({'sentry': True} if frame_dsn else {}) })
+
+        self.app_handler: AppHandler = AppHandler(self.config, self.logger)
+        self.image_handler: ImageHandler = ImageHandler(self.logger, self.socketio, self.config, self.app_handler)
+        self.app_handler.register_image_handler(self.image_handler)
+        self.app_handler.init()
+
+        self.saved_image: Optional[Any] = None
+        self.saved_bytes: Optional[bytes] = None
+        self.saved_format: Optional[str] = None
+
+        @self.app.route('/')
+        def index():
+            with open("index.html", "r") as file:
+                content = file.read()
+            return content.replace('{_body_class_}', '')
+        
+        @self.app.route('/kiosk')
+        def kiosk():
+            with open("index.html", "r") as file:
+                content = file.read()
+            return content.replace('{_body_class_}', 'kiosk')
+
+        @self.app.route('/image')
+        def image():
+            try:
+                self.logger.log(
+                    {'event': '@frame:http_get_image'})
+                image = self.image_handler.kiosk_image.copy()
+                if image is None:
+                    raise ValueError("No image to render. Image is None.")
+                if image.size[0] == 0 or image.size[1] == 0:
+                    raise ValueError("No image to render. Image width and height are zero.")
+
+                if image != self.saved_image or self.saved_bytes is None:
+                    export_start = time.time()
+                    bytes_buffer = io.BytesIO()
+                    self.saved_format = image.format or 'png'
+                    self.logger.log(
+                        {'event': '@frame:export_image', 'format': self.saved_format})
+                    image.save(bytes_buffer, format=self.saved_format)
+                    self.saved_image = image
+                    self.saved_bytes = bytes_buffer.getvalue()
+                    self.logger.log(
+                        {'event': '@frame:export_image_done', 'format': self.saved_format, 'seconds': round(time.time() - export_start, 2)})
+
+                bytes_buffer = io.BytesIO(self.saved_bytes)
+
+                return send_file(bytes_buffer, mimetype=f'image/{self.saved_format.lower()}', as_attachment=False)
+            except Exception as e:
+                self.logger.log({ 'event': '@frame:error_serving_image', 'error': str(e), 'stacktrace': traceback.format_exc() })
+
+        @self.app.route('/logs')
+        def logs():
+            return self.logger.get()
+
+        @self.app.route('/event/render')
+        def event_render():
+            self.image_handler.render_image('http trigger')
+            return "OK"
+
+        @self.app.route('/display_off')
+        def display_off():
+            self.image_handler.display_off()
+            return "off"
+
+        @self.app.route('/display_toggle')
+        def display_toggle():
+            on = self.image_handler.display_toggle()
+            return "on" if on else "off"
+
+        @self.app.route('/display_on')
+        def display_on():
+            self.image_handler.display_on()
+            return "on"
+
+        @self.socketio.on('connect')
+        def test_connect():
+            emit('log_event', {'logs': self.logger.get()})
+
+    def run(self):
+        if self.config.device == 'pimoroni.inky_impression':
+            ButtonHandler(self.logger, [5, 6, 16, 24], ['A', 'B', 'C', 'D'], self.image_handler, self.app_handler)
+        touch_handler = TouchClickHandler(self.logger, self.image_handler, self.app_handler)
+        touch_handler.start()
+        reset_event: Event = Event()
+
+        Scheduler(image_handler=self.image_handler, reset_event=reset_event, logger=self.logger, config=self.config)
+        MetricsLogger(image_handler=self.image_handler, reset_event=reset_event, logger=self.logger, config=self.config)
+
+        self.image_handler.render_image('bootup')
+        self.logger.log({'event': '@frame:server_start', 'message': 'Starting web kiosk server on port 8787'})
+        self.socketio.run(self.app, host='0.0.0.0', port=8787, allow_unsafe_werkzeug=True)

@@ -1,0 +1,24 @@
+{
+    "name": "Unsplash",
+    "description": "Random unsplash image",
+    "category": "image",
+    "version": "1.0.0",
+    "fields": [
+        {
+            "name": "keyword",
+            "type": "string",
+            "value": "nature",
+            "required": false,
+            "label": "Random keyword (one word)",
+            "placeholder": "e.g. pineapple, nature, birds, power"
+        },
+        {
+            "name": "cacheSeconds",
+            "type": "float",
+            "value": "60",
+            "required": false,
+            "label": "Seconds to cache the result",
+            "placeholder": "Default: 60. Use 0 for no cache"
+        }
+    ]
+}

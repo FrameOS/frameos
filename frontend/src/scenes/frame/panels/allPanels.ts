@@ -10,6 +10,7 @@ import { EditApp } from './EditApp/EditApp'
 import { Debug } from './Debug/Debug'
 import { Templates } from './Templates/Templates'
 import { Terminal } from './Terminal/Terminal'
+import { SceneSource } from './SceneSource/SceneSource'
 
 export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   Diagram,
@@ -23,4 +24,5 @@ export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   EditApp,
   Templates,
   Terminal,
+  SceneSource,
 }

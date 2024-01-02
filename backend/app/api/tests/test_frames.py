@@ -128,7 +128,7 @@ class TestFrames(BaseTestCase):
             'ssh_pass': 'herring',
             'ssh_port': '2222',
             'server_host': 'walrus',
-            'server_port': '89999',
+            'server_port': '89898',
             'device': 'framebuffer',
             'scaling_mode': 'contain',
             'rotate': '90',
@@ -143,7 +143,7 @@ class TestFrames(BaseTestCase):
         assert updated_frame.ssh_pass == 'herring'
         assert updated_frame.ssh_port == 2222
         assert updated_frame.server_host == 'walrus'
-        assert updated_frame.server_port == 89999
+        assert updated_frame.server_port == 89898
         assert updated_frame.device == 'framebuffer'
         assert updated_frame.scaling_mode == 'contain'
         assert updated_frame.rotate == 90
@@ -188,10 +188,10 @@ class TestFrames(BaseTestCase):
         assert response.status_code == 200
         assert data['frame']['name'] == 'Frame'
         assert data['frame']['frame_host'] == 'localhost'
-        assert data['frame']['frame_port'] == 8999
+        assert data['frame']['frame_port'] == 8787
         assert data['frame']['ssh_port'] == 22
         assert data['frame']['server_host'] == 'localhost'
-        assert data['frame']['server_port'] == 8999
+        assert data['frame']['server_port'] == 8989
         assert data['frame']['device'] == 'web_only'
 
     def test_api_frame_new_parsed(self):
@@ -200,12 +200,12 @@ class TestFrames(BaseTestCase):
         assert response.status_code == 200
         assert data['frame']['name'] == 'Frame'
         assert data['frame']['frame_host'] == 'localhost'
-        assert data['frame']['frame_port'] == 8999
+        assert data['frame']['frame_port'] == 8787
         assert data['frame']['ssh_port'] == 22
         assert data['frame']['ssh_user'] == 'user'
         assert data['frame']['ssh_pass'] == 'pass'
         assert data['frame']['server_host'] == 'localhost'
-        assert data['frame']['server_port'] == 8999
+        assert data['frame']['server_port'] == 8989
         assert data['frame']['device'] == 'framebuffer'
 
     def test_api_frame_delete(self):

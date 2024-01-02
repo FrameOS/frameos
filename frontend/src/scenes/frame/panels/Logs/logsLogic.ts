@@ -9,7 +9,7 @@ import type { logsLogicType } from './logsLogicType'
 export interface logsLogicProps {
   frameId: number
 }
-const MAX_LOG_LINES = 100000
+const MAX_LOG_LINES = 50000
 
 export const logsLogic = kea<logsLogicType>([
   path(['src', 'scenes', 'frame', 'logsLogic']),

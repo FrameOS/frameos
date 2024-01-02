@@ -1,0 +1,6 @@
+src/assets/
+build/
+tmp/
+frame.deps
+nimcache
+testresults

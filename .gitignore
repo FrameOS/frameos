@@ -29,3 +29,6 @@ dist-ssr
 *.sln
 *.sw?
 *Type.ts
+
+# Nim
+frameos/tmp/

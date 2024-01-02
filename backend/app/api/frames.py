@@ -6,7 +6,8 @@ from flask import jsonify, request, Response
 from flask_login import login_required
 from . import api
 from app import redis
-from app.models.frame import Frame, new_frame, delete_frame, update_frame
+from app.models.frame import Frame, new_frame, delete_frame, update_frame, generate_scene_nim_source
+
 
 @api.route("/frames", methods=["GET"])
 @login_required
@@ -43,6 +44,7 @@ def api_frame_get_logs(id: int):
 def api_frame_get_image(id: int):
     frame = Frame.query.get_or_404(id)
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    url = f'http://{frame.frame_host}:{frame.frame_port}/image'
 
     try:
         if request.args.get('t') == '-1':
@@ -50,7 +52,7 @@ def api_frame_get_image(id: int):
             if last_image:
                 return Response(last_image, content_type='image/png')
 
-        response = requests.get(f'http://{frame.frame_host}:{frame.frame_port}/image')
+        response = requests.get(url, timeout=15)
         if response.status_code == 200:
             redis.set(cache_key, response.content, ex=86400 * 30)  # cache for 30 days
             return Response(response.content, content_type='image/png')
@@ -59,6 +61,8 @@ def api_frame_get_image(id: int):
             if last_image:
                 return Response(last_image, content_type='image/png')
             return jsonify({"error": "Unable to fetch image"}), response.status_code
+    except requests.exceptions.Timeout:
+        return jsonify({'error': f'Request Timeout to {url}'}), HTTPStatus.REQUEST_TIMEOUT
     except Exception as e:
         return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
 
@@ -74,6 +78,15 @@ def api_frame_render_event(id: int):
             return jsonify({"error": "Unable to refresh frame"}), response.status_code
     except Exception as e:
         return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+@api.route('/frames/<int:id>/scene_source/<scene>', methods=['GET'])
+@login_required
+def api_frame_scene_source(id: int, scene: str):
+    frame = Frame.query.get_or_404(id)
+    scene = [scene for scene in frame.scenes if scene.get('id') == 'default'][0]
+    if not scene:
+        return jsonify({'error': f'Scene {scene} not found'}), HTTPStatus.NOT_FOUND
+    return jsonify({'source': generate_scene_nim_source(frame, scene)})
 
 @api.route('/frames/<int:id>/reset', methods=['POST'])
 @login_required
@@ -112,7 +125,7 @@ def api_frame_update(id: int):
     fields = ['scenes', 'name', 'frame_host', 'frame_port', 'ssh_user', 'ssh_pass', 'ssh_port', 'server_host',
               'server_port', 'server_api_key', 'width', 'height', 'rotate', 'color', 'interval', 'metrics_interval',
               'scaling_mode', 'background_color', 'device']
-    defaults = {'frame_port': 8999, 'ssh_port': 22}
+    defaults = {'frame_port': 8787, 'ssh_port': 22}
     try:
         payload = request.json
         for field in fields:
@@ -120,9 +133,9 @@ def api_frame_update(id: int):
                 value = payload[field]
                 if value == '' or value == 'null':
                     value = defaults.get(field, None)
-                elif field in ['frame_port', 'ssh_port', 'width', 'height', 'rotate']:
+                elif field in ['frame_port', 'ssh_port', 'width', 'height', 'rotate'] and value is not None:
                     value = int(value)
-                elif field in ['interval', 'metrics_interval']:
+                elif field in ['interval', 'metrics_interval'] and value is not None:
                     value = float(value)
                 elif field in ['scenes']:
                     if type(value) == str:

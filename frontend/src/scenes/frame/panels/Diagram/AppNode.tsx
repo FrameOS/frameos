@@ -1,6 +1,6 @@
 import { useActions, useValues } from 'kea'
 import { NodeProps, Handle, Position } from 'reactflow'
-import { App, AppNodeData } from '../../../../types'
+import { AppNodeData } from '../../../../types'
 import clsx from 'clsx'
 import { RevealDots } from '../../../../components/Reveal'
 import { diagramLogic } from './diagramLogic'
@@ -19,7 +19,9 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
   const { updateNodeConfig, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const { editApp } = useActions(panelsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { app, appFields, isCustomApp, configJsonError, isSelected, node } = useValues(appNodeLogic(appNodeLogicProps))
+  const { appName, appFields, isCustomApp, configJsonError, isSelected, codeFields } = useValues(
+    appNodeLogic(appNodeLogicProps)
+  )
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
 
   return (
@@ -41,7 +43,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
         )}
       >
         <div>
-          {app?.name}
+          {appName}
           {isCustomApp ? ' (edited)' : ''}
         </div>
         <DropdownMenu
@@ -58,7 +60,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
               icon: <ClipboardDocumentIcon className="w-5 h-5" />,
             },
             {
-              label: 'Delete App',
+              label: 'Delete Node',
               onClick: () => deleteApp(id),
               icon: <TrashIcon className="w-5 h-5" />,
             },
@@ -66,27 +68,22 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
         />
       </div>
       <div className="p-1">
-        <div className="flex justify-between">
-          <div className="flex items-center space-x-1">
-            <Handle
-              type="target"
-              position={Position.Left}
-              id="prev"
-              style={{ position: 'relative', transform: 'none', left: 0, top: 0, background: 'white' }}
-              onConnect={(params) => console.log('handle onConnect', params)}
-              isConnectable={isConnectable}
-            />
-            <span>&nbsp;</span>
-          </div>
-          <div className="flex items-center space-x-1">
-            <Handle
-              type="source"
-              position={Position.Right}
-              id="next"
-              style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
-              isConnectable={isConnectable}
-            />
-          </div>
+        <div className="flex justify-between px-1 py-1">
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="prev"
+            style={{ position: 'relative', transform: 'none', left: 0, top: 0, background: 'white' }}
+            onConnect={(params) => console.log('handle onConnect', params)}
+            isConnectable={isConnectable}
+          />
+          <Handle
+            type="source"
+            position={Position.Right}
+            id="next"
+            style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
+            isConnectable={isConnectable}
+          />
         </div>
         {configJsonError !== null ? (
           <div className="text-red-400">
@@ -102,16 +99,34 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                 <React.Fragment key={i}>
                   {'markdown' in field ? (
                     <tr>
-                      <td className={clsx('font-sm text-indigo-200')} colSpan={2}>
+                      <td className={clsx('font-sm text-indigo-200')} colSpan={4}>
                         <Markdown value={field.markdown} />
                       </td>
                     </tr>
                   ) : (
                     <tr>
+                      <td>
+                        <Handle
+                          type="target"
+                          position={Position.Left}
+                          id={`fieldInput/${field.name}`}
+                          style={{
+                            position: 'relative',
+                            transform: 'none',
+                            left: 0,
+                            top: 0,
+                            background: 'black',
+                            borderColor: 'white',
+                          }}
+                          onConnect={(params) => console.log('handle onConnect', params)}
+                          isConnectable
+                        />
+                      </td>
                       <td
                         className={clsx(
                           'font-sm text-indigo-200',
-                          field.name in data.config && data.config[field.name] !== field.value
+                          codeFields.includes(field.name) ||
+                            (field.name in data.config && data.config[field.name] !== field.value)
                             ? 'underline font-bold'
                             : ''
                         )}
@@ -141,7 +156,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                           ) : null}
                         </div>
                       </td>
-                      {field.type !== 'node' ? (
+                      {field.type !== 'node' && !codeFields.includes(field.name) ? (
                         <td className="cursor-text">
                           {field.secret && !secretRevealed[field.name] ? (
                             <RevealDots onClick={() => setSecretRevealed({ ...secretRevealed, [field.name]: true })} />
@@ -161,12 +176,26 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                               onChange={(value) => updateNodeConfig(id, field.name, value)}
                               rows={field.rows ?? 3}
                             />
+                          ) : field.type === 'boolean' ? (
+                            <input
+                              type="checkbox"
+                              checked={(field.name in data.config ? data.config[field.name] : field.value) == 'true'}
+                              onChange={(e) => updateNodeConfig(id, field.name, e.target.checked ? 'true' : 'false')}
+                            />
                           ) : (
                             <TextInput
                               theme="node"
                               placeholder={field.placeholder}
                               value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
                               onChange={(value) => updateNodeConfig(id, field.name, value)}
+                              className={field.type === 'color' ? 'min-w-[50px]' : ''}
+                              type={
+                                field.type === 'integer' || field.type === 'float'
+                                  ? 'tel'
+                                  : field.type === 'color'
+                                  ? 'color'
+                                  : 'text'
+                              }
                             />
                           )}
                         </td>

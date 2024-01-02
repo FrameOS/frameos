@@ -40,6 +40,7 @@ export const diagramLogic = kea<diagramLogicType>([
     rearrangeCurrentScene: true,
     fitDiagramView: true,
     keywordDropped: (keyword: string, type: string, position: XYPosition) => ({ keyword, type, position }),
+    updateNodeData: (id: string, data: Record<string, any>) => ({ id, data }),
     updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
     copyAppJSON: (nodeId: string) => ({ nodeId }),
     deleteApp: (id: string) => ({ id }),
@@ -55,6 +56,12 @@ export const diagramLogic = kea<diagramLogicType>([
         },
         deselectNode: (state) => {
           const newNodes = state.map((node) => ({ ...node, selected: false }))
+          return equal(state, newNodes) ? state : newNodes
+        },
+        updateNodeData: (state, { id, data }) => {
+          const newNodes = state.map((node) =>
+            node.id === id ? { ...node, data: { ...(node.data ?? {}), ...data } } : node
+          )
           return equal(state, newNodes) ? state : newNodes
         },
         updateNodeConfig: (state, { id, field, value }) => {

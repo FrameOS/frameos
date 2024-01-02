@@ -56,7 +56,7 @@ export const editAppLogic = kea<editAppLogicType>([
       null as string | null,
       {
         enhance: async () => {
-          const source = values.sources['frame.py']
+          const source = values.sources['app.nim']
           const prompt = values.prompt
           const response = await fetch(`/api/apps/enhance_source`, {
             method: 'POST',
@@ -74,10 +74,10 @@ export const editAppLogic = kea<editAppLogicType>([
   })),
   reducers(({ props }) => ({
     activeFile: [
-      'frame.py' as string,
+      'app.nim' as string,
       {
         setActiveFile: (state, { file }) => file,
-        resetEnhanceSuggestion: (state) => (state === 'frame.py/suggestion' ? 'frame.py' : state),
+        resetEnhanceSuggestion: (state) => (state === 'app.nim/suggestion' ? 'app.nim' : state),
       },
     ],
     prompt: [
@@ -184,7 +184,7 @@ export const editAppLogic = kea<editAppLogicType>([
       actions.setSourceErrors(file, errors || [])
     },
     enhanceSuccess: () => {
-      actions.setActiveFile('frame.py/suggestion')
+      actions.setActiveFile('app.nim/suggestion')
     },
   })),
   afterMount(({ actions, props }) => {

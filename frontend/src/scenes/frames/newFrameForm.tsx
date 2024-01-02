@@ -37,6 +37,9 @@ export const newFrameForm = kea<newFrameFormType>([
           const response = await fetch('/api/frames/new', {
             method: 'POST',
             body: JSON.stringify(frame),
+            headers: {
+              'Content-Type': 'application/json',
+            },
           })
 
           if (!response.ok) {

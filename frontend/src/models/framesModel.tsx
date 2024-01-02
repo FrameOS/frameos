@@ -68,7 +68,8 @@ export const framesModel = kea<framesModelType>([
     frameImageTimestamps: [
       {} as Record<string, number>,
       {
-        updateFrameImage: (state, { id }) => ({ ...state, [id]: Date.now().valueOf() }),
+        updateFrameImage: (state, { id }) =>
+          state[id] === Math.floor(Date.now() / 1000) ? state : { ...state, [id]: Math.floor(Date.now() / 1000) },
       },
     ],
   })),
@@ -111,7 +112,7 @@ export const framesModel = kea<framesModelType>([
     [socketLogic.actionTypes.newLog]: ({ log }) => {
       if (log.type === 'webhook') {
         const parsed = JSON.parse(log.line)
-        if (parsed.event == '@frame:render_update_screen') {
+        if (parsed.event == 'render:done' || parsed.event == 'http:start') {
           actions.updateFrameImage(log.frame_id)
         }
       }

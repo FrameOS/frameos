@@ -103,7 +103,7 @@ export function FrameSettings({ className }: DetailsProps) {
               <TextInput name="frame_host" placeholder="127.0.0.1" required />
             </Field>
             <Field name="frame_port" label="Frame port">
-              <TextInput name="frame_port" placeholder="8999" required />
+              <TextInput name="frame_port" placeholder="8787" required />
             </Field>
             <Field name="ssh_user" label="SSH user">
               <TextInput name="ssh_user" placeholder="pi" required />
@@ -123,7 +123,7 @@ export function FrameSettings({ className }: DetailsProps) {
               <TextInput name="server_host" placeholder="localhost" required />
             </Field>
             <Field name="server_port" label="Server port">
-              <TextInput name="server_port" placeholder="8999" required />
+              <TextInput name="server_port" placeholder="8989" required />
             </Field>
             <Field name="server_api_key" label="Server API key">
               <TextInput
@@ -172,7 +172,7 @@ export function FrameSettings({ className }: DetailsProps) {
               />
             </Field>
             <Field name="background_color" label="Background color">
-              <TextInput name="background_color" placeholder="white" />
+              <TextInput type="color" name="background_color" className="p-0" placeholder="white" />
             </Field>
           </Form>
         </>
