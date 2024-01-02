@@ -1,6 +1,8 @@
-# FrameOS - smart home frames
+# FrameOS
 
-FrameOS is a tool for controlling Raspberry Pi-powered e-ink displays, a repository of apps to run on them, and an IDE for writing your own. 
+FrameOS is an **operating system for single function smart frames**. 
+
+More specifically, it's a tool for controlling Raspberry Pi-powered e-ink displays, a repository of apps to run on them, and an IDE for writing your own. 
 
 To get started:
 
