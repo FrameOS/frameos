@@ -282,7 +282,7 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                 event_nodes[event].append(node)
         elif node.get('type') == 'app':
             sources = node.get('data', {}).get('sources', {})
-            name = node.get('data', {}).get('keyword', None)
+            name = node.get('data', {}).get('keyword', f"app_{node_id}")
             app_id = "app_" + node_id.replace('-', '_')
 
             if name in available_apps or len(sources) > 0:
@@ -299,19 +299,25 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
                 if app_import not in imports:
                     imports += [app_import]
 
-                app_config = node.get('data').get('config', {}).copy()
-                config_path = os.path.join(local_apps_path, name, "config.json")
+                app_config = node.get('data', {}).get('config', {}).copy()
+                if len(sources) > 0 and sources.get('config.json', None):
+                    config = json.loads(sources.get('config.json'))
+                else:
+                    config_path = os.path.join(local_apps_path, name, "config.json")
+                    if os.path.exists(config_path):
+                        with open(config_path, 'r') as file:
+                            config = json.load(file)
+                    else:
+                        config = {}
+
                 config_types: Dict[str, str] = {}
-                if os.path.exists(config_path):
-                    with open(config_path, 'r') as file:
-                        config = json.load(file)
-                        for field in config.get('fields'):
-                            key = field.get('name', None)
-                            value = field.get('value', None)
-                            field_type = field.get('type', 'string')
-                            config_types[key] = field_type
-                            if (key not in app_config or app_config.get(key) is None) and (value is not None or field_type == 'node'):
-                                app_config[key] = value
+                for field in config.get('fields'):
+                    key = field.get('name', None)
+                    value = field.get('value', None)
+                    field_type = field.get('type', 'string')
+                    config_types[key] = field_type
+                    if (key not in app_config or app_config.get(key) is None) and (value is not None or field_type == 'node'):
+                        app_config[key] = value
 
                 field_inputs_for_node = field_inputs.get(node_id, {})
                 node_fields_for_node = node_fields.get(node_id, {})
