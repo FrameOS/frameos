@@ -5,16 +5,19 @@ import ./libevdev
 import ./linuxInput
 
 from frameos/types import FrameOS, Logger, FrameOSDriver
-
-var thread: Thread[Logger]
+from frameos/logger import logChannel
+import frameos/events
 
 type Driver* = ref object of FrameOSDriver
-  logger: Logger
+  discard
 
-proc safeLog*(logger: Logger, event: JsonNode) =
-  # TODO: write to the channel directly from here
-  {.gcsafe.}:
-    logger.log(event)
+var thread: Thread[void]
+
+proc log*(event: JsonNode) =
+  logChannel.send(event)
+
+proc sendEvent*(event: string, payload: JsonNode) =
+  eventChannel.send((event, payload))
 
 proc getListener*(device: string): Option[ptr libevdev] =
   var evdev: ptr libevdev
@@ -37,23 +40,23 @@ proc getListener*(device: string): Option[ptr libevdev] =
     discard close(fd)
     return none(ptr libevdev)
 
-proc startThread*(logger: Logger) {.thread.} =
+proc startThread*() {.thread.} =
   try:
     var openDevices: seq[(string, ptr libevdev)] = @[]
     for device in walkPattern("/dev/input/event*"):
       let listener = getListener(device)
       if listener.isNone:
-        logger.safeLog(%*{"event": "driver:evdev",
+        log(%*{"event": "driver:evdev",
           "device": device, "type": "unknown"})
       else:
-        logger.safeLog(%*{"event": "driver:evdev", "device": device,
+        log(%*{"event": "driver:evdev", "device": device,
             "listening": true})
         openDevices.add((device, listener.get()))
 
     if openDevices.len == 0:
       raise newException(Exception, &"No devices found")
 
-    logger.safeLog(%*{"event": "driver:evdev",
+    log(%*{"event": "driver:evdev",
           "info": &"Listening to {openDevices.len} device" & (
               if openDevices.len > 1: "s" else: "")})
 
@@ -79,36 +82,41 @@ proc startThread*(logger: Logger) {.thread.} =
                 continue
               if ev.ev_type == EV_KEY:
                 if ev.code >= BTN_MISC and ev.code <= BTN_GEAR_UP:
-                  logger.safeLog(%*{
-                    "event": if ev.value ==
-                    1: "ev:mouseDown" else: "ev:mouseUp",
-                    "key": $libevdev_event_code_get_name(ev.ev_type, ev.code),
-                    "keyCode": ev.code,
-                  })
+                  let button: int = case ev.code:
+                    of BTN_LEFT: 0
+                    of BTN_RIGHT: 1
+                    of BTN_MIDDLE: 2
+                    of BTN_SIDE: 3
+                    of BTN_EXTRA: 4
+                    of BTN_FORWARD: 5
+                    of BTN_BACK: 6
+                    of BTN_TASK: 7
+                    else: -1
+                  if ev.value == 1:
+                    sendEvent("mouseDown", %*{"button": button})
+                  else:
+                    sendEvent("mouseUp", %*{"button": button})
                 else:
-                  logger.safeLog(%*{
-                    "event": if ev.value == 1: "ev:keyDown" else: "ev:keyUp",
-                    "key": $libevdev_event_code_get_name(ev.ev_type, ev.code),
-                    "keyCode": ev.code,
-                  })
+                  if ev.value == 1:
+                    sendEvent("keyDown", %*{
+                      "key": $libevdev_event_code_get_name(ev.ev_type, ev.code),
+                      "code": ev.code
+                    })
+                  else:
+                    sendEvent("keyUp", %*{
+                      "key": $libevdev_event_code_get_name(ev.ev_type, ev.code),
+                      "code": ev.code
+                    })
               elif ev.ev_type == EV_ABS:
                 if otherValue == -1:
                   otherValue = ev.value
                 else:
                   if ev.code == ABS_X:
-                    logger.safeLog(%*{
-                      "event": "ev:mouseMove",
-                      "x": ev.value,
-                      "y": otherValue,
-                    })
+                    sendEvent("mouseMove", %*{"x": ev.value, "y": otherValue})
                   elif ev.code == ABS_Y:
-                    logger.safeLog(%*{
-                      "event": "ev:mouseMove",
-                      "x": otherValue,
-                      "y": ev.value,
-                    })
+                    sendEvent("mouseMove", %*{"x": otherValue, "y": ev.value})
               else:
-                logger.safeLog(%*{"event": "driver:evdev",
+                log(%*{"event": "event:unknown",
                     "eventName": $libevdev_event_type_get_name(ev.ev_type),
                     "eventCode": $libevdev_event_code_get_name(ev.ev_type,
                         ev.code),
@@ -121,14 +129,10 @@ proc startThread*(logger: Logger) {.thread.} =
         sleep(10) # give the cpu some air
 
   except Exception as e:
-    logger.safeLog(%*{"event": "driver:evdev",
+    log(%*{"event": "driver:evdev",
         "error": "Failed to initialize driver", "exception": e.msg,
         "stack": e.getStackTrace()})
 
 proc init*(frameOS: FrameOS): Driver =
-  let logger = frameOS.logger
-  createThread(thread, startThread, logger)
-  result = Driver(
-    name: "evdev",
-    logger: logger,
-  )
+  createThread(thread, startThread)
+  result = Driver(name: "evdev")

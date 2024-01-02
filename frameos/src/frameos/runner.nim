@@ -2,6 +2,7 @@ import json, pixie, times, options, asyncdispatch, locks
 import scenes/default as defaultScene
 
 from frameos/types import FrameOS, FrameConfig, FrameScene, Logger, RunnerControl
+import frameos/events
 from frameos/utils/image import rotateDegrees, renderError, scaleAndDrawImage
 
 import drivers/drivers as drivers
@@ -18,11 +19,9 @@ type
 
 var
   thread: Thread[(FrameConfig, Logger)]
-  toRunner: Channel[JsonNode]
   globalLastImageLock: Lock
   globalLastImage: Option[Image]
 
-toRunner.open()
 initLock(globalLastImageLock)
 
 proc renderScene*(self: RunnerThread) =
@@ -117,7 +116,6 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
         fastSceneResumeAt = 0.0
         self.logger.enable()
 
-
     # Sleep until the next frame
     sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) *
         1000, 0.1)
@@ -140,18 +138,20 @@ proc triggerRender*(self: RunnerThread): void =
 proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
   var waitTime = 10
   while true:
-    let (success, message) = toRunner.tryRecv()
+    let (success, (event, payload)) = eventChannel.tryRecv()
     if success:
       waitTime = 1
-      echo "Got message: " & $message
-      case message{"event"}.getStr:
+      case event:
         of "render":
           self.triggerRender()
         of "turnOn":
           drivers.turnOn()
         of "turnOff":
           drivers.turnOff()
-    else:
+        else:
+          self.logger.log(%*{"event": "event:" & event, "payload": payload})
+
+    if not success:
       await sleepAsync(waitTime)
       if waitTime < 200:
         waitTime += 5
@@ -189,8 +189,8 @@ proc newRunner*(frameConfig: FrameConfig, logger: Logger): RunnerControl =
     frameConfig: frameConfig,
     start: proc () = createThread(thread, createThreadRunner, (
       frameConfig, logger)),
-    sendEvent: proc (event: string, payload: JsonNode) =
-    toRunner.send(%*{"event": event, "payload": payload}),
+    sendEvent: proc (event: string, payload: JsonNode) = eventChannel.send((
+        event, payload)),
   )
   return runner
 

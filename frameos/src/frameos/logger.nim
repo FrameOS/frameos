@@ -15,9 +15,9 @@ const LOG_FLUSH_SECONDS = 1.0
 
 var
   thread: Thread[FrameConfig]
-  channel: Channel[JsonNode]
+  logChannel*: Channel[JsonNode]
 
-channel.open()
+logChannel.open()
 
 proc logInThread*(self: LoggerThread) =
   var newLogs = self.erroredLogs.concat(self.logs)
@@ -46,7 +46,7 @@ proc start(self: LoggerThread) =
         epochTime()):
       self.logInThread()
 
-    let (success, payload) = channel.tryRecv()
+    let (success, payload) = logChannel.tryRecv()
     if success:
       self.logs.add(payload)
     else:
@@ -78,12 +78,12 @@ proc newLogger*(frameConfig: FrameConfig): Logger =
   createThread(thread, createThreadRunner, frameConfig)
   var logger = Logger(
     frameConfig: frameConfig,
-    channel: channel,
+    channel: logChannel,
     enabled: true,
   )
   logger.log = proc(payload: JsonNode) =
     if logger.enabled:
-      channel.send(payload)
+      logChannel.send(payload)
   logger.enable = proc() =
     logger.enabled = true
   logger.disable = proc() =

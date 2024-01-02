@@ -1,14 +1,16 @@
 import json, os, psutil, strutils, sequtils
 
 from frameos/types import FrameConfig, MetricsLogger, Logger
+from frameos/logger import logChannel
 
 type
   MetricsLoggerThread = ref object
     frameConfig: FrameConfig
-    logger: Logger
 
-var
-  thread: Thread[Logger]
+var thread: Thread[FrameConfig]
+
+proc log*(event: JsonNode) =
+  logChannel.send(event)
 
 proc getLoadAverage(self: MetricsLoggerThread): seq[float] =
   try:
@@ -39,46 +41,39 @@ proc getCPUUsage(self: MetricsLoggerThread): float =
   result = psutil.cpuPercent(interval = 1)
 
 proc logMetrics(self: MetricsLoggerThread) =
-  {.gcsafe.}:
-    self.logger.log(%*{
-      "event": "metrics",
-      "load": self.getLoadAverage(),
-      "cpuTemperature": self.getCPUTemperature(),
-      "memoryUsage": self.getMemoryUsage(),
-      "cpuUsage": self.getCPUUsage()
-    })
+  log(%*{
+    "event": "metrics",
+    "load": self.getLoadAverage(),
+    "cpuTemperature": self.getCPUTemperature(),
+    "memoryUsage": self.getMemoryUsage(),
+    "cpuUsage": self.getCPUUsage()
+  })
 
 proc start(self: MetricsLoggerThread) =
   let ms = (self.frameConfig.metricsInterval * 1000).int
   if ms == 0:
-    {.gcsafe.}:
-      self.logger.log(%*{"event": "metrics", "state": "disabled"})
+    log(%*{"event": "metrics", "state": "disabled"})
   else:
-    {.gcsafe.}:
-      self.logger.log(%*{"event": "metrics", "state": "enabled",
-          "intervalMs": ms})
+    log(%*{"event": "metrics", "state": "enabled", "intervalMs": ms})
     while true:
       try:
         self.logMetrics()
       except Exception as e:
-        {.gcsafe.}:
-          self.logger.log(%*{
-            "event": "metrics",
-            "state": "error",
-            "error": e.msg,
-          })
+        log(%*{
+          "event": "metrics",
+          "state": "error",
+          "error": e.msg,
+        })
       sleep(ms)
 
-proc createThreadRunner(logger: Logger) {.thread.} =
+proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
   var metricsLoggerThread = MetricsLoggerThread(
-    frameConfig: logger.frameConfig,
-    logger: logger,
+    frameConfig: frameConfig,
   )
   metricsLoggerThread.start()
 
-proc newMetricsLogger*(logger: Logger): MetricsLogger =
-  createThread(thread, createThreadRunner, logger)
+proc newMetricsLogger*(frameConfig: FrameConfig): MetricsLogger =
+  createThread(thread, createThreadRunner, frameConfig)
   result = MetricsLogger(
-    frameConfig: logger.frameConfig,
-    logger: logger,
+    frameConfig: frameConfig,
   )

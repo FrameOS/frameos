@@ -12,7 +12,7 @@ proc newFrameOS*(): FrameOS =
   var frameConfig = loadConfig()
   var logger = newLogger(frameConfig)
   logger.log(%*{"event": "startup"})
-  var metricsLogger = newMetricsLogger(logger)
+  var metricsLogger = newMetricsLogger(frameConfig)
   result = FrameOS(
     frameConfig: frameConfig,
     logger: logger,
