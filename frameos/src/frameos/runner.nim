@@ -1,8 +1,8 @@
-import json, pixie, times, options, asyncdispatch, locks
+import json, pixie, times, options, asyncdispatch, locks, os
 import scenes/default as defaultScene
 
-from frameos/types import FrameOS, FrameConfig, FrameScene, Logger, RunnerControl
 import frameos/events
+from frameos/types import FrameOS, FrameConfig, FrameScene, Logger, RunnerControl
 from frameos/utils/image import rotateDegrees, renderError, scaleAndDrawImage
 
 import drivers/drivers as drivers
@@ -16,36 +16,45 @@ type
     lastRotatedImage: Option[Image]
     lastRenderAt: float
     sleepFuture: Option[Future[void]]
+    isRendering: bool = false
+    triggerRenderNext: bool = false
 
 var
   thread: Thread[(FrameConfig, Logger)]
+  renderSceneLock: Lock
   globalLastImageLock: Lock
   globalLastImage: Option[Image]
 
+initLock(renderSceneLock)
 initLock(globalLastImageLock)
 
 proc renderScene*(self: RunnerThread) =
-  self.logger.log(%*{"event": "render"})
   let sceneTimer = epochTime()
+  let requiredWidth = case self.frameConfig.rotate:
+    of 90, 270: self.frameConfig.height
+    else: self.frameConfig.width
+  let requiredHeight = case self.frameConfig.rotate:
+    of 90, 270: self.frameConfig.width
+    else: self.frameConfig.height
+  self.logger.log(%*{"event": "render", "width": requiredWidth,
+      "height": requiredHeight})
+
   try:
+    # render the scene
     type DefaultScene = defaultScene.Scene
     let image = defaultScene.render(self.scene.DefaultScene)
-    let requiredWidth = case self.frameConfig.rotate:
-      of 90, 270: self.frameConfig.height
-      else: self.frameConfig.width
-    let requiredHeight = case self.frameConfig.rotate:
-      of 90, 270: self.frameConfig.width
-      else: self.frameConfig.height
+
+    # do we have to resize the result?
     if image.width != requiredWidth or image.height != requiredHeight:
       let resizedImage = newImage(requiredWidth, requiredHeight)
       resizedImage.scaleAndDrawImage(image, self.frameConfig.scalingMode)
-      withLock(globalLastImageLock):
+      withLock globalLastImageLock:
         globalLastImage = some(resizedImage)
       self.lastImage = some(resizedImage)
       self.lastRotatedImage = some(resizedImage.rotateDegrees(
           self.frameConfig.rotate))
     else:
-      withLock(globalLastImageLock):
+      withLock globalLastImageLock:
         globalLastImage = some(image)
       self.lastImage = some(image)
       self.lastRotatedImage = some(image.rotateDegrees(
@@ -91,10 +100,12 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
 
   while true:
     timer = epochTime()
+    self.isRendering = true
+    self.triggerRenderNext = false
     self.renderScene()
-
     driverTimer = epochTime()
     drivers.render(self.lastRotatedRender())
+
     self.logger.log(%*{"event": "render:driver",
         "device": self.frameConfig.device, "ms": round((epochTime() -
             driverTimer) * 1000, 3)})
@@ -103,6 +114,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
       if epochTime() - timer < fastScene:
         fastSceneCount += 1
         if fastSceneCount == 3:
+          # TODO: only hide logging for the renders, not before and after (hides other events)
           self.logger.log(%*{"event": "pause",
               "message": "Rendering fast. Pausing logging for 10s"})
           self.logger.disable()
@@ -115,6 +127,15 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
         fastSceneCount = 0
         fastSceneResumeAt = 0.0
         self.logger.enable()
+
+    # Gives a chance for the gathered events to be collected
+    await sleepAsync(0.001)
+    self.isRendering = false
+
+    # While we were rendering an event to trigger a render was dispatched
+    if self.triggerRenderNext:
+      self.triggerRenderNext = false
+      continue
 
     # Sleep until the next frame
     sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) *
@@ -137,25 +158,38 @@ proc triggerRender*(self: RunnerThread): void =
 
 proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
   var waitTime = 10
+
   while true:
     let (success, (event, payload)) = eventChannel.tryRecv()
     if success:
       waitTime = 1
-      self.logger.log(%*{"event": "event:" & event, "payload": payload})
+      self.logger.log(%*{"event": "event:" & event, "payload": payload,
+          "rendering": self.isRendering})
       case event:
         of "render":
-          self.triggerRender()
+          self.triggerRenderNext = true
         of "turnOn":
           drivers.turnOn()
         of "turnOff":
           drivers.turnOff()
+        of "mouseMove":
+          discard
+        of "mouseUp", "mouseDown":
+          discard
+        of "keyUp", "keyDown":
+          discard
         else:
           discard
 
+    # after we have processed all queued messages
     if not success:
-      await sleepAsync(waitTime)
-      if waitTime < 200:
-        waitTime += 5
+      if self.triggerRenderNext and not self.isRendering:
+        self.triggerRenderNext = false
+        self.triggerRender()
+      else:
+        await sleepAsync(waitTime)
+        if waitTime < 200:
+          waitTime += 5
 
 proc createThreadRunner*(args: (FrameConfig, Logger)) =
   {.cast(gcsafe).}: # TODO: is this a mistake?
