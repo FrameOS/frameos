@@ -1,4 +1,4 @@
-{.compile("EPD_7in5_V2.c", "-D epd7in5V2 -D USE_LGPIO_LIB -D RPI -llgpio").}
+{.compile: "EPD_7in5_V2.c".}
 ## ***************************************************************************
 ##  | File      	:	EPD_7in5_V2.h
 ##  | Author      :   Waveshare team
@@ -38,17 +38,16 @@ import
 ##  Display resolution
 
 const
-  EPD_7IN5_V2_WIDTH* = 800
-  EPD_7IN5_V2_HEIGHT* = 480
+  WIDTH* = 800
+  HEIGHT* = 480
 
-proc EPD_7IN5_V2_Init*(): UBYTE {.importc: "EPD_7IN5_V2_Init".}
-proc EPD_7IN5_V2_Init_Fast*(): UBYTE {.importc: "EPD_7IN5_V2_Init_Fast".}
-proc EPD_7IN5_V2_Init_Part*(): UBYTE {.importc: "EPD_7IN5_V2_Init_Part".}
-proc EPD_7IN5_V2_Clear*() {.importc: "EPD_7IN5_V2_Clear".}
-proc EPD_7IN5_V2_ClearBlack*() {.importc: "EPD_7IN5_V2_ClearBlack".}
-proc EPD_7IN5_V2_Display*(blackimage: ptr UBYTE) {.importc: "EPD_7IN5_V2_Display".}
-proc EPD_7IN5_V2_Display_Part*(blackimage: ptr UBYTE; x_start: UDOUBLE;
-                              y_start: UDOUBLE; x_end: UDOUBLE;
-                                  y_end: UDOUBLE) {.
+proc Init*(): UBYTE {.importc: "EPD_7IN5_V2_Init".}
+proc Init_Fast*(): UBYTE {.importc: "EPD_7IN5_V2_Init_Fast".}
+proc Init_Part*(): UBYTE {.importc: "EPD_7IN5_V2_Init_Part".}
+proc Clear*() {.importc: "EPD_7IN5_V2_Clear".}
+proc ClearBlack*() {.importc: "EPD_7IN5_V2_ClearBlack".}
+proc Display*(blackimage: ptr UBYTE) {.importc: "EPD_7IN5_V2_Display".}
+proc Display_Part*(blackimage: ptr UBYTE; x_start: UDOUBLE; y_start: UDOUBLE;
+                  x_end: UDOUBLE; y_end: UDOUBLE) {.
     importc: "EPD_7IN5_V2_Display_Part".}
-proc EPD_7IN5_V2_Sleep*() {.importc: "EPD_7IN5_V2_Sleep".}
+proc Sleep*() {.importc: "EPD_7IN5_V2_Sleep".}

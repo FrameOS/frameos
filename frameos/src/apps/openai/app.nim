@@ -4,7 +4,6 @@ import options
 import json
 import strformat
 import httpclient
-import zippy
 from frameos/utils/image import scaleAndDrawImage
 from frameos/types import FrameScene, FrameConfig, ExecutionContext
 

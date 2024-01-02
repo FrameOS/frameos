@@ -1,8 +1,13 @@
 transform_epd_files:
-	export USE_LGPIO_LIB=1
-	`nimble path c2nim`/c2nim --assumedef:DEBUG --assumedef:USE_LGPIO_LIB --assumedef:RPI --assumendef:JETSON --assumendef:USE_BCM2835_LIB --assumendef:USE_WIRINGPI_LIB --assumendef:USE_DEV_LIB --importc EPD_*.h
-	
-	echo '{.compile("EPD_7in5_V2.c", "-D epd7in5V2 -D USE_LGPIO_LIB -D RPI -llgpio").}' > EPD_7in5_V2.nim.tmp
-	cat EPD_7in5_V2.nim >> EPD_7in5_V2.nim.tmp
-	mv EPD_7in5_V2.nim.tmp EPD_7in5_V2.nim
+	`nimble path c2nim`/c2nim --assumendef:DEBUG --assumedef:USE_LGPIO_LIB --assumedef:RPI --assumendef:JETSON --assumendef:USE_BCM2835_LIB --assumendef:USE_WIRINGPI_LIB --assumendef:USE_DEV_LIB --importc EPD_*.h
 
+	for file in EPD_*.h; do \
+		base=$$(basename "$$file" .h); \
+		baseupper=$$(basename "$$file" .h | tr '[:lower:]' '[:upper:]'); \
+		`nimble path c2nim`/c2nim --assumendef:DEBUG --prefix:"$$base"_ --prefix:"$$baseupper"_ --importc $$file; \
+		echo '{.compile: "'$$base'.c".}' > "$$file.tmp"; \
+		cat "$$base".nim >> "$$file.tmp"; \
+		mv "$$file.tmp" "$$base".nim; \
+	done
+
+	# TODO: remove Debug.h from all files

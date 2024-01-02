@@ -28,8 +28,7 @@
 #
 ******************************************************************************/
 #include "DEV_Config.h"
-
-#define Debug(__info,...)  
+#include "Debug.h"
 
 #if USE_LGPIO_LIB
 int GPIO_Handle;

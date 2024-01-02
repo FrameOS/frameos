@@ -5,6 +5,7 @@ from typing import Optional, Dict
 @dataclass
 class Driver:
     name: str # camelCase, safe for nim code, unique within this file
+    device: Optional[str] = None # device name, e.g. "7in5_V2"
     import_path: Optional[str] = None # nim local import path for driver
     vendor_folder: Optional[str] = None # vendor/folder to be copied to the release folder
     can_render: bool = False # add render(image)
@@ -51,8 +52,9 @@ def drivers_for_device(device: str) -> Dict[str, Driver]:
     elif device == "framebuffer":
         return {"frameBuffer": drivers["frameBuffer"]}
     elif device.startswith("waveshare."):
-        # TODO: select specific version
-        return {"waveshare": drivers["waveshare"], "spi": drivers["spi"]}
+        waveshare = drivers["waveshare"]
+        waveshare.device = device.split(".")[1]
+        return {"waveshare": waveshare, "spi": drivers["spi"]}
     return {}
 
 def write_drivers_nim(drivers: Dict[str, Driver]) -> str:
@@ -94,3 +96,33 @@ proc turnOn*() =
 proc turnOff*() =
   {(newline + '  ').join(off_drivers or ["discard"])}
     """
+
+def write_waveshare_driver(drivers: Dict[str, Driver]) -> str:
+    driver = drivers.get("waveshare", None)
+    if not driver:
+        raise Exception("No waveshare driver found")
+    if not driver.device:
+        raise Exception("No waveshare device found")
+    
+    return """
+import ePaper/DEV_Config as waveshareConfig
+import ePaper/EPD_2in13_V3 as waveshareDisplay
+from ./types import ColorOption
+
+let width* = waveshareDisplay.WIDTH
+let height* = waveshareDisplay.HEIGHT
+
+let colorOption* = ColorOption.Black
+
+proc init*() =
+  let resp = waveshareConfig.DEV_Module_Init()
+  if resp != 0: raise newException(Exception, "Failed to initialize waveshare display")
+  waveshareDisplay.Init()
+
+proc renderOne*(image: seq[uint8]) =
+  waveshareDisplay.Display(addr image[0])
+
+proc renderTwo*(image1: seq[uint8], image2: seq[uint8]) =
+  discard
+
+"""

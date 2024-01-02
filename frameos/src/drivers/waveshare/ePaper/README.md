@@ -1,3 +1,6 @@
-This folder is copied from https://github.com/waveshareteam/e-Paper/blob/master/RaspberryPi_JetsonNano/c/lib/e-Paper/
+This folder is synced from https://github.com/waveshareteam/e-Paper/blob/master/RaspberryPi_JetsonNano/c/lib/e-Paper/
 
-The `Makefile` contains steps that convert this to work with nim
+To update:
+1. Copy over the new or changed `EPD_*` files
+2. Run `make`.
+3. Update `backend/app/models/drivers.py`

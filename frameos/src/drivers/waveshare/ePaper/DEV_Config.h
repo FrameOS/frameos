@@ -54,6 +54,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include "Debug.h"
 
 #ifdef RPI
     #ifdef USE_BCM2835_LIB
