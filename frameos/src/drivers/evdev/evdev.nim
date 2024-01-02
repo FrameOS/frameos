@@ -58,6 +58,7 @@ proc startThread*(logger: Logger) = #{.thread.} =
               if openDevices.len > 1: "s" else: "")})
 
     var foundSome = false
+    var otherValue = -1
     while true:
       foundSome = false
       for (device, evdev) in openDevices:
@@ -72,15 +73,39 @@ proc startThread*(logger: Logger) = #{.thread.} =
             if rc == cint(LIBEVDEV_READ_STATUS_SUCCESS):
               foundSome = true
               if ev.ev_type == EV_SYN:
+                otherValue = -1
                 continue
               if ev.ev_type == EV_MSC:
                 continue
               if ev.ev_type == EV_KEY:
-                logger.safeLog(%*{
-                  "event": if ev.value == 1: "keydown" else: "keyup",
-                  "key": $libevdev_event_code_get_name(ev.ev_type, ev.code),
-                  "keyCode": ev.code,
-                })
+                if ev.code >= BTN_MISC and ev.code <= BTN_GEAR_UP:
+                  logger.safeLog(%*{
+                    "event": if ev.value == 1: "mousedown" else: "mouseup",
+                    "key": $libevdev_event_code_get_name(ev.ev_type, ev.code),
+                    "keyCode": ev.code,
+                  })
+                else:
+                  logger.safeLog(%*{
+                    "event": if ev.value == 1: "keydown" else: "keyup",
+                    "key": $libevdev_event_code_get_name(ev.ev_type, ev.code),
+                    "keyCode": ev.code,
+                  })
+              elif ev.ev_type == EV_ABS:
+                if otherValue == -1:
+                  otherValue = ev.value
+                else:
+                  if ev.code == ABS_X:
+                    logger.safeLog(%*{
+                      "event": "mousemove",
+                      "x": ev.value,
+                      "y": otherValue,
+                    })
+                  elif ev.code == ABS_Y:
+                    logger.safeLog(%*{
+                      "event": "mousemove",
+                      "x": otherValue,
+                      "y": ev.value,
+                    })
               else:
                 logger.safeLog(%*{"event": "driver:evdev",
                     "eventName": $libevdev_event_type_get_name(ev.ev_type),
