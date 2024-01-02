@@ -27,6 +27,9 @@ type Scene* = ref object of FrameScene
   app_06d5af4b_069e_4550_bd1b_e636e1b8cc2b: rotateApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
+# This makes strformat available within the scene's inline code and avoids the "unused import" error
+let trashString = &""
+
 proc runNode*(self: Scene, nodeId: string,
     context: var ExecutionContext) =
   let scene = self
@@ -82,7 +85,10 @@ proc runNode*(self: Scene, nodeId: string,
 proc runEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:
   of "render":
-    self.runNode("f4071b08-9afa-47c1-b890-0ca025849914", context)
+    try: self.runNode("f4071b08-9afa-47c1-b890-0ca025849914", context)
+    except Exception as e: self.logger.log(%*{"event": "event:error",
+        "node": "f4071b08-9afa-47c1-b890-0ca025849914",
+        "error": $e.msg, "stacktrace": e.getStackTrace()})
   else: discard
 
 proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(

@@ -176,27 +176,31 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
     let (success, (event, payload)) = eventChannel.tryRecv()
     if success:
       waitTime = 1
-      case event:
-        of "render":
-          self.logger.log(%*{"event": "event:" & event})
-          self.triggerRenderNext = true
-        of "turnOn":
-          self.logger.log(%*{"event": "event:" & event})
-          drivers.turnOn()
-        of "turnOff":
-          self.logger.log(%*{"event": "event:" & event})
-          drivers.turnOff()
-        of "mouseMove":
-          if self.frameConfig.width > 0 and self.frameConfig.height > 0:
-            payload["x"] = %*((self.frameConfig.width.float * payload[
-                "x"].getInt().float / 32767.0).int)
-            payload["y"] = %*((self.frameConfig.height.float * payload[
-                "y"].getInt().float / 32767.0).int)
-          self.dispatchSceneEvent(event, payload)
-        of "mouseUp", "mouseDown", "keyUp", "keyDown":
-          self.dispatchSceneEvent(event, payload)
-        else:
-          self.logger.log(%*{"event": "event:" & event, "payload": payload})
+      try:
+        case event:
+          of "render":
+            self.logger.log(%*{"event": "event:" & event})
+            self.triggerRenderNext = true
+          of "turnOn":
+            self.logger.log(%*{"event": "event:" & event})
+            drivers.turnOn()
+          of "turnOff":
+            self.logger.log(%*{"event": "event:" & event})
+            drivers.turnOff()
+          of "mouseMove":
+            if self.frameConfig.width > 0 and self.frameConfig.height > 0:
+              payload["x"] = %*((self.frameConfig.width.float * payload[
+                  "x"].getInt().float / 32767.0).int)
+              payload["y"] = %*((self.frameConfig.height.float * payload[
+                  "y"].getInt().float / 32767.0).int)
+            self.dispatchSceneEvent(event, payload)
+          of "mouseUp", "mouseDown", "keyUp", "keyDown":
+            self.dispatchSceneEvent(event, payload)
+          else:
+            self.logger.log(%*{"event": "event:" & event, "payload": payload})
+      except Exception as e:
+        self.logger.log(%*{"event": "event:error", "error": $e.msg,
+            "stacktrace": e.getStackTrace()})
 
     # after we have processed all queued messages
     if not success:

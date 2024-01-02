@@ -376,7 +376,10 @@ def generate_scene_nim_source(frame: Frame, scene: Dict) -> str:
         event_lines += [f"of \"{event}\":", ]
         for node in nodes:
             next_node = next_nodes.get(node['id'], '-1')
-            event_lines += [f"  self.runNode(\"{next_node}\", context)"]
+            event_lines += [f"  try: self.runNode(\"{next_node}\", context)"]
+            event_lines += [f"  except Exception as e: self.logger.log(%*{{\"event\": \"event:error\","]
+            event_lines += [f"      \"node\": \"{next_node}\","]
+            event_lines += [f"      \"error\": $e.msg, \"stacktrace\": e.getStackTrace()}})"]
     newline = "\n"
     scene_source = f"""
 import pixie, json, times, strformat
@@ -386,13 +389,13 @@ from frameos/types import FrameOS, FrameConfig, Logger, FrameScene, ExecutionCon
 
 const DEBUG = false
 
-# This makes strformat available within the scene's inline code and avoids the "unused import" error
-let trashString = &""
-
 type Scene* = ref object of FrameScene
   {(newline + "  ").join(scene_object_fields)}
 
 {{.push hint[XDeclaredButNotUsed]: off.}}
+# This makes strformat available within the scene's inline code and avoids the "unused import" error
+let trashString = &""
+
 proc runNode*(self: Scene, nodeId: string,
     context: var ExecutionContext) =
   let scene = self
