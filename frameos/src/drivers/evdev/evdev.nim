@@ -80,13 +80,14 @@ proc startThread*(logger: Logger) = #{.thread.} =
               if ev.ev_type == EV_KEY:
                 if ev.code >= BTN_MISC and ev.code <= BTN_GEAR_UP:
                   logger.safeLog(%*{
-                    "event": if ev.value == 1: "mousedown" else: "mouseup",
+                    "event": if ev.value ==
+                    1: "ev:mousedown" else: "ev:mouseup",
                     "key": $libevdev_event_code_get_name(ev.ev_type, ev.code),
                     "keyCode": ev.code,
                   })
                 else:
                   logger.safeLog(%*{
-                    "event": if ev.value == 1: "keydown" else: "keyup",
+                    "event": if ev.value == 1: "ev:keydown" else: "ev:keyup",
                     "key": $libevdev_event_code_get_name(ev.ev_type, ev.code),
                     "keyCode": ev.code,
                   })
@@ -96,13 +97,13 @@ proc startThread*(logger: Logger) = #{.thread.} =
                 else:
                   if ev.code == ABS_X:
                     logger.safeLog(%*{
-                      "event": "mousemove",
+                      "event": "ev:mousemove",
                       "x": ev.value,
                       "y": otherValue,
                     })
                   elif ev.code == ABS_Y:
                     logger.safeLog(%*{
-                      "event": "mousemove",
+                      "event": "ev:mousemove",
                       "x": otherValue,
                       "y": ev.value,
                     })
