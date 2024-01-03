@@ -8,7 +8,7 @@ from .restart_frame import restart_frame
 
 @huey.signal(SIGNAL_LOCKED)
 def task_not_run_handler(signal, task, exc=None):
-    # Do something in response to the "ERROR" or "LOCEKD" signals.
+    # Do something in response to the "ERROR" or "LOCKED" signals.
     # Note that the "ERROR" signal includes a third parameter,
     # which is the unhandled exception that was raised by the task.
     # Since this parameter is not sent with the "LOCKED" signal, we
