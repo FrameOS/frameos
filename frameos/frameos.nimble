@@ -21,6 +21,7 @@ requires "psutil >= 0.6.0"
 taskRequires "assets", "nimassets >= 0.2.4"
 
 task assets, "Create assets":
+  exec "mkdir -p src/assets"
   exec "~/.nimble/bin/nimassets -d=assets/web -o=src/assets/web.nim"
   exec "~/.nimble/bin/nimassets -d=assets/fonts -o=src/assets/fonts.nim"
 
