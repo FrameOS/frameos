@@ -37,4 +37,4 @@ def restart_frame(id: int):
             if ssh is not None:
                 ssh.close()
                 log(id, "stdinfo", "SSH connection closed")
-            remove_ssh_connection(ssh)
+                remove_ssh_connection(ssh)
