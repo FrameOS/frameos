@@ -1,4 +1,4 @@
-# Use the official Python 3.9 image as the base
+# Use the official Python 3.11 image as the base
 FROM python:3.11-slim-bullseye
 
 # Set the working directory
