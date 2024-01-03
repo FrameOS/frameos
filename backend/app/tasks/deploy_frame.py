@@ -301,7 +301,8 @@ def find_nim_executable():
         ],
         'Linux': [
             '/usr/bin/nim',
-            '/usr/local/bin/nim'
+            '/usr/local/bin/nim',
+            '/opt/nim/bin/nim',
         ]
     }
 
@@ -355,6 +356,7 @@ def find_nimbase_file(nim_executable: str):
         nimbase_paths.append('/usr/local/lib/nim')
     elif os_type == 'Linux':
         nimbase_paths.append('/usr/lib/nim')
+        nimbase_paths.append('/opt/nim/lib')
     elif os_type == 'Windows':
         nimbase_paths.append('C:\\Nim\\lib')
 
