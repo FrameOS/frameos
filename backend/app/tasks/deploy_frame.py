@@ -74,6 +74,8 @@ def deploy_frame(id: int):
                     exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  build-essential\" || sudo apt -y install build-essential")
                     if drivers.get("evdev"):
                         exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libevdev-dev\" || sudo apt -y install libevdev-dev")
+                    if drivers.get('waveshare'):
+                        exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  liblgpio-dev\" || sudo apt -y install liblgpio-dev")
 
                     exec_command(frame, ssh, "if [ ! -d /srv/frameos/ ]; then sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; fi")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/build/")
