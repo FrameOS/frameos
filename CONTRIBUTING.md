@@ -1,11 +1,20 @@
 
 # Developing locally
 
+## Prerequisites
+
+You'll need to install:
+Python >= 3.11
+`Node.js` and `npm`
+`redis-server`
+`nim >=2.0.0` (https://nim-lang.org/install.html)
+(Note that Debian distros have only packaged `1.6.x` as of Jan 2024)
+
 ## FrameOS Controller
 
 
 ```bash
-cd backend 
+cd backend
 python3 -m venv env
 source env/bin/activate
 pip install -r requirements.txt
