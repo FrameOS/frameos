@@ -56,7 +56,7 @@ def deploy_frame(id: int):
                 elif arch == "i386":
                     cpu = "i386"
                 else:
-                    cpu = "x86_64"
+                    cpu = "amd64"
 
                 drivers = drivers_for_device(frame.device)
 
