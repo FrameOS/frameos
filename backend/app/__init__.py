@@ -22,7 +22,7 @@ from redis import Redis
 # Initialize extensions
 db = SQLAlchemy()
 login_manager = LoginManager()
-login_manager.login_view = 'views.login'
+login_manager.login_view = 'api.login'
 migrate = Migrate()
 socketio = SocketIO(async_mode='gevent')
 

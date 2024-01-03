@@ -20,7 +20,7 @@ def setup_base_routes(app: Flask):
         from app.models import User  # Import here to avoid circular dependencies
         if User.query.first() is None:
             flash('Please register the first user!')
-            return redirect(url_for('views.register.register'))
+            return redirect(url_for('views.register'))
         else:
             flash('Please login!')
             return redirect('/login')
@@ -30,7 +30,13 @@ def setup_base_routes(app: Flask):
         if request.is_json or request.path.startswith('/api/'):
             return jsonify({'error': 'Not found'}), 404
         if not current_user.is_authenticated and not request.path.startswith('/login'):
-            return redirect('/login')
+            from app.models import User  # Import here to avoid circular dependencies
+            if User.query.first() is None:
+                flash('Please register the first user!')
+                return redirect(url_for('views.register'))
+            else:
+                flash('Please login!')
+                return redirect('/login')
         return current_app.send_static_file('index.html')
 
     @app.before_request

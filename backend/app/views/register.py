@@ -29,7 +29,7 @@ class RegisterForm(FlaskForm):
 def register():
     if User.query.first() is not None:
         flash('Only one user is allowed. Please login!')
-        return redirect(url_for('views.login'))
+        return redirect('/login')
     form = RegisterForm()
     if form.validate_on_submit():
         user = User(username=form.username.data, email=form.email.data)
@@ -37,7 +37,7 @@ def register():
         db.session.add(user)
         db.session.commit()
         flash('Congratulations, you are now a registered user!')
-        return redirect(url_for('views.login'))
+        return redirect('/login')
     elif len(form.errors) > 0:
         flash(form.errors)
     return render_template('register.html', title='Register', form=form)
