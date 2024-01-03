@@ -15,6 +15,9 @@ cd ../frontend
 npm install
 cd ..
 
+# start a redis server
+redis-server --daemonize yes
+
 honcho start
 ```
 
