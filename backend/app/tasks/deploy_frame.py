@@ -49,14 +49,14 @@ def deploy_frame(id: int):
                 uname_output = []
                 exec_command(frame, ssh, f"uname -m", uname_output)
                 arch = "".join(uname_output).strip()
-                if arch == "aarch64":
+                if arch == "aarch64" or arch == "armv7l":
                     cpu = "arm64"
                 elif arch == "armv6l":
                     cpu = "arm"
                 elif arch == "i386":
                     cpu = "i386"
                 else:
-                    cpu = "x86_64"
+                    cpu = "amd64"
 
                 drivers = drivers_for_device(frame.device)
 
