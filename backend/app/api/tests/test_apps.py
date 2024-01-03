@@ -9,16 +9,16 @@ class TestApps(BaseTestCase):
         assert response.status_code == 200
         assert 'apps' in data
         assert len(data['apps']) > 0
-        assert 'boilerplate' in data['apps']
+        assert 'breakIfRendering' in data['apps']
         assert 'clock' in data['apps']
 
     def test_api_apps_source(self):
         response = self.client.get('/api/apps/source/code')
         data = json.loads(response.data)
         assert response.status_code == 200
-        assert 'frame.py' in data
+        assert 'app.nim' in data
         assert 'config.json' in data
-        assert 'CodeApp' in data['frame.py']
+        assert 'FrameConfig' in data['app.nim']
 
     def test_validate_python_frame_source_python(self):
         data = {'file': 'test.py', 'source': 'print("Hello World")'}

@@ -31,9 +31,9 @@ class TestModelsLog(BaseTestCase):
         self.assertEqual(logs_count, 1001)  # 1101 - 100 = 1001
 
     def test_process_log(self):
-        process_log(self.frame, {'event': '@frame:render'})
+        process_log(self.frame, {'event': 'render'})
         self.assertEqual(self.frame.status, "preparing")
-        process_log(self.frame, {'event': '@frame:render_done'})
+        process_log(self.frame, {'event': 'render:done'})
         self.assertEqual(self.frame.status, "ready")
 
     def test_log_without_frame(self):
@@ -52,11 +52,10 @@ class TestModelsLog(BaseTestCase):
 
     def test_process_log_events(self):
         events = [
-            ('@frame:render', 'preparing'),
-            ('@frame:render_update_screen', 'rendering'),
-            ('@frame:render_done', 'ready'),
-            ('@frame:render_skipped', 'ready'),
-            ('@frame:config', 'ready')  # Assuming the frame was not 'ready' before
+            ('render', 'preparing'),
+            ('render:device', 'rendering'),
+            ('render:done', 'ready'),
+            ('config', 'ready')  # Assuming the frame was not 'ready' before
         ]
 
         for event, expected_status in events:

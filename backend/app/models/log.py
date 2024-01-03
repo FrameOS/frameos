@@ -49,8 +49,8 @@ def process_log(frame: Frame, log: dict):
     event = log.get('event', 'log')
     if event == 'render':
         changes['status'] = 'preparing'
-    # if event == 'render:render':
-    #     changes['status'] = 'rendering'
+    if event == 'render:device':
+        changes['status'] = 'rendering'
     if event == 'render:done':
         changes['status'] = 'ready'
     if event == 'bootup':
