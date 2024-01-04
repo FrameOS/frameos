@@ -5,6 +5,7 @@ import { FrameType } from '../../types'
 
 import type { newFrameFormType } from './newFrameFormType'
 import { framesModel } from '../../models/framesModel'
+import { router } from 'kea-router'
 
 export const newFrameForm = kea<newFrameFormType>([
   path(['src', 'scenes', 'frames', 'newFrameForm']),
@@ -48,6 +49,10 @@ export const newFrameForm = kea<newFrameFormType>([
 
           actions.resetNewFrame()
           actions.hideForm()
+          const result = await response.json()
+          if (result?.frame?.id) {
+            router.actions.push(`/frames/${result.frame.id}`)
+          }
         } catch (error) {
           console.error(error)
         }
