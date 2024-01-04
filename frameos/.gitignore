@@ -1,6 +1,6 @@
 src/assets/
 build/
 tmp/
-frame.deps
+frameos.deps
 nimcache
 testresults
