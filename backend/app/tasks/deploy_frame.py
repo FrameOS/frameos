@@ -346,7 +346,9 @@ def find_nimbase_file(nim_executable: str):
 
     # Try to get paths from 'nim dump'
     try:
-        nim_dump_output = subprocess.check_output([nim_executable, "dump"], text=True)
+        nim_dump_output = subprocess.run([nim_executable, "dump"], text=True,
+                                         stdout=subprocess.DEVNULL,
+                                         stderr=subprocess.PIPE).stderr
         # Extract paths that might contain 'nimbase.h'
         nimbase_paths.extend(line for line in nim_dump_output.splitlines() if 'lib' in line)
     except subprocess.CalledProcessError as e:
