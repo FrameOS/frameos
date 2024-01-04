@@ -124,8 +124,7 @@ def update_frame(frame: Frame):
 
 
 def delete_frame(frame_id: int):
-    frame = Frame.query.get(frame_id)
-    if frame:
+    if frame := Frame.query.get(frame_id):
         # delete corresonding log and metric entries first
         from .log import Log
         Log.query.filter_by(frame_id=frame_id).delete()
