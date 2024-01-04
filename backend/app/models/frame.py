@@ -397,7 +397,7 @@ type Scene* = ref object of FrameScene
 
 {{.push hint[XDeclaredButNotUsed]: off.}}
 # This makes strformat available within the scene's inline code and avoids the "unused import" error
-let trashString = &""
+discard &""
 
 proc runNode*(self: Scene, nodeId: string,
     context: var ExecutionContext) =

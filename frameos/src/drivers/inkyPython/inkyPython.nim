@@ -1,4 +1,4 @@
-import osproc, os, streams, pixie, json, options, strformat
+import osproc, os, streams, pixie, json, options
 
 from frameos/types import FrameConfig, FrameOS, Logger, FrameOSDriver
 

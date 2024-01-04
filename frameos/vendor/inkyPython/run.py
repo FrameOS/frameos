@@ -2,6 +2,7 @@ from typing import Dict
 import sys
 import json
 import io
+import inspect
 
 def log(obj: Dict):
     print(json.dumps(obj))
@@ -41,7 +42,17 @@ if __name__ == "__main__":
 
     try:
         image = Image.open(io.BytesIO(data))
-        inky.set_image(image, saturation=1)
+        signature = inspect.signature(inky.set_image)
+        num_parameters = len(signature.parameters)
+        if num_parameters == 2:
+            # TODO: make the saturation variable configurable when setting up the frame
+            inky.set_image(image, saturation=1)
+        elif num_parameters == 1:
+            inky.set_image(image)
+        else:
+            log({ "error": f"inky.set_image() requires {num_parameters} arguments, but we only support sending 1 or 2" })
+            sys.exit(1)
+
         inky.show()
     except Exception as e:
         log({ "error": str(e) })
