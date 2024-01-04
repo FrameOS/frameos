@@ -1,4 +1,4 @@
-import json, pixie, times, options, asyncdispatch, locks, os
+import json, pixie, times, options, asyncdispatch, locks
 import scenes/default as defaultScene
 
 import frameos/events
