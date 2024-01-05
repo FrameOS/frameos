@@ -1,11 +1,12 @@
+import os
 from dataclasses import dataclass
-from typing import Optional, Dict, Literal
+from typing import Optional, Dict, List
 
 
 @dataclass
 class Driver:
     name: str # camelCase, safe for nim code, unique within this file
-    variant: Optional[str] = None # device name, e.g. "7in5_V2"
+    variant: Optional[str] = None # device name, e.g. "EPD_1in54b_V2"
     import_path: Optional[str] = None # nim local import path for driver
     vendor_folder: Optional[str] = None # vendor/folder to be copied to the release folder
     can_render: bool = False # add render(image)
@@ -48,28 +49,6 @@ drivers = {
     ),
 }
 
-@dataclass
-class WaveshareVariant:
-    keyword: str
-    nim_import_path: str
-    color_option: Literal["Black", "BlackRed"] = "Black"
-    init_returns_zero: bool = False
-
-
-waveshare_variants: Dict[str, WaveshareVariant] = {
-    "epd7in5_V2": WaveshareVariant("epd7in5_V2", "EPD_7in5_V2", init_returns_zero=True),
-    "epd2in13_V3": WaveshareVariant("epd2in13_V3", "EPD_2in13_V3"),
-}
-
-# SUPPORTED_DEVICES = [
-#     "epd1in02", "epd1in64g", "epd2in13", "epd2in66", "epd4in2b_V2", "epd5in83", "epd7in5b_V2",
-#     "epd1in54b", "epd2in13bc", "epd2in13_V2", "epd2in7b", "epd2in9bc", "epd3in0g", "epd4in2", "epd5in83_V2", "epd7in5_HD",
-#     "epd1in54b_V2", "epd2in13b_V3", "epd2in13_V3", "epd2in7b_V2", "epd2in9b_V3", "epd3in52", "epd4in37g", "epd7in3f", "epd7in5",
-#     "epd1in54c", "epd2in13b_V4", "epd2in13_V4", "epd2in7", "epd2in9d", "epd3in7", "epd5in65f", "epd7in3g", "epd7in5_V2_fast",
-#     "epd1in54", "epd2in13d", "epd2in36g", "epd2in9", "epd4in01f", "epd5in83bc", "epd7in5bc", "epd7in5_V2",
-#     "epd1in54_V2", "epd2in13g", "epd2in66b", "epd2in7_V2", "epd2in9_V2", "epd4in2bc", "epd5in83b_V2", "epd7in5b_HD",
-# ]
-
 def drivers_for_device(device: str) -> Dict[str, Driver]:
     device_drivers: Dict[str, Driver] = {}
     if device == "pimoroni.inky_impression":
@@ -81,6 +60,14 @@ def drivers_for_device(device: str) -> Dict[str, Driver]:
     elif device.startswith("waveshare."):
         waveshare = drivers["waveshare"]
         waveshare.variant = device.split(".")[1]
+        # backwards compatibility
+        if waveshare.variant == "epd7in5_V2":
+            waveshare.variant = "EPD_7in5_V2"
+        if waveshare.variant == "epd2in13_V3":
+            waveshare.variant = "EPD_2in13_V3"
+
+        if waveshare.variant not in get_waveshare_variants():
+            raise Exception(f"Unknown waveshare driver variant {waveshare.variant}")
         device_drivers = {"waveshare": waveshare, "spi": drivers["spi"]}
     
     # Always enable evdev if not eink
@@ -129,21 +116,70 @@ proc turnOff*() =
   {(newline + '  ').join(off_drivers or ["discard"])}
     """
 
+def get_waveshare_variants() -> List[str]:
+    directory = os.path.join("..", "frameos", "src", "drivers", "waveshare", "ePaper")
+    return [
+        filename[0:-4]
+        for filename in os.listdir(directory)
+        if filename.startswith("EPD_") and filename.endswith(".nim")
+    ]
+
+@dataclass
+class WaveshareVariant:
+    key: str
+    prefix: str
+    width: Optional[int] = None
+    height: Optional[int] = None
+    init_function: Optional[str] = None
+    clear_function: Optional[str] = None
+    display_function: Optional[str] = None
+    init_returns_zero: bool = False
+    color_option: str = "Black"
+
+def convert_waveshare_source(variant: str) -> WaveshareVariant:
+    if not variant:
+        raise Exception("No waveshare driver variant specified")
+    if variant not in get_waveshare_variants(): # checks if a file called variant.nim exists
+        raise Exception(f"Unknown waveshare driver variant {variant}")
+    with open(os.path.join("..", "frameos", "src", "drivers", "waveshare", "ePaper", f"{variant}.nim"), "r") as f:
+        variant = WaveshareVariant(key=variant, prefix='')
+        for line in f.readlines():
+            if "_WIDTH* = " in line:
+                variant.width = int(line.split(" = ")[1].strip())
+                variant.prefix = line.split("_WIDTH")[0].strip() # this is always the first and before any proc
+            if "_HEIGHT* = " in line:
+                variant.height = int(line.split(" = ")[1].strip())
+            if line.startswith("proc"):
+                proc_name = line.split("*(")[0].split(" ")[1]
+                if proc_name.lower() == f"{variant.prefix}_Init".lower():
+                    variant.init_function = proc_name
+                    variant.init_returns_zero = "(): UBYTE" in line
+                if proc_name.lower() == f"{variant.prefix}_Init_4Gray".lower() and variant.init_function is None:
+                    variant.init_function = proc_name
+                    variant.init_returns_zero = "(): UBYTE" in line
+                if proc_name.lower() == f"{variant.prefix}_4Gray_Init".lower() and variant.init_function is None:
+                    variant.init_function = proc_name
+                    variant.init_returns_zero = "(): UBYTE" in line
+                if proc_name.lower() == f"{variant.prefix}_Clear".lower():
+                    variant.clear_function = proc_name
+                if proc_name.lower() == f"{variant.prefix}_4Gray_Clear".lower() and variant.clear_function is None:
+                    variant.clear_function = proc_name
+                if proc_name.lower() == f"{variant.prefix}_Display".lower():
+                    variant.display_function = proc_name
+                if proc_name.lower() == f"{variant.prefix}_4Gray_Display".lower() and variant.display_function is None:
+                    variant.display_function = proc_name
+        return variant
+
 def write_waveshare_driver_nim(drivers: Dict[str, Driver]) -> str:
     driver = drivers.get("waveshare", None)
     if not driver:
         raise Exception("No waveshare driver found")
-    if not driver.variant:
-        raise Exception("No waveshare driver variant specified")
-    if driver.variant not in waveshare_variants:
-        raise Exception(f"Unknown waveshare driver variant {driver.variant}")
-    
-    variant = waveshare_variants[driver.variant]
 
-    
+    variant = convert_waveshare_source(driver.variant)
+
     return f"""
 import ePaper/DEV_Config as waveshareConfig
-import ePaper/{variant.nim_import_path} as waveshareDisplay
+import ePaper/{variant.key} as waveshareDisplay
 from ./types import ColorOption
 
 let width* = waveshareDisplay.WIDTH
@@ -154,12 +190,15 @@ let color_option* = ColorOption.{variant.color_option}
 proc init*() =
   let resp = waveshareConfig.DEV_Module_Init()
   if resp != 0: raise newException(Exception, "Failed to initialize waveshare display")
-  {'discard ' if variant.init_returns_zero else ''}waveshareDisplay.Init()
+  {'discard ' if variant.init_returns_zero else ''}waveshareDisplay.{variant.init_function}()
+
+proc clear*() =
+  waveshareDisplay.{variant.clear_function}()
 
 proc renderOne*(image: seq[uint8]) =
-  {'waveshareDisplay.Display(addr image[0])' if variant.color_option == 'Black' else 'discard'}
+  {f'waveshareDisplay.{variant.display_function}(addr image[0])' if variant.color_option == 'Black' else 'discard'}
 
 proc renderTwo*(image1: seq[uint8], image2: seq[uint8]) =
-  {'waveshareDisplay.Display(addr image1[0], addr image2[0])' if variant.color_option == 'BlackRed' else 'discard'}
+  {f'waveshareDisplay.{variant.display_function}(addr image1[0], addr image2[0])' if variant.color_option == 'BlackRed' else 'discard'}
 
 """

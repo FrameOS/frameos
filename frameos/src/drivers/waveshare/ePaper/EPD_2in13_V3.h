@@ -33,7 +33,7 @@
 
 #include "DEV_Config.h"
 
-// Display resolution
+
 #define EPD_2in13_V3_WIDTH       122
 #define EPD_2in13_V3_HEIGHT      250
 
