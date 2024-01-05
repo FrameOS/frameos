@@ -43,6 +43,10 @@ def deploy_frame(id: int):
 
             nim_path = find_nim_v2()
 
+            def install_if_necessary(package: str):
+                """If a package is not installed, install it."""
+                exec_command(frame, ssh, f"dpkg -l | grep -q \"^ii  {package}\" || sudo apt-get install -y {package}")
+
             with tempfile.TemporaryDirectory() as temp_dir:
                 ssh = get_ssh_connection(frame)
                 log(id, "stdout", f"- Getting target architecture")
@@ -70,12 +74,12 @@ def deploy_frame(id: int):
 
                 with SCPClient(ssh.get_transport()) as scp:
                     # build the release on the server
-                    exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  ntp\" || sudo apt -y install ntp")
-                    exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  build-essential\" || sudo apt -y install build-essential")
+                    install_if_necessary("ntp")
+                    install_if_necessary("build-essential")
                     if drivers.get("evdev"):
-                        exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  libevdev-dev\" || sudo apt -y install libevdev-dev")
+                        install_if_necessary("libevdev-dev")
                     if drivers.get('waveshare'):
-                        exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  liblgpio-dev\" || sudo apt -y install liblgpio-dev")
+                        install_if_necessary("liblgpio-dev")
 
                     exec_command(frame, ssh, "if [ ! -d /srv/frameos/ ]; then sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; fi")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/build/")
@@ -92,14 +96,14 @@ def deploy_frame(id: int):
                     # TODO: abstract vendor logic
                     if inkyPython := drivers.get("inkyPython"):
                         exec_command(frame, ssh, f"cp -r /srv/frameos/build/build_{build_id}/vendor /srv/frameos/releases/release_{build_id}/vendor")
-                        exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-pip\" || sudo apt -y install python3-pip")
-                        exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-venv\" || sudo apt -y install python3-venv")
+                        install_if_necessary("python3-pip")
+                        install_if_necessary("python3-venv")
                         exec_command(frame, ssh, f"cd /srv/frameos/releases/release_{build_id}/vendor/{inkyPython.vendor_folder} && python3 -m venv env && env/bin/pip3 install -r requirements.txt")
 
                     if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
                         exec_command(frame, ssh, f"cp -r /srv/frameos/build/build_{build_id}/vendor /srv/frameos/releases/release_{build_id}/vendor")
-                        exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-pip\" || sudo apt -y install python3-pip")
-                        exec_command(frame, ssh, "dpkg -l | grep -q \"^ii  python3-venv\" || sudo apt -y install python3-venv")
+                        install_if_necessary("python3-pip")
+                        install_if_necessary("python3-venv")
                         exec_command(frame, ssh, f"cd /srv/frameos/releases/release_{build_id}/vendor/{inkyHyperPixel2r.vendor_folder} && python3 -m venv env && env/bin/pip3 install -r requirements.txt")
 
                     # add frameos.service
