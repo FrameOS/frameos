@@ -120,9 +120,8 @@ def deploy_frame(id: int):
 
                 # restart
                 exec_command(frame, ssh, "sudo systemctl daemon-reload")
-                exec_command(frame, ssh, "sudo systemctl stop frameos.service || true")
                 exec_command(frame, ssh, "sudo systemctl enable frameos.service")
-                exec_command(frame, ssh, "sudo systemctl start frameos.service")
+                exec_command(frame, ssh, "sudo systemctl restart frameos.service")
                 exec_command(frame, ssh, "sudo systemctl status frameos.service")
 
             if drivers.get("i2c"):
