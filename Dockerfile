@@ -68,7 +68,10 @@ COPY . .
 
 RUN rm -rf /app/frontend && mv /tmp/frontend /app/
 
+# Cache nimble deps for when deploying on frame
+RUN cd frameos && nimble install -d -y
+
 EXPOSE 8989
 
 # Start huey in the background and then run the Flask application
-CMD ["sh", "-c", "redis-server --daemonize yes && cd backend && flask db upgrade && huey_consumer.py app.huey.huey --worker-type=greenlet --workers=10 --flush-locks & cd backend && python3 run.py"]
+CMD ["sh", "-c", "(redis-server --daemonize yes) && (cd backend && flask db upgrade) && (cd backend && huey_consumer.py app.huey.huey --worker-type=greenlet --workers=10 --flush-locks) & (cd backend && python3 run.py)"]
