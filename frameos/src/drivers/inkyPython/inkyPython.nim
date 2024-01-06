@@ -49,7 +49,6 @@ proc init*(frameOS: FrameOS): Driver =
             result.screenInfo.color = json{"color"}.getStr("")
             frameOS.frameConfig.width = result.screenInfo.width
             frameOS.frameConfig.height = result.screenInfo.height
-            frameOS.frameConfig.color = result.screenInfo.color
           break toploop
         if json{"error"}.getStr() != "": # block until we get error
           # TODO: abort driver init
