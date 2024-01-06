@@ -47,7 +47,7 @@ proc renderBlack*(self: Driver, image: Image) =
       let bw: uint8 = if weightedSum < 128 * 1000: 0 else: 1
       blackImage[index div 8] = blackImage[index div 8] or (bw shl (7 - (index mod 8)))
 
-  waveshareDriver.renderOne(blackImage)
+  waveshareDriver.renderImage(blackImage)
 
 proc renderBlackRed*(self: Driver, image: Image) =
   let rowWidth = ceil(image.width.float / 8).int
@@ -65,7 +65,16 @@ proc renderBlackRed*(self: Driver, image: Image) =
       blackImage[index div 8] = blackImage[index div 8] or (bw shl (7 - (index mod 8)))
       redImage[index div 8] = redImage[index div 8] or (red shl (7 - (index mod 8)))
 
-  waveshareDriver.renderTwo(blackImage, redImage)
+  waveshareDriver.renderImageBlackRed(blackImage, redImage)
+
+proc render4Gray*(self: Driver, image: Image) =
+  raise newException(Exception, "4 gray mode not yet supported")
+
+proc render7Color*(self: Driver, image: Image) =
+  raise newException(Exception, "7 color mode not yet supported")
+
+proc renderBWYR*(self: Driver, image: Image) =
+  raise newException(Exception, "Black White Yellow Red mode not yet supported")
 
 proc render*(self: Driver, image: Image) =
   if self.lastImageData == image.data:
@@ -79,3 +88,9 @@ proc render*(self: Driver, image: Image) =
     self.renderBlack(image)
   of ColorOption.BlackRed:
     self.renderBlackRed(image)
+  of ColorOption.SevenColor:
+    self.render7Color(image)
+  of ColorOption.FourGray:
+    self.render4Gray(image)
+  of ColorOption.BlackWhiteYellowRed:
+    self.renderBWYR(image)
