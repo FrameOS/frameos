@@ -1,7 +1,7 @@
+from app.drivers.waveshare import get_variant_keys, convert_waveshare_source
 from app.models.frame import new_frame
 from app.tests.base import BaseTestCase
 
-from app.models.drivers import get_waveshare_variants, convert_waveshare_source
 class TestDrivers(BaseTestCase):
 
     def setUp(self):
@@ -9,7 +9,7 @@ class TestDrivers(BaseTestCase):
         self.frame = new_frame("frame", "pi@192.168.1.1:8787", "server_host.com", "device_test")
 
     def test_waveshare_variants(self):
-        variants = get_waveshare_variants()
+        variants = get_variant_keys()
         assert len(variants) > 0
         assert "EPD_2in13_V2" in variants
         for variant_key in variants:

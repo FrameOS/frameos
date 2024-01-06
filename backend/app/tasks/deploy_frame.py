@@ -16,11 +16,14 @@ from io import StringIO
 from scp import SCPClient
 
 from app import create_app
+from app.codegen.drivers_nim import write_drivers_nim
+from app.codegen.scene_nim import write_scene_nim
+from app.drivers.devices import drivers_for_device
+from app.drivers.waveshare import write_waveshare_driver_nim
 from app.huey import huey
 from app.models import get_apps_from_scenes
-from app.models.drivers import drivers_for_device, write_drivers_nim, write_waveshare_driver_nim
 from app.models.log import new_log as log
-from app.models.frame import Frame, update_frame, get_frame_json, generate_scene_nim_source
+from app.models.frame import Frame, update_frame, get_frame_json
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection, exec_local_command
 
 
@@ -178,7 +181,7 @@ def make_local_modifications(frame: Frame, source_dir: str):
 
     # only one scene called "default" for now
     for scene in frame.scenes:
-        scene_source = generate_scene_nim_source(frame, scene)
+        scene_source = write_scene_nim(frame, scene)
         with open(os.path.join(source_dir, "src", "scenes", f"{scene.get('id')}.nim"), "w") as file:
             file.write(scene_source)
 
