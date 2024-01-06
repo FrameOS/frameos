@@ -1,4 +1,4 @@
-import json, asyncdispatch
+import json, asyncdispatch, pixie
 
 from frameos/types import FrameOS, Server
 from frameos/config import loadConfig
@@ -32,7 +32,7 @@ proc start*(self: FrameOS) {.async.} =
     "metrics_interval": self.frameConfig.metricsInterval,
     "scaling_mode": self.frameConfig.scalingMode,
     "rotate": self.frameConfig.rotate,
-    "background_color": self.frameConfig.backgroundColor,
+    "background_color": $self.frameConfig.backgroundColor.asRgb,
   }}
   self.logger.log(message)
   self.runner.start()
