@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import random
 import re
@@ -82,7 +83,7 @@ def deploy_frame(id: int):
                     if drivers.get("evdev"):
                         install_if_necessary("libevdev-dev")
                     if drivers.get('waveshare'):
-                        install_if_necessary("liblgpio-dev")
+                        install_if_necessary("libgpiod-dev")
 
                     exec_command(frame, ssh, "if [ ! -d /srv/frameos/ ]; then sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; fi")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/build/")
@@ -197,6 +198,21 @@ def make_local_modifications(frame: Frame, source_dir: str):
             drivers_nim = write_waveshare_driver_nim(drivers)
             file.write(drivers_nim)
 
+def compile_line_md5(input: str) -> str:
+    words = []
+    ignore_next = False
+    # The -I paths contain temporary folders, making this non-deterministic. So we remove them.
+    for word in input.split(' '):
+        if word == '-I':
+            ignore_next = True
+        elif ignore_next or word.startswith("-I"):
+            pass
+        else:
+            words.append(word)
+    encoded_string = " ".join(words).encode()
+    hash_object = hashlib.md5(encoded_string)
+    md5_hash = hash_object.hexdigest()
+    return md5_hash
 
 def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_path: str, source_dir: str, temp_dir: str, cpu: str):
     # TODO: abstract driver-specific vendor steps
@@ -247,9 +263,11 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
     shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
 
     if waveshare := drivers.get('waveshare'):
-        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "Debug.h"), os.path.join(build_dir, "Debug.h")) # TODO: name
-        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "DEV_Config.c"), os.path.join(build_dir, "DEV_Config.c"))
-        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "DEV_Config.h"), os.path.join(build_dir, "DEV_Config.h"))
+        files = [
+            "Debug.h", "DEV_Config.c", "DEV_Config.h", "RPI_gpiod.c", "RPI_gpiod.h", "dev_hardware_SPI.c", "dev_hardware_SPI.h",
+        ]
+        for file in files:
+            shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", file), os.path.join(build_dir, file))
 
         if waveshare.variant:
             files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
@@ -273,7 +291,7 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
                 source_cleaned = '/'.join(source_file.split('@s')[-3:]).replace('@m', './')
 
                 # take the md5sum of the source file <source>.c
-                file.write(f"md5sum=$(md5sum {source_file} | awk '{{print $1}}')\n")
+                file.write(f"md5sum={compile_line_md5(line)}$(md5sum {source_file} | awk '{{print $1}}')\n")
                 # check if there's a file in the cache folder called <md5sum>.c.o
                 file.write(f"if [ -f ../cache/${{md5sum}}.{cpu}.c.o ]; then\n")
                 # if there is, make a symlink to the build folder with the name <source>.o
