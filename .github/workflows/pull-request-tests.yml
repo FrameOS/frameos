@@ -17,25 +17,22 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Set up Node
-        uses: actions/setup-node@v2
-        with:
-          node-version: '16.x'
-
       - name: Install redis
         run: sudo apt-get install -y redis-server
+
+      - name: Cache pip packages
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Install python dependencies
         run: |
           cd backend
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Install node dependencies
-        run: |
-          cd frontend
-          npm install
-          npm run build
 
       - name: Run Pytest
         run: |
