@@ -1,4 +1,5 @@
 import json
+import pixie
 from frameos/types import FrameConfig
 
 proc setConfigDefaults*(config: var FrameConfig) =
@@ -6,12 +7,10 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.width == 0: config.width = 1920
   if config.height == 0: config.height = 1080
   if config.device == "": config.device = "web_only"
-  if config.color == "": config.color = "black"
   if config.interval == 0: config.interval = 300
   if config.metricsInterval == 0: config.metricsInterval = 60
   if config.rotate == 0: config.rotate = 0
   if config.scalingMode == "": config.scalingMode = "cover"
-  if config.backgroundColor == "": config.backgroundColor = "white"
   if config.framePort == 0: config.framePort = 8787
 
 proc loadConfig*(filename: string = "frame.json"): FrameConfig =
@@ -24,8 +23,8 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     width: data{"width"}.getInt(),
     height: data{"height"}.getInt(),
     device: data{"device"}.getStr(),
-    color: data{"color"}.getStr(),
-    backgroundColor: data{"backgroundColor"}.getStr(),
+    backgroundColor: parseHtmlColor(if data{"backgroundColor"}.getStr() ==
+        "": data{"backgroundColor"}.getStr() else: "black"),
     interval: data{"interval"}.getFloat(),
     metricsInterval: data{"metricsInterval"}.getFloat(),
     rotate: data{"rotate"}.getInt(),

@@ -40,7 +40,7 @@ proc run*(self: App, context: ExecutionContext) =
 
   # Create a new target image with the calculated dimensions
   let targetImage = newImage(newWidth, newHeight)
-  targetImage.fill(parseHtmlColor(self.frameConfig.backgroundColor))
+  targetImage.fill(self.frameConfig.backgroundColor)
 
   # Calculate the center of the original and target images
   let originalCenterX = originalImage.width.float32 / 2

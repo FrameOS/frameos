@@ -36,7 +36,7 @@
 #include "DEV_Config.h"
 
 
-// Display resolution
+
 #define EPD_7IN5_V2_WIDTH       800
 #define EPD_7IN5_V2_HEIGHT      480
 

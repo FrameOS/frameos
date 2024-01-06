@@ -6,9 +6,9 @@ import { Form } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import { frameLogic } from '../../frameLogic'
-import { devices } from '../../constants'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
+import { devices } from '../../../../devices'
 
 export interface DetailsProps {
   className?: string
@@ -172,7 +172,7 @@ export function FrameSettings({ className }: DetailsProps) {
               />
             </Field>
             <Field name="background_color" label="Background color">
-              <TextInput type="color" name="background_color" className="p-0" placeholder="white" />
+              <TextInput type="color" name="background_color" className="!p-0" placeholder="white" />
             </Field>
           </Form>
         </>

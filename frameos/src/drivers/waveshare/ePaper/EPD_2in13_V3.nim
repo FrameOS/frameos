@@ -33,15 +33,15 @@
 import
   DEV_Config
 
-##  Display resolution
-
 const
-  WIDTH* = 122
-  HEIGHT* = 250
+  EPD_2in13_V3_WIDTH* = 122
+  EPD_2in13_V3_HEIGHT* = 250
 
-proc Init*() {.importc: "EPD_2in13_V3_Init".}
-proc Clear*() {.importc: "EPD_2in13_V3_Clear".}
-proc Display*(Image: ptr UBYTE) {.importc: "EPD_2in13_V3_Display".}
-proc Display_Base*(Image: ptr UBYTE) {.importc: "EPD_2in13_V3_Display_Base".}
-proc Display_Partial*(Image: ptr UBYTE) {.importc: "EPD_2in13_V3_Display_Partial".}
-proc Sleep*() {.importc: "EPD_2in13_V3_Sleep".}
+proc EPD_2in13_V3_Init*() {.importc: "EPD_2in13_V3_Init".}
+proc EPD_2in13_V3_Clear*() {.importc: "EPD_2in13_V3_Clear".}
+proc EPD_2in13_V3_Display*(Image: ptr UBYTE) {.importc: "EPD_2in13_V3_Display".}
+proc EPD_2in13_V3_Display_Base*(Image: ptr UBYTE) {.
+    importc: "EPD_2in13_V3_Display_Base".}
+proc EPD_2in13_V3_Display_Partial*(Image: ptr UBYTE) {.
+    importc: "EPD_2in13_V3_Display_Partial".}
+proc EPD_2in13_V3_Sleep*() {.importc: "EPD_2in13_V3_Sleep".}

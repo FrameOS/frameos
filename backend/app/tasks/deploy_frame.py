@@ -16,11 +16,14 @@ from io import StringIO
 from scp import SCPClient
 
 from app import create_app
+from app.codegen.drivers_nim import write_drivers_nim
+from app.codegen.scene_nim import write_scene_nim
+from app.drivers.devices import drivers_for_device
+from app.drivers.waveshare import write_waveshare_driver_nim
 from app.huey import huey
 from app.models import get_apps_from_scenes
-from app.models.drivers import drivers_for_device, write_drivers_nim, write_waveshare_driver_nim
 from app.models.log import new_log as log
-from app.models.frame import Frame, update_frame, get_frame_json, generate_scene_nim_source
+from app.models.frame import Frame, update_frame, get_frame_json
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection, exec_local_command
 
 
@@ -42,13 +45,13 @@ def deploy_frame(id: int):
             log(id, "stdout", f"Deploying frame {frame.name} with build id {build_id}")
 
             nim_path = find_nim_v2()
+            ssh = get_ssh_connection(frame)
 
             def install_if_necessary(package: str):
                 """If a package is not installed, install it."""
                 exec_command(frame, ssh, f"dpkg -l | grep -q \"^ii  {package}\" || sudo apt-get install -y {package}")
 
             with tempfile.TemporaryDirectory() as temp_dir:
-                ssh = get_ssh_connection(frame)
                 log(id, "stdout", f"- Getting target architecture")
                 uname_output = []
                 exec_command(frame, ssh, f"uname -m", uname_output)
@@ -181,7 +184,7 @@ def make_local_modifications(frame: Frame, source_dir: str):
 
     # only one scene called "default" for now
     for scene in frame.scenes:
-        scene_source = generate_scene_nim_source(frame, scene)
+        scene_source = write_scene_nim(frame, scene)
         with open(os.path.join(source_dir, "src", "scenes", f"{scene.get('id')}.nim"), "w") as file:
             file.write(scene_source)
 
@@ -247,11 +250,11 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
         shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "Debug.h"), os.path.join(build_dir, "Debug.h")) # TODO: name
         shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "DEV_Config.c"), os.path.join(build_dir, "DEV_Config.c"))
         shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "DEV_Config.h"), os.path.join(build_dir, "DEV_Config.h"))
-        # TODO: select just one
-        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "EPD_7in5_V2.c"), os.path.join(build_dir, "EPD_7in5_V2.c"))
-        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "EPD_7in5_V2.h"), os.path.join(build_dir, "EPD_7in5_V2.h"))
-        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "EPD_2in13_V3.c"), os.path.join(build_dir, "EPD_2in13_V3.c"))
-        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "EPD_2in13_V3.h"), os.path.join(build_dir, "EPD_2in13_V3.h"))
+
+        if waveshare.variant:
+            files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
+            for file in files:
+                shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", file), os.path.join(build_dir, file))
 
     # Update the compilation script for verbose output
     script_path = os.path.join(build_dir, "compile_frameos.sh")

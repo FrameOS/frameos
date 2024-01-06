@@ -10,12 +10,11 @@ type
     width*: int
     height*: int
     device*: string
-    color*: string
     interval*: float
     metricsInterval*: float
     rotate*: int
     scalingMode*: string
-    backgroundColor*: string
+    backgroundColor*: Color
     settings*: JsonNode
 
   Logger* = ref object
