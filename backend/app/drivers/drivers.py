@@ -45,4 +45,8 @@ DRIVERS = {
     "i2c": Driver( # enables i2c on deploy
         name="i2c",
     ),
+    "gpioButton": Driver(
+        name="gpioButton",
+        import_path="gpioButton/gpioButton",
+    ),
 }
