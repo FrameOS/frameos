@@ -1,0 +1,189 @@
+{
+  "version": 2,
+  "packages": {
+    "flatty": {
+      "version": "0.3.4",
+      "vcsRevision": "07f6ba8ab96238e5bd1264cf0cea1d1746abb00c",
+      "url": "https://github.com/treeform/flatty",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "5775e6ea6ca339efc5bd37b082b8294342d49dc5"
+      }
+    },
+    "nimsimd": {
+      "version": "1.2.6",
+      "vcsRevision": "156e424306756a106442aca985eed61a8d12097b",
+      "url": "https://github.com/guzba/nimsimd",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "a371cce59834c8d56091f5c891fd182e2eb9b3c4"
+      }
+    },
+    "crunchy": {
+      "version": "0.1.9",
+      "vcsRevision": "d0c9ad33ae72aece49093d7688fc78a7101aa4b0",
+      "url": "https://github.com/guzba/crunchy",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nimsimd"
+      ],
+      "checksums": {
+        "sha1": "3afda170fbe40158cd78e00375e34690f1fae263"
+      }
+    },
+    "vmath": {
+      "version": "2.0.0",
+      "vcsRevision": "7282ae1247f2f384ebeaec3826d7fa38fd0e1df1",
+      "url": "https://github.com/treeform/vmath",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "c90a664f3425d26219e1262ed9a888b859b3127c"
+      }
+    },
+    "asynctools": {
+      "version": "0.1.1",
+      "vcsRevision": "0e6bdc3ed5bae8c7cc9e03cfbf66b7c882a908a7",
+      "url": "https://github.com/cheatfate/asynctools",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "54314dceabb06b20908ecb0f2c007e9ff3aaa054"
+      }
+    },
+    "chroma": {
+      "version": "0.2.7",
+      "vcsRevision": "b2e71179174e040884ebf6a16cbac711c84620b9",
+      "url": "https://github.com/treeform/chroma",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "f873f4b97e87a82e27e0b85bf9130fe3e320a2b8"
+      }
+    },
+    "zippy": {
+      "version": "0.10.11",
+      "vcsRevision": "9560f3d20479fb390c97f731ef8d100f1ed54e6c",
+      "url": "https://github.com/guzba/zippy",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "12e761e18ccc0a1b0e931c74dd02bb4b74544d56"
+      }
+    },
+    "bumpy": {
+      "version": "1.1.2",
+      "vcsRevision": "d7eaf00c24820ad0317c9926737402e62431e931",
+      "url": "https://github.com/treeform/bumpy",
+      "downloadMethod": "git",
+      "dependencies": [
+        "vmath"
+      ],
+      "checksums": {
+        "sha1": "acc789c4e31b3ee969a13dd0c238d808f39b19c7"
+      }
+    },
+    "pixie": {
+      "version": "5.0.6",
+      "vcsRevision": "f3e73f722fbb0e5d496fbc59ee860a9fd49983de",
+      "url": "https://github.com/treeform/pixie",
+      "downloadMethod": "git",
+      "dependencies": [
+        "vmath",
+        "chroma",
+        "zippy",
+        "flatty",
+        "nimsimd",
+        "bumpy",
+        "crunchy"
+      ],
+      "checksums": {
+        "sha1": "fd4c5d12bba41aac760fc86c2de820e1a367dbfd"
+      }
+    },
+    "linuxfb": {
+      "version": "0.1.0",
+      "vcsRevision": "ed5671d9aab99ca2c2fea74bea57b42e0a685c2d",
+      "url": "https://github.com/luked99/linuxfb.nim",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "8e639fafa952f3e9d0315f181aa05e0694603bfc"
+      }
+    },
+    "unpack": {
+      "version": "0.4.0",
+      "vcsRevision": "1b6d749473bfb6bd7b749abf823503df633ba04c",
+      "url": "https://github.com/technicallyagd/unpack",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "d65465ca8e74e9fcb590255491c8fe7763e38c42"
+      }
+    },
+    "psutil": {
+      "version": "0.6.1",
+      "vcsRevision": "8e5db60edb22a5fc21268127eb385e5d8f70b474",
+      "url": "https://github.com/juancarlospaco/psutil-nim",
+      "downloadMethod": "git",
+      "dependencies": [
+        "unpack"
+      ],
+      "checksums": {
+        "sha1": "137403c200c58c6cd566ab5fbfd597b535303fc6"
+      }
+    },
+    "httpbeast": {
+      "version": "0.4.2",
+      "vcsRevision": "75008aaba497479df4023d52880086deae6385e3",
+      "url": "https://github.com/dom96/httpbeast",
+      "downloadMethod": "git",
+      "dependencies": [
+        "asynctools"
+      ],
+      "checksums": {
+        "sha1": "ceacc8345c9513bd69c4bdb36dd2cb270e8614c4"
+      }
+    },
+    "jester": {
+      "version": "0.6.0",
+      "vcsRevision": "ac9b8541dce64feff9b53b700cab8496c1816651",
+      "url": "https://github.com/dom96/jester/",
+      "downloadMethod": "git",
+      "dependencies": [
+        "httpbeast"
+      ],
+      "checksums": {
+        "sha1": "a5120cfff525e23be29bb2ff47b6ba2f4b2674a3"
+      }
+    }
+  },
+  "tasks": {
+    "assets": {
+      "zstd": {
+        "version": "0.9.0",
+        "vcsRevision": "f8f80a57ff782f176b16de0b3885600523d39d80",
+        "url": "https://github.com/wltsmrz/nim_zstd",
+        "downloadMethod": "git",
+        "dependencies": [],
+        "checksums": {
+          "sha1": "20b23158e94f01ea0c4bf419a21b0feabe70bf31"
+        }
+      },
+      "nimassets": {
+        "version": "0.2.4",
+        "vcsRevision": "d06724dd7b80fb470542ab932f3a94af78fe2eb1",
+        "url": "https://github.com/xmonader/nimassets",
+        "downloadMethod": "git",
+        "dependencies": [
+          "zstd"
+        ],
+        "checksums": {
+          "sha1": "71d5510ad86a323fc0ad5dc6b774261e80fe0361"
+        }
+      }
+    }
+  }
+}

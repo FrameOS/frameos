@@ -14,7 +14,6 @@ bin           = @["frameos"]
 requires "nim >= 2.0.0"
 requires "pixie >= 5.0.6"
 requires "jester >= 0.6.0"
-requires "wiringpinim >= 0.1.0"
 requires "linuxfb >= 0.1.0"
 requires "psutil >= 0.6.0"
 
