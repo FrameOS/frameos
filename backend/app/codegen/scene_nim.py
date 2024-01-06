@@ -215,6 +215,7 @@ proc render*(self: Scene): Image =
     loopIndex: 0, 
     loopKey: "."
   )
+  context.image.fill(self.frameConfig.backgroundColor)
   runEvent(self, context)
   return context.image
 {{.pop.}}
