@@ -122,6 +122,11 @@ def deploy_frame(id: int):
                 # swap out the release
                 exec_command(frame, ssh, f"rm -rf /srv/frameos/current && ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current")
 
+                # clean old build and release and cache folders
+                exec_command(frame, ssh, f"cd /srv/frameos/build && ls -dt1 build_* | tail -n +11 | xargs rm -rf")
+                exec_command(frame, ssh, f"cd /srv/frameos/build/cache && find . -type f \( -atime +0 -a -mtime +0 \) | xargs rm -rf")
+                exec_command(frame, ssh, f"cd /srv/frameos/releases && ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" | tail -n +11 | xargs rm -rf")
+
                 # restart
                 exec_command(frame, ssh, "sudo systemctl daemon-reload")
                 exec_command(frame, ssh, "sudo systemctl enable frameos.service")
