@@ -1,5 +1,7 @@
-{.compile("DEV_Config.c", "-D epd7in5V2 -D USE_LGPIO_LIB -D RPI -llgpio").}
-{.passl: "-llgpio".}
+{.compile("DEV_Config.c", "-D USE_DEV_LIB -D RPI -lgpiod").}
+{.compile("RPI_gpiod.c", "-D USE_DEV_LIB -D RPI -lgpiod").}
+{.compile("dev_hardware_SPI.c", "-D USE_DEV_LIB -D RPI -lgpiod").}
+{.passl: "-lgpiod".}
 ## ***************************************************************************
 ##  | File      	:   DEV_Config.h
 ##  | Author      :   Waveshare team

@@ -282,6 +282,7 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
     with open(script_path, "w") as file:
         file.write("#!/bin/sh\n")
         file.write("set -eu\n")
+        file.write("start_time=$(date +%s)\n")
         file.write("mkdir -p ../cache\n") # make sure we have the cache folder
         file.write("cached_files_count=0\n")  # Initialize cached files counter
         for i, line in enumerate(lines):
@@ -307,6 +308,9 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
                 file.write(f"echo [{i + 1}/{len(lines)}] Compiling on device: frameos\n")
                 file.write(line)
         file.write("echo \"Used $cached_files_count cached files\"\n")
+        file.write("end_time=$(date +%s)\n")
+        file.write("duration=$((end_time - start_time))\n")
+        file.write("echo \"Compiled in $duration seconds\"\n")
 
     # 7. Zip it up "(cd tmp && tar -czf ./build_1.tar.gz build_1)"
     archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")
