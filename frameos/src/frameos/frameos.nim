@@ -28,7 +28,6 @@ proc start*(self: FrameOS) {.async.} =
     "width": self.frameConfig.width,
     "height": self.frameConfig.height,
     "device": self.frameConfig.device,
-    "color": self.frameConfig.color,
     "interval": self.frameConfig.interval,
     "metrics_interval": self.frameConfig.metricsInterval,
     "scaling_mode": self.frameConfig.scalingMode,
