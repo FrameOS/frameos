@@ -6,9 +6,9 @@ import { Form } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import { frameLogic } from '../../frameLogic'
-import { devices } from '../../constants'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
+import { devices } from '../../../../devices'
 
 export interface DetailsProps {
   className?: string

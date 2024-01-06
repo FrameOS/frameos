@@ -23,5 +23,4 @@ class TestDrivers(BaseTestCase):
             assert variant.init_function is not None
             assert variant.clear_function is not None
             assert variant.display_function is not None
-
-            # TODO: color options
+            assert variant.color_option != "Unknown"

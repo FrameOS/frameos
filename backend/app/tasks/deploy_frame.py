@@ -250,11 +250,11 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
         shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "Debug.h"), os.path.join(build_dir, "Debug.h")) # TODO: name
         shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "DEV_Config.c"), os.path.join(build_dir, "DEV_Config.c"))
         shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "DEV_Config.h"), os.path.join(build_dir, "DEV_Config.h"))
-        # TODO: select just one
-        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "EPD_7in5_V2.c"), os.path.join(build_dir, "EPD_7in5_V2.c"))
-        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "EPD_7in5_V2.h"), os.path.join(build_dir, "EPD_7in5_V2.h"))
-        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "EPD_2in13_V3.c"), os.path.join(build_dir, "EPD_2in13_V3.c"))
-        shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", "EPD_2in13_V3.h"), os.path.join(build_dir, "EPD_2in13_V3.h"))
+
+        if waveshare.variant:
+            files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
+            for file in files:
+                shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", file), os.path.join(build_dir, file))
 
     # Update the compilation script for verbose output
     script_path = os.path.join(build_dir, "compile_frameos.sh")

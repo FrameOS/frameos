@@ -6,8 +6,8 @@ import { TextInput } from '../../components/TextInput'
 import { Field } from '../../components/Field'
 import { newFrameForm } from './newFrameForm'
 import { Select } from '../../components/Select'
-import { devices } from '../frame/constants'
 import { useActions, useValues } from 'kea'
+import { devices } from '../../devices'
 
 export function NewFrame(): JSX.Element {
   const { hideForm, resetNewFrame } = useActions(newFrameForm)

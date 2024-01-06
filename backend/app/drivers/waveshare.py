@@ -1,6 +1,7 @@
 import os
+import re
 from dataclasses import dataclass
-from typing import Optional, Dict, List, Literal
+from typing import Optional, Dict, List, Literal, Tuple
 
 from app.drivers.drivers import Driver
 
@@ -8,6 +9,8 @@ from app.drivers.drivers import Driver
 class WaveshareVariant:
     key: str
     prefix: str
+    size: float
+    code: str = ""
     width: Optional[int] = None
     height: Optional[int] = None
     init_function: Optional[str] = None
@@ -84,13 +87,25 @@ def get_proc_arguments(line: str, variant_key: str) -> List[str]:
         arg_names.append(argmap.get(name.lower(), name))
     return arg_names
 
+def key_to_float(key: str) -> Tuple[Optional[float], Optional[str]]:
+    match = re.search(r'(\d+)in(\d+)([a-zA-Z_0-9]*)', key)
+    if match:
+        whole_number = match.group(1)
+        fractional_part = match.group(2)
+        suffix = match.group(3)
+        float_str = f"{whole_number}.{fractional_part}"
+        return float(float_str), suffix.replace('_', ' ').strip()
+    else:
+        return None, None
+
 def convert_waveshare_source(variant_key: str) -> WaveshareVariant:
     if not variant_key:
         raise Exception("No waveshare driver variant specified")
     if variant_key not in get_variant_keys(): # checks if a file called variant.nim exists
         raise Exception(f"Unknown waveshare driver variant {variant_key}")
     with open(os.path.join("..", "frameos", "src", "drivers", "waveshare", "ePaper", f"{variant_key}.nim"), "r") as f:
-        variant = WaveshareVariant(key=variant_key, prefix='')
+        size, code = key_to_float(variant_key)
+        variant = WaveshareVariant(key=variant_key, prefix='', size=size, code=code)
         lines = []
         in_proc = False
         for line in f.readlines():

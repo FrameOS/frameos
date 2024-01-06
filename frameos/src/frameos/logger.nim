@@ -1,4 +1,4 @@
-import httpclient, zippy, json, sequtils, os, times, math, strformat
+import httpclient, zippy, json, sequtils, os, times, math
 
 from frameos/types import FrameConfig, Logger
 
