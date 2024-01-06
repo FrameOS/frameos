@@ -14,7 +14,7 @@ class WaveshareVariant:
     clear_function: Optional[str] = None
     display_function: Optional[str] = None
     init_returns_zero: bool = False
-    color_option: str = Literal["Black", "BlackRed"]
+    color_option: Literal["Black", "BlackRed"] = "Black"
 
 
 def get_variant_keys() -> List[str]:
@@ -71,8 +71,8 @@ import ePaper/DEV_Config as waveshareConfig
 import ePaper/{variant.key} as waveshareDisplay
 from ./types import ColorOption
 
-let width* = waveshareDisplay.WIDTH
-let height* = waveshareDisplay.HEIGHT
+let width* = waveshareDisplay.{variant.prefix}_WIDTH
+let height* = waveshareDisplay.{variant.prefix}_HEIGHT
 
 let color_option* = ColorOption.{variant.color_option}
 
