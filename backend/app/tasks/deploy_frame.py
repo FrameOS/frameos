@@ -42,9 +42,9 @@ def deploy_frame(id: int):
             log(id, "stdout", f"Deploying frame {frame.name} with build id {build_id}")
 
             nim_path = find_nim_v2()
+            ssh = get_ssh_connection(frame)
 
             with tempfile.TemporaryDirectory() as temp_dir:
-                ssh = get_ssh_connection(frame)
                 log(id, "stdout", f"- Getting target architecture")
                 uname_output = []
                 exec_command(frame, ssh, f"uname -m", uname_output)
