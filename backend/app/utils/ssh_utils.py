@@ -51,17 +51,20 @@ def get_ssh_connection(frame: Frame) -> SSHClient:
         if ssh_keys and ssh_keys.value:
             default_key = ssh_keys.value.get("default", None)
         if default_key:
-            private_key_cryptography = load_pem_private_key(
-                default_key.encode(),
-                password=None,
-                backend=default_backend()
-            )
-            pem = private_key_cryptography.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.TraditionalOpenSSL,
-                encryption_algorithm=serialization.NoEncryption()
-            )
-            ssh_key_obj = RSAKey(file_obj=StringIO(pem.decode()))
+            try:
+                private_key_cryptography = load_pem_private_key(
+                    default_key.encode(),
+                    password=None,
+                    backend=default_backend()
+                )
+                pem = private_key_cryptography.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.TraditionalOpenSSL,
+                    encryption_algorithm=serialization.NoEncryption()
+                )
+                ssh_key_obj = RSAKey(file_obj=StringIO(pem.decode()))
+            except:
+                ssh_key_obj = RSAKey.from_private_key(StringIO(default_key))
             ssh.connect(frame.frame_host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=30)
         else:
             raise Exception(f"Set up SSH keys in the settings page, or provide a password for the frame")
