@@ -25,6 +25,14 @@ jobs:
       - name: Install redis
         run: sudo apt-get install -y redis-server
 
+      - name: Cache pip packages
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install python dependencies
         run: |
           cd backend
@@ -35,6 +43,10 @@ jobs:
         run: |
           cd frontend
           npm install
+
+      - name: Build frontend
+        run: |
+          cd frontend
           npm run build
 
       - name: Run Pytest
