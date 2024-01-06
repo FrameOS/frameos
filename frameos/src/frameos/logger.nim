@@ -1,4 +1,4 @@
-import httpclient, zippy, json, sequtils, os, times
+import httpclient, zippy, json, sequtils, os, times, math, strformat
 
 from frameos/types import FrameConfig, Logger
 
@@ -19,12 +19,12 @@ var
 
 logChannel.open()
 
-proc logInThread*(self: LoggerThread) =
+proc sendCollectedLogs*(self: LoggerThread): bool =
   var newLogs = self.erroredLogs.concat(self.logs)
   self.logs = @[]
   self.erroredLogs = @[]
   if newLogs.len == 0:
-    return
+    return true
   if newLogs.len > 100:
     newLogs = newLogs[(newLogs.len - 100) .. (newLogs.len - 1)]
   try:
@@ -34,17 +34,37 @@ proc logInThread*(self: LoggerThread) =
     self.lastSendAt = epochTime()
     if response.code != Http200:
       echo "Error sending logs: HTTP " & $response.status
-      self.erroredLogs = self.erroredLogs.concat(newLogs)
+      if self.erroredLogs.len > 0 and self.erroredLogs[0]{"event"}.getStr() == "logger:error":
+        self.erroredLogs = self.erroredLogs.concat(newLogs)
+      else:
+        let errorLog = %*{"event": "logger:error",
+            "error": "Error sending logs, will retry: HTTP " &
+            $response.status}
+        self.erroredLogs = @[errorLog].concat(self.erroredLogs.concat(newLogs))
+      return false
   except CatchableError as e:
     echo "Error sending logs: " & $e.msg
-    self.erroredLogs = self.erroredLogs.concat(newLogs)
+    if self.erroredLogs.len > 0 and self.erroredLogs[0]{"event"}.getStr() == "logger:error":
+      self.erroredLogs = self.erroredLogs.concat(newLogs)
+    else:
+      let errorLog = %*{"event": "logger:error",
+            "error": "Error sending logs, will retry: " & $e.msg}
+      self.erroredLogs = @[errorLog].concat(self.erroredLogs.concat(newLogs))
+    return false
+  return true
 
 proc start(self: LoggerThread) =
+  var attempt = 0
   while true:
     let logCount = (self.logs.len + self.erroredLogs.len)
     if logCount > 10 or (logCount > 0 and self.lastSendAt + LOG_FLUSH_SECONDS <
         epochTime()):
-      self.logInThread()
+      if self.sendCollectedLogs():
+        attempt = 0
+      else:
+        attempt += 1
+        let sleepDuration = min(100 * (2 ^ attempt), 7500)
+        sleep(sleepDuration)
 
     let (success, payload) = logChannel.tryRecv()
     if success:
