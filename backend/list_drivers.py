@@ -31,7 +31,7 @@ if __name__ == '__main__':
         code = "" if v.code == "" else f" ({v.code.upper()})"
         output = {
             "value": f"waveshare.{v.key}",
-            "label": f'Waveshare {v.size}"{code} {v.width}x{v.width} {color}',
+            "label": f'Waveshare {v.size}"{code} {max(v.width, v.height)}x{min(v.width, v.height)} {color}',
         }
         print(f"    {json.dumps(output)},")
 
