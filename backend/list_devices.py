@@ -19,7 +19,7 @@ if __name__ == '__main__':
 
     # Waveshare
     variants = [convert_waveshare_source(key) for key in get_variant_keys()]
-    variants = sorted(variants, key=lambda x: x.size)
+    variants = sorted(variants, key=lambda x: (x.size, x.width, x.height, x.code))
     for v in variants:
         color = {
             "Black": "Black/White",
