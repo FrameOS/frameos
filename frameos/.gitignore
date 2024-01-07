@@ -4,3 +4,5 @@ tmp/
 frameos.deps
 nimcache
 testresults
+nimble.develop
+nimble.paths
