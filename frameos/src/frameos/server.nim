@@ -3,7 +3,11 @@
 import json
 import pixie
 import assets/web as webAssets
-import asyncdispatch, jester
+import asyncdispatch
+import jester
+import locks
+import ws, ws/jester_extra
+
 from net import Port
 import options
 import strutils
@@ -13,22 +17,51 @@ from frameos/runner import lastRender, triggerRender, getLastImage
 var globalLogger: Logger
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
+let indexHtml = webAssets.getAsset("assets/web/index.html")
+
+var connections = newSeq[WebSocket]()
+var connectionsLock: Lock
+
+initLock(connectionsLock)
+
+proc sendToAll(message: string) {.async.} =
+  withLock connectionsLock:
+    for ws in connections:
+      if ws.readyState == Open:
+        asyncCheck ws.send(message)
+
 
 proc match(request: Request): Future[ResponseData] {.async.} =
-  {.cast(gcsafe).}: # TODO: is this correct? https://forum.nim-lang.org/t/10474
-    var indexHtml = webAssets.getAsset("assets/web/index.html")
-    var scalingMode = case globalFrameConfig.scalingMode:
-      of "cover", "center":
-        globalFrameConfig.scalingMode
-      of "stretch":
-        "100% 100%"
-      else:
-        "contain"
-    indexHtml = indexHtml.replace("/*$scalingMode*/contain", scalingMode)
+  {.cast(gcsafe).}:
     block route:
       case request.pathInfo
-      of "/", "/kiosk":
-        resp Http200, indexHtml
+      of "/":
+        let scalingMode = case globalFrameConfig.scalingMode:
+          of "cover", "center":
+            globalFrameConfig.scalingMode
+          of "stretch":
+            "100% 100%"
+          else:
+            "contain"
+        resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
+      of "/ws":
+        var ws = await newWebSocket(request)
+        try:
+          withLock connectionsLock:
+            connections.add ws
+          while ws.readyState == Open:
+            let packet = await ws.receiveStrPacket()
+            globalLogger.log(%*{"event": "websocket", "message": packet})
+            # TODO: handle incoming messages
+            # TODO: accept render events, but debounced?
+            # TODO: send render events
+            await sendToAll(packet)
+        except WebSocketError:
+          echo "socket closed:", getCurrentExceptionMsg()
+          withLock connectionsLock:
+            let index = connections.find(ws)
+            if index >= 0:
+              connections.del(index)
       of "/event/render":
         globalLogger.log(%*{"event": "http", "path": request.pathInfo})
         globalRunner.triggerRender()

@@ -29,8 +29,35 @@
 <body>
 <div id="image1" style="opacity:1; background-image:url('/image')" class="image-holder" onclick="toggleImageSize()"></div>
 <div id="image2" style="opacity:0" class="image-holder" onclick="toggleImageSize()"></div>
+<script>  
+    function connectWebSocket() {
+        var loc = window.location;
+        var wsProtocol = loc.protocol === "https:" ? "wss:" : "ws:";
+        var wsURL = wsProtocol + "//" + loc.host + "/ws";
+        ws = new WebSocket(wsURL);
 
-<script>
+        ws.onopen = function() {
+            console.log("WebSocket connection established");
+            ws.send("hi");
+        };
+
+        ws.onmessage = function(event) {
+            console.log("Message received:", event.data);
+        };
+
+        ws.onerror = function(error) {
+            console.error("WebSocket Error:", error);
+        };
+
+        ws.onclose = function(event) {
+            console.log("WebSocket closed:", event);
+            if (event.code !== 1000) {
+                console.log("Attempting to reconnect...");
+                setTimeout(connectWebSocket, 3000);
+            }
+        };
+    }
+
     function toggleImageSize() {
         const image1 = document.getElementById('image1');
         const image2 = document.getElementById('image2');
@@ -57,6 +84,8 @@
             newImageElem.style.opacity = '1';
         };
     }
+
+    connectWebSocket();
 </script>
 </body>
 </html>
