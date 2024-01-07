@@ -82,7 +82,7 @@ def deploy_frame(id: int):
                     install_if_necessary("build-essential")
                     if drivers.get("evdev"):
                         install_if_necessary("libevdev-dev")
-                    if drivers.get('waveshare'):
+                    if drivers.get('waveshare') or drivers.get('gpioButton'):
                         install_if_necessary("libgpiod-dev")
 
                     exec_command(frame, ssh, "if [ ! -d /srv/frameos/ ]; then sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; fi")
