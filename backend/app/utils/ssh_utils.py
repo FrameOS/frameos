@@ -95,6 +95,7 @@ def exec_command(frame: Frame, ssh: SSHClient, command: str, output: Optional[Li
 
     if exit_status != 0:
         log(frame.id, "exit_status", f"The command exited with status {exit_status}")
+        raise Exception(f"The command exited with status {exit_status}")
 
     return exit_status
 
