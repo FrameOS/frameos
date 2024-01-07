@@ -1,5 +1,4 @@
-import json
-import pixie
+import json, pixie, os
 from frameos/types import FrameConfig
 
 proc setConfigDefaults*(config: var FrameConfig) =
@@ -30,5 +29,6 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     rotate: data{"rotate"}.getInt(),
     scalingMode: data{"scalingMode"}.getStr(),
     settings: data{"settings"},
+    verbose: commandLineParams().contains("--verbose")
   )
   setConfigDefaults(result)
