@@ -47,6 +47,7 @@ proc match(request: Request): Future[ResponseData] {.async.} =
       of "/ws":
         var ws = await newWebSocket(request)
         try:
+          globalLogger.log(%*{"event": "websocket", "connect": ws.key})
           withLock connectionsLock:
             connections.add ws
           while ws.readyState == Open:
@@ -57,7 +58,7 @@ proc match(request: Request): Future[ResponseData] {.async.} =
             # TODO: send render events
             await sendToAll(packet)
         except WebSocketError:
-          echo "socket closed:", getCurrentExceptionMsg()
+          globalLogger.log(%*{"event": "websocket", "disconnect": ws.key, "reason": getCurrentExceptionMsg()})
           withLock connectionsLock:
             let index = connections.find(ws)
             if index >= 0:
