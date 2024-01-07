@@ -6,6 +6,7 @@ import assets/web as webAssets
 import asyncdispatch, jester
 from net import Port
 import options
+import strutils
 from frameos/types import FrameOS, FrameConfig, Logger, Server, RunnerControl
 from frameos/runner import lastRender, triggerRender, getLastImage
 
@@ -14,12 +15,20 @@ var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
 
 proc match(request: Request): Future[ResponseData] {.async.} =
-  echo "GET " & request.pathInfo
   {.cast(gcsafe).}: # TODO: is this correct? https://forum.nim-lang.org/t/10474
+    var indexHtml = webAssets.getAsset("assets/web/index.html")
+    var scalingMode = case globalFrameConfig.scalingMode:
+      of "cover", "center":
+        globalFrameConfig.scalingMode
+      of "stretch":
+        "100% 100%"
+      else:
+        "contain"
+    indexHtml = indexHtml.replace("/*$scalingMode*/contain", scalingMode)
     block route:
       case request.pathInfo
       of "/", "/kiosk":
-        resp Http200, webAssets.getAsset("assets/web/index.html")
+        resp Http200, indexHtml
       of "/event/render":
         globalLogger.log(%*{"event": "http", "path": request.pathInfo})
         globalRunner.triggerRender()
