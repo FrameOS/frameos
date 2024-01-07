@@ -19,17 +19,14 @@ var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
 let indexHtml = webAssets.getAsset("assets/web/index.html")
 
-var connections = newSeq[WebSocket]()
 var connectionsLock: Lock
-
-initLock(connectionsLock)
+var connections {.guard: connectionsLock.} = newSeq[WebSocket]()
 
 proc sendToAll(message: string) {.async.} =
   withLock connectionsLock:
-    for ws in connections:
-      if ws.readyState == Open:
-        asyncCheck ws.send(message)
-
+    for connection in connections:
+      if connection.readyState == Open:
+        asyncCheck connection.send(message)
 
 proc match(request: Request): Future[ResponseData] {.async.} =
   {.cast(gcsafe).}:
@@ -56,7 +53,7 @@ proc match(request: Request): Future[ResponseData] {.async.} =
             # TODO: handle incoming messages
             # TODO: accept render events, but debounced?
             # TODO: send render events
-            await sendToAll(packet)
+            asyncCheck sendToAll(packet)
         except WebSocketError:
           globalLogger.log(%*{"event": "websocket", "disconnect": ws.key, "reason": getCurrentExceptionMsg()})
           withLock connectionsLock:
