@@ -6,7 +6,7 @@ import pixie
 # import frameBuffer/frameBuffer as frameBufferDriver
 # import waveshare/waveshare as waveshareDriver
 
-from frameos/types import Logger, FrameOS
+import frameos/types
 
 # var inkyDriverInstance: inkyDriver.Driver
 # var frameBufferDriverInstance: frameBufferDriver.Driver

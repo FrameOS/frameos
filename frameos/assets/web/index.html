@@ -1,10 +1,94 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FrameOS</title>
+    <style>
+        body {
+            padding: 0;
+            margin: 0;
+            background: black;
+            position: relative;
+        }
+        .image-holder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-repeat: no-repeat;
+            background-position: center center;
+            background-size: /*$scalingMode*/contain;
+            /* transition: opacity 1s; // make this controllable */
+            cursor: pointer;
+        }
+        #displayedImage { width: 100%; }
+    </style>
 </head>
 <body>
-    <h1>Welcome to FrameOS. From an asset!</h1>
-    <img src="/image" alt="Image">
+<div id="image1" style="opacity:1; background-image:url('/image')" class="image-holder" onclick="toggleImageSize()"></div>
+<div id="image2" style="opacity:0" class="image-holder" onclick="toggleImageSize()"></div>
+<script>  
+    function connectWebSocket() {
+        var loc = window.location;
+        var wsProtocol = loc.protocol === "https:" ? "wss:" : "ws:";
+        var wsURL = wsProtocol + "//" + loc.host + "/ws";
+        ws = new WebSocket(wsURL);
+
+        ws.onopen = function() {
+            console.log("WebSocket connection established");
+            refreshImage();
+        };
+
+        ws.onmessage = function(event) {
+            console.log("Message received:", event.data);
+            if (event.data === "render") {
+                refreshImage();
+            }
+        };
+
+        ws.onerror = function(error) {
+            console.error("WebSocket Error:", error);
+        };
+
+        ws.onclose = function(event) {
+            console.log("WebSocket closed:", event);
+            if (event.code !== 1000) {
+                console.log("Attempting to reconnect...");
+                setTimeout(connectWebSocket, 3000);
+            }
+        };
+    }
+
+    function toggleImageSize() {
+        const image1 = document.getElementById('image1');
+        const image2 = document.getElementById('image2');
+        
+        let currentSize = window.getComputedStyle(image1, null).getPropertyValue('background-size');
+
+        if (currentSize.trim() === 'cover') {
+            image1.style.backgroundSize = 'contain';
+            image2.style.backgroundSize = 'contain';
+        } else {
+            image1.style.backgroundSize = 'cover';
+            image2.style.backgroundSize = 'cover';
+        }
+    }
+    function refreshImage() {
+        const imageUrl = '/image?' + new Date().getTime();
+        const tempImage = new Image();
+        tempImage.src = imageUrl;
+        tempImage.onload = () => {
+            const newImageElem = (parseFloat(document.getElementById('image1').style.opacity) === 1) ? document.getElementById('image2') : document.getElementById('image1');
+            const oldImageElem = (newImageElem.id === 'image1') ? document.getElementById('image2') : document.getElementById('image1');
+            newImageElem.style.backgroundImage = `url(${imageUrl})`;
+            oldImageElem.style.opacity = '0';
+            newImageElem.style.opacity = '1';
+        };
+    }
+
+    connectWebSocket();
+</script>
 </body>
 </html>

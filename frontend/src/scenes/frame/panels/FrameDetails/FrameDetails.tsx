@@ -97,7 +97,7 @@ export function FrameDetails({ className }: DetailsProps) {
                 <td className="truncate">{frame.background_color}</td>
               </tr>
               <tr>
-                <td className="text-blue-200 text-right">Kiosk URL:</td>
+                <td className="text-blue-200 text-right">Frame URL:</td>
                 <td className="truncate">
                   <a href={frameUrl(frame)} target="_blank" rel="noreferer noopener">
                     {frameUrl(frame)}

@@ -1,6 +1,6 @@
 import pixie
-from frameos/types import FrameScene, FrameConfig, ExecutionContext, Logger
-from frameos/utils/image import scaleAndDrawImage
+import frameos/types
+import frameos/utils/image
 
 type
   AppConfig* = object

@@ -1,8 +1,8 @@
 import pixie
 import times
 import options
-from frameos/utils/image import downloadImage, scaleAndDrawImage
-from frameos/types import FrameScene, FrameConfig, ExecutionContext
+import frameos/utils/image
+import frameos/types
 
 type
   AppConfig* = object

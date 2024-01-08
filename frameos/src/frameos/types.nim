@@ -16,6 +16,7 @@ type
     scalingMode*: string
     backgroundColor*: Color
     settings*: JsonNode
+    verbose*: bool
 
   Logger* = ref object
     frameConfig*: FrameConfig
@@ -56,7 +57,6 @@ type
 
   Server* = ref object
     frameConfig*: FrameConfig
-    logger*: Logger
     jester*: Jester
     runner*: RunnerControl
     url*: string

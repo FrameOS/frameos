@@ -5,7 +5,7 @@ import json
 import strformat
 import httpclient
 from frameos/utils/image import scaleAndDrawImage
-from frameos/types import FrameScene, FrameConfig, ExecutionContext
+import frameos/types
 
 type
   AppConfig* = object
