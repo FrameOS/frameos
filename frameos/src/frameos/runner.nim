@@ -104,8 +104,19 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     self.scene.isRendering = true
     self.triggerRenderNext = false
     self.renderScene()
-    # TODO: option to put the driver render part in another thread
+
+    if self.frameConfig.interval < 1:
+      let now = epochTime()
+      if now >= nextServerRenderAt:
+        nextServerRenderAt = nextServerRenderAt + SERVER_RENDER_DELAY
+        if nextServerRenderAt < now:
+          nextServerRenderAt = now + SERVER_RENDER_DELAY
+        triggerServerRender()
+    else:
+      triggerServerRender()
+
     driverTimer = epochTime()
+    # TODO: render the part in another thread if fast rendering is enabled
     drivers.render(self.lastRotatedRender())
 
     self.logger.log(%*{"event": "render:driver",
@@ -131,15 +142,6 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
         fastSceneCount = 0
         fastSceneResumeAt = 0.0
         self.logger.enable()
-
-      if now >= nextServerRenderAt:
-        nextServerRenderAt = nextServerRenderAt + SERVER_RENDER_DELAY
-        if nextServerRenderAt < now:
-          nextServerRenderAt = now + SERVER_RENDER_DELAY
-        triggerServerRender()
-
-    else:
-      triggerServerRender()
 
 
     # Gives a chance for the gathered events to be collected
