@@ -57,7 +57,6 @@ type
 
   Server* = ref object
     frameConfig*: FrameConfig
-    logger*: Logger
     jester*: Jester
     runner*: RunnerControl
     url*: string

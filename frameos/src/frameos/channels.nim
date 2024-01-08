@@ -22,5 +22,4 @@ var serverChannel*: Channel[bool]
 serverChannel.open(1)
 
 proc triggerServerRender*() =
-  echo "Triggering server render"
   discard serverChannel.trySend(true)

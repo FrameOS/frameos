@@ -96,7 +96,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   var sleepDuration = 0.0
   var fastSceneCount = 0
   var fastSceneResumeAt = 0.0
-  var lastServerRender = 0.0
+  var nextServerRenderAt = 0.0
 
   while true:
     timer = epochTime()
@@ -132,8 +132,10 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
         fastSceneResumeAt = 0.0
         self.logger.enable()
 
-      if now - lastServerRender >= SERVER_RENDER_DELAY:
-        lastServerRender = now
+      if now >= nextServerRenderAt:
+        nextServerRenderAt = nextServerRenderAt + SERVER_RENDER_DELAY
+        if nextServerRenderAt < now:
+          nextServerRenderAt = now + SERVER_RENDER_DELAY
         triggerServerRender()
 
     else:

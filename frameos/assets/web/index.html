@@ -20,7 +20,7 @@
             background-repeat: no-repeat;
             background-position: center center;
             background-size: /*$scalingMode*/contain;
-            transition: opacity 1s;
+            /* transition: opacity 1s; // make this controllable */
             cursor: pointer;
         }
         #displayedImage { width: 100%; }
@@ -38,11 +38,14 @@
 
         ws.onopen = function() {
             console.log("WebSocket connection established");
-            ws.send("hi");
+            refreshImage();
         };
 
         ws.onmessage = function(event) {
             console.log("Message received:", event.data);
+            if (event.data === "render") {
+                refreshImage();
+            }
         };
 
         ws.onerror = function(error) {

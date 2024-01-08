@@ -12,9 +12,9 @@ from net import Port
 import options
 import strutils
 import frameos/types
+import frameos/channels
 from frameos/runner import lastRender, triggerRender, getLastImage
 
-var globalLogger: Logger
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
 let indexHtml = webAssets.getAsset("assets/web/index.html")
@@ -44,47 +44,53 @@ proc match(request: Request): Future[ResponseData] {.async.} =
       of "/ws":
         var ws = await newWebSocket(request)
         try:
-          globalLogger.log(%*{"event": "websocket", "connect": ws.key})
+          log(%*{"event": "websocket:connect", "key": ws.key})
           withLock connectionsLock:
             connections.add ws
           while ws.readyState == Open:
             let packet = await ws.receiveStrPacket()
-            globalLogger.log(%*{"event": "websocket", "message": packet})
-            # TODO: handle incoming messages
-            # TODO: accept render events, but debounced?
-            # TODO: send render events
-            asyncCheck sendToAll(packet)
+            log(%*{"event": "websocket:message", "message": packet})
+            # TODO: accept (debounced) render requests?
         except WebSocketError:
-          globalLogger.log(%*{"event": "websocket", "disconnect": ws.key, "reason": getCurrentExceptionMsg()})
+          log(%*{"event": "websocket:disconnect", "key": ws.key, "reason": getCurrentExceptionMsg()})
           withLock connectionsLock:
             let index = connections.find(ws)
             if index >= 0:
-              connections.del(index)
+              connections.delete(index)
       of "/event/render":
-        globalLogger.log(%*{"event": "http", "path": request.pathInfo})
+        log(%*{"event": "http", "path": request.pathInfo})
         globalRunner.triggerRender()
-        resp Http200, {"Content-Type": "application/json"}, $(%*{
-            "status": "ok"})
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
       of "/event/turnOn":
-        globalLogger.log(%*{"event": "http", "path": request.pathInfo})
+        log(%*{"event": "http", "path": request.pathInfo})
         globalRunner.sendEvent("turnOn", %*{})
-        resp Http200, {"Content-Type": "application/json"}, $(%*{
-            "status": "ok"})
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
       of "/event/turnOff":
-        globalLogger.log(%*{"event": "http", "path": request.pathInfo})
+        log(%*{"event": "http", "path": request.pathInfo})
         globalRunner.sendEvent("turnOff", %*{})
-        resp Http200, {"Content-Type": "application/json"}, $(%*{
-            "status": "ok"})
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
       of "/image":
-        globalLogger.log(%*{"event": "http", "path": request.pathInfo})
+        log(%*{"event": "http", "path": request.pathInfo})
         resp Http200, {"Content-Type": "image/png"}, globalRunner.getLastImage().encodeImage(PngFormat)
       else:
         resp Http404, "Not found!"
 
+proc listenForRender*() {.async.} =
+  var hasConnections = false
+  while true:
+    withLock connectionsLock:
+      hasConnections = connections.len > 0
+    if hasConnections:
+      let (dataAvailable, _) = serverChannel.tryRecv()
+      if dataAvailable:
+        asyncCheck sendToAll("render")
+        log(%*{"event": "websocket:send", "message": "render"})
+      await sleepAsync(0.1)
+    else:
+      await sleepAsync(2)
 
 proc newServer*(frameOS: FrameOS): Server =
   globalFrameConfig = frameOS.frameConfig
-  globalLogger = frameOS.logger
   globalRunner = frameOS.runner
 
   let port = (frameOS.frameConfig.framePort or 8787).Port
@@ -93,12 +99,11 @@ proc newServer*(frameOS: FrameOS): Server =
 
   result = Server(
     frameConfig: frameOS.frameConfig,
-    logger: frameOS.logger,
     runner: frameOS.runner,
     jester: jester,
   )
 
 proc startServer*(self: Server) {.async.} =
-  self.logger.log(%*{"event": "http:start",
-      "message": "Starting web server"})
+  log(%*{"event": "http:start", "message": "Starting web server"})
+  asyncCheck listenForRender()
   self.jester.serve() # blocks forever
