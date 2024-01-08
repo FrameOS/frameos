@@ -3,23 +3,63 @@
 import json
 import pixie
 import assets/web as webAssets
-import asyncdispatch, jester
+import asyncdispatch
+import jester
+import locks
+import ws, ws/jester_extra
+
 from net import Port
 import options
+import strutils
 from frameos/types import FrameOS, FrameConfig, Logger, Server, RunnerControl
 from frameos/runner import lastRender, triggerRender, getLastImage
 
 var globalLogger: Logger
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
+let indexHtml = webAssets.getAsset("assets/web/index.html")
+
+var connectionsLock: Lock
+var connections {.guard: connectionsLock.} = newSeq[WebSocket]()
+
+proc sendToAll(message: string) {.async.} =
+  withLock connectionsLock:
+    for connection in connections:
+      if connection.readyState == Open:
+        asyncCheck connection.send(message)
 
 proc match(request: Request): Future[ResponseData] {.async.} =
-  echo "GET " & request.pathInfo
-  {.cast(gcsafe).}: # TODO: is this correct? https://forum.nim-lang.org/t/10474
+  {.cast(gcsafe).}:
     block route:
       case request.pathInfo
-      of "/", "/kiosk":
-        resp Http200, webAssets.getAsset("assets/web/index.html")
+      of "/":
+        let scalingMode = case globalFrameConfig.scalingMode:
+          of "cover", "center":
+            globalFrameConfig.scalingMode
+          of "stretch":
+            "100% 100%"
+          else:
+            "contain"
+        resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
+      of "/ws":
+        var ws = await newWebSocket(request)
+        try:
+          globalLogger.log(%*{"event": "websocket", "connect": ws.key})
+          withLock connectionsLock:
+            connections.add ws
+          while ws.readyState == Open:
+            let packet = await ws.receiveStrPacket()
+            globalLogger.log(%*{"event": "websocket", "message": packet})
+            # TODO: handle incoming messages
+            # TODO: accept render events, but debounced?
+            # TODO: send render events
+            asyncCheck sendToAll(packet)
+        except WebSocketError:
+          globalLogger.log(%*{"event": "websocket", "disconnect": ws.key, "reason": getCurrentExceptionMsg()})
+          withLock connectionsLock:
+            let index = connections.find(ws)
+            if index >= 0:
+              connections.del(index)
       of "/event/render":
         globalLogger.log(%*{"event": "http", "path": request.pathInfo})
         globalRunner.triggerRender()

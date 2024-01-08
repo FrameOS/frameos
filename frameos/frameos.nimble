@@ -16,6 +16,7 @@ requires "pixie >= 5.0.6"
 requires "jester >= 0.6.0"
 requires "linuxfb >= 0.1.0"
 requires "psutil >= 0.6.0"
+requires "ws >= 0.5.0"
 
 taskRequires "assets", "nimassets >= 0.2.4"
 

@@ -23,9 +23,8 @@ type
 var
   thread: Thread[(FrameConfig, Logger)]
   globalLastImageLock: Lock
-  globalLastImage: Option[Image]
+  globalLastImage {.guard: globalLastImageLock.}: Option[Image]
 
-initLock(globalLastImageLock)
 
 proc renderScene*(self: RunnerThread) =
   let sceneTimer = epochTime()
@@ -103,6 +102,8 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     self.scene.isRendering = true
     self.triggerRenderNext = false
     self.renderScene()
+    # TODO: if render looop listeners, notify them
+    # TODO: option to put the driver render part in another thread
     driverTimer = epochTime()
     drivers.render(self.lastRotatedRender())
 
