@@ -1,6 +1,7 @@
 import httpclient, zippy, json, sequtils, os, times, math
 
-from frameos/types import FrameConfig, Logger
+import frameos/channels
+import frameos/types
 
 type
   LoggerThread = ref object
@@ -13,11 +14,7 @@ type
 
 const LOG_FLUSH_SECONDS = 1.0
 
-var
-  thread: Thread[FrameConfig]
-  logChannel*: Channel[JsonNode]
-
-logChannel.open()
+var thread: Thread[FrameConfig]
 
 proc sendCollectedLogs*(self: LoggerThread): bool =
   var newLogs = self.erroredLogs.concat(self.logs)

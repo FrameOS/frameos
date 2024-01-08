@@ -1,6 +1,5 @@
 import pixie, json, linuxfb, posix, strformat, sequtils, osproc
-
-from frameos/types import FrameOS, Logger, FrameOSDriver
+import frameos/types
 
 const DEVICE = "/dev/fb0"
 

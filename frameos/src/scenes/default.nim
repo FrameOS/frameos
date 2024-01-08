@@ -2,7 +2,7 @@
 
 import pixie, json, times, strformat
 
-from frameos/types import FrameOS, FrameConfig, Logger, FrameScene, ExecutionContext
+import frameos/types
 import apps/unsplash/app as unsplashApp
 import apps/text/app as textApp
 import apps/clock/app as clockApp

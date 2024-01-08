@@ -1,6 +1,6 @@
 import pixie, times, options, json, strformat
 from frameos/utils/image import downloadImage, scaleAndDrawImage
-from frameos/types import FrameScene, FrameConfig, ExecutionContext
+import frameos/types
 
 const BASE_URL = "https://gallery.frameos.net/image"
 

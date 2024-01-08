@@ -3,8 +3,8 @@ import std/strformat
 import times
 import strutils
 import options
-from frameos/utils/image import downloadImage
-from frameos/types import FrameScene, FrameConfig, ExecutionContext
+import frameos/utils/image
+import frameos/types
 
 type
   AppConfig* = object

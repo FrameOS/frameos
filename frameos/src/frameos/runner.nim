@@ -1,9 +1,8 @@
 import json, pixie, times, options, asyncdispatch, locks
 import scenes/default as defaultScene
 
-import frameos/events
-from frameos/types import FrameOS, FrameConfig, FrameScene, Logger,
-    RunnerControl, ExecutionContext
+import frameos/channels
+import frameos/types
 from frameos/utils/image import rotateDegrees, renderError, scaleAndDrawImage
 
 import drivers/drivers as drivers

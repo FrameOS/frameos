@@ -1,6 +1,6 @@
 import pixie, options, times
 
-from frameos/types import FrameScene, FrameConfig, ExecutionContext
+import frameos/types
 from frameos/utils/font import getDefaultTypeface, newFont
 
 type

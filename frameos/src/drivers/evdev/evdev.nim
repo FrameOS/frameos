@@ -4,20 +4,13 @@ import pixie, json, posix, strformat, os, options
 import ./libevdev
 import ./linuxInput
 
-from frameos/types import FrameOS, Logger, FrameOSDriver
-from frameos/logger import logChannel
-import frameos/events
+import frameos/types
+import frameos/channels
 
 type Driver* = ref object of FrameOSDriver
   discard
 
 var thread: Thread[void]
-
-proc log*(event: JsonNode) =
-  logChannel.send(event)
-
-proc sendEvent*(event: string, payload: JsonNode) =
-  eventChannel.send((event, payload))
 
 proc getListener*(device: string): Option[ptr libevdev] =
   var evdev: ptr libevdev

@@ -1,16 +1,12 @@
 import json, os, psutil, strutils, sequtils
-
-from frameos/types import FrameConfig, MetricsLogger, Logger
-from frameos/logger import logChannel
+import frameos/types
+import frameos/channels
 
 type
   MetricsLoggerThread = ref object
     frameConfig: FrameConfig
 
 var thread: Thread[FrameConfig]
-
-proc log*(event: JsonNode) =
-  logChannel.send(event)
 
 proc getLoadAverage(self: MetricsLoggerThread): seq[float] =
   try:

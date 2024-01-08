@@ -156,7 +156,7 @@ def write_scene_nim(frame: Frame, scene: Dict) -> str:
     scene_source = f"""
 import pixie, json, times, strformat
 
-from frameos/types import FrameOS, FrameConfig, Logger, FrameScene, ExecutionContext
+import frameos/types
 {newline.join(imports)}
 
 const DEBUG = false

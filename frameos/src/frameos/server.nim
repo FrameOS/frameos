@@ -11,7 +11,7 @@ import ws, ws/jester_extra
 from net import Port
 import options
 import strutils
-from frameos/types import FrameOS, FrameConfig, Logger, Server, RunnerControl
+import frameos/types
 from frameos/runner import lastRender, triggerRender, getLastImage
 
 var globalLogger: Logger

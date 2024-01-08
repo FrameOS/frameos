@@ -1,6 +1,5 @@
 import osproc, os, streams, pixie, json, options
-
-from frameos/types import FrameConfig, FrameOS, Logger, FrameOSDriver
+import frameos/types
 
 type ScreenInfo* = object
   width*: int

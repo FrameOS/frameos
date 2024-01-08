@@ -1,6 +1,6 @@
 import pixie, json
 
-from frameos/types import FrameOS, Logger, FrameOSDriver
+import frameos/types
 from ./types import ColorOption
 import driver as waveshareDriver
 

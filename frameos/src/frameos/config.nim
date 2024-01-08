@@ -1,5 +1,5 @@
 import json, pixie, os
-from frameos/types import FrameConfig
+import frameos/types
 
 proc setConfigDefaults*(config: var FrameConfig) =
   if config.serverPort == 0: config.serverPort = 8989

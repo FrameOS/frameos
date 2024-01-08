@@ -1,6 +1,5 @@
 import pixie, osproc
-
-from frameos/types import FrameOS, Logger, FrameOSDriver
+import frameos/types
 
 import drivers/frameBuffer/frameBuffer as frameBuffer
 

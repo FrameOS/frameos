@@ -1,5 +1,5 @@
 import json, strformat, httpclient, options, times
-from frameos/types import FrameScene, FrameConfig, ExecutionContext, Logger
+import frameos/types
 
 type
   AppConfig* = object
