@@ -15,3 +15,12 @@ logChannel.open()
 
 proc log*(event: JsonNode) =
   logChannel.send(event)
+
+# Server
+
+var serverChannel*: Channel[bool]
+serverChannel.open(1)
+
+proc triggerServerRender*() =
+  echo "Triggering server render"
+  discard serverChannel.trySend(true)

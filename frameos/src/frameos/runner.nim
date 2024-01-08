@@ -7,6 +7,9 @@ from frameos/utils/image import rotateDegrees, renderError, scaleAndDrawImage
 
 import drivers/drivers as drivers
 
+const FAST_SCENE = 0.5
+const SERVER_RENDER_DELAY = 1.0
+
 type
   RunnerThread = ref object
     frameConfig: FrameConfig
@@ -91,9 +94,9 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   var timer = 0.0
   var driverTimer = 0.0
   var sleepDuration = 0.0
-  let fastScene = 0.5 # 500ms
   var fastSceneCount = 0
   var fastSceneResumeAt = 0.0
+  var lastServerRender = 0.0
 
   while true:
     timer = epochTime()
@@ -101,7 +104,6 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     self.scene.isRendering = true
     self.triggerRenderNext = false
     self.renderScene()
-    # TODO: if render looop listeners, notify them
     # TODO: option to put the driver render part in another thread
     driverTimer = epochTime()
     drivers.render(self.lastRotatedRender())
@@ -110,16 +112,18 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
         "device": self.frameConfig.device, "ms": round((epochTime() -
             driverTimer) * 1000, 3)})
 
-    if self.frameConfig.interval < 2:
-      if epochTime() - timer < fastScene:
+    if self.frameConfig.interval < 1:
+      let now = epochTime()
+      if now - timer < FAST_SCENE:
         fastSceneCount += 1
-        if fastSceneCount == 3:
-          # TODO: only hide logging for the renders, not before and after (hides other events)
+        # Two fast scenes in a row
+        if fastSceneCount == 2:
+          # TODO: still log if there was a slow scene while logging was stopped
           self.logger.log(%*{"event": "pause",
               "message": "Rendering fast. Pausing logging for 10s"})
           self.logger.disable()
-          fastSceneResumeAt = epochTime() + 10
-        elif fastSceneResumeAt != 0.0 and epochTime() > fastSceneResumeAt:
+          fastSceneResumeAt = now + 10
+        elif fastSceneResumeAt != 0.0 and now > fastSceneResumeAt:
           fastSceneCount = 0
           fastSceneResumeAt = 0.0
           self.logger.enable()
@@ -127,6 +131,14 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
         fastSceneCount = 0
         fastSceneResumeAt = 0.0
         self.logger.enable()
+
+      if now - lastServerRender >= SERVER_RENDER_DELAY:
+        lastServerRender = now
+        triggerServerRender()
+
+    else:
+      triggerServerRender()
+
 
     # Gives a chance for the gathered events to be collected
     await sleepAsync(0.001)
