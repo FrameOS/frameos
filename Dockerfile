@@ -69,7 +69,7 @@ COPY . .
 RUN rm -rf /app/frontend && mv /tmp/frontend /app/
 
 # Cache nimble deps for when deploying on frame
-RUN cd frameos && nimble install -d -y
+RUN cd frameos && nimble install -d -y && nimble setup
 
 EXPOSE 8989
 
