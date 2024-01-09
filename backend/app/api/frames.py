@@ -7,6 +7,7 @@ from flask_login import login_required
 from . import api
 from app import redis
 from app.models.frame import Frame, new_frame, delete_frame, update_frame
+from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
 
 
@@ -179,5 +180,24 @@ def api_frame_delete(frame_id):
             return jsonify({'message': 'Frame deleted successfully'}), 200
         else:
             return jsonify({'message': 'Frame not found'}), 404
+    except Exception as e:
+        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+@api.route('/frames/<int:id>/metrics', methods=['GET'])
+@login_required
+def api_frame_metrics(id: int):
+    Frame.query.get_or_404(id)
+    try:
+        metrics = Metrics.query.filter_by(frame_id=id).all()
+        metrics = [
+            {
+                'id': metric.id,
+                'timestamp': metric.timestamp.isoformat(),
+                'frame_id': metric.frame_id,
+                'metrics': metric.metrics,
+            }
+            for metric in metrics
+        ]
+        return jsonify({"metrics": metrics}), HTTPStatus.OK
     except Exception as e:
         return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR

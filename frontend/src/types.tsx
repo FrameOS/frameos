@@ -57,6 +57,13 @@ export interface LogType {
   frame_id: number
 }
 
+export interface MetricsType {
+  id: string
+  timestamp: string
+  frame_id: number
+  metrics: Record<string, any>
+}
+
 export interface ConfigField {
   /** Unique config field keyword */
   name: string
@@ -143,6 +150,7 @@ export enum Panel {
   Logs = 'Logs',
   Apps = 'Apps',
   Events = 'Events',
+  Metrics = 'Metrics',
   EditApp = 'EditApp',
   Templates = 'Templates',
   Terminal = 'Terminal',

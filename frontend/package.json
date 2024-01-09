@@ -18,6 +18,8 @@
     "@headlessui/react": "^1.7.17",
     "@heroicons/react": "^2.0.18",
     "@monaco-editor/react": "^4.5.2",
+    "@nivo/core": "^0.84.0",
+    "@nivo/line": "^0.84.0",
     "@projectstorm/react-diagrams": "^7.0.2",
     "clsx": "^2.0.0",
     "copy-to-clipboard": "^3.3.3",
