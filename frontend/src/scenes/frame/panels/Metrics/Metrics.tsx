@@ -16,11 +16,34 @@ export function Metrics() {
       {Object.entries(metricsByCategory).map(([key, data]) => (
         <div>
           <strong>{key}</strong>
-          <div style={{ height: 200 }}>
+          <div className="h-[200px] text-white">
             <ResponsiveLine
               data={[{ id: 'data', data }]}
               margin={{ top: 0, right: 50, bottom: 50, left: 60 }}
-              xScale={{ type: 'time', nice: true }}
+              xScale={{
+                type: 'time',
+                min: 'auto',
+                max: 'auto',
+              }}
+              theme={{
+                axis: {
+                  ticks: {
+                    text: {
+                      stroke: '#999',
+                    },
+                  },
+                  legend: {
+                    text: {
+                      stroke: '#999',
+                    },
+                  },
+                },
+                grid: {
+                  line: {
+                    stroke: '#888',
+                  },
+                },
+              }}
               yScale={{
                 type: 'linear',
                 min: 'auto',
@@ -47,11 +70,13 @@ export function Metrics() {
                 legendOffset: -40,
                 legendPosition: 'middle',
               }}
-              pointSize={10}
+              pointSize={3}
               pointColor={{ theme: 'background' }}
               pointBorderWidth={2}
               pointBorderColor={{ from: 'serieColor' }}
               pointLabelYOffset={-12}
+              enableArea
+              enableCrosshair
             />
           </div>
         </div>
