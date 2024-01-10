@@ -24,7 +24,7 @@ def new_metrics(frame_id: int, metrics: Dict) -> Metrics:
     db.session.add(metrics)
     db.session.commit()
     metrics_count = Metrics.query.filter_by(frame_id=frame_id).count()
-    if metrics_count > 110:
+    if metrics_count > 1100:
         oldest_metrics = (Metrics.query
                           .filter_by(frame_id=frame_id)
                           .order_by(Metrics.timestamp)
