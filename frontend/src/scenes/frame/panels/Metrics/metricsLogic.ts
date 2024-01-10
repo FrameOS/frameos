@@ -42,6 +42,9 @@ export const metricsLogic = kea<metricsLogicType>([
         const metricsByCategory: Record<string, { x: Date; y: number }[]> = {}
         metrics.forEach((metric) => {
           for (const [key, value] of Object.entries(metric.metrics)) {
+            if (key === 'intervalMs') {
+              continue
+            }
             if (Array.isArray(value)) {
               for (let i = 0; i < value.length; i++) {
                 const subKey = `${key}[${i}]`
