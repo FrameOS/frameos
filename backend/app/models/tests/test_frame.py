@@ -13,6 +13,7 @@ class TestModelsFrame(BaseTestCase):
         self.assertEqual(frame.ssh_pass, None)
         self.assertEqual(frame.server_host, "server_host.com")
         self.assertEqual(frame.server_port, 8989)
+        self.assertEqual(frame.interval, 60)
         self.assertEqual(frame.device, "device_test")
 
     def test_frame_update(self):
@@ -30,7 +31,7 @@ class TestModelsFrame(BaseTestCase):
         self.assertIsNone(deleted_frame)
 
     def test_to_dict_method(self):
-        frame = new_frame("frame", "pi@192.168.1.1", "server_host.com", None)
+        frame = new_frame("frame", "pi@192.168.1.1", "server_host.com", None, 55)
         frame_dict = frame.to_dict()
         self.assertEqual(frame_dict['frame_host'], "192.168.1.1")
         self.assertEqual(frame_dict['frame_port'], 8787)
@@ -40,6 +41,7 @@ class TestModelsFrame(BaseTestCase):
         self.assertEqual(frame_dict['server_host'], "server_host.com")
         self.assertEqual(frame_dict['server_port'], 8989)
         self.assertEqual(frame_dict['device'], 'web_only')
+        self.assertEqual(frame_dict['interval'], 55)
 
     def test_get_frame_by_host(self):
         frame1 = new_frame("frame", "pi@192.168.1.1", "server_host.com", None)
