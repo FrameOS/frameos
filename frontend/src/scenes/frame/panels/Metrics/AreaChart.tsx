@@ -108,6 +108,9 @@ export function AreaChart({
           stroke={axisColor}
           tickStroke={axisColor}
           tickLabelProps={axisLeftTickLabelProps}
+          tickFormat={(v: number) =>
+            v >= 1000000 ? `${Math.floor(v / 100000) / 10}M` : v >= 1000 ? `${Math.floor(v / 1000)}K` : String(v)
+          }
         />
       )}
       {children}

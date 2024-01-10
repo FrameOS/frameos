@@ -48,7 +48,7 @@ export function BrushChart({
   data,
   margin = {
     top: 20,
-    left: 60,
+    left: 40,
     bottom: 20,
     right: 20,
   },
