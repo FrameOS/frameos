@@ -127,18 +127,18 @@ def deploy_frame(id: int):
                 exec_command(frame, ssh, f"cd /srv/frameos/build/cache && find . -type f \( -atime +0 -a -mtime +0 \) | xargs rm -rf")
                 exec_command(frame, ssh, f"cd /srv/frameos/releases && ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" | tail -n +11 | xargs rm -rf")
 
-                # restart
-                exec_command(frame, ssh, "sudo systemctl daemon-reload")
-                exec_command(frame, ssh, "sudo systemctl enable frameos.service")
-                exec_command(frame, ssh, "sudo systemctl restart frameos.service")
-                exec_command(frame, ssh, "sudo systemctl status frameos.service")
-
             if drivers.get("i2c"):
                 exec_command(frame, ssh, 'grep -q "^dtparam=i2c_vc=on$" /boot/config.txt || echo "dtparam=i2c_vc=on" | sudo tee -a /boot/config.txt')
                 exec_command(frame, ssh, 'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1" && { sudo raspi-config nonint do_i2c 0; echo "I2C is now enabled"; }')
 
             if drivers.get("spi"):
                 exec_command(frame, ssh, 'sudo raspi-config nonint do_spi 0')
+
+            # restart
+            exec_command(frame, ssh, "sudo systemctl daemon-reload")
+            exec_command(frame, ssh, "sudo systemctl enable frameos.service")
+            exec_command(frame, ssh, "sudo systemctl restart frameos.service")
+            exec_command(frame, ssh, "sudo systemctl status frameos.service")
 
             frame.status = 'starting'
             update_frame(frame)
