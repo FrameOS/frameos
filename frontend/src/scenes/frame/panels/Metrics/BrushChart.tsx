@@ -34,12 +34,12 @@ export type BrushProps = {
   data: { x: Date; y: number }[]
 }
 
-const getInitialBounds = (data: { x: Date; y: number }[]) => [
-  data.length > 0
-    ? Math.max(getDate(data[0]).getTime(), new Date().getTime() - 86400000)
-    : new Date().getTime() - 86400000,
-  data.length > 0 ? Math.min(getDate(data[data?.length - 1]).getTime(), new Date().getTime()) : new Date().getTime(),
-]
+const getInitialBounds = (data: { x: Date; y: number }[]) => {
+  const last =
+    data.length > 0 ? Math.min(getDate(data[data?.length - 1]).getTime(), new Date().getTime()) : new Date().getTime()
+  const first = data.length > 0 ? Math.max(getDate(data[0]).getTime(), last - 86400000) : last - 86400000
+  return [first, last]
+}
 
 export function BrushChart({
   compact = false,
