@@ -14,6 +14,12 @@ proc init*() =
   if resp != 0: raise newException(Exception, "Failed to initialize waveshare display")
   waveshareDisplay.EPD_2in13_V3_Init()
 
+proc clear*() =
+  waveshareDisplay.EPD_2in13_V3_Clear()
+
+proc sleep*() =
+  waveshareDisplay.EPD_2in13_V3_Sleep()
+
 proc renderOne*(image: seq[uint8]) =
   waveshareDisplay.EPD_2in13_V3_Display_Base(addr image[0])
 

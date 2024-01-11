@@ -15,6 +15,7 @@ class WaveshareVariant:
     height: Optional[int] = None
     init_function: Optional[str] = None
     clear_function: Optional[str] = None
+    sleep_function: Optional[str] = None
     display_function: Optional[str] = None
     display_arguments: Optional[List[str]] = None
     init_returns_zero: bool = False
@@ -144,6 +145,8 @@ def convert_waveshare_source(variant_key: str) -> WaveshareVariant:
                     variant.clear_function = proc_name
                 if proc_name.lower() == f"{variant.prefix}_4Gray_Clear".lower():
                     variant.clear_function = proc_name
+                if proc_name.lower() == f"{variant.prefix}_Sleep".lower():
+                    variant.sleep_function = proc_name
                 if (proc_name.lower() == f"{variant.prefix}_Display".lower() and variant.display_function is None) or (
                     proc_name.lower() == f"{variant.prefix}_4Gray_Display".lower() or proc_name.lower() == f"{variant.prefix}_Display_4Gray".lower()
                 ) or (proc_name.lower() == f"{variant.prefix}_4GrayDisplay".lower()):
@@ -194,6 +197,9 @@ proc init*() =
 
 proc clear*() =
   waveshareDisplay.{variant.clear_function}()
+
+proc sleep*() =
+  waveshareDisplay.{variant.sleep_function}()
 
 proc renderImage*(image: seq[uint8]) =
   {f'waveshareDisplay.{variant.display_function}(addr image[0])' if variant.color_option != 'BlackRed' else 'discard'}

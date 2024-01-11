@@ -39,7 +39,7 @@ const
 
 proc EPD_2in13_V3_Init*() {.importc: "EPD_2in13_V3_Init".}
 proc EPD_2in13_V3_Clear*() {.importc: "EPD_2in13_V3_Clear".}
-proc EPD_2in13_V3_Init*(Image: ptr UBYTE) {.importc: "EPD_2in13_V3_Display".}
+proc EPD_2in13_V3_Display*(Image: ptr UBYTE) {.importc: "EPD_2in13_V3_Display".}
 proc EPD_2in13_V3_Display_Base*(Image: ptr UBYTE) {.
     importc: "EPD_2in13_V3_Display_Base".}
 proc EPD_2in13_V3_Display_Partial*(Image: ptr UBYTE) {.

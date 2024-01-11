@@ -22,5 +22,6 @@ class TestDrivers(BaseTestCase):
             assert variant.height > 0
             assert variant.init_function is not None
             assert variant.clear_function is not None
+            assert variant.sleep_function is not None
             assert variant.display_function is not None
             assert variant.color_option != "Unknown"
