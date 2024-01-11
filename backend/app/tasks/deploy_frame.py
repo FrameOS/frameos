@@ -83,7 +83,8 @@ def deploy_frame(id: int):
                     if drivers.get("evdev"):
                         install_if_necessary("libevdev-dev")
                     if drivers.get('waveshare'):
-                        install_if_necessary("libgpiod-dev")
+                        install_if_necessary("liblgpio-dev")
+                        # install_if_necessary("libgpiod-dev") # disabled for now
 
                     exec_command(frame, ssh, "if [ ! -d /srv/frameos/ ]; then sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; fi")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/build/")
@@ -269,7 +270,9 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
 
     if waveshare := drivers.get('waveshare'):
         files = [
-            "Debug.h", "DEV_Config.c", "DEV_Config.h", "RPI_gpiod.c", "RPI_gpiod.h", "dev_hardware_SPI.c", "dev_hardware_SPI.h",
+            "Debug.h", "DEV_Config.c", "DEV_Config.h" 
+            # used with the GPIOD driver
+            #, "RPI_gpiod.c", "RPI_gpiod.h", "dev_hardware_SPI.c", "dev_hardware_SPI.h",
         ]
         for file in files:
             shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", file), os.path.join(build_dir, file))

@@ -1,7 +1,8 @@
-{.compile("DEV_Config.c", "-D USE_DEV_LIB -D RPI -lgpiod").}
-{.compile("RPI_gpiod.c", "-D USE_DEV_LIB -D RPI -lgpiod").}
-{.compile("dev_hardware_SPI.c", "-D USE_DEV_LIB -D RPI -lgpiod").}
-{.passl: "-lgpiod".}
+{.compile("DEV_Config.c", "-D USE_LGPIO_LIB -D RPI -llgpio").}
+{.passl: "-llgpio".}
+# To enable the GPIOD driver, use these two lines as well:
+# {.compile("RPI_gpiod.c", "-D USE_LGPIO_LIB -D RPI -lgpiod").}
+# {.compile("dev_hardware_SPI.c", "-D USE_LGPIO_LIB -D RPI -lgpiod").}
 ## ***************************************************************************
 ##  | File      	:   DEV_Config.h
 ##  | Author      :   Waveshare team
