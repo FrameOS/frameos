@@ -22,7 +22,7 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     width: data{"width"}.getInt(),
     height: data{"height"}.getInt(),
     device: data{"device"}.getStr(),
-    backgroundColor: parseHtmlColor(if data{"backgroundColor"}.getStr() ==
+    backgroundColor: parseHtmlColor(if data{"backgroundColor"}.getStr() !=
         "": data{"backgroundColor"}.getStr() else: "black"),
     interval: data{"interval"}.getFloat(),
     metricsInterval: data{"metricsInterval"}.getFloat(),

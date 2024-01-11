@@ -3,6 +3,7 @@ import pixie, json
 import frameos/types
 from ./types import ColorOption
 import driver as waveshareDriver
+import ./dither
 
 type Driver* = ref object of FrameOSDriver
   logger: Logger
@@ -37,16 +38,15 @@ proc init*(frameOS: FrameOS): Driver =
 proc renderBlack*(self: Driver, image: Image) =
   let rowWidth = ceil(image.width.float / 8).int
   var blackImage = newSeq[uint8](rowWidth * image.height)
+  var gray = grayscaleFloat(image)
+  floydSteinberg(gray, image.width, image.height)
 
   for y in 0..<image.height:
     for x in 0..<image.width:
       let inputIndex = y * image.width + x
       let index = y * rowWidth * 8 + x
-      let pixel = image.data[inputIndex]
-      let weightedSum = pixel.r * 299 + pixel.g * 587 + pixel.b * 114
-      let bw: uint8 = if weightedSum < 128 * 1000: 0 else: 1
+      let bw: uint8 = gray[inputIndex].uint8
       blackImage[index div 8] = blackImage[index div 8] or (bw shl (7 - (index mod 8)))
-
   waveshareDriver.renderImage(blackImage)
 
 proc renderBlackRed*(self: Driver, image: Image) =
