@@ -35,6 +35,21 @@ export const metricsLogic = kea<metricsLogicType>([
       },
     ],
   })),
+  reducers(({ props }) => ({
+    metrics: {
+      [socketLogic.actionTypes.newLog]: (state, { log }) => {
+        try {
+          const { event, ...metrics } = JSON.parse(log.line)
+          if (event === 'metrics') {
+            return [...state, { frame_id: log.frame_id, id: String(log.id), timestamp: log.timestamp, metrics }]
+          }
+        } catch (error) {
+          console.error(error)
+        }
+        return state
+      },
+    },
+  })),
   selectors({
     metricsByCategory: [
       (s) => [s.metrics],
@@ -73,7 +88,6 @@ export const metricsLogic = kea<metricsLogicType>([
             }
           }
         })
-        console.log(metricsByCategory)
         return metricsByCategory
       },
     ],
