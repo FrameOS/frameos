@@ -69,7 +69,7 @@ class Frame(db.Model):
         }
 
 
-def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str] = None) -> Frame:
+def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:
     if '@' in frame_host:
         user_pass, frame_host = frame_host.split('@')
     else:
@@ -102,6 +102,7 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         server_host=server_host,
         server_port=int(server_port),
         server_api_key=secrets.token_hex(32),
+        interval=interval or 60,
         status="uninitialized",
         apps=[],
         scenes=[create_default_scene()],

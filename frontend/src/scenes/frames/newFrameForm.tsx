@@ -28,6 +28,7 @@ export const newFrameForm = kea<newFrameFormType>([
                 window.location.port || (window.location.protocol === 'https:' ? 443 : 80)
               }`
             : null,
+        interval: 60,
       } as FrameType,
       errors: (frame: Partial<FrameType>) => ({
         name: !frame.name ? 'Please enter a name' : null,

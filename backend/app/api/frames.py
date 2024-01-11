@@ -165,8 +165,9 @@ def api_frame_new():
         name = request.json['name']
         frame_host = request.json['frame_host']
         server_host = request.json['server_host']
+        interval = request.json.get('interval', 60)
         device = request.json.get('device', 'web_only')
-        frame = new_frame(name, frame_host, server_host, device)
+        frame = new_frame(name, frame_host, server_host, device, interval)
         return jsonify(frame=frame.to_dict())
     except Exception as e:
         return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR

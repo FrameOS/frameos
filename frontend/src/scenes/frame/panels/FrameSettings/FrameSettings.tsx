@@ -140,7 +140,17 @@ export function FrameSettings({ className }: DetailsProps) {
             <Field name="height" label="Height">
               <TextInput name="height" placeholder="1080" />
             </Field>
-            <Field name="interval" label="Refresh interval in seconds">
+            <Field
+              name="interval"
+              label="Refresh interval in seconds"
+              tooltip={
+                <>
+                  How often do we trigger a refresh, in seconds. Pass a large number like "60" or even more for e-ink
+                  frames. A number below 1 activates realtime mode (0.041s = 24fps, 0.016s = 60fps). This should be used
+                  when you're certain of your setup and only if your hardware supports it.
+                </>
+              }
+            >
               <TextInput name="interval" placeholder="300" />
             </Field>
             <Field name="metrics_interval" label="Metrics reporting interval in seconds, 0 to disable">

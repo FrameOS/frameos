@@ -188,7 +188,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                               placeholder={field.placeholder}
                               value={String((field.name in data.config ? data.config[field.name] : field.value) ?? '')}
                               onChange={(value) => updateNodeConfig(id, field.name, value)}
-                              className={field.type === 'color' ? 'min-w-[50px]' : ''}
+                              className={field.type === 'color' ? '!min-w-[50px]' : ''}
                               type={
                                 field.type === 'integer' || field.type === 'float'
                                   ? 'tel'
