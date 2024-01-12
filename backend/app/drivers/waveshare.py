@@ -19,17 +19,17 @@ class WaveshareVariant:
     display_function: Optional[str] = None
     display_arguments: Optional[List[str]] = None
     init_returns_zero: bool = False
-    color_option: Literal["Unknown", "Black", "BlackRed", "4Gray", "7Color"] = "Unknown"
+    color_option: Literal["Unknown", "Black", "BlackRed", "FourGray", "SevenColor", "BlackWhiteYellowRed"] = "Unknown"
 
 # Colors if we can't autodetect
 VARIANT_COLORS = {
-    "EPD_1in64g": "BWYR",
-    "EPD_2in36g": "BWYR",
-    "EPD_2in66g": "BWYR",
-    "EPD_2in13g": "BWYR",
-    "EPD_3in0g": "BWYR",
-    "EPD_4in37g": "BWYR",
-    "EPD_7in3g": "BWYR",
+    "EPD_1in64g": "BlackWhiteYellowRed",
+    "EPD_2in36g": "BlackWhiteYellowRed",
+    "EPD_2in66g": "BlackWhiteYellowRed",
+    "EPD_2in13g": "BlackWhiteYellowRed",
+    "EPD_3in0g": "BlackWhiteYellowRed",
+    "EPD_4in37g": "BlackWhiteYellowRed",
+    "EPD_7in3g": "BlackWhiteYellowRed",
 
     "EPD_1in02d": "Black",
     "EPD_1in54": "Black",
@@ -54,14 +54,14 @@ VARIANT_COLORS = {
 
     "EPD_10in2b": "Black", # and red
 
-    "EPD_4in01f": "7Color",
-    "EPD_7in3f": "7Color",
-    "EPD_5in65f": "7Color",
+    "EPD_4in01f": "SevenColor",
+    "EPD_7in3f": "SevenColor",
+    "EPD_5in65f": "SevenColor",
 }
 
-# TODO: BYWR support https://www.waveshare.com/wiki/4.37inch_e-Paper_Module_(G)_Manual#Working_With_Raspberry_Pi
-# TODO: 4Gray support
-# TODO: 7Color support
+# TODO: BlackRed support
+# TODO: BlackWhiteYellowRed support https://www.waveshare.com/wiki/4.37inch_e-Paper_Module_(G)_Manual#Working_With_Raspberry_Pi
+# TODO: SevenColor support
 
 def get_variant_keys() -> List[str]:
     directory = os.path.join("..", "frameos", "src", "drivers", "waveshare", "ePaper")
@@ -72,7 +72,7 @@ def get_variant_keys() -> List[str]:
     ]
 
 def get_proc_arguments(line: str, variant_key: str) -> List[str]:
-    unknown_color = "4Gray" if "4Gray" in line else "Unknown"
+    unknown_color = "FourGray" if "4Gray" in line else "Unknown"
     argmap = {
         "blackimage": "Black",
         "imageblack": "Black",
@@ -158,12 +158,12 @@ def convert_waveshare_source(variant_key: str) -> WaveshareVariant:
             variant.color_option = "Black"
         elif variant.display_arguments == ["Black", "Red"]:
             variant.color_option = "BlackRed"
-        elif variant.display_arguments == ["BWYR"]:
+        elif variant.display_arguments == ["BlackWhiteYellowRed"]:
             variant.color_option = "BlackWhiteYellowRed"
-        elif variant.display_arguments == ["4Gray"]:
-            variant.color_option = "4Gray"
-        elif variant.display_arguments == ["7Color"]:
-            variant.color_option = "7Color"
+        elif variant.display_arguments == ["FourGray"]:
+            variant.color_option = "FourGray"
+        elif variant.display_arguments == ["SevenColor"]:
+            variant.color_option = "SevenColor"
         else:
             print(f"Unknown color: {variant_key} - {variant.display_function} -- {variant.display_arguments}" )
 

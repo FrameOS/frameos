@@ -40,12 +40,12 @@ proc init*(frameOS: FrameOS): Driver =
         "stack": e.getStackTrace()})
 
 proc renderBlack*(self: Driver, image: Image) =
-  let rowWidth = ceil(image.width.float / 8).int
-  var blackImage = newSeq[uint8](rowWidth * image.height)
   # TODO: make dithering configurable
   var gray = grayscaleFloat(image)
   floydSteinberg(gray, image.width, image.height)
 
+  let rowWidth = ceil(image.width.float / 8).int
+  var blackImage = newSeq[uint8](rowWidth * image.height)
   for y in 0..<image.height:
     for x in 0..<image.width:
       let inputIndex = y * image.width + x
@@ -64,6 +64,7 @@ proc renderBlack*(self: Driver, image: Image) =
         outputImage.data[index].b = if gray[index] > 0.5: 255 else: 0
         outputImage.data[index].a = 255
     # TODO: output this over http somehow
+    self.logger.log(%*{"event": "driver:waveshare", "message": "Writing debug image to /tmp/output.png"})
     outputImage.writeFile("/tmp/output.png")
 
 
@@ -85,13 +86,37 @@ proc renderBlackRed*(self: Driver, image: Image) =
 
   waveshareDriver.renderImageBlackRed(blackImage, redImage)
 
-proc render4Gray*(self: Driver, image: Image) =
-  raise newException(Exception, "4 gray mode not yet supported")
+proc renderFourGray*(self: Driver, image: Image) =
+  # TODO: make dithering configurable
+  var gray = grayscaleFloat(image, 3)
+  floydSteinberg(gray, image.width, image.height)
+  let rowWidth = ceil(image.width.float / 4).int
+  var blackImage = newSeq[uint8](rowWidth * image.height)
+  for y in 0..<image.height:
+    for x in 0..<image.width:
+      let inputIndex = y * image.width + x
+      let index = y * rowWidth * 4 + x
+      let bw: uint8 = gray[inputIndex].uint8 # 0, 1, 2 or 3
+      blackImage[index div 4] = blackImage[index div 4] or ((bw and 0b11) shl (6 - (index mod 4) * 2))
+  waveshareDriver.renderImage(blackImage)
 
-proc render7Color*(self: Driver, image: Image) =
+  if DEBUG:
+    var outputImage = newImage(image.width, image.height)
+    for y in 0 ..< image.height:
+      for x in 0 ..< image.width:
+        let index = y * image.width + x
+        outputImage.data[index].r = (gray[index] / 3 * 255).uint8
+        outputImage.data[index].g = (gray[index] / 3 * 255).uint8
+        outputImage.data[index].b = (gray[index] / 3 * 255).uint8
+        outputImage.data[index].a = 255
+    # TODO: output this over http somehow
+    self.logger.log(%*{"event": "driver:waveshare", "message": "Writing debug image to /tmp/output.png"})
+    outputImage.writeFile("/tmp/output.png")
+
+proc renderSevenColor*(self: Driver, image: Image) =
   raise newException(Exception, "7 color mode not yet supported")
 
-proc renderBWYR*(self: Driver, image: Image) =
+proc renderBlackWhiteYellowRed*(self: Driver, image: Image) =
   raise newException(Exception, "Black White Yellow Red mode not yet supported")
 
 proc render*(self: Driver, image: Image) =
@@ -112,10 +137,10 @@ proc render*(self: Driver, image: Image) =
   of ColorOption.BlackRed:
     self.renderBlackRed(image)
   of ColorOption.SevenColor:
-    self.render7Color(image)
+    self.renderSevenColor(image)
   of ColorOption.FourGray:
-    self.render4Gray(image)
+    self.renderFourGray(image)
   of ColorOption.BlackWhiteYellowRed:
-    self.renderBWYR(image)
+    self.renderBlackWhiteYellowRed(image)
 
   waveshareDriver.sleep()

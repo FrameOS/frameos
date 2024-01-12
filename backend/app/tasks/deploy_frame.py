@@ -243,8 +243,8 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
         f"cd {source_dir} && nimble assets -y && {nim_path} compile --os:linux --cpu:{cpu} --compileOnly --genScript --nimcache:{build_dir} src/frameos.nim 2>&1"
     )
     if status != 0:
-        last_line = [line for line in err.split("\n") if line != ''][-1]
-        if match := re.match(r'^(.*\.nim)\((\d+), (\d+)\),*', last_line):
+        last_line = [line for line in out.split("\n") if line != ''][-1]
+        if match := re.match(r'^(.*\.nim)\((\d+), (\d+)\),?.*', last_line):
             filename = match.group(1)
             line = int(match.group(2))
             column = int(match.group(3))
