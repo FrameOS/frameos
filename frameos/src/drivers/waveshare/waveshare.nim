@@ -64,6 +64,7 @@ proc renderBlack*(self: Driver, image: Image) =
         outputImage.data[index].b = if gray[index] > 0.5: 255 else: 0
         outputImage.data[index].a = 255
     # TODO: output this over http somehow
+    self.logger.log(%*{"event": "driver:waveshare", "message": "Writing debug image to /tmp/output.png"})
     outputImage.writeFile("/tmp/output.png")
 
 
@@ -109,6 +110,7 @@ proc renderFourGray*(self: Driver, image: Image) =
         outputImage.data[index].b = (gray[index] / 3 * 255).uint8
         outputImage.data[index].a = 255
     # TODO: output this over http somehow
+    self.logger.log(%*{"event": "driver:waveshare", "message": "Writing debug image to /tmp/output.png"})
     outputImage.writeFile("/tmp/output.png")
 
 proc renderSevenColor*(self: Driver, image: Image) =
