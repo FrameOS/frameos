@@ -19,6 +19,7 @@ proc init*(frameOS: FrameOS): Driver =
   let width = waveshareDriver.width
   let height = waveshareDriver.height
 
+  logger.log(%*{"event": "driver:waveshare", "width": width, "height": height})
   waveshareDriver.init()
 
   try:
