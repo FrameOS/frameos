@@ -190,9 +190,12 @@ let height* = waveshareDisplay.{variant.prefix}_HEIGHT
 
 let color_option* = ColorOption.{variant.color_option}
 {color_warning}
+
 proc init*() =
   let resp = waveshareConfig.DEV_Module_Init()
   if resp != 0: raise newException(Exception, "Failed to initialize waveshare display")
+
+proc start*() =
   {'discard ' if variant.init_returns_zero else ''}waveshareDisplay.{variant.init_function}()
 
 proc clear*() =

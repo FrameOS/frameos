@@ -12,6 +12,8 @@ let colorOption* = ColorOption.Black
 proc init*() =
   let resp = waveshareConfig.DEV_Module_Init()
   if resp != 0: raise newException(Exception, "Failed to initialize waveshare display")
+
+proc start*() =
   waveshareDisplay.EPD_2in13_V3_Init()
 
 proc clear*() =
@@ -20,8 +22,8 @@ proc clear*() =
 proc sleep*() =
   waveshareDisplay.EPD_2in13_V3_Sleep()
 
-proc renderOne*(image: seq[uint8]) =
+proc renderImage*(image: seq[uint8]) =
   waveshareDisplay.EPD_2in13_V3_Display_Base(addr image[0])
 
-proc renderTwo*(image1: seq[uint8], image2: seq[uint8]) =
+proc renderImageBlackRed*(image1: seq[uint8], image2: seq[uint8]) =
   discard
