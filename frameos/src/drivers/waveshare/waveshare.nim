@@ -85,13 +85,13 @@ proc renderBlackRed*(self: Driver, image: Image) =
 
   waveshareDriver.renderImageBlackRed(blackImage, redImage)
 
-proc render4Gray*(self: Driver, image: Image) =
+proc renderFourGray*(self: Driver, image: Image) =
   raise newException(Exception, "4 gray mode not yet supported")
 
-proc render7Color*(self: Driver, image: Image) =
+proc renderSevenColor*(self: Driver, image: Image) =
   raise newException(Exception, "7 color mode not yet supported")
 
-proc renderBWYR*(self: Driver, image: Image) =
+proc renderBlackWhiteYellowRed*(self: Driver, image: Image) =
   raise newException(Exception, "Black White Yellow Red mode not yet supported")
 
 proc render*(self: Driver, image: Image) =
@@ -112,10 +112,10 @@ proc render*(self: Driver, image: Image) =
   of ColorOption.BlackRed:
     self.renderBlackRed(image)
   of ColorOption.SevenColor:
-    self.render7Color(image)
+    self.renderSevenColor(image)
   of ColorOption.FourGray:
-    self.render4Gray(image)
+    self.renderFourGray(image)
   of ColorOption.BlackWhiteYellowRed:
-    self.renderBWYR(image)
+    self.renderBlackWhiteYellowRed(image)
 
   waveshareDriver.sleep()
