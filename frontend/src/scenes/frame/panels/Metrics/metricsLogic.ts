@@ -43,9 +43,7 @@ export const metricsLogic = kea<metricsLogicType>([
           if (event === 'metrics') {
             return [...state, { frame_id: log.frame_id, id: String(log.id), timestamp: log.timestamp, metrics }]
           }
-        } catch (error) {
-          console.error(error)
-        }
+        } catch (error) {}
         return state
       },
     },

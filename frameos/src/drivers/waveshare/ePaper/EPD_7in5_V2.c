@@ -109,18 +109,20 @@ parameter:
 ******************************************************************************/
 UBYTE EPD_7IN5_V2_Init(void)
 {
+    // altered changes from: https://github.com/esphome/esphome/pull/5168/files
     EPD_Reset();
     EPD_SendCommand(0x01);			//POWER SETTING
 	EPD_SendData(0x07);
-	EPD_SendData(0x07);    //VGH=20V,VGL=-20V
+	EPD_SendData(0x17);  // altered   //VGH=20V,VGL=-20V
 	EPD_SendData(0x3f);		//VDH=15V
-	EPD_SendData(0x3f);		//VDL=-15V
+	EPD_SendData(0x26);	 // altered	//VDL=-15V
+	EPD_SendData(0x11);	 // altered	//VDL=-15V
 
 	//Enhanced display drive(Add 0x06 command)
 	EPD_SendCommand(0x06);			//Booster Soft Start 
-	EPD_SendData(0x17);
-	EPD_SendData(0x17);   
-	EPD_SendData(0x28);		
+	EPD_SendData(0x27);  // altered
+	EPD_SendData(0x27);  // altered   
+	EPD_SendData(0x2f);  // altered	
 	EPD_SendData(0x17);	
 
 	EPD_SendCommand(0x04); //POWER ON
@@ -141,7 +143,7 @@ UBYTE EPD_7IN5_V2_Init(void)
 
 	EPD_SendCommand(0X50);			//VCOM AND DATA INTERVAL SETTING
 	EPD_SendData(0x10);
-	EPD_SendData(0x07);
+	EPD_SendData(0x00); // altered
 
 	EPD_SendCommand(0X60);			//TCON SETTING
 	EPD_SendData(0x22);
