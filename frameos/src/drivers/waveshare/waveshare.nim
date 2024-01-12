@@ -12,6 +12,7 @@ type Driver* = ref object of FrameOSDriver
   lastImageData: seq[ColorRGBX]
   lastRenderAt: float
 
+# TODO: make this configurable
 const DEBUG = true
 
 proc init*(frameOS: FrameOS): Driver =
@@ -41,6 +42,7 @@ proc init*(frameOS: FrameOS): Driver =
 proc renderBlack*(self: Driver, image: Image) =
   let rowWidth = ceil(image.width.float / 8).int
   var blackImage = newSeq[uint8](rowWidth * image.height)
+  # TODO: make dithering configurable
   var gray = grayscaleFloat(image)
   floydSteinberg(gray, image.width, image.height)
 
@@ -61,6 +63,7 @@ proc renderBlack*(self: Driver, image: Image) =
         outputImage.data[index].g = if gray[index] > 0.5: 255 else: 0
         outputImage.data[index].b = if gray[index] > 0.5: 255 else: 0
         outputImage.data[index].a = 255
+    # TODO: output this over http somehow
     outputImage.writeFile("/tmp/output.png")
 
 
@@ -94,11 +97,13 @@ proc renderBWYR*(self: Driver, image: Image) =
 proc render*(self: Driver, image: Image) =
   if self.lastImageData == image.data and self.lastRenderAt > epochTime() - 12 * 60 * 60:
     # refresh at least every 12h to preserve display
+    # TODO: make this configurable
     self.logger.log(%*{"event": "driver:waveshare",
         "info": "Skipping render, image data is the same"})
     return
 
   self.lastImageData = image.data
+  self.lastRenderAt = epochTime()
   waveshareDriver.start()
 
   case waveshareDriver.colorOption:

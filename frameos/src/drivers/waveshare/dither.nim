@@ -30,6 +30,7 @@ proc floydSteinberg*(image: var seq[float], width, height: int) =
           image[(y + u[i]) * width + (x + v[i])] += error * distribution[i]
 
   # The 7.5" waveshare frame displays weird artifacts without this. Whilte colors bleed from top to bottom if neither of these is blanked.
+  # TODO: turn this into an option you can toggle
   for y in 0..<width:
     image[y] = 1
     image[y + width * (height - 1)] = 1
