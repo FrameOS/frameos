@@ -59,8 +59,8 @@ VARIANT_COLORS = {
     "EPD_5in65f": "SevenColor",
 }
 
+# TODO: BlackRed support
 # TODO: BlackWhiteYellowRed support https://www.waveshare.com/wiki/4.37inch_e-Paper_Module_(G)_Manual#Working_With_Raspberry_Pi
-# TODO: FourGray support
 # TODO: SevenColor support
 
 def get_variant_keys() -> List[str]:

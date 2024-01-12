@@ -1,6 +1,6 @@
 import math, pixie
 
-proc grayscaleFloat*(image: Image): seq[float] =
+proc grayscaleFloat*(image: Image, multiple: float = 1.0): seq[float] =
   let
     width = image.width
     height = image.height
@@ -8,8 +8,8 @@ proc grayscaleFloat*(image: Image): seq[float] =
   for y in 0..<height:
     for x in 0..<width:
       let index = y * width + x
-      res[index] = (image.data[index].r.float * 0.21 + image.data[index].g.float * 0.72 + image.data[index].b.float *
-          0.07) / 255.0
+      res[index] = multiple * (image.data[index].r.float * 0.21 + image.data[index].g.float * 0.72 + image.data[
+          index].b.float * 0.07) / 255.0
   return res
 
 proc floydSteinberg*(image: var seq[float], width, height: int) =
