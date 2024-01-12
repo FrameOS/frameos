@@ -10,7 +10,7 @@ type Driver* = ref object of FrameOSDriver
   width: int
   height: int
   lastImageData: seq[ColorRGBX]
-  lastRender: float
+  lastRenderAt: float
 
 const DEBUG = true
 
@@ -92,7 +92,7 @@ proc renderBWYR*(self: Driver, image: Image) =
   raise newException(Exception, "Black White Yellow Red mode not yet supported")
 
 proc render*(self: Driver, image: Image) =
-  if self.lastImageData == image.data and self.lastRender > epochTime() - 12 * 60 * 60:
+  if self.lastImageData == image.data and self.lastRenderAt > epochTime() - 12 * 60 * 60:
     # refresh at least every 12h to preserve display
     self.logger.log(%*{"event": "driver:waveshare",
         "info": "Skipping render, image data is the same"})

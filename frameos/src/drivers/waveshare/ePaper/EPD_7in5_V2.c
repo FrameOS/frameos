@@ -122,7 +122,7 @@ UBYTE EPD_7IN5_V2_Init(void)
 	EPD_SendCommand(0x06);			//Booster Soft Start 
 	EPD_SendData(0x27);  // altered
 	EPD_SendData(0x27);  // altered   
-	EPD_SendData(0x2f);	 // altered	
+	EPD_SendData(0x2f);  // altered	
 	EPD_SendData(0x17);	
 
 	EPD_SendCommand(0x04); //POWER ON
