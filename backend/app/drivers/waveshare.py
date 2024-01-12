@@ -158,7 +158,7 @@ def convert_waveshare_source(variant_key: str) -> WaveshareVariant:
             variant.color_option = "Black"
         elif variant.display_arguments == ["Black", "Red"]:
             variant.color_option = "BlackRed"
-        elif variant.display_arguments == ["BWYR"]:
+        elif variant.display_arguments == ["BlackWhiteYellowRed"]:
             variant.color_option = "BlackWhiteYellowRed"
         elif variant.display_arguments == ["FourGray"]:
             variant.color_option = "FourGray"
