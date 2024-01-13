@@ -70,6 +70,9 @@ export const metricsLogic = kea<metricsLogicType>([
               }
             } else if (typeof value === 'object') {
               for (const [subKey, subValue] of Object.entries(value)) {
+                if (key === 'memoryUsage' && (subKey === 'active' || subKey === 'free')) {
+                  continue
+                }
                 if (typeof subValue === 'number') {
                   const fullSubKey = `${key}.${subKey}`
                   if (!metricsByCategory[fullSubKey]) {
