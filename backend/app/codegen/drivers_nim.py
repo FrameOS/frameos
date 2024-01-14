@@ -8,6 +8,7 @@ def write_drivers_nim(drivers: Dict[str, Driver]) -> str:
     vars = []
     init_drivers = []
     render_drivers = []
+    png_drivers = []
     on_drivers = []
     off_drivers = []
 
@@ -18,13 +19,15 @@ def write_drivers_nim(drivers: Dict[str, Driver]) -> str:
             init_drivers.append(f"{driver.name}DriverInstance = {driver.name}Driver.init(frameOS)")
             if driver.can_render:
                 render_drivers.append(f"{driver.name}DriverInstance.render(image)")
+            if driver.can_png and len(png_drivers) == 0:
+                png_drivers.append(f"return {driver.name}Driver.toPng()")
             if driver.can_turn_on_off:
                 on_drivers.append(f"{driver.name}DriverInstance.turnOn()")
                 off_drivers.append(f"{driver.name}DriverInstance.turnOff()")
 
     newline = "\n"
 
-    return f"""
+    code = f"""
 import pixie
 import frameos/types
 {newline.join(imports)}
@@ -36,9 +39,14 @@ proc init*(frameOS: FrameOS) =
 proc render*(image: Image) =
   {(newline + '  ').join(render_drivers or ["discard"])}
 
+proc toPng*(): string =
+  {(newline + '  ').join(png_drivers or ['result = ""'])}
+
 proc turnOn*() =
   {(newline + '  ').join(on_drivers or ["discard"])}
 
 proc turnOff*() =
   {(newline + '  ').join(off_drivers or ["discard"])}
     """
+
+    return code

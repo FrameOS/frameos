@@ -1,4 +1,4 @@
-import pixie, json, linuxfb, posix, strformat, sequtils, osproc
+import pixie, json, linuxfb, posix, strformat, osproc
 import frameos/types
 
 const DEVICE = "/dev/fb0"

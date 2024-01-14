@@ -8,6 +8,7 @@ class Driver:
     import_path: Optional[str] = None # nim local import path for driver
     vendor_folder: Optional[str] = None # vendor/folder to be copied to the release folder
     can_render: bool = False # add render(image)
+    can_png: bool = False # add toPng()
     can_turn_on_off: bool = False # add turnOn() and turnOff()
 
 DRIVERS = {
@@ -27,6 +28,7 @@ DRIVERS = {
         name="waveshare",
         import_path="waveshare/waveshare",
         can_render=True,
+        can_png=True,
     ),
     "inkyHyperPixel2r": Driver(
         name="inkyHyperPixel2r",

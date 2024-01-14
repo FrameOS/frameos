@@ -2085,7 +2085,7 @@ proc libevdev_event_type_from_name*(name: cstring): cint {.importc.}
 ##
 
 proc libevdev_event_type_from_name_n*(name: cstring;
-    len: csize): cint {.importc.}
+    len: csize_t): cint {.importc.}
 ## *
 ##  @ingroup misc
 ##
@@ -2131,7 +2131,7 @@ proc libevdev_event_code_from_name*(`type`: cuint;
 ##
 
 proc libevdev_event_code_from_name_n*(`type`: cuint; name: cstring;
-    len: csize): cint {.importc.}
+    len: csize_t): cint {.importc.}
 ## *
 ##  @ingroup misc
 ##
@@ -2161,7 +2161,7 @@ proc libevdev_property_from_name*(name: cstring): cint {.importc.}
 ##  @return The given code constant for the name or -1 if not found.
 ##
 
-proc libevdev_property_from_name_n*(name: cstring; len: csize): cint {.importc.}
+proc libevdev_property_from_name_n*(name: cstring; len: csize_t): cint {.importc.}
 ## *
 ##  @ingroup bits
 ##
