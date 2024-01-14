@@ -12,20 +12,33 @@ import frameos/types
 # var frameBufferDriverInstance: frameBufferDriver.Driver
 # var waveshareDriverInstance: waveshareDriver.Driver
 
+# Called before the runner is created
 proc init*(frameOS: FrameOS) =
   # inkyDriverInstance = inkyDriver.init(frameOS)
   # frameBufferDriverInstance = frameBufferDriver.init(frameOS)
   # waveshareDriverInstance = waveshareDriver.init(frameOS)
   discard
 
+# Called after the frame's image is rendered
 proc render*(image: Image) =
   # inkyDriverInstance.render(image)
   # frameBufferDriverInstance.render(image)
   # waveshareDriverInstance.render(image)
   discard
 
-proc turnOn*() =
+# Convert the rendered pixels to a PNG image. For accurate colors on the web.
+proc toPng*(): string =
+  # return inkyDriverInstance.toPng()
+  # return frameBufferDriverInstance.toPng()
+  # return waveshareDriverInstance.toPng()
   discard
 
+# Turn on the device, if supported
+proc turnOn*() =
+  # frameBufferDriverInstance.turnOn()
+  discard
+
+# Turn off the device, if supported
 proc turnOff*() =
+  # frameBufferDriverInstance.turnOff()
   discard

@@ -13,6 +13,7 @@ import options
 import strutils
 import frameos/types
 import frameos/channels
+import drivers/drivers as drivers
 from frameos/runner import lastRender, triggerRender, getLastImage
 
 var globalFrameConfig: FrameConfig
@@ -71,7 +72,11 @@ proc match(request: Request): Future[ResponseData] {.async.} =
         resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
       of "/image":
         log(%*{"event": "http", "path": request.pathInfo})
-        resp Http200, {"Content-Type": "image/png"}, globalRunner.getLastImage().encodeImage(PngFormat)
+        let image = drivers.toPng()
+        if image != "":
+          resp Http200, {"Content-Type": "image/png"}, image
+        else:
+          resp Http200, {"Content-Type": "image/png"}, globalRunner.getLastImage().encodeImage(PngFormat)
       else:
         resp Http404, "Not found!"
 

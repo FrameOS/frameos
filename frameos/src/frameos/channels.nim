@@ -16,6 +16,9 @@ logChannel.open()
 proc log*(event: JsonNode) =
   logChannel.send(event)
 
+proc debug*(message: string) =
+  logChannel.send(%*{"event": "debug", "message": message})
+
 # Server
 
 var serverChannel*: Channel[bool]
