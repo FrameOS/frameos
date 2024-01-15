@@ -32,3 +32,9 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     verbose: commandLineParams().contains("--verbose")
   )
   setConfigDefaults(result)
+
+proc renderWidth*(config: FrameConfig): int {.inline.} =
+  if config.rotate in [90, 270]: config.height else: config.width
+
+proc renderHeight*(config: FrameConfig): int {.inline.} =
+  if config.rotate in [90, 270]: config.width else: config.height

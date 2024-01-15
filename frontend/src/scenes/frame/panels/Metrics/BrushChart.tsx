@@ -37,7 +37,7 @@ export type BrushProps = {
 const getInitialBounds = (data: { x: Date; y: number }[]) => {
   const last =
     data.length > 0 ? Math.min(getDate(data[data?.length - 1]).getTime(), new Date().getTime()) : new Date().getTime()
-  const first = data.length > 0 ? Math.max(getDate(data[0]).getTime(), last - 86400000) : last - 86400000
+  const first = data.length > 0 ? Math.max(getDate(data[0]).getTime(), last - 3600000) : last - 3600000
   return [first, last]
 }
 

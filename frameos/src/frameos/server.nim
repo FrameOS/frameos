@@ -14,7 +14,7 @@ import strutils
 import frameos/types
 import frameos/channels
 import drivers/drivers as drivers
-from frameos/runner import lastRender, triggerRender, getLastImage
+from frameos/runner import getLastPng, triggerRender
 
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
@@ -76,7 +76,7 @@ proc match(request: Request): Future[ResponseData] {.async.} =
         if image != "":
           resp Http200, {"Content-Type": "image/png"}, image
         else:
-          resp Http200, {"Content-Type": "image/png"}, globalRunner.getLastImage().encodeImage(PngFormat)
+          resp Http200, {"Content-Type": "image/png"}, getLastPng()
       else:
         resp Http404, "Not found!"
 
