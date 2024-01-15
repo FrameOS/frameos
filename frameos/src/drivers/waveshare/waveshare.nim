@@ -1,6 +1,7 @@
 import pixie, json, times, locks
 
 import frameos/types
+import frameos/utils/image
 import frameos/utils/dither
 import driver as waveshareDriver
 import ./types
@@ -140,7 +141,7 @@ proc render*(self: Driver, image: Image) =
   waveshareDriver.sleep()
 
 # Convert the rendered pixels to a PNG image. For accurate colors on the web.
-proc toPng*(): string =
+proc toPng*(rotate: int = 0): string =
   let pixels = getLastFloatImage()
   var outputImage = newImage(width, height)
   case waveshareDriver.colorOption:
@@ -166,5 +167,8 @@ proc toPng*(): string =
     discard
   of ColorOption.BlackWhiteYellowRed:
     discard
+
+  if rotate != 0:
+    return outputImage.rotateDegrees(rotate).encodeImage(PngFormat)
 
   return outputImage.encodeImage(PngFormat)
