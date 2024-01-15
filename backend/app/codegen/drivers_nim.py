@@ -20,7 +20,7 @@ def write_drivers_nim(drivers: Dict[str, Driver]) -> str:
             if driver.can_render:
                 render_drivers.append(f"{driver.name}DriverInstance.render(image)")
             if driver.can_png and len(png_drivers) == 0:
-                png_drivers.append(f"return {driver.name}Driver.toPng()")
+                png_drivers.append(f"return {driver.name}Driver.toPng(rotate)")
             if driver.can_turn_on_off:
                 on_drivers.append(f"{driver.name}DriverInstance.turnOn()")
                 off_drivers.append(f"{driver.name}DriverInstance.turnOff()")
@@ -39,7 +39,7 @@ proc init*(frameOS: FrameOS) =
 proc render*(image: Image) =
   {(newline + '  ').join(render_drivers or ["discard"])}
 
-proc toPng*(): string =
+proc toPng*(rotate: int): string =
   {(newline + '  ').join(png_drivers or ['result = ""'])}
 
 proc turnOn*() =

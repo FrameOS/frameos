@@ -72,7 +72,7 @@ def get_ssh_connection(frame: Frame) -> SSHClient:
     return ssh
 
 
-def exec_command(frame: Frame, ssh: SSHClient, command: str, output: Optional[List[str]] = None) -> int:
+def exec_command(frame: Frame, ssh: SSHClient, command: str, output: Optional[List[str]] = None, raise_on_error = True) -> int:
     log(frame.id, "stdout", f"> {command}")
     _stdin, stdout, stderr = ssh.exec_command(command)
     exit_status = None
@@ -94,7 +94,10 @@ def exec_command(frame: Frame, ssh: SSHClient, command: str, output: Optional[Li
         sleep(0.1)
 
     if exit_status != 0:
-        log(frame.id, "exit_status", f"The command exited with status {exit_status}")
+        if raise_on_error:
+            raise Exception(f"Command exited with status {exit_status}")
+        else:
+            log(frame.id, "exit_status", f"The command exited with status {exit_status}")
 
     return exit_status
 

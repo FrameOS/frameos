@@ -1,9 +1,10 @@
 import pixie, json, times, locks
 
 import frameos/types
-from ./types import ColorOption
+import frameos/utils/image
+import frameos/utils/dither
 import driver as waveshareDriver
-import ./dither
+import ./types
 
 type Driver* = ref object of FrameOSDriver
   logger: Logger
@@ -16,16 +17,13 @@ var
   lastFloatImageLock: Lock
   lastFloatImage: seq[float]
 
-proc setAsLastFloatImage*(image: seq[float]) =
+proc setLastFloatImage*(image: seq[float]) =
   withLock lastFloatImageLock:
     lastFloatImage = image
 
 proc getLastFloatImage*(): seq[float] =
   withLock lastFloatImageLock:
     result = lastFloatImage
-
-# TODO: make this configurable
-const DEBUG = true
 
 proc init*(frameOS: FrameOS): Driver =
   let logger = frameOS.logger
@@ -63,7 +61,7 @@ proc renderBlack*(self: Driver, image: Image) =
       gray[y] = 1
       gray[y + image.width * (image.height - 1)] = 1
 
-  gray.setAsLastFloatImage()
+  setLastFloatImage(gray)
 
   let rowWidth = ceil(image.width.float / 8).int
   var blackImage = newSeq[uint8](rowWidth * image.height)
@@ -79,7 +77,7 @@ proc renderFourGray*(self: Driver, image: Image) =
   var gray = newSeq[float](image.width * image.height)
   image.toGrayscaleFloat(gray, 3)
   gray.floydSteinberg(image.width, image.height)
-  gray.setAsLastFloatImage()
+  setLastFloatImage(gray)
 
   let rowWidth = ceil(image.width.float / 4).int
   var blackImage = newSeq[uint8](rowWidth * image.height)
@@ -143,7 +141,7 @@ proc render*(self: Driver, image: Image) =
   waveshareDriver.sleep()
 
 # Convert the rendered pixels to a PNG image. For accurate colors on the web.
-proc toPng*(): string =
+proc toPng*(rotate: int = 0): string =
   let pixels = getLastFloatImage()
   var outputImage = newImage(width, height)
   case waveshareDriver.colorOption:
@@ -169,5 +167,8 @@ proc toPng*(): string =
     discard
   of ColorOption.BlackWhiteYellowRed:
     discard
+
+  if rotate != 0:
+    return outputImage.rotateDegrees(rotate).encodeImage(PngFormat)
 
   return outputImage.encodeImage(PngFormat)
