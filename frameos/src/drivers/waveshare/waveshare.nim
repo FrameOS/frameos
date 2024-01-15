@@ -1,9 +1,9 @@
 import pixie, json, times, locks
 
 import frameos/types
-from ./types import ColorOption
+import frameos/utils/dither
 import driver as waveshareDriver
-import ./dither
+import ./types
 
 type Driver* = ref object of FrameOSDriver
   logger: Logger
@@ -16,7 +16,7 @@ var
   lastFloatImageLock: Lock
   lastFloatImage: seq[float]
 
-proc setAsLastFloatImage*(image: seq[float]) =
+proc setLastFloatImage*(image: seq[float]) =
   withLock lastFloatImageLock:
     lastFloatImage = image
 
@@ -60,7 +60,7 @@ proc renderBlack*(self: Driver, image: Image) =
       gray[y] = 1
       gray[y + image.width * (image.height - 1)] = 1
 
-  gray.setAsLastFloatImage()
+  setLastFloatImage(gray)
 
   let rowWidth = ceil(image.width.float / 8).int
   var blackImage = newSeq[uint8](rowWidth * image.height)
@@ -76,7 +76,7 @@ proc renderFourGray*(self: Driver, image: Image) =
   var gray = newSeq[float](image.width * image.height)
   image.toGrayscaleFloat(gray, 3)
   gray.floydSteinberg(image.width, image.height)
-  gray.setAsLastFloatImage()
+  setLastFloatImage(gray)
 
   let rowWidth = ceil(image.width.float / 4).int
   var blackImage = newSeq[uint8](rowWidth * image.height)
