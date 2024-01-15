@@ -1,4 +1,4 @@
-import json, pixie, times, options, asyncdispatch, strformat, std/isolation, locks
+import json, pixie, times, options, asyncdispatch, strformat, locks
 import pixie/fileformats/png
 import scenes/default as defaultScene
 
