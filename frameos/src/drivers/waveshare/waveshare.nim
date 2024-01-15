@@ -24,9 +24,6 @@ proc getLastFloatImage*(): seq[float] =
   withLock lastFloatImageLock:
     result = lastFloatImage
 
-# TODO: make this configurable
-const DEBUG = true
-
 proc init*(frameOS: FrameOS): Driver =
   let logger = frameOS.logger
   let width = waveshareDriver.width

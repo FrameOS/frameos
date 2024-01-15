@@ -48,9 +48,9 @@ def deploy_frame(id: int):
             nim_path = find_nim_v2()
             ssh = get_ssh_connection(frame)
 
-            def install_if_necessary(package: str):
+            def install_if_necessary(package: str, raise_on_error = True) -> int:
                 """If a package is not installed, install it."""
-                exec_command(frame, ssh, f"dpkg -l | grep -q \"^ii  {package}\" || sudo apt-get install -y {package}")
+                return exec_command(frame, ssh, f"dpkg -l | grep -q \"^ii  {package}\" || sudo apt-get install -y {package}", raise_on_error=raise_on_error)
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 log(id, "stdout", f"- Getting target architecture")
@@ -83,8 +83,21 @@ def deploy_frame(id: int):
                     if drivers.get("evdev"):
                         install_if_necessary("libevdev-dev")
                     if drivers.get('waveshare'):
-                        install_if_necessary("liblgpio-dev")
-                        # install_if_necessary("libgpiod-dev") # disabled for now
+                        if exec_command(frame, ssh, '[[ -f "/usr/local/include/lgpio.h" || -f "/usr/include/lgpio.h" ]] && exit 0 || exit 1', raise_on_error=False) != 0:
+                            if install_if_necessary("liblgpio-dev", raise_on_error=False) != 0:
+                                log(id, "stdout", f"--> Could not find liblgpio-dev package, installing from source")
+                                command = "if [ ! -f /usr/local/include/lgpio.h ]; then "\
+                                          "rm -rf /tmp/lgpio-install && "\
+                                          "mkdir -p /tmp/lgpio-install && "\
+                                          "cd /tmp/lgpio-install && "\
+                                          "wget -q -O v0.2.2.tar.gz https://github.com/joan2937/lg/archive/refs/tags/v0.2.2.tar.gz && "\
+                                          "tar -xzf v0.2.2.tar.gz && "\
+                                          "cd lg-0.2.2 && "\
+                                          "make && "\
+                                          "sudo make install && "\
+                                          "sudo rm -rf /tmp/lgpio-install; "\
+                                          "fi"
+                                exec_command(frame, ssh, command)
 
                     exec_command(frame, ssh, "if [ ! -d /srv/frameos/ ]; then sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; fi")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/build/")
