@@ -6,7 +6,6 @@ import frameos/channels
 import frameos/types
 import frameos/config
 import frameos/utils/image
-import frameos/utils/dither
 
 import drivers/drivers as drivers
 
@@ -37,8 +36,6 @@ proc setLastImage(image: Image) =
 proc getLastPng*(): string =
   var copy: seq[ColorRGBX]
   withLock pngLock:
-    # TODO: optimize this locked time
-    pngImage.dither(desaturatedPalette)
     copy = pngImage.data
   return encodePng(pngImage.width, pngImage.height, 4, copy[0].addr, copy.len * 4)
 
