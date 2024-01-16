@@ -23,7 +23,7 @@ if __name__ == '__main__':
     for v in variants:
         color = {
             "Black": "Black/White",
-            "BlackRed": "Black/White/Red",
+            "BlackWhiteRed": "Black/White/Red",
             "BlackWhiteYellowRed": "Black/White/Yellow/Red (not implemented)",
             "FourGray": "4 Grayscale (not implemented!)",
             "SevenColor": "7 Color (not implemented!)",
