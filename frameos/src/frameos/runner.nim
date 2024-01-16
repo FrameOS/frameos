@@ -5,7 +5,7 @@ import scenes/default as defaultScene
 import frameos/channels
 import frameos/types
 import frameos/config
-from frameos/utils/image import rotateDegrees, renderError, scaleAndDrawImage
+import frameos/utils/image
 
 import drivers/drivers as drivers
 

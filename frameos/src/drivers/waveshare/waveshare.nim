@@ -16,6 +16,8 @@ type Driver* = ref object of FrameOSDriver
 var
   lastFloatImageLock: Lock
   lastFloatImage: seq[float]
+  lastPixelsLock: Lock
+  lastPixels: seq[uint8]
 
 proc setLastFloatImage*(image: seq[float]) =
   withLock lastFloatImageLock:
@@ -24,6 +26,14 @@ proc setLastFloatImage*(image: seq[float]) =
 proc getLastFloatImage*(): seq[float] =
   withLock lastFloatImageLock:
     result = lastFloatImage
+
+proc setLastPixels*(image: seq[uint8]) =
+  withLock lastPixelsLock:
+    lastPixels = image
+
+proc getLastPixels*(): seq[uint8] =
+  withLock lastPixelsLock:
+    result = lastPixels
 
 proc init*(frameOS: FrameOS): Driver =
   let logger = frameOS.logger
@@ -89,8 +99,8 @@ proc renderFourGray*(self: Driver, image: Image) =
       blackImage[index div 4] = blackImage[index div 4] or ((bw and 0b11) shl (6 - (index mod 4) * 2))
   waveshareDriver.renderImage(blackImage)
 
-
-proc renderBlackRed*(self: Driver, image: Image) =
+proc renderBlackWhiteRed*(self: Driver, image: Image) =
+  let pixels = ditherPaletteIndexed(image, @[(0, 0, 0), (255, 0, 0), (255, 255, 255)])
   let rowWidth = ceil(image.width.float / 8).int
   var blackImage = newSeq[uint8](rowWidth * image.height)
   var redImage = newSeq[uint8](rowWidth * image.height)
@@ -98,21 +108,23 @@ proc renderBlackRed*(self: Driver, image: Image) =
   for y in 0..<image.height:
     for x in 0..<image.width:
       let inputIndex = y * image.width + x
-      let index = y * rowWidth * 8 + x
-      let pixel = image.data[inputIndex]
-      let weightedSum = pixel.r * 299 + pixel.g * 587 + pixel.b * 114
-      let bw: uint8 = if weightedSum < 128 * 1000: 0 else: 1
-      let red: uint8 = if pixel.r > 100 and pixel.g > 50 and pixel.b > 50: 1 else: 0
-      blackImage[index div 8] = blackImage[index div 8] or (bw shl (7 - (index mod 8)))
-      redImage[index div 8] = redImage[index div 8] or (red shl (7 - (index mod 8)))
+      let index = y * rowWidth + x div 8
+      let oneByte = pixels[inputIndex div 2]
+      let pixel = if inputIndex mod 2 == 0: oneByte shr 4 else: oneByte and 0x0F
+      let bw: uint8 = if pixel == 0: 1 else: 0
+      let red: uint8 = if pixel == 1: 1 else: 0
+      blackImage[index] = blackImage[index] or (bw shl (7 - (x mod 8)))
+      redImage[index] = redImage[index] or (red shl (7 - (x mod 8)))
 
-  waveshareDriver.renderImageBlackRed(blackImage, redImage)
-
-proc renderSevenColor*(self: Driver, image: Image) =
-  raise newException(Exception, "7 color mode not yet supported")
+  waveshareDriver.renderImageBlackWhiteRed(blackImage, redImage)
 
 proc renderBlackWhiteYellowRed*(self: Driver, image: Image) =
-  raise newException(Exception, "Black White Yellow Red mode not yet supported")
+  let pixels = ditherPaletteIndexed(image, saturated4ColorPalette)
+  waveshareDriver.renderImage(pixels)
+
+proc renderSevenColor*(self: Driver, image: Image) =
+  let pixels = ditherPaletteIndexed(image, saturated7ColorPalette)
+  waveshareDriver.renderImage(pixels)
 
 proc render*(self: Driver, image: Image) =
   # Refresh at least every 12h to preserve display
@@ -129,8 +141,8 @@ proc render*(self: Driver, image: Image) =
   case waveshareDriver.colorOption:
   of ColorOption.Black:
     self.renderBlack(image)
-  of ColorOption.BlackRed:
-    self.renderBlackRed(image)
+  of ColorOption.BlackWhiteRed:
+    self.renderBlackWhiteRed(image)
   of ColorOption.SevenColor:
     self.renderSevenColor(image)
   of ColorOption.FourGray:
@@ -142,31 +154,58 @@ proc render*(self: Driver, image: Image) =
 
 # Convert the rendered pixels to a PNG image. For accurate colors on the web.
 proc toPng*(rotate: int = 0): string =
-  let pixels = getLastFloatImage()
   var outputImage = newImage(width, height)
   case waveshareDriver.colorOption:
   of ColorOption.Black:
+    let pixels = getLastFloatImage()
     for y in 0 ..< height:
       for x in 0 ..< width:
         let index = y * width + x
-        outputImage.data[index].r = (pixels[index] * 255).uint8
-        outputImage.data[index].g = (pixels[index] * 255).uint8
-        outputImage.data[index].b = (pixels[index] * 255).uint8
+        let pixel = (pixels[index] * 255).uint8
+        outputImage.data[index].r = pixel
+        outputImage.data[index].g = pixel
+        outputImage.data[index].b = pixel
         outputImage.data[index].a = 255
   of ColorOption.FourGray:
+    let pixels = getLastFloatImage()
     for y in 0 ..< height:
       for x in 0 ..< width:
         let index = y * width + x
-        outputImage.data[index].r = (pixels[index] * 85).uint8
-        outputImage.data[index].g = (pixels[index] * 85).uint8
-        outputImage.data[index].b = (pixels[index] * 85).uint8
+        let pixel = (pixels[index] * 85).uint8
+        outputImage.data[index].r = pixel
+        outputImage.data[index].g = pixel
+        outputImage.data[index].b = pixel
         outputImage.data[index].a = 255
-  of ColorOption.BlackRed:
-    discard
-  of ColorOption.SevenColor:
-    discard
+  of ColorOption.BlackWhiteRed:
+    let pixels = getLastPixels()
+    for y in 0 ..< height:
+      for x in 0 ..< width:
+        let index = y * width + x
+        let pixel = (pixels[index div 4] shr ((3 - (index mod 4)) * 2)) and 0x03
+        outputImage.data[index].r = if pixel == 0: 0 else: 255
+        outputImage.data[index].g = if pixel == 2: 255 else: 1
+        outputImage.data[index].b = if pixel == 2: 255 else: 1
+        outputImage.data[index].a = 255
   of ColorOption.BlackWhiteYellowRed:
-    discard
+    let pixels = getLastPixels()
+    for y in 0 ..< height:
+      for x in 0 ..< width:
+        let index = y * width + x
+        let pixel = (pixels[index div 4] shr ((3 - (index mod 4)) * 2)) and 0x03
+        outputImage.data[index].r = saturated4ColorPalette[pixel][0].uint8
+        outputImage.data[index].g = saturated4ColorPalette[pixel][1].uint8
+        outputImage.data[index].b = saturated4ColorPalette[pixel][2].uint8
+        outputImage.data[index].a = 255
+  of ColorOption.SevenColor:
+    let pixels = getLastPixels()
+    for y in 0 ..< height:
+      for x in 0 ..< width:
+        let index = y * width + x
+        let pixel = pixels[index]
+        outputImage.data[index].r = saturated7ColorPalette[pixel][0].uint8
+        outputImage.data[index].g = saturated7ColorPalette[pixel][1].uint8
+        outputImage.data[index].b = saturated7ColorPalette[pixel][2].uint8
+        outputImage.data[index].a = 255
 
   if rotate != 0:
     return outputImage.rotateDegrees(rotate).encodeImage(PngFormat)

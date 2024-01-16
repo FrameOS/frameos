@@ -14,7 +14,6 @@ import strutils
 import drivers/drivers as drivers
 import frameos/types
 import frameos/channels
-import frameos/utils/image
 from frameos/runner import getLastPng, triggerRender
 
 var globalFrameConfig: FrameConfig

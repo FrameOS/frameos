@@ -19,7 +19,7 @@ class WaveshareVariant:
     display_function: Optional[str] = None
     display_arguments: Optional[List[str]] = None
     init_returns_zero: bool = False
-    color_option: Literal["Unknown", "Black", "BlackRed", "FourGray", "SevenColor", "BlackWhiteYellowRed"] = "Unknown"
+    color_option: Literal["Unknown", "Black", "BlackWhiteRed", "FourGray", "SevenColor", "BlackWhiteYellowRed"] = "Unknown"
 
 # Colors if we can't autodetect
 VARIANT_COLORS = {
@@ -59,7 +59,7 @@ VARIANT_COLORS = {
     "EPD_5in65f": "SevenColor",
 }
 
-# TODO: BlackRed support
+# TODO: BlackWhiteRed support
 # TODO: BlackWhiteYellowRed support https://www.waveshare.com/wiki/4.37inch_e-Paper_Module_(G)_Manual#Working_With_Raspberry_Pi
 # TODO: SevenColor support
 
@@ -157,7 +157,7 @@ def convert_waveshare_source(variant_key: str) -> WaveshareVariant:
         if variant.display_arguments == ["Black"]:
             variant.color_option = "Black"
         elif variant.display_arguments == ["Black", "Red"]:
-            variant.color_option = "BlackRed"
+            variant.color_option = "BlackWhiteRed"
         elif variant.display_arguments == ["BlackWhiteYellowRed"]:
             variant.color_option = "BlackWhiteYellowRed"
         elif variant.display_arguments == ["FourGray"]:
@@ -205,9 +205,9 @@ proc sleep*() =
   waveshareDisplay.{variant.sleep_function}()
 
 proc renderImage*(image: seq[uint8]) =
-  {f'waveshareDisplay.{variant.display_function}(addr image[0])' if variant.color_option != 'BlackRed' else 'discard'}
+  {f'waveshareDisplay.{variant.display_function}(addr image[0])' if variant.color_option != 'BlackWhiteRed' else 'discard'}
 
-proc renderImageBlackRed*(image1: seq[uint8], image2: seq[uint8]) =
-  {f'waveshareDisplay.{variant.display_function}(addr image1[0], addr image2[0])' if variant.color_option == 'BlackRed' else 'discard'}
+proc renderImageBlackWhiteRed*(image1: seq[uint8], image2: seq[uint8]) =
+  {f'waveshareDisplay.{variant.display_function}(addr image1[0], addr image2[0])' if variant.color_option == 'BlackWhiteRed' else 'discard'}
 
 """
