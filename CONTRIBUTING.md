@@ -27,6 +27,8 @@ cd ../frameos
 nimble install -d
 nimble setup
 
+cd ..
+
 # start a redis server
 redis-server --daemonize yes
 
