@@ -57,9 +57,9 @@ def deploy_frame(id: int):
                 uname_output = []
                 exec_command(frame, ssh, f"uname -m", uname_output)
                 arch = "".join(uname_output).strip()
-                if arch == "aarch64" or arch == "armv7l":
+                if arch == "aarch64":
                     cpu = "arm64"
-                elif arch == "armv6l":
+                elif arch == "armv6l" or arch == "armv7l":
                     cpu = "arm"
                 elif arch == "i386":
                     cpu = "i386"
