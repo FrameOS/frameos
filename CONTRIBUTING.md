@@ -22,7 +22,10 @@ flask db upgrade
 
 cd ../frontend
 npm install
-cd ..
+
+cd ../frameos
+nimble install -d
+nimble setup
 
 # start a redis server
 redis-server --daemonize yes
