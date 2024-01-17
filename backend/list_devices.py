@@ -24,9 +24,9 @@ if __name__ == '__main__':
         color = {
             "Black": "Black/White",
             "BlackWhiteRed": "Black/White/Red",
-            "BlackWhiteYellowRed": "Black/White/Yellow/Red (not implemented)",
-            "FourGray": "4 Grayscale (not implemented!)",
-            "SevenColor": "7 Color (not implemented!)",
+            "BlackWhiteYellowRed": "Black/White/Yellow/Red",
+            "FourGray": "4 Grayscale",
+            "SevenColor": "7 Color",
         }.get(v.color_option, v.color_option)
         code = "" if v.code == "" else f" ({v.code.upper()})"
         output = {
