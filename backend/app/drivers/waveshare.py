@@ -15,6 +15,7 @@ class WaveshareVariant:
     height: Optional[int] = None
     init_function: Optional[str] = None
     clear_function: Optional[str] = None
+    clear_args: str = ""
     sleep_function: Optional[str] = None
     display_function: Optional[str] = None
     display_arguments: Optional[List[str]] = None
@@ -143,6 +144,8 @@ def convert_waveshare_source(variant_key: str) -> WaveshareVariant:
                     variant.init_returns_zero = "(): UBYTE" in line
                 if proc_name.lower() == f"{variant.prefix}_Clear".lower() and variant.clear_function is None:
                     variant.clear_function = proc_name
+                    if "UBYTE color" in line:
+                        variant.clear_args = "1"
                 if proc_name.lower() == f"{variant.prefix}_4Gray_Clear".lower():
                     variant.clear_function = proc_name
                 if proc_name.lower() == f"{variant.prefix}_Sleep".lower():
@@ -199,7 +202,7 @@ proc start*() =
   {'discard ' if variant.init_returns_zero else ''}waveshareDisplay.{variant.init_function}()
 
 proc clear*() =
-  waveshareDisplay.{variant.clear_function}()
+  waveshareDisplay.{variant.clear_function}({variant.clear_args})
 
 proc sleep*() =
   waveshareDisplay.{variant.sleep_function}()
