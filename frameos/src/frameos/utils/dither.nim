@@ -98,7 +98,7 @@ proc ditherPaletteIndexed*(image: Image, palette: seq[(int, int, int)]): seq[uin
     dx = [1, -1, 0, 1]
     bits = nextPowerOfTwo(palette.len)
 
-  let rowWidth = ceil(width.float / bits.float).int
+  let rowWidth = ceil(width.float / (9 - bits).float).int
   var output = newSeq[uint8](height * rowWidth)
 
   for y in 0..<height:

@@ -120,10 +120,12 @@ proc renderBlackWhiteRed*(self: Driver, image: Image) =
 
 proc renderBlackWhiteYellowRed*(self: Driver, image: Image) =
   let pixels = ditherPaletteIndexed(image, saturated4ColorPalette)
+  setLastPixels(pixels)
   waveshareDriver.renderImage(pixels)
 
 proc renderSevenColor*(self: Driver, image: Image) =
   let pixels = ditherPaletteIndexed(image, saturated7ColorPalette)
+  setLastPixels(pixels)
   waveshareDriver.renderImage(pixels)
 
 proc render*(self: Driver, image: Image) =

@@ -89,10 +89,12 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
 
     driverTimer = epochTime()
     # TODO: render the driver part in another thread if fast rendering is enabled
-    drivers.render(lastRotatedImage)
-
-    self.logger.log(%*{"event": "render:driver",
+    try:
+      drivers.render(lastRotatedImage)
+      self.logger.log(%*{"event": "render:driver",
         "device": self.frameConfig.device, "ms": round((epochTime() - driverTimer) * 1000, 3)})
+    except Exception as e:
+      self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
     if self.frameConfig.interval < 1:
       let now = epochTime()
