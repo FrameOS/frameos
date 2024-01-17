@@ -15,9 +15,9 @@ type Driver* = ref object of FrameOSDriver
 
 var
   lastFloatImageLock: Lock
-  lastFloatImage: seq[float]
+  lastFloatImage: seq[float] = @[]
   lastPixelsLock: Lock
-  lastPixels: seq[uint8]
+  lastPixels: seq[uint8] = @[]
 
 proc setLastFloatImage*(image: seq[float]) =
   withLock lastFloatImageLock:
@@ -59,6 +59,9 @@ proc init*(frameOS: FrameOS): Driver =
         "error": "Failed to initialize driver", "exception": e.msg,
         "stack": e.getStackTrace()})
 
+proc notifyImageAvailable*(self: Driver) =
+  self.logger.log(%*{"event": "render:dither", "info": "Dithered image available"})
+
 proc renderBlack*(self: Driver, image: Image) =
   var gray = newSeq[float](image.width * image.height)
   image.toGrayscaleFloat(gray)
@@ -72,6 +75,7 @@ proc renderBlack*(self: Driver, image: Image) =
       gray[y + image.width * (image.height - 1)] = 1
 
   setLastFloatImage(gray)
+  self.notifyImageAvailable()
 
   let rowWidth = ceil(image.width.float / 8).int
   var blackImage = newSeq[uint8](rowWidth * image.height)
@@ -88,6 +92,7 @@ proc renderFourGray*(self: Driver, image: Image) =
   image.toGrayscaleFloat(gray, 3)
   gray.floydSteinberg(image.width, image.height)
   setLastFloatImage(gray)
+  self.notifyImageAvailable()
 
   let rowWidth = ceil(image.width.float / 4).int
   var blackImage = newSeq[uint8](rowWidth * image.height)
@@ -105,6 +110,9 @@ proc renderBlackWhiteRed*(self: Driver, image: Image) =
   var blackImage = newSeq[uint8](rowWidth * image.height)
   var redImage = newSeq[uint8](rowWidth * image.height)
 
+  # TODO: save last pixels
+  # TODO: notify image available
+
   for y in 0..<image.height:
     for x in 0..<image.width:
       let inputIndex = y * image.width + x
@@ -121,11 +129,13 @@ proc renderBlackWhiteRed*(self: Driver, image: Image) =
 proc renderBlackWhiteYellowRed*(self: Driver, image: Image) =
   let pixels = ditherPaletteIndexed(image, saturated4ColorPalette)
   setLastPixels(pixels)
+  self.notifyImageAvailable()
   waveshareDriver.renderImage(pixels)
 
 proc renderSevenColor*(self: Driver, image: Image) =
   let pixels = ditherPaletteIndexed(image, saturated7ColorPalette)
   setLastPixels(pixels)
+  self.notifyImageAvailable()
   waveshareDriver.renderImage(pixels)
 
 proc render*(self: Driver, image: Image) =
@@ -160,6 +170,8 @@ proc toPng*(rotate: int = 0): string =
   case waveshareDriver.colorOption:
   of ColorOption.Black:
     let pixels = getLastFloatImage()
+    if pixels.len == 0:
+      raise newException(Exception, "No render yet")
     for y in 0 ..< height:
       for x in 0 ..< width:
         let index = y * width + x
@@ -170,6 +182,8 @@ proc toPng*(rotate: int = 0): string =
         outputImage.data[index].a = 255
   of ColorOption.FourGray:
     let pixels = getLastFloatImage()
+    if pixels.len == 0:
+      raise newException(Exception, "No render yet")
     for y in 0 ..< height:
       for x in 0 ..< width:
         let index = y * width + x
@@ -180,30 +194,42 @@ proc toPng*(rotate: int = 0): string =
         outputImage.data[index].a = 255
   of ColorOption.BlackWhiteRed:
     let pixels = getLastPixels()
+    if pixels.len == 0:
+      raise newException(Exception, "No render yet")
     for y in 0 ..< height:
       for x in 0 ..< width:
         let index = y * width + x
-        let pixel = (pixels[index div 4] shr ((3 - (index mod 4)) * 2)) and 0x03
+        let pixelIndex = index div 4
+        let pixelShift = (3 - (index mod 4)) * 2
+        let pixel = (pixels[pixelIndex] shr pixelShift) and 0x03
         outputImage.data[index].r = if pixel == 0: 0 else: 255
         outputImage.data[index].g = if pixel == 2: 255 else: 1
         outputImage.data[index].b = if pixel == 2: 255 else: 1
         outputImage.data[index].a = 255
   of ColorOption.BlackWhiteYellowRed:
     let pixels = getLastPixels()
+    if pixels.len == 0:
+      raise newException(Exception, "No render yet")
     for y in 0 ..< height:
       for x in 0 ..< width:
         let index = y * width + x
-        let pixel = (pixels[index div 4] shr ((3 - (index mod 4)) * 2)) and 0x03
+        let pixelIndex = index div 4
+        let pixelShift = (3 - (index mod 4)) * 2
+        let pixel = (pixels[pixelIndex] shr pixelShift) and 0x03
         outputImage.data[index].r = saturated4ColorPalette[pixel][0].uint8
         outputImage.data[index].g = saturated4ColorPalette[pixel][1].uint8
         outputImage.data[index].b = saturated4ColorPalette[pixel][2].uint8
         outputImage.data[index].a = 255
   of ColorOption.SevenColor:
     let pixels = getLastPixels()
+    if pixels.len == 0:
+      raise newException(Exception, "No render yet")
     for y in 0 ..< height:
       for x in 0 ..< width:
         let index = y * width + x
-        let pixel = pixels[index]
+        let pixelIndex = index div 2
+        let pixelShift = (1 - (index mod 2)) * 4
+        let pixel = (pixels[pixelIndex] shr pixelShift) and 0x07
         outputImage.data[index].r = saturated7ColorPalette[pixel][0].uint8
         outputImage.data[index].g = saturated7ColorPalette[pixel][1].uint8
         outputImage.data[index].b = saturated7ColorPalette[pixel][2].uint8
