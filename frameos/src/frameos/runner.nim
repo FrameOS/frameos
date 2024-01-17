@@ -26,14 +26,18 @@ var
   thread: Thread[(FrameConfig, Logger)]
   pngLock: Lock
   pngImage = newImage(1, 1)
+  hasPngImage = false
 
 proc setLastImage(image: Image) =
   withLock pngLock:
     if pngImage.width != image.width or pngImage.height != image.height:
       pngImage = newImage(image.width, image.height)
     pngImage.draw(image)
+    hasPngImage = true
 
 proc getLastPng*(): string =
+  if not hasPngImage:
+    raise newException(Exception, "No image rendered yet")
   var copy: seq[ColorRGBX]
   withLock pngLock:
     copy = pngImage.data

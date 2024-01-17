@@ -1,5 +1,6 @@
 import math, pixie
 
+# 4-color screen colors, as presented by the manufacturer
 const desaturated4ColorPalette* = @[
   (0, 0, 0),
   (255, 255, 255),
@@ -7,6 +8,7 @@ const desaturated4ColorPalette* = @[
   (255, 0, 0),
 ]
 
+# 4-color screen colors, as measured on a real display
 const saturated4ColorPalette* = @[
   (57, 48, 57),
   (255, 255, 255),
@@ -14,6 +16,7 @@ const saturated4ColorPalette* = @[
   (156, 72, 75),
 ]
 
+# 7-color screen colors, as presented by the manufacturer
 const desaturated7ColorPalette* = @[
   (0, 0, 0),
   (255, 255, 255),
@@ -24,6 +27,7 @@ const desaturated7ColorPalette* = @[
   (255, 140, 0)
 ]
 
+# 7-color screen colors, as measured on a real display
 const saturated7ColorPalette* = @[
   (57, 48, 57),
   (255, 255, 255),
@@ -38,16 +42,6 @@ proc clip8(value: int): uint8 {.inline.} =
   if value < 0: return 0
   elif value > 255: return 255
   else: return value.uint8
-
-proc nextPowerOfTwo(bits: int): int =
-  var n = bits - 1
-  n = n or n shr 1
-  n = n or n shr 2
-  n = n or n shr 4
-  n = n or n shr 8
-  n = n or n shr 16
-  n += 1
-  return n
 
 proc toGrayscaleFloat*(image: Image, grayscale: var seq[float], multiple: float = 1.0) =
   let
@@ -96,14 +90,16 @@ proc ditherPaletteIndexed*(image: Image, palette: seq[(int, int, int)]): seq[uin
     distribution = [7, 3, 5, 1]
     dy = [0, 1, 1, 1]
     dx = [1, -1, 0, 1]
-    bits = nextPowerOfTwo(palette.len)
+    bits = if palette.len <= 2: 1 elif palette.len <= 4: 2 elif palette.len <= 16: 4 else: 8
+    divider = if palette.len <= 2: 8 elif palette.len <= 4: 4 elif palette.len <= 16: 2 else: 1
 
-  let rowWidth = ceil(width.float / (9 - bits).float).int
+  let rowWidth = ceil(width.float / divider.float).int
   var output = newSeq[uint8](height * rowWidth)
 
   for y in 0..<height:
     for x in 0..<width:
       let dataIndex = y * width + x
+      let outputIndex = y * rowWidth + x div divider
 
       let imageR = img.data[dataIndex].r.int
       let imageG = img.data[dataIndex].g.int
@@ -116,13 +112,16 @@ proc ditherPaletteIndexed*(image: Image, palette: seq[(int, int, int)]): seq[uin
       let errorB = imageB - palB
 
       case bits:
-        of 8: output[dataIndex] = index.uint8
+        of 8: output[outputIndex] = index.uint8
         of 4:
-          output[dataIndex div 2] = output[dataIndex div 2] or (index shl (5 - (dataIndex mod 2) * 4)).uint8
+          let bitPosition = (1 - (x mod 2)) * 4
+          output[outputIndex] = output[outputIndex] or (index shl bitPosition).uint8
         of 2:
-          output[dataIndex div 4] = output[dataIndex div 4] or (index shl (6 - (dataIndex mod 4) * 2)).uint8
+          let bitPosition = (3 - (x mod 4)) * 2
+          output[outputIndex] = output[outputIndex] or (index shl bitPosition).uint8
         of 1:
-          output[dataIndex div 8] = output[dataIndex div 8] or (index shl (7 - (dataIndex mod 8))).uint8
+          let bitPosition = (7 - x) mod 8
+          output[outputIndex] = output[outputIndex] or (index shl bitPosition).uint8
         else: discard
 
       for i in 0..<4:

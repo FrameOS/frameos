@@ -10,10 +10,12 @@ import ws, ws/jester_extra
 
 from net import Port
 import options
-import strutils
+import strutils, strformat
 import drivers/drivers as drivers
 import frameos/types
 import frameos/channels
+import frameos/config
+import frameos/utils/image
 from frameos/runner import getLastPng, triggerRender
 
 var globalFrameConfig: FrameConfig
@@ -72,11 +74,15 @@ proc match(request: Request): Future[ResponseData] {.async.} =
         resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
       of "/image":
         log(%*{"event": "http", "path": request.pathInfo})
-        let image = drivers.toPng(360 - globalFrameConfig.rotate)
-        if image != "":
-          resp Http200, {"Content-Type": "image/png"}, image
-        else:
-          resp Http200, {"Content-Type": "image/png"}, getLastPng()
+        try:
+          let image = drivers.toPng(360 - globalFrameConfig.rotate)
+          if image != "":
+            resp Http200, {"Content-Type": "image/png"}, image
+          else:
+            resp Http200, {"Content-Type": "image/png"}, getLastPng()
+        except Exception as e:
+          resp Http200, {"Content-Type": "image/png"}, renderError(globalFrameConfig.renderWidth(),
+              globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
       else:
         resp Http404, "Not found!"
 
