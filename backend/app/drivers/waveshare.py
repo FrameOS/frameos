@@ -144,7 +144,7 @@ def convert_waveshare_source(variant_key: str) -> WaveshareVariant:
                     variant.init_returns_zero = "(): UBYTE" in line
                 if proc_name.lower() == f"{variant.prefix}_Clear".lower() and variant.clear_function is None:
                     variant.clear_function = proc_name
-                    if "UBYTE color" in line:
+                    if "color: UBYTE" in line:
                         variant.clear_args = "1"
                 if proc_name.lower() == f"{variant.prefix}_4Gray_Clear".lower():
                     variant.clear_function = proc_name
