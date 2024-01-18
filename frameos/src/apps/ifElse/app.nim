@@ -22,8 +22,8 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
 
 proc run*(self: App, context: var ExecutionContext) =
   if self.appConfig.condition:
-    if self.appConfig.thenNode != "":
+    if self.appConfig.thenNode != 0:
       self.scene.execNode(self.appConfig.thenNode, context)
   else:
-    if self.appConfig.elseNode != "":
+    if self.appConfig.elseNode != 0:
       self.scene.execNode(self.appConfig.elseNode, context)

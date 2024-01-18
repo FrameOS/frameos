@@ -32,7 +32,7 @@ type
     frameConfig*: FrameConfig
     logger*: Logger
 
-  NodeId* = distinct string
+  NodeId* = distinct int
 
   FrameScene* = ref object of RootObj
     isRendering*: bool
@@ -74,6 +74,8 @@ type
     runner*: RunnerControl
 
 
-proc `==`*(x, y: NodeId): bool = x.string == y.string
-proc `==`*(x: string, y: NodeId): bool = x == y.string
-proc `==`*(x: NodeId, y: string): bool = x.string == y
+proc `==`*(x, y: NodeId): bool = x.int == y.int
+proc `==`*(x: int, y: NodeId): bool = x == y.int
+proc `==`*(x: NodeId, y: int): bool = x.int == y
+proc `$`*(x: NodeId): string = $(x.int)
+proc `%`*(x: NodeId): JsonNode = %(x.int)

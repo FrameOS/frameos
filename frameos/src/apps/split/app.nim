@@ -131,7 +131,7 @@ proc run*(self: App, context: var ExecutionContext) =
     for column in 0..<columns:
       let (cellWidth, cellHeight) = cellDims[row * columns + column]
       let image = context.image.subImage(cellX.toInt, cellY.toInt, cellWidth, cellHeight)
-      if renderFunction != "":
+      if renderFunction != 0:
         var cellContext = ExecutionContext(
             scene: context.scene,
             image: image,
