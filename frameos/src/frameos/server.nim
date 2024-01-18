@@ -79,9 +79,12 @@ proc match(request: Request): Future[ResponseData] {.async.} =
           if image != "":
             resp Http200, {"Content-Type": "image/png"}, image
           else:
+            raise newException(Exception, "No image available")
+        except Exception:
+          try:
             resp Http200, {"Content-Type": "image/png"}, getLastPng()
-        except Exception as e:
-          resp Http200, {"Content-Type": "image/png"}, renderError(globalFrameConfig.renderWidth(),
+          except Exception as e:
+            resp Http200, {"Content-Type": "image/png"}, renderError(globalFrameConfig.renderWidth(),
               globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
       else:
         resp Http404, "Not found!"
