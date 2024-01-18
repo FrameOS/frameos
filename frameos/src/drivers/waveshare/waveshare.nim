@@ -214,8 +214,9 @@ proc toPng*(rotate: int = 0): string =
         let pixel = (pixelByte shr pixelShift) and 0x03
         let index = y * width + x
         outputImage.data[index].r = if pixel == 0: 0 else: 255
-        outputImage.data[index].g = if pixel == 2 or waveshareDriver.colorOption == ColorOption.BlackWhiteYellow: 255
-                                                      else: 0
+        outputImage.data[index].g = if pixel == 2: 255
+                                    elif pixel == 1 and waveshareDriver.colorOption == ColorOption.BlackWhiteYellow: 255
+                                    else: 0
         outputImage.data[index].b = if pixel == 2: 255 else: 0
         outputImage.data[index].a = 255
   of ColorOption.BlackWhiteYellowRed:
