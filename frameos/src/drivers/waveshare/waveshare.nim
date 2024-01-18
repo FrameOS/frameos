@@ -106,23 +106,30 @@ proc renderFourGray*(self: Driver, image: Image) =
 
 proc renderBlackWhiteRed*(self: Driver, image: Image) =
   let pixels = ditherPaletteIndexed(image, @[(0, 0, 0), (255, 0, 0), (255, 255, 255)])
-  let rowWidth = ceil(image.width.float / 8).int
-  var blackImage = newSeq[uint8](rowWidth * image.height)
-  var redImage = newSeq[uint8](rowWidth * image.height)
+  let inputRowWidth = int(ceil(image.width.float / 4))
+  let packedRowWidth = int(ceil(image.width.float / 8))
+  var blackImage = newSeq[uint8](packedRowWidth * image.height)
+  var redImage = newSeq[uint8](packedRowWidth * image.height)
 
-  # TODO: save last pixels
-  # TODO: notify image available
+  setLastPixels(pixels)
+  self.notifyImageAvailable()
+
+  echo pixels.len
+  echo blackImage.len
 
   for y in 0..<image.height:
     for x in 0..<image.width:
-      let inputIndex = y * image.width + x
-      let index = y * rowWidth + x div 8
-      let oneByte = pixels[inputIndex div 2]
-      let pixel = if inputIndex mod 2 == 0: oneByte shr 4 else: oneByte and 0x0F
-      let bw: uint8 = if pixel == 0: 1 else: 0
-      let red: uint8 = if pixel == 1: 1 else: 0
-      blackImage[index] = blackImage[index] or (bw shl (7 - (x mod 8)))
-      redImage[index] = redImage[index] or (red shl (7 - (x mod 8)))
+      let inputIndex = y * inputRowWidth + x div 4
+      let pixelByte = pixels[inputIndex]
+      let pixelValue = (pixelByte shr ((3 - x mod 4) * 2)) and 0b11
+
+      let black: uint8 = if pixelValue == 0: 0'u8 else: 1'u8
+      let red: uint8 = if pixelValue == 1: 0'u8 else: 1'u8
+
+      let outputIndex = y * packedRowWidth + x div 8
+
+      blackImage[outputIndex] = blackImage[outputIndex] or (black shl (7 - x mod 8))
+      redImage[outputIndex] = redImage[outputIndex] or (red shl (7 - x mod 8))
 
   waveshareDriver.renderImageBlackWhiteRed(blackImage, redImage)
 
@@ -196,15 +203,17 @@ proc toPng*(rotate: int = 0): string =
     let pixels = getLastPixels()
     if pixels.len == 0:
       raise newException(Exception, "No render yet")
+    let inputRowWidth = int(ceil(width.float / 4))
     for y in 0 ..< height:
       for x in 0 ..< width:
+        let inputIndex = y * inputRowWidth + x div 4
+        let pixelByte = pixels[inputIndex]
+        let pixelShift = (3 - (x mod 4)) * 2
+        let pixel = (pixelByte shr pixelShift) and 0x03
         let index = y * width + x
-        let pixelIndex = index div 4
-        let pixelShift = (3 - (index mod 4)) * 2
-        let pixel = (pixels[pixelIndex] shr pixelShift) and 0x03
         outputImage.data[index].r = if pixel == 0: 0 else: 255
-        outputImage.data[index].g = if pixel == 2: 255 else: 1
-        outputImage.data[index].b = if pixel == 2: 255 else: 1
+        outputImage.data[index].g = if pixel == 2: 255 else: 0
+        outputImage.data[index].b = if pixel == 2: 255 else: 0
         outputImage.data[index].a = 255
   of ColorOption.BlackWhiteYellowRed:
     let pixels = getLastPixels()
