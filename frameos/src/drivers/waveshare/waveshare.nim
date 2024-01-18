@@ -104,8 +104,8 @@ proc renderFourGray*(self: Driver, image: Image) =
       blackImage[index div 4] = blackImage[index div 4] or ((bw and 0b11) shl (6 - (index mod 4) * 2))
   waveshareDriver.renderImage(blackImage)
 
-proc renderBlackWhiteRed*(self: Driver, image: Image) =
-  let pixels = ditherPaletteIndexed(image, @[(0, 0, 0), (255, 0, 0), (255, 255, 255)])
+proc renderBlackWhiteRed*(self: Driver, image: Image, isRed = true) =
+  let pixels = ditherPaletteIndexed(image, @[(0, 0, 0), (255, if isRed: 0 else: 255, 0), (255, 255, 255)])
   let inputRowWidth = int(ceil(image.width.float / 4))
   let packedRowWidth = int(ceil(image.width.float / 8))
   var blackImage = newSeq[uint8](packedRowWidth * image.height)
@@ -161,7 +161,9 @@ proc render*(self: Driver, image: Image) =
   of ColorOption.Black:
     self.renderBlack(image)
   of ColorOption.BlackWhiteRed:
-    self.renderBlackWhiteRed(image)
+    self.renderBlackWhiteRed(image, true)
+  of ColorOption.BlackWhiteYellow:
+    self.renderBlackWhiteRed(image, false)
   of ColorOption.SevenColor:
     self.renderSevenColor(image)
   of ColorOption.FourGray:
@@ -199,7 +201,7 @@ proc toPng*(rotate: int = 0): string =
         outputImage.data[index].g = pixel
         outputImage.data[index].b = pixel
         outputImage.data[index].a = 255
-  of ColorOption.BlackWhiteRed:
+  of ColorOption.BlackWhiteRed, ColorOption.BlackWhiteYellow:
     let pixels = getLastPixels()
     if pixels.len == 0:
       raise newException(Exception, "No render yet")

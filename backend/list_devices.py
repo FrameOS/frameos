@@ -24,6 +24,7 @@ if __name__ == '__main__':
         color = {
             "Black": "Black/White",
             "BlackWhiteRed": "Black/White/Red",
+            "BlackWhiteYellow": "Black/White/Yellow",
             "BlackWhiteYellowRed": "Black/White/Yellow/Red",
             "FourGray": "4 Grayscale",
             "SevenColor": "7 Color",
