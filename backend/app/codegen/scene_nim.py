@@ -106,9 +106,9 @@ def write_scene_nim(frame: Frame, scene: Dict) -> str:
                     if key in field_inputs_for_node:
                         app_config_pairs += [f"{key}: {field_inputs_for_node[key]}"]
                     elif type == "node" and key in node_fields_for_node:
-                        app_config_pairs += [f"{key}: \"{sanitize_nim_string(node_fields_for_node[key])}\""]
+                        app_config_pairs += [f"{key}: \"{sanitize_nim_string(node_fields_for_node[key])}\".NodeId"]
                     elif type == "node" and key not in node_fields_for_node:
-                        app_config_pairs += [f"{key}: \"\""]
+                        app_config_pairs += [f"{key}: \"\".NodeId"]
                     elif type == "integer":
                         app_config_pairs += [f"{key}: {int(value)}"]
                     elif type == "float":
@@ -125,22 +125,22 @@ def write_scene_nim(frame: Frame, scene: Dict) -> str:
                 if len(sources) > 0:
                     node_app_id = "nodeapp_" + node_id.replace('-', '_')
                     init_apps += [
-                        f"scene.{app_id} = {node_app_id}App.init(\"{node_id}\", scene, {node_app_id}App.AppConfig({', '.join(app_config_pairs)}))"
+                        f"scene.{app_id} = {node_app_id}App.init(\"{node_id}\".NodeId, scene, {node_app_id}App.AppConfig({', '.join(app_config_pairs)}))"
                     ]
                 else:
                     init_apps += [
-                        f"scene.{app_id} = {name}App.init(\"{node_id}\", scene, {name}App.AppConfig({', '.join(app_config_pairs)}))"
+                        f"scene.{app_id} = {name}App.init(\"{node_id}\".NodeId, scene, {name}App.AppConfig({', '.join(app_config_pairs)}))"
                     ]
 
                 render_nodes += [
-                    f"of \"{node_id}\":",
+                    f"of \"{node_id}\".NodeId:",
                 ]
                 for key, code in field_inputs_for_node.items():
                     render_nodes += [f"  self.{app_id}.appConfig.{key} = {code}"]
 
                 render_nodes += [
                     f"  self.{app_id}.run(context)",
-                    f"  nextNode = \"{next_nodes.get(node_id, '-1')}\""
+                    f"  nextNode = \"{next_nodes.get(node_id, '-1')}\".NodeId"
                 ]
             else:
                 log(frame.id, "stderr", f"- ERROR: App not found: {name}")
@@ -148,7 +148,7 @@ def write_scene_nim(frame: Frame, scene: Dict) -> str:
         event_lines += [f"of \"{event}\":", ]
         for node in nodes:
             next_node = next_nodes.get(node['id'], '-1')
-            event_lines += [f"  try: self.runNode(\"{next_node}\", context)"]
+            event_lines += [f"  try: self.runNode(\"{next_node}\".NodeId, context)"]
             event_lines += [f"  except Exception as e: self.logger.log(%*{{\"event\": \"event:error\","]
             event_lines += [f"      \"node\": \"{next_node}\","]
             event_lines += [f"      \"error\": $e.msg, \"stacktrace\": e.getStackTrace()}})"]
@@ -168,7 +168,7 @@ type Scene* = ref object of FrameScene
 # This makes strformat available within the scene's inline code and avoids the "unused import" error
 discard &""
 
-proc runNode*(self: Scene, nodeId: string,
+proc runNode*(self: Scene, nodeId: NodeId,
     context: var ExecutionContext) =
   let scene = self
   let frameConfig = scene.frameConfig
@@ -176,15 +176,15 @@ proc runNode*(self: Scene, nodeId: string,
   var nextNode = nodeId
   var currentNode = nodeId
   var timer = epochTime()
-  while nextNode != "-1":
+  while nextNode != "-1".NodeId:
     currentNode = nextNode
     timer = epochTime()
     case nextNode:
     {(newline + "    ").join(render_nodes)}
     else:
-      nextNode = "-1"
+      nextNode = "-1".NodeId
     if DEBUG:
-      self.logger.log(%*{{"event": "runApp", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
+      self.logger.log(%*{{"event": "runApp", "node": currentNode.string, "ms": (-timer + epochTime()) * 1000}})
 
 proc runEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:
@@ -200,7 +200,7 @@ proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(
   var context = ExecutionContext(scene: scene, event: "init", payload: %*{{
     }}, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
-  scene.execNode = (proc(nodeId: string, context: var ExecutionContext) = self.runNode(nodeId, context))
+  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = self.runNode(nodeId, context))
   {(newline + "  ").join(init_apps)}
   runEvent(scene, context)
 

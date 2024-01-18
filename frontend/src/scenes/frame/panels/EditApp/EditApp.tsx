@@ -18,7 +18,7 @@ import { Markdown } from '../../../../components/Markdown'
 interface EditAppProps {
   panel: PanelWithMetadata
   sceneId: string
-  nodeId: string
+  nodeId: NodeId
   nodeData: AppNodeData
 }
 

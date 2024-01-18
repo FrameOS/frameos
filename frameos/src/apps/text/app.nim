@@ -32,14 +32,14 @@ type
     borderTypeset*: Option[Arrangement]
 
   App* = ref object
-    nodeId*: string
+    nodeId*: NodeId
     scene*: FrameScene
     appConfig*: AppConfig
     frameConfig*: FrameConfig
     typeface*: Typeface
     cachedRender*: Option[CachedRender]
 
-proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
+proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   let typeface = getDefaultTypeface()
   result = App(
     nodeId: nodeId,

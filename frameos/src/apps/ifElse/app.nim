@@ -3,16 +3,16 @@ import frameos/types
 type
   AppConfig* = object
     condition*: bool
-    thenNode*: string
-    elseNode*: string
+    thenNode*: NodeId
+    elseNode*: NodeId
 
   App* = ref object
-    nodeId*: string
+    nodeId*: NodeId
     scene*: FrameScene
     appConfig*: AppConfig
     frameConfig*: FrameConfig
 
-proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
+proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
     nodeId: nodeId,
     scene: scene,
