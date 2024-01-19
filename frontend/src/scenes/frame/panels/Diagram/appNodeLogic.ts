@@ -8,7 +8,7 @@ import { App, ConfigField, MarkdownField } from '../../../../types'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 
 export interface AppNodeLogicProps extends DiagramLogicProps {
-  nodeId: NodeId
+  nodeId: string
 }
 
 export const appNodeLogic = kea<appNodeLogicType>([
@@ -20,7 +20,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
   })),
   selectors({
     nodeId: [() => [(_, props) => props.nodeId], (nodeId): string => nodeId],
-    node: [(s) => [s.nodes, s.nodeId], (nodes: Node[], nodeId: NodeId) => nodes?.find((n) => n.id === nodeId) ?? null],
+    node: [(s) => [s.nodes, s.nodeId], (nodes: Node[], nodeId: string) => nodes?.find((n) => n.id === nodeId) ?? null],
     nodeEdges: [
       (s) => [s.edges, s.nodeId],
       (edges: Edge[], nodeId): Edge[] => edges?.filter((e) => e.source === nodeId || e.target === nodeId) ?? [],

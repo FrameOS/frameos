@@ -42,7 +42,7 @@ export const diagramLogic = kea<diagramLogicType>([
     keywordDropped: (keyword: string, type: string, position: XYPosition) => ({ keyword, type, position }),
     updateNodeData: (id: string, data: Record<string, any>) => ({ id, data }),
     updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
-    copyAppJSON: (nodeId: NodeId) => ({ nodeId }),
+    copyAppJSON: (nodeId: string) => ({ nodeId }),
     deleteApp: (id: string) => ({ id }),
   }),
   reducers({

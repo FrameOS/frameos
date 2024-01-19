@@ -7,7 +7,7 @@ const SPACE_BETWEEN_CHAINS = 50
 export function arrangeNodes(nodes: Node[], edges: Edge[]): Node[] {
   let visited = new Set<string>()
 
-  function dfs(currentnodeId: NodeId, chain: Node[]): Node[] {
+  function dfs(currentNodeId: string, chain: Node[]): Node[] {
     visited.add(currentNodeId)
 
     // Add the current node to the chain
