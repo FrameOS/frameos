@@ -6,19 +6,19 @@ type
   AppConfig* = object
     rows*: int
     columns*: int
-    renderFunction*: string
+    renderFunction*: NodeId
     gap*: string
     margin*: string
     widthRatios*: string
     heightRatios*: string
 
   App* = ref object
-    nodeId*: string
+    nodeId*: NodeId
     scene*: FrameScene
     appConfig*: AppConfig
     frameConfig*: FrameConfig
 
-proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
+proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
     nodeId: nodeId,
     scene: scene,
@@ -131,7 +131,7 @@ proc run*(self: App, context: var ExecutionContext) =
     for column in 0..<columns:
       let (cellWidth, cellHeight) = cellDims[row * columns + column]
       let image = context.image.subImage(cellX.toInt, cellY.toInt, cellWidth, cellHeight)
-      if renderFunction != "":
+      if renderFunction != 0:
         var cellContext = ExecutionContext(
             scene: context.scene,
             image: image,

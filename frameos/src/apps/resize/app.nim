@@ -9,12 +9,12 @@ type
     height*: int
 
   App* = ref object
-    nodeId*: string
+    nodeId*: NodeId
     frameConfig*: FrameConfig
     scene*: FrameScene
     appConfig*: AppConfig
 
-proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
+proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
     nodeId: nodeId,
     scene: scene,

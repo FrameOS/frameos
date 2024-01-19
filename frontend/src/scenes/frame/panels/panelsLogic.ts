@@ -42,7 +42,7 @@ export const panelsLogic = kea<panelsLogicType>([
     setPanel: (area: Area, panel: PanelWithMetadata) => ({ area, panel }),
     closePanel: (panel: PanelWithMetadata) => ({ panel }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
-    editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
+    editApp: (sceneId: string, nodeId: NodeId, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
     persistUntilClosed: (panel: PanelWithMetadata, logic: AnyBuiltLogic) => ({ panel, logic }),
   }),
   reducers({

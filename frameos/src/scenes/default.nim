@@ -14,21 +14,21 @@ import apps/gradient/app as gradientApp
 const DEBUG = false
 
 type Scene* = ref object of FrameScene
-  app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200: unsplashApp.App
-  app_b94c5793_aeb1_4f3a_b273_c2305c12096e: textApp.App
-  app_1c9414bd_8bc4_4249_8ffb_1b3094715a06: clockApp.App
-  app_ddbd3753_ea6a_4a80_98b4_455fb623ef6b: downloadImageApp.App
-  app_caa0e562_49c7_47ba_9bfb_c6d1a837e414: splitApp.App
-  app_af43bfef_9f59_4a37_912b_8138c07ff9d3: unsplashApp.App
-  app_bbe82c34_84f6_4afe_beb3_87baa54f02e7: ifElseApp.App
-  app_b5f06d55_8889_4869_b12e_f5207211fa05: gradientApp.App
-  app_f4071b08_9afa_47c1_b890_0ca025849914: unsplashApp.App
+  node1: unsplashApp.App
+  node2: textApp.App
+  node3: clockApp.App
+  node4: downloadImageApp.App
+  node5: splitApp.App
+  node6: ifElseApp.App
+  node7: unsplashApp.App
+  node8: gradientApp.App
+  node9: unsplashApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
 # This makes strformat available within the scene's inline code and avoids the "unused import" error
 discard &""
 
-proc runNode*(self: Scene, nodeId: string,
+proc runNode*(self: Scene, nodeId: NodeId,
     context: var ExecutionContext) =
   let scene = self
   let frameConfig = scene.frameConfig
@@ -36,51 +36,51 @@ proc runNode*(self: Scene, nodeId: string,
   var nextNode = nodeId
   var currentNode = nodeId
   var timer = epochTime()
-  while nextNode != "-1":
+  while nextNode != -1.NodeId:
     currentNode = nextNode
     timer = epochTime()
     case nextNode:
-    of "cbef1661-d2f5-4ef8-b0cf-458c3ae11200":
-      self.app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200.run(context)
-      nextNode = "-1"
-    of "b94c5793-aeb1-4f3a-b273-c2305c12096e":
-      self.app_b94c5793_aeb1_4f3a_b273_c2305c12096e.appConfig.text = &"Welcome to FrameOS!\nResolution: {context.image.width} x {context.image.height} .. " &
+    of 1.NodeId: # unsplash
+      self.node1.run(context)
+      nextNode = -1.NodeId
+    of 2.NodeId: # text
+      self.node2.appConfig.text = &"Welcome to FrameOS!\nResolution: {context.image.width} x {context.image.height} .. " &
           scene.state{"magic"}.getStr()
-      self.app_b94c5793_aeb1_4f3a_b273_c2305c12096e.appConfig.position = "top-left"
-      self.app_b94c5793_aeb1_4f3a_b273_c2305c12096e.run(context)
-      nextNode = "1c9414bd-8bc4-4249-8ffb-1b3094715a06"
-    of "1c9414bd-8bc4-4249-8ffb-1b3094715a06":
-      self.app_1c9414bd_8bc4_4249_8ffb_1b3094715a06.run(context)
-      nextNode = "-1"
-    of "ddbd3753-ea6a-4a80-98b4-455fb623ef6b":
-      self.app_ddbd3753_ea6a_4a80_98b4_455fb623ef6b.run(context)
-      nextNode = "-1"
-    of "caa0e562-49c7-47ba-9bfb-c6d1a837e414":
-      self.app_caa0e562_49c7_47ba_9bfb_c6d1a837e414.run(context)
-      nextNode = "-1"
-    of "af43bfef-9f59-4a37-912b-8138c07ff9d3":
-      self.app_af43bfef_9f59_4a37_912b_8138c07ff9d3.run(context)
-      nextNode = "-1"
-    of "bbe82c34-84f6-4afe-beb3-87baa54f02e7":
-      self.app_bbe82c34_84f6_4afe_beb3_87baa54f02e7.appConfig.condition = context.loopIndex mod 2 == 0
-      self.app_bbe82c34_84f6_4afe_beb3_87baa54f02e7.run(context)
-      nextNode = "-1"
-    of "b5f06d55-8889-4869-b12e-f5207211fa05":
-      self.app_b5f06d55_8889_4869_b12e_f5207211fa05.run(context)
-      nextNode = "-1"
-    of "f4071b08-9afa-47c1-b890-0ca025849914":
-      self.app_f4071b08_9afa_47c1_b890_0ca025849914.run(context)
-      nextNode = "b94c5793-aeb1-4f3a-b273-c2305c12096e"
+      self.node2.appConfig.position = "top-left"
+      self.node2.run(context)
+      nextNode = 3.NodeId
+    of 3.NodeId: # clock
+      self.node3.run(context)
+      nextNode = -1.NodeId
+    of 4.NodeId: # downloadImage
+      self.node4.run(context)
+      nextNode = -1.NodeId
+    of 5.NodeId: # split
+      self.node5.run(context)
+      nextNode = -1.NodeId
+    of 7.NodeId: # unsplash
+      self.node7.run(context)
+      nextNode = -1.NodeId
+    of 6.NodeId: # ifElse
+      self.node6.appConfig.condition = context.loopIndex mod 2 == 0
+      self.node6.run(context)
+      nextNode = -1.NodeId
+    of 8.NodeId: # gradient
+      self.node8.run(context)
+      nextNode = -1.NodeId
+    of 9.NodeId: # unsplash
+      self.node9.run(context)
+      nextNode = 2.NodeId
     else:
-      nextNode = "-1"
+      nextNode = -1.NodeId
     if DEBUG:
       self.logger.log(%*{"event": "runApp", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
 proc runEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:
   of "render":
-    try: self.runNode("f4071b08-9afa-47c1-b890-0ca025849914", context)
-    except Exception as e: self.logger.log(%*{"event": "event:error",
+    try: self.runNode(9.NodeId, context)
+    except Exception as e: self.logger.log(%*{"event": "event:render:error",
         "node": "f4071b08-9afa-47c1-b890-0ca025849914",
         "error": $e.msg, "stacktrace": e.getStackTrace()})
   else: discard
@@ -94,31 +94,25 @@ proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(
   var context = ExecutionContext(scene: scene, event: "init", payload: %*{
     }, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
-  scene.execNode = (proc(nodeId: string, context: var ExecutionContext) = self.runNode(nodeId, context))
-  scene.app_cbef1661_d2f5_4ef8_b0cf_458c3ae11200 = unsplashApp.init("cbef1661-d2f5-4ef8-b0cf-458c3ae11200", scene,
-      unsplashApp.AppConfig(cacheSeconds: 60.0, keyword: "birds"))
-  scene.app_b94c5793_aeb1_4f3a_b273_c2305c12096e = textApp.init("b94c5793-aeb1-4f3a-b273-c2305c12096e", scene,
-      textApp.AppConfig(borderWidth: 2, fontColor: parseHtmlColor("#ffffff"), fontSize: 64.0,
-      text: &"Welcome to FrameOS!\nResolution: {context.image.width} x {context.image.height} .. " & scene.state{
-      "magic"}.getStr(), position: "top-left", offsetX: 0.0, offsetY: 0.0, padding: 10.0, borderColor: parseHtmlColor("#000000")))
-  scene.app_1c9414bd_8bc4_4249_8ffb_1b3094715a06 = clockApp.init("1c9414bd-8bc4-4249-8ffb-1b3094715a06", scene,
-      clockApp.AppConfig(position: "bottom-center", format: "HH:mm:ss", formatCustom: "", offsetX: 0.0, offsetY: 0.0,
-      padding: 10.0, fontColor: parseHtmlColor("#ffffff"), fontSize: 32.0, borderColor: parseHtmlColor("#000000"),
-      borderWidth: 1))
-  scene.app_ddbd3753_ea6a_4a80_98b4_455fb623ef6b = downloadImageApp.init("ddbd3753-ea6a-4a80-98b4-455fb623ef6b", scene,
-      downloadImageApp.AppConfig(url: "http://10.4.0.11:4999/", scalingMode: "cover", cacheSeconds: 60.0))
-  scene.app_caa0e562_49c7_47ba_9bfb_c6d1a837e414 = splitApp.init("caa0e562-49c7-47ba-9bfb-c6d1a837e414", scene,
-      splitApp.AppConfig(columns: 3, gap: "10", margin: "5", rows: 2,
-      render_function: "bbe82c34-84f6-4afe-beb3-87baa54f02e7"))
-  scene.app_af43bfef_9f59_4a37_912b_8138c07ff9d3 = unsplashApp.init("af43bfef-9f59-4a37-912b-8138c07ff9d3", scene,
-      unsplashApp.AppConfig(keyword: "nature", cacheSeconds: 60.0))
-  scene.app_bbe82c34_84f6_4afe_beb3_87baa54f02e7 = ifElseApp.init("bbe82c34-84f6-4afe-beb3-87baa54f02e7", scene,
-      ifElseApp.AppConfig(condition: context.loopIndex mod 2 == 0, thenNode: "af43bfef-9f59-4a37-912b-8138c07ff9d3",
-      elseNode: "b5f06d55-8889-4869-b12e-f5207211fa05"))
-  scene.app_b5f06d55_8889_4869_b12e_f5207211fa05 = gradientApp.init("b5f06d55-8889-4869-b12e-f5207211fa05", scene,
-      gradientApp.AppConfig(startColor: parseHtmlColor("#800080"), endColor: parseHtmlColor("#ffc0cb"), angle: 45.0))
-  scene.app_f4071b08_9afa_47c1_b890_0ca025849914 = unsplashApp.init("f4071b08-9afa-47c1-b890-0ca025849914", scene,
-      unsplashApp.AppConfig(cacheSeconds: 600.0, keyword: "nature"))
+  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = self.runNode(nodeId, context))
+  scene.node1 = unsplashApp.init(1.NodeId, scene, unsplashApp.AppConfig(cacheSeconds: 60.0, keyword: "birds"))
+  scene.node2 = textApp.init(2.NodeId, scene, textApp.AppConfig(borderWidth: 2, fontColor: parseHtmlColor("#ffffff"),
+      fontSize: 64.0, text: &"Welcome to FrameOS!\nResolution: {context.image.width} x {context.image.height} .. " &
+      scene.state{"magic"}.getStr(), position: "top-left", offsetX: 0.0, offsetY: 0.0, padding: 10.0,
+      borderColor: parseHtmlColor("#000000")))
+  scene.node3 = clockApp.init(3.NodeId, scene, clockApp.AppConfig(position: "bottom-center", format: "HH:mm:ss",
+      formatCustom: "", offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontColor: parseHtmlColor("#ffffff"), fontSize: 32.0,
+      borderColor: parseHtmlColor("#000000"), borderWidth: 1))
+  scene.node4 = downloadImageApp.init(4.NodeId, scene, downloadImageApp.AppConfig(url: "http://10.4.0.11:4999/",
+      scalingMode: "cover", cacheSeconds: 60.0))
+  scene.node5 = splitApp.init(5.NodeId, scene, splitApp.AppConfig(columns: 3, gap: "10", margin: "5", rows: 2,
+      render_function: 6.NodeId))
+  scene.node7 = unsplashApp.init(7.NodeId, scene, unsplashApp.AppConfig(keyword: "nature", cacheSeconds: 60.0))
+  scene.node6 = ifElseApp.init(6.NodeId, scene, ifElseApp.AppConfig(condition: context.loopIndex mod 2 == 0,
+      thenNode: 7.NodeId, elseNode: 8.NodeId))
+  scene.node8 = gradientApp.init(8.NodeId, scene, gradientApp.AppConfig(startColor: parseHtmlColor("#800080"),
+      endColor: parseHtmlColor("#ffc0cb"), angle: 45.0))
+  scene.node9 = unsplashApp.init(9.NodeId, scene, unsplashApp.AppConfig(cacheSeconds: 600.0, keyword: "nature"))
   runEvent(scene, context)
 
 proc render*(self: Scene): Image =

@@ -10,7 +10,7 @@ export interface ModelMarker extends editor.IMarkerData {}
 export interface EditAppLogicProps {
   frameId: number
   sceneId: string
-  nodeId: string
+  nodeId: NodeId
   keyword: string
   sources?: Record<string, string>
 }

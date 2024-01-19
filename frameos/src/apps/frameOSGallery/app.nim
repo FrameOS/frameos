@@ -11,7 +11,7 @@ type
     cacheSeconds*: float
 
   App* = ref object
-    nodeId*: string
+    nodeId*: NodeId
     scene*: FrameScene
     appConfig*: AppConfig
     frameConfig*: FrameConfig
@@ -20,7 +20,7 @@ type
     cachedImage: Option[Image]
     cachedUrl: string
 
-proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
+proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
     nodeId: nodeId,
     scene: scene,

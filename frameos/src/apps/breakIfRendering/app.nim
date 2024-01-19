@@ -7,12 +7,12 @@ type
     discard
 
   App* = ref object
-    nodeId*: string
+    nodeId*: NodeId
     scene*: FrameScene
     frameConfig*: FrameConfig
     appConfig*: AppConfig
 
-proc init*(nodeId: string, scene: FrameScene, appConfig: AppConfig): App =
+proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
     nodeId: nodeId,
     scene: scene,

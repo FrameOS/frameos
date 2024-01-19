@@ -32,12 +32,14 @@ type
     frameConfig*: FrameConfig
     logger*: Logger
 
+  NodeId* = distinct int
+
   FrameScene* = ref object of RootObj
     isRendering*: bool
     frameConfig*: FrameConfig
     logger*: Logger
     state*: JsonNode
-    execNode*: proc(nodeId: string, context: var ExecutionContext)
+    execNode*: proc(nodeId: NodeId, context: var ExecutionContext)
     dispatchEvent*: proc(event: string, payload: JsonNode)
 
   ExecutionContext* = ref object
@@ -70,3 +72,10 @@ type
     metricsLogger*: MetricsLogger
     server*: Server
     runner*: RunnerControl
+
+
+proc `==`*(x, y: NodeId): bool = x.int == y.int
+proc `==`*(x: int, y: NodeId): bool = x == y.int
+proc `==`*(x: NodeId, y: int): bool = x.int == y
+proc `$`*(x: NodeId): string = $(x.int)
+proc `%`*(x: NodeId): JsonNode = %(x.int)
