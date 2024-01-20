@@ -295,18 +295,6 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
             for file in files:
                 shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", file), os.path.join(build_dir, file))
     
-    if waveshare := drivers.get('gpioButton'):
-        files = [
-            "gpioHandler.c", "gpioHandler.h"
-        ]
-        for file in files:
-            shutil.copy(os.path.join(source_dir, "src", "drivers", "gpioButton", "gpioHandler", file), os.path.join(build_dir, file))
-
-        if waveshare.variant:
-            files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
-            for file in files:
-                shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", file), os.path.join(build_dir, file))
-
     # Update the compilation script for verbose output
     script_path = os.path.join(build_dir, "compile_frameos.sh")
     log(frame.id, "stdout", f"Cleaning build script at {script_path}")

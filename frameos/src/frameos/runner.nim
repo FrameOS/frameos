@@ -180,7 +180,9 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
               payload["x"] = %*((self.frameConfig.width.float * payload["x"].getInt().float / 32767.0).int)
               payload["y"] = %*((self.frameConfig.height.float * payload["y"].getInt().float / 32767.0).int)
             self.dispatchSceneEvent(event, payload)
-          of "mouseUp", "mouseDown", "keyUp", "keyDown":
+          of "mouseUp", "mouseDown", "keyUp", "keyDown", "button":
+            if event == "button":
+              self.logger.log(%*{"event": "event:" & event, "payload": payload})
             self.dispatchSceneEvent(event, payload)
           else:
             self.logger.log(%*{"event": "event:" & event, "payload": payload})
