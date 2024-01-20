@@ -82,7 +82,7 @@ def deploy_frame(id: int):
                     install_if_necessary("build-essential")
                     if drivers.get("evdev"):
                         install_if_necessary("libevdev-dev")
-                    if drivers.get('waveshare'):
+                    if drivers.get('waveshare') or drivers.get('gpioButton'):
                         if exec_command(frame, ssh, '[[ -f "/usr/local/include/lgpio.h" || -f "/usr/include/lgpio.h" ]] && exit 0 || exit 1', raise_on_error=False) != 0:
                             if install_if_necessary("liblgpio-dev", raise_on_error=False) != 0:
                                 log(id, "stdout", f"--> Could not find liblgpio-dev package, installing from source")
@@ -289,6 +289,18 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
         ]
         for file in files:
             shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", file), os.path.join(build_dir, file))
+
+        if waveshare.variant:
+            files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
+            for file in files:
+                shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", file), os.path.join(build_dir, file))
+    
+    if waveshare := drivers.get('gpioButton'):
+        files = [
+            "gpioHandler.c", "gpioHandler.h"
+        ]
+        for file in files:
+            shutil.copy(os.path.join(source_dir, "src", "drivers", "gpioButton", "gpioHandler", file), os.path.join(build_dir, file))
 
         if waveshare.variant:
             files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]

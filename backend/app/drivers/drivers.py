@@ -18,6 +18,10 @@ DRIVERS = {
         vendor_folder="inkyPython",
         can_render=True,
     ),
+    "gpioButton": Driver(
+        name="gpioButton",
+        import_path="gpioButton/gpioButton",
+    ),
     "frameBuffer": Driver(
         name="frameBuffer",
         import_path="frameBuffer/frameBuffer",

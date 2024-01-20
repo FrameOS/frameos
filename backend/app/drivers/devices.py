@@ -6,7 +6,12 @@ from app.drivers.waveshare import get_variant_keys
 def drivers_for_device(device: str) -> Dict[str, Driver]:
     device_drivers: Dict[str, Driver] = {}
     if device == "pimoroni.inky_impression":
-        device_drivers = {"inkyPython": DRIVERS["inkyPython"], "spi": DRIVERS["spi"], "i2c": DRIVERS["i2c"]}
+        device_drivers = {
+            "inkyPython": DRIVERS["inkyPython"],
+            "spi": DRIVERS["spi"], 
+            "i2c": DRIVERS["i2c"],
+            "gpioButton": DRIVERS["gpioButton"]
+        }
     elif device == "pimoroni.hyperpixel2r":
         device_drivers = {"inkyHyperPixel2r": DRIVERS["inkyHyperPixel2r"]}
     elif device == "framebuffer":

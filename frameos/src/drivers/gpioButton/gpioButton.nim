@@ -1,4 +1,4 @@
-import pixie, json
+import pixie, json, strformat, strutils
 import frameos/types
 
 import gpioHandler/gpioHandler as gpioHandler
@@ -26,6 +26,7 @@ proc init*(frameOS: FrameOS): Driver =
     handler: handler
   )
 
-  let pins = [5, 6, 16, 24]
+  let pins = [5.cint, 6.cint, 16.cint, 24.cint]
   for pin in pins:
-    gpioHandler.registerButton(pin)
+    if gpioHandler.registerButton(pin.cint).int == -1:
+      log(frameOS.logger, &"Failed to register GPIO button {pin}")
