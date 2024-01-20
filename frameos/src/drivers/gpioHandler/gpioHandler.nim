@@ -1,3 +1,6 @@
+{.compile("gpioHandler.c", "-D USE_LGPIO_LIB -llgpio").}
+{.passl: "-llgpio".}
+
 type
   event_callback_t* = proc (gpio: cint; level: cint) {.cdecl.}
   log_callback_t* = proc (message: cstring) {.cdecl.}
