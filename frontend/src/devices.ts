@@ -6,7 +6,8 @@ import { Option } from './components/Select'
 export const devices: Option[] = [
   { value: 'web_only', label: 'Web only' },
   { value: 'framebuffer', label: 'HDMI / Framebuffer' },
-  { value: 'pimoroni.inky_impression', label: 'Pimoroni Inky Impression e-ink frames' },
+  { value: 'pimoroni.inky_impression', label: 'Pimoroni Inky Impression e-ink frames (Python driver + Buttons)' },
+  { value: 'pimoroni.inky_python', label: 'Pimoroni Inky other frames (Python driver)' },
   { value: 'pimoroni.hyperpixel2r', label: 'Pimoroni HyperPixel 2.1" Round' },
   { value: 'waveshare.EPD_1in02d', label: 'Waveshare 1.02" (D) 128x80 Black/White' },
   { value: 'waveshare.EPD_1in54_DES', label: 'Waveshare 1.54" (DES) 152x152 Black/White' },

@@ -9,6 +9,7 @@ const events = {
   mouseMove: 'When a mouse moves {x: int, y: int}',
   mouseDown: 'When a mouse button is pressed {button: int}',
   mouseUp: 'When a mouse button is released {button: int}',
+  button: 'When a GPIO button is triggered {pin: int, label: str, line: int}',
 }
 
 export function Events() {
