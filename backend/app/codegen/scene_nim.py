@@ -23,6 +23,7 @@ def write_scene_nim(frame: Frame, scene: Dict) -> str:
     edges = scene.get('edges', [])
     event_nodes = {}
     next_nodes = {}
+    prev_nodes = {}
     field_inputs: Dict[str, Dict[str, str]] = {}
     node_fields: Dict[str, Dict[str, str]] = {}
     
@@ -39,6 +40,7 @@ def write_scene_nim(frame: Frame, scene: Dict) -> str:
         if source and target:
             if source_handle == 'next' and target_handle == 'prev':
                 next_nodes[source] = target
+                prev_nodes[target] = source
             if source_handle == 'fieldOutput' and target_handle.startswith('fieldInput/'):
                 field = target_handle.replace('fieldInput/', '')
                 if not field_inputs.get(target):
@@ -57,9 +59,21 @@ def write_scene_nim(frame: Frame, scene: Dict) -> str:
         if node.get('type') == 'event':
             event = node.get('data', {}).get('keyword', None)
             if event:
-                if not event_nodes.get(event):
-                    event_nodes[event] = []
-                event_nodes[event].append(node)
+                # only if a source node
+                if node_id in next_nodes:
+                    if not event_nodes.get(event):
+                        event_nodes[event] = []
+                    event_nodes[event].append(node)
+
+                # only if a target node
+                if node_id in prev_nodes:
+                    node_integer = node_id_to_integer(node_id)
+                    run_node_lines += [
+                        f"of {node_integer}.NodeId: # {event}",
+                        f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{}'})",
+                        f"  nextNode = -1.NodeId"
+                    ]
+    
         elif node.get('type') == 'app':
             sources = node.get('data', {}).get('sources', {})
             name = node.get('data', {}).get('keyword', f"app_{node_id}")
@@ -171,6 +185,7 @@ def write_scene_nim(frame: Frame, scene: Dict) -> str:
 import pixie, json, times, strformat
 
 import frameos/types
+import frameos/channels
 {newline.join(imports)}
 
 const DEBUG = false
