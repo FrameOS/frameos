@@ -223,12 +223,15 @@ proc toPng*(rotate: int = 0): string =
     let pixels = getLastPixels()
     if pixels.len == 0:
       raise newException(Exception, "No render yet")
+    let inputRowWidth = int(ceil(width.float / 4))
     for y in 0 ..< height:
       for x in 0 ..< width:
+        let inputIndex = y * inputRowWidth + x div 4
+        let pixelByte = pixels[inputIndex]
+        let pixelShift = (3 - (x mod 4)) * 2
+        let pixel = (pixelByte shr pixelShift) and 0x03
         let index = y * width + x
-        let pixelIndex = index div 4
-        let pixelShift = (3 - (index mod 4)) * 2
-        let pixel = (pixels[pixelIndex] shr pixelShift) and 0x03
+
         outputImage.data[index].r = saturated4ColorPalette[pixel][0].uint8
         outputImage.data[index].g = saturated4ColorPalette[pixel][1].uint8
         outputImage.data[index].b = saturated4ColorPalette[pixel][2].uint8
