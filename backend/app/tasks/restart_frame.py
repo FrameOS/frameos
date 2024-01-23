@@ -1,12 +1,9 @@
-import json
 
-from io import StringIO
-from scp import SCPClient
 
 from app import create_app
 from app.huey import huey
 from app.models.log import new_log as log
-from app.models.frame import Frame, update_frame, get_frame_json
+from app.models.frame import Frame, update_frame
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection
 
 @huey.task()

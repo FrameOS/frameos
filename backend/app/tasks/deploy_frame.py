@@ -283,7 +283,7 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
 
     if waveshare := drivers.get('waveshare'):
         files = [
-            "Debug.h", "DEV_Config.c", "DEV_Config.h" 
+            "Debug.h", "DEV_Config.c", "DEV_Config.h"
             # used with the GPIOD driver
             #, "RPI_gpiod.c", "RPI_gpiod.h", "dev_hardware_SPI.c", "dev_hardware_SPI.h",
         ]
@@ -294,7 +294,7 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
             files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
             for file in files:
                 shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", file), os.path.join(build_dir, file))
-    
+
     # Update the compilation script for verbose output
     script_path = os.path.join(build_dir, "compile_frameos.sh")
     log(frame.id, "stdout", f"Cleaning build script at {script_path}")

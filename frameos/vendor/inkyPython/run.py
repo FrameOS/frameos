@@ -1,10 +1,9 @@
-from typing import Dict 
 import sys
 import json
 import io
 import inspect
 
-def log(obj: Dict):
+def log(obj: dict):
     print(json.dumps(obj))
     sys.stdout.flush()
 
@@ -33,7 +32,7 @@ if __name__ == "__main__":
     log({ "inky": True, "width": inky.resolution[0], "height": inky.resolution[1], "color": inky.colour })
     data = read_binary_data()
     log({ "bytesReceived": len(data) })
-    
+
     try:
         from PIL import Image
     except ImportError:
