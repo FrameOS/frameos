@@ -1,0 +1,15 @@
+repos:
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v2.3.0
+  hooks:
+    - id: check-yaml
+    - id: trailing-whitespace
+      files: ^(backend/|frameos/vendor/).*$
+
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  # Ruff version.
+  rev: v0.1.14
+  hooks:
+    # Run the linter.
+    - id: ruff
+      files: ^(backend/|frameos/vendor/).*$
