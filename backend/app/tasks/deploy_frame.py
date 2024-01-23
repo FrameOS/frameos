@@ -36,7 +36,7 @@ def deploy_frame(id: int):
         try:
             frame = Frame.query.get_or_404(id)
             if frame.status == 'deploying':
-                raise Exception(f"Already deploying, will not deploy again. Request again to force deploy.")
+                raise Exception("Already deploying, will not deploy again. Request again to force deploy.")
 
             frame.status = 'deploying'
             update_frame(frame)
@@ -53,9 +53,9 @@ def deploy_frame(id: int):
                 return exec_command(frame, ssh, f"dpkg -l | grep -q \"^ii  {package}\" || sudo apt-get install -y {package}", raise_on_error=raise_on_error)
 
             with tempfile.TemporaryDirectory() as temp_dir:
-                log(id, "stdout", f"- Getting target architecture")
+                log(id, "stdout", "- Getting target architecture")
                 uname_output = []
-                exec_command(frame, ssh, f"uname -m", uname_output)
+                exec_command(frame, ssh, "uname -m", uname_output)
                 arch = "".join(uname_output).strip()
                 if arch == "aarch64":
                     cpu = "arm64"
@@ -69,11 +69,11 @@ def deploy_frame(id: int):
                 drivers = drivers_for_device(frame.device)
 
                 # create a build .tar.gz
-                log(id, "stdout", f"- Copying build folders")
+                log(id, "stdout", "- Copying build folders")
                 build_dir, source_dir = create_build_folders(temp_dir, build_id)
-                log(id, "stdout", f"- Applying local modifications")
+                log(id, "stdout", "- Applying local modifications")
                 make_local_modifications(frame, source_dir)
-                log(id, "stdout", f"- Creating build archive")
+                log(id, "stdout", "- Creating build archive")
                 archive_path = create_local_build_archive(frame, build_dir, build_id, nim_path, source_dir, temp_dir, cpu)
 
                 with SCPClient(ssh.get_transport()) as scp:
@@ -85,7 +85,7 @@ def deploy_frame(id: int):
                     if drivers.get('waveshare') or drivers.get('gpioButton'):
                         if exec_command(frame, ssh, '[[ -f "/usr/local/include/lgpio.h" || -f "/usr/include/lgpio.h" ]] && exit 0 || exit 1', raise_on_error=False) != 0:
                             if install_if_necessary("liblgpio-dev", raise_on_error=False) != 0:
-                                log(id, "stdout", f"--> Could not find liblgpio-dev package, installing from source")
+                                log(id, "stdout", "--> Could not find liblgpio-dev package, installing from source")
                                 command = "if [ ! -f /usr/local/include/lgpio.h ]; then "\
                                           "rm -rf /tmp/lgpio-install && "\
                                           "mkdir -p /tmp/lgpio-install && "\
@@ -100,7 +100,7 @@ def deploy_frame(id: int):
                                 exec_command(frame, ssh, command)
 
                     exec_command(frame, ssh, "if [ ! -d /srv/frameos/ ]; then sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; fi")
-                    exec_command(frame, ssh, f"mkdir -p /srv/frameos/build/")
+                    exec_command(frame, ssh, "mkdir -p /srv/frameos/build/")
                     log(id, "stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
                     scp.put(archive_path, f"/srv/frameos/build/build_{build_id}.tar.gz")
                     exec_command(frame, ssh, f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz")
@@ -137,9 +137,9 @@ def deploy_frame(id: int):
                 exec_command(frame, ssh, f"rm -rf /srv/frameos/current && ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current")
 
                 # clean old build and release and cache folders
-                exec_command(frame, ssh, f"cd /srv/frameos/build && ls -dt1 build_* | tail -n +11 | xargs rm -rf")
-                exec_command(frame, ssh, f"cd /srv/frameos/build/cache && find . -type f \( -atime +0 -a -mtime +0 \) | xargs rm -rf")
-                exec_command(frame, ssh, f"cd /srv/frameos/releases && ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" | tail -n +11 | xargs rm -rf")
+                exec_command(frame, ssh, "cd /srv/frameos/build && ls -dt1 build_* | tail -n +11 | xargs rm -rf")
+                exec_command(frame, ssh, "cd /srv/frameos/build/cache && find . -type f \( -atime +0 -a -mtime +0 \) | xargs rm -rf")
+                exec_command(frame, ssh, "cd /srv/frameos/releases && ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" | tail -n +11 | xargs rm -rf")
 
             if drivers.get("i2c"):
                 exec_command(frame, ssh, 'grep -q "^dtparam=i2c_vc=on$" /boot/config.txt || echo "dtparam=i2c_vc=on" | sudo tee -a /boot/config.txt')
@@ -248,7 +248,7 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
         shutil.rmtree(os.path.join(build_dir, "vendor", inkyHyperPixel2r.vendor_folder, "__pycache__"), ignore_errors=True)
 
     # Tell a white lie
-    log(frame.id, "stdout", f"- No cross compilation. Generating source code for compilation on frame.")
+    log(frame.id, "stdout", "- No cross compilation. Generating source code for compilation on frame.")
 
     # run "nim c --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:tmp/build_1 src/frameos.nim"
     status, out, err = exec_local_command(
@@ -283,7 +283,7 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
 
     if waveshare := drivers.get('waveshare'):
         files = [
-            "Debug.h", "DEV_Config.c", "DEV_Config.h" 
+            "Debug.h", "DEV_Config.c", "DEV_Config.h"
             # used with the GPIOD driver
             #, "RPI_gpiod.c", "RPI_gpiod.h", "dev_hardware_SPI.c", "dev_hardware_SPI.h",
         ]
@@ -294,7 +294,7 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
             files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
             for file in files:
                 shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", file), os.path.join(build_dir, file))
-    
+
     # Update the compilation script for verbose output
     script_path = os.path.join(build_dir, "compile_frameos.sh")
     log(frame.id, "stdout", f"Cleaning build script at {script_path}")
@@ -317,7 +317,7 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
                 # check if there's a file in the cache folder called <md5sum>.c.o
                 file.write(f"if [ -f ../cache/${{md5sum}}.{cpu}.c.o ]; then\n")
                 # if there is, make a symlink to the build folder with the name <source>.o
-                file.write(f"    cached_files_count=$((cached_files_count + 1))\n")
+                file.write("    cached_files_count=$((cached_files_count + 1))\n")
                 file.write(f"    ln -s ../cache/${{md5sum}}.{cpu}.c.o {o_file}\n")
                 file.write("else\n")
                 # if not, run the command in "line" and then copy the <source>.c.o into the build folder as <md5sum>.c.o
