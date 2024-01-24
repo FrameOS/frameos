@@ -13,3 +13,7 @@ repos:
     # Run the linter.
     - id: ruff
       files: ^(backend/|frameos/vendor/).*$
+      args: ['--ignore', 'E402,F403,E722']
+      # E402 Module level import not at top of file
+      # F403 `from foo import *` used; unable to detect undefined names
+      # E722 Do not use bare `except`
