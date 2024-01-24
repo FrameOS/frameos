@@ -141,7 +141,7 @@ def validate_nim(source):
 
     except Exception as e:
         return [{"error": str(e)}]
-    
+
 def validate_json(source):
     try:
         json.loads(source)

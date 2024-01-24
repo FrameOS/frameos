@@ -2,9 +2,9 @@ from huey.signals import SIGNAL_ERROR, SIGNAL_LOCKED
 
 from app.huey import huey
 
-from .deploy_frame import deploy_frame
-from .reset_frame import reset_frame
-from .restart_frame import restart_frame
+from .deploy_frame import deploy_frame  # noqa: F401  (breaks huey)
+from .reset_frame import reset_frame  # noqa: F401  (breaks huey)
+from .restart_frame import restart_frame  # noqa: F401  (breaks huey)
 
 @huey.signal(SIGNAL_LOCKED)
 def task_not_run_handler(signal, task, exc=None):
@@ -15,8 +15,3 @@ def task_not_run_handler(signal, task, exc=None):
     # provide a default of ``exc=None``.
     print('SIGNAL_ERROR')
     print(SIGNAL_ERROR)
-
-@huey.signal(SIGNAL_LOCKED)
-def task_not_run_handler(signal, task, exc=None):
-    print('SIGNAL_LOCKED')
-    print(SIGNAL_LOCKED)

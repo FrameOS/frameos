@@ -40,7 +40,7 @@ class BaseTestCase(unittest.TestCase):
             user.set_password(password)
             db.session.add(user)
             db.session.commit()
-        except Exception as e:
+        except:
             db.session.rollback()
             raise
 

@@ -23,3 +23,5 @@ pillow==9.5.0
 sentry-sdk[flask]
 pytest
 pip-tools
+pre-commit
+ruff

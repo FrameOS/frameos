@@ -1,9 +1,7 @@
-from typing import Dict
-
 from app.drivers.drivers import Driver
 
 
-def write_drivers_nim(drivers: Dict[str, Driver]) -> str:
+def write_drivers_nim(drivers: dict[str, Driver]) -> str:
     imports = []
     vars = []
     init_drivers = []

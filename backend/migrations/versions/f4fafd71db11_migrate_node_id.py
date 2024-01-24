@@ -5,8 +5,6 @@ Revises: fa715fc28251
 Create Date: 2024-01-18 23:47:48.016511
 
 """
-from alembic import op
-import sqlalchemy as sa
 from sqlalchemy.orm import attributes
 
 

@@ -2,7 +2,7 @@ import atexit
 import signal
 import subprocess
 from io import StringIO
-from typing import Optional, List
+from typing import Optional
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
@@ -67,12 +67,12 @@ def get_ssh_connection(frame: Frame) -> SSHClient:
                 ssh_key_obj = RSAKey.from_private_key(StringIO(default_key))
             ssh.connect(frame.frame_host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=30)
         else:
-            raise Exception(f"Set up SSH keys in the settings page, or provide a password for the frame")
+            raise Exception("Set up SSH keys in the settings page, or provide a password for the frame")
     log(frame.id, "stdinfo", f"Connected via SSH to {frame.ssh_user}@{frame.frame_host}")
     return ssh
 
 
-def exec_command(frame: Frame, ssh: SSHClient, command: str, output: Optional[List[str]] = None, raise_on_error = True) -> int:
+def exec_command(frame: Frame, ssh: SSHClient, command: str, output: Optional[list[str]] = None, raise_on_error = True) -> int:
     log(frame.id, "stdout", f"> {command}")
     _stdin, stdout, stderr = ssh.exec_command(command)
     exit_status = None

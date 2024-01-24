@@ -1,7 +1,5 @@
 from app import db
 from sqlalchemy.dialects.sqlite import JSON
-from typing import Dict
-
 
 class Settings(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -16,5 +14,5 @@ class Settings(db.Model):
         }
 
 
-def get_settings_dict() -> Dict:
+def get_settings_dict() -> dict:
     return {setting.key: setting.value for setting in Settings.query.all()}

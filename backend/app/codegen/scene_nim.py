@@ -1,20 +1,19 @@
 import json
 import os
-from typing import Dict
 
 from app.models.frame import Frame
 from app.models.apps import get_local_frame_apps, local_apps_path
 from app.codegen.utils import sanitize_nim_string, natural_keys
 
 
-def write_scene_nim(frame: Frame, scene: Dict) -> str:
+def write_scene_nim(frame: Frame, scene: dict) -> str:
     from app.models.log import new_log as log
     available_apps = get_local_frame_apps()
     scene_id = scene.get('id', 'default')
     log(frame.id, "stdout", f"- Generating scene: {scene_id}")
     nodes = scene.get('nodes', [])
     nodes_by_id = {n['id']: n for n in nodes}
-    node_integer_map: Dict[str, int] = {}
+    node_integer_map: dict[str, int] = {}
     imports = []
     scene_object_fields = []
     init_apps = []
@@ -24,14 +23,14 @@ def write_scene_nim(frame: Frame, scene: Dict) -> str:
     event_nodes = {}
     next_nodes = {}
     prev_nodes = {}
-    field_inputs: Dict[str, Dict[str, str]] = {}
-    node_fields: Dict[str, Dict[str, str]] = {}
-    
+    field_inputs: dict[str, dict[str, str]] = {}
+    node_fields: dict[str, dict[str, str]] = {}
+
     def node_id_to_integer(node_id: str) -> int:
         if node_id not in node_integer_map:
             node_integer_map[node_id] = len(node_integer_map) + 1
         return node_integer_map[node_id]
-    
+
     for edge in edges:
         source = edge.get('source', None)
         target = edge.get('target', None)
@@ -71,9 +70,9 @@ def write_scene_nim(frame: Frame, scene: Dict) -> str:
                     run_node_lines += [
                         f"of {node_integer}.NodeId: # {event}",
                         f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{}'})",
-                        f"  nextNode = -1.NodeId"
+                        "  nextNode = -1.NodeId"
                     ]
-    
+
         elif node.get('type') == 'app':
             sources = node.get('data', {}).get('sources', {})
             name = node.get('data', {}).get('keyword', f"app_{node_id}")
@@ -108,7 +107,7 @@ def write_scene_nim(frame: Frame, scene: Dict) -> str:
                 else:
                     config = {}
 
-            config_types: Dict[str, str] = {}
+            config_types: dict[str, str] = {}
             for field in config.get('fields'):
                 key = field.get('name', None)
                 value = field.get('value', None)
@@ -170,7 +169,7 @@ def write_scene_nim(frame: Frame, scene: Dict) -> str:
                 f"  self.{app_id}.run(context)",
                 f"  nextNode = {-1 if next_node_id is None else node_id_to_integer(next_node_id)}.NodeId"
             ]
-    
+
     scene_object_fields.sort(key=natural_keys)
 
     for event, nodes in event_nodes.items():
@@ -241,7 +240,7 @@ proc render*(self: Scene): Image =
     image: case self.frameConfig.rotate:
     of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
     else: newImage(self.frameConfig.width, self.frameConfig.height),
-    loopIndex: 0, 
+    loopIndex: 0,
     loopKey: "."
   )
   context.image.fill(self.frameConfig.backgroundColor)
@@ -250,4 +249,3 @@ proc render*(self: Scene): Image =
 {{.pop.}}
 """
     return scene_source
-

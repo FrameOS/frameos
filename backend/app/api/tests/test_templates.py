@@ -2,7 +2,6 @@ import json
 from app import db
 from app.models import Template
 from app.tests.base import BaseTestCase
-from unittest.mock import patch
 
 class TestTemplateAPI(BaseTestCase):
     def test_create_template(self):
