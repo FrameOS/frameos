@@ -1,7 +1,7 @@
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField
 from wtforms.validators import DataRequired, ValidationError, Email, EqualTo
-from flask import redirect, url_for, render_template, flash
+from flask import redirect, render_template, flash
 
 from app import db
 from . import views

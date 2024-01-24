@@ -1,6 +1,3 @@
-import gzip
-from flask import send_from_directory
-
 from flask import Blueprint
 
 api = Blueprint('api', __name__)

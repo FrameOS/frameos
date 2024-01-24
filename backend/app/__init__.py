@@ -1,6 +1,3 @@
-import gzip
-import io
-import json
 from typing import Optional
 
 from gevent import monkey
@@ -10,8 +7,8 @@ import sentry_sdk
 import os
 from sqlalchemy.exc import OperationalError
 
-from flask import Flask, current_app, flash, redirect, url_for, request, jsonify
-from flask_login import current_user, LoginManager
+from flask import Flask
+from flask_login import LoginManager
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_socketio import SocketIO
