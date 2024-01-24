@@ -29,7 +29,6 @@ $(OBJECTS): pre-build
 		cache_obj=../cache/$$md5sum.c.o; \
 		if [ -f "$$cache_obj" ]; then \
 			ln -s "$$cache_obj" $@; \
-			echo "[$$(ls *.o | wc -l)/$(TOTAL)] $$file (cached)"; \
 		else \
 			$(CC) -c $(CFLAGS) $< -o $@; \
 			cp $@ "$$cache_obj"; \
