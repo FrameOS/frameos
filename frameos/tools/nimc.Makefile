@@ -18,7 +18,8 @@ clean:
 	rm -f *.o $(EXECUTABLE)
 
 pre-build:
-	mkdir -p ../cache
+	@mkdir -p ../cache
+	@echo "Compiling on device. This might take a while on the first run."
 
 $(OBJECTS): pre-build
 
