@@ -18,21 +18,23 @@ clean:
 	rm -f *.o $(EXECUTABLE)
 
 pre-build:
-	mkdir -p ../cache/obj
+	mkdir -p ../cache
 
 $(OBJECTS): pre-build
 
 %.o: %.c
-	@md5sum=$$(md5sum $< | awk '{print $1}'); \
-	cache_obj=../cache/obj/$$md5sum.c.o; \
-	if [ -f "$$cache_obj" ]; then \
-		if [ ! -L $@ ]; then \
+	@if [ ! -e $@ ]; then \
+		md5sum=$$(md5sum $< | awk '{print $1}'); \
+		file=$$(echo '$<' | sed 's/@s/\//g' | sed 's/@m//g' | sed 's/.*nimble\/pkgs2\/\(.*\)/\1/' | sed 's/.*\/\(nim\/lib\/.*\)/\1/'); \
+		cache_obj=../cache/$$md5sum.c.o; \
+		if [ -f "$$cache_obj" ]; then \
 			ln -s "$$cache_obj" $@; \
+			echo "[$$(ls *.o | wc -l)/$(TOTAL)] $$file (cached)"; \
+		else \
+			$(CC) -c $(CFLAGS) $< -o $@; \
+			cp $@ "$$cache_obj"; \
+			echo "[$$(ls *.o | wc -l)/$(TOTAL)] $$file"; \
 		fi; \
-	else \
-		$(CC) -c $(CFLAGS) $< -o $@; \
-		cp $@ "$$cache_obj"; \
-	fi; \
-	echo "[$$(ls *.o | wc -l)/$(TOTAL)] $$(echo '$<' | sed 's/@s/\//g' | sed 's/@m//g' | sed 's/.*nimble\/pkgs2\/\(.*\)/\1/' | sed 's/.*\/\(nim\/lib\/.*\)/\1/')"
+	fi
 
 .PHONY: all clean pre-build
