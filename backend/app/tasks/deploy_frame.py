@@ -57,7 +57,7 @@ def deploy_frame(id: int):
                 uname_output = []
                 exec_command(frame, ssh, "uname -m", uname_output)
                 arch = "".join(uname_output).strip()
-                if arch == "aarch64":
+                if arch == "aarch64" or arch == "arm64":
                     cpu = "arm64"
                 elif arch == "armv6l" or arch == "armv7l":
                     cpu = "arm"
@@ -67,7 +67,7 @@ def deploy_frame(id: int):
                     cpu = "amd64"
 
                 drivers = drivers_for_device(frame.device)
-
+                
                 # create a build .tar.gz
                 log(id, "stdout", "- Copying build folders")
                 build_dir, source_dir = create_build_folders(temp_dir, build_id)
@@ -104,7 +104,7 @@ def deploy_frame(id: int):
                     log(id, "stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
                     scp.put(archive_path, f"/srv/frameos/build/build_{build_id}.tar.gz")
                     exec_command(frame, ssh, f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz")
-                    exec_command(frame, ssh, f"cd /srv/frameos/build/build_{build_id} && sh ./compile_frameos.sh")
+                    exec_command(frame, ssh, f"cd /srv/frameos/build/build_{build_id} && make -j$(nproc)")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/releases/release_{build_id}")
                     exec_command(frame, ssh, f"cp /srv/frameos/build/build_{build_id}/frameos /srv/frameos/releases/release_{build_id}/frameos")
                     log(id, "stdout", f"> add /srv/frameos/releases/release_{build_id}/frame.json")
@@ -294,6 +294,30 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
             files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
             for file in files:
                 shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", file), os.path.join(build_dir, file))
+
+    # Create Makefile
+    with open(os.path.join(build_dir, "Makefile"), "w") as file:
+        # Read the compilation flags from the generated script
+        script_path = os.path.join(build_dir, "compile_frameos.sh")
+        linker_flags = ["-pthread", "-lm", "-lrt", "-ldl"]
+        compiler_flags = []
+        with open(script_path, "r") as script:
+            lines = script.readlines()
+        for line in lines:
+            if " -o frameos " in line and " -l" in line:
+                linker_flags = [flag.strip() for flag in line.split(' ') if flag.startswith('-') and flag != '-o']
+            elif " -c " in line and len(compiler_flags) == 0:
+                compiler_flags = [flag for flag in line.split(' ') if flag.startswith('-') and not flag.startswith('-I') and not flag in ['-o', '-c']]
+
+        # Read the Makefile from ../frameos/tools/nimc.Makefile
+        with open(os.path.join(source_dir, "tools", "nimc.Makefile"), "r") as makefile:
+            lines = makefile.readlines()
+        for line in lines:
+            if line.startswith("LIBS = "):
+                line = "LIBS = -L. " + (" ".join(linker_flags)) + "\n"
+            if line.startswith("CFLAGS = "):
+                line = "CFLAGS = " + (" ".join([f for f in compiler_flags if f != '-c'])) + "\n"
+            file.write(line)
 
     # Update the compilation script for verbose output
     script_path = os.path.join(build_dir, "compile_frameos.sh")
