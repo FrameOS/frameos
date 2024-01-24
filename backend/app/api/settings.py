@@ -28,7 +28,7 @@ def set_settings():
                     setting = Settings(key=key, value=value)
                     db.session.add(setting)
         db.session.commit()
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
         return jsonify(error="Database error"), 500
 
     return jsonify(get_settings_dict())
@@ -44,7 +44,7 @@ def generate_ssh_keys():
             public_exponent=65537,
             key_size=3072,
         )
-    except Exception as e:
+    except:
         return jsonify(error="Key generation error"), 500
 
     public_key = private_key.public_key()
