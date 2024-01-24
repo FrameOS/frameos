@@ -23,14 +23,14 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
     event_nodes = {}
     next_nodes = {}
     prev_nodes = {}
-    
     field_inputs: dict[str, dict[str, str]] = {}
     node_fields: dict[str, dict[str, str]] = {}
+
     def node_id_to_integer(node_id: str) -> int:
         if node_id not in node_integer_map:
             node_integer_map[node_id] = len(node_integer_map) + 1
         return node_integer_map[node_id]
-    
+
     for edge in edges:
         source = edge.get('source', None)
         target = edge.get('target', None)
@@ -72,7 +72,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                         f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{}'})",
                         f"  nextNode = -1.NodeId"
                     ]
-    
+
         elif node.get('type') == 'app':
             sources = node.get('data', {}).get('sources', {})
             name = node.get('data', {}).get('keyword', f"app_{node_id}")
@@ -169,7 +169,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                 f"  self.{app_id}.run(context)",
                 f"  nextNode = {-1 if next_node_id is None else node_id_to_integer(next_node_id)}.NodeId"
             ]
-    
+
     scene_object_fields.sort(key=natural_keys)
 
     for event, nodes in event_nodes.items():
@@ -240,7 +240,7 @@ proc render*(self: Scene): Image =
     image: case self.frameConfig.rotate:
     of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
     else: newImage(self.frameConfig.width, self.frameConfig.height),
-    loopIndex: 0, 
+    loopIndex: 0,
     loopKey: "."
   )
   context.image.fill(self.frameConfig.backgroundColor)
@@ -249,4 +249,3 @@ proc render*(self: Scene): Image =
 {{.pop.}}
 """
     return scene_source
-

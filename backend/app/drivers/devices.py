@@ -6,7 +6,7 @@ def drivers_for_device(device: str) -> dict[str, Driver]:
     if device == "pimoroni.inky_impression" or device == "pimoroni.inky_python":
         device_drivers = {
             "inkyPython": DRIVERS["inkyPython"],
-            "spi": DRIVERS["spi"], 
+            "spi": DRIVERS["spi"],
             "i2c": DRIVERS["i2c"],
         }
         if device == "pimoroni.inky_impression":
