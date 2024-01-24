@@ -5,7 +5,7 @@ SOURCES = $(wildcard *.c)
 OBJECTS = $(SOURCES:.c=.o)
 TOTAL = $(words $(SOURCES))
 EXECUTABLE = frameos
-LIBS = -L. -pthread -pthread -lm -lm -lrt -levdev -ldl -L.
+LIBS = -pthread -lm -lm -lrt -ldl
 CFLAGS = -w -fmax-errors=3 -pthread -O3 -fno-strict-aliasing -fno-ident -fno-math-errno
 
 all: $(EXECUTABLE)
@@ -17,8 +17,22 @@ $(EXECUTABLE): $(OBJECTS)
 clean:
 	rm -f *.o $(EXECUTABLE)
 
-%.o: %.c
-	@$(CC) -c $(CFLAGS) $< -o $@	
-	@echo "[$$(ls *.o | wc -l)/$(TOTAL)] $$(echo '$<' | sed 's/@s/\//g' | sed 's/@m//g' | sed 's/.*nimble\/pkgs2\/\(.*\)/\1/' | sed 's/.*\/\(nim\/lib\/.*\)/\1/')"
+pre-build:
+	mkdir -p ../cache/obj
 
-.PHONY: all
+$(OBJECTS): pre-build
+
+%.o: %.c
+	@md5sum=$$(md5sum $< | awk '{print $1}'); \
+	cache_obj=../cache/obj/$$md5sum.c.o; \
+	if [ -f "$$cache_obj" ]; then \
+		if [ ! -L $@ ]; then \
+			ln -s "$$cache_obj" $@; \
+		fi; \
+	else \
+		$(CC) -c $(CFLAGS) $< -o $@; \
+		cp $@ "$$cache_obj"; \
+	fi; \
+	echo "[$$(ls *.o | wc -l)/$(TOTAL)] $$(echo '$<' | sed 's/@s/\//g' | sed 's/@m//g' | sed 's/.*nimble\/pkgs2\/\(.*\)/\1/' | sed 's/.*\/\(nim\/lib\/.*\)/\1/')"
+
+.PHONY: all clean pre-build

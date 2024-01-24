@@ -67,7 +67,7 @@ def deploy_frame(id: int):
                     cpu = "amd64"
 
                 drivers = drivers_for_device(frame.device)
-                
+
                 # create a build .tar.gz
                 log(id, "stdout", "- Copying build folders")
                 build_dir, source_dir = create_build_folders(temp_dir, build_id)
