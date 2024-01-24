@@ -15,8 +15,3 @@ def task_not_run_handler(signal, task, exc=None):
     # provide a default of ``exc=None``.
     print('SIGNAL_ERROR')
     print(SIGNAL_ERROR)
-
-@huey.signal(SIGNAL_LOCKED)
-def task_not_run_handler(signal, task, exc=None):
-    print('SIGNAL_LOCKED')
-    print(SIGNAL_LOCKED)
