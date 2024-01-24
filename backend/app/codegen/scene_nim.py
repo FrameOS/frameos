@@ -70,7 +70,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                     run_node_lines += [
                         f"of {node_integer}.NodeId: # {event}",
                         f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{}'})",
-                        f"  nextNode = -1.NodeId"
+                        "  nextNode = -1.NodeId"
                     ]
 
         elif node.get('type') == 'app':

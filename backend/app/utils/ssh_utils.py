@@ -67,7 +67,7 @@ def get_ssh_connection(frame: Frame) -> SSHClient:
                 ssh_key_obj = RSAKey.from_private_key(StringIO(default_key))
             ssh.connect(frame.frame_host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=30)
         else:
-            raise Exception(f"Set up SSH keys in the settings page, or provide a password for the frame")
+            raise Exception("Set up SSH keys in the settings page, or provide a password for the frame")
     log(frame.id, "stdinfo", f"Connected via SSH to {frame.ssh_user}@{frame.frame_host}")
     return ssh
 
