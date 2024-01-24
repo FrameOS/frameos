@@ -140,7 +140,7 @@ def api_frame_update(id: int):
                 elif field in ['interval', 'metrics_interval'] and value is not None:
                     value = float(value)
                 elif field in ['scenes']:
-                    if type(value) == str:
+                    if isinstance(value, str):
                         value = json.loads(value) if value is not None else None
                 setattr(frame, field, value)
         update_frame(frame)
