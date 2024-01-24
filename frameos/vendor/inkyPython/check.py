@@ -1,8 +1,7 @@
-from typing import Dict 
 import sys
 import json
 
-def log(obj: Dict):
+def log(obj: dict):
     print(json.dumps(obj))
     sys.stdout.flush()
 

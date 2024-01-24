@@ -2,7 +2,7 @@ import atexit
 import signal
 import subprocess
 from io import StringIO
-from typing import Optional, List
+from typing import Optional
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
@@ -72,7 +72,7 @@ def get_ssh_connection(frame: Frame) -> SSHClient:
     return ssh
 
 
-def exec_command(frame: Frame, ssh: SSHClient, command: str, output: Optional[List[str]] = None, raise_on_error = True) -> int:
+def exec_command(frame: Frame, ssh: SSHClient, command: str, output: Optional[list[str]] = None, raise_on_error = True) -> int:
     log(frame.id, "stdout", f"> {command}")
     _stdin, stdout, stderr = ssh.exec_command(command)
     exit_status = None

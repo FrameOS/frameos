@@ -1,7 +1,6 @@
 import uuid
 from app import db, socketio
 from sqlalchemy.dialects.sqlite import JSON
-from typing import Dict
 
 class Metrics(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -19,7 +18,7 @@ class Metrics(db.Model):
         }
 
 
-def new_metrics(frame_id: int, metrics: Dict) -> Metrics:
+def new_metrics(frame_id: int, metrics: dict) -> Metrics:
     metrics = Metrics(frame_id=frame_id, metrics=metrics)
     db.session.add(metrics)
     db.session.commit()

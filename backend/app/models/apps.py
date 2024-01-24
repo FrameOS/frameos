@@ -1,10 +1,10 @@
-from typing import Dict, Optional, List
+from typing import Optional, List
 import json
 import os
 
 local_apps_path = "../frameos/src/apps"
 
-def get_app_configs() -> Dict[str, Dict]:
+def get_app_configs() -> dict[str, dict]:
     configs = {}
     for keyword in os.listdir(local_apps_path):
         local_app_path = os.path.join(local_apps_path, keyword)
@@ -34,9 +34,9 @@ def get_local_frame_apps() -> List[str]:
 
 
 
-def get_one_app_sources(keyword: str) -> Optional[Dict[str, str]]:
+def get_one_app_sources(keyword: str) -> Optional[dict[str, str]]:
     apps = os.listdir(local_apps_path)
-    sources: Dict[str, str] = {}
+    sources: dict[str, str] = {}
     if keyword in apps:
         local_app_path = os.path.join(local_apps_path, keyword)
         app_path = os.path.join(local_app_path, "app.nim")
@@ -51,7 +51,7 @@ def get_one_app_sources(keyword: str) -> Optional[Dict[str, str]]:
 
 
 
-def get_apps_from_scenes(scenes: List[Dict]) -> Dict[str, Dict]:
+def get_apps_from_scenes(scenes: List[dict]) -> dict[str, dict]:
     apps = {}
     for scene in scenes:
         for node in scene.get('nodes', []):

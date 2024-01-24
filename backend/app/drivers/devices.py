@@ -1,10 +1,8 @@
-from typing import Dict
-
 from app.drivers.drivers import Driver, DRIVERS
 from app.drivers.waveshare import get_variant_keys
 
-def drivers_for_device(device: str) -> Dict[str, Driver]:
-    device_drivers: Dict[str, Driver] = {}
+def drivers_for_device(device: str) -> dict[str, Driver]:
+    device_drivers: dict[str, Driver] = {}
     if device == "pimoroni.inky_impression" or device == "pimoroni.inky_python":
         device_drivers = {
             "inkyPython": DRIVERS["inkyPython"],

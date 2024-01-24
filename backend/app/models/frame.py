@@ -2,7 +2,7 @@ import json
 import uuid
 import secrets
 from app import db, socketio
-from typing import Dict, Optional
+from typing import Optional
 from sqlalchemy.dialects.sqlite import JSON
 
 from app.models.apps import get_app_configs
@@ -138,7 +138,7 @@ def delete_frame(frame_id: int):
     return False
 
 
-def create_default_scene() -> Dict:
+def create_default_scene() -> dict:
     event_uuid = str(uuid.uuid4())
     unsplash_uuid = str(uuid.uuid4())
     edge_uuid = str(uuid.uuid4())

@@ -1,20 +1,19 @@
 import json
 import os
-from typing import Dict
 
 from app.models.frame import Frame
 from app.models.apps import get_local_frame_apps, local_apps_path
 from app.codegen.utils import sanitize_nim_string, natural_keys
 
 
-def write_scene_nim(frame: Frame, scene: Dict) -> str:
+def write_scene_nim(frame: Frame, scene: dict) -> str:
     from app.models.log import new_log as log
     available_apps = get_local_frame_apps()
     scene_id = scene.get('id', 'default')
     log(frame.id, "stdout", f"- Generating scene: {scene_id}")
     nodes = scene.get('nodes', [])
     nodes_by_id = {n['id']: n for n in nodes}
-    node_integer_map: Dict[str, int] = {}
+    node_integer_map: dict[str, int] = {}
     imports = []
     scene_object_fields = []
     init_apps = []
@@ -24,9 +23,9 @@ def write_scene_nim(frame: Frame, scene: Dict) -> str:
     event_nodes = {}
     next_nodes = {}
     prev_nodes = {}
-    field_inputs: Dict[str, Dict[str, str]] = {}
-    node_fields: Dict[str, Dict[str, str]] = {}
     
+    field_inputs: dict[str, dict[str, str]] = {}
+    node_fields: dict[str, dict[str, str]] = {}
     def node_id_to_integer(node_id: str) -> int:
         if node_id not in node_integer_map:
             node_integer_map[node_id] = len(node_integer_map) + 1
@@ -108,7 +107,7 @@ def write_scene_nim(frame: Frame, scene: Dict) -> str:
                 else:
                     config = {}
 
-            config_types: Dict[str, str] = {}
+            config_types: dict[str, str] = {}
             for field in config.get('fields'):
                 key = field.get('name', None)
                 value = field.get('value', None)
