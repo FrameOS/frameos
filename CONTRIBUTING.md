@@ -44,6 +44,16 @@ flask db migrate -m "something changed"
 # apply the migrations
 flask db upgrade
 ```
+## Installing pre-commit
+
+```bash
+# run linter on files changes in every commit
+pre-commit install
+# run linter on all files
+pre-commit run --all-files
+# uninstall if causing problems
+pre-commit uninstall
+```
 
 ## Running tests
 
