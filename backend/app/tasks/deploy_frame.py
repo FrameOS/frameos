@@ -319,44 +319,6 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
                 line = "CFLAGS = " + (" ".join([f for f in compiler_flags if f != '-c'])) + "\n"
             file.write(line)
 
-    # Update the compilation script for verbose output
-    script_path = os.path.join(build_dir, "compile_frameos.sh")
-    log(frame.id, "stdout", f"Cleaning build script at {script_path}")
-    with open(script_path, "r") as file:
-        lines = file.readlines()
-    with open(script_path, "w") as file:
-        file.write("#!/bin/sh\n")
-        file.write("set -eu\n")
-        file.write("start_time=$(date +%s)\n")
-        file.write("mkdir -p ../cache\n") # make sure we have the cache folder
-        file.write("cached_files_count=0\n")  # Initialize cached files counter
-        for i, line in enumerate(lines):
-            if line.startswith("gcc -c") and line.strip().endswith(".c"):
-                source_file = line.split(' ')[-1].strip()
-                o_file = line.split(' ')[-2].strip()
-                source_cleaned = '/'.join(source_file.split('@s')[-3:]).replace('@m', './')
-
-                # take the md5sum of the source file <source>.c
-                file.write(f"md5sum={compile_line_md5(line)}$(md5sum {source_file} | awk '{{print $1}}')\n")
-                # check if there's a file in the cache folder called <md5sum>.c.o
-                file.write(f"if [ -f ../cache/${{md5sum}}.{cpu}.c.o ]; then\n")
-                # if there is, make a symlink to the build folder with the name <source>.o
-                file.write("    cached_files_count=$((cached_files_count + 1))\n")
-                file.write(f"    ln -s ../cache/${{md5sum}}.{cpu}.c.o {o_file}\n")
-                file.write("else\n")
-                # if not, run the command in "line" and then copy the <source>.c.o into the build folder as <md5sum>.c.o
-                file.write(f"    echo [{i + 1}/{len(lines)}] Compiling on device: {source_cleaned}\n")
-                file.write(f"    {line.strip()}\n")
-                file.write(f"    cp {o_file} ../cache/${{md5sum}}.{cpu}.c.o\n")
-                file.write("fi\n")
-            else:
-                file.write(f"echo [{i + 1}/{len(lines)}] Compiling on device: frameos\n")
-                file.write(line)
-        file.write("echo \"Used $cached_files_count cached files\"\n")
-        file.write("end_time=$(date +%s)\n")
-        file.write("duration=$((end_time - start_time))\n")
-        file.write("echo \"Compiled in $duration seconds\"\n")
-
     # 7. Zip it up "(cd tmp && tar -czf ./build_1.tar.gz build_1)"
     archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")
     zip_base_path = os.path.join(temp_dir, f"build_{build_id}")
