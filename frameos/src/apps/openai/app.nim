@@ -75,15 +75,19 @@ proc run*(self: App, context: ExecutionContext) =
         self.error("No image URL returned from OpenAI.")
         return
       var client2 = newHttpClient(timeout = 60000)
-      let imageData = client2.request(imageUrl, httpMethod = HttpGet)
-      if imageData.code != Http200:
-        self.error "Error fetching image " & $imageData.status
-        return
+      try:
+        let imageData = client2.request(imageUrl, httpMethod = HttpGet)
+        if imageData.code != Http200:
+          self.error "Error fetching image " & $imageData.status
+          return
 
-      downloadedImage = some(decodeImage(imageData.body))
-
+        downloadedImage = some(decodeImage(imageData.body))
+      finally:
+        client2.close()
     except CatchableError as e:
       self.error "Error fetching image from OpenAI: " & $e.msg
+    finally:
+      client.close()
 
     if self.appConfig.cacheSeconds > 0:
       self.cachedImage = downloadedImage
