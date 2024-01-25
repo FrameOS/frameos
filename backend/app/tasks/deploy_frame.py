@@ -113,16 +113,16 @@ def deploy_frame(id: int):
                     # TODO: abstract driver-specific install steps
                     # TODO: abstract vendor logic
                     if inkyPython := drivers.get("inkyPython"):
-                        exec_command(frame, ssh, f"cp -r /srv/frameos/build/build_{build_id}/vendor /srv/frameos/releases/release_{build_id}/vendor")
+                        exec_command(frame, ssh, f"mkdir -p /srv/frameos/vendor && cp -r /srv/frameos/build/build_{build_id}/vendor/inkyPython /srv/frameos/vendor/")
                         install_if_necessary("python3-pip")
                         install_if_necessary("python3-venv")
-                        exec_command(frame, ssh, f"cd /srv/frameos/releases/release_{build_id}/vendor/{inkyPython.vendor_folder} && python3 -m venv env && env/bin/pip3 install -r requirements.txt")
+                        exec_command(frame, ssh, f"cd /srv/frameos/vendor/{inkyPython.vendor_folder} && ([ ! -d env ] && python3 -m venv env || echo 'env exists') && (sha256sum -c requirements.txt.sha256sum 2>/dev/null || (echo '> env/bin/pip3 install -r requirements.txt' && env/bin/pip3 install -r requirements.txt && sha256sum requirements.txt > requirements.txt.sha256sum))")
 
                     if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
-                        exec_command(frame, ssh, f"cp -r /srv/frameos/build/build_{build_id}/vendor /srv/frameos/releases/release_{build_id}/vendor")
+                        exec_command(frame, ssh, f"mkdir -p /srv/frameos/vendor && cp -r /srv/frameos/build/build_{build_id}/vendor/inkyHyperPixel2r /srv/frameos/vendor/")
                         install_if_necessary("python3-pip")
                         install_if_necessary("python3-venv")
-                        exec_command(frame, ssh, f"cd /srv/frameos/releases/release_{build_id}/vendor/{inkyHyperPixel2r.vendor_folder} && python3 -m venv env && env/bin/pip3 install -r requirements.txt")
+                        exec_command(frame, ssh, f"cd /srv/frameos/vendor/{inkyHyperPixel2r.vendor_folder} && ([ ! -d env ] && python3 -m venv env || echo 'env exists') && (sha256sum -c requirements.txt.sha256sum 2>/dev/null || (echo '> env/bin/pip3 install -r requirements.txt' && env/bin/pip3 install -r requirements.txt && sha256sum requirements.txt > requirements.txt.sha256sum))")
 
                     # add frameos.service
                     with open("../frameos/frameos.service", "r") as file:

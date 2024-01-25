@@ -10,7 +10,6 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
     from app.models.log import new_log as log
     available_apps = get_local_frame_apps()
     scene_id = scene.get('id', 'default')
-    log(frame.id, "stdout", f"- Generating scene: {scene_id}")
     nodes = scene.get('nodes', [])
     nodes_by_id = {n['id']: n for n in nodes}
     node_integer_map: dict[str, int] = {}
@@ -80,16 +79,14 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
             app_id = f"node{node_integer}"
 
             if name not in available_apps and len(sources) == 0:
-                log(frame.id, "stderr", f"- ERROR: App \"{name}\" for node \"{node_id}\" not found")
+                log(frame.id, "stderr", f"- ERROR: When generating scene {scene_id}. App \"{name}\" for node \"{node_id}\" not found")
                 continue
 
             if len(sources) > 0:
-                log(frame.id, "stdout", f"- Generating source app: {node_id}")
                 node_app_id = "nodeapp_" + node_id.replace('-', '_')
                 app_import = f"import apps/{node_app_id}/app as nodeApp{node_id_to_integer(node_app_id)}"
                 scene_object_fields += [f"{app_id}: nodeApp{node_id_to_integer(node_app_id)}.App"]
             else:
-                log(frame.id, "stdout", f"- Generating app: {node_id} ({name})")
                 app_import = f"import apps/{name}/app as {name}App"
                 scene_object_fields += [f"{app_id}: {name}App.App"]
 
@@ -124,7 +121,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
             for key, value in app_config.items():
                 if key not in config_types:
                     log(frame.id, "stderr",
-                        f"- ERROR: Config key \"{key}\" not found for app \"{name}\", node \"{node_id}\"")
+                        f"- ERROR: When generating scene {scene_id}. Config key \"{key}\" not found for app \"{name}\", node \"{node_id}\"")
                     continue
                 type = config_types[key]
 

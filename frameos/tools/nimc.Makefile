@@ -19,7 +19,7 @@ clean:
 
 pre-build:
 	@mkdir -p ../cache
-	@echo "Compiling on device. This might take a while on the first run."
+	@echo "Compiling on device, largest files first. This might take minutes on the first run."
 
 $(OBJECTS): pre-build
 

@@ -32,7 +32,7 @@ proc init*(frameOS: FrameOS): Driver =
     logger: frameOS.logger
   )
 
-  let process = startProcess(workingDir = "./vendor/inkyPython",
+  let process = startProcess(workingDir = "/srv/frameos/vendor/inkyPython",
       command = "./env/bin/python3", args = ["check.py"], options = {poStdErrToStdOut})
   let pOut = process.outputStream()
   var line = ""
@@ -68,7 +68,7 @@ proc render*(self: Driver, image: Image) =
   self.lastImageData = image.data
   let imageData = image.encodeImage(BmpFormat)
 
-  let process = startProcess(workingDir = "./vendor/inkyPython",
+  let process = startProcess(workingDir = "/srv/frameos/vendor/inkyPython",
       command = "./env/bin/python3", args = ["run.py"], options = {poStdErrToStdOut})
   let pOut = process.outputStream()
   let pIn = process.inputStream()

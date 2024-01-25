@@ -12,7 +12,7 @@ proc render*(self: Driver, image: Image) =
   frameBuffer.render(self, image)
 
 proc turnOn*(self: Driver) =
-  discard execCmd("cd ./vendor/inkyHyperPixel2r && ./env/bin/python3 turnOn.py")
+  discard execCmd("cd /srv/frameos/vendor/inkyHyperPixel2r && ./env/bin/python3 turnOn.py")
 
 proc turnOff*(self: Driver) =
-  discard execCmd("cd ./vendor/inkyHyperPixel2r && ./env/bin/python3 turnOff.py")
+  discard execCmd("cd /srv/frameos/vendor/inkyHyperPixel2r && ./env/bin/python3 turnOff.py")
