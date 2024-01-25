@@ -307,7 +307,7 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
             if " -o frameos " in line and " -l" in line:
                 linker_flags = [flag.strip() for flag in line.split(' ') if flag.startswith('-') and flag != '-o']
             elif " -c " in line and len(compiler_flags) == 0:
-                compiler_flags = [flag for flag in line.split(' ') if flag.startswith('-') and not flag.startswith('-I') and not flag in ['-o', '-c']]
+                compiler_flags = [flag for flag in line.split(' ') if flag.startswith('-') and not flag.startswith('-I') and not flag in ['-o', '-c', '-D']]
 
         # Read the Makefile from ../frameos/tools/nimc.Makefile
         with open(os.path.join(source_dir, "tools", "nimc.Makefile"), "r") as makefile:
