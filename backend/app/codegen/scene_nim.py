@@ -128,8 +128,8 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                 if key in field_inputs_for_node:
                     app_config_pairs += [f"{key}: {field_inputs_for_node[key]}"]
                 elif type == "node" and key in node_fields_for_node:
-                    node_id = node_fields_for_node[key]
-                    app_config_pairs += [f"{key}: {node_id_to_integer(node_id)}.NodeId"]
+                    outgoing_node_id = node_fields_for_node[key]
+                    app_config_pairs += [f"{key}: {node_id_to_integer(outgoing_node_id)}.NodeId"]
                 elif type == "node" and key not in node_fields_for_node:
                     app_config_pairs += [f"{key}: 0.NodeId"]
                 elif type == "integer":
