@@ -1,4 +1,5 @@
 import json
+from datetime import timezone
 from copy import deepcopy
 from app import db, socketio
 from .frame import Frame, update_frame
@@ -16,7 +17,7 @@ class Log(db.Model):
     def to_dict(self):
         return {
             'id': self.id,
-            'timestamp': self.timestamp.isoformat(),
+            'timestamp': self.timestamp.replace(tzinfo=timezone.utc).isoformat(),
             'type': self.type,
             'line': self.line,
             'frame_id': self.frame_id
@@ -38,7 +39,7 @@ def new_log(frame_id: int, type: str, line: str) -> Log:
             db.session.delete(old_log)
         db.session.commit()
 
-    socketio.emit('new_log', {**log.to_dict(), 'timestamp': str(log.timestamp)})
+    socketio.emit('new_log', {**log.to_dict(), 'timestamp': log.timestamp.replace(tzinfo=timezone.utc).isoformat()})
     return log
 
 

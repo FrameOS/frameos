@@ -7,6 +7,15 @@ import { frameLogic } from '../../frameLogic'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '../../../../components/Button'
 
+function formatTimestamp(isoTimestamp: string): string {
+  const date = new Date(isoTimestamp)
+  return `${date.getFullYear()}-${date.getMonth() + 1 < 10 ? '0' : ''}${date.getMonth() + 1}-${
+    date.getDate() < 10 ? '0' : ''
+  }${date.getDate()} ${date.getHours() < 10 ? '0' : ''}${date.getHours()}:${
+    date.getMinutes() < 10 ? '0' : ''
+  }${date.getMinutes()}:${date.getSeconds() < 10 ? '0' : ''}${date.getSeconds()}`
+}
+
 export function Logs() {
   const { frameId } = useValues(frameLogic)
   const { logs, logsLoading } = useValues(logsLogic({ frameId }))
@@ -53,7 +62,7 @@ export function Logs() {
                 'text-red-300': log.type === 'stderr',
               })}
             >
-              <div className="flex-0 mr-2 text-yellow-900 whitespace-nowrap">{log.timestamp.replace('T', ' ')}</div>
+              <div className="flex-0 mr-2 text-yellow-900 whitespace-nowrap">{formatTimestamp(log.timestamp)}</div>
               <div className="flex-1 break-words" style={{ wordBreak: 'break-word' }}>
                 {logLine}
               </div>
