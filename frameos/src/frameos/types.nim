@@ -16,7 +16,7 @@ type
     scalingMode*: string
     backgroundColor*: Color
     settings*: JsonNode
-    verbose*: bool
+    debug*: bool
 
   Logger* = ref object
     frameConfig*: FrameConfig

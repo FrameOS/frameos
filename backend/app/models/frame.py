@@ -1,6 +1,7 @@
 import json
 import uuid
 import secrets
+from datetime import timezone
 from app import db, socketio
 from typing import Optional
 from sqlalchemy.dialects.sqlite import JSON
@@ -35,6 +36,8 @@ class Frame(db.Model):
     scaling_mode = db.Column(db.String(64), nullable=True)  # cover (default), contain, stretch, center
     background_color = db.Column(db.String(64), nullable=True)
     rotate = db.Column(db.Integer, nullable=True)
+    debug = db.Column(db.Boolean, nullable=True)
+    last_log_at = db.Column(db.DateTime, nullable=True)
     # apps
     apps = db.Column(JSON, nullable=True)
     scenes = db.Column(JSON, nullable=True)
@@ -65,7 +68,9 @@ class Frame(db.Model):
             'scaling_mode': self.scaling_mode,
             'rotate': self.rotate,
             'background_color': self.background_color,
+            'debug': self.debug,
             'scenes': self.scenes,
+            'last_log_at': self.last_log_at.replace(tzinfo=timezone.utc).isoformat() if self.last_log_at else None,
         }
 
 
@@ -198,6 +203,7 @@ def get_frame_json(frame: Frame) -> dict:
         "backgroundColor": frame.background_color or "white",
         "interval": frame.interval or 30.0,
         "metricsInterval": frame.metrics_interval or 60.0,
+        "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "cover",
         "rotate": frame.rotate or 0,
     }

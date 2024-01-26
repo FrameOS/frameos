@@ -184,6 +184,15 @@ export function FrameSettings({ className }: DetailsProps) {
             <Field name="background_color" label="Background color">
               <TextInput type="color" name="background_color" className="!p-0" placeholder="white" />
             </Field>
+            <Field name="debug" label="Debug logging (noisy)">
+              <Select
+                name="debug"
+                options={[
+                  { value: 'false', label: 'Disabled' },
+                  { value: 'true', label: 'Enabled' },
+                ]}
+              />
+            </Field>
           </Form>
         </>
       )}

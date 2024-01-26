@@ -33,6 +33,7 @@ proc start*(self: FrameOS) {.async.} =
     "scaling_mode": self.frameConfig.scalingMode,
     "rotate": self.frameConfig.rotate,
     "background_color": self.frameConfig.backgroundColor.toHtmlHex.toLowerAscii,
+    "debug": self.frameConfig.debug,
   }}
   self.logger.log(message)
   self.runner.start()

@@ -184,7 +184,7 @@ import frameos/types
 import frameos/channels
 {newline.join(imports)}
 
-const DEBUG = false
+const DEBUG = {'true' if frame.debug else 'false'}
 
 type Scene* = ref object of FrameScene
   {(newline + "  ").join(scene_object_fields)}
@@ -209,7 +209,7 @@ proc runNode*(self: Scene, nodeId: NodeId,
     else:
       nextNode = -1.NodeId
     if DEBUG:
-      self.logger.log(%*{{"event": "runApp", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
+      self.logger.log(%*{{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
 
 proc runEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:

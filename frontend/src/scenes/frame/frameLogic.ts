@@ -29,6 +29,7 @@ const FRAME_KEYS = [
   'rotate',
   'background_color',
   'scenes',
+  'debug',
 ]
 
 export const frameLogic = kea<frameLogicType>([

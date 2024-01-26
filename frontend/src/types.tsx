@@ -23,6 +23,7 @@ export interface FrameType {
   rotate?: number
   background_color: string
   scenes?: FrameScene[]
+  debug?: boolean
 }
 
 export interface TemplateType {

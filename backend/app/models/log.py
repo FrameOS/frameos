@@ -1,5 +1,5 @@
 import json
-from datetime import timezone
+from datetime import timezone, datetime
 from copy import deepcopy
 from app import db, socketio
 from .frame import Frame, update_frame
@@ -63,6 +63,7 @@ def process_log(frame: Frame, log: dict):
             if 'config' in log and key in log['config'] and log['config'][key] is not None and log['config'][key] != getattr(frame, key):
                 changes[key] = log['config'][key]
     if len(changes) > 0:
+        changes['last_log_at'] = datetime.utcnow()
         for key, value in changes.items():
             setattr(frame, key, value)
         update_frame(frame)

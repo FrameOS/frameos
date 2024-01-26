@@ -63,7 +63,7 @@ proc run(self: LoggerThread) =
 
     let (success, payload) = logChannel.tryRecv()
     if success:
-      if self.frameConfig.verbose:
+      if self.frameConfig.debug:
         echo payload
       self.logs.add(payload)
     else:
