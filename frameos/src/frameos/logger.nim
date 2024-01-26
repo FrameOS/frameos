@@ -16,52 +16,50 @@ const LOG_FLUSH_SECONDS = 1.0
 
 var thread: Thread[FrameConfig]
 
-proc sendCollectedLogs*(self: LoggerThread): bool =
-  var newLogs = self.erroredLogs.concat(self.logs)
-  self.logs = @[]
-  self.erroredLogs = @[]
-  if newLogs.len == 0:
-    return true
-  if newLogs.len > 100:
-    newLogs = newLogs[(newLogs.len - 100) .. (newLogs.len - 1)]
-  try:
-    let body = %*{"logs": newLogs}
-    let response = self.client.request(self.url, httpMethod = HttpPost,
-        body = compress($body))
-    self.lastSendAt = epochTime()
-    if response.code != Http200:
-      echo "Error sending logs: HTTP " & $response.status
-      if self.erroredLogs.len > 0 and self.erroredLogs[0]{"event"}.getStr() == "logger:error":
-        self.erroredLogs = self.erroredLogs.concat(newLogs)
-      else:
-        let errorLog = %*{"event": "logger:error",
-            "error": "Error sending logs, will retry: HTTP " &
-            $response.status}
-        self.erroredLogs = @[errorLog].concat(self.erroredLogs.concat(newLogs))
-      return false
-  except CatchableError as e:
-    echo "Error sending logs: " & $e.msg
-    if self.erroredLogs.len > 0 and self.erroredLogs[0]{"event"}.getStr() == "logger:error":
-      self.erroredLogs = self.erroredLogs.concat(newLogs)
-    else:
-      let errorLog = %*{"event": "logger:error",
-            "error": "Error sending logs, will retry: " & $e.msg}
-      self.erroredLogs = @[errorLog].concat(self.erroredLogs.concat(newLogs))
-    return false
-  return true
-
-proc start(self: LoggerThread) =
+proc run(self: LoggerThread) =
   var attempt = 0
   while true:
     let logCount = (self.logs.len + self.erroredLogs.len)
-    if logCount > 10 or (logCount > 0 and self.lastSendAt + LOG_FLUSH_SECONDS <
-        epochTime()):
-      if self.sendCollectedLogs():
-        attempt = 0
-      else:
+    if logCount > 10 or (logCount > 0 and self.lastSendAt + LOG_FLUSH_SECONDS < epochTime()):
+      # make a copy, just in case some thread from somewhere adds new entries
+      var newLogs = self.erroredLogs.concat(self.logs)
+      self.logs = @[]
+      self.erroredLogs = @[]
+
+      if newLogs.len == 0:
+        # how did we even get here?
+        sleep(100)
+        continue
+
+      if newLogs.len > 100:
+        newLogs = newLogs[(newLogs.len - 100) .. (newLogs.len - 1)]
+
+      var client = newHttpClient(timeout = 10000)
+      try:
+        client.headers = newHttpHeaders([
+            ("Authorization", "Bearer " & self.frameConfig.serverApiKey),
+            ("Content-Type", "application/json"),
+            ("Content-Encoding", "gzip")
+        ])
+        let body = %*{"logs": newLogs}
+        let response = client.request(self.url, httpMethod = HttpPost, body = compress($body))
+        self.lastSendAt = epochTime()
+        if response.code != Http200:
+          echo "Error sending logs: HTTP " & $response.status
+          self.erroredLogs = newLogs
+      except CatchableError as e:
+        echo "Error sending logs: " & $e.msg
+        self.erroredLogs = newLogs
+      finally:
+        client.close()
+
+      if self.erroredLogs.len > 0:
         attempt += 1
         let sleepDuration = min(100 * (2 ^ attempt), 7500)
+        echo "Sleeping for " & $sleepDuration & "ms, attempt " & $attempt & ". Logs queued: " & $self.erroredLogs.len
         sleep(sleepDuration)
+      else:
+        attempt = 0
 
     let (success, payload) = logChannel.tryRecv()
     if success:
@@ -72,26 +70,21 @@ proc start(self: LoggerThread) =
       sleep(100)
 
 proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
-  var client = newHttpClient(timeout = 10000)
-  client.headers = newHttpHeaders([
-      ("Authorization", "Bearer " & frameConfig.serverApiKey),
-      ("Content-Type", "application/json"),
-      ("Content-Encoding", "gzip")
-  ])
-  let protocol = if frameConfig.serverPort mod 1000 ==
-      443: "https" else: "http"
-  let url = protocol & "://" & frameConfig.serverHost & ":" &
-    $frameConfig.serverPort & "/api/log"
-
+  let protocol = if frameConfig.serverPort mod 1000 == 443: "https" else: "http"
+  let url = protocol & "://" & frameConfig.serverHost & ":" & $frameConfig.serverPort & "/api/log"
   var loggerThread = LoggerThread(
     frameConfig: frameConfig,
-    client: client,
     url: url,
     logs: @[],
     erroredLogs: @[],
     lastSendAt: 0.0,
   )
-  loggerThread.start()
+  while true:
+    try:
+      run(loggerThread)
+    except Exception as e:
+      echo "Error in logger thread: " & $e.msg
+      sleep(1000)
 
 proc newLogger*(frameConfig: FrameConfig): Logger =
   createThread(thread, createThreadRunner, frameConfig)
