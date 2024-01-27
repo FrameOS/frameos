@@ -24,6 +24,7 @@ export interface FrameType {
   background_color: string
   scenes?: FrameScene[]
   debug?: boolean
+  last_log_at?: string
 }
 
 export interface TemplateType {

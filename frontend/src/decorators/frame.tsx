@@ -11,10 +11,19 @@ export function frameHost(frame: FrameType): string {
 export const frameStatusWithSpinner = ['deploying', 'preparing', 'rendering', 'restarting', 'starting']
 
 export function frameStatus(frame: FrameType): JSX.Element {
+  let status = frame.status
+  if (frame.last_log_at) {
+    const lastLogAt = new Date(frame.last_log_at)
+    const now = new Date()
+    if (now.getTime() - lastLogAt.getTime() > 1000 * 60 * 60) {
+      status = 'stale'
+    }
+  }
+
   return (
     <div className="flex gap-2 items-center">
-      {frame.status}
-      {frameStatusWithSpinner.includes(frame.status) ? <Spinner /> : null}
+      {status}
+      {frameStatusWithSpinner.includes(status) ? <Spinner /> : null}
     </div>
   )
 }
