@@ -5,7 +5,8 @@ import assets/fonts as fontAssets
 var typeface: Option[Typeface] = none(TypeFace)
 
 proc getDefaultTypeface*(): Typeface {.gcsafe.} =
-  {.cast(gcsafe).}: # TODO: find a better way
+  # We assume nobody overrides this font in a thread. Worse case they should override to the same data.
+  {.cast(gcsafe).}:
     if typeface.isNone:
       typeface = some(parseTtf(fontAssets.getAsset(
           "assets/fonts/Ubuntu-Regular_1.ttf")))
