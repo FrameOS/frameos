@@ -110,6 +110,16 @@ def api_frame_restart_event(id: int):
     except Exception as e:
         return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
 
+@api.route('/frames/<int:id>/stop', methods=['POST'])
+@login_required
+def api_frame_stop_event(id: int):
+    try:
+        from app.tasks import stop_frame
+        stop_frame(id)
+        return 'Success', 200
+    except Exception as e:
+        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+
 @api.route('/frames/<int:id>/deploy', methods=['POST'])
 @login_required
 def api_frame_deploy_event(id: int):
@@ -150,6 +160,9 @@ def api_frame_update(id: int):
         if payload.get('next_action') == 'restart':
             from app.tasks import restart_frame
             restart_frame(frame.id)
+        if payload.get('next_action') == 'stop':
+            from app.tasks import stop_frame
+            stop_frame(frame.id)
         elif payload.get('next_action') == 'deploy':
             from app.tasks import deploy_frame
             deploy_frame(frame.id)

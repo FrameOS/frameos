@@ -5,6 +5,7 @@ from app.huey import huey
 from .deploy_frame import deploy_frame  # noqa: F401  (breaks huey)
 from .reset_frame import reset_frame  # noqa: F401  (breaks huey)
 from .restart_frame import restart_frame  # noqa: F401  (breaks huey)
+from .stop_frame import stop_frame  # noqa: F401  (breaks huey)
 
 @huey.signal(SIGNAL_LOCKED)
 def task_not_run_handler(signal, task, exc=None):

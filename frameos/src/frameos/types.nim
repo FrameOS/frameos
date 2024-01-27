@@ -6,6 +6,7 @@ type
     serverHost*: string
     serverPort*: int
     serverApiKey*: string
+    frameHost*: string
     framePort*: int
     width*: int
     height*: int

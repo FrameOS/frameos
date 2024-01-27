@@ -192,6 +192,7 @@ def create_default_scene() -> dict:
 
 def get_frame_json(frame: Frame) -> dict:
     frame_json = {
+        "frameHost": frame.frame_host,
         "framePort": frame.frame_port or 8787,
         "serverHost": frame.server_host or "localhost",
         "serverPort": frame.server_port or 8989,

@@ -24,6 +24,7 @@ proc newFrameOS*(): FrameOS =
 
 proc start*(self: FrameOS) {.async.} =
   var message = %*{"event": "bootup", "config": {
+    "frameHost": self.frameConfig.frameHost,
     "framePort": self.frameConfig.framePort,
     "width": self.frameConfig.width,
     "height": self.frameConfig.height,
