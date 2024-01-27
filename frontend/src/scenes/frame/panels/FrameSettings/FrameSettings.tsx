@@ -163,8 +163,8 @@ export function FrameSettings({ className }: DetailsProps) {
               <Select
                 name="scaling_mode"
                 options={[
-                  { value: 'cover', label: 'Cover' },
                   { value: 'contain', label: 'Contain' },
+                  { value: 'cover', label: 'Cover' },
                   { value: 'stretch', label: 'Stretch' },
                   { value: 'center', label: 'Center' },
                 ]}

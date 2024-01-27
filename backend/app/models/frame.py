@@ -33,7 +33,7 @@ class Frame(db.Model):
     color = db.Column(db.String(256), nullable=True)
     interval = db.Column(db.Double, default=300)
     metrics_interval = db.Column(db.Double, default=60)
-    scaling_mode = db.Column(db.String(64), nullable=True)  # cover (default), contain, stretch, center
+    scaling_mode = db.Column(db.String(64), nullable=True)  # contain (default), cover, stretch, center
     background_color = db.Column(db.String(64), nullable=True)
     rotate = db.Column(db.Integer, nullable=True)
     debug = db.Column(db.Boolean, nullable=True)
@@ -111,7 +111,7 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         status="uninitialized",
         apps=[],
         scenes=[create_default_scene()],
-        scaling_mode="cover",
+        scaling_mode="contain",
         rotate=0,
         background_color="white",
         device=device or "web_only",
@@ -205,7 +205,7 @@ def get_frame_json(frame: Frame) -> dict:
         "interval": frame.interval or 30.0,
         "metricsInterval": frame.metrics_interval or 60.0,
         "debug": frame.debug or False,
-        "scalingMode": frame.scaling_mode or "cover",
+        "scalingMode": frame.scaling_mode or "contain",
         "rotate": frame.rotate or 0,
     }
 
