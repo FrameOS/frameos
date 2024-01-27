@@ -1,0 +1,91 @@
+{
+  "name": "QR",
+  "description": "Display QR codes",
+  "category": "overlay",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "code",
+      "label": "Code",
+      "type": "string",
+      "value": "",
+      "required": false
+    },
+    {
+      "name": "size",
+      "type": "float",
+      "value": "100",
+      "label": "Size"
+    },
+    {
+      "name": "sizeUnit",
+      "type": "select",
+      "options": [
+        "percentage",
+        "pixels"
+      ],
+      "value": "% of smallest dimension",
+      "required": true,
+      "label": "Size unit"
+    },
+    {
+      "name": "position",
+      "type": "select",
+      "options": [
+        "top-left",
+        "top-center",
+        "top-right",
+        "center-left",
+        "center-center",
+        "center-right",
+        "bottom-left",
+        "bottom-center",
+        "bottom-right"
+      ],
+      "value": "center-center",
+      "required": true,
+      "label": "Position",
+      "placeholder": "center-center"
+    },
+    {
+      "name": "offsetX",
+      "type": "float",
+      "value": "0",
+      "required": true,
+      "label": "Offset X",
+      "placeholder": "0"
+    },
+    {
+      "name": "offsetY",
+      "type": "float",
+      "value": "0",
+      "required": true,
+      "label": "Offset Y",
+      "placeholder": "0"
+    },
+    {
+      "name": "padding",
+      "type": "float",
+      "value": "2",
+      "required": true,
+      "label": "Padding in dots",
+      "placeholder": "2"
+    },
+    {
+      "name": "qrCodeColor",
+      "type": "color",
+      "value": "#000000",
+      "required": true,
+      "label": "QR Code Color",
+      "placeholder": "#000000"
+    },
+    {
+      "name": "backgroundColor",
+      "type": "color",
+      "value": "#ffffff",
+      "required": true,
+      "label": "Background Color",
+      "placeholder": "#ffffff"
+    }
+  ]
+}

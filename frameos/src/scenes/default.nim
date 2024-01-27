@@ -3,26 +3,25 @@
 import pixie, json, times, strformat
 
 import frameos/types
-import apps/unsplash/app as unsplashApp
-import apps/text/app as textApp
-import apps/clock/app as clockApp
-import apps/downloadImage/app as downloadImageApp
+import frameos/channels
 import apps/split/app as splitApp
 import apps/ifElse/app as ifElseApp
-import apps/gradient/app as gradientApp
+import apps/text/app as textApp
+import apps/clock/app as clockApp
+import apps/unsplash/app as unsplashApp
+import apps/text/app as nodeApp8
+import apps/qr/app as qrApp
 
 const DEBUG = false
 
 type Scene* = ref object of FrameScene
-  node1: unsplashApp.App
-  node2: textApp.App
+  node1: splitApp.App
+  node2: ifElseApp.App
   node3: clockApp.App
-  node4: downloadImageApp.App
-  node5: splitApp.App
-  node6: ifElseApp.App
-  node7: unsplashApp.App
-  node8: gradientApp.App
-  node9: unsplashApp.App
+  node4: unsplashApp.App
+  node5: textApp.App
+  node6: nodeApp8.App
+  node7: qrApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
 # This makes strformat available within the scene's inline code and avoids the "unused import" error
@@ -40,49 +39,39 @@ proc runNode*(self: Scene, nodeId: NodeId,
     currentNode = nextNode
     timer = epochTime()
     case nextNode:
-    of 1.NodeId: # unsplash
+    of 1.NodeId: # split
       self.node1.run(context)
       nextNode = -1.NodeId
-    of 2.NodeId: # text
-      self.node2.appConfig.text = &"Welcome to FrameOS!\nResolution: {context.image.width} x {context.image.height} .. " &
-          scene.state{"magic"}.getStr()
-      self.node2.appConfig.position = "top-left"
+    of 2.NodeId: # ifElse
+      self.node2.appConfig.condition = context.loopIndex == 0
       self.node2.run(context)
-      nextNode = 3.NodeId
+      nextNode = -1.NodeId
+    of 5.NodeId: # text
+      self.node5.run(context)
+      nextNode = 6.NodeId
     of 3.NodeId: # clock
       self.node3.run(context)
-      nextNode = -1.NodeId
-    of 4.NodeId: # downloadImage
+      nextNode = 7.NodeId
+    of 4.NodeId: # unsplash
       self.node4.run(context)
-      nextNode = -1.NodeId
-    of 5.NodeId: # split
-      self.node5.run(context)
-      nextNode = -1.NodeId
-    of 7.NodeId: # unsplash
-      self.node7.run(context)
-      nextNode = -1.NodeId
-    of 6.NodeId: # ifElse
-      self.node6.appConfig.condition = context.loopIndex mod 2 == 0
+      nextNode = 5.NodeId
+    of 6.NodeId: # code
       self.node6.run(context)
       nextNode = -1.NodeId
-    of 8.NodeId: # gradient
-      self.node8.run(context)
+    of 7.NodeId: # qr
+      self.node7.run(context)
       nextNode = -1.NodeId
-    of 9.NodeId: # unsplash
-      self.node9.run(context)
-      nextNode = 2.NodeId
     else:
       nextNode = -1.NodeId
     if DEBUG:
-      self.logger.log(%*{"event": "runApp", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
 proc runEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:
   of "render":
-    try: self.runNode(9.NodeId, context)
-    except Exception as e: self.logger.log(%*{"event": "event:render:error",
-        "node": "f4071b08-9afa-47c1-b890-0ca025849914",
-        "error": $e.msg, "stacktrace": e.getStackTrace()})
+    try: self.runNode(1.NodeId, context)
+    except Exception as e: self.logger.log(%*{"event": "render:error",
+        "node": 1, "error": $e.msg, "stacktrace": e.getStackTrace()})
   else: discard
 
 proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(
@@ -95,24 +84,21 @@ proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(
     }, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = self.runNode(nodeId, context))
-  scene.node1 = unsplashApp.init(1.NodeId, scene, unsplashApp.AppConfig(cacheSeconds: 60.0, keyword: "birds"))
-  scene.node2 = textApp.init(2.NodeId, scene, textApp.AppConfig(borderWidth: 2, fontColor: parseHtmlColor("#ffffff"),
-      fontSize: 64.0, text: &"Welcome to FrameOS!\nResolution: {context.image.width} x {context.image.height} .. " &
-      scene.state{"magic"}.getStr(), position: "top-left", offsetX: 0.0, offsetY: 0.0, padding: 10.0,
-      borderColor: parseHtmlColor("#000000")))
-  scene.node3 = clockApp.init(3.NodeId, scene, clockApp.AppConfig(position: "bottom-center", format: "HH:mm:ss",
-      formatCustom: "", offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontColor: parseHtmlColor("#ffffff"), fontSize: 32.0,
-      borderColor: parseHtmlColor("#000000"), borderWidth: 1))
-  scene.node4 = downloadImageApp.init(4.NodeId, scene, downloadImageApp.AppConfig(url: "http://10.4.0.11:4999/",
-      scalingMode: "cover", cacheSeconds: 60.0))
-  scene.node5 = splitApp.init(5.NodeId, scene, splitApp.AppConfig(columns: 3, gap: "10", margin: "5", rows: 2,
-      render_function: 6.NodeId))
-  scene.node7 = unsplashApp.init(7.NodeId, scene, unsplashApp.AppConfig(keyword: "nature", cacheSeconds: 60.0))
-  scene.node6 = ifElseApp.init(6.NodeId, scene, ifElseApp.AppConfig(condition: context.loopIndex mod 2 == 0,
-      thenNode: 7.NodeId, elseNode: 8.NodeId))
-  scene.node8 = gradientApp.init(8.NodeId, scene, gradientApp.AppConfig(startColor: parseHtmlColor("#800080"),
-      endColor: parseHtmlColor("#ffc0cb"), angle: 45.0))
-  scene.node9 = unsplashApp.init(9.NodeId, scene, unsplashApp.AppConfig(cacheSeconds: 600.0, keyword: "nature"))
+  scene.node1 = splitApp.init(1.NodeId, scene, splitApp.AppConfig(height_ratios: "1 6", rows: 2, columns: 1,
+      render_function: 2.NodeId))
+  scene.node2 = ifElseApp.init(2.NodeId, scene, ifElseApp.AppConfig(condition: context.loopIndex == 0,
+      thenNode: 3.NodeId, elseNode: 4.NodeId))
+  scene.node5 = textApp.init(5.NodeId, scene, textApp.AppConfig(text: "Don't forget to kiss your man",
+      position: "center-center", offsetX: 0.0, offsetY: 0.0, padding: 4.0, fontColor: parseHtmlColor("#ffffff"),
+      fontSize: 32.0, borderColor: parseHtmlColor("#000000"), borderWidth: 1))
+  scene.node3 = clockApp.init(3.NodeId, scene, clockApp.AppConfig(format: "yyyy-MM-dd HH:mm:ss", formatCustom: "",
+      position: "center-center", offsetX: 0.0, offsetY: 0.0, padding: 4.0, fontColor: parseHtmlColor("#ffffff"),
+      fontSize: 32.0, borderColor: parseHtmlColor("#000000"), borderWidth: 1))
+  scene.node4 = unsplashApp.init(4.NodeId, scene, unsplashApp.AppConfig(keyword: "bird", cacheSeconds: 60.0))
+  scene.node6 = nodeApp8.init(6.NodeId, scene, nodeApp8.AppConfig(text: ""))
+  scene.node7 = qrApp.init(7.NodeId, scene, qrApp.AppConfig(code: "", padding: 4.0, position: "center-left",
+      size: 100.0, sizeUnit: "% of smallest dimension", offsetX: 0.0, offsetY: 0.0, qrCodeColor: parseHtmlColor(
+      "#000000"), backgroundColor: parseHtmlColor("#ffffff")))
   runEvent(scene, context)
 
 proc render*(self: Scene): Image =
