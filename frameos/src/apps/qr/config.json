@@ -1,6 +1,6 @@
 {
-  "name": "QR",
-  "description": "Display QR codes",
+  "name": "QR Code",
+  "description": "Display QR codes. Default to link to self.",
   "category": "overlay",
   "version": "1.0.0",
   "fields": [
