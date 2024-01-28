@@ -21,10 +21,11 @@
       "name": "sizeUnit",
       "type": "select",
       "options": [
-        "percentage",
-        "pixels"
+        "percent",
+        "pixels per dot",
+        "pixels total"
       ],
-      "value": "% of smallest dimension",
+      "value": "percent",
       "required": true,
       "label": "Size unit"
     },
@@ -65,11 +66,11 @@
     },
     {
       "name": "padding",
-      "type": "float",
-      "value": "2",
+      "type": "integer",
+      "value": "1",
       "required": true,
       "label": "Padding in dots",
-      "placeholder": "2"
+      "placeholder": "1"
     },
     {
       "name": "qrCodeColor",

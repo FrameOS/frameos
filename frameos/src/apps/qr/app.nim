@@ -12,7 +12,7 @@ type
     position*: string
     offsetX*: float
     offsetY*: float
-    padding*: float
+    padding*: int
     qrCodeColor*: Color
     backgroundColor*: Color
 
@@ -42,14 +42,14 @@ proc run*(self: App, context: ExecutionContext) =
   let myQR = newQR(code)
 
   let width = case self.appConfig.sizeUnit
-    of "percentage": self.appConfig.size / 100.0 * min(context.image.width,
-        context.image.height).float
+    of "percent": self.appConfig.size / 100.0 * min(context.image.width, context.image.height).float
+    of "pixels per dot": self.appConfig.size * (myQR.drawing.size.int + self.appConfig.padding * 2).float
     else: self.appConfig.size
 
   let qrImage = myQR.renderImg(
-    self.appConfig.backgroundColor.toHtmlHex,
-      self.appConfig.qrCodeColor.toHtmlHex,
-    30, 30, 0, width.uint32,
+    light = self.appConfig.backgroundColor.toHtmlHex,
+    dark = self.appConfig.qrCodeColor.toHtmlHex,
+    alRad = 30, moRad = 30, moSep = 0, pixels = width.uint32,
     padding = self.appConfig.padding.uint8
   )
   context.image.draw(qrImage)

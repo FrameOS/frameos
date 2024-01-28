@@ -1,7 +1,8 @@
 # Copied from:
 # https://raw.githubusercontent.com/aruZeta/QRgen/main/src/QRgen/renderer.nim
 #
-# Adapted to support variable width padding
+# Adapted to support variable width padding.
+# TODO: patch and merge upstream
 
 ## # An optional QR renderer using pixie
 ##
@@ -83,7 +84,6 @@ proc renderImg*(
   ##    was made with, the higher the `ecLevel` the bigger the embedded image
   ##    will be. You can change this by setting `imgCoords`, which contains a
   ##    tuple with the `x,y` position of `img` and it's width an height.
-  echo("pixels: " & $pixels & ", drawing.size: " & $self.drawing.size & ", padding: " & $padding)
   let
     modules: uint8 = self.drawing.size + padding * 2
     modulePixels: uint16 = (pixels div modules).uint16
@@ -92,8 +92,6 @@ proc renderImg*(
   let pixels: uint32 =
     if actualSize < pixels: actualSize
     else: pixels
-  echo("modules: " & $modules & ", modulePixels: " & $modulePixels &
-      ", pixelsMargin: " & $pixelsMargin & ", actualSize: " & $actualSize & ", pixels: " & $pixels)
   result = newImage(pixels.int, pixels.int)
   result.fill(light)
   let ctx: Context = result.newContext
