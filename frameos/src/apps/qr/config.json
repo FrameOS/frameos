@@ -30,6 +30,24 @@
       "label": "Size unit"
     },
     {
+      "name": "alRad",
+      "type": "float",
+      "value": "30",
+      "label": "Alignment pattern radius %"
+    },
+    {
+      "name": "moRad",
+      "type": "float",
+      "value": "0",
+      "label": "Module radius %"
+    },
+    {
+      "name": "moSep",
+      "type": "float",
+      "value": "0",
+      "label": "Module separation %"
+    },
+    {
       "name": "position",
       "type": "select",
       "options": [

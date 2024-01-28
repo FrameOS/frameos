@@ -9,6 +9,9 @@ type
     code*: string
     size*: float
     sizeUnit*: string
+    alRad*: float
+    moRad*: float
+    moSep*: float
     position*: string
     offsetX*: float
     offsetY*: float
@@ -49,7 +52,26 @@ proc run*(self: App, context: ExecutionContext) =
   let qrImage = myQR.renderImg(
     light = self.appConfig.backgroundColor.toHtmlHex,
     dark = self.appConfig.qrCodeColor.toHtmlHex,
-    alRad = 30, moRad = 30, moSep = 0, pixels = width.uint32,
+    alRad = self.appConfig.alRad,
+    moRad = self.appConfig.moRad,
+    moSep = self.appConfig.moSep,
+    pixels = width.uint32,
     padding = self.appConfig.padding.uint8
   )
-  context.image.draw(qrImage)
+
+  let xAlign = case self.appConfig.position:
+    of "top-left", "center-left", "bottom-left": self.appConfig.offsetX
+    of "top-right", "center-right", "bottom-right": context.image.width.float - qrImage.width.float +
+        self.appConfig.offsetX
+    else: (context.image.width.float - qrImage.width.float) / 2.0 + self.appConfig.offsetX
+
+  let yAlign = case self.appConfig.position:
+    of "top-left", "top-center", "top-right": self.appConfig.offsetY
+    of "bottom-left", "bottom-center", "bottom-right": context.image.height.float - qrImage.height.float +
+        self.appConfig.offsetY
+    else: (context.image.height.float - qrImage.height.float) / 2.0 + self.appConfig.offsetY
+
+  context.image.draw(
+    qrImage,
+    translate(vec2(xAlign, yAlign))
+  )
