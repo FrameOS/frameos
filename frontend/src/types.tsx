@@ -136,6 +136,16 @@ export interface FrameSceneIndexed {
   edges: Record<string, Edge[]>
 }
 
+/** config.json schema */
+export interface FrameEvent {
+  /** Name for this app */
+  name: string
+  /** Description for this event */
+  description?: string
+  /** Fields for app in diagram editor */
+  fields?: ConfigField[]
+}
+
 export enum Area {
   TopLeft = 'TopLeft',
   TopRight = 'TopRight',

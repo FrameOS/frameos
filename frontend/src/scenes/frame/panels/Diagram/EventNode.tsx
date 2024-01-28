@@ -3,6 +3,11 @@ import { NodeProps, Handle, Position } from 'reactflow'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 
+import _events from '../Events/events.json'
+import { FrameEvent } from '../../../../types'
+
+const events: Record<string, FrameEvent> = _events as any
+
 export function EventNode(props: NodeProps): JSX.Element {
   const { data, id } = props
   const { selectedNodeId, edgesForNode } = useValues(diagramLogic)
@@ -11,6 +16,15 @@ export function EventNode(props: NodeProps): JSX.Element {
   const edges = edgesForNode[id] || []
   let usedAsSource = edges.some((edge) => edge.source === id)
   let usedAsTarget = edges.some((edge) => edge.target === id)
+
+  const fields = events?.[keyword]?.fields ?? []
+  const fieldTypeToGetter: Record<string, string> = {
+    integer: 'getInt',
+    string: 'getStr',
+    boolean: 'getBool',
+    float: 'getFloat',
+    select: 'getStr',
+  }
 
   return (
     <div
@@ -51,16 +65,20 @@ export function EventNode(props: NodeProps): JSX.Element {
             </div>
           ) : null}
         </div>
-        {keyword === 'button_press' ? (
-          <div className="text-right">
-            <div>payload.label</div>
-            <div>payload.pin</div>
+        {fields.map((field: Record<string, any>) => (
+          <div className="flex items-center justify-end space-x-1 w-full">
+            <code className="text-xs mr-2 text-gray-400 flex-1">{field.type}</code>
+            <div>{field.label || field.name}</div>
+            <Handle
+              type="source"
+              position={Position.Right}
+              id={`code/context.payload{"${field.name}"}.${
+                fieldTypeToGetter[String(field.type ?? 'string')] ?? 'getStr'
+              }()`}
+              style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#000000' }}
+            />
           </div>
-        ) : keyword === 'render' && usedAsSource ? (
-          <div className="text-right">
-            <div>image</div>
-          </div>
-        ) : null}
+        ))}
       </div>
     </div>
   )
