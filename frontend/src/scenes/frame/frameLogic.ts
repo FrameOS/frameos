@@ -43,6 +43,7 @@ export const frameLogic = kea<frameLogicType>([
     saveFrame: true,
     renderFrame: true,
     restartFrame: true,
+    stopFrame: true,
     deployFrame: true,
     applyTemplate: (template: TemplateType) => ({ template }),
   }),
@@ -75,11 +76,12 @@ export const frameLogic = kea<frameLogicType>([
   reducers({
     currentScene: ['default', {}],
     nextAction: [
-      null as 'render' | 'restart' | 'deploy' | null,
+      null as 'render' | 'restart' | 'stop' | 'deploy' | null,
       {
         saveFrame: () => null,
         renderFrame: () => 'render',
         restartFrame: () => 'restart',
+        stopFrame: () => 'stop',
         deployFrame: () => 'deploy',
       },
     ],
@@ -107,6 +109,7 @@ export const frameLogic = kea<frameLogicType>([
     saveFrame: () => actions.submitFrameForm(),
     deployFrame: () => actions.submitFrameForm(),
     restartFrame: () => actions.submitFrameForm(),
+    stopFrame: () => actions.submitFrameForm(),
     updateScene: ({ sceneId, scene }) => {
       const { frame } = values
       const hasScene = frame.scenes?.some(({ id }) => id === sceneId)

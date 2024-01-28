@@ -3,6 +3,7 @@ from ../config import FrameConfig, loadConfig
 
 block test_load_config:
     let config = loadConfig("./frame.json")
+    doAssert config.frameHost == "localhost"
     doAssert config.framePort == 8787
     doAssert config.serverHost == "127.0.0.1"
     doAssert config.serverPort == 8989
