@@ -10,6 +10,7 @@ type Driver* = ref object of FrameOSDriver
   screenInfo: ScreenInfo
   logger: Logger
   lastImageData: seq[ColorRGBX]
+  debug: bool
 
 proc safeLog(logger: Logger, message: string): JsonNode =
   try:
@@ -29,7 +30,8 @@ proc init*(frameOS: FrameOS): Driver =
       height: 0,
       color: ""
     ),
-    logger: frameOS.logger
+    logger: frameOS.logger,
+    debug: frameOS.frameConfig.debug
   )
 
   let process = startProcess(workingDir = "/srv/frameos/vendor/inkyPython",
@@ -73,7 +75,8 @@ proc render*(self: Driver, image: Image) =
   let pOut = process.outputStream()
   let pIn = process.inputStream()
   var line = ""
-  discard self.logger.safeLog("Executing")
+  if self.debug:
+    discard self.logger.safeLog("Executing")
 
   var i = 0
   var error = false
@@ -97,10 +100,12 @@ proc render*(self: Driver, image: Image) =
     process.close()
     return
 
-  discard self.logger.safeLog("Writing output")
+  if self.debug:
+    discard self.logger.safeLog("Writing output")
   for x in imageData:
     pIn.write x
-  discard self.logger.safeLog("Wrote output")
+  if self.debug:
+    discard self.logger.safeLog("Wrote output")
 
   pIn.flush
   pIn.close() # NOTE **Essential** - This prevents hanging/freezing when reading stdout below
