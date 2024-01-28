@@ -14,7 +14,7 @@
     {
       "name": "size",
       "type": "float",
-      "value": "100",
+      "value": "2",
       "label": "Size"
     },
     {
@@ -25,7 +25,7 @@
         "pixels per dot",
         "pixels total"
       ],
-      "value": "percent",
+      "value": "pixels per dot",
       "required": true,
       "label": "Size unit"
     },
