@@ -191,6 +191,9 @@ import frameos/channels
 
 const DEBUG = {'true' if frame.debug else 'false'}
 
+type Config* = ref object of SceneConfig
+  discard
+
 type Scene* = ref object of FrameScene
   {(newline + "  ").join(scene_object_fields)}
 
@@ -224,7 +227,8 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
 proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(
     event: string, payload: JsonNode)): Scene =
   var state = %*{{}}
-  let scene = Scene(frameConfig: frameConfig, logger: logger, state: state,
+  let sceneConfig = Config()
+  let scene = Scene(frameConfig: frameConfig, sceneConfig: sceneConfig, logger: logger, state: state,
       dispatchEvent: dispatchEvent)
   let self = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: %*{{

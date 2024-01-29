@@ -14,6 +14,9 @@ import apps/qr/app as qrApp
 
 const DEBUG = false
 
+type Config* = ref object of SceneConfig
+  discard
+
 type Scene* = ref object of FrameScene
   node1: splitApp.App
   node2: ifElseApp.App
@@ -31,6 +34,7 @@ proc runNode*(self: Scene, nodeId: NodeId,
     context: var ExecutionContext) =
   let scene = self
   let frameConfig = scene.frameConfig
+  let sceneConfig = scene.sceneConfig
   let state = scene.state
   var nextNode = nodeId
   var currentNode = nodeId
@@ -77,14 +81,15 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
 proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(
     event: string, payload: JsonNode)): Scene =
   var state = %*{}
-  let scene = Scene(frameConfig: frameConfig, logger: logger, state: state,
+  let sceneConfig = Config()
+  let scene = Scene(frameConfig: frameConfig, sceneConfig: sceneConfig, logger: logger, state: state,
       dispatchEvent: dispatchEvent)
   let self = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: %*{
     }, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = self.runNode(nodeId, context))
-  scene.node1 = splitApp.init(1.NodeId, scene, splitApp.AppConfig(height_ratios: "1 6", rows: 2, columns: 1,
+  scene.node1 = splitApp.init(1.NodeId, scene, splitApp.AppConfig(height_ratios: "100 380", rows: 2, columns: 1,
       render_function: 2.NodeId))
   scene.node2 = ifElseApp.init(2.NodeId, scene, ifElseApp.AppConfig(condition: context.loopIndex == 0,
       thenNode: 3.NodeId, elseNode: 4.NodeId))
