@@ -60,12 +60,12 @@ router myrouter:
           if index >= 0:
             connections.delete(index)
   post "/event/@name":
-    log(%*{"event": "http", "path": request.pathInfo})
+    log(%*{"event": "http", "post": request.pathInfo})
     let payload = parseJson(if request.body == "": "{}" else: request.body)
     sendEvent(@"name", payload)
     resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
   get "/image":
-    log(%*{"event": "http", "path": request.pathInfo})
+    log(%*{"event": "http", "get": request.pathInfo})
     {.gcsafe.}: # We're reading immutable globals and png data via a lock. It's fine.
       try:
         let image = drivers.toPng(360 - globalFrameConfig.rotate)

@@ -85,14 +85,13 @@ class TestFrames(BaseTestCase):
             assert response.status_code == 500
             assert json.loads(response.data) == { "error": "Unable to fetch image" }
 
-
     def test_api_frame_render_event_success(self):
-        with mock.patch('requests.get', return_value=MockResponse(status_code=200)):
+        with mock.patch('requests.post', return_value=MockResponse(status_code=200)):
             response = self.client.post(f'/api/frames/{self.frame.id}/event/render')
             assert response.status_code == 200
 
     def test_api_frame_render_event_failure(self):
-        with mock.patch('requests.get', return_value=MockResponse(status_code=500)):
+        with mock.patch('requests.post', return_value=MockResponse(status_code=500)):
             response = self.client.post(f'/api/frames/{self.frame.id}/event/render')
             assert response.status_code == 500
 

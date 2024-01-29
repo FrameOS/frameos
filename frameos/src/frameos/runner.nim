@@ -1,4 +1,4 @@
-import json, pixie, times, options, asyncdispatch, strformat, locks
+import json, pixie, times, options, asyncdispatch, strformat, strutils, locks
 import pixie/fileformats/png
 import scenes/default as defaultScene
 
@@ -164,10 +164,8 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
     let (success, (event, payload)) = eventChannel.tryRecv()
     if success:
       waitTime = 1
-      case event:
-        of "button", "turnOn", "turnOff", "render":
-          self.logger.log(%*{"event": "event:" & event, "payload": payload})
-        else: discard
+      if not event.startsWith("mouse"):
+        self.logger.log(%*{"event": "event:" & event, "payload": payload})
       try:
         case event:
           of "render":
