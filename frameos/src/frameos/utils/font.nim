@@ -4,9 +4,8 @@ import assets/fonts as fontAssets
 
 var typeface: Option[Typeface] = none(TypeFace)
 
-proc getDefaultTypeface*(): Typeface {.gcsafe.} =
-  # We assume nobody overrides this font in a thread. Worse case they should override to the same data.
-  {.cast(gcsafe).}:
+proc getDefaultTypeface*(): Typeface =
+  {.cast(gcsafe).}: # We're reading an immutable global. It's fine.
     if typeface.isNone:
       typeface = some(parseTtf(fontAssets.getAsset(
           "assets/fonts/Ubuntu-Regular_1.ttf")))

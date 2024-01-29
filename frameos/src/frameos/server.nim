@@ -31,63 +31,57 @@ proc sendToAll(message: string) {.async.} =
       if connection.readyState == Open:
         asyncCheck connection.send(message)
 
-proc match(request: Request): Future[ResponseData] {.async.} =
-  {.cast(gcsafe).}:
-    block route:
-      case request.pathInfo
-      of "/":
-        let scalingMode = case globalFrameConfig.scalingMode:
-          of "cover", "center":
-            globalFrameConfig.scalingMode
-          of "stretch":
-            "100% 100%"
-          else:
-            "contain"
-        resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
-      of "/ws":
-        var ws = await newWebSocket(request)
+router myrouter:
+  get "/":
+    {.gcsafe.}: # We're only reading static assets. It's fine.
+      let scalingMode = case globalFrameConfig.scalingMode:
+        of "cover", "center":
+          globalFrameConfig.scalingMode
+        of "stretch":
+          "100% 100%"
+        else:
+          "contain"
+      resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
+  get "/ws":
+    {.gcsafe.}: # We're only modifying globals via locks. It's fine.
+      var ws = await newWebSocket(request)
+      try:
+        log(%*{"event": "websocket:connect", "key": ws.key})
+        withLock connectionsLock:
+          connections.add ws
+        while ws.readyState == Open:
+          let packet = await ws.receiveStrPacket()
+          log(%*{"event": "websocket:message", "message": packet})
+          # TODO: accept events?
+      except WebSocketError:
+        log(%*{"event": "websocket:disconnect", "key": ws.key, "reason": getCurrentExceptionMsg()})
+        withLock connectionsLock:
+          let index = connections.find(ws)
+          if index >= 0:
+            connections.delete(index)
+  post "/event/@name":
+    log(%*{"event": "http", "post": request.pathInfo})
+    let payload = parseJson(if request.body == "": "{}" else: request.body)
+    sendEvent(@"name", payload)
+    resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
+  get "/image":
+    log(%*{"event": "http", "get": request.pathInfo})
+    {.gcsafe.}: # We're reading immutable globals and png data via a lock. It's fine.
+      try:
+        let image = drivers.toPng(360 - globalFrameConfig.rotate)
+        if image != "":
+          resp Http200, {"Content-Type": "image/png"}, image
+        else:
+          raise newException(Exception, "No image available")
+      except Exception:
         try:
-          log(%*{"event": "websocket:connect", "key": ws.key})
-          withLock connectionsLock:
-            connections.add ws
-          while ws.readyState == Open:
-            let packet = await ws.receiveStrPacket()
-            log(%*{"event": "websocket:message", "message": packet})
-            # TODO: accept (debounced) render requests?
-        except WebSocketError:
-          log(%*{"event": "websocket:disconnect", "key": ws.key, "reason": getCurrentExceptionMsg()})
-          withLock connectionsLock:
-            let index = connections.find(ws)
-            if index >= 0:
-              connections.delete(index)
-      of "/event/render":
-        log(%*{"event": "http", "path": request.pathInfo})
-        globalRunner.triggerRender()
-        resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
-      of "/event/turnOn":
-        log(%*{"event": "http", "path": request.pathInfo})
-        globalRunner.sendEvent("turnOn", %*{})
-        resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
-      of "/event/turnOff":
-        log(%*{"event": "http", "path": request.pathInfo})
-        globalRunner.sendEvent("turnOff", %*{})
-        resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
-      of "/image":
-        log(%*{"event": "http", "path": request.pathInfo})
-        try:
-          let image = drivers.toPng(360 - globalFrameConfig.rotate)
-          if image != "":
-            resp Http200, {"Content-Type": "image/png"}, image
-          else:
-            raise newException(Exception, "No image available")
-        except Exception:
-          try:
-            resp Http200, {"Content-Type": "image/png"}, getLastPng()
-          except Exception as e:
-            resp Http200, {"Content-Type": "image/png"}, renderError(globalFrameConfig.renderWidth(),
-              globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
-      else:
-        resp Http404, "Not found!"
+          resp Http200, {"Content-Type": "image/png"}, getLastPng()
+        except Exception as e:
+          resp Http200, {"Content-Type": "image/png"}, renderError(globalFrameConfig.renderWidth(),
+            globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
+  error Http404:
+    log(%*{"event": "404", "path": request.pathInfo})
+    resp Http404, "Not found!"
 
 proc listenForRender*() {.async.} =
   var hasConnections = false
@@ -109,7 +103,7 @@ proc newServer*(frameOS: FrameOS): Server =
 
   let port = (frameOS.frameConfig.framePort or 8787).Port
   let settings = newSettings(port = port)
-  var jester = initJester(matcher = match.MatchProc, settings = settings)
+  var jester = initJester(myrouter, settings)
 
   result = Server(
     frameConfig: frameOS.frameConfig,

@@ -1,16 +1,9 @@
 import { Box } from '../../../../components/Box'
 import { H6 } from '../../../../components/H6'
+import { FrameEvent } from '../../../../types'
 
-const events = {
-  init: 'Scene initialization. Triggered when the scene is loaded.',
-  render: "Render the scene. Triggered according to the frame's refresh interval, or when explicitly requested.",
-  keyDown: 'When a key is pressed on a keyboard {key: string, code: int}',
-  keyUp: 'When a key is released on a keyboard {key: string, code: int}',
-  mouseMove: 'When a mouse moves {x: int, y: int}',
-  mouseDown: 'When a mouse button is pressed {button: int}',
-  mouseUp: 'When a mouse button is released {button: int}',
-  button: 'When a GPIO button is triggered {pin: int, label: string, line: int}',
-}
+import _events from './events.json'
+const events: Record<string, FrameEvent> = _events as any
 
 export function Events() {
   const onDragStart = (event: any, type: 'event', keyword: string) => {
@@ -21,15 +14,18 @@ export function Events() {
     <div className="space-y-2">
       <div>Did you know: the "render" event can be dispatched or listened to. Connect either end.</div>
 
-      {Object.entries(events).map(([keyword, description]) => (
+      {Object.values(events).map(({ name, description, fields }) => (
         <Box
           className="bg-gray-900 px-3 py-2 dndnode flex items-center justify-between space-x-2 cursor-move"
           draggable
-          onDragStart={(event) => onDragStart(event, 'event', keyword)}
+          onDragStart={(event) => onDragStart(event, 'event', name)}
         >
           <div>
-            <H6>Event: {keyword}</H6>
-            <div className="text-sm">{description}</div>
+            <H6>Event: {name}</H6>
+            <div className="text-sm">
+              {description}
+              {fields && fields.length > 0 ? ' (' + fields.map((f) => `${f.name}: ${f.type}`).join(', ') + ')' : ''}
+            </div>
           </div>
         </Box>
       ))}

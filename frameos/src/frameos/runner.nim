@@ -1,4 +1,4 @@
-import json, pixie, times, options, asyncdispatch, strformat, locks
+import json, pixie, times, options, asyncdispatch, strformat, strutils, locks
 import pixie/fileformats/png
 import scenes/default as defaultScene
 
@@ -164,28 +164,24 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
     let (success, (event, payload)) = eventChannel.tryRecv()
     if success:
       waitTime = 1
+      if not event.startsWith("mouse"):
+        self.logger.log(%*{"event": "event:" & event, "payload": payload})
       try:
         case event:
           of "render":
-            self.logger.log(%*{"event": "event:" & event})
             self.triggerRenderNext = true
+            continue
           of "turnOn":
-            self.logger.log(%*{"event": "event:" & event})
             drivers.turnOn()
           of "turnOff":
-            self.logger.log(%*{"event": "event:" & event})
             drivers.turnOff()
           of "mouseMove":
             if self.frameConfig.width > 0 and self.frameConfig.height > 0:
               payload["x"] = %*((self.frameConfig.width.float * payload["x"].getInt().float / 32767.0).int)
               payload["y"] = %*((self.frameConfig.height.float * payload["y"].getInt().float / 32767.0).int)
-            self.dispatchSceneEvent(event, payload)
-          of "mouseUp", "mouseDown", "keyUp", "keyDown", "button":
-            if event == "button":
-              self.logger.log(%*{"event": "event:" & event, "payload": payload})
-            self.dispatchSceneEvent(event, payload)
-          else:
-            self.logger.log(%*{"event": "event:" & event, "payload": payload})
+          else: discard
+
+        self.dispatchSceneEvent(event, payload)
       except Exception as e:
         self.logger.log(%*{"event": "event:error", "error": $e.msg,
             "stacktrace": e.getStackTrace()})

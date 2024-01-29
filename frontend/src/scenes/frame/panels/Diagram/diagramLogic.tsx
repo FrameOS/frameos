@@ -223,8 +223,6 @@ export const diagramLogic = kea<diagramLogicType>([
         }
         actions.setNodes([...values.nodes, newNode])
       }
-
-      window.setTimeout(() => actions.fitDiagramView(), 50)
     },
     applyTemplate: () => {
       window.setTimeout(() => actions.fitDiagramView(), 50)

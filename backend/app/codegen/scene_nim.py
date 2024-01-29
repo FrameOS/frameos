@@ -51,6 +51,11 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                 if not node_fields.get(source):
                     node_fields[source] = {}
                 node_fields[source][field] = target
+            if source_handle.startswith('code/') and target_handle.startswith('fieldInput/'):
+                field = target_handle.replace('fieldInput/', '')
+                if not field_inputs.get(target):
+                    field_inputs[target] = {}
+                field_inputs[target][field] = source_handle.replace('code/', '')
 
     for node in nodes:
         node_id = node['id']
