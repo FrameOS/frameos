@@ -14,7 +14,7 @@ export function Frame(props: FrameSceneProps) {
   const frameId = parseInt(props.id)
   const frameLogicProps = { frameId }
   const { frame, frameChanged } = useValues(frameLogic(frameLogicProps))
-  const { saveFrame, renderFrame, restartFrame, deployFrame } = useActions(frameLogic(frameLogicProps))
+  const { saveFrame, renderFrame, restartFrame, stopFrame, deployFrame } = useActions(frameLogic(frameLogicProps))
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -29,6 +29,9 @@ export function Frame(props: FrameSceneProps) {
                 </Button>
                 <Button color="light-gray" type="button" onClick={() => restartFrame()}>
                   Restart
+                </Button>
+                <Button color="light-gray" type="button" onClick={() => stopFrame()}>
+                  Stop
                 </Button>
                 <div className="flex pl-2 space-x-2">
                   <Button color={frameChanged ? 'primary' : 'light-gray'} type="button" onClick={() => saveFrame()}>

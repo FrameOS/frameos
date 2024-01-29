@@ -168,6 +168,16 @@
       "checksums": {
         "sha1": "ae4daf4ae302d0431f3c2d385ae9d2fe767a3246"
       }
+    },
+    "QRgen": {
+      "version": "3.0.0",
+      "vcsRevision": "aa10edbf292513c1c636ab8afe960a037a55be4b",
+      "url": "https://github.com/aruZeta/QRgen",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "df0c1d5ec4188c508b51b065b196aa63e0c6e924"
+      }
     }
   },
   "tasks": {

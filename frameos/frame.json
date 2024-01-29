@@ -1,5 +1,6 @@
 {
     "framePort": 8787,
+    "frameHost": "localhost",
     "serverHost": "mariuss-macbook-air",
     "serverPort": 8989,
     "serverApiKey": "test-api-key",
