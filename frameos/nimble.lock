@@ -170,13 +170,13 @@
       }
     },
     "QRgen": {
-      "version": "3.0.0",
-      "vcsRevision": "aa10edbf292513c1c636ab8afe960a037a55be4b",
+      "version": "3.1.0",
+      "vcsRevision": "4445bb93a126ec33004901e9486963a40cbb97fc",
       "url": "https://github.com/aruZeta/QRgen",
       "downloadMethod": "git",
       "dependencies": [],
       "checksums": {
-        "sha1": "df0c1d5ec4188c508b51b065b196aa63e0c6e924"
+        "sha1": "41a7a63b515a4cad66091a70509925e2dcc5a0e4"
       }
     }
   },
