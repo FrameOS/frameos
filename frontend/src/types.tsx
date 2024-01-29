@@ -66,6 +66,8 @@ export interface MetricsType {
   metrics: Record<string, any>
 }
 
+export const configFieldTypes = ['string', 'text', 'float', 'integer', 'boolean', 'color', 'select', 'node'] as const
+
 export interface ConfigField {
   /** Unique config field keyword */
   name: string
@@ -127,6 +129,7 @@ export interface FrameScene {
   name: string
   nodes: Node[]
   edges: Edge[]
+  fields?: (ConfigField | MarkdownField)[]
 }
 
 export interface FrameSceneIndexed {
@@ -160,6 +163,7 @@ export enum Panel {
   FrameSettings = 'FrameSettings',
   Image = 'Image',
   Logs = 'Logs',
+  Scenes = 'Scenes',
   Apps = 'Apps',
   Events = 'Events',
   Metrics = 'Metrics',

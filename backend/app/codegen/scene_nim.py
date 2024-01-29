@@ -181,6 +181,30 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
             run_event_lines += [f"  try: self.runNode({node_id_to_integer(next_node)}.NodeId, context)"]
             run_event_lines += [f"  except Exception as e: self.logger.log(%*{{\"event\": \"{sanitize_nim_string(event)}:error\","]
             run_event_lines += [f"      \"node\": {node_id_to_integer(next_node)}, \"error\": $e.msg, \"stacktrace\": e.getStackTrace()}})"]
+
+
+    scene_config_fields = []
+    scene_config_init_fields = []
+    for field in scene.get('fields', []):
+        type = field.get('type', 'string')
+        name = field.get('name', '')
+        value = field.get('value', '')
+        if type == 'integer':
+            scene_config_fields += [f"{name}*: int"]
+            scene_config_init_fields += [f"{name}: {int(value)}"]
+        elif type == 'float':
+            scene_config_fields += [f"{name}*: float"]
+            scene_config_init_fields += [f"{name}: {float(value)}"]
+        elif type == 'boolean':
+            scene_config_fields += [f"{name}*: bool"]
+            scene_config_init_fields += [f"{name}: {'true' if value == 'true' else 'false'}"]
+        elif type == 'color':
+            scene_config_fields += [f"{name}*: Color"]
+            scene_config_init_fields += [f"{name}: parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"]
+        else:
+            scene_config_fields += [f"{name}*: string"]
+            scene_config_init_fields += [f"{name}: \"{sanitize_nim_string(str(value))}\""]
+
     newline = "\n"
     scene_source = f"""
 import pixie, json, times, strformat
@@ -192,9 +216,10 @@ import frameos/channels
 const DEBUG = {'true' if frame.debug else 'false'}
 
 type Config* = ref object of SceneConfig
-  discard
+  {(newline + "  ").join(scene_config_fields) if len(scene_config_fields) > 0 else "discard"}
 
 type Scene* = ref object of FrameScene
+  sceneConfig*: Config
   {(newline + "  ").join(scene_object_fields)}
 
 {{.push hint[XDeclaredButNotUsed]: off.}}
@@ -205,6 +230,7 @@ proc runNode*(self: Scene, nodeId: NodeId,
     context: var ExecutionContext) =
   let scene = self
   let frameConfig = scene.frameConfig
+  let sceneConfig = Config(scene.sceneConfig)
   let state = scene.state
   var nextNode = nodeId
   var currentNode = nodeId
@@ -227,7 +253,7 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
 proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(
     event: string, payload: JsonNode)): Scene =
   var state = %*{{}}
-  let sceneConfig = Config()
+  let sceneConfig = Config({", ".join(scene_config_init_fields)})
   let scene = Scene(frameConfig: frameConfig, sceneConfig: sceneConfig, logger: logger, state: state,
       dispatchEvent: dispatchEvent)
   let self = scene

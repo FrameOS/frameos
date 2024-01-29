@@ -41,7 +41,6 @@ type
   FrameScene* = ref object of RootObj
     isRendering*: bool
     frameConfig*: FrameConfig
-    sceneConfig*: SceneConfig
     logger*: Logger
     state*: JsonNode
     execNode*: proc(nodeId: NodeId, context: var ExecutionContext)
