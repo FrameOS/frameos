@@ -1,23 +1,23 @@
-import { afterMount, connect, kea, key, listeners, path, props, selectors } from 'kea'
+import { connect, kea, key, path, props, selectors } from 'kea'
 
-import { loaders } from 'kea-loaders'
 import { frameLogic } from '../../frameLogic'
 
-import type { sceneFormLogicType } from './sceneFormLogicType'
 import { forms } from 'kea-forms'
 import { FrameScene } from '../../../../types'
 import { subscriptions } from 'kea-subscriptions'
 
-export interface SceneFormLogic {
+import type { sceneConfigLogicType } from './sceneConfigLogicType'
+
+export interface SceneConfigLogicProps {
   frameId: number
   sceneId: string
 }
 
-export const sceneFormLogic = kea<sceneFormLogicType>([
-  path(['src', 'scenes', 'frame', 'panels', 'Scenes', 'sceneFormLogic']),
-  props({} as SceneFormLogic),
+export const sceneConfigLogic = kea<sceneConfigLogicType>([
+  path(['src', 'scenes', 'frame', 'panels', 'Scenes', 'sceneConfigLogic']),
+  props({} as SceneConfigLogicProps),
   key((props) => `${props.frameId}-${props.sceneId}`),
-  connect(({ frameId }: SceneFormLogic) => ({
+  connect(({ frameId }: SceneConfigLogicProps) => ({
     values: [frameLogic({ frameId }), ['frame', 'frameForm']],
     actions: [frameLogic({ frameId }), ['setFrameFormValues', 'applyTemplate']],
   })),

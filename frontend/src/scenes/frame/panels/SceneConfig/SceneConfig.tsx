@@ -1,6 +1,6 @@
 import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
-import { sceneFormLogic } from './sceneFormLogic'
+import { sceneConfigLogic } from './sceneConfigLogic'
 import { Form, Group } from 'kea-forms'
 import { Field } from '../../../../components/Field'
 import { TextInput } from '../../../../components/TextInput'
@@ -8,28 +8,33 @@ import { Select } from '../../../../components/Select'
 import { configFieldTypes } from '../../../../types'
 import { Button } from '../../../../components/Button'
 
-export function SceneForm({ sceneId }: { sceneId: string }): JSX.Element | null {
+const PERSIST_OPTIONS = [
+  { label: 'memory (reset on boot)', value: 'memory' },
+  { label: 'disk (wear on sd card)', value: 'disk' },
+]
+
+export function SceneConfig(): JSX.Element {
+  const sceneId = 'default'
   const { frameId } = useValues(frameLogic)
-  const { sceneForm } = useValues(sceneFormLogic({ frameId, sceneId }))
-  const { setSceneFormValue } = useActions(sceneFormLogic({ frameId, sceneId }))
+  const { sceneForm } = useValues(sceneConfigLogic({ frameId, sceneId }))
+  const { setSceneFormValue } = useActions(sceneConfigLogic({ frameId, sceneId }))
 
   if (!sceneForm) {
-    return null
+    return <></>
   }
 
   return (
-    <Form logic={sceneFormLogic} props={{ frameId, sceneId }} formKey="sceneForm" className="space-y-4">
+    <Form logic={sceneConfigLogic} props={{ frameId, sceneId }} formKey="sceneForm" className="space-y-4">
       <Group name={[]}>
         <div className="bg-gray-900 p-2 space-y-2">
-          <Field name="id" label="Scene ID (change at your own risk)">
-            <TextInput />
-          </Field>
-          <Field name="name" label="Name">
-            <TextInput />
+          <Field name="id" label="Scene ID">
+            <TextInput disabled />
           </Field>
         </div>
         <div className="flex justify-between w-full items-center gap-2">
-          <div className="font-bold">Fields</div>
+          <div className="font-bold">
+            <code>sceneConfig</code>
+          </div>
           <Button
             onClick={() => {
               setSceneFormValue('fields', [...(sceneForm.fields ?? []), { name: '', label: '', type: 'string' }])
@@ -70,6 +75,9 @@ export function SceneForm({ sceneId }: { sceneId: string }): JSX.Element | null 
               </Field>
               <Field name="placeholder" label="Placeholder">
                 <TextInput />
+              </Field>
+              <Field name="persist" label="Perist">
+                <Select options={PERSIST_OPTIONS} />
               </Field>
             </div>
           </Group>

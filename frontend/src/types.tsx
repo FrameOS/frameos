@@ -89,6 +89,10 @@ export interface ConfigField {
   rows?: number
 }
 
+export interface SceneConfigField extends ConfigField {
+  persist?: 'dist' | 'memory'
+}
+
 export interface MarkdownField {
   /** Block of markdown text to display between fields */
   markdown: string
@@ -129,7 +133,7 @@ export interface FrameScene {
   name: string
   nodes: Node[]
   edges: Edge[]
-  fields?: (ConfigField | MarkdownField)[]
+  fields?: SceneConfigField[]
 }
 
 export interface FrameSceneIndexed {
@@ -163,7 +167,7 @@ export enum Panel {
   FrameSettings = 'FrameSettings',
   Image = 'Image',
   Logs = 'Logs',
-  Scenes = 'Scenes',
+  SceneConfig = 'SceneConfig',
   Apps = 'Apps',
   Events = 'Events',
   Metrics = 'Metrics',
