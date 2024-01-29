@@ -73,7 +73,7 @@ def api_frame_get_image(id: int):
 def api_frame_render_event(id: int):
     frame = Frame.query.get_or_404(id)
     try:
-        response = requests.get(f'http://{frame.frame_host}:{frame.frame_port}/event/render')
+        response = requests.post(f'http://{frame.frame_host}:{frame.frame_port}/event/render')
         if response.status_code == 200:
             return "OK", 200
         else:

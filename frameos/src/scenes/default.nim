@@ -96,8 +96,8 @@ proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(
       fontSize: 32.0, borderColor: parseHtmlColor("#000000"), borderWidth: 1))
   scene.node4 = unsplashApp.init(4.NodeId, scene, unsplashApp.AppConfig(keyword: "bird", cacheSeconds: 60.0))
   scene.node6 = nodeApp8.init(6.NodeId, scene, nodeApp8.AppConfig(text: ""))
-  scene.node7 = qrApp.init(7.NodeId, scene, qrApp.AppConfig(code: "", padding: 4.0, position: "center-left",
-      size: 100.0, sizeUnit: "% of smallest dimension", offsetX: 0.0, offsetY: 0.0, qrCodeColor: parseHtmlColor(
+  scene.node7 = qrApp.init(7.NodeId, scene, qrApp.AppConfig(code: "", padding: 4, position: "center-left",
+      size: 100.0, sizeUnit: "% of smallest dimension", offsetX: 0, offsetY: 0, qrCodeColor: parseHtmlColor(
       "#000000"), backgroundColor: parseHtmlColor("#ffffff")))
   runEvent(scene, context)
 

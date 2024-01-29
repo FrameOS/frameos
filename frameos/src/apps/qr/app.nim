@@ -136,17 +136,17 @@ proc renderImg*(
         if alRadPx == 0: 0f
         elif alRadPx-lvl <= 0: 1f / (lvl * 2)
         else: alRadPx-lvl
+    template vec2F(a, b: untyped): Vec2 = vec2(a.calcPos, b.calcPos)
+    template s1(lvl: untyped): float32 = ((7-lvl*2) * modulePixels).float32
+    template s(lvl: untyped): Vec2 {.dirty.} = vec2(s1(lvl), s1(lvl))
+    template r(lvl: untyped): float32 = innerRadius(lvl) * modulePixels.float32
     template drawAlPatterns(lvl: range[0'i8..2'i8], c: untyped) {.dirty.} =
-      template s1: float32 = ((7-lvl*2) * modulePixels).float32
-      template s: Vec2 {.dirty.} = vec2(s1, s1)
-      template r: float32 = innerRadius(lvl) * modulePixels.float32
-      template vec2F(a, b: untyped): Vec2 = vec2(a.calcPos, b.calcPos)
       when c == "light":
         ctx.fillStyle = light
         ctx.strokeStyle = light
-      ctx.fillRoundedRect rect(vec2F(0'u8+lvl, 0'u8+lvl), s), r
-      ctx.fillRoundedRect rect(vec2F(size-7'u8+lvl, 0'u8+lvl), s), r
-      ctx.fillRoundedRect rect(vec2F(0'u8+lvl, size-7+lvl), s), r
+      ctx.fillRoundedRect rect(vec2F(0'u8+lvl, 0'u8+lvl), s(lvl)), r(lvl)
+      ctx.fillRoundedRect rect(vec2F(size-7'u8+lvl, 0'u8+lvl), s(lvl)), r(lvl)
+      ctx.fillRoundedRect rect(vec2F(0'u8+lvl, size-7+lvl), s(lvl)), r(lvl)
       when c == "light":
         ctx.fillStyle = dark
         ctx.strokeStyle = dark
