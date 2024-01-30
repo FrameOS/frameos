@@ -25,7 +25,7 @@ export function Field({
 }: FieldProps): ReturnType<typeof KeaField> {
   const template: KeaFieldProps['template'] = ({ label, kids, error }) => {
     return (
-      <div className={clsx('space-y-2', className)}>
+      <div className={clsx('space-y-1', className)}>
         <>
           {label ? (
             <Label>
@@ -34,7 +34,9 @@ export function Field({
             </Label>
           ) : null}
           {secret ? (
-            <Reveal className="border rounded-lg w-full p-2.5 py-4 bg-gray-600 border-gray-500">{kids as any}</Reveal>
+            <Reveal className="border rounded-lg w-full px-2.5 py-1.5 py-4 bg-gray-600 border-gray-500">
+              {kids as any}
+            </Reveal>
           ) : (
             kids
           )}

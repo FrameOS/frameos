@@ -10,7 +10,7 @@ import { Button } from '../../../../components/Button'
 
 const PERSIST_OPTIONS = [
   { label: 'memory (reset on boot)', value: 'memory' },
-  { label: 'disk (wear on sd card)', value: 'disk' },
+  { label: 'disk (or sd card)', value: 'disk' },
 ]
 
 export function SceneConfig(): JSX.Element {
@@ -26,7 +26,7 @@ export function SceneConfig(): JSX.Element {
   return (
     <Form logic={sceneConfigLogic} props={{ frameId, sceneId }} formKey="sceneForm" className="space-y-4">
       <Group name={[]}>
-        <div className="bg-gray-900 p-2 space-y-2">
+        <div className="bg-gray-900 p-2 space-y-4">
           <Field name="id" label="Scene ID">
             <TextInput disabled />
           </Field>
@@ -46,7 +46,7 @@ export function SceneConfig(): JSX.Element {
         </div>
         {sceneForm.fields?.map((field, index) => (
           <Group name={['fields', index]}>
-            <div className="bg-gray-900 p-2 space-y-2">
+            <div className="bg-gray-900 p-2 space-y-4">
               <div className="flex justify-between items-center w-full gap-2">
                 <div>Field #{index + 1}</div>
                 <Button
