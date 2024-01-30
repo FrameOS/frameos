@@ -5,6 +5,7 @@ import { diagramLogic } from './diagramLogic'
 
 import _events from '../Events/events.json'
 import { FrameEvent } from '../../../../types'
+import { fieldTypeToGetter } from '../../../../utils/fieldTypes'
 
 const events: Record<string, FrameEvent> = _events as any
 
@@ -18,14 +19,6 @@ export function EventNode(props: NodeProps): JSX.Element {
   let usedAsTarget = edges.some((edge) => edge.target === id)
 
   const fields = events?.[keyword]?.fields ?? []
-  const fieldTypeToGetter: Record<string, string> = {
-    integer: 'getInt',
-    string: 'getStr',
-    boolean: 'getBool',
-    float: 'getFloat',
-    select: 'getStr',
-  }
-
   return (
     <div
       className={clsx(
@@ -72,9 +65,9 @@ export function EventNode(props: NodeProps): JSX.Element {
             <Handle
               type="source"
               position={Position.Right}
-              id={`code/context.payload{"${field.name}"}.${
-                fieldTypeToGetter[String(field.type ?? 'string')] ?? 'getStr'
-              }()`}
+              id={`code/context.payload{"${field.name}"}${
+                fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr'
+              }`}
               style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#000000' }}
             />
           </div>

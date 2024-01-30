@@ -13,12 +13,7 @@ import apps/qr/app as qrApp
 
 const DEBUG = false
 
-type Config* = ref object of SceneConfig
-  background*: string
-  message*: string
-
 type Scene* = ref object of FrameScene
-  sceneConfig*: Config
   node1: splitApp.App
   node2: ifElseApp.App
   node3: clockApp.App
@@ -34,7 +29,6 @@ proc runNode*(self: Scene, nodeId: NodeId,
     context: var ExecutionContext) =
   let scene = self
   let frameConfig = scene.frameConfig
-  let sceneConfig = scene.sceneConfig
   let state = scene.state
   var nextNode = nodeId
   var currentNode = nodeId
@@ -51,14 +45,14 @@ proc runNode*(self: Scene, nodeId: NodeId,
       self.node2.run(context)
       nextNode = -1.NodeId
     of 5.NodeId: # text
-      self.node5.appConfig.text = sceneConfig.message
+      self.node5.appConfig.text = state{"message"}.getStr
       self.node5.run(context)
       nextNode = -1.NodeId
     of 3.NodeId: # clock
       self.node3.run(context)
       nextNode = 6.NodeId
     of 4.NodeId: # unsplash
-      self.node4.appConfig.keyword = sceneConfig.background
+      self.node4.appConfig.keyword = state{"background"}.getStr
       self.node4.run(context)
       nextNode = 5.NodeId
     of 6.NodeId: # qr
@@ -77,15 +71,11 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
         "node": 1, "error": $e.msg, "stacktrace": e.getStackTrace()})
   else: discard
 
-proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(
-    event: string, payload: JsonNode)): Scene =
-  var state = %*{}
-  let sceneConfig = Config(background: "kiss", message: "give a hug")
-  let scene = Scene(frameConfig: frameConfig, sceneConfig: sceneConfig, logger: logger, state: state,
-      dispatchEvent: dispatchEvent)
+proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: string, payload: JsonNode)): Scene =
+  var state = %*{"background": %*("kiss"), "message": %*("give a hug")}
+  let scene = Scene(frameConfig: frameConfig, logger: logger, state: state, dispatchEvent: dispatchEvent)
   let self = scene
-  var context = ExecutionContext(scene: scene, event: "init", payload: %*{
-    }, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+  var context = ExecutionContext(scene: scene, event: "init", payload: %*{}, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = self.runNode(nodeId, context))
   scene.node1 = splitApp.init(1.NodeId, scene, splitApp.AppConfig(height_ratios: "52 748", rows: 2, columns: 1,
@@ -93,12 +83,12 @@ proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(
   scene.node2 = ifElseApp.init(2.NodeId, scene, ifElseApp.AppConfig(condition: context.loopIndex == 0,
       thenNode: 3.NodeId, elseNode: 4.NodeId))
   scene.node5 = textApp.init(5.NodeId, scene, textApp.AppConfig(borderWidth: 4, fontColor: parseHtmlColor("#f5dbdb"),
-      fontSize: 100.0, position: "center-center", text: sceneConfig.message, offsetX: 0.0, offsetY: 0.0, padding: 10.0,
-      borderColor: parseHtmlColor("#000000")))
+      fontSize: 100.0, position: "center-center", text: state{"message"}.getStr, offsetX: 0.0, offsetY: 0.0,
+      padding: 10.0, borderColor: parseHtmlColor("#000000")))
   scene.node3 = clockApp.init(3.NodeId, scene, clockApp.AppConfig(borderWidth: 0, fontColor: parseHtmlColor("#000000"),
       format: "yyyy-MM-dd HH:mm:ss", position: "center-right", formatCustom: "", offsetX: 0.0, offsetY: 0.0,
       padding: 10.0, fontSize: 32.0, borderColor: parseHtmlColor("#000000")))
-  scene.node4 = unsplashApp.init(4.NodeId, scene, unsplashApp.AppConfig(keyword: sceneConfig.background,
+  scene.node4 = unsplashApp.init(4.NodeId, scene, unsplashApp.AppConfig(keyword: state{"background"}.getStr,
       cacheSeconds: 60.0))
   scene.node6 = qrApp.init(6.NodeId, scene, qrApp.AppConfig(padding: 0, position: "top-left", size: 2.0,
       sizeUnit: "pixels per dot", code: "", alRad: 30.0, moRad: 0.0, moSep: 0.0, offsetX: 0.0, offsetY: 0.0,

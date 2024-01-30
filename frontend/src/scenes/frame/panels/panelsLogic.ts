@@ -17,7 +17,7 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
     { panel: Panel.Apps, active: true, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
     { panel: Panel.Templates, active: false, hidden: false },
-    { panel: Panel.SceneConfig, active: false, hidden: false },
+    { panel: Panel.SceneState, active: false, hidden: false },
     { panel: Panel.FrameDetails, active: false, hidden: false },
     { panel: Panel.FrameSettings, active: false, hidden: false },
   ],

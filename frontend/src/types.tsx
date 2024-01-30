@@ -66,7 +66,17 @@ export interface MetricsType {
   metrics: Record<string, any>
 }
 
-export const configFieldTypes = ['string', 'text', 'float', 'integer', 'boolean', 'color', 'select', 'node'] as const
+export const configFieldTypes = [
+  'string',
+  'text',
+  'float',
+  'integer',
+  'boolean',
+  'color',
+  'select',
+  'json',
+  'node',
+] as const
 
 export interface ConfigField {
   /** Unique config field keyword */
@@ -74,7 +84,7 @@ export interface ConfigField {
   /** Human readable label */
   label: string
   /** Type of the field, only 'string' is supported for now */
-  type: 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'node'
+  type: 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'json' | 'node'
   /** List of options for the field, only used if type is 'select' */
   options?: string[]
   /** Whether the field is required */
@@ -89,7 +99,7 @@ export interface ConfigField {
   rows?: number
 }
 
-export interface SceneConfigField extends ConfigField {
+export interface StateField extends ConfigField {
   persist?: 'dist' | 'memory'
 }
 
@@ -133,7 +143,7 @@ export interface FrameScene {
   name: string
   nodes: Node[]
   edges: Edge[]
-  fields?: SceneConfigField[]
+  fields?: StateField[]
 }
 
 export interface FrameSceneIndexed {
@@ -167,7 +177,7 @@ export enum Panel {
   FrameSettings = 'FrameSettings',
   Image = 'Image',
   Logs = 'Logs',
-  SceneConfig = 'SceneConfig',
+  SceneState = 'SceneState',
   Apps = 'Apps',
   Events = 'Events',
   Metrics = 'Metrics',

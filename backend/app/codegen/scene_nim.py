@@ -179,31 +179,27 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
         for node in nodes:
             next_node = next_nodes.get(node['id'], '-1')
             run_event_lines += [f"  try: self.runNode({node_id_to_integer(next_node)}.NodeId, context)"]
-            run_event_lines += [f"  except Exception as e: self.logger.log(%*{{\"event\": \"{sanitize_nim_string(event)}:error\","]
-            run_event_lines += [f"      \"node\": {node_id_to_integer(next_node)}, \"error\": $e.msg, \"stacktrace\": e.getStackTrace()}})"]
+            run_event_lines += [f"  except Exception as e: self.logger.log(%*{{\"event\": \"{sanitize_nim_string(event)}:error\","
+                                f" \"node\": {node_id_to_integer(next_node)}, \"error\": $e.msg, \"stacktrace\": e.getStackTrace()}})"]
 
 
-    scene_config_fields = []
-    scene_config_init_fields = []
+    state_init_fields = []
     for field in scene.get('fields', []):
-        type = field.get('type', 'string')
         name = field.get('name', '')
+        if name == "":
+            continue
+        type = field.get('type', 'string')
         value = field.get('value', '')
         if type == 'integer':
-            scene_config_fields += [f"{name}*: int"]
-            scene_config_init_fields += [f"{name}: {int(value)}"]
+            state_init_fields += [f"\"{sanitize_nim_string(name)}\": %*({int(value)})"]
         elif type == 'float':
-            scene_config_fields += [f"{name}*: float"]
-            scene_config_init_fields += [f"{name}: {float(value)}"]
+            state_init_fields += [f"\"{sanitize_nim_string(name)}\": %*({float(value)})"]
         elif type == 'boolean':
-            scene_config_fields += [f"{name}*: bool"]
-            scene_config_init_fields += [f"{name}: {'true' if value == 'true' else 'false'}"]
-        elif type == 'color':
-            scene_config_fields += [f"{name}*: Color"]
-            scene_config_init_fields += [f"{name}: parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"]
+            state_init_fields += [f"\"{sanitize_nim_string(name)}\": %*({'true' if value == 'true' else 'false'})"]
+        elif type == 'json':
+            state_init_fields += [f"\"{sanitize_nim_string(name)}\": parseJson(\"{sanitize_nim_string(str(value))}\")"]
         else:
-            scene_config_fields += [f"{name}*: string"]
-            scene_config_init_fields += [f"{name}: \"{sanitize_nim_string(str(value))}\""]
+            state_init_fields += [f"\"{sanitize_nim_string(name)}\": %*(\"{sanitize_nim_string(str(value))}\")"]
 
     newline = "\n"
     scene_source = f"""
@@ -215,11 +211,7 @@ import frameos/channels
 
 const DEBUG = {'true' if frame.debug else 'false'}
 
-type Config* = ref object of SceneConfig
-  {(newline + "  ").join(scene_config_fields) if len(scene_config_fields) > 0 else "discard"}
-
 type Scene* = ref object of FrameScene
-  sceneConfig*: Config
   {(newline + "  ").join(scene_object_fields)}
 
 {{.push hint[XDeclaredButNotUsed]: off.}}
@@ -230,7 +222,6 @@ proc runNode*(self: Scene, nodeId: NodeId,
     context: var ExecutionContext) =
   let scene = self
   let frameConfig = scene.frameConfig
-  let sceneConfig = scene.sceneConfig
   let state = scene.state
   var nextNode = nodeId
   var currentNode = nodeId
@@ -250,17 +241,12 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
   {(newline + "  ").join(run_event_lines)}
   else: discard
 
-proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(
-    event: string, payload: JsonNode)): Scene =
-  var state = %*{{}}
-  let sceneConfig = Config({", ".join(scene_config_init_fields)})
-  let scene = Scene(frameConfig: frameConfig, sceneConfig: sceneConfig, logger: logger, state: state,
-      dispatchEvent: dispatchEvent)
-  let self = scene
-  var context = ExecutionContext(scene: scene, event: "init", payload: %*{{
-    }}, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: string, payload: JsonNode)): Scene =
+  var state = %*{{{", ".join(state_init_fields)}}}
+  let scene = Scene(frameConfig: frameConfig, logger: logger, state: state, dispatchEvent: dispatchEvent)
+  var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
-  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = self.runNode(nodeId, context))
+  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
   {(newline + "  ").join(init_apps)}
   runEvent(scene, context)
 
@@ -270,8 +256,8 @@ proc render*(self: Scene): Image =
     event: "render",
     payload: %*{{}},
     image: case self.frameConfig.rotate:
-    of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-    else: newImage(self.frameConfig.width, self.frameConfig.height),
+      of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
+      else: newImage(self.frameConfig.width, self.frameConfig.height),
     loopIndex: 0,
     loopKey: "."
   )

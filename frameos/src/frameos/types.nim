@@ -35,9 +35,6 @@ type
 
   NodeId* = distinct int
 
-  SceneConfig* = ref object of RootObj
-    discard
-
   FrameScene* = ref object of RootObj
     isRendering*: bool
     frameConfig*: FrameConfig
