@@ -230,7 +230,7 @@ proc runNode*(self: Scene, nodeId: NodeId,
     context: var ExecutionContext) =
   let scene = self
   let frameConfig = scene.frameConfig
-  let sceneConfig = Config(scene.sceneConfig)
+  let sceneConfig = scene.sceneConfig
   let state = scene.state
   var nextNode = nodeId
   var currentNode = nodeId

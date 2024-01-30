@@ -7,6 +7,7 @@ import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import { configFieldTypes } from '../../../../types'
 import { Button } from '../../../../components/Button'
+import { Tooltip } from '../../../../components/Tooltip'
 
 const PERSIST_OPTIONS = [
   { label: 'memory (reset on boot)', value: 'memory' },
@@ -32,8 +33,15 @@ export function SceneConfig(): JSX.Element {
           </Field>
         </div>
         <div className="flex justify-between w-full items-center gap-2">
-          <div className="font-bold">
-            <code>sceneConfig</code>
+          <div className="flex items-center gap-2">
+            <code className="font-bold">sceneConfig</code>
+            <Tooltip
+              title={
+                <>
+                  The fields you set here will be available through <code>sceneConfig.fieldName</code> in your app
+                </>
+              }
+            />
           </div>
           <Button
             onClick={() => {
@@ -76,7 +84,11 @@ export function SceneConfig(): JSX.Element {
               <Field name="placeholder" label="Placeholder">
                 <TextInput />
               </Field>
-              <Field name="persist" label="Perist">
+              <Field
+                name="persist"
+                label="Perist"
+                tooltip={<>Persisting to disk reduces the lifetime of your SD card</>}
+              >
                 <Select options={PERSIST_OPTIONS} />
               </Field>
             </div>
