@@ -23,6 +23,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
     next_nodes = {}
     prev_nodes = {}
     field_inputs: dict[str, dict[str, str]] = {}
+    source_field_inputs: dict[str, dict[str, tuple[str, str]]] = {}
     node_fields: dict[str, dict[str, str]] = {}
 
     def node_id_to_integer(node_id: str) -> int:
@@ -56,6 +57,13 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                 if not field_inputs.get(target):
                     field_inputs[target] = {}
                 field_inputs[target][field] = source_handle.replace('code/', '')
+                print(f"field_inputs[{target}][{field}] = {source_handle.replace('code/', '')}")
+            if source_handle.startswith('field/') and target_handle.startswith('fieldInput/'):
+                target_field = target_handle.replace('fieldInput/', '')
+                source_field = source_handle.replace('field/', '')
+                if not source_field_inputs.get(target):
+                    source_field_inputs[target] = {}
+                source_field_inputs[target][target_field] = (source, source_field)
 
     for node in nodes:
         node_id = node['id']
@@ -120,6 +128,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                     app_config[key] = value
 
             field_inputs_for_node = field_inputs.get(node_id, {})
+            source_field_inputs_for_node = source_field_inputs.get(node_id, {})
             node_fields_for_node = node_fields.get(node_id, {})
 
             app_config_pairs = []
@@ -165,6 +174,8 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
             ]
             for key, code in field_inputs_for_node.items():
                 run_node_lines += [f"  self.{app_id}.appConfig.{key} = {code}"]
+            for key, (source_id, source_key) in source_field_inputs_for_node.items():
+                run_node_lines += [f"  self.{app_id}.appConfig.{key} = self.node{node_id_to_integer(source_id)}.appConfig.{source_key}"]
 
             next_node_id = next_nodes.get(node_id, None)
             run_node_lines += [
@@ -244,6 +255,7 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
 proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: string, payload: JsonNode)): Scene =
   var state = %*{{{", ".join(state_init_fields)}}}
   let scene = Scene(frameConfig: frameConfig, logger: logger, state: state, dispatchEvent: dispatchEvent)
+  let self = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
