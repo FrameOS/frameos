@@ -97,8 +97,8 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
 
             if len(sources) > 0:
                 node_app_id = "nodeapp_" + node_id.replace('-', '_')
-                app_import = f"import apps/{node_app_id}/app as nodeApp{node_id_to_integer(node_app_id)}"
-                scene_object_fields += [f"{app_id}: nodeApp{node_id_to_integer(node_app_id)}.App"]
+                app_import = f"import apps/{node_app_id}/app as nodeApp{node_id_to_integer(node_id)}"
+                scene_object_fields += [f"{app_id}: nodeApp{node_id_to_integer(node_id)}.App"]
             else:
                 app_import = f"import apps/{name}/app as {name}App"
                 scene_object_fields += [f"{app_id}: {name}App.App"]
@@ -162,7 +162,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
             if len(sources) > 0:
                 node_app_id = "nodeapp_" + node_id.replace('-', '_')
                 init_apps += [
-                    f"scene.{app_id} = nodeApp{node_id_to_integer(node_app_id)}.init({node_integer}.NodeId, scene, nodeApp{node_id_to_integer(node_app_id)}.AppConfig({', '.join(app_config_pairs)}))"
+                    f"scene.{app_id} = nodeApp{node_id_to_integer(node_id)}.init({node_integer}.NodeId, scene, nodeApp{node_id_to_integer(node_id)}.AppConfig({', '.join(app_config_pairs)}))"
                 ]
             else:
                 init_apps += [
