@@ -9,10 +9,18 @@ import { configFieldTypes } from '../../../../types'
 import { Button } from '../../../../components/Button'
 import { Tooltip } from '../../../../components/Tooltip'
 import { fieldTypeToGetter } from '../../../../utils/fieldTypes'
+import { ClipboardDocumentIcon } from '@heroicons/react/24/outline'
+import React from 'react'
+import copy from 'copy-to-clipboard'
 
 const PERSIST_OPTIONS = [
   { label: 'memory (reset on boot)', value: 'memory' },
   { label: 'disk (or sd card)', value: 'disk' },
+]
+
+const ACCESS_OPTIONS = [
+  { label: 'private (use in the scene)', value: 'private' },
+  { label: 'public (controllable externally)', value: 'public' },
 ]
 
 export function SceneState(): JSX.Element {
@@ -102,15 +110,38 @@ export function SceneState(): JSX.Element {
                 >
                   <Select options={PERSIST_OPTIONS} />
                 </Field>
+                <Field
+                  name="access"
+                  label="Access"
+                  tooltip={
+                    <>
+                      Whether this field is just usable within the scene (private), or if it can also be controlled
+                      externally, for example from the frame's settings page.
+                    </>
+                  }
+                >
+                  <Select options={ACCESS_OPTIONS} />
+                </Field>
               </div>
             </Group>
           ) : (
             <div className="bg-gray-900 p-2 space-y-4">
               <div className="flex justify-between items-center w-full gap-2">
-                <code>{`state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr'}`}</code>
+                <div>{field.label || field.name}</div>
                 <Button onClick={() => editField(index)} size="small">
                   Edit field
                 </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="text-sm text-gray-400 break-words">{`state{"${field.name}"}${
+                  fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr'
+                }`}</code>
+                <ClipboardDocumentIcon
+                  className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block"
+                  onClick={() =>
+                    copy(`state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr'}`)
+                  }
+                />
               </div>
             </div>
           )

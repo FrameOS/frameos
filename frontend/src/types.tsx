@@ -101,6 +101,7 @@ export interface ConfigField {
 
 export interface StateField extends ConfigField {
   persist?: 'dist' | 'memory'
+  access?: 'private' | 'public'
 }
 
 export interface MarkdownField {
