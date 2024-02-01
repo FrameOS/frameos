@@ -79,6 +79,14 @@ router myrouter:
         except Exception as e:
           resp Http200, {"Content-Type": "image/png"}, renderError(globalFrameConfig.renderWidth(),
             globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
+  get "/c":
+    var html = "<html><meta name='viewport' content='width=device-width, initial-scale=1.0'><body><h1>Control</h1>"
+    html.add("<script>function postRender() { fetch('/event/render', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify({})}}</script>")
+    html.add("<form onSubmit='postRender(); return false'><input type='submit' value='Render'></form>")
+    html.add("<script>function postSetSceneState() { var data={render:true,state:{message:document.getElementById('message').value, background:document.getElementById('background').value}};fetch('/event/setSceneState', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify(data)}) }</script>")
+    html.add("<form onSubmit='postSetSceneState(); return false'><textarea id='message' placeholder='message'></textarea><br/><input type='text' id='background' value='' placeholder='background, one word'/><br/><input type='submit' value='Set Scene State'></form>")
+    resp Http200, {"Content-Type": "text/html"}, html
+
   error Http404:
     log(%*{"event": "404", "path": request.pathInfo})
     resp Http404, "Not found!"
