@@ -120,5 +120,10 @@
                 "required": true
             }
         ]
+    },
+    "setSceneState": {
+        "name": "setSceneState",
+        "description": "External request to set the scene's public state. This is not called direct internal state changes.",
+        "fields": []
     }
 }

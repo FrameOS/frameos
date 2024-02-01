@@ -18,7 +18,8 @@ export function EventNode(props: NodeProps): JSX.Element {
   let usedAsSource = edges.some((edge) => edge.source === id)
   let usedAsTarget = edges.some((edge) => edge.target === id)
 
-  const fields = keyword === 'init' ? scene?.fields ?? [] : events?.[keyword]?.fields ?? []
+  const fields =
+    keyword === 'init' || keyword === 'setSceneState' ? scene?.fields ?? [] : events?.[keyword]?.fields ?? []
 
   return (
     <div
