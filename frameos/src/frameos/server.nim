@@ -81,10 +81,10 @@ router myrouter:
             globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
   get "/c":
     var html = "<html><meta name='viewport' content='width=device-width, initial-scale=1.0'><body><h1>Control</h1>"
-    html.add("<script>function postRender() { fetch('/event/render', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify({})}}</script>")
+    html.add("<script>function postRender() { fetch('/event/render', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify({})}) }</script>")
     html.add("<form onSubmit='postRender(); return false'><input type='submit' value='Render'></form>")
-    html.add("<script>function postSetSceneState() { var data={render:true,state:{message:document.getElementById('message').value, background:document.getElementById('background').value}};fetch('/event/setSceneState', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify(data)}) }</script>")
-    html.add("<form onSubmit='postSetSceneState(); return false'><textarea id='message' placeholder='message'></textarea><br/><input type='text' id='background' value='' placeholder='background, one word'/><br/><input type='submit' value='Set Scene State'></form>")
+    html.add("<script>function postSetSceneState() { var data={render:true,state:{message:document.getElementById('message').value, background:document.getElementById('background').value}};fetch('/event/setSceneState', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify(data)}); document.getElementById('setSceneState').value = 'Now wait a while...'; }</script>")
+    html.add("<form onSubmit='postSetSceneState(); return false'><textarea id='message' placeholder='message'></textarea><br/><input type='text' id='background' value='' placeholder='background, one word'/><br/><input type='submit' id='setSceneState' value='Set Scene State'></form>")
     resp Http200, {"Content-Type": "text/html"}, html
 
   error Http404:
