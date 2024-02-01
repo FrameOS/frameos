@@ -185,16 +185,31 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
 
     scene_object_fields.sort(key=natural_keys)
 
+    set_scene_state_lines = [
+        '  if context.payload.hasKey("state") and context.payload["state"].kind == JObject:',
+        '    let payload = context.payload["state"]',
+        '    for key in PUBLIC_STATE_KEYS:',
+        '      if payload.hasKey(key) and payload[key] != self.state{key}:',
+        '        self.state[key] = copy(payload[key])',
+        '  if context.payload.hasKey("render"):',
+        '    sendEvent("render", %*{})',
+    ]
+
     for event, nodes in event_nodes.items():
-        run_event_lines += [f"of \"{event}\":", ]
+        run_event_lines += [f"of \"{event}\":"]
+        if event == 'setSceneState':
+            run_event_lines += set_scene_state_lines
         for node in nodes:
             next_node = next_nodes.get(node['id'], '-1')
             run_event_lines += [f"  try: self.runNode({node_id_to_integer(next_node)}.NodeId, context)"]
             run_event_lines += [f"  except Exception as e: self.logger.log(%*{{\"event\": \"{sanitize_nim_string(event)}:error\","
                                 f" \"node\": {node_id_to_integer(next_node)}, \"error\": $e.msg, \"stacktrace\": e.getStackTrace()}})"]
-
+    if not event_nodes.get('setSceneState', None):
+        run_event_lines += ["of \"setSceneState\":"]
+        run_event_lines += set_scene_state_lines
 
     state_init_fields = []
+    public_state_keys = []
     for field in scene.get('fields', []):
         name = field.get('name', '')
         if name == "":
@@ -211,8 +226,11 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
             state_init_fields += [f"\"{sanitize_nim_string(name)}\": parseJson(\"{sanitize_nim_string(str(value))}\")"]
         else:
             state_init_fields += [f"\"{sanitize_nim_string(name)}\": %*(\"{sanitize_nim_string(str(value))}\")"]
+        if field.get('access', 'private') == 'public':
+            public_state_keys += [name]
 
     newline = "\n"
+    public_state_keys_seq = "@[" + (", ".join([f"\"{sanitize_nim_string(name)}\"" for name in public_state_keys])) + "]"
     scene_source = f"""
 import pixie, json, times, strformat
 
@@ -221,6 +239,7 @@ import frameos/channels
 {newline.join(imports)}
 
 const DEBUG = {'true' if frame.debug else 'false'}
+const PUBLIC_STATE_KEYS: seq[string] = {public_state_keys_seq}
 
 type Scene* = ref object of FrameScene
   {(newline + "  ").join(scene_object_fields)}

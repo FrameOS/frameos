@@ -125,23 +125,26 @@ export function SceneState(): JSX.Element {
               </div>
             </Group>
           ) : (
-            <div className="bg-gray-900 p-2 space-y-4">
+            <div className="bg-gray-900 p-2 space-y-2">
               <div className="flex justify-between items-center w-full gap-2">
                 <div>{field.label || field.name}</div>
                 <Button onClick={() => editField(index)} size="small">
                   Edit field
                 </Button>
               </div>
-              <div className="flex items-center gap-2">
-                <code className="text-sm text-gray-400 break-words">{`state{"${field.name}"}${
-                  fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr'
-                }`}</code>
+              <div>
+                <TextInput placeholder="values coming soon" disabled />
+              </div>
+              <div className="flex items-center gap-1">
                 <ClipboardDocumentIcon
                   className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block"
                   onClick={() =>
                     copy(`state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr'}`)
                   }
                 />
+                <code className="text-sm text-gray-400 break-words">{`state{"${field.name}"}${
+                  fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr'
+                }`}</code>
               </div>
             </div>
           )
