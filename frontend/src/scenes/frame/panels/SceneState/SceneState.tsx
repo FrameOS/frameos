@@ -133,7 +133,7 @@ export function SceneState(): JSX.Element {
                 </Button>
               </div>
               <div>
-                <TextInput placeholder="values coming soon" disabled />
+                <TextInput placeholder="live value sync coming soon" disabled />
               </div>
               <div className="flex items-center gap-1">
                 <ClipboardDocumentIcon

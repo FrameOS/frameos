@@ -57,7 +57,6 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                 if not field_inputs.get(target):
                     field_inputs[target] = {}
                 field_inputs[target][field] = source_handle.replace('code/', '')
-                print(f"field_inputs[{target}][{field}] = {source_handle.replace('code/', '')}")
             if source_handle.startswith('field/') and target_handle.startswith('fieldInput/'):
                 target_field = target_handle.replace('fieldInput/', '')
                 source_field = source_handle.replace('field/', '')
