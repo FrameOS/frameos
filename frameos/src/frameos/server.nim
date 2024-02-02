@@ -16,7 +16,7 @@ import frameos/types
 import frameos/channels
 import frameos/config
 import frameos/utils/image
-from frameos/runner import getLastPng, triggerRender
+from frameos/runner import getLastPng, getLastPublicState, getPublicStateKeys, triggerRender
 
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
@@ -84,7 +84,14 @@ router myrouter:
     html.add("<script>function postRender() { fetch('/event/render', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify({})}) }</script>")
     html.add("<form onSubmit='postRender(); return false'><input type='submit' value='Render'></form>")
     html.add("<script>function postSetSceneState() { var data={render:true,state:{message:document.getElementById('message').value, background:document.getElementById('background').value}};fetch('/event/setSceneState', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify(data)}); document.getElementById('setSceneState').value = 'Now wait a while...'; }</script>")
-    html.add("<form onSubmit='postSetSceneState(); return false'><textarea id='message' placeholder='message'></textarea><br/><input type='text' id='background' value='' placeholder='background, one word'/><br/><input type='submit' id='setSceneState' value='Set Scene State'></form>")
+    html.add("<form onSubmit='postSetSceneState(); return false'>")
+    let keys = getPublicStateKeys()
+    let values = getLastPublicState()
+    for key in keys:
+      let value = if values.hasKey(key): values{key} else: %*""
+      html.add(fmt"<input type='text' id='{$key}' value='{value.getStr()}' placeholder='{$key}' /><br/>")
+    html.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
+    html.add("</form>")
     resp Http200, {"Content-Type": "text/html"}, html
 
   error Http404:

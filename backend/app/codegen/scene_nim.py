@@ -238,7 +238,7 @@ import frameos/channels
 {newline.join(imports)}
 
 const DEBUG = {'true' if frame.debug else 'false'}
-const PUBLIC_STATE_KEYS: seq[string] = {public_state_keys_seq}
+const PUBLIC_STATE_KEYS*: seq[string] = {public_state_keys_seq}
 
 type Scene* = ref object of FrameScene
   {(newline + "  ").join(scene_object_fields)}
@@ -279,6 +279,12 @@ proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: 
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
   {(newline + "  ").join(init_apps)}
   runEvent(scene, context)
+
+proc getPublicState*(self: Scene): JsonNode =
+  result = %*{{}}
+  for key in PUBLIC_STATE_KEYS:
+    if self.state.hasKey(key):
+      result[key] = self.state{{key}}
 
 proc render*(self: Scene): Image =
   var context = ExecutionContext(

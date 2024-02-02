@@ -27,6 +27,9 @@ var
   pngLock: Lock
   pngImage = newImage(1, 1)
   hasPngImage = false
+  lastPublicState = %*{}
+  lastPublicStateLock: Lock
+  lastPublicStateUpdate = 0.0
 
 proc setLastImage(image: Image) =
   withLock pngLock:
@@ -42,6 +45,20 @@ proc getLastPng*(): string =
   withLock pngLock:
     copy = pngImage.data
   return encodePng(pngImage.width, pngImage.height, 4, copy[0].addr, copy.len * 4)
+
+proc updateLastPublicState*(state: JsonNode) =
+  withLock lastPublicStateLock:
+    for key in defaultScene.PUBLIC_STATE_KEYS:
+      if state.hasKey(key) and state[key] != lastPublicState{key}:
+        lastPublicState[key] = copy(state[key])
+
+proc getLastPublicState*(): JsonNode =
+  {.gcsafe.}:
+    withLock lastPublicStateLock:
+      return lastPublicState.copy()
+
+proc getPublicStateKeys*(): seq[string] =
+  return defaultScene.PUBLIC_STATE_KEYS
 
 proc renderScene*(self: RunnerThread): Image =
   let sceneTimer = epochTime()
@@ -123,6 +140,10 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     await sleepAsync(0.001)
     self.isRendering = false
     self.scene.isRendering = false
+
+    if epochTime() > lastPublicStateUpdate + 1.0:
+      updateLastPublicState(defaultScene.getPublicState(defaultScene.Scene(self.scene)))
+      lastPublicStateUpdate = epochTime()
 
     # While we were rendering an event to trigger a render was dispatched
     if self.triggerRenderNext:
