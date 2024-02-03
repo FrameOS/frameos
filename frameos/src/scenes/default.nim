@@ -17,6 +17,7 @@ let PUBLIC_STATE_FIELDS*: seq[StateField] = @[
       required: false, secret: false),
   StateField(name: "message", label: "Message", fieldType: "text", options: @[], placeholder: "", required: false, secret: false)
 ]
+let PERSISTED_STATE_KEYS*: seq[string] = @["background", "message"]
 
 type Scene* = ref object of FrameScene
   node1: splitApp.App
@@ -85,8 +86,12 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
       sendEvent("render", %*{})
   else: discard
 
-proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: string, payload: JsonNode)): Scene =
+proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: string, payload: JsonNode),
+    persistedState: JsonNode): Scene =
   var state = %*{"background": %*("fish"), "message": %*("pas op voor de prikkelvis")}
+  if persistedState.kind == JObject:
+    for key in persistedState.keys:
+      state[key] = persistedState[key]
   let scene = Scene(frameConfig: frameConfig, logger: logger, state: state, dispatchEvent: dispatchEvent)
   let self = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
@@ -113,6 +118,12 @@ proc getPublicState*(self: Scene): JsonNode =
   result = %*{}
   for field in PUBLIC_STATE_FIELDS:
     let key = field.name
+    if self.state.hasKey(key):
+      result[key] = self.state{key}
+
+proc getPersistedState*(self: Scene): JsonNode =
+  result = %*{}
+  for key in PERSISTED_STATE_KEYS:
     if self.state.hasKey(key):
       result[key] = self.state{key}
 

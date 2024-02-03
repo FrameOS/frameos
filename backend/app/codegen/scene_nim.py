@@ -210,6 +210,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
 
     state_init_fields = []
     public_state_fields = []
+    persisted_state_fields = []
     for field in scene.get('fields', []):
         name = field.get('name', '')
         if name == "":
@@ -239,12 +240,15 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                 f"required: {'true' if field.get('required', False) else 'false'}, " \
                 f"secret: {'true' if field.get('secret', False) else 'false'})"
             )
+        if field.get('persist', 'memory') == 'disk':
+            persisted_state_fields.append(f"\"{sanitize_nim_string(name)}\"")
 
     newline = "\n"
     if len(public_state_fields) > 0:
         public_state_fields_seq = "@[\n  " + (",\n  ".join([field for field in public_state_fields])) + "\n]"
     else:
         public_state_fields_seq = "@[]"
+
     scene_source = f"""
 import pixie, json, times, strformat
 
@@ -254,6 +258,7 @@ import frameos/channels
 
 const DEBUG = {'true' if frame.debug else 'false'}
 let PUBLIC_STATE_FIELDS*: seq[StateField] = {public_state_fields_seq}
+let PERSISTED_STATE_KEYS*: seq[string] = @[{', '.join(persisted_state_fields)}]
 
 type Scene* = ref object of FrameScene
   {(newline + "  ").join(scene_object_fields)}
@@ -285,8 +290,11 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
   {(newline + "  ").join(run_event_lines)}
   else: discard
 
-proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: string, payload: JsonNode)): Scene =
+proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: string, payload: JsonNode), persistedState: JsonNode): Scene =
   var state = %*{{{", ".join(state_init_fields)}}}
+  if persistedState.kind == JObject:
+    for key in persistedState.keys:
+      state[key] = persistedState[key]
   let scene = Scene(frameConfig: frameConfig, logger: logger, state: state, dispatchEvent: dispatchEvent)
   let self = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
@@ -299,6 +307,12 @@ proc getPublicState*(self: Scene): JsonNode =
   result = %*{{}}
   for field in PUBLIC_STATE_FIELDS:
     let key = field.name
+    if self.state.hasKey(key):
+      result[key] = self.state{{key}}
+
+proc getPersistedState*(self: Scene): JsonNode =
+  result = %*{{}}
+  for key in PERSISTED_STATE_KEYS:
     if self.state.hasKey(key):
       result[key] = self.state{{key}}
 

@@ -12,6 +12,8 @@ import drivers/drivers as drivers
 const FAST_SCENE = 0.5
 const SERVER_RENDER_DELAY = 1.0
 
+const SCENE_STATE_JSON_PATH = "../db/scene.json"
+
 type
   RunnerThread = ref object
     frameConfig: FrameConfig
@@ -30,6 +32,8 @@ var
   lastPublicState = %*{}
   lastPublicStateLock: Lock
   lastPublicStateUpdate = 0.0
+  lastPersistedState = %*{}
+  lastPersistedStateUpdate = 0.0
 
 proc setLastImage(image: Image) =
   withLock pngLock:
@@ -61,6 +65,22 @@ proc getLastPublicState*(): JsonNode =
 proc getPublicStateFields*(): seq[StateField] =
   {.gcsafe.}:
     return defaultScene.PUBLIC_STATE_FIELDS
+
+proc updateLastPersistedState*(state: JsonNode) =
+  var hasChanges = false
+  for key in defaultScene.PERSISTED_STATE_KEYS:
+    if state.hasKey(key) and state{key} != lastPersistedState{key}:
+      lastPersistedState[key] = copy(state[key])
+      hasChanges = true
+  if hasChanges:
+    writeFile(SCENE_STATE_JSON_PATH, $state)
+  lastPersistedStateUpdate = epochTime()
+
+proc loadPersistedState*(): JsonNode =
+  try:
+    return parseJson(readFile(SCENE_STATE_JSON_PATH))
+  except IOError:
+    return %*{}
 
 proc renderScene*(self: RunnerThread): Image =
   let sceneTimer = epochTime()
@@ -147,6 +167,10 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
       updateLastPublicState(defaultScene.getPublicState(defaultScene.Scene(self.scene)))
       lastPublicStateUpdate = epochTime()
 
+    if epochTime() > lastPersistedStateUpdate + 1.0:
+      updateLastPersistedState(defaultScene.getPersistedState(defaultScene.Scene(self.scene)))
+      lastPersistedStateUpdate = epochTime()
+
     # While we were rendering an event to trigger a render was dispatched
     if self.triggerRenderNext:
       self.triggerRenderNext = false
@@ -220,11 +244,12 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
           waitTime += 5
 
 proc createThreadRunner*(args: (FrameConfig, Logger)) =
-  {.cast(gcsafe).}: # TODO: is this a mistake?
+  {.cast(gcsafe).}:
     var scene = defaultScene.init(
       args[0],
       args[1],
-      proc(event: string, payload: JsonNode) = eventChannel.send((event, payload))
+      proc(event: string, payload: JsonNode) = eventChannel.send((event, payload)),
+      loadPersistedState()
     ).FrameScene
     var runnerThread = RunnerThread(
       frameConfig: args[0],
