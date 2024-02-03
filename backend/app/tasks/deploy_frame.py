@@ -104,7 +104,7 @@ def deploy_frame(id: int):
                     log(id, "stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
                     scp.put(archive_path, f"/srv/frameos/build/build_{build_id}.tar.gz")
                     exec_command(frame, ssh, f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz")
-                    exec_command(frame, ssh, f"cd /srv/frameos/build/build_{build_id} && make -j$(nproc)")
+                    exec_command(frame, ssh, f"cd /srv/frameos/build/build_{build_id} && PARALLEL_MEM=$(awk '/MemTotal/{{printf \"%.0f\\n\", $2/1024/150}}' /proc/meminfo) && PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && make -j$PARALLEL")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/releases/release_{build_id}")
                     exec_command(frame, ssh, f"cp /srv/frameos/build/build_{build_id}/frameos /srv/frameos/releases/release_{build_id}/frameos")
                     log(id, "stdout", f"> add /srv/frameos/releases/release_{build_id}/frame.json")
@@ -129,6 +129,7 @@ def deploy_frame(id: int):
                         service_contents = file.read().replace("%I", frame.ssh_user)
                     with SCPClient(ssh.get_transport()) as scp:
                         scp.putfo(StringIO(service_contents), f"/srv/frameos/releases/release_{build_id}/frameos.service")
+                    exec_command(frame, ssh, f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state /srv/frameos/releases/release_{build_id}/state")
                     exec_command(frame, ssh, f"sudo cp /srv/frameos/releases/release_{build_id}/frameos.service /etc/systemd/system/frameos.service")
                     exec_command(frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
                     exec_command(frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")

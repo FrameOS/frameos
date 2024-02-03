@@ -11,8 +11,7 @@ import drivers/drivers as drivers
 
 const FAST_SCENE = 0.5
 const SERVER_RENDER_DELAY = 1.0
-
-const SCENE_STATE_JSON_PATH = "scene.json"
+const SCENE_STATE_JSON_PATH = "./state/scene.json"
 
 type
   RunnerThread = ref object
@@ -251,6 +250,8 @@ proc createThreadRunner*(args: (FrameConfig, Logger)) =
       proc(event: string, payload: JsonNode) = eventChannel.send((event, payload)),
       loadPersistedState()
     ).FrameScene
+    updateLastPublicState(defaultScene.getPublicState(defaultScene.Scene(scene)))
+    lastPublicStateUpdate = epochTime()
     var runnerThread = RunnerThread(
       frameConfig: args[0],
       logger: args[1],
