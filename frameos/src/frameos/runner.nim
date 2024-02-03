@@ -48,7 +48,8 @@ proc getLastPng*(): string =
 
 proc updateLastPublicState*(state: JsonNode) =
   withLock lastPublicStateLock:
-    for key in defaultScene.PUBLIC_STATE_KEYS:
+    for field in defaultScene.PUBLIC_STATE_FIELDS:
+      let key = field.name
       if state.hasKey(key) and state[key] != lastPublicState{key}:
         lastPublicState[key] = copy(state[key])
 
@@ -57,8 +58,9 @@ proc getLastPublicState*(): JsonNode =
     withLock lastPublicStateLock:
       return lastPublicState.copy()
 
-proc getPublicStateKeys*(): seq[string] =
-  return defaultScene.PUBLIC_STATE_KEYS
+proc getPublicStateFields*(): seq[StateField] =
+  {.gcsafe.}:
+    return defaultScene.PUBLIC_STATE_FIELDS
 
 proc renderScene*(self: RunnerThread): Image =
   let sceneTimer = epochTime()

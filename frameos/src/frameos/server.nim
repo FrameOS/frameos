@@ -16,7 +16,7 @@ import frameos/types
 import frameos/channels
 import frameos/config
 import frameos/utils/image
-from frameos/runner import getLastPng, getLastPublicState, getPublicStateKeys, triggerRender
+from frameos/runner import getLastPng, getLastPublicState, getPublicStateFields, triggerRender
 
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
@@ -80,19 +80,28 @@ router myrouter:
           resp Http200, {"Content-Type": "image/png"}, renderError(globalFrameConfig.renderWidth(),
             globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
   get "/c":
-    var html = "<html><meta name='viewport' content='width=device-width, initial-scale=1.0'><body><h1>Control</h1>"
-    html.add("<script>function postRender() { fetch('/event/render', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify({})}) }</script>")
-    html.add("<form onSubmit='postRender(); return false'><input type='submit' value='Render'></form>")
-    html.add("<script>function postSetSceneState() { var data={render:true,state:{message:document.getElementById('message').value, background:document.getElementById('background').value}};fetch('/event/setSceneState', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify(data)}); document.getElementById('setSceneState').value = 'Now wait a while...'; }</script>")
-    html.add("<form onSubmit='postSetSceneState(); return false'>")
-    let keys = getPublicStateKeys()
+    var html = ""
+    let fields = getPublicStateFields()
     let values = getLastPublicState()
-    for key in keys:
+    for field in fields:
+      let key = field.name
+      let placeholder = field.placeholder
+      let fieldType = field.fieldType
       let value = if values.hasKey(key): values{key} else: %*""
-      html.add(fmt"<input type='text' id='{$key}' value='{value.getStr()}' placeholder='{$key}' /><br/>")
+      html.add(fmt"<label for='{$key}'>{field.label}</label><br/>")
+      if fieldType == "text":
+        html.add(fmt"<textarea id='{$key}' placeholder='{placeholder}'>{value.getStr()}</textarea><br/>")
+      elif fieldType == "select":
+        html.add(fmt"<select id='{$key} placeholder='{placeholder}'>")
+        for option in field.options:
+          html.add(fmt"<option value='{$option}'>{$option}</option>")
+        html.add("</select><br/>")
+      else:
+        html.add(fmt"<input type='text' id='{$key}' placeholder='{placeholder}' value='{value.getStr()}' /><br/>")
     html.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
-    html.add("</form>")
-    resp Http200, {"Content-Type": "text/html"}, html
+    {.gcsafe.}: # We're only reading static assets. It's fine.
+      let controlHtml = webAssets.getAsset("assets/web/control.html").replace("/*$$fields$$*/", html)
+      resp Http200, controlHtml
 
   error Http404:
     log(%*{"event": "404", "path": request.pathInfo})

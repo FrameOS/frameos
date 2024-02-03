@@ -52,6 +52,15 @@ type
     loopIndex*: int
     loopKey*: string
 
+  StateField* = ref object
+    name*: string
+    label*: string
+    fieldType*: string
+    options*: seq[string]
+    placeholder*: string
+    required*: bool
+    secret*: bool
+
   RunnerControl* = ref object
     logger*: Logger
     frameConfig*: FrameConfig

@@ -187,7 +187,8 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
     set_scene_state_lines = [
         '  if context.payload.hasKey("state") and context.payload["state"].kind == JObject:',
         '    let payload = context.payload["state"]',
-        '    for key in PUBLIC_STATE_KEYS:',
+        '    for field in PUBLIC_STATE_FIELDS:',
+        '      let key = field.name',
         '      if payload.hasKey(key) and payload[key] != self.state{key}:',
         '        self.state[key] = copy(payload[key])',
         '  if context.payload.hasKey("render"):',
@@ -208,7 +209,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
         run_event_lines += set_scene_state_lines
 
     state_init_fields = []
-    public_state_keys = []
+    public_state_fields = []
     for field in scene.get('fields', []):
         name = field.get('name', '')
         if name == "":
@@ -226,10 +227,24 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
         else:
             state_init_fields += [f"\"{sanitize_nim_string(name)}\": %*(\"{sanitize_nim_string(str(value))}\")"]
         if field.get('access', 'private') == 'public':
-            public_state_keys += [name]
+            opts = ""
+            if field.get('type', 'string') == 'select':
+                opts = ", ".join([f"\"{sanitize_nim_string(option)}\"" for option in field.get('options', [])])
+
+            public_state_fields.append(
+                f"StateField(name: \"{sanitize_nim_string(field.get('name', ''))}\", " \
+                f"label: \"{sanitize_nim_string(field.get('label', field.get('name', '')))}\", " \
+                f"fieldType: \"{(field.get('type', 'string'))}\", options: @[{opts}], " \
+                f"placeholder: \"{(field.get('placeholder', ''))}\", " \
+                f"required: {'true' if field.get('required', False) else 'false'}, " \
+                f"secret: {'true' if field.get('secret', False) else 'false'})"
+            )
 
     newline = "\n"
-    public_state_keys_seq = "@[" + (", ".join([f"\"{sanitize_nim_string(name)}\"" for name in public_state_keys])) + "]"
+    if len(public_state_fields) > 0:
+        public_state_fields_seq = "@[\n  " + (",\n  ".join([field for field in public_state_fields])) + "\n]"
+    else:
+        public_state_fields_seq = "@[]"
     scene_source = f"""
 import pixie, json, times, strformat
 
@@ -238,7 +253,7 @@ import frameos/channels
 {newline.join(imports)}
 
 const DEBUG = {'true' if frame.debug else 'false'}
-const PUBLIC_STATE_KEYS*: seq[string] = {public_state_keys_seq}
+let PUBLIC_STATE_FIELDS*: seq[StateField] = {public_state_fields_seq}
 
 type Scene* = ref object of FrameScene
   {(newline + "  ").join(scene_object_fields)}
@@ -282,7 +297,8 @@ proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: 
 
 proc getPublicState*(self: Scene): JsonNode =
   result = %*{{}}
-  for key in PUBLIC_STATE_KEYS:
+  for field in PUBLIC_STATE_FIELDS:
+    let key = field.name
     if self.state.hasKey(key):
       result[key] = self.state{{key}}
 

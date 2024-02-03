@@ -12,7 +12,11 @@ import apps/unsplash/app as unsplashApp
 import apps/text/app as textApp
 
 const DEBUG = false
-const PUBLIC_STATE_KEYS*: seq[string] = @["background", "message"]
+let PUBLIC_STATE_FIELDS*: seq[StateField] = @[
+  StateField(name: "background", label: "Background image one word", fieldType: "string", options: @[], placeholder: "",
+      required: false, secret: false),
+  StateField(name: "message", label: "Message", fieldType: "text", options: @[], placeholder: "", required: false, secret: false)
+]
 
 type Scene* = ref object of FrameScene
   node1: splitApp.App
@@ -73,7 +77,8 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
   of "setSceneState":
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
       let payload = context.payload["state"]
-      for key in PUBLIC_STATE_KEYS:
+      for field in PUBLIC_STATE_FIELDS:
+        let key = field.name
         if payload.hasKey(key) and payload[key] != self.state{key}:
           self.state[key] = copy(payload[key])
     if context.payload.hasKey("render"):
@@ -106,7 +111,8 @@ proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: 
 
 proc getPublicState*(self: Scene): JsonNode =
   result = %*{}
-  for key in PUBLIC_STATE_KEYS:
+  for field in PUBLIC_STATE_FIELDS:
+    let key = field.name
     if self.state.hasKey(key):
       result[key] = self.state{key}
 
