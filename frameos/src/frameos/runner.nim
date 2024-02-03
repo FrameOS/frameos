@@ -12,7 +12,7 @@ import drivers/drivers as drivers
 const FAST_SCENE = 0.5
 const SERVER_RENDER_DELAY = 1.0
 
-const SCENE_STATE_JSON_PATH = "../db/scene.json"
+const SCENE_STATE_JSON_PATH = "scene.json"
 
 type
   RunnerThread = ref object
