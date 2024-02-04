@@ -203,6 +203,12 @@ proc dispatchSceneEvent*(self: RunnerThread, event: string, payload: JsonNode) =
   let scene = defaultScene.Scene(self.scene)
   defaultScene.runEvent(scene, context)
 
+  if event == "setSceneState":
+    updateLastPublicState(defaultScene.getPublicState(defaultScene.Scene(self.scene)))
+    lastPublicStateUpdate = epochTime()
+    updateLastPersistedState(defaultScene.getPersistedState(defaultScene.Scene(self.scene)))
+    lastPersistedStateUpdate = epochTime()
+
 proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
   var waitTime = 10
 

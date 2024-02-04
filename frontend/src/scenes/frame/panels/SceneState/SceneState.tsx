@@ -185,16 +185,19 @@ export function SceneState(): JSX.Element {
           <div className="space-y-4">
             {sceneForm.fields?.map((field, index) => (
               <div className="bg-gray-900 p-2 space-y-2">
-                <div className="flex justify-between items-center w-full gap-2">
+                <div className="flex items-center w-full gap-2">
                   <div>
                     {field.label || field.name}
                     {field.name in stateChanges && stateChanges[field.name] !== (state[field.name] ?? field.value)
                       ? ' (modified)'
                       : ''}
                   </div>
+                  {field.access !== 'public' ? (
+                    <Tooltip title="This is a private field whose state is not shared externally" />
+                  ) : null}
                 </div>
                 <div>
-                  {field.type === 'select' ? (
+                  {field.access !== 'public' ? null : field.type === 'select' ? (
                     <Field name={field.name}>
                       {({ value, onChange }) => (
                         <Select

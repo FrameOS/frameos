@@ -82,27 +82,48 @@ router myrouter:
   get "/state":
     resp Http200, {"Content-Type": "application/json"}, $getLastPublicState()
   get "/c":
-    var html = ""
+    var fieldsHtml = ""
+    var fieldsSubmitHtml = ""
     let fields = getPublicStateFields()
     let values = getLastPublicState()
     for field in fields:
       let key = field.name
+      let label = if field.label != "": field.label else: key
       let placeholder = field.placeholder
       let fieldType = field.fieldType
       let value = if values.hasKey(key): values{key} else: %*""
-      html.add(fmt"<label for='{$key}'>{field.label}</label><br/>")
-      if fieldType == "text":
-        html.add(fmt"<textarea id='{$key}' placeholder='{placeholder}'>{value.getStr()}</textarea><br/>")
-      elif fieldType == "select":
-        html.add(fmt"<select id='{$key} placeholder='{placeholder}'>")
-        for option in field.options:
-          html.add(fmt"<option value='{$option}'>{$option}</option>")
-        html.add("</select><br/>")
+      var stringValue = value.getStr()
+
+      if fieldsSubmitHtml != "":
+        fieldsSubmitHtml.add(", ")
+      if fieldType == "integer":
+        stringValue = $value.getInt()
+        fieldsSubmitHtml.add(fmt"{$key}: parseInt(document.getElementById('{$key}').value)")
+      elif fieldType == "float":
+        stringValue = $value.getFloat()
+        fieldsSubmitHtml.add(fmt"{$key}: parseFloat(document.getElementById('{$key}').value)")
+      elif fieldType == "boolean":
+        stringValue = $value.getBool()
+        fieldsSubmitHtml.add(fmt"{$key}: document.getElementById('{$key}').value === 'true'")
       else:
-        html.add(fmt"<input type='text' id='{$key}' placeholder='{placeholder}' value='{value.getStr()}' /><br/>")
-    html.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
+        fieldsSubmitHtml.add(fmt"{$key}: document.getElementById('{$key}').value")
+
+      fieldsHtml.add(fmt"<label for='{$key}'>{label}</label><br/>")
+      if fieldType == "text":
+        fieldsHtml.add(fmt"<textarea id='{$key}' placeholder='{placeholder}'>{stringValue}</textarea><br/><br/>")
+      elif fieldType == "select":
+        fieldsHtml.add(fmt"<select id='{$key}' placeholder='{placeholder}'>")
+        for option in field.options:
+          let selected = if option == stringValue: " selected" else: ""
+          fieldsHtml.add(fmt"<option value='{$option}'{selected}>{$option}</option>")
+        fieldsHtml.add("</select><br/><br/>")
+      else:
+        fieldsHtml.add(fmt"<input type='text' id='{$key}' placeholder='{placeholder}' value='{stringValue}' /><br/><br/>")
+
+    fieldsHtml.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
     {.gcsafe.}: # We're only reading static assets. It's fine.
-      let controlHtml = webAssets.getAsset("assets/web/control.html").replace("/*$$fields$$*/", html)
+      let controlHtml = webAssets.getAsset("assets/web/control.html").replace("/*$$fieldsHtml$$*/", fieldsHtml).replace(
+          "/*$$fieldsSubmitHtml$$*/", fieldsSubmitHtml)
       resp Http200, controlHtml
 
   error Http404:

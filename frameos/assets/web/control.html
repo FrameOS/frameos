@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FrameOS Control Panel</title>
+    <title>Frame Control</title>
     <style>
         body {
             padding: 0;
@@ -14,14 +14,14 @@
     </style>
 </head>
 <body>
-    <h1>FrameOS Control Panel</h1>
+    <h1>Frame Control</h1>
     <h2>Actions:</h2>
     <script>function postRender() { fetch('/event/render', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify({})}) }</script>
     <form onSubmit='postRender(); return false'><input type='submit' value='Render'></form>
     <h2>State</h2>
-    <script>function postSetSceneState() { var data={render:true,state:{message:document.getElementById('message').value, background:document.getElementById('background').value}};fetch('/event/setSceneState', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify(data)}); document.getElementById('setSceneState').value = 'Now wait a while...'; }</script>
+    <script>function postSetSceneState() { var data={render:true,state:{/*$$fieldsSubmitHtml$$*/}};fetch('/event/setSceneState', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify(data)}); document.getElementById('setSceneState').value = 'Now wait a while...'; }</script>
     <form onSubmit='postSetSceneState(); return false'>
-        /*$$fields$$*/
+        /*$$fieldsHtml$$*/
     </form>
 </body>
 </html>
