@@ -3,6 +3,7 @@ import std/locks
 
 type
   FrameConfig* = ref object
+    name*: string
     serverHost*: string
     serverPort*: int
     serverApiKey*: string
@@ -51,6 +52,15 @@ type
     parent*: ExecutionContext
     loopIndex*: int
     loopKey*: string
+
+  StateField* = ref object
+    name*: string
+    label*: string
+    fieldType*: string
+    options*: seq[string]
+    placeholder*: string
+    required*: bool
+    secret*: bool
 
   RunnerControl* = ref object
     logger*: Logger

@@ -23,6 +23,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
     next_nodes = {}
     prev_nodes = {}
     field_inputs: dict[str, dict[str, str]] = {}
+    source_field_inputs: dict[str, dict[str, tuple[str, str]]] = {}
     node_fields: dict[str, dict[str, str]] = {}
 
     def node_id_to_integer(node_id: str) -> int:
@@ -56,6 +57,12 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                 if not field_inputs.get(target):
                     field_inputs[target] = {}
                 field_inputs[target][field] = source_handle.replace('code/', '')
+            if source_handle.startswith('field/') and target_handle.startswith('fieldInput/'):
+                target_field = target_handle.replace('fieldInput/', '')
+                source_field = source_handle.replace('field/', '')
+                if not source_field_inputs.get(target):
+                    source_field_inputs[target] = {}
+                source_field_inputs[target][target_field] = (source, source_field)
 
     for node in nodes:
         node_id = node['id']
@@ -89,8 +96,8 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
 
             if len(sources) > 0:
                 node_app_id = "nodeapp_" + node_id.replace('-', '_')
-                app_import = f"import apps/{node_app_id}/app as nodeApp{node_id_to_integer(node_app_id)}"
-                scene_object_fields += [f"{app_id}: nodeApp{node_id_to_integer(node_app_id)}.App"]
+                app_import = f"import apps/{node_app_id}/app as nodeApp{node_id_to_integer(node_id)}"
+                scene_object_fields += [f"{app_id}: nodeApp{node_id_to_integer(node_id)}.App"]
             else:
                 app_import = f"import apps/{name}/app as {name}App"
                 scene_object_fields += [f"{app_id}: {name}App.App"]
@@ -120,6 +127,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                     app_config[key] = value
 
             field_inputs_for_node = field_inputs.get(node_id, {})
+            source_field_inputs_for_node = source_field_inputs.get(node_id, {})
             node_fields_for_node = node_fields.get(node_id, {})
 
             app_config_pairs = []
@@ -153,7 +161,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
             if len(sources) > 0:
                 node_app_id = "nodeapp_" + node_id.replace('-', '_')
                 init_apps += [
-                    f"scene.{app_id} = nodeApp{node_id_to_integer(node_app_id)}.init({node_integer}.NodeId, scene, nodeApp{node_id_to_integer(node_app_id)}.AppConfig({', '.join(app_config_pairs)}))"
+                    f"scene.{app_id} = nodeApp{node_id_to_integer(node_id)}.init({node_integer}.NodeId, scene, nodeApp{node_id_to_integer(node_id)}.AppConfig({', '.join(app_config_pairs)}))"
                 ]
             else:
                 init_apps += [
@@ -165,6 +173,8 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
             ]
             for key, code in field_inputs_for_node.items():
                 run_node_lines += [f"  self.{app_id}.appConfig.{key} = {code}"]
+            for key, (source_id, source_key) in source_field_inputs_for_node.items():
+                run_node_lines += [f"  self.{app_id}.appConfig.{key} = self.node{node_id_to_integer(source_id)}.appConfig.{source_key}"]
 
             next_node_id = next_nodes.get(node_id, None)
             run_node_lines += [
@@ -174,14 +184,71 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
 
     scene_object_fields.sort(key=natural_keys)
 
+    set_scene_state_lines = [
+        '  if context.payload.hasKey("state") and context.payload["state"].kind == JObject:',
+        '    let payload = context.payload["state"]',
+        '    for field in PUBLIC_STATE_FIELDS:',
+        '      let key = field.name',
+        '      if payload.hasKey(key) and payload[key] != self.state{key}:',
+        '        self.state[key] = copy(payload[key])',
+        '  if context.payload.hasKey("render"):',
+        '    sendEvent("render", %*{})',
+    ]
+
     for event, nodes in event_nodes.items():
-        run_event_lines += [f"of \"{event}\":", ]
+        run_event_lines += [f"of \"{event}\":"]
+        if event == 'setSceneState':
+            run_event_lines += set_scene_state_lines
         for node in nodes:
             next_node = next_nodes.get(node['id'], '-1')
             run_event_lines += [f"  try: self.runNode({node_id_to_integer(next_node)}.NodeId, context)"]
-            run_event_lines += [f"  except Exception as e: self.logger.log(%*{{\"event\": \"{sanitize_nim_string(event)}:error\","]
-            run_event_lines += [f"      \"node\": {node_id_to_integer(next_node)}, \"error\": $e.msg, \"stacktrace\": e.getStackTrace()}})"]
+            run_event_lines += [f"  except Exception as e: self.logger.log(%*{{\"event\": \"{sanitize_nim_string(event)}:error\","
+                                f" \"node\": {node_id_to_integer(next_node)}, \"error\": $e.msg, \"stacktrace\": e.getStackTrace()}})"]
+    if not event_nodes.get('setSceneState', None):
+        run_event_lines += ["of \"setSceneState\":"]
+        run_event_lines += set_scene_state_lines
+
+    state_init_fields = []
+    public_state_fields = []
+    persisted_state_fields = []
+    for field in scene.get('fields', []):
+        name = field.get('name', '')
+        if name == "":
+            continue
+        type = field.get('type', 'string')
+        value = field.get('value', '')
+        if type == 'integer':
+            state_init_fields += [f"\"{sanitize_nim_string(name)}\": %*({int(value)})"]
+        elif type == 'float':
+            state_init_fields += [f"\"{sanitize_nim_string(name)}\": %*({float(value)})"]
+        elif type == 'boolean':
+            state_init_fields += [f"\"{sanitize_nim_string(name)}\": %*({'true' if value == 'true' else 'false'})"]
+        elif type == 'json':
+            state_init_fields += [f"\"{sanitize_nim_string(name)}\": parseJson(\"{sanitize_nim_string(str(value))}\")"]
+        else:
+            state_init_fields += [f"\"{sanitize_nim_string(name)}\": %*(\"{sanitize_nim_string(str(value))}\")"]
+        if field.get('access', 'private') == 'public':
+            opts = ""
+            if field.get('type', 'string') == 'select':
+                opts = ", ".join([f"\"{sanitize_nim_string(option)}\"" for option in field.get('options', [])])
+
+            public_state_fields.append(
+                f"StateField(name: \"{sanitize_nim_string(field.get('name', ''))}\", " \
+                f"label: \"{sanitize_nim_string(field.get('label', field.get('name', '')))}\", " \
+                f"fieldType: \"{sanitize_nim_string(field.get('type', 'string'))}\", options: @[{opts}], " \
+                f"placeholder: \"{sanitize_nim_string(field.get('placeholder', ''))}\", " \
+                f"required: {'true' if field.get('required', False) else 'false'}, " \
+                f"secret: {'true' if field.get('secret', False) else 'false'})"
+            )
+        if field.get('persist', 'memory') == 'disk':
+            persisted_state_fields.append(f"\"{sanitize_nim_string(name)}\"")
+
     newline = "\n"
+    if len(public_state_fields) > 0:
+        public_state_fields_seq = "@[\n  " + (",\n  ".join([field for field in public_state_fields])) + "\n]"
+    else:
+        public_state_fields_seq = "@[]"
+
     scene_source = f"""
 import pixie, json, times, strformat
 
@@ -190,6 +257,8 @@ import frameos/channels
 {newline.join(imports)}
 
 const DEBUG = {'true' if frame.debug else 'false'}
+let PUBLIC_STATE_FIELDS*: seq[StateField] = {public_state_fields_seq}
+let PERSISTED_STATE_KEYS*: seq[string] = @[{', '.join(persisted_state_fields)}]
 
 type Scene* = ref object of FrameScene
   {(newline + "  ").join(scene_object_fields)}
@@ -221,18 +290,31 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
   {(newline + "  ").join(run_event_lines)}
   else: discard
 
-proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(
-    event: string, payload: JsonNode)): Scene =
-  var state = %*{{}}
-  let scene = Scene(frameConfig: frameConfig, logger: logger, state: state,
-      dispatchEvent: dispatchEvent)
+proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: string, payload: JsonNode), persistedState: JsonNode): Scene =
+  var state = %*{{{", ".join(state_init_fields)}}}
+  if persistedState.kind == JObject:
+    for key in persistedState.keys:
+      state[key] = persistedState[key]
+  let scene = Scene(frameConfig: frameConfig, logger: logger, state: state, dispatchEvent: dispatchEvent)
   let self = scene
-  var context = ExecutionContext(scene: scene, event: "init", payload: %*{{
-    }}, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+  var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
-  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = self.runNode(nodeId, context))
+  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
   {(newline + "  ").join(init_apps)}
   runEvent(scene, context)
+
+proc getPublicState*(self: Scene): JsonNode =
+  result = %*{{}}
+  for field in PUBLIC_STATE_FIELDS:
+    let key = field.name
+    if self.state.hasKey(key):
+      result[key] = self.state{{key}}
+
+proc getPersistedState*(self: Scene): JsonNode =
+  result = %*{{}}
+  for key in PERSISTED_STATE_KEYS:
+    if self.state.hasKey(key):
+      result[key] = self.state{{key}}
 
 proc render*(self: Scene): Image =
   var context = ExecutionContext(
@@ -240,8 +322,8 @@ proc render*(self: Scene): Image =
     event: "render",
     payload: %*{{}},
     image: case self.frameConfig.rotate:
-    of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-    else: newImage(self.frameConfig.width, self.frameConfig.height),
+      of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
+      else: newImage(self.frameConfig.width, self.frameConfig.height),
     loopIndex: 0,
     loopKey: "."
   )

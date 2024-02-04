@@ -68,16 +68,46 @@ def api_frame_get_image(id: int):
     except Exception as e:
         return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
 
-@api.route('/frames/<int:id>/event/render', methods=['POST'])
+@api.route('/frames/<int:id>/state', methods=['GET'])
 @login_required
-def api_frame_render_event(id: int):
+def api_frame_get_state(id: int):
+    frame = Frame.query.get_or_404(id)
+    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:state'
+    url = f'http://{frame.frame_host}:{frame.frame_port}/state'
+
+    try:
+        last_state = redis.get(cache_key)
+        if last_state:
+            return Response(last_state, content_type='application/json')
+
+        response = requests.get(url, timeout=15)
+        if response.status_code == 200:
+            redis.set(cache_key, response.content, ex=1)  # cache for 1 second
+            return Response(response.content, content_type='application/json')
+        else:
+            last_state = redis.get(cache_key)
+            if last_state:
+                return Response(last_state, content_type='application/json')
+            return jsonify({"error": "Unable to fetch state"}), response.status_code
+    except requests.exceptions.Timeout:
+        return jsonify({'error': f'Request Timeout to {url}'}), HTTPStatus.REQUEST_TIMEOUT
+    except Exception as e:
+        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+@api.route('/frames/<int:id>/event/<event>', methods=['POST'])
+@login_required
+def api_frame_event(id: int, event: str):
     frame = Frame.query.get_or_404(id)
     try:
-        response = requests.post(f'http://{frame.frame_host}:{frame.frame_port}/event/render')
+        if request.is_json:
+            headers = {"Content-Type": "application/json"}
+            response = requests.post(f'http://{frame.frame_host}:{frame.frame_port}/event/{event}', json=request.json, headers=headers)
+        else:
+            response = requests.post(f'http://{frame.frame_host}:{frame.frame_port}/event/{event}')
         if response.status_code == 200:
             return "OK", 200
         else:
-            return jsonify({"error": "Unable to refresh frame"}), response.status_code
+            return jsonify({"error": "Unable to reach frame"}), response.status_code
     except Exception as e:
         return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
 

@@ -66,13 +66,25 @@ export interface MetricsType {
   metrics: Record<string, any>
 }
 
+export const configFieldTypes = [
+  'string',
+  'text',
+  'float',
+  'integer',
+  'boolean',
+  'color',
+  'select',
+  'json',
+  'node',
+] as const
+
 export interface ConfigField {
   /** Unique config field keyword */
   name: string
   /** Human readable label */
   label: string
   /** Type of the field, only 'string' is supported for now */
-  type: 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'node'
+  type: 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'json' | 'node'
   /** List of options for the field, only used if type is 'select' */
   options?: string[]
   /** Whether the field is required */
@@ -85,6 +97,11 @@ export interface ConfigField {
   placeholder?: string
   /** Number of rows for the field, only used if type is 'text' */
   rows?: number
+}
+
+export interface StateField extends ConfigField {
+  persist?: 'memory' | 'disk'
+  access?: 'private' | 'public'
 }
 
 export interface MarkdownField {
@@ -127,6 +144,7 @@ export interface FrameScene {
   name: string
   nodes: Node[]
   edges: Edge[]
+  fields?: StateField[]
 }
 
 export interface FrameSceneIndexed {
@@ -160,6 +178,7 @@ export enum Panel {
   FrameSettings = 'FrameSettings',
   Image = 'Image',
   Logs = 'Logs',
+  SceneState = 'SceneState',
   Apps = 'Apps',
   Events = 'Events',
   Metrics = 'Metrics',

@@ -23,7 +23,7 @@ export function Tooltip({ children, title, className }: TooltipProps) {
           <Popover.Button
             ref={setReferenceElement}
             className={clsx(
-              'inline-flex justify-center px-1 py-1 text-sm font-medium text-white rounded-md focus:outline-none shadow-sm',
+              'block justify-center text-sm font-medium text-white rounded-md focus:outline-none shadow-sm',
               className
             )}
           >

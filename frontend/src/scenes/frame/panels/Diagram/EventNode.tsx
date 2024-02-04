@@ -5,26 +5,21 @@ import { diagramLogic } from './diagramLogic'
 
 import _events from '../Events/events.json'
 import { FrameEvent } from '../../../../types'
+import { fieldTypeToGetter } from '../../../../utils/fieldTypes'
 
 const events: Record<string, FrameEvent> = _events as any
 
 export function EventNode(props: NodeProps): JSX.Element {
   const { data, id } = props
-  const { selectedNodeId, edgesForNode } = useValues(diagramLogic)
+  const { selectedNodeId, edgesForNode, scene } = useValues(diagramLogic)
   const { keyword } = data
 
   const edges = edgesForNode[id] || []
   let usedAsSource = edges.some((edge) => edge.source === id)
   let usedAsTarget = edges.some((edge) => edge.target === id)
 
-  const fields = events?.[keyword]?.fields ?? []
-  const fieldTypeToGetter: Record<string, string> = {
-    integer: 'getInt',
-    string: 'getStr',
-    boolean: 'getBool',
-    float: 'getFloat',
-    select: 'getStr',
-  }
+  const fields =
+    keyword === 'init' || keyword === 'setSceneState' ? scene?.fields ?? [] : events?.[keyword]?.fields ?? []
 
   return (
     <div
@@ -68,13 +63,13 @@ export function EventNode(props: NodeProps): JSX.Element {
         {fields.map((field: Record<string, any>) => (
           <div className="flex items-center justify-end space-x-1 w-full">
             <code className="text-xs mr-2 text-gray-400 flex-1">{field.type}</code>
-            <div>{field.label || field.name}</div>
+            <div title={field.label}>{field.name}</div>
             <Handle
               type="source"
               position={Position.Right}
-              id={`code/context.payload{"${field.name}"}.${
-                fieldTypeToGetter[String(field.type ?? 'string')] ?? 'getStr'
-              }()`}
+              id={`code/context.payload{"${field.name}"}${
+                fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
+              }`}
               style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#000000' }}
             />
           </div>

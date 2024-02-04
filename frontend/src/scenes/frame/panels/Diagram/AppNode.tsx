@@ -19,7 +19,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
   const { updateNodeConfig, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const { editApp } = useActions(panelsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { appName, appFields, isCustomApp, configJsonError, isSelected, codeFields } = useValues(
+  const { appName, appFields, isCustomApp, configJsonError, isSelected, codeFields, fieldInputFields } = useValues(
     appNodeLogic(appNodeLogicProps)
   )
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
@@ -93,7 +93,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
           </div>
         ) : null}
         {appFields ? (
-          <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5">
+          <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5 w-full">
             <tbody>
               {appFields.map((field, i) => (
                 <React.Fragment key={i}>
@@ -125,7 +125,13 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                       <td
                         className={clsx(
                           'font-sm text-indigo-200',
+                          field.type === 'node' ||
+                            codeFields.includes(field.name) ||
+                            fieldInputFields.includes(field.name)
+                            ? 'w-full'
+                            : '',
                           codeFields.includes(field.name) ||
+                            fieldInputFields.includes(field.name) ||
                             (field.name in data.config && data.config[field.name] !== field.value)
                             ? 'underline font-bold'
                             : ''
@@ -135,28 +141,21 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                             ? `${field.name} has been modified`
                             : undefined
                         }
-                        colSpan={field.type === 'node' ? 2 : 1}
+                        colSpan={
+                          field.type === 'node' ||
+                          codeFields.includes(field.name) ||
+                          fieldInputFields.includes(field.name)
+                            ? 2
+                            : 1
+                        }
                       >
                         <div className="flex justify-between items-center gap-2">
                           <div>{field.label ?? field.name}</div>
-                          {field.type === 'node' ? (
-                            <Handle
-                              type="source"
-                              position={Position.Right}
-                              id={`field/${field.name}`}
-                              style={{
-                                position: 'relative',
-                                transform: 'none',
-                                right: 0,
-                                top: 0,
-                                background: '#cccccc',
-                              }}
-                              isConnectable={isConnectable}
-                            />
-                          ) : null}
                         </div>
                       </td>
-                      {field.type !== 'node' && !codeFields.includes(field.name) ? (
+                      {field.type !== 'node' &&
+                      !codeFields.includes(field.name) &&
+                      !fieldInputFields.includes(field.name) ? (
                         <td className="cursor-text">
                           {field.secret && !secretRevealed[field.name] ? (
                             <RevealDots onClick={() => setSecretRevealed({ ...secretRevealed, [field.name]: true })} />
@@ -200,6 +199,30 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                           )}
                         </td>
                       ) : null}
+                      <td>
+                        {field.type === 'node' ? (
+                          <Handle
+                            type="source"
+                            position={Position.Right}
+                            id={`field/${field.name}`}
+                            style={{
+                              position: 'relative',
+                              transform: 'none',
+                              right: 0,
+                              top: 0,
+                              background: '#cccccc',
+                            }}
+                            isConnectable={isConnectable}
+                          />
+                        ) : (
+                          <Handle
+                            type="source"
+                            position={Position.Right}
+                            id={`field/${field.name}`}
+                            style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#000000' }}
+                          />
+                        )}
+                      </td>
                     </tr>
                   )}
                 </React.Fragment>

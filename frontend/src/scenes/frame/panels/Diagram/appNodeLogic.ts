@@ -26,10 +26,27 @@ export const appNodeLogic = kea<appNodeLogicType>([
       (edges: Edge[], nodeId): Edge[] => edges?.filter((e) => e.source === nodeId || e.target === nodeId) ?? [],
     ],
     codeFields: [
-      (s) => [s.nodeEdges],
-      (nodeEdges) =>
+      (s) => [s.nodeEdges, s.nodeId],
+      (nodeEdges, nodeId) =>
         nodeEdges
-          .filter((edge) => edge.sourceHandle === 'fieldOutput' && edge.targetHandle?.startsWith('fieldInput/'))
+          .filter(
+            (edge) =>
+              (edge.sourceHandle === 'fieldOutput' || edge.sourceHandle?.startsWith('code/')) &&
+              nodeId == edge.target &&
+              edge.targetHandle?.startsWith('fieldInput/')
+          )
+          .map((edge) => edge.targetHandle?.replace('fieldInput/', '') ?? ''),
+    ],
+    fieldInputFields: [
+      (s) => [s.nodeEdges, s.nodeId],
+      (nodeEdges, nodeId) =>
+        nodeEdges
+          .filter(
+            (edge) =>
+              (edge.sourceHandle === 'fieldOutput' || edge.sourceHandle?.startsWith('field/')) &&
+              nodeId == edge.target &&
+              edge.targetHandle?.startsWith('fieldInput/')
+          )
           .map((edge) => edge.targetHandle?.replace('fieldInput/', '') ?? ''),
     ],
     isSelected: [(s) => [s.selectedNodeId, s.nodeId], (selectedNodeId, nodeId) => selectedNodeId === nodeId],

@@ -41,7 +41,7 @@ proc error*(self: App, message: string) =
 
 proc run*(self: App, context: ExecutionContext) =
   let code = if self.appConfig.code == "": (if self.frameConfig.framePort mod 1000 == 443: "https" else: "http") &
-      "://" & self.frameConfig.frameHost & ":" & $self.frameConfig.framePort else: self.appConfig.code
+      "://" & self.frameConfig.frameHost & ":" & $self.frameConfig.framePort & "/c" else: self.appConfig.code
   let myQR = newQR(code)
 
   let width = case self.appConfig.sizeUnit

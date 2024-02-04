@@ -11,6 +11,7 @@ import drivers/drivers as drivers
 
 const FAST_SCENE = 0.5
 const SERVER_RENDER_DELAY = 1.0
+const SCENE_STATE_JSON_PATH = "./state/scene.json"
 
 type
   RunnerThread = ref object
@@ -27,6 +28,11 @@ var
   pngLock: Lock
   pngImage = newImage(1, 1)
   hasPngImage = false
+  lastPublicState = %*{}
+  lastPublicStateLock: Lock
+  lastPublicStateUpdate = 0.0
+  lastPersistedState = %*{}
+  lastPersistedStateUpdate = 0.0
 
 proc setLastImage(image: Image) =
   withLock pngLock:
@@ -42,6 +48,38 @@ proc getLastPng*(): string =
   withLock pngLock:
     copy = pngImage.data
   return encodePng(pngImage.width, pngImage.height, 4, copy[0].addr, copy.len * 4)
+
+proc updateLastPublicState*(state: JsonNode) =
+  withLock lastPublicStateLock:
+    for field in defaultScene.PUBLIC_STATE_FIELDS:
+      let key = field.name
+      if state.hasKey(key) and state[key] != lastPublicState{key}:
+        lastPublicState[key] = copy(state[key])
+
+proc getLastPublicState*(): JsonNode =
+  {.gcsafe.}:
+    withLock lastPublicStateLock:
+      return lastPublicState.copy()
+
+proc getPublicStateFields*(): seq[StateField] =
+  {.gcsafe.}:
+    return defaultScene.PUBLIC_STATE_FIELDS
+
+proc updateLastPersistedState*(state: JsonNode) =
+  var hasChanges = false
+  for key in defaultScene.PERSISTED_STATE_KEYS:
+    if state.hasKey(key) and state{key} != lastPersistedState{key}:
+      lastPersistedState[key] = copy(state[key])
+      hasChanges = true
+  if hasChanges:
+    writeFile(SCENE_STATE_JSON_PATH, $state)
+  lastPersistedStateUpdate = epochTime()
+
+proc loadPersistedState*(): JsonNode =
+  try:
+    return parseJson(readFile(SCENE_STATE_JSON_PATH))
+  except IOError:
+    return %*{}
 
 proc renderScene*(self: RunnerThread): Image =
   let sceneTimer = epochTime()
@@ -124,6 +162,14 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     self.isRendering = false
     self.scene.isRendering = false
 
+    if epochTime() > lastPublicStateUpdate + 1.0:
+      updateLastPublicState(defaultScene.getPublicState(defaultScene.Scene(self.scene)))
+      lastPublicStateUpdate = epochTime()
+
+    if epochTime() > lastPersistedStateUpdate + 1.0:
+      updateLastPersistedState(defaultScene.getPersistedState(defaultScene.Scene(self.scene)))
+      lastPersistedStateUpdate = epochTime()
+
     # While we were rendering an event to trigger a render was dispatched
     if self.triggerRenderNext:
       self.triggerRenderNext = false
@@ -156,6 +202,12 @@ proc dispatchSceneEvent*(self: RunnerThread, event: string, payload: JsonNode) =
   )
   let scene = defaultScene.Scene(self.scene)
   defaultScene.runEvent(scene, context)
+
+  if event == "setSceneState":
+    updateLastPublicState(defaultScene.getPublicState(defaultScene.Scene(self.scene)))
+    lastPublicStateUpdate = epochTime()
+    updateLastPersistedState(defaultScene.getPersistedState(defaultScene.Scene(self.scene)))
+    lastPersistedStateUpdate = epochTime()
 
 proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
   var waitTime = 10
@@ -197,12 +249,15 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
           waitTime += 5
 
 proc createThreadRunner*(args: (FrameConfig, Logger)) =
-  {.cast(gcsafe).}: # TODO: is this a mistake?
+  {.cast(gcsafe).}:
     var scene = defaultScene.init(
       args[0],
       args[1],
-      proc(event: string, payload: JsonNode) = eventChannel.send((event, payload))
+      proc(event: string, payload: JsonNode) = eventChannel.send((event, payload)),
+      loadPersistedState()
     ).FrameScene
+    updateLastPublicState(defaultScene.getPublicState(defaultScene.Scene(scene)))
+    lastPublicStateUpdate = epochTime()
     var runnerThread = RunnerThread(
       frameConfig: args[0],
       logger: args[1],

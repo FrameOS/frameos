@@ -108,6 +108,14 @@ export function FrameDetails({ className }: DetailsProps) {
                   </a>
                 </td>
               </tr>
+              <tr>
+                <td className="text-blue-200 text-right">Control URL:</td>
+                <td className="truncate">
+                  <a href={frameUrl(frame) + 'c'} target="_blank" rel="noreferer noopener">
+                    {frameUrl(frame) + 'c'}
+                  </a>
+                </td>
+              </tr>
             </tbody>
           </table>
         </>

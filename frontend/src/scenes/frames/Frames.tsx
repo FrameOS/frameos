@@ -24,7 +24,7 @@ export function Frames() {
             right={
               <div className="flex gap-2 items-center">
                 {version}
-                <Button color="light-gray" onClick={() => router.actions.push('/settings')}>
+                <Button color="secondary" onClick={() => router.actions.push('/settings')}>
                   Settings
                 </Button>
               </div>
@@ -47,7 +47,7 @@ export function Frames() {
               {formVisible ? (
                 <NewFrame />
               ) : (
-                <Button color="light-gray" onClick={showForm}>
+                <Button color="secondary" onClick={showForm}>
                   Add a smart frame
                 </Button>
               )}
