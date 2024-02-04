@@ -58,7 +58,7 @@ export function Templates() {
               <Field label="" name="url">
                 <TextInput placeholder="https://url/to/template.zip" />
               </Field>
-              <Button type="submit" color="light-gray">
+              <Button type="submit" color="secondary">
                 Add template
               </Button>
             </Form>
@@ -86,7 +86,7 @@ export function Templates() {
                   />
                 )}
               </Field>
-              <Button type="submit" color="light-gray">
+              <Button type="submit" color="secondary">
                 Upload template
               </Button>
             </Form>
@@ -145,7 +145,7 @@ export function Templates() {
               <Field label="" name="url">
                 <TextInput placeholder="https://url/to/templates.json" />
               </Field>
-              <Button type="submit" color="light-gray">
+              <Button type="submit" color="secondary">
                 Add repository
               </Button>
             </Form>

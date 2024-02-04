@@ -65,11 +65,11 @@ export function SceneState(): JSX.Element {
                   setSceneFormValue('fields', newFields)
                 }}
                 size="small"
-                color="light-gray"
+                color="secondary"
               >
                 Add field
               </Button>
-              <Button onClick={resetFields} size="small" color="light-gray">
+              <Button onClick={resetFields} size="small" color="secondary">
                 Cancel
               </Button>
             </>
@@ -78,7 +78,7 @@ export function SceneState(): JSX.Element {
               <Button onClick={sync} disabled={stateLoading} size="small">
                 {stateLoading ? <Spinner className="text-white" /> : 'Sync'}
               </Button>
-              <Button onClick={editFields} size="small" color="light-gray">
+              <Button onClick={editFields} size="small" color="secondary">
                 Edit fields
               </Button>
             </>
@@ -133,7 +133,7 @@ export function SceneState(): JSX.Element {
                       )
                     }}
                     size="small"
-                    color="light-gray"
+                    color="secondary"
                   >
                     <span className="text-red-300">Remove field</span>
                   </Button>
@@ -144,12 +144,12 @@ export function SceneState(): JSX.Element {
           <div className="flex w-full items-center gap-2">
             <Button
               onClick={submitSceneForm}
-              color={sceneFormChanged ? 'primary' : 'light-gray'}
+              color={sceneFormChanged ? 'primary' : 'secondary'}
               disabled={isSceneFormSubmitting}
             >
               Save changes
             </Button>
-            <Button onClick={resetFields} color="light-gray">
+            <Button onClick={resetFields} color="secondary">
               Cancel
             </Button>
             <div>
@@ -180,9 +180,12 @@ export function SceneState(): JSX.Element {
               </div>
             </div>
           ))}
-          <div className="flex justify-between w-full items-center gap-2">
+          <div className="flex w-full items-center gap-2">
             <Button onClick={sync} color="primary" disabled>
-              Update state on Frame (coming soon)
+              Send changes to frame
+            </Button>
+            <Button onClick={sync} color="secondary" disabled>
+              Reset
             </Button>
           </div>
         </div>

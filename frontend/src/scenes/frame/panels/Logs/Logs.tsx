@@ -73,7 +73,7 @@ export function Logs() {
       {!atBottom && (
         <Button
           onClick={() => virtuosoRef.current?.scrollToIndex({ index: logs.length - 1, behavior: 'smooth' })}
-          color="light-gray"
+          color="secondary"
           size="small"
           className="absolute right-6 bottom-2"
         >

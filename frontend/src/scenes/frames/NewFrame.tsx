@@ -44,7 +44,7 @@ export function NewFrame(): JSX.Element {
           <div className="flex gap-2">
             <Button type="submit">Add Frame</Button>
             <Button
-              color="light-gray"
+              color="secondary"
               onClick={() => {
                 resetNewFrame()
                 hideForm()

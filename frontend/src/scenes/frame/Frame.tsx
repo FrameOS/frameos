@@ -24,20 +24,20 @@ export function Frame(props: FrameSceneProps) {
             title={!frame ? `Loading frame ${props.id}...` : frame.name || frameHost(frame)}
             buttons={
               <div className="flex divide-x divide-gray-700 space-x-2">
-                <Button color="light-gray" type="button" onClick={() => renderFrame()}>
+                <Button color="secondary" type="button" onClick={() => renderFrame()}>
                   Re-Render
                 </Button>
-                <Button color="light-gray" type="button" onClick={() => restartFrame()}>
+                <Button color="secondary" type="button" onClick={() => restartFrame()}>
                   Restart
                 </Button>
-                <Button color="light-gray" type="button" onClick={() => stopFrame()}>
+                <Button color="secondary" type="button" onClick={() => stopFrame()}>
                   Stop
                 </Button>
                 <div className="flex pl-2 space-x-2">
-                  <Button color={frameChanged ? 'primary' : 'light-gray'} type="button" onClick={() => saveFrame()}>
+                  <Button color={frameChanged ? 'primary' : 'secondary'} type="button" onClick={() => saveFrame()}>
                     Save
                   </Button>
-                  <Button color={frameChanged ? 'primary' : 'light-gray'} type="button" onClick={() => deployFrame()}>
+                  <Button color={frameChanged ? 'primary' : 'secondary'} type="button" onClick={() => deployFrame()}>
                     Save&nbsp;&&nbsp;Redeploy
                   </Button>
                 </div>
