@@ -201,9 +201,21 @@ export function SceneState(): JSX.Element {
                     <Field name={field.name}>
                       {({ value, onChange }) => (
                         <Select
+                          placeholder={field.placeholder}
                           value={stateChanges[field.name] ?? state[field.name] ?? value ?? field.value}
                           onChange={onChange}
                           options={(field.options ?? []).map((option) => ({ label: option, value: option }))}
+                        />
+                      )}
+                    </Field>
+                  ) : field.type === 'text' ? (
+                    <Field name={field.name}>
+                      {({ value, onChange }) => (
+                        <TextArea
+                          placeholder={field.placeholder}
+                          value={stateChanges[field.name] ?? state[field.name] ?? value ?? field.value}
+                          onChange={onChange}
+                          rows={3}
                         />
                       )}
                     </Field>
@@ -211,7 +223,7 @@ export function SceneState(): JSX.Element {
                     <Field name={field.name}>
                       {({ value, onChange }) => (
                         <TextInput
-                          placeholder=""
+                          placeholder={field.placeholder}
                           value={stateChanges[field.name] ?? state[field.name] ?? value ?? field.value}
                           onChange={onChange}
                         />
