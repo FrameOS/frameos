@@ -84,7 +84,12 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
   listeners(({ values, actions }) => ({
     editFields: () => {
       const scene: Partial<FrameScene> = values.scene ?? {}
-      actions.resetSceneForm({ id: scene.id || '', name: scene.name || '', fields: scene.fields ?? [] })
+      const fields = scene.fields ?? []
+      actions.resetSceneForm({
+        id: scene.id || '',
+        name: scene.name || '',
+        fields: fields.length > 0 ? fields : [{ name: '', label: '', type: 'string' }],
+      })
     },
     resetFields: () => {
       const scene: Partial<FrameScene> = values.scene ?? {}

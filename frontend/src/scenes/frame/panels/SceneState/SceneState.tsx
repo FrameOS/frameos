@@ -10,7 +10,6 @@ import { Button } from '../../../../components/Button'
 import { Tooltip } from '../../../../components/Tooltip'
 import { fieldTypeToGetter } from '../../../../utils/fieldTypes'
 import { ClipboardDocumentIcon } from '@heroicons/react/24/outline'
-import React from 'react'
 import copy from 'copy-to-clipboard'
 import { Spinner } from '../../../../components/Spinner'
 import { TextArea } from '../../../../components/TextArea'
@@ -41,6 +40,8 @@ export function SceneState(): JSX.Element {
   const { setSceneFormValue, editFields, resetFields, sync, submitSceneForm, submitStateChanges, resetStateChanges } =
     useActions(sceneStateLogic({ frameId, sceneId }))
 
+  let fieldCount = (sceneForm.fields ?? []).length
+
   if (!sceneForm) {
     return <></>
   }
@@ -54,9 +55,9 @@ export function SceneState(): JSX.Element {
             title={
               <>
                 The fields you set here will be available through{' '}
-                <code className="text-xs">{'state{"fieldName"}.getStr'}</code> in any app in this scene. The state is
+                <code className="text-xs">{'state{"fieldName"}.getStr()'}</code> in any app in this scene. The state is
                 just Nim's <code className="text-xs">JsonNode</code>, so access it accordingly. This means use{' '}
-                <code className="text-xs">{'state{"field"}.getStr'}</code> to access values, and{' '}
+                <code className="text-xs">{'state{"field"}.getStr()'}</code> to access values, and{' '}
                 <pre className="text-xs">{'state{"field"} = %*("str")'}</pre>
                 to store scalar values.
               </>
@@ -66,23 +67,11 @@ export function SceneState(): JSX.Element {
         <div className="flex items-center gap-2">
           {editingFields ? (
             <>
-              {(sceneForm.fields ?? []).length === 0 ? (
-                <Button
-                  onClick={() => {
-                    const newFields = [...(sceneForm.fields ?? []), { name: '', label: '', type: 'string' }]
-                    setSceneFormValue('fields', newFields)
-                  }}
-                  size="small"
-                  color="secondary"
-                >
-                  Add field
-                </Button>
-              ) : null}
               <Button onClick={resetFields} size="small" color="secondary">
                 Cancel
               </Button>
             </>
-          ) : (
+          ) : fieldCount > 0 ? (
             <>
               <Button onClick={sync} disabled={stateLoading} size="small">
                 {stateLoading ? <Spinner className="text-white" /> : 'Sync'}
@@ -91,7 +80,7 @@ export function SceneState(): JSX.Element {
                 Edit fields
               </Button>
             </>
-          )}
+          ) : null}
         </div>
       </div>
       {editingFields ? (
@@ -150,11 +139,13 @@ export function SceneState(): JSX.Element {
                   <Select options={ACCESS_OPTIONS} />
                 </Field>
                 <div className="flex justify-end items-center w-full gap-2">
-                  {index === (sceneForm.fields ?? []).length ? (
+                  {index === fieldCount - 1 ? (
                     <Button
                       onClick={() => {
-                        const newFields = [...(sceneForm.fields ?? []), { name: '', label: '', type: 'string' }]
-                        setSceneFormValue('fields', newFields)
+                        setSceneFormValue('fields', [
+                          ...(sceneForm.fields ?? []),
+                          { name: '', label: '', type: 'string' },
+                        ])
                       }}
                       size="small"
                       color="secondary"
@@ -178,21 +169,35 @@ export function SceneState(): JSX.Element {
               </div>
             </Group>
           ))}
-          <div className="flex w-full items-center gap-2">
-            <Button
-              onClick={submitSceneForm}
-              color={sceneFormChanged ? 'primary' : 'secondary'}
-              disabled={isSceneFormSubmitting}
-            >
-              Save changes
-            </Button>
-            <Button onClick={resetFields} color="secondary">
-              Cancel
-            </Button>
-            <div>
-              <Tooltip title="Remember, after saving changes here, you must also save the scene for these changes to persist" />
+          {fieldCount > 0 ? (
+            <div className="flex w-full items-center gap-2">
+              <Button
+                onClick={submitSceneForm}
+                color={sceneFormChanged ? 'primary' : 'secondary'}
+                disabled={isSceneFormSubmitting}
+              >
+                Save changes
+              </Button>
+              <Button onClick={resetFields} color="secondary">
+                Cancel
+              </Button>
+              <div>
+                <Tooltip title="Remember, after saving changes here, you must also save the scene for these changes to persist" />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div>
+              <Button
+                onClick={() => {
+                  setSceneFormValue('fields', [...(sceneForm.fields ?? []), { name: '', label: '', type: 'string' }])
+                }}
+                size="small"
+                color="secondary"
+              >
+                Add another field
+              </Button>
+            </div>
+          )}
         </Form>
       ) : (
         <Form logic={sceneStateLogic} props={{ frameId, sceneId }} formKey="stateChanges" className="space-y-4">
@@ -249,7 +254,7 @@ export function SceneState(): JSX.Element {
                   <ClipboardDocumentIcon
                     className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block"
                     onClick={() =>
-                      copy(`state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr'}`)
+                      copy(`state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`)
                     }
                   />
                   <code className="text-sm text-gray-400 break-words">{`state{"${field.name}"}${
@@ -258,14 +263,23 @@ export function SceneState(): JSX.Element {
                 </div>
               </div>
             ))}
-            <div className="flex w-full items-center gap-2">
-              <Button onClick={submitStateChanges} color={stateChangesChanged ? 'primary' : 'secondary'}>
-                Send changes to frame
-              </Button>
-              <Button onClick={() => resetStateChanges()} color="secondary">
-                Reset
-              </Button>
-            </div>
+            {fieldCount > 0 ? (
+              <div className="flex w-full items-center gap-2">
+                <Button onClick={submitStateChanges} color={stateChangesChanged ? 'primary' : 'secondary'}>
+                  Send changes to frame
+                </Button>
+                <Button onClick={() => resetStateChanges()} color="secondary">
+                  Reset
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p>Here you can define persistent and/or externally controllable state fields.</p>
+                <Button onClick={editFields} size="small" color="secondary">
+                  Add fields
+                </Button>
+              </div>
+            )}
           </div>
         </Form>
       )}
