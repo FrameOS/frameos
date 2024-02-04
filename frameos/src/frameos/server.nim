@@ -8,15 +8,14 @@ import jester
 import locks
 import ws, ws/jester_extra
 import strformat
-
-from net import Port
 import options
-import strutils, strformat
+import strutils
 import drivers/drivers as drivers
 import frameos/types
 import frameos/channels
 import frameos/config
 import frameos/utils/image
+from net import Port
 from frameos/runner import getLastPng, getLastPublicState, getPublicStateFields, triggerRender
 
 var globalFrameConfig: FrameConfig

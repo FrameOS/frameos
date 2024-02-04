@@ -20,7 +20,7 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
   key((props) => `${props.frameId}-${props.sceneId}`),
   connect(({ frameId }: SceneStateLogicProps) => ({
     values: [frameLogic({ frameId }), ['frame', 'frameForm']],
-    actions: [frameLogic({ frameId }), ['setFrameFormValues', 'applyTemplate']],
+    actions: [frameLogic({ frameId }), ['updateScene', 'applyTemplate']],
   })),
   actions({
     sync: true,
@@ -51,9 +51,7 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
         return { id: def.id || '', name: def.name || '', fields: def.fields ?? [] }
       }) as any as Partial<FrameScene>,
       submit: async (formValues) => {
-        actions.setFrameFormValues({
-          scenes: values.scenes?.map((scene) => (scene.id === props.sceneId ? { ...scene, ...formValues } : scene)),
-        })
+        actions.updateScene(props.sceneId, formValues)
       },
     },
     stateChanges: {
