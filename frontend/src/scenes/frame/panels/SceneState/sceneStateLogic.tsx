@@ -1,4 +1,4 @@
-import { actions, afterMount, connect, kea, key, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
 import { frameLogic } from '../../frameLogic'
 
@@ -24,15 +24,16 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
   })),
   actions({
     sync: true,
-    editField: (fieldId: number) => ({ fieldId }),
-    closeField: (fieldId: number) => ({ fieldId }),
+    editFields: true,
+    resetFields: true,
   }),
   reducers({
     editingFields: [
-      {} as Record<number, boolean>,
+      false,
       {
-        editField: (state, { fieldId }) => ({ ...state, [fieldId]: true }),
-        closeField: (state, { fieldId }) => ({ ...state, [fieldId]: false }),
+        editFields: () => true,
+        resetFields: () => false,
+        submitSceneFormSuccess: () => false,
       },
     ],
   }),
@@ -40,22 +41,30 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
     scenes: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm.scenes ?? frame.scenes],
     scene: [
       (s, p) => [s.scenes, p.sceneId],
-      (scenes, sceneId) => scenes?.find((scene) => scene.id === sceneId) ?? null,
+      (scenes, sceneId): FrameScene | null => scenes?.find((scene) => scene.id === sceneId) ?? null,
     ],
   }),
-  forms(({ selectors }) => ({
+  forms(({ selectors, actions, values, props }) => ({
     sceneForm: {
       defaults: ((state: any) => {
         const def: Record<string, any> = selectors.scene(state) || {}
         return { id: def.id || '', name: def.name || '', fields: def.fields ?? [] }
-      }) as any as FrameScene,
+      }) as any as Partial<FrameScene>,
+      submit: async (formValues) => {
+        actions.setFrameFormValues({
+          scenes: values.scenes?.map((scene) => (scene.id === props.sceneId ? { ...scene, ...formValues } : scene)),
+        })
+      },
     },
   })),
-  subscriptions(({ actions, values, props }) => ({
-    sceneForm: (sceneForm, oldSceneform) => {
-      actions.setFrameFormValues({
-        scenes: values.scenes?.map((scene) => (scene.id === props.sceneId ? { ...scene, ...sceneForm } : scene)),
-      })
+  listeners(({ values, actions }) => ({
+    editFields: () => {
+      const scene: Partial<FrameScene> = values.scene ?? {}
+      actions.resetSceneForm({ id: scene.id || '', name: scene.name || '', fields: scene.fields ?? [] })
+    },
+    resetFields: () => {
+      const scene: Partial<FrameScene> = values.scene ?? {}
+      actions.resetSceneForm({ id: scene.id || '', name: scene.name || '', fields: scene.fields ?? [] })
     },
   })),
   loaders(({ props, values }) => ({
