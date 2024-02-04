@@ -13,6 +13,7 @@ import { ClipboardDocumentIcon } from '@heroicons/react/24/outline'
 import React from 'react'
 import copy from 'copy-to-clipboard'
 import { Spinner } from '../../../../components/Spinner'
+import { TextArea } from '../../../../components/TextArea'
 
 const PERSIST_OPTIONS = [
   { label: 'memory (reset on boot)', value: 'memory' },
@@ -102,6 +103,22 @@ export function SceneState(): JSX.Element {
                 <Field name="type" label="Type of field">
                   <Select options={configFieldTypes.filter((f) => f !== 'node').map((k) => ({ label: k, value: k }))} />
                 </Field>
+                {field.type === 'select' ? (
+                  <Field name="options" label="Options (one per line)">
+                    <TextArea
+                      value={(field.options ?? []).join('\n')}
+                      rows={3}
+                      onChange={(value) =>
+                        setSceneFormValue(
+                          'fields',
+                          (sceneForm.fields ?? []).map((field, i) =>
+                            i === index ? { ...field, options: value.split('\n') } : field
+                          )
+                        )
+                      }
+                    />
+                  </Field>
+                ) : null}
                 <Field name="value" label="Initial value">
                   <TextInput />
                 </Field>
@@ -177,15 +194,27 @@ export function SceneState(): JSX.Element {
                   </div>
                 </div>
                 <div>
-                  <Field name={field.name}>
-                    {({ value, onChange }) => (
-                      <TextInput
-                        placeholder="live value sync coming soon"
-                        value={stateChanges[field.name] ?? state[field.name] ?? value}
-                        onChange={onChange}
-                      />
-                    )}
-                  </Field>
+                  {field.type === 'select' ? (
+                    <Field name={field.name}>
+                      {({ value, onChange }) => (
+                        <Select
+                          value={stateChanges[field.name] ?? state[field.name] ?? value}
+                          onChange={onChange}
+                          options={(field.options ?? []).map((option) => ({ label: option, value: option }))}
+                        />
+                      )}
+                    </Field>
+                  ) : (
+                    <Field name={field.name}>
+                      {({ value, onChange }) => (
+                        <TextInput
+                          placeholder=""
+                          value={stateChanges[field.name] ?? state[field.name] ?? value}
+                          onChange={onChange}
+                        />
+                      )}
+                    </Field>
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
                   <ClipboardDocumentIcon
