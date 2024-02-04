@@ -66,16 +66,18 @@ export function SceneState(): JSX.Element {
         <div className="flex items-center gap-2">
           {editingFields ? (
             <>
-              <Button
-                onClick={() => {
-                  const newFields = [...(sceneForm.fields ?? []), { name: '', label: '', type: 'string' }]
-                  setSceneFormValue('fields', newFields)
-                }}
-                size="small"
-                color="secondary"
-              >
-                Add field
-              </Button>
+              {(sceneForm.fields ?? []).length === 0 ? (
+                <Button
+                  onClick={() => {
+                    const newFields = [...(sceneForm.fields ?? []), { name: '', label: '', type: 'string' }]
+                    setSceneFormValue('fields', newFields)
+                  }}
+                  size="small"
+                  color="secondary"
+                >
+                  Add field
+                </Button>
+              ) : null}
               <Button onClick={resetFields} size="small" color="secondary">
                 Cancel
               </Button>
@@ -148,6 +150,18 @@ export function SceneState(): JSX.Element {
                   <Select options={ACCESS_OPTIONS} />
                 </Field>
                 <div className="flex justify-end items-center w-full gap-2">
+                  {index === (sceneForm.fields ?? []).length ? (
+                    <Button
+                      onClick={() => {
+                        const newFields = [...(sceneForm.fields ?? []), { name: '', label: '', type: 'string' }]
+                        setSceneFormValue('fields', newFields)
+                      }}
+                      size="small"
+                      color="secondary"
+                    >
+                      Add field
+                    </Button>
+                  ) : null}
                   <Button
                     onClick={() => {
                       setSceneFormValue(

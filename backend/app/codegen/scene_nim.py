@@ -224,7 +224,12 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
         elif type == 'boolean':
             state_init_fields += [f"\"{sanitize_nim_string(name)}\": %*({'true' if value == 'true' else 'false'})"]
         elif type == 'json':
-            state_init_fields += [f"\"{sanitize_nim_string(name)}\": parseJson(\"{sanitize_nim_string(str(value))}\")"]
+            try:
+                json.loads(str(value))
+                json_string = sanitize_nim_string(str(value))
+            except ValueError:
+                json_string = "null"
+            state_init_fields += [f"\"{sanitize_nim_string(name)}\": parseJson(\"{json_string}\")"]
         else:
             state_init_fields += [f"\"{sanitize_nim_string(name)}\": %*(\"{sanitize_nim_string(str(value))}\")"]
         if field.get('access', 'private') == 'public':
