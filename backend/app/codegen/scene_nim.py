@@ -235,8 +235,8 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
             public_state_fields.append(
                 f"StateField(name: \"{sanitize_nim_string(field.get('name', ''))}\", " \
                 f"label: \"{sanitize_nim_string(field.get('label', field.get('name', '')))}\", " \
-                f"fieldType: \"{(field.get('type', 'string'))}\", options: @[{opts}], " \
-                f"placeholder: \"{(field.get('placeholder', ''))}\", " \
+                f"fieldType: \"{sanitize_nim_string(field.get('type', 'string'))}\", options: @[{opts}], " \
+                f"placeholder: \"{sanitize_nim_string(field.get('placeholder', ''))}\", " \
                 f"required: {'true' if field.get('required', False) else 'false'}, " \
                 f"secret: {'true' if field.get('secret', False) else 'false'})"
             )

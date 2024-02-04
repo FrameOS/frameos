@@ -12,10 +12,12 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.scalingMode == "": config.scalingMode = "cover"
   if config.framePort == 0: config.framePort = 8787
   if config.frameHost == "": config.frameHost = "localhost"
+  if config.name == "": config.name = config.frameHost
 
 proc loadConfig*(filename: string = "frame.json"): FrameConfig =
   let data = parseFile(filename)
   result = FrameConfig(
+    name: data{"name"}.getStr(),
     serverHost: data{"serverHost"}.getStr(),
     serverPort: data{"serverPort"}.getInt(),
     serverApiKey: data{"serverApiKey"}.getStr(),

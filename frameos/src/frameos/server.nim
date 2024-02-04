@@ -7,6 +7,7 @@ import asyncdispatch
 import jester
 import locks
 import ws, ws/jester_extra
+import strformat
 
 from net import Port
 import options
@@ -30,6 +31,12 @@ proc sendToAll(message: string) {.async.} =
     for connection in connections:
       if connection.readyState == Open:
         asyncCheck connection.send(message)
+
+proc h(message: string): string =
+  message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#039;")
+
+proc s(message: string): string =
+  message.replace("'", "\\'").replace("\n", "\\n")
 
 router myrouter:
   get "/":
@@ -98,32 +105,34 @@ router myrouter:
         fieldsSubmitHtml.add(", ")
       if fieldType == "integer":
         stringValue = $value.getInt()
-        fieldsSubmitHtml.add(fmt"{$key}: parseInt(document.getElementById('{$key}').value)")
+        fieldsSubmitHtml.add(fmt"'{s($key)}': parseInt(document.getElementById('{s($key)}').value)")
       elif fieldType == "float":
         stringValue = $value.getFloat()
-        fieldsSubmitHtml.add(fmt"{$key}: parseFloat(document.getElementById('{$key}').value)")
+        fieldsSubmitHtml.add(fmt"'{s($key)}': parseFloat(document.getElementById('{s($key)}').value)")
       elif fieldType == "boolean":
         stringValue = $value.getBool()
-        fieldsSubmitHtml.add(fmt"{$key}: document.getElementById('{$key}').value === 'true'")
+        fieldsSubmitHtml.add(fmt"'{s($key)}': document.getElementById('{s($key)}').value === 'true'")
       else:
-        fieldsSubmitHtml.add(fmt"{$key}: document.getElementById('{$key}').value")
+        fieldsSubmitHtml.add(fmt"'{s($key)}': document.getElementById('{s($key)}').value")
 
-      fieldsHtml.add(fmt"<label for='{$key}'>{label}</label><br/>")
+      fieldsHtml.add(fmt"<label for='{h($key)}'>{h(label)}</label><br/>")
       if fieldType == "text":
-        fieldsHtml.add(fmt"<textarea id='{$key}' placeholder='{placeholder}'>{stringValue}</textarea><br/><br/>")
+        fieldsHtml.add(fmt"<textarea id='{h($key)}' placeholder='{h(placeholder)}'>{h(stringValue)}</textarea><br/><br/>")
       elif fieldType == "select":
-        fieldsHtml.add(fmt"<select id='{$key}' placeholder='{placeholder}'>")
+        fieldsHtml.add(fmt"<select id='{h($key)}' placeholder='{h(placeholder)}'>")
         for option in field.options:
           let selected = if option == stringValue: " selected" else: ""
-          fieldsHtml.add(fmt"<option value='{$option}'{selected}>{$option}</option>")
+          fieldsHtml.add(fmt"<option value='{h($option)}'{selected}>{h($option)}</option>")
         fieldsHtml.add("</select><br/><br/>")
       else:
-        fieldsHtml.add(fmt"<input type='text' id='{$key}' placeholder='{placeholder}' value='{stringValue}' /><br/><br/>")
+        fieldsHtml.add(fmt"<input type='text' id='{h($key)}' placeholder='{h(placeholder)}' value='{h(stringValue)}' /><br/><br/>")
 
     fieldsHtml.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
     {.gcsafe.}: # We're only reading static assets. It's fine.
-      let controlHtml = webAssets.getAsset("assets/web/control.html").replace("/*$$fieldsHtml$$*/", fieldsHtml).replace(
-          "/*$$fieldsSubmitHtml$$*/", fieldsSubmitHtml)
+      let controlHtml = webAssets.getAsset("assets/web/control.html").
+        replace("/*$$fieldsHtml$$*/", fieldsHtml).
+        replace("/*$$fieldsSubmitHtml$$*/", fieldsSubmitHtml).
+        replace("Frame Control", if globalFrameConfig.name != "": h(globalFrameConfig.name) else: "Frame Control")
       resp Http200, controlHtml
 
   error Http404:

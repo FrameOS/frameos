@@ -3,6 +3,7 @@ import std/locks
 
 type
   FrameConfig* = ref object
+    name*: string
     serverHost*: string
     serverPort*: int
     serverApiKey*: string

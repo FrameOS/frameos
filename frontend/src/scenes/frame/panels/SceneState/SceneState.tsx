@@ -201,7 +201,7 @@ export function SceneState(): JSX.Element {
                     <Field name={field.name}>
                       {({ value, onChange }) => (
                         <Select
-                          value={stateChanges[field.name] ?? state[field.name] ?? value}
+                          value={stateChanges[field.name] ?? state[field.name] ?? value ?? field.value}
                           onChange={onChange}
                           options={(field.options ?? []).map((option) => ({ label: option, value: option }))}
                         />
@@ -212,7 +212,7 @@ export function SceneState(): JSX.Element {
                       {({ value, onChange }) => (
                         <TextInput
                           placeholder=""
-                          value={stateChanges[field.name] ?? state[field.name] ?? value}
+                          value={stateChanges[field.name] ?? state[field.name] ?? value ?? field.value}
                           onChange={onChange}
                         />
                       )}
