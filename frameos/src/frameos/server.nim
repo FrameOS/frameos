@@ -79,6 +79,8 @@ router myrouter:
         except Exception as e:
           resp Http200, {"Content-Type": "image/png"}, renderError(globalFrameConfig.renderWidth(),
             globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
+  get "/state":
+    resp Http200, {"Content-Type": "application/json"}, $getLastPublicState()
   get "/c":
     var html = ""
     let fields = getPublicStateFields()

@@ -1,4 +1,4 @@
-import { actions, connect, kea, key, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, kea, key, path, props, reducers, selectors } from 'kea'
 
 import { frameLogic } from '../../frameLogic'
 
@@ -7,6 +7,7 @@ import { FrameScene } from '../../../../types'
 import { subscriptions } from 'kea-subscriptions'
 
 import type { sceneStateLogicType } from './sceneStateLogicType'
+import { loaders } from 'kea-loaders'
 
 export interface SceneStateLogicProps {
   frameId: number
@@ -22,6 +23,7 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
     actions: [frameLogic({ frameId }), ['setFrameFormValues', 'applyTemplate']],
   })),
   actions({
+    sync: true,
     editField: (fieldId: number) => ({ fieldId }),
     closeField: (fieldId: number) => ({ fieldId }),
   }),
@@ -56,4 +58,26 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
       })
     },
   })),
+  loaders(({ props, values }) => ({
+    state: [
+      {} as Record<string, any>,
+      {
+        sync: async () => {
+          try {
+            const response = await fetch(`/api/frames/${props.frameId}/state`)
+            if (!response.ok) {
+              throw new Error('Failed to fetch logs')
+            }
+            return await response.json()
+          } catch (error) {
+            console.error(error)
+            return values.state
+          }
+        },
+      },
+    ],
+  })),
+  afterMount(({ actions }) => {
+    actions.sync()
+  }),
 ])

@@ -12,6 +12,7 @@ import { fieldTypeToGetter } from '../../../../utils/fieldTypes'
 import { ClipboardDocumentIcon } from '@heroicons/react/24/outline'
 import React from 'react'
 import copy from 'copy-to-clipboard'
+import { Spinner } from '../../../../components/Spinner'
 
 const PERSIST_OPTIONS = [
   { label: 'memory (reset on boot)', value: 'memory' },
@@ -26,8 +27,8 @@ const ACCESS_OPTIONS = [
 export function SceneState(): JSX.Element {
   const sceneId = 'default'
   const { frameId } = useValues(frameLogic)
-  const { sceneForm, editingFields } = useValues(sceneStateLogic({ frameId, sceneId }))
-  const { setSceneFormValue, editField, closeField } = useActions(sceneStateLogic({ frameId, sceneId }))
+  const { sceneForm, editingFields, stateLoading, state } = useValues(sceneStateLogic({ frameId, sceneId }))
+  const { setSceneFormValue, editField, closeField, sync } = useActions(sceneStateLogic({ frameId, sceneId }))
 
   if (!sceneForm) {
     return <></>
@@ -51,21 +52,28 @@ export function SceneState(): JSX.Element {
                   <code className="text-xs">{'state{"fieldName"}.getStr'}</code> in any app in this scene. The state is
                   just Nim's <code className="text-xs">JsonNode</code>, so access it accordingly. This means use{' '}
                   <code className="text-xs">{'state{"field"}.getStr'}</code> to access values, and{' '}
-                  <pre className="text-xs">{'state{"field"} = %*("str")'}</pre> to store scalar values.
+                  <pre className="text-xs">{'state{"field"} = %*("str")'}</pre>
+                  to store scalar values.
                 </>
               }
             />
           </div>
-          <Button
-            onClick={() => {
-              const newFields = [...(sceneForm.fields ?? []), { name: '', label: '', type: 'string' }]
-              setSceneFormValue('fields', newFields)
-              editField(newFields.length - 1)
-            }}
-            size="small"
-          >
-            Add field
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={sync} disabled={stateLoading} size="small">
+              {stateLoading ? <Spinner className="text-white" /> : 'Sync'}
+            </Button>
+            <Button
+              onClick={() => {
+                const newFields = [...(sceneForm.fields ?? []), { name: '', label: '', type: 'string' }]
+                setSceneFormValue('fields', newFields)
+                editField(newFields.length - 1)
+              }}
+              size="small"
+              color="light-gray"
+            >
+              Add field
+            </Button>
+          </div>
         </div>
         {sceneForm.fields?.map((field, index) =>
           editingFields[index] ? (
@@ -80,11 +88,11 @@ export function SceneState(): JSX.Element {
                       )
                     }}
                     size="small"
-                    color="red"
+                    color="light-gray"
                   >
-                    Remove field
+                    <span className="text-red-300">Remove field</span>
                   </Button>
-                  <Button onClick={() => closeField(index)} size="small">
+                  <Button onClick={() => closeField(index)} size="small" color="light-gray">
                     Close
                   </Button>
                 </div>
@@ -128,12 +136,12 @@ export function SceneState(): JSX.Element {
             <div className="bg-gray-900 p-2 space-y-2">
               <div className="flex justify-between items-center w-full gap-2">
                 <div>{field.label || field.name}</div>
-                <Button onClick={() => editField(index)} size="small">
+                <Button onClick={() => editField(index)} size="small" color="light-gray">
                   Edit field
                 </Button>
               </div>
               <div>
-                <TextInput placeholder="live value sync coming soon" disabled />
+                <TextInput placeholder="live value sync coming soon" value={state[field.name]} disabled />
               </div>
               <div className="flex items-center gap-1">
                 <ClipboardDocumentIcon
@@ -149,6 +157,12 @@ export function SceneState(): JSX.Element {
             </div>
           )
         )}
+
+        <div className="flex justify-between w-full items-center gap-2">
+          <Button onClick={sync} color="primary" disabled>
+            Update state on Frame (coming soon)
+          </Button>
+        </div>
       </Group>
     </Form>
   )
