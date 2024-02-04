@@ -68,7 +68,7 @@ export function EventNode(props: NodeProps): JSX.Element {
               type="source"
               position={Position.Right}
               id={`code/context.payload{"${field.name}"}${
-                fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr'
+                fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
               }`}
               style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#000000' }}
             />

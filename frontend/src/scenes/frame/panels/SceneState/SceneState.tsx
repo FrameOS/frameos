@@ -175,7 +175,7 @@ export function SceneState(): JSX.Element {
                   }
                 />
                 <code className="text-sm text-gray-400 break-words">{`state{"${field.name}"}${
-                  fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr'
+                  fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
                 }`}</code>
               </div>
             </div>
