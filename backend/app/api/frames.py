@@ -94,16 +94,20 @@ def api_frame_get_state(id: int):
     except Exception as e:
         return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
 
-@api.route('/frames/<int:id>/event/render', methods=['POST'])
+@api.route('/frames/<int:id>/event/<event>', methods=['POST'])
 @login_required
-def api_frame_render_event(id: int):
+def api_frame_event(id: int, event: str):
     frame = Frame.query.get_or_404(id)
     try:
-        response = requests.post(f'http://{frame.frame_host}:{frame.frame_port}/event/render')
+        if request.is_json:
+            headers = {"Content-Type": "application/json"}
+            response = requests.post(f'http://{frame.frame_host}:{frame.frame_port}/event/{event}', json=request.json, headers=headers)
+        else:
+            response = requests.post(f'http://{frame.frame_host}:{frame.frame_port}/event/{event}')
         if response.status_code == 200:
             return "OK", 200
         else:
-            return jsonify({"error": "Unable to refresh frame"}), response.status_code
+            return jsonify({"error": "Unable to reach frame"}), response.status_code
     except Exception as e:
         return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
 

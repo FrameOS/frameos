@@ -6,7 +6,7 @@ import { Reveal } from './Reveal'
 import { Tooltip } from './Tooltip'
 
 interface FieldProps extends KeaFieldProps {
-  label: JSX.Element | string
+  label?: JSX.Element | string
   hint?: JSX.Element | string
   tooltip?: JSX.Element | string
   className?: string

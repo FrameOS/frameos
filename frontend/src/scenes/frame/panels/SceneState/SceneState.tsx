@@ -27,12 +27,18 @@ const ACCESS_OPTIONS = [
 export function SceneState(): JSX.Element {
   const sceneId = 'default'
   const { frameId } = useValues(frameLogic)
-  const { sceneForm, editingFields, stateLoading, state, isSceneFormSubmitting, sceneFormChanged } = useValues(
-    sceneStateLogic({ frameId, sceneId })
-  )
-  const { setSceneFormValue, editFields, resetFields, sync, submitSceneForm } = useActions(
-    sceneStateLogic({ frameId, sceneId })
-  )
+  const {
+    sceneForm,
+    stateChanges,
+    editingFields,
+    stateLoading,
+    state,
+    isSceneFormSubmitting,
+    sceneFormChanged,
+    stateChangesChanged,
+  } = useValues(sceneStateLogic({ frameId, sceneId }))
+  const { setSceneFormValue, editFields, resetFields, sync, submitSceneForm, submitStateChanges, resetStateChanges } =
+    useActions(sceneStateLogic({ frameId, sceneId }))
 
   if (!sceneForm) {
     return <></>
@@ -158,37 +164,52 @@ export function SceneState(): JSX.Element {
           </div>
         </Form>
       ) : (
-        <div className="space-y-4">
-          {sceneForm.fields?.map((field, index) => (
-            <div className="bg-gray-900 p-2 space-y-2">
-              <div className="flex justify-between items-center w-full gap-2">
-                <div>{field.label || field.name}</div>
+        <Form logic={sceneStateLogic} props={{ frameId, sceneId }} formKey="stateChanges" className="space-y-4">
+          <div className="space-y-4">
+            {sceneForm.fields?.map((field, index) => (
+              <div className="bg-gray-900 p-2 space-y-2">
+                <div className="flex justify-between items-center w-full gap-2">
+                  <div>
+                    {field.label || field.name}
+                    {field.name in stateChanges && stateChanges[field.name] !== (state[field.name] ?? field.value)
+                      ? ' (modified)'
+                      : ''}
+                  </div>
+                </div>
+                <div>
+                  <Field name={field.name}>
+                    {({ value, onChange }) => (
+                      <TextInput
+                        placeholder="live value sync coming soon"
+                        value={stateChanges[field.name] ?? state[field.name] ?? value}
+                        onChange={onChange}
+                      />
+                    )}
+                  </Field>
+                </div>
+                <div className="flex items-center gap-1">
+                  <ClipboardDocumentIcon
+                    className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block"
+                    onClick={() =>
+                      copy(`state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr'}`)
+                    }
+                  />
+                  <code className="text-sm text-gray-400 break-words">{`state{"${field.name}"}${
+                    fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
+                  }`}</code>
+                </div>
               </div>
-              <div>
-                <TextInput placeholder="live value sync coming soon" value={state[field.name]} disabled />
-              </div>
-              <div className="flex items-center gap-1">
-                <ClipboardDocumentIcon
-                  className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block"
-                  onClick={() =>
-                    copy(`state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr'}`)
-                  }
-                />
-                <code className="text-sm text-gray-400 break-words">{`state{"${field.name}"}${
-                  fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
-                }`}</code>
-              </div>
+            ))}
+            <div className="flex w-full items-center gap-2">
+              <Button onClick={submitStateChanges} color={stateChangesChanged ? 'primary' : 'secondary'}>
+                Send changes to frame
+              </Button>
+              <Button onClick={() => resetStateChanges()} color="secondary">
+                Reset
+              </Button>
             </div>
-          ))}
-          <div className="flex w-full items-center gap-2">
-            <Button onClick={sync} color="primary" disabled>
-              Send changes to frame
-            </Button>
-            <Button onClick={sync} color="secondary" disabled>
-              Reset
-            </Button>
           </div>
-        </div>
+        </Form>
       )}
     </div>
   )

@@ -56,6 +56,32 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
         })
       },
     },
+    stateChanges: {
+      defaults: {} as Record<string, any>,
+      submit: async (formValues) => {
+        const state: Record<string, any> = {}
+        const fields = values.scene?.fields ?? []
+        for (const field of fields) {
+          if (field.access === 'public') {
+            if (field.type === 'boolean') {
+              state[field.name] = formValues[field.name] === 'true'
+            } else if (field.type === 'integer') {
+              state[field.name] = parseInt(formValues[field.name])
+            } else if (field.type === 'float') {
+              state[field.name] = parseFloat(formValues[field.name])
+            } else {
+              state[field.name] = formValues[field.name]
+            }
+          }
+        }
+        const response = await fetch(`/api/frames/${props.frameId}/event/setSceneState`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ render: true, state }),
+        })
+        await response.json()
+      },
+    },
   })),
   listeners(({ values, actions }) => ({
     editFields: () => {
