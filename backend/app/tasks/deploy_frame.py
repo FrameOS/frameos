@@ -134,9 +134,6 @@ def deploy_frame(id: int):
                     exec_command(frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
                     exec_command(frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")
 
-                # disable swap if enabled
-                exec_command(frame, ssh, "sudo dphys-swapfile swapoff && sudo dphys-swapfile uninstall && (systemctl is-enabled dphys-swapfile && sudo systemctl disable dphys-swapfile) || echo 'disabled'", raise_on_error=False)
-
                 # swap out the release
                 exec_command(frame, ssh, f"rm -rf /srv/frameos/current && ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current")
 
