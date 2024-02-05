@@ -22,7 +22,7 @@ export function NewFrame(): JSX.Element {
           <Field name="frame_host" label="IP address or hostname">
             <TextInput name="frame_host" placeholder="user:pass@127.0.0.1" required />
           </Field>
-          <Field name="server_host" label="API host for reverse access">
+          <Field name="server_host" label="Controller IP or hostname for reverse access">
             <TextInput name="server_host" placeholder="127.0.0.1" required />
           </Field>
           <Field name="device" label="Driver">

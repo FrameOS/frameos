@@ -9,6 +9,7 @@ import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
 import { devices } from '../../../../devices'
+import { secureToken } from '../../../../utils/secureToken'
 
 export interface DetailsProps {
   className?: string
@@ -105,6 +106,31 @@ export function FrameSettings({ className }: DetailsProps) {
             <Field name="frame_port" label="Frame port">
               <TextInput name="frame_port" placeholder="8787" required />
             </Field>
+            <Field
+              name="frame_api_key"
+              label={<div>Frame API key</div>}
+              labelRight={
+                <Button
+                  color="secondary"
+                  size="small"
+                  onClick={() => {
+                    setFrameFormValues({ frame_api_key: secureToken(32) })
+                    touchFrameFormField('frame_api_key')
+                  }}
+                >
+                  Regenerate
+                </Button>
+              }
+              tooltip="This API key is used when communicating with the frame over HTTP. Leave blank for keyless access."
+            >
+              <TextInput
+                name="frame_api_key"
+                onClick={() => touchFrameFormField('frame_api_key')}
+                type={frameFormTouches.frame_api_key ? 'text' : 'password'}
+                placeholder=""
+                required
+              />
+            </Field>
             <Field name="ssh_user" label="SSH user">
               <TextInput name="ssh_user" placeholder="pi" required />
             </Field>
@@ -125,7 +151,23 @@ export function FrameSettings({ className }: DetailsProps) {
             <Field name="server_port" label="Server port">
               <TextInput name="server_port" placeholder="8989" required />
             </Field>
-            <Field name="server_api_key" label="Server API key">
+            <Field
+              name="server_api_key"
+              label={<div>Server API key</div>}
+              labelRight={
+                <Button
+                  color="secondary"
+                  size="small"
+                  onClick={() => {
+                    setFrameFormValues({ server_api_key: secureToken(32) })
+                    touchFrameFormField('server_api_key')
+                  }}
+                >
+                  Regenerate
+                </Button>
+              }
+              tooltip="This is the API key that the frame uses to communicate with the server. It should be kept secret."
+            >
               <TextInput
                 name="server_api_key"
                 onClick={() => touchFrameFormField('server_api_key')}

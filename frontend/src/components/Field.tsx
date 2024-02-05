@@ -7,6 +7,7 @@ import { Tooltip } from './Tooltip'
 
 interface FieldProps extends KeaFieldProps {
   label?: JSX.Element | string
+  labelRight?: JSX.Element | string
   hint?: JSX.Element | string
   tooltip?: JSX.Element | string
   className?: string
@@ -17,22 +18,31 @@ export function Field({
   children,
   name,
   label,
+  labelRight,
   className,
   secret,
   hint,
   tooltip,
   ...props
 }: FieldProps): ReturnType<typeof KeaField> {
+  const labelNode = label ? (
+    <Label>
+      {label}
+      {tooltip ? <Tooltip title={tooltip} /> : null}
+    </Label>
+  ) : null
   const template: KeaFieldProps['template'] = ({ label, kids, error }) => {
     return (
       <div className={clsx('space-y-1', className)}>
         <>
-          {label ? (
-            <Label>
-              {label}
-              {tooltip ? <Tooltip title={tooltip} /> : null}
-            </Label>
-          ) : null}
+          {labelRight ? (
+            <div className="flex w-full justify-between items-center">
+              {labelNode}
+              {labelRight}
+            </div>
+          ) : (
+            labelNode
+          )}
           {secret ? (
             <Reveal className="border rounded-lg w-full px-2.5 py-1.5 py-4 bg-gray-600 border-gray-500">
               {kids as any}

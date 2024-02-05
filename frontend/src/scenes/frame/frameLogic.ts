@@ -13,6 +13,7 @@ const FRAME_KEYS = [
   'name',
   'frame_host',
   'frame_port',
+  'frame_api_key',
   'ssh_user',
   'ssh_pass',
   'ssh_port',

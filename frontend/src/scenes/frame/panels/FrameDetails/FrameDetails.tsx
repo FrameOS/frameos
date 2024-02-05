@@ -33,6 +33,12 @@ export function FrameDetails({ className }: DetailsProps) {
                 <td>{frame.frame_port}</td>
               </tr>
               <tr>
+                <td className="text-blue-200 text-right">Frame API key:</td>
+                <td>
+                  <Reveal>{frame.frame_api_key}</Reveal>
+                </td>
+              </tr>
+              <tr>
                 <td className="text-blue-200 text-right">SSH user:</td>
                 <td>{frame.ssh_user}</td>
               </tr>
@@ -47,15 +53,15 @@ export function FrameDetails({ className }: DetailsProps) {
                 <td>{frame.ssh_port}</td>
               </tr>
               <tr>
-                <td className="text-blue-200 text-right">API host:</td>
+                <td className="text-blue-200 text-right">Controller host:</td>
                 <td>{frame.server_host}</td>
               </tr>
               <tr>
-                <td className="text-blue-200 text-right">API port:</td>
+                <td className="text-blue-200 text-right">Controller port:</td>
                 <td>{frame.server_port}</td>
               </tr>
               <tr>
-                <td className="text-blue-200 text-right">API key:</td>
+                <td className="text-blue-200 text-right">Controller API key:</td>
                 <td>
                   <Reveal>{frame.server_api_key}</Reveal>
                 </td>
