@@ -164,7 +164,7 @@ def api_frame_deploy_event(id: int):
 @login_required
 def api_frame_update(id: int):
     frame = Frame.query.get_or_404(id)
-    fields = ['scenes', 'name', 'frame_host', 'frame_port', 'frame_api_key', 'ssh_user', 'ssh_pass', 'ssh_port', 'server_host',
+    fields = ['scenes', 'name', 'frame_host', 'frame_port', 'frame_access_key', 'frame_access', 'ssh_user', 'ssh_pass', 'ssh_port', 'server_host',
               'server_port', 'server_api_key', 'width', 'height', 'rotate', 'color', 'interval', 'metrics_interval',
               'scaling_mode', 'background_color', 'device', 'debug']
     defaults = {'frame_port': 8787, 'ssh_port': 22}

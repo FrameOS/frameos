@@ -9,6 +9,8 @@ type
     serverApiKey*: string
     frameHost*: string
     framePort*: int
+    frameAccessKey*: string
+    frameAccess*: string
     width*: int
     height*: int
     device*: string

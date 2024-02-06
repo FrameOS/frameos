@@ -17,7 +17,8 @@ class Frame(db.Model):
     # sending commands to frame
     frame_host = db.Column(db.String(256), nullable=False)
     frame_port = db.Column(db.Integer, default=8787)
-    frame_api_key = db.Column(db.String(256), nullable=True)
+    frame_access_key = db.Column(db.String(256), nullable=True)
+    frame_access = db.Column(db.String(50), nullable=True)
     ssh_user = db.Column(db.String(50), nullable=True)
     ssh_pass = db.Column(db.String(50), nullable=True)
     ssh_port = db.Column(db.Integer, default=22)
@@ -52,7 +53,8 @@ class Frame(db.Model):
             'name': self.name,
             'frame_host': self.frame_host,
             'frame_port': self.frame_port,
-            'frame_api_key': self.frame_api_key,
+            'frame_access_key': self.frame_access_key,
+            'frame_access': self.frame_access,
             'ssh_user': self.ssh_user,
             'ssh_pass': self.ssh_pass,
             'ssh_port': self.ssh_port,
@@ -105,7 +107,8 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         ssh_pass=password,
         ssh_port=ssh_port,
         frame_host=frame_host,
-        frame_api_key=secure_token(32),
+        frame_access_key=secure_token(20),
+        frame_access="protected",
         server_host=server_host,
         server_port=int(server_port),
         server_api_key=secure_token(32),
@@ -197,7 +200,8 @@ def get_frame_json(frame: Frame) -> dict:
         "name": frame.name,
         "frameHost": frame.frame_host or "localhost",
         "framePort": frame.frame_port or 8787,
-        "frameApiKey": frame.frame_api_key,
+        "frameAccessKey": frame.frame_access_key,
+        "frameAccess": frame.frame_access,
         "serverHost": frame.server_host or "localhost",
         "serverPort": frame.server_port or 8989,
         "serverApiKey": frame.server_api_key,

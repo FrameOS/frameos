@@ -107,26 +107,59 @@ export function FrameSettings({ className }: DetailsProps) {
               <TextInput name="frame_port" placeholder="8787" required />
             </Field>
             <Field
-              name="frame_api_key"
-              label={<div>Frame API key</div>}
+              name="frame_access"
+              label="Frame access"
+              tooltip={
+                <div className="space-y-2">
+                  <p>
+                    <strong>Protected (default):</strong> Everyone can view the frame's image over HTTP, but you need
+                    the access key to update content.
+                  </p>
+                  <p>
+                    <strong>Public:</strong> Everyone can view or control the frame without a key. This makes for the
+                    smallest QR codes.
+                  </p>
+                  <p>
+                    <strong>Private:</strong> You need a key to both view and control the frame.
+                  </p>
+                  <p>
+                    <strong>Disabled:</strong> The frame's HTTP server is disabled. You will also not see a preview of
+                    the frame because of that.
+                  </p>
+                </div>
+              }
+            >
+              <Select
+                name="frame_access"
+                options={[
+                  { value: 'protected', label: 'Protected (no key to view, key to edit)' },
+                  { value: 'public', label: 'Public (no key to view or edit)' },
+                  { value: 'private', label: 'Private (key to view and edit)' },
+                  { value: 'disabled', label: 'Disabled (no access over HTTP)' },
+                ]}
+              />
+            </Field>
+            <Field
+              name="frame_access_key"
+              label={<div>Frame access key</div>}
               labelRight={
                 <Button
                   color="secondary"
                   size="small"
                   onClick={() => {
-                    setFrameFormValues({ frame_api_key: secureToken(32) })
-                    touchFrameFormField('frame_api_key')
+                    setFrameFormValues({ frame_access_key: secureToken(20) })
+                    touchFrameFormField('frame_access_key')
                   }}
                 >
                   Regenerate
                 </Button>
               }
-              tooltip="This API key is used when communicating with the frame over HTTP. Leave blank for keyless access."
+              tooltip="This key is used when communicating with the frame over HTTP."
             >
               <TextInput
-                name="frame_api_key"
-                onClick={() => touchFrameFormField('frame_api_key')}
-                type={frameFormTouches.frame_api_key ? 'text' : 'password'}
+                name="frame_access_key"
+                onClick={() => touchFrameFormField('frame_access_key')}
+                type={frameFormTouches.frame_access_key ? 'text' : 'password'}
                 placeholder=""
                 required
               />
@@ -139,7 +172,7 @@ export function FrameSettings({ className }: DetailsProps) {
                 name="ssh_pass"
                 onClick={() => touchFrameFormField('ssh_pass')}
                 type={frameFormTouches.ssh_pass ? 'text' : 'password'}
-                placeholder="raspberry"
+                placeholder="no password, using SSH key"
               />
             </Field>
             <Field name="ssh_port" label="SSH port">
