@@ -108,7 +108,7 @@ export function FrameSettings({ className }: DetailsProps) {
             </Field>
             <Field
               name="frame_access"
-              label="Frame access"
+              label="Frame access over HTTP"
               tooltip={
                 <div className="space-y-2">
                   <p>
@@ -132,7 +132,7 @@ export function FrameSettings({ className }: DetailsProps) {
               <Select
                 name="frame_access"
                 options={[
-                  { value: 'protected', label: 'Protected (no key to view, key to edit)' },
+                  { value: 'protected', label: 'Protected (key to edit, no key to view)' },
                   { value: 'public', label: 'Public (no key to view or edit)' },
                   { value: 'private', label: 'Private (key to view and edit)' },
                   { value: 'disabled', label: 'Disabled (no access over HTTP)' },
