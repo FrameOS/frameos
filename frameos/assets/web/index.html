@@ -27,13 +27,24 @@
     </style>
 </head>
 <body>
-<div id="image1" style="opacity:1; background-image:url('/image')" class="image-holder" onclick="toggleImageSize()"></div>
+<div id="image1" style="opacity:1;" class="image-holder" onclick="toggleImageSize()"></div>
 <div id="image2" style="opacity:0" class="image-holder" onclick="toggleImageSize()"></div>
 <script>  
+    let accessKey = ""
+    let accessKeyPart = ""
+    if (window.location.search) {
+        for (const [key, value] of window.location.search.substring(1).split("&").map(p => p.split("="))) {
+            if (key === 'k') {
+                accessKey = value;
+                accessKeyPart = "?k=" + encodeURIComponent(value);
+            }
+        }
+    }
+
     function connectWebSocket() {
         var loc = window.location;
         var wsProtocol = loc.protocol === "https:" ? "wss:" : "ws:";
-        var wsURL = wsProtocol + "//" + loc.host + "/ws";
+        var wsURL = wsProtocol + "//" + loc.host + "/ws" + accessKeyPart;
         ws = new WebSocket(wsURL);
 
         ws.onopen = function() {
@@ -76,7 +87,7 @@
         }
     }
     function refreshImage() {
-        const imageUrl = '/image?' + new Date().getTime();
+        const imageUrl = '/image?t=' + new Date().getTime() + (accessKey ? '&k=' + encodeURIComponent(accessKey) : '');
         const tempImage = new Image();
         tempImage.src = imageUrl;
         tempImage.onload = () => {
@@ -89,6 +100,7 @@
     }
 
     connectWebSocket();
+    refreshImage();
 </script>
 </body>
 </html>

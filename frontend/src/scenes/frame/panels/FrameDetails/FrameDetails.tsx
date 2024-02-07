@@ -71,8 +71,6 @@ export function FrameDetails({ className }: DetailsProps) {
                         ? 'Can view without an access key, but requires an access key to edit'
                         : frame.frame_access === 'private'
                         ? 'Requires an access key to view and edit'
-                        : frame.frame_access === 'disabled'
-                        ? 'Frame cannot be accessed over HTTP'
                         : 'Unknown access type'
                     }
                   />

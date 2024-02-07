@@ -12,6 +12,7 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.scalingMode == "": config.scalingMode = "cover"
   if config.framePort == 0: config.framePort = 8787
   if config.frameHost == "": config.frameHost = "localhost"
+  if config.frameAccess == "": config.frameAccess = "private"
   if config.name == "": config.name = config.frameHost
 
 proc loadConfig*(filename: string = "frame.json"): FrameConfig =
@@ -23,6 +24,8 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     serverApiKey: data{"serverApiKey"}.getStr(),
     frameHost: data{"frameHost"}.getStr(),
     framePort: data{"framePort"}.getInt(),
+    frameAccess: data{"frameAccess"}.getStr(),
+    frameAccessKey: data{"frameAccessKey"}.getStr(),
     width: data{"width"}.getInt(),
     height: data{"height"}.getInt(),
     device: data{"device"}.getStr(),

@@ -5,8 +5,16 @@
   "version": "1.0.0",
   "fields": [
     {
+      "name": "codeType",
+      "label": "Code Type",
+      "type": "select",
+      "options": ["Frame Control URL", "Frame Image URL", "Custom"],
+      "value": "Frame Control URL",
+      "required": false
+    },
+    {
       "name": "code",
-      "label": "Code",
+      "label": "Code (if Custom above)",
       "type": "string",
       "value": "",
       "required": false

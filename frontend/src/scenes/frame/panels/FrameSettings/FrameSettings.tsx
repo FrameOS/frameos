@@ -108,23 +108,23 @@ export function FrameSettings({ className }: DetailsProps) {
             </Field>
             <Field
               name="frame_access"
-              label="Frame access over HTTP"
+              label="Frame access"
               tooltip={
                 <div className="space-y-2">
                   <p>
-                    <strong>Protected (default):</strong> Everyone can view the frame's image over HTTP, but you need
-                    the access key to update content.
+                    <strong>Private (default):</strong> You need a key to both view and control the frame.
+                  </p>
+                  <p>
+                    <strong>Protected:</strong> Everyone can view the frame's image, but you need the access key to
+                    update content.
                   </p>
                   <p>
                     <strong>Public:</strong> Everyone can view or control the frame without a key. This makes for the
                     smallest QR codes.
                   </p>
                   <p>
-                    <strong>Private:</strong> You need a key to both view and control the frame.
-                  </p>
-                  <p>
-                    <strong>Disabled:</strong> The frame's HTTP server is disabled. You will also not see a preview of
-                    the frame because of that.
+                    Please note that frames are currenly accessed over unsecured HTTP. You can still capture the key by
+                    intercepting network traffic. More secure methods are planned.
                   </p>
                 </div>
               }
@@ -132,10 +132,9 @@ export function FrameSettings({ className }: DetailsProps) {
               <Select
                 name="frame_access"
                 options={[
-                  { value: 'protected', label: 'Protected (key to edit, no key to view)' },
-                  { value: 'public', label: 'Public (no key to view or edit)' },
-                  { value: 'private', label: 'Private (key to view and edit)' },
-                  { value: 'disabled', label: 'Disabled (no access over HTTP)' },
+                  { value: 'private', label: 'Private (key needed to view and edit)' },
+                  { value: 'protected', label: 'Protected (no key needed to view, key needed to edit)' },
+                  { value: 'public', label: 'Public (no key needed to view or edit)' },
                 ]}
               />
             </Field>

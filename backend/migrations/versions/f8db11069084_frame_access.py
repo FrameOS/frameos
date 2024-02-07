@@ -27,7 +27,7 @@ def upgrade():
     frames = Frame.query.all()
     for frame in frames:
         frame.frame_access_key = secure_token(20)
-        frame.frame_access = "protected"
+        frame.frame_access = "private"
         db.session.add(frame)
         db.session.commit()
     db.session.flush()

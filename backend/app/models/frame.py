@@ -108,7 +108,7 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         ssh_port=ssh_port,
         frame_host=frame_host,
         frame_access_key=secure_token(20),
-        frame_access="protected",
+        frame_access="private",
         server_host=server_host,
         server_port=int(server_port),
         server_api_key=secure_token(32),

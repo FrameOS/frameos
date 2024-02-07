@@ -12,16 +12,38 @@
             position: relative;
         }
     </style>
+    <script>
+        const headers = {'Content-Type': 'application/json'}
+        if (window.location.search) {
+            for (const [key, value] of window.location.search.substring(1).split("&").map(p => p.split("="))) {
+                if (key === 'k') {
+                    headers['Authorization'] = 'Bearer ' + value;
+                }
+            }
+        }
+        function postRender() { 
+            fetch('/event/render', { 
+                method: 'POST', 
+                headers: headers, 
+                body: JSON.stringify({}) 
+            }) 
+        }
+        function postSetSceneState() { 
+            var data={render:true,state:{/*$$fieldsSubmitHtml$$*/}};
+            fetch('/event/setSceneState', { 
+                method: 'POST', 
+                headers: headers, 
+                body: JSON.stringify(data) 
+            }); 
+            document.getElementById('setSceneState').value = 'Now wait a while...'; 
+        }
+    </script>
 </head>
 <body>
     <h1>Frame Control</h1>
     <h2>Actions:</h2>
-    <script>function postRender() { fetch('/event/render', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify({})}) }</script>
     <form onSubmit='postRender(); return false'><input type='submit' value='Render'></form>
     <h2>State</h2>
-    <script>function postSetSceneState() { var data={render:true,state:{/*$$fieldsSubmitHtml$$*/}};fetch('/event/setSceneState', {method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify(data)}); document.getElementById('setSceneState').value = 'Now wait a while...'; }</script>
-    <form onSubmit='postSetSceneState(); return false'>
-        /*$$fieldsHtml$$*/
-    </form>
+    <form onSubmit='postSetSceneState(); return false'>/*$$fieldsHtml$$*/</form>
 </body>
 </html>

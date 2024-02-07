@@ -47,6 +47,8 @@ def api_frame_get_image(id: int):
     frame = Frame.query.get_or_404(id)
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
     url = f'http://{frame.frame_host}:{frame.frame_port}/image'
+    if frame.frame_access == "private":
+        url += "?k=" + frame.frame_access_key
 
     try:
         if request.args.get('t') == '-1':
@@ -74,6 +76,8 @@ def api_frame_get_state(id: int):
     frame = Frame.query.get_or_404(id)
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:state'
     url = f'http://{frame.frame_host}:{frame.frame_port}/state'
+    if frame.frame_access == "private":
+        url += "?k=" + frame.frame_access_key
 
     try:
         last_state = redis.get(cache_key)
@@ -99,11 +103,14 @@ def api_frame_get_state(id: int):
 def api_frame_event(id: int, event: str):
     frame = Frame.query.get_or_404(id)
     try:
+        headers = {}
+        if (frame.frame_access == "protected" or frame.frame_access == "private") and frame.frame_access_key is not None:
+            headers["Authorization"] = f'Bearer {frame.frame_access_key}'
         if request.is_json:
-            headers = {"Content-Type": "application/json"}
+            headers["Content-Type"] = "application/json"
             response = requests.post(f'http://{frame.frame_host}:{frame.frame_port}/event/{event}', json=request.json, headers=headers)
         else:
-            response = requests.post(f'http://{frame.frame_host}:{frame.frame_port}/event/{event}')
+            response = requests.post(f'http://{frame.frame_host}:{frame.frame_port}/event/{event}', headers=headers)
         if response.status_code == 200:
             return "OK", 200
         else:
