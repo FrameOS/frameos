@@ -1,6 +1,5 @@
 import json
 import uuid
-import secrets
 from datetime import timezone
 from app import db, socketio
 from typing import Optional
@@ -8,6 +7,7 @@ from sqlalchemy.dialects.sqlite import JSON
 
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
+from app.utils.token import secure_token
 
 
 # NB! Update frontend/src/types.tsx if you change this
@@ -17,6 +17,8 @@ class Frame(db.Model):
     # sending commands to frame
     frame_host = db.Column(db.String(256), nullable=False)
     frame_port = db.Column(db.Integer, default=8787)
+    frame_access_key = db.Column(db.String(256), nullable=True)
+    frame_access = db.Column(db.String(50), nullable=True)
     ssh_user = db.Column(db.String(50), nullable=True)
     ssh_pass = db.Column(db.String(50), nullable=True)
     ssh_port = db.Column(db.Integer, default=22)
@@ -51,6 +53,8 @@ class Frame(db.Model):
             'name': self.name,
             'frame_host': self.frame_host,
             'frame_port': self.frame_port,
+            'frame_access_key': self.frame_access_key,
+            'frame_access': self.frame_access,
             'ssh_user': self.ssh_user,
             'ssh_pass': self.ssh_pass,
             'ssh_port': self.ssh_port,
@@ -72,7 +76,6 @@ class Frame(db.Model):
             'scenes': self.scenes,
             'last_log_at': self.last_log_at.replace(tzinfo=timezone.utc).isoformat() if self.last_log_at else None,
         }
-
 
 def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:
     if '@' in frame_host:
@@ -102,11 +105,13 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         name=name,
         ssh_user=user,
         ssh_pass=password,
-        frame_host=frame_host,
         ssh_port=ssh_port,
+        frame_host=frame_host,
+        frame_access_key=secure_token(20),
+        frame_access="private",
         server_host=server_host,
         server_port=int(server_port),
-        server_api_key=secrets.token_hex(32),
+        server_api_key=secure_token(32),
         interval=interval or 60,
         status="uninitialized",
         apps=[],
@@ -195,6 +200,8 @@ def get_frame_json(frame: Frame) -> dict:
         "name": frame.name,
         "frameHost": frame.frame_host or "localhost",
         "framePort": frame.frame_port or 8787,
+        "frameAccessKey": frame.frame_access_key,
+        "frameAccess": frame.frame_access,
         "serverHost": frame.server_host or "localhost",
         "serverPort": frame.server_port or 8989,
         "serverApiKey": frame.server_api_key,

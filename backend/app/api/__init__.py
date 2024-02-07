@@ -9,3 +9,4 @@ from .login import *
 from .repositories import *
 from .settings import *
 from .templates import *
+from .misc import *

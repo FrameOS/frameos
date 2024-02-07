@@ -37,8 +37,31 @@ proc h(message: string): string =
 proc s(message: string): string =
   message.replace("'", "\\'").replace("\n", "\\n")
 
+const AUTH_HEADER = "authorization"
+const AUTH_TYPE = "Bearer"
+
+type
+  AccessType = enum
+    Read
+    Write
+
 router myrouter:
+  proc hasAccess*(request: Request, accessType: AccessType): bool =
+    {.gcsafe.}:
+      let access = globalFrameConfig.frameAccess
+      if access == "public" or (access == "protected" and accessType == Read):
+        return true
+      let accessKey = globalFrameConfig.frameAccessKey
+      if accessKey == "":
+        return false
+      if request.reqMethod() == HttpPost:
+        return contains(request.headers.table, AUTH_HEADER) and request.headers[AUTH_HEADER] == AUTH_TYPE & " " & accessKey
+      else:
+        let paramsTable = request.params()
+        return contains(paramsTable, "k") and paramsTable["k"] == accessKey
   get "/":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
     {.gcsafe.}: # We're only reading static assets. It's fine.
       let scalingMode = case globalFrameConfig.scalingMode:
         of "cover", "center":
@@ -49,6 +72,8 @@ router myrouter:
           "contain"
       resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
   get "/ws":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
     {.gcsafe.}: # We're only modifying globals via locks. It's fine.
       var ws = await newWebSocket(request)
       try:
@@ -65,12 +90,9 @@ router myrouter:
           let index = connections.find(ws)
           if index >= 0:
             connections.delete(index)
-  post "/event/@name":
-    log(%*{"event": "http", "post": request.pathInfo})
-    let payload = parseJson(if request.body == "": "{}" else: request.body)
-    sendEvent(@"name", payload)
-    resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
   get "/image":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
     log(%*{"event": "http", "get": request.pathInfo})
     {.gcsafe.}: # We're reading immutable globals and png data via a lock. It's fine.
       try:
@@ -85,9 +107,20 @@ router myrouter:
         except Exception as e:
           resp Http200, {"Content-Type": "image/png"}, renderError(globalFrameConfig.renderWidth(),
             globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
+  post "/event/@name":
+    if not hasAccess(request, Write):
+      resp Http401, "Unauthorized"
+    log(%*{"event": "http", "post": request.pathInfo})
+    let payload = parseJson(if request.body == "": "{}" else: request.body)
+    sendEvent(@"name", payload)
+    resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
   get "/state":
+    if not hasAccess(request, Write):
+      resp Http401, "Unauthorized"
     resp Http200, {"Content-Type": "application/json"}, $getLastPublicState()
   get "/c":
+    if not hasAccess(request, Write):
+      resp Http401, "Unauthorized"
     var fieldsHtml = ""
     var fieldsSubmitHtml = ""
     let fields = getPublicStateFields()

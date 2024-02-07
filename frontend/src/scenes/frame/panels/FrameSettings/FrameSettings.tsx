@@ -9,6 +9,7 @@ import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
 import { devices } from '../../../../devices'
+import { secureToken } from '../../../../utils/secureToken'
 
 export interface DetailsProps {
   className?: string
@@ -105,6 +106,63 @@ export function FrameSettings({ className }: DetailsProps) {
             <Field name="frame_port" label="Frame port">
               <TextInput name="frame_port" placeholder="8787" required />
             </Field>
+            <Field
+              name="frame_access"
+              label="Frame access"
+              tooltip={
+                <div className="space-y-2">
+                  <p>
+                    <strong>Private (default):</strong> You need a key to both view and control the frame.
+                  </p>
+                  <p>
+                    <strong>Protected:</strong> Everyone can view the frame's image, but you need the access key to
+                    update content.
+                  </p>
+                  <p>
+                    <strong>Public:</strong> Everyone can view or control the frame without a key. This makes for the
+                    smallest QR codes.
+                  </p>
+                  <p>
+                    Please note that frames are currenly accessed over unsecured HTTP. You can still capture the key by
+                    intercepting network traffic. More secure methods are planned.
+                  </p>
+                </div>
+              }
+            >
+              <Select
+                name="frame_access"
+                options={[
+                  { value: 'private', label: 'Private (key needed to view and edit)' },
+                  { value: 'protected', label: 'Protected (no key needed to view, key needed to edit)' },
+                  { value: 'public', label: 'Public (no key needed to view or edit)' },
+                ]}
+              />
+            </Field>
+            <Field
+              name="frame_access_key"
+              label={<div>Frame access key</div>}
+              labelRight={
+                <Button
+                  color="secondary"
+                  size="small"
+                  onClick={() => {
+                    setFrameFormValues({ frame_access_key: secureToken(20) })
+                    touchFrameFormField('frame_access_key')
+                  }}
+                >
+                  Regenerate
+                </Button>
+              }
+              tooltip="This key is used when communicating with the frame over HTTP."
+            >
+              <TextInput
+                name="frame_access_key"
+                onClick={() => touchFrameFormField('frame_access_key')}
+                type={frameFormTouches.frame_access_key ? 'text' : 'password'}
+                placeholder=""
+                required
+              />
+            </Field>
             <Field name="ssh_user" label="SSH user">
               <TextInput name="ssh_user" placeholder="pi" required />
             </Field>
@@ -113,7 +171,7 @@ export function FrameSettings({ className }: DetailsProps) {
                 name="ssh_pass"
                 onClick={() => touchFrameFormField('ssh_pass')}
                 type={frameFormTouches.ssh_pass ? 'text' : 'password'}
-                placeholder="raspberry"
+                placeholder="no password, using SSH key"
               />
             </Field>
             <Field name="ssh_port" label="SSH port">
@@ -125,7 +183,23 @@ export function FrameSettings({ className }: DetailsProps) {
             <Field name="server_port" label="Server port">
               <TextInput name="server_port" placeholder="8989" required />
             </Field>
-            <Field name="server_api_key" label="Server API key">
+            <Field
+              name="server_api_key"
+              label={<div>Server API key</div>}
+              labelRight={
+                <Button
+                  color="secondary"
+                  size="small"
+                  onClick={() => {
+                    setFrameFormValues({ server_api_key: secureToken(32) })
+                    touchFrameFormField('server_api_key')
+                  }}
+                >
+                  Regenerate
+                </Button>
+              }
+              tooltip="This is the API key that the frame uses to communicate with the server. It should be kept secret."
+            >
               <TextInput
                 name="server_api_key"
                 onClick={() => touchFrameFormField('server_api_key')}

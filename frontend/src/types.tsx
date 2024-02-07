@@ -5,6 +5,8 @@ export interface FrameType {
   name: string
   frame_host: string
   frame_port: number
+  frame_access_key: string
+  frame_access: string
   ssh_user?: string
   ssh_pass?: string
   ssh_port: number

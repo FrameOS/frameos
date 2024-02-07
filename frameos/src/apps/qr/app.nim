@@ -6,6 +6,7 @@ import QRgen/renderer
 
 type
   AppConfig* = object
+    codeType*: string
     code*: string
     size*: float
     sizeUnit*: string
@@ -40,8 +41,17 @@ proc error*(self: App, message: string) =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
 
 proc run*(self: App, context: ExecutionContext) =
-  let code = if self.appConfig.code == "": (if self.frameConfig.framePort mod 1000 == 443: "https" else: "http") &
-      "://" & self.frameConfig.frameHost & ":" & $self.frameConfig.framePort & "/c" else: self.appConfig.code
+  let code = if self.appConfig.codeType == "Frame Control URL":
+      (if self.frameConfig.framePort mod 1000 == 443: "https" else: "http") & "://" & self.frameConfig.frameHost &
+        ":" & $self.frameConfig.framePort & "/c" & (if self.frameConfig.frameAccess != "public": "?k=" &
+            self.frameConfig.frameAccessKey else: "")
+    elif self.appConfig.codeType == "Frame Image URL":
+      (if self.frameConfig.framePort mod 1000 == 443: "https" else: "http") & "://" & self.frameConfig.frameHost &
+        ":" & $self.frameConfig.framePort & (if self.frameConfig.frameAccess == "private": "/?k=" &
+            self.frameConfig.frameAccessKey else: "")
+    else:
+      self.appConfig.code
+
   let myQR = newQR(code)
 
   let width = case self.appConfig.sizeUnit

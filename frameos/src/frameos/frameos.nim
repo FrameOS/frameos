@@ -26,14 +26,15 @@ proc start*(self: FrameOS) {.async.} =
   var message = %*{"event": "bootup", "config": {
     "frameHost": self.frameConfig.frameHost,
     "framePort": self.frameConfig.framePort,
+    "frameAccess": self.frameConfig.frameAccess,
     "width": self.frameConfig.width,
     "height": self.frameConfig.height,
     "device": self.frameConfig.device,
     "interval": self.frameConfig.interval,
-    "metrics_interval": self.frameConfig.metricsInterval,
-    "scaling_mode": self.frameConfig.scalingMode,
+    "metricsInterval": self.frameConfig.metricsInterval,
+    "scalingMode": self.frameConfig.scalingMode,
     "rotate": self.frameConfig.rotate,
-    "background_color": self.frameConfig.backgroundColor.toHtmlHex.toLowerAscii,
+    "backgroundColor": self.frameConfig.backgroundColor.toHtmlHex.toLowerAscii,
     "debug": self.frameConfig.debug,
   }}
   self.logger.log(message)
