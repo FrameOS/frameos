@@ -76,7 +76,7 @@ def api_frame_get_state(id: int):
     frame = Frame.query.get_or_404(id)
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:state'
     url = f'http://{frame.frame_host}:{frame.frame_port}/state'
-    if frame.frame_access == "private":
+    if (frame.frame_access == "private" or frame.frame_access == "protected" )and frame.frame_access_key is not None:
         url += "?k=" + frame.frame_access_key
 
     try:
