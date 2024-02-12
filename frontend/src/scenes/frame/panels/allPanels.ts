@@ -13,6 +13,7 @@ import { Templates } from './Templates/Templates'
 import { Terminal } from './Terminal/Terminal'
 import { SceneSource } from './SceneSource/SceneSource'
 import { Metrics } from './Metrics/Metrics'
+import { Scenes } from './Scenes/Scenes'
 
 export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   Diagram,
@@ -29,4 +30,5 @@ export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   Terminal,
   SceneSource,
   Metrics,
+  Scenes,
 }

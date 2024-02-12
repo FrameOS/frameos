@@ -3,14 +3,13 @@ import { Container } from '../../../components/panels/Container'
 import { Tabs } from '../../../components/panels/Tabs'
 import { Tab } from '../../../components/panels/Tab'
 import { Area, PanelWithMetadata } from '../../../types'
-import { EditApp } from './EditApp/EditApp'
+import { useActions, useValues } from 'kea'
+import { panelsLogic } from './panelsLogic'
+import { frameLogic } from '../frameLogic'
 
 export interface PanelAreaProps {
   area: Area
   areaPanels: PanelWithMetadata[]
-  setPanel: (area: Area, panel: PanelWithMetadata) => void
-  closePanel: (panel: PanelWithMetadata) => void
-  toggleFullScreenPanel: (panel: PanelWithMetadata) => void
 }
 
 function pascalCaseToTitleCase(pascalCase: string): string {
@@ -18,13 +17,10 @@ function pascalCaseToTitleCase(pascalCase: string): string {
   return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
 }
 
-export function PanelArea({
-  area,
-  areaPanels,
-  setPanel,
-  closePanel,
-  toggleFullScreenPanel,
-}: PanelAreaProps): JSX.Element {
+export function PanelArea({ area, areaPanels }: PanelAreaProps): JSX.Element {
+  const { frameId } = useValues(frameLogic)
+  const { setPanel, closePanel, toggleFullScreenPanel } = useActions(panelsLogic({ frameId }))
+
   // Don't look at panel.active directly, as many might have it set
   const activePanel = areaPanels.find((panel) => panel.active) ?? areaPanels.find((panel) => !panel.hidden)
   const Component = activePanel ? allPanels[activePanel.panel] : null
@@ -53,12 +49,7 @@ export function PanelArea({
                   {PanelTitle ? (
                     <PanelTitle panel={panel} {...(panel?.metadata ?? {})} />
                   ) : (
-                    <>
-                      {panel.title ??
-                        (panel?.metadata?.sceneId
-                          ? `Scene: ${panel.metadata.sceneId}`
-                          : pascalCaseToTitleCase(panel.panel))}
-                    </>
+                    <>{panel.title ?? pascalCaseToTitleCase(panel.panel)}</>
                   )}
                 </Tab>
               )

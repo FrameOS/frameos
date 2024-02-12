@@ -147,6 +147,7 @@ export interface FrameScene {
   nodes: Node[]
   edges: Edge[]
   fields?: StateField[]
+  default?: boolean
 }
 
 export interface FrameSceneIndexed {
@@ -188,6 +189,7 @@ export enum Panel {
   Templates = 'Templates',
   Terminal = 'Terminal',
   SceneSource = 'SceneSource',
+  Scenes = 'Scenes',
 }
 
 export type PanelWithMetadata = {

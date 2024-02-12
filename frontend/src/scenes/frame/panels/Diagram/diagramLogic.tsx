@@ -110,6 +110,7 @@ export const diagramLogic = kea<diagramLogicType>([
       (s) => [s.editingFrame, s.sceneId],
       (editingFrame, sceneId) => (editingFrame.scenes ?? []).find((s) => s.id === sceneId) || null,
     ],
+    sceneName: [(s) => [s.scene], (scene) => scene?.name || (scene?.id ? `Scene: ${scene.id}` : 'Untitled scene')],
     selectedNode: [(s) => [s.nodes], (nodes): Node | null => nodes.find((node) => node.selected) ?? null],
     selectedNodeId: [(s) => [s.selectedNode], (node) => node?.id ?? null],
     selectedEdge: [(s) => [s.edges], (edges): Edge | null => edges.find((edge) => edge.selected) ?? null],

@@ -98,6 +98,7 @@ export function Templates() {
               <H6>{repository.name}</H6>
               <div className="flex gap-2">
                 <DropdownMenu
+                  buttonColor="secondary"
                   items={[
                     {
                       label: 'Refresh',

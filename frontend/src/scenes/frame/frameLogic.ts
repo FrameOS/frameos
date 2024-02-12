@@ -1,10 +1,11 @@
-import { actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { framesModel } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
 import { FrameScene, FrameType, TemplateType } from '../../types'
 import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
+import { v4 as uuidv4 } from 'uuid'
 
 export interface FrameLogicProps {
   frameId: number
@@ -74,9 +75,7 @@ export const frameLogic = kea<frameLogicType>([
       },
     },
   })),
-
   reducers({
-    currentScene: ['default', {}],
     nextAction: [
       null as 'render' | 'restart' | 'stop' | 'deploy' | null,
       {
@@ -95,6 +94,13 @@ export const frameLogic = kea<frameLogicType>([
       (s) => [s.frame, s.frameForm],
       (frame, frameForm) =>
         FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], frameForm?.[key as keyof FrameType])),
+    ],
+    defaultScene: [
+      (s) => [s.frame, s.frameForm],
+      (frame, frameForm) => {
+        const allScenes = frameForm?.scenes ?? frame?.scenes ?? []
+        return (allScenes.find((scene) => scene.id === 'default' || scene.default) || allScenes[0])?.id ?? null
+      },
     ],
   })),
   subscriptions(({ actions }) => ({
@@ -155,4 +161,9 @@ export const frameLogic = kea<frameLogicType>([
       })
     },
   })),
+  afterMount(({ actions, values }) => {
+    if (values.frame?.scenes?.find((scene) => scene.id === 'default')) {
+      actions.updateScene('default', { id: uuidv4(), default: true, name: 'Default Scene' })
+    }
+  }),
 ])

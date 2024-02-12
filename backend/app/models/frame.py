@@ -153,7 +153,9 @@ def create_default_scene() -> dict:
     unsplash_uuid = str(uuid.uuid4())
     edge_uuid = str(uuid.uuid4())
     return {
-        "id": "default",
+        "name": "Default Scene",
+        "default": True,
+        "id": str(uuid.uuid4()),
         "edges": [
             {
                 "id": edge_uuid,

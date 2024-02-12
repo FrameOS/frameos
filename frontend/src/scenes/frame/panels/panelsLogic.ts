@@ -1,9 +1,10 @@
-import { actions, BuiltLogic, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, BuiltLogic, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { framesModel } from '../../../models/framesModel'
 import equal from 'fast-deep-equal'
 import { AppNodeData, Area, Panel, PanelWithMetadata } from '../../../types'
 
 import type { panelsLogicType } from './panelsLogicType'
+import { frameLogic } from '../frameLogic'
 
 export interface PanelsLogicProps {
   frameId: number
@@ -12,12 +13,13 @@ export interface PanelsLogicProps {
 export interface AnyBuiltLogic extends BuiltLogic {}
 
 const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
-  [Area.TopLeft]: [{ panel: Panel.Diagram, active: true, hidden: false, metadata: { sceneId: 'default' } }],
+  [Area.TopLeft]: [],
   [Area.TopRight]: [
     { panel: Panel.Apps, active: true, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
-    { panel: Panel.Templates, active: false, hidden: false },
+    { panel: Panel.Scenes, active: false, hidden: false },
     { panel: Panel.SceneState, active: false, hidden: false },
+    { panel: Panel.Templates, active: false, hidden: false },
     { panel: Panel.FrameDetails, active: false, hidden: false },
     { panel: Panel.FrameSettings, active: false, hidden: false },
   ],
@@ -39,11 +41,16 @@ export const panelsLogic = kea<panelsLogicType>([
   path(['src', 'scenes', 'frame', 'panelsLogic']),
   props({} as PanelsLogicProps),
   key((props) => props.frameId),
+  connect((props: PanelsLogicProps) => ({
+    values: [frameLogic(props), ['defaultScene']],
+  })),
   actions({
     setPanel: (area: Area, panel: PanelWithMetadata) => ({ area, panel }),
+    openPanel: (panel: PanelWithMetadata) => ({ panel }),
     closePanel: (panel: PanelWithMetadata) => ({ panel }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
+    editScene: (sceneId: string) => ({ sceneId }),
     persistUntilClosed: (panel: PanelWithMetadata, logic: AnyBuiltLogic) => ({ panel, logic }),
   }),
   reducers({
@@ -82,6 +89,24 @@ export const panelsLogic = kea<panelsLogicType>([
                     nodeId,
                     nodeData,
                   },
+                },
+              ],
+        }),
+        editScene: (state, { sceneId }) => ({
+          ...state,
+          [Area.TopLeft]: state[Area.TopLeft].find((a) => a.panel === Panel.Diagram && a.metadata?.sceneId === sceneId)
+            ? state[Area.TopLeft].map((a) =>
+                a.metadata?.sceneId === sceneId ? { ...a, active: true } : a.active ? { ...a, active: false } : a
+              )
+            : [
+                ...state[Area.TopLeft].map((a) => ({ ...a, active: false })),
+                {
+                  panel: Panel.Diagram,
+                  key: sceneId,
+                  active: true,
+                  hidden: false,
+                  closable: true,
+                  metadata: { sceneId },
                 },
               ],
         }),
@@ -126,4 +151,14 @@ export const panelsLogic = kea<panelsLogicType>([
       }
     },
   })),
+  afterMount(({ values, actions }) => {
+    if (values.defaultScene) {
+      actions.editScene(values.defaultScene)
+    } else {
+      const scenesPanel = values.panels[Area.TopRight].find((p) => p.panel === Panel.Scenes)
+      if (scenesPanel) {
+        actions.setPanel(Area.TopRight, scenesPanel)
+      }
+    }
+  }),
 ])
