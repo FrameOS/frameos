@@ -33,35 +33,14 @@ body {
 .continuous-fade-in-out {
   animation: fadeInOut 3s infinite ease-in-out;
 }
-/* 
-.react-flow .react-flow__node-default,
-.react-flow .react-flow__node-input,
-.react-flow .react-flow__node-output,
-.react-flow .react-flow__node-group {
-  border: 2px solid #0c4a6e;
-}
-.react-flow .react-flow__node-default:focus,
-.react-flow .react-flow__node-input:focus,
-.react-flow .react-flow__node-output:focus,
-.react-flow .react-flow__node-group:focus {
-  border: 2px solid red;
-  box-shadow: 0 0 0 2px red;
-} */
 
-/* 
-  &.selected,
-  &:focus,
-  &:focus-visible {
-    outline: none;
-    border: 1px solid #555;
-  } */
-/* } */
-/*
-.react-flow__nodesselection-rect,
-.react-flow__selection {
-  background: rgba(150, 150, 180, 0.1);
-  border: 1px dotted rgba(155, 155, 155, 0.8);
-} */
+.react-flow .react-flow__node {
+  cursor: default;
+}
+
+.react-flow .react-flow__node .frameos-node-title {
+  cursor: grab;
+}
 
 .react-flow .react-flow__handle {
   width: 16px;

@@ -32,7 +32,7 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
       <NodeResizer minWidth={300} minHeight={130} />
       <div
         className={clsx(
-          'text-xl p-1 gap-1',
+          'frameos-node-title text-xl p-1 gap-1',
           isSelected ? 'bg-indigo-900' : 'bg-sky-900',
           'flex w-full justify-between items-center'
         )}

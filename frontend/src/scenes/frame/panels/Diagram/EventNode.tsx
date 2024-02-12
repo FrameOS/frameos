@@ -30,7 +30,7 @@ export function EventNode(props: NodeProps): JSX.Element {
           : 'bg-black bg-opacity-70 border-red-900 shadow-red-700/50 '
       )}
     >
-      <div className={clsx('text-xl p-1', selectedNodeId === id ? 'bg-indigo-900' : 'bg-red-900')}>
+      <div className={clsx('frameos-node-title text-xl p-1', selectedNodeId === id ? 'bg-indigo-900' : 'bg-red-900')}>
         Event: {keyword}
       </div>
       <div className="p-1">

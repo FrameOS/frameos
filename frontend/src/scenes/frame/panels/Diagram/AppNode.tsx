@@ -37,7 +37,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
     >
       <div
         className={clsx(
-          'text-xl p-1 gap-1',
+          'frameos-node-title text-xl p-1 gap-1',
           isSelected ? 'bg-indigo-900' : isCustomApp ? 'bg-teal-900' : 'bg-sky-900',
           'flex w-full justify-between items-center'
         )}

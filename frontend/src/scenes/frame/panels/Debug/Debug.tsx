@@ -1,4 +1,3 @@
-import { Box } from '../../../../components/Box'
 import { H6 } from '../../../../components/H6'
 import ReactJson from 'react-json-view'
 import { useActions, useValues } from 'kea'

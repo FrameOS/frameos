@@ -42,7 +42,7 @@ export function Diagram({ sceneId }: DiagramProps) {
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
   const { frameId } = useValues(frameLogic)
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
-  const { nodes, edges, fitViewCounter } = useValues(diagramLogic(diagramLogicProps))
+  const { nodes, nodesWithStyle, edges, fitViewCounter } = useValues(diagramLogic(diagramLogicProps))
   const { onEdgesChange, onNodesChange, setNodes, addEdge, rearrangeCurrentScene, fitDiagramView, keywordDropped } =
     useActions(diagramLogic(diagramLogicProps))
 
@@ -138,7 +138,7 @@ export function Diagram({ sceneId }: DiagramProps) {
     <BindLogic logic={diagramLogic} props={diagramLogicProps}>
       <div className="w-full h-full dndflow" ref={reactFlowWrapper}>
         <ReactFlow
-          nodes={nodes}
+          nodes={nodesWithStyle}
           edges={edges}
           onInit={setReactFlowInstance}
           onNodesChange={onNodesChange}

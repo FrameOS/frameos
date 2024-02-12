@@ -149,6 +149,10 @@ export const diagramLogic = kea<diagramLogicType>([
         )
       },
     ],
+    nodesWithStyle: [
+      (s) => [s.nodes],
+      (nodes: Node[]): Node[] => nodes.map((node) => ({ ...node, dragHandle: '.frameos-node-title' })),
+    ],
   })),
   subscriptions(({ actions, values, props }) => ({
     nodes: (nodes: Node[], oldNodes: Node[]) => {

@@ -16,7 +16,9 @@ export function RenderNode({ data, isConnectable }: NodeProps): JSX.Element {
           : 'bg-black bg-opacity-70 border-green-900 shadow-green-700/50 '
       )}
     >
-      <div className={clsx('text-xl p-1', selectedNodeId === id ? 'bg-indigo-900' : 'bg-green-900')}>Render Frame</div>
+      <div className={clsx('frameos-node-title text-xl p-1', selectedNodeId === id ? 'bg-indigo-900' : 'bg-green-900')}>
+        Render Frame
+      </div>
       <div className="p-1">
         <div className="flex justify-between">
           <div className="flex items-center space-x-1">
