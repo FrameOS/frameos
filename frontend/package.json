@@ -18,7 +18,6 @@
     "@headlessui/react": "^1.7.17",
     "@heroicons/react": "^2.0.18",
     "@monaco-editor/react": "^4.5.2",
-    "@projectstorm/react-diagrams": "^7.0.2",
     "@visx/axis": "^3.5.0",
     "@visx/brush": "^3.6.1",
     "@visx/curve": "^3.3.0",
