@@ -4,7 +4,7 @@ import { scenesLogic } from './scenesLogic'
 import { Button } from '../../../../components/Button'
 import { Box } from '../../../../components/Box'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { PencilSquareIcon, TrashIcon, FlagIcon } from '@heroicons/react/24/solid'
+import { PencilSquareIcon, TrashIcon, FlagIcon, FolderOpenIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import { TextInput } from '../../../../components/TextInput'
 import { Form } from 'kea-forms'
@@ -15,7 +15,7 @@ export function Scenes() {
   const { frameId } = useValues(frameLogic)
   const { editScene } = useActions(panelsLogic)
   const { scenes, isNewSceneSubmitting, newSceneHasErrors } = useValues(scenesLogic({ frameId }))
-  const { submitNewScene, deleteScene, setAsDefault } = useActions(scenesLogic({ frameId }))
+  const { submitNewScene, renameScene, deleteScene, setAsDefault } = useActions(scenesLogic({ frameId }))
 
   return (
     <div className="space-y-4">
@@ -32,16 +32,30 @@ export function Scenes() {
               </div>
               <div className="flex items-start gap-1">
                 <Button size="small" color="secondary" onClick={() => editScene(scene.id)}>
-                  Edit
+                  Open
                 </Button>
                 <DropdownMenu
                   buttonColor="secondary"
                   items={[
                     {
-                      label: 'Edit scene',
+                      label: 'Open in editor',
                       onClick: () => editScene(scene.id),
+                      icon: <FolderOpenIcon className="w-5 h-5" />,
+                    },
+                    {
+                      label: 'Rename',
+                      onClick: () => renameScene(scene.id),
                       icon: <PencilSquareIcon className="w-5 h-5" />,
                     },
+                    ...(!scene.default
+                      ? [
+                          {
+                            label: 'Set as default',
+                            onClick: () => setAsDefault(scene.id),
+                            icon: <FlagIcon className="w-5 h-5" />,
+                          },
+                        ]
+                      : []),
                     ...(scenes.length > 1
                       ? [
                           {
@@ -49,15 +63,6 @@ export function Scenes() {
                             confirm: 'Are you sure you want to delete this scene?',
                             onClick: () => deleteScene(scene.id),
                             icon: <TrashIcon className="w-5 h-5" />,
-                          },
-                        ]
-                      : []),
-                    ...(!scene.default
-                      ? [
-                          {
-                            label: 'Set as default',
-                            onClick: () => setAsDefault(scene.id),
-                            icon: <FlagIcon className="w-5 h-5" />,
                           },
                         ]
                       : []),

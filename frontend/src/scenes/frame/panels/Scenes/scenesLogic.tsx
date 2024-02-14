@@ -28,6 +28,7 @@ export const scenesLogic = kea<scenesLogicType>([
   actions({
     setAsDefault: (sceneId: string) => ({ sceneId }),
     deleteScene: (sceneId: string) => ({ sceneId }),
+    renameScene: (sceneId: string) => ({ sceneId }),
   }),
   forms(({ actions, values }) => ({
     newScene: {
@@ -58,6 +59,15 @@ export const scenesLogic = kea<scenesLogicType>([
         scenes: values.scenes.map((s) =>
           s.id === sceneId ? { ...s, default: true } : s['default'] ? { ...s, default: false } : s
         ),
+      })
+    },
+    renameScene: ({ sceneId }) => {
+      const sceneName = window.prompt('New name', values.scenes.find((s) => s.id === sceneId)?.name)
+      if (!sceneName) {
+        return
+      }
+      actions.setFrameFormValues({
+        scenes: values.scenes.map((s) => (s.id === sceneId ? { ...s, name: sceneName } : s)),
       })
     },
     deleteScene: ({ sceneId }) => {

@@ -144,8 +144,13 @@ export const panelsLogic = kea<panelsLogicType>([
     ],
     selectedSceneId: [
       (s) => [s.frame, s.lastSelectedScene],
-      (frame, lastSelectedScene) =>
+      (frame, lastSelectedScene): string | null =>
         lastSelectedScene ?? frame?.scenes?.find((s) => s.default)?.id ?? frame?.scenes?.[0]?.id ?? null,
+    ],
+    selectedSceneName: [
+      (s) => [s.frame, s.selectedSceneId],
+      (frame, selectedSceneId): string | null =>
+        selectedSceneId ? frame?.scenes?.find((s) => s.id === selectedSceneId)?.name ?? null : null,
     ],
   })),
   listeners(({ cache }) => ({
