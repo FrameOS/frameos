@@ -154,8 +154,8 @@ def create_default_scene() -> dict:
     edge_uuid = str(uuid.uuid4())
     return {
         "name": "Default Scene",
-        "default": True,
         "id": str(uuid.uuid4()),
+        "default": True,
         "edges": [
             {
                 "id": edge_uuid,

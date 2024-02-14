@@ -118,6 +118,14 @@ export const panelsLogic = kea<panelsLogicType>([
         toggleFullScreenPanel: (state, { panel }) => (state && panelsEqual(state, panel) ? null : panel),
       },
     ],
+    lastSelectedScene: [
+      null as string | null,
+      {
+        openPanel: (state, { panel }) => (panel.panel === Panel.Diagram ? panel.key ?? state : state),
+        setPanel: (state, { panel }) => (panel.panel === Panel.Diagram ? panel.key ?? state : state),
+        editScene: (_, { sceneId }) => sceneId,
+      },
+    ],
   }),
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
@@ -133,6 +141,11 @@ export const panelsLogic = kea<panelsLogicType>([
               [Area.BottomRight]: panels.BottomRight.filter((p) => panelsEqual(p, fullScreenPanel)),
             }
           : panels,
+    ],
+    selectedSceneId: [
+      (s) => [s.frame, s.lastSelectedScene],
+      (frame, lastSelectedScene) =>
+        lastSelectedScene ?? frame?.scenes?.find((s) => s.default)?.id ?? frame?.scenes?.[0]?.id ?? null,
     ],
   })),
   listeners(({ cache }) => ({

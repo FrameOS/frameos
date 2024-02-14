@@ -13,6 +13,7 @@ import { ClipboardDocumentIcon } from '@heroicons/react/24/outline'
 import copy from 'copy-to-clipboard'
 import { Spinner } from '../../../../components/Spinner'
 import { TextArea } from '../../../../components/TextArea'
+import { panelsLogic } from '../panelsLogic'
 
 const PERSIST_OPTIONS = [
   { label: 'memory (reset on boot)', value: 'memory' },
@@ -25,8 +26,8 @@ const ACCESS_OPTIONS = [
 ]
 
 export function SceneState(): JSX.Element {
-  const sceneId = 'default'
   const { frameId } = useValues(frameLogic)
+  const { selectedSceneId: sceneId } = useValues(panelsLogic({ frameId }))
   const {
     sceneForm,
     stateChanges,
@@ -42,7 +43,7 @@ export function SceneState(): JSX.Element {
 
   let fieldCount = (sceneForm.fields ?? []).length
 
-  if (!sceneForm) {
+  if (!sceneForm || !sceneId) {
     return <></>
   }
 

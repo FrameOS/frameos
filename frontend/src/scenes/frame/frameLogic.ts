@@ -162,8 +162,10 @@ export const frameLogic = kea<frameLogicType>([
     },
   })),
   afterMount(({ actions, values }) => {
-    if (values.frame?.scenes?.find((scene) => scene.id === 'default')) {
-      actions.updateScene('default', { id: uuidv4(), default: true, name: 'Default Scene' })
+    const defaultScene = values.frame?.scenes?.find((scene) => scene.id === 'default')
+    if (defaultScene) {
+      const { name, id, default: _def, ...rest } = defaultScene
+      actions.updateScene('default', { name: 'Default Scene', id: uuidv4(), default: true, ...rest })
     }
   }),
 ])

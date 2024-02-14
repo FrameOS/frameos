@@ -122,10 +122,10 @@ def api_frame_event(id: int, event: str):
 @login_required
 def api_frame_scene_source(id: int, scene: str):
     frame = Frame.query.get_or_404(id)
-    scene = [scene for scene in frame.scenes if scene.get('id') == 'default'][0]
-    if not scene:
+    scenes = [s for s in frame.scenes if s.get('id') == scene]
+    if not scenes:
         return jsonify({'error': f'Scene {scene} not found'}), HTTPStatus.NOT_FOUND
-    return jsonify({'source': write_scene_nim(frame, scene)})
+    return jsonify({'source': write_scene_nim(frame, scenes[0])})
 
 @api.route('/frames/<int:id>/reset', methods=['POST'])
 @login_required

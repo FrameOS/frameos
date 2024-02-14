@@ -11,7 +11,7 @@ import { loaders } from 'kea-loaders'
 
 export interface SceneStateLogicProps {
   frameId: number
-  sceneId: string
+  sceneId: string | null
 }
 
 export const sceneStateLogic = kea<sceneStateLogicType>([
@@ -51,7 +51,9 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
         return { id: def.id || '', name: def.name || '', fields: def.fields ?? [] }
       }) as any as Partial<FrameScene>,
       submit: async (formValues) => {
-        actions.updateScene(props.sceneId, formValues)
+        if (props.sceneId) {
+          actions.updateScene(props.sceneId, formValues)
+        }
       },
     },
     stateChanges: {

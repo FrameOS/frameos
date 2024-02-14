@@ -1,15 +1,16 @@
 import { useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { sceneSourceLogic } from './sceneSourceLogic'
-import React from 'react'
-import { Code } from '../../../../components/Code'
 import { Spinner } from '../../../../components/Spinner'
 import Editor, { Monaco } from '@monaco-editor/react'
-import schema from '../../../../../schema/config_json.json'
+import { panelsLogic } from '../panelsLogic'
 
 export function SceneSource() {
   const { frame } = useValues(frameLogic)
-  const { sceneSource, sceneSourceLoading } = useValues(sceneSourceLogic({ frameId: frame.id }))
+  const { selectedSceneId } = useValues(panelsLogic({ frameId: frame.id }))
+  const { sceneSource, sceneSourceLoading } = useValues(
+    sceneSourceLogic({ frameId: frame.id, sceneId: selectedSceneId })
+  )
   function beforeMount(monaco: Monaco) {
     monaco.editor.defineTheme('darkframe', {
       base: 'vs-dark',
