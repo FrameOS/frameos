@@ -206,7 +206,8 @@ def make_local_modifications(frame: Frame, source_dir: str):
     # only one scene called "default" for now
     for scene in frame.scenes:
         scene_source = write_scene_nim(frame, scene)
-        with open(os.path.join(source_dir, "src", "scenes", f"{scene.get('id')}.nim"), "w") as file:
+        id = re.sub(r'\W+', '', scene.get('id', 'default'))
+        with open(os.path.join(source_dir, "src", "scenes", f"{id}.nim"), "w") as file:
             file.write(scene_source)
 
     drivers = drivers_for_device(frame.device)
