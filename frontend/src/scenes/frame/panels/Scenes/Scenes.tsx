@@ -10,6 +10,7 @@ import { TextInput } from '../../../../components/TextInput'
 import { Form } from 'kea-forms'
 import { Field } from '../../../../components/Field'
 import { H6 } from '../../../../components/H6'
+import { Tag } from '../../../../components/Tag'
 
 export function Scenes() {
   const { frameId } = useValues(frameLogic)
@@ -26,14 +27,11 @@ export function Scenes() {
               <div>
                 <H6 className="cursor-pointer" onClick={() => editScene(scene.id)}>
                   {scene.name || scene.id}
-                  {scene.default ? ' (default)' : ''}
+                  {scene.default ? <Tag className="ml-2">default</Tag> : null}
                 </H6>
                 <div className="text-xs text-gray-400">id: {scene.id}</div>
               </div>
               <div className="flex items-start gap-1">
-                <Button size="small" color="secondary" onClick={() => editScene(scene.id)}>
-                  Open
-                </Button>
                 <DropdownMenu
                   buttonColor="secondary"
                   items={[
