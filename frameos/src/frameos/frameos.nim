@@ -19,7 +19,7 @@ proc newFrameOS*(): FrameOS =
     metricsLogger: metricsLogger
   )
   drivers.init(result)
-  result.runner = newRunner(frameConfig, logger)
+  result.runner = newRunner(frameConfig)
   result.server = newServer(result)
 
 proc start*(self: FrameOS) {.async.} =
@@ -39,7 +39,7 @@ proc start*(self: FrameOS) {.async.} =
   }}
   self.logger.log(message)
   self.runner.start()
-  self.server.startServer()
+  result = self.server.startServer()
 
 proc startFrameOS*() {.async.} =
   var frameOS = newFrameOS()

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 from app.models.frame import Frame
 from app.models.apps import get_local_frame_apps, local_apps_path
@@ -161,11 +162,11 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
             if len(sources) > 0:
                 node_app_id = "nodeapp_" + node_id.replace('-', '_')
                 init_apps += [
-                    f"scene.{app_id} = nodeApp{node_id_to_integer(node_id)}.init({node_integer}.NodeId, scene, nodeApp{node_id_to_integer(node_id)}.AppConfig({', '.join(app_config_pairs)}))"
+                    f"scene.{app_id} = nodeApp{node_id_to_integer(node_id)}.init({node_integer}.NodeId, scene.FrameScene, nodeApp{node_id_to_integer(node_id)}.AppConfig({', '.join(app_config_pairs)}))"
                 ]
             else:
                 init_apps += [
-                    f"scene.{app_id} = {name}App.init({node_integer}.NodeId, scene, {name}App.AppConfig({', '.join(app_config_pairs)}))"
+                    f"scene.{app_id} = {name}App.init({node_integer}.NodeId, scene.FrameScene, {name}App.AppConfig({', '.join(app_config_pairs)}))"
                 ]
 
             run_node_lines += [
@@ -290,38 +291,14 @@ proc runNode*(self: Scene, nodeId: NodeId,
     if DEBUG:
       self.logger.log(%*{{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
 
-proc runEvent*(self: Scene, context: var ExecutionContext) =
+proc runEvent*(context: var ExecutionContext) =
+  let self = Scene(context.scene)
   case context.event:
   {(newline + "  ").join(run_event_lines)}
   else: discard
 
-proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: string, payload: JsonNode), persistedState: JsonNode): Scene =
-  var state = %*{{{", ".join(state_init_fields)}}}
-  if persistedState.kind == JObject:
-    for key in persistedState.keys:
-      state[key] = persistedState[key]
-  let scene = Scene(frameConfig: frameConfig, logger: logger, state: state, dispatchEvent: dispatchEvent)
-  let self = scene
-  var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
-  result = scene
-  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  {(newline + "  ").join(init_apps)}
-  runEvent(scene, context)
-
-proc getPublicState*(self: Scene): JsonNode =
-  result = %*{{}}
-  for field in PUBLIC_STATE_FIELDS:
-    let key = field.name
-    if self.state.hasKey(key):
-      result[key] = self.state{{key}}
-
-proc getPersistedState*(self: Scene): JsonNode =
-  result = %*{{}}
-  for key in PERSISTED_STATE_KEYS:
-    if self.state.hasKey(key):
-      result[key] = self.state{{key}}
-
-proc render*(self: Scene): Image =
+proc render*(self: FrameScene): Image =
+  let self = Scene(self)
   var context = ExecutionContext(
     scene: self,
     event: "render",
@@ -333,8 +310,61 @@ proc render*(self: Scene): Image =
     loopKey: "."
   )
   context.image.fill(self.frameConfig.backgroundColor)
-  runEvent(self, context)
+  runEvent(context)
   return context.image
+
+proc init*(sceneId: SceneId, frameConfig: FrameConfig, persistedState: JsonNode): FrameScene =
+  var state = %*{{{", ".join(state_init_fields)}}}
+  if persistedState.kind == JObject:
+    for key in persistedState.keys:
+      state[key] = persistedState[key]
+  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state)
+  result = scene
+  var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
+  {(newline + "  ").join(init_apps)}
+  runEvent(context)
 {{.pop.}}
+
+var exportedScene* = ExportedScene(
+  publicStateFields: PUBLIC_STATE_FIELDS,
+  persistedStateKeys: PERSISTED_STATE_KEYS,
+  init: init,
+  runEvent: runEvent,
+  render: render
+)
 """
     return scene_source
+
+def write_scenes_nim(frame: Frame) -> str:
+    rows = ""
+    imports = ""
+    default_scene = None
+    for scene in frame.scenes:
+        if default_scene is None:
+            default_scene = scene
+        if scene.get('default', False):
+            default_scene = scene
+
+        scene_id = scene.get('id', 'default')
+        scene_id = re.sub(r'[^a-zA-Z0-9\-\_]', '_', scene_id)
+        scene_id_import = re.sub(r'\W+', '', scene_id)
+        imports += f"import scenes/{scene_id_import} as scene_{scene_id_import}\n"
+        rows += f"  result[\"{scene_id}\".SceneId] = scene_{scene_id_import}.exportedScene\n"
+
+    default_scene_id = default_scene.get('id', 'default')
+    default_scene_id = re.sub(r'[^a-zA-Z0-9\-\_]', '_', default_scene_id)
+
+    scenes_source = f"""
+import frameos/types
+import tables
+{imports}
+
+let defaultSceneId* = "{default_scene_id}".SceneId
+
+proc getExportedScenes*(): Table[SceneId, ExportedScene] =
+  result = initTable[SceneId, ExportedScene]()
+{rows}
+"""
+
+    return scenes_source

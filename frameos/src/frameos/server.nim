@@ -16,7 +16,7 @@ import frameos/channels
 import frameos/config
 import frameos/utils/image
 from net import Port
-from frameos/runner import getLastPng, getLastPublicState, getPublicStateFields, triggerRender
+from frameos/runner import getLastImagePng, getLastPublicState #, getPublicStateFields
 
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
@@ -103,7 +103,7 @@ router myrouter:
           raise newException(Exception, "No image available")
       except Exception:
         try:
-          resp Http200, {"Content-Type": "image/png"}, getLastPng()
+          resp Http200, {"Content-Type": "image/png"}, getLastImagePng()
         except Exception as e:
           resp Http200, {"Content-Type": "image/png"}, renderError(globalFrameConfig.renderWidth(),
             globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
@@ -117,14 +117,15 @@ router myrouter:
   get "/state":
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"
-    resp Http200, {"Content-Type": "application/json"}, $getLastPublicState()
+    {.gcsafe.}: # It's a copy of the state, so it's fine.
+      let (state, _) = getLastPublicState()
+      resp Http200, {"Content-Type": "application/json"}, $state
   get "/c":
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"
     var fieldsHtml = ""
     var fieldsSubmitHtml = ""
-    let fields = getPublicStateFields()
-    let values = getLastPublicState()
+    let (values, fields) = getLastPublicState()
     for field in fields:
       let key = field.name
       let label = if field.label != "": field.label else: key
@@ -181,9 +182,9 @@ proc listenForRender*() {.async.} =
       if dataAvailable:
         asyncCheck sendToAll("render")
         log(%*{"event": "websocket:send", "message": "render"})
-      await sleepAsync(0.1)
+      await sleepAsync(10)
     else:
-      await sleepAsync(2)
+      await sleepAsync(100)
 
 proc newServer*(frameOS: FrameOS): Server =
   globalFrameConfig = frameOS.frameConfig

@@ -67,14 +67,14 @@ proc runNode*(self: Scene, nodeId: NodeId,
     else:
       nextNode = -1.NodeId
     if DEBUG:
-      self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
-proc runEvent*(self: Scene, context: var ExecutionContext) =
+proc runEvent*(context: var ExecutionContext) =
+  let self = Scene(context.scene)
   case context.event:
   of "render":
     try: self.runNode(1.NodeId, context)
-    except Exception as e: self.logger.log(%*{"event": "render:error", "node": 1, "error": $e.msg,
-        "stacktrace": e.getStackTrace()})
+    except Exception as e: log(%*{"event": "render:error", "node": 1, "error": $e.msg, "stacktrace": e.getStackTrace()})
   of "setSceneState":
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
       let payload = context.payload["state"]
@@ -86,13 +86,32 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
       sendEvent("render", %*{})
   else: discard
 
-proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: string, payload: JsonNode),
-    persistedState: JsonNode): Scene =
+proc render*(self: FrameScene): Image =
+  let self = Scene(self)
+  var context = ExecutionContext(
+    scene: self,
+    event: "render",
+    payload: %*{},
+    image: case self.frameConfig.rotate:
+    of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
+    else: newImage(self.frameConfig.width, self.frameConfig.height),
+    loopIndex: 0,
+    loopKey: "."
+  )
+  context.image.fill(self.frameConfig.backgroundColor)
+  runEvent(context)
+  return context.image
+
+proc init*(sceneId: SceneId, frameConfig: FrameConfig, persistedState: JsonNode): FrameScene =
   var state = %*{"background": %*("fish"), "message": %*("pas op voor de prikkelvis")}
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
-  let scene = Scene(frameConfig: frameConfig, logger: logger, state: state, dispatchEvent: dispatchEvent)
+  let scene = Scene(
+    id: sceneId,
+    frameConfig: frameConfig,
+    state: state,
+  )
   let self = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
@@ -112,33 +131,13 @@ proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: 
   scene.node6 = textApp.init(6.NodeId, scene, textApp.AppConfig(borderWidth: 4, fontColor: parseHtmlColor("#f5dbdb"),
       fontSize: 100.0, position: "center-center", text: state{"message"}.getStr, offsetX: 0.0, offsetY: 0.0,
       padding: 10.0, borderColor: parseHtmlColor("#000000")))
-  runEvent(scene, context)
-
-proc getPublicState*(self: Scene): JsonNode =
-  result = %*{}
-  for field in PUBLIC_STATE_FIELDS:
-    let key = field.name
-    if self.state.hasKey(key):
-      result[key] = self.state{key}
-
-proc getPersistedState*(self: Scene): JsonNode =
-  result = %*{}
-  for key in PERSISTED_STATE_KEYS:
-    if self.state.hasKey(key):
-      result[key] = self.state{key}
-
-proc render*(self: Scene): Image =
-  var context = ExecutionContext(
-    scene: self,
-    event: "render",
-    payload: %*{},
-    image: case self.frameConfig.rotate:
-    of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-    else: newImage(self.frameConfig.width, self.frameConfig.height),
-    loopIndex: 0,
-    loopKey: "."
-  )
-  context.image.fill(self.frameConfig.backgroundColor)
-  runEvent(self, context)
-  return context.image
+  runEvent(context)
 {.pop.}
+
+var exportedScene* = ExportedScene(
+  publicStateFields: PUBLIC_STATE_FIELDS,
+  persistedStateKeys: PERSISTED_STATE_KEYS,
+  init: init,
+  runEvent: runEvent,
+  render: render
+)

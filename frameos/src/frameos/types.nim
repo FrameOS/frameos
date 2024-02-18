@@ -1,4 +1,4 @@
-import json, jester, pixie
+import json, jester, pixie, hashes
 import std/locks
 
 type
@@ -27,24 +27,31 @@ type
     lock*: Lock
     thread*: Thread[FrameConfig]
     channel*: Channel[JsonNode]
-    log*: proc(payload: JsonNode)
-    enabled*: bool
-    enable*: proc()
-    disable*: proc()
+    log*: proc (payload: JsonNode)
 
   MetricsLogger* = ref object
     frameConfig*: FrameConfig
     logger*: Logger
 
   NodeId* = distinct int
+  SceneId* = distinct string
 
   FrameScene* = ref object of RootObj
+    id*: SceneId
     isRendering*: bool
     frameConfig*: FrameConfig
     logger*: Logger
     state*: JsonNode
     execNode*: proc(nodeId: NodeId, context: var ExecutionContext)
-    dispatchEvent*: proc(event: string, payload: JsonNode)
+    lastPublicStateUpdate*: float
+    lastPersistedStateUpdate*: float
+
+  ExportedScene* = ref object of RootObj
+    publicStateFields*: seq[StateField]
+    persistedStateKeys*: seq[string]
+    runEvent*: proc (context: var ExecutionContext): void
+    render*: proc (self: FrameScene): Image
+    init*: proc (sceneId: SceneId, frameConfig: FrameConfig, persistedState: JsonNode): FrameScene
 
   ExecutionContext* = ref object
     scene*: FrameScene
@@ -64,10 +71,16 @@ type
     required*: bool
     secret*: bool
 
-  RunnerControl* = ref object
-    logger*: Logger
+  RunnerThread* = ref object
     frameConfig*: FrameConfig
-    sendEvent*: proc (event: string, data: JsonNode)
+    scenes*: Table[SceneId, FrameScene]
+    currentSceneId*: SceneId
+    lastRenderAt*: float
+    sleepFuture*: Option[Future[void]]
+    isRendering*: bool = false
+    triggerRenderNext*: bool = false
+
+  RunnerControl* = ref object
     start*: proc()
 
   Server* = ref object
@@ -86,9 +99,11 @@ type
     server*: Server
     runner*: RunnerControl
 
-
 proc `==`*(x, y: NodeId): bool = x.int == y.int
 proc `==`*(x: int, y: NodeId): bool = x == y.int
 proc `==`*(x: NodeId, y: int): bool = x.int == y
 proc `$`*(x: NodeId): string = $(x.int)
 proc `%`*(x: NodeId): JsonNode = %(x.int)
+proc hash*(x: SceneId): Hash = x.string.hash
+proc `==`*(x, y: SceneId): bool = x.string == y.string
+proc `$`*(x: SceneId): string = x.string
