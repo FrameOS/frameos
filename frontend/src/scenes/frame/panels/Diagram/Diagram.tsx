@@ -47,7 +47,6 @@ export function Diagram({ sceneId }: DiagramProps) {
     useActions(diagramLogic(diagramLogicProps))
 
   const onDragOver = useCallback((event: any) => {
-    console.log(event)
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
   }, [])
@@ -70,11 +69,14 @@ export function Diagram({ sceneId }: DiagramProps) {
   const connectingNodeId = useRef<string | null>(null)
   const connectingNodeHandle = useRef<string | null>(null)
 
-  const onConnect = useCallback((connection: Connection) => {
-    connectingNodeId.current = null
-    connectingNodeHandle.current = null
-    addEdge(connection)
-  }, [])
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      connectingNodeId.current = null
+      connectingNodeHandle.current = null
+      addEdge(connection)
+    },
+    [addEdge]
+  )
 
   const onConnectStart = useCallback((_: ReactMouseEvent | ReactTouchEvent, params: OnConnectStartParams) => {
     const { nodeId, handleId, handleType } = params
@@ -125,7 +127,7 @@ export function Diagram({ sceneId }: DiagramProps) {
         })
       }
     },
-    [reactFlowInstance, nodes, edges]
+    [reactFlowInstance, nodes, edges, setNodes, addEdge]
   )
 
   useEffect(() => {

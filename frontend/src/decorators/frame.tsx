@@ -32,18 +32,16 @@ export function frameUrl(frame: FrameType): string | null {
   const url = `http${frame.frame_port % 1000 === 443 ? 's' : ''}://${frame.frame_host}:${frame.frame_port}/`
   if (frame.frame_access === 'public' || frame.frame_access === 'protected') {
     return url
-  } else if (frame.frame_access === 'private') {
+  } else {
     return `${url}?k=${frame.frame_access_key}`
   }
-  return null
 }
 
 export function frameControlUrl(frame: FrameType): string | null {
   const url = `http${frame.frame_port % 1000 === 443 ? 's' : ''}://${frame.frame_host}:${frame.frame_port}/c`
   if (frame.frame_access === 'public') {
     return url
-  } else if (frame.frame_access === 'private' || frame.frame_access === 'protected') {
+  } else {
     return `${url}?k=${frame.frame_access_key}`
   }
-  return null
 }

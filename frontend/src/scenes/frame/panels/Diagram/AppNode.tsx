@@ -74,7 +74,6 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
             position={Position.Left}
             id="prev"
             style={{ position: 'relative', transform: 'none', left: 0, top: 0, background: 'white' }}
-            onConnect={(params) => console.log('handle onConnect', params)}
             isConnectable={isConnectable}
           />
           <Handle
@@ -118,7 +117,6 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                             background: 'black',
                             borderColor: 'white',
                           }}
-                          onConnect={(params) => console.log('handle onConnect', params)}
                           isConnectable
                         />
                       </td>
