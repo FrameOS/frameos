@@ -1,5 +1,4 @@
-import { actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
-import { framesModel } from '../../../../models/framesModel'
+import { actions, connect, kea, key, listeners, path, props, selectors } from 'kea'
 import type { scenesLogicType } from './scenesLogicType'
 import { FrameScene } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
@@ -7,16 +6,17 @@ import { appsModel } from '../../../../models/appsModel'
 import { forms } from 'kea-forms'
 import { v4 as uuidv4 } from 'uuid'
 import { panelsLogic } from '../panelsLogic'
+import { Option } from '../../../../components/Select'
 
-export interface scenesLogicProps {
+export interface ScenesLogicProps {
   frameId: number
 }
 
 export const scenesLogic = kea<scenesLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Scenes', 'scenesLogic']),
-  props({} as scenesLogicProps),
+  props({} as ScenesLogicProps),
   key((props) => props.frameId),
-  connect(({ frameId }: scenesLogicProps) => ({
+  connect(({ frameId }: ScenesLogicProps) => ({
     values: [frameLogic({ frameId }), ['frame', 'frameForm'], appsModel, ['apps']],
     actions: [
       frameLogic({ frameId }),
@@ -47,12 +47,12 @@ export const scenesLogic = kea<scenesLogicType>([
       },
     },
   })),
-  reducers({}),
-  selectors(() => ({
-    frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
+  selectors({
+    frameId: [() => [(_, props: ScenesLogicProps) => props.frameId], (frameId) => frameId],
     editingFrame: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm || frame || null],
     scenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame.scenes ?? []],
-  })),
+    sceneTemplateOptions: [() => [], (): Option[] => [{ label: 'Blank', value: '' }]],
+  }),
   listeners(({ actions, values }) => ({
     setAsDefault: ({ sceneId }) => {
       actions.setFrameFormValues({

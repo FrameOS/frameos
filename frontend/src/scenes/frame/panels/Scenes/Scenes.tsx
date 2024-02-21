@@ -11,11 +11,12 @@ import { Form } from 'kea-forms'
 import { Field } from '../../../../components/Field'
 import { H6 } from '../../../../components/H6'
 import { Tag } from '../../../../components/Tag'
+import { Select } from '../../../../components/Select'
 
 export function Scenes() {
   const { frameId } = useValues(frameLogic)
   const { editScene } = useActions(panelsLogic)
-  const { scenes, isNewSceneSubmitting, newSceneHasErrors } = useValues(scenesLogic({ frameId }))
+  const { scenes, isNewSceneSubmitting, newSceneHasErrors, sceneTemplateOptions } = useValues(scenesLogic({ frameId }))
   const { submitNewScene, renameScene, deleteScene, setAsDefault } = useActions(scenesLogic({ frameId }))
 
   return (
@@ -73,9 +74,12 @@ export function Scenes() {
       </div>
       <H6>New scene</H6>
       <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">
-        <Box className="p-2 space-y-2 bg-gray-900">
+        <Box className="p-2 space-y-4 bg-gray-900">
           <Field label="Name" name="name">
-            <TextInput />
+            <TextInput placeholder="e.g. Camera view" />
+          </Field>
+          <Field label="Template" name="template">
+            <Select options={sceneTemplateOptions} />
           </Field>
           <Button
             size="small"

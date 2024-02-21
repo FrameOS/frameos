@@ -16,7 +16,7 @@ import frameos/channels
 import frameos/config
 import frameos/utils/image
 from net import Port
-from frameos/runner import getLastImagePng, getLastPublicState #, getPublicStateFields
+from frameos/runner import getLastImagePng, getLastPublicState
 
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
@@ -117,15 +117,16 @@ router myrouter:
   get "/state":
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"
+    log(%*{"event": "http", "get": request.pathInfo})
     {.gcsafe.}: # It's a copy of the state, so it's fine.
-      let (state, _) = getLastPublicState()
-      resp Http200, {"Content-Type": "application/json"}, $state
+      let (sceneId, state, _) = getLastPublicState()
+      resp Http200, {"Content-Type": "application/json"}, $(%*{"sceneId": $sceneId, "state": state})
   get "/c":
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"
     var fieldsHtml = ""
     var fieldsSubmitHtml = ""
-    let (values, fields) = getLastPublicState()
+    let (_, values, fields) = getLastPublicState()
     for field in fields:
       let key = field.name
       let label = if field.label != "": field.label else: key
