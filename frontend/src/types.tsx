@@ -182,6 +182,7 @@ export enum Panel {
   Image = 'Image',
   Logs = 'Logs',
   SceneState = 'SceneState',
+  Control = 'Control',
   Apps = 'Apps',
   Events = 'Events',
   Metrics = 'Metrics',
