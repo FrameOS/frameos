@@ -86,7 +86,7 @@ export interface ConfigField {
   /** Human readable label */
   label: string
   /** Type of the field, only 'string' is supported for now */
-  type: 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'json' | 'node'
+  type: 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'json' | 'node' | 'scene'
   /** List of options for the field, only used if type is 'select' */
   options?: string[]
   /** Whether the field is required */
@@ -165,6 +165,8 @@ export interface FrameEvent {
   description?: string
   /** Fields for app in diagram editor */
   fields?: ConfigField[]
+  /** Can this event be listened to and/or dispatched */
+  type?: 'input' | 'output' | 'both'
 }
 
 export enum Area {

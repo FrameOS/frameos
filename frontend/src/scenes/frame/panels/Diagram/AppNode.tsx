@@ -15,7 +15,7 @@ import { ClipboardDocumentIcon, PencilSquareIcon, TrashIcon } from '@heroicons/r
 import { appNodeLogic } from './appNodeLogic'
 
 export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JSX.Element {
-  const { frameId, sceneId } = useValues(diagramLogic)
+  const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
   const { updateNodeConfig, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const { editApp } = useActions(panelsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
@@ -163,6 +163,14 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                               placeholder={field.placeholder}
                               value={field.name in data.config ? data.config[field.name] : field.value}
                               options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
+                              onChange={(value) => updateNodeConfig(id, field.name, value)}
+                            />
+                          ) : field.type === 'scene' ? (
+                            <Select
+                              theme="node"
+                              placeholder={field.placeholder}
+                              value={field.name in data.config ? data.config[field.name] : field.value}
+                              options={sceneOptions}
                               onChange={(value) => updateNodeConfig(id, field.name, value)}
                             />
                           ) : field.type === 'text' ? (

@@ -19,7 +19,6 @@ import {
 } from 'react'
 import { AppNode } from './AppNode'
 import { CodeNode } from './CodeNode'
-import { RenderNode } from './RenderNode'
 import { EventNode } from './EventNode'
 import { Button } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
@@ -29,7 +28,6 @@ const nodeTypes = {
   app: AppNode,
   code: CodeNode,
   source: AppNode,
-  render: RenderNode,
   event: EventNode,
 }
 

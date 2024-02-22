@@ -16,6 +16,7 @@ import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { arrangeNodes } from '../../../../utils/arrangeNodes'
 import copy from 'copy-to-clipboard'
+import { Option } from '../../../../components/Select'
 
 export interface DiagramLogicProps {
   frameId: number
@@ -153,6 +154,11 @@ export const diagramLogic = kea<diagramLogicType>([
     nodesWithStyle: [
       (s) => [s.nodes],
       (nodes: Node[]): Node[] => nodes.map((node) => ({ ...node, dragHandle: '.frameos-node-title' })),
+    ],
+    sceneOptions: [
+      (s) => [s.editingFrame],
+      (frame): Option[] => (frame.scenes ?? []).map((s) => ({ label: s.name || 'Unnamed Scene', value: s.id || '' })),
+      { resultEqualityCheck: equal },
     ],
   })),
   subscriptions(({ actions, values, props }) => ({
