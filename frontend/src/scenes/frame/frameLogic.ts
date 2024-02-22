@@ -10,7 +10,7 @@ import { v4 as uuidv4 } from 'uuid'
 export interface FrameLogicProps {
   frameId: number
 }
-const FRAME_KEYS = [
+const FRAME_KEYS: (keyof FrameType)[] = [
   'name',
   'frame_host',
   'frame_port',
@@ -105,10 +105,8 @@ export const frameLogic = kea<frameLogicType>([
   })),
   subscriptions(({ actions }) => ({
     frame: (frame, oldFrame) => {
-      if (frame) {
-        if (FRAME_KEYS.some((key) => JSON.stringify(frame[key]) !== JSON.stringify(oldFrame?.[key]))) {
-          actions.resetFrameForm(frame)
-        }
+      if (frame && !oldFrame) {
+        actions.resetFrameForm(frame)
       }
     },
   })),
