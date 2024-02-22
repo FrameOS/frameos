@@ -256,7 +256,7 @@ export function FrameSettings({ className }: DetailsProps) {
               />
             </Field>
             <Field name="background_color" label="Background color">
-              <TextInput type="color" name="background_color" className="!p-0" placeholder="white" />
+              <TextInput type="color" name="background_color" className="!p-0" placeholder="#ffffff" />
             </Field>
             <Field name="debug" label="Debug logging (noisy)">
               <Select

@@ -33,7 +33,7 @@ export function Field({
   ) : null
   const template: KeaFieldProps['template'] = ({ label, kids, error }) => {
     return (
-      <div className={clsx('space-y-1', className)}>
+      <div className={clsx('space-y-1', className)} {...(error ? { 'data-field-with-error': true } : {})}>
         <>
           {labelRight ? (
             <div className="flex w-full justify-between items-center">
