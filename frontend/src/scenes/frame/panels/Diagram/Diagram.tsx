@@ -26,8 +26,9 @@ import { v4 as uuidv4 } from 'uuid'
 
 const nodeTypes = {
   app: AppNode,
-  code: CodeNode,
   source: AppNode,
+  dispatch: AppNode,
+  code: CodeNode,
   event: EventNode,
 }
 
@@ -40,9 +41,17 @@ export function Diagram({ sceneId }: DiagramProps) {
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
   const { frameId } = useValues(frameLogic)
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
-  const { nodes, nodesWithStyle, edges, fitViewCounter } = useValues(diagramLogic(diagramLogicProps))
-  const { onEdgesChange, onNodesChange, setNodes, addEdge, rearrangeCurrentScene, fitDiagramView, keywordDropped } =
-    useActions(diagramLogic(diagramLogicProps))
+  const { nodes, nodesWithStyle, edges, fitViewCounter, newNodePosition } = useValues(diagramLogic(diagramLogicProps))
+  const {
+    onEdgesChange,
+    onNodesChange,
+    setNodes,
+    addEdge,
+    rearrangeCurrentScene,
+    fitDiagramView,
+    keywordDropped,
+    showNewNode,
+  } = useActions(diagramLogic(diagramLogicProps))
 
   const onDragOver = useCallback((event: any) => {
     event.preventDefault()
@@ -87,7 +96,6 @@ export function Diagram({ sceneId }: DiagramProps) {
   const onConnectEnd = useCallback(
     (event: MouseEvent | TouchEvent) => {
       if (!connectingNodeId.current) return
-      if (!connectingNodeHandle.current) return
 
       event.preventDefault()
 
@@ -102,27 +110,33 @@ export function Diagram({ sceneId }: DiagramProps) {
         }
         inputCoords.x -= reactFlowBounds?.left ?? 0
         inputCoords.y -= reactFlowBounds?.top ?? 0
-        const position = reactFlowInstance?.project(inputCoords) ?? { x: 0, y: 0 }
-        position.x -= 200
-        position.y -= 80
-        const newNode: Node = {
-          id,
-          position: position,
-          type: 'code',
-          data: {},
-          style: {
-            width: 300,
-            height: 130,
-          },
+
+        if (!connectingNodeHandle.current) {
+          const position = reactFlowInstance?.project(inputCoords) ?? { x: 0, y: 0 }
+          position.x -= 200
+          position.y -= 0
+          const newNode: Node = {
+            id,
+            position: position,
+            type: 'code',
+            data: {},
+            style: {
+              width: 300,
+              height: 130,
+            },
+          }
+          setNodes([...nodes, newNode])
+          addEdge({
+            id,
+            target: connectingNodeId.current,
+            targetHandle: connectingNodeHandle.current,
+            source: id,
+            sourceHandle: 'fieldOutput',
+          })
+        } else {
+          // TODO: implement this
+          showNewNode(inputCoords)
         }
-        setNodes([...nodes, newNode])
-        addEdge({
-          id,
-          target: connectingNodeId.current,
-          targetHandle: connectingNodeHandle.current,
-          source: id,
-          sourceHandle: 'fieldOutput',
-        })
       }
     },
     [reactFlowInstance, nodes, edges, setNodes, addEdge]

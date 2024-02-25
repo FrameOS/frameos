@@ -3,20 +3,16 @@ import { NodeProps, Handle, Position } from 'reactflow'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 
-import _events from '../Events/events.json'
 import { FrameEvent } from '../../../../types'
 import { fieldTypeToGetter } from '../../../../utils/fieldTypes'
 
+import _events from '../Events/events.json'
 const events: Record<string, FrameEvent> = _events as any
 
 export function EventNode(props: NodeProps): JSX.Element {
   const { data, id } = props
-  const { selectedNodeId, edgesForNode, scene } = useValues(diagramLogic)
+  const { selectedNodeId, scene } = useValues(diagramLogic)
   const { keyword } = data
-
-  const edges = edgesForNode[id] || []
-  let usedAsSource = edges.some((edge) => edge.source === id)
-  let usedAsTarget = edges.some((edge) => edge.target === id)
 
   const fields =
     keyword === 'init' || keyword === 'setSceneState' ? scene?.fields ?? [] : events?.[keyword]?.fields ?? []
@@ -31,34 +27,21 @@ export function EventNode(props: NodeProps): JSX.Element {
       )}
     >
       <div className={clsx('frameos-node-title text-xl p-1', selectedNodeId === id ? 'bg-indigo-900' : 'bg-red-900')}>
-        Event: {keyword}
+        {keyword}
       </div>
       <div className="p-1">
         <div className="flex justify-between">
-          {keyword === 'render' && (usedAsTarget || !usedAsSource) ? (
-            <div className="flex items-center space-x-1">
-              <Handle
-                type="target"
-                position={Position.Left}
-                id="prev"
-                style={{ position: 'relative', transform: 'none', left: 0, top: 0, background: 'white' }}
-              />
-              <span>&nbsp;</span>
-            </div>
-          ) : null}
           <div className="flex items-center space-x-1">
             <span>&nbsp;</span>
           </div>
-          {usedAsSource || !usedAsTarget ? (
-            <div className="flex items-center space-x-1">
-              <Handle
-                type="source"
-                position={Position.Right}
-                id="next"
-                style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
-              />
-            </div>
-          ) : null}
+          <div className="flex items-center space-x-1">
+            <Handle
+              type="source"
+              position={Position.Right}
+              id="next"
+              style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
+            />
+          </div>
         </div>
         {fields.map((field: Record<string, any>) => (
           <div className="flex items-center justify-end space-x-1 w-full">

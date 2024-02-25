@@ -4,8 +4,11 @@ import type { appNodeLogicType } from './appNodeLogicType'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { appsModel } from '../../../../models/appsModel'
 import type { Node } from '@reactflow/core/dist/esm/types/nodes'
-import { App, ConfigField, MarkdownField } from '../../../../types'
+import { App, ConfigField, FrameEvent, MarkdownField } from '../../../../types'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
+
+import _events from '../Events/events.json'
+const events: Record<string, FrameEvent> = _events as any
 
 export interface AppNodeLogicProps extends DiagramLogicProps {
   nodeId: string
@@ -16,7 +19,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
   props({} as AppNodeLogicProps),
   key((props) => `${props.frameId}/${props.sceneId}/${props.nodeId}`),
   connect(({ sceneId, frameId }: DiagramLogicProps) => ({
-    values: [appsModel, ['apps'], diagramLogic({ frameId, sceneId }), ['nodes', 'edges', 'selectedNodeId']],
+    values: [appsModel, ['apps'], diagramLogic({ frameId, sceneId }), ['nodes', 'edges', 'selectedNodeId', 'scene']],
   })),
   selectors({
     nodeId: [() => [(_, props) => props.nodeId], (nodeId): string => nodeId],
@@ -87,28 +90,51 @@ export const appNodeLogic = kea<appNodeLogicType>([
     app: [
       (s) => [s.apps, s.node],
       (apps, node): App | null => {
-        if (node && node.data && node.data.keyword && !node.data.sources) {
+        if (node && node.type === 'app' && node.data && node.data.keyword && !node.data.sources) {
           return apps[node.data.keyword] ?? null
         }
         return null
       },
     ],
+    event: [
+      (s) => [s.node],
+      (node): App | null => {
+        if (node && node.type === 'dispatch' && node.data && node.data.keyword) {
+          return events[node.data.keyword] ?? null
+        }
+        return null
+      },
+    ],
+    isApp: [(s) => [s.node], (node) => node?.type === 'app'],
+    isDispatch: [(s) => [s.node], (node) => node?.type === 'dispatch'],
     configJson: [
       (s) => [s.app, s.sourceConfigJson],
       (app, [config]) => {
         return config || app || null
       },
     ],
-    appFields: [
-      (s) => [s.app, s.configJson],
-      (app, configJson): (ConfigField | MarkdownField)[] | null => {
-        return app?.fields ?? configJson?.fields ?? null
+    fields: [
+      (s) => [s.app, s.event, s.scene, s.configJson],
+      (app, event, scene, configJson): (ConfigField | MarkdownField)[] | null => {
+        if (app) {
+          return app?.fields ?? configJson?.fields ?? null
+        } else if (event) {
+          if (event.name === 'init' || event.name === 'setSceneState') {
+            return scene?.fields ?? null
+          }
+          return event?.fields ?? null
+        }
+        return null
       },
     ],
-    appName: [
-      (s) => [s.app, s.configJson],
-      (app, configJson): string => {
-        return String(app?.name ?? configJson?.name ?? 'App')
+    name: [
+      (s) => [s.app, s.event, s.configJson],
+      (app, event, configJson): string => {
+        return app
+          ? String(app?.name ?? configJson?.name ?? 'App')
+          : event
+          ? `Dispatch: ${String(event?.name ?? 'Event')}`
+          : 'Node'
       },
     ],
     isCustomApp: [

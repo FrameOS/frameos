@@ -11,7 +11,7 @@ import type { EdgeChange, NodeChange } from '@reactflow/core/dist/esm/types/chan
 import equal from 'fast-deep-equal'
 import type { diagramLogicType } from './diagramLogicType'
 import { subscriptions } from 'kea-subscriptions'
-import { AppNodeData, EventNodeData, FrameScene } from '../../../../types'
+import { AppNodeData, DispatchNodeData, EventNodeData, FrameScene } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { arrangeNodes } from '../../../../utils/arrangeNodes'
@@ -41,6 +41,7 @@ export const diagramLogic = kea<diagramLogicType>([
     rearrangeCurrentScene: true,
     fitDiagramView: true,
     keywordDropped: (keyword: string, type: string, position: XYPosition) => ({ keyword, type, position }),
+    showNewNode: (position: XYPosition) => ({ position }),
     updateNodeData: (id: string, data: Record<string, any>) => ({ id, data }),
     updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
     copyAppJSON: (nodeId: string) => ({ nodeId }),
@@ -98,6 +99,7 @@ export const diagramLogic = kea<diagramLogicType>([
       },
     ],
     fitViewCounter: [0, { fitDiagramView: (state) => state + 1 }],
+    newNodePosition: [null as XYPosition | null, { showNewNode: (_, { position }) => position }],
   }),
   selectors(() => ({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
@@ -222,15 +224,23 @@ export const diagramLogic = kea<diagramLogicType>([
           id: uuidv4(),
           type: 'app',
           position,
-          data: { keyword: keyword, config: {} } as AppNodeData,
+          data: { keyword: keyword, config: {} } satisfies AppNodeData,
         }
         actions.setNodes([...values.nodes, newNode])
       } else if (type === 'event') {
         const newNode: Node = {
           id: uuidv4(),
-          type: 'event',
+          type: type,
           position,
-          data: { keyword } as EventNodeData,
+          data: { keyword } satisfies EventNodeData,
+        }
+        actions.setNodes([...values.nodes, newNode])
+      } else if (type === 'dispatch') {
+        const newNode: Node = {
+          id: uuidv4(),
+          type: type,
+          position,
+          data: { keyword, config: {} } satisfies DispatchNodeData,
         }
         actions.setNodes([...values.nodes, newNode])
       }

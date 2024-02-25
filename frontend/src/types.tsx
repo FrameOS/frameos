@@ -133,12 +133,18 @@ export interface AppNodeData {
   config: Record<string, any>
   sources?: Record<string, string>
 }
+
 export interface CodeNodeData {
   code: string
 }
 
 export interface EventNodeData {
   keyword: string
+}
+
+export interface DispatchNodeData {
+  keyword: string
+  config: Record<string, any>
 }
 
 export interface FrameScene {
