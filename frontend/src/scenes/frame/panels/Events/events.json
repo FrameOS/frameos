@@ -137,15 +137,15 @@
         "type": "output",
         "fields": []
     },
-    "setScene": {
+    "setCurrentScene": {
         "name": "setCurrentScene",
         "description": "Set the scene's public state. This is not used for private state changes.",
         "type": "output",
         "fields": [
             {
-                "name": "sceneId",
+                "name": "scene",
                 "label": "Scene",
-                "type": "sceneId",
+                "type": "scene",
                 "required": true
             }
         ]
