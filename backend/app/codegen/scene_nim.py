@@ -6,6 +6,13 @@ from app.models.frame import Frame
 from app.models.apps import get_local_frame_apps, local_apps_path
 from app.codegen.utils import sanitize_nim_string, natural_keys
 
+def get_events_schema() -> list[dict]:
+    events_schema_path = os.path.join("..", "frontend", "schema", "events.json")
+    if os.path.exists(events_schema_path):
+        with open(events_schema_path, 'r') as file:
+            return json.load(file)
+    else:
+        return []
 
 def write_scene_nim(frame: Frame, scene: dict) -> str:
     from app.models.log import new_log as log
@@ -26,6 +33,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
     field_inputs: dict[str, dict[str, str]] = {}
     source_field_inputs: dict[str, dict[str, tuple[str, str]]] = {}
     node_fields: dict[str, dict[str, str]] = {}
+    events_schema = get_events_schema()
 
     def node_id_to_integer(node_id: str) -> int:
         if node_id not in node_integer_map:
@@ -67,22 +75,66 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
 
     for node in nodes:
         node_id = node['id']
-        if node.get('type') == 'event':
+        if node.get('type') == 'event' or node.get('type') == 'dispatch':
             event = node.get('data', {}).get('keyword', None)
             if event:
                 # only if a source node
-                if node_id in next_nodes:
+                if node.get('type') == 'event' and node_id in next_nodes:
                     if not event_nodes.get(event):
                         event_nodes[event] = []
                     event_nodes[event].append(node)
 
-                # only if a target node
+                # only if a target node (plus legacy support for using 'event' as a target node)
                 if node_id in prev_nodes:
                     node_integer = node_id_to_integer(node_id)
+                    config = node.get('data', {}).get('config', {}).copy()
+                    field_inputs_for_node = field_inputs.get(node_id, {})
+                    source_field_inputs_for_node = source_field_inputs.get(node_id, {})
+                    node_fields_for_node = node_fields.get(node_id, {})
+
+                    event_schema = None
+                    for e in events_schema:
+                        if e.get('name') == event:
+                            event_schema = e
+                            break
+
+                    event_payload_pairs = []
+                    if event_schema:
+                        for field in event_schema.get('fields', []):
+                            key = field.get('name', None)
+                            if key not in config:
+                                config[key] = field.get('value', None)
+                            type = field.get('type', 'string')
+                            value = config.get(key, None)
+
+                            if key in field_inputs_for_node:
+                                event_payload_pairs += [f"\"{key}\": {field_inputs_for_node[key]}"]
+                            elif key in source_field_inputs_for_node:
+                                (source_id, source_key) = source_field_inputs_for_node[key]
+                                event_payload_pairs += [f"\"{key}\": self.node{node_id_to_integer(source_id)}.appConfig.{source_key}"]
+                            elif type == "node" and key in node_fields_for_node:
+                                outgoing_node_id = node_fields_for_node[key]
+                                event_payload_pairs += [f"\"{key}\": {node_id_to_integer(outgoing_node_id)}.NodeId"]
+                            elif type == "node" and key not in node_fields_for_node:
+                                event_payload_pairs += [f"\"{key}\": 0.NodeId"]
+                            elif type == "integer":
+                                event_payload_pairs += [f"\"{key}\": {int(value)}"]
+                            elif type == "float":
+                                event_payload_pairs += [f"\"{key}\": {float(value)}"]
+                            elif type == "boolean":
+                                event_payload_pairs += [f"\"{key}\": {'true' if value == 'true' else 'false'}"]
+                            elif type == "color":
+                                event_payload_pairs += [f"\"{key}\": parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"]
+                            elif type == "scene":
+                                event_payload_pairs += [f"\"{key}\": \"{sanitize_nim_string(str(value))}\".SceneId"]
+                            else:
+                                event_payload_pairs += [f"\"{key}\": \"{sanitize_nim_string(str(value))}\""]
+
+                    next_node_id = next_nodes.get(node_id, None)
                     run_node_lines += [
                         f"of {node_integer}.NodeId: # {event}",
-                        f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{}'})",
-                        "  nextNode = -1.NodeId"
+                        f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{'+(','.join(event_payload_pairs))+'}'})",
+                        f"  nextNode = {-1 if next_node_id is None else node_id_to_integer(next_node_id)}.NodeId"
                     ]
 
         elif node.get('type') == 'app':
@@ -156,6 +208,8 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                     app_config_pairs += [f"{key}: parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"]
                 elif type == "node":
                     app_config_pairs += [f"{key}: -1.NodeId"]
+                elif type == "scene":
+                    app_config_pairs += [f"{key}: \"{sanitize_nim_string(str(value))}\".SceneId"]
                 else:
                     app_config_pairs += [f"{key}: \"{sanitize_nim_string(str(value))}\""]
 

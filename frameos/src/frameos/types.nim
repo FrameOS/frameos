@@ -107,3 +107,4 @@ proc `%`*(x: NodeId): JsonNode = %(x.int)
 proc hash*(x: SceneId): Hash = x.string.hash
 proc `==`*(x, y: SceneId): bool = x.string == y.string
 proc `$`*(x: SceneId): string = x.string
+proc `%`*(x: SceneId): JsonNode = %*(x.string)
