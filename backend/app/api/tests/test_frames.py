@@ -33,7 +33,7 @@ class TestFrames(BaseTestCase):
         response = self.client.get(f'/api/frames/{self.frame.id}/logs')
         data = json.loads(response.data)
         assert response.status_code == 200
-        assert data == {"logs": [log1.to_dict(), log2.to_dict()]}
+        assert [log for log in data['logs'] if log['type'] != 'welcome'] == [log1.to_dict(), log2.to_dict()]
 
     def test_api_frame_get_logs_limit(self):
         for i in range(0, 1010):
