@@ -159,7 +159,10 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
     sceneOptions: [
       (s) => [s.editingFrame],
-      (frame): Option[] => (frame.scenes ?? []).map((s) => ({ label: s.name || 'Unnamed Scene', value: s.id || '' })),
+      (frame): Option[] => [
+        { label: '', value: '' },
+        ...(frame.scenes ?? []).map((s) => ({ label: s.name || 'Unnamed Scene', value: s.id || '' })),
+      ],
       { resultEqualityCheck: equal },
     ],
   })),

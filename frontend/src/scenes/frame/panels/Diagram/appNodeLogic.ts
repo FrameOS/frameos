@@ -7,8 +7,8 @@ import type { Node } from '@reactflow/core/dist/esm/types/nodes'
 import { App, ConfigField, FrameEvent, MarkdownField } from '../../../../types'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 
-import _events from '../Events/events.json'
-const events: Record<string, FrameEvent> = _events as any
+import _events from '../../../../../schema/events.json'
+const events: FrameEvent[] = _events as any
 
 export interface AppNodeLogicProps extends DiagramLogicProps {
   nodeId: string
@@ -100,7 +100,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
       (s) => [s.node],
       (node): App | null => {
         if (node && node.type === 'dispatch' && node.data && node.data.keyword) {
-          return events[node.data.keyword] ?? null
+          return events.find((e) => e.name == node.data.keyword) ?? null
         }
         return null
       },

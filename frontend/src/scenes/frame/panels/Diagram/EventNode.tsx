@@ -6,8 +6,8 @@ import { diagramLogic } from './diagramLogic'
 import { FrameEvent } from '../../../../types'
 import { fieldTypeToGetter } from '../../../../utils/fieldTypes'
 
-import _events from '../Events/events.json'
-const events: Record<string, FrameEvent> = _events as any
+import _events from '../../../../../schema/events.json'
+const events: FrameEvent[] = _events as any
 
 export function EventNode(props: NodeProps): JSX.Element {
   const { data, id } = props
@@ -15,7 +15,9 @@ export function EventNode(props: NodeProps): JSX.Element {
   const { keyword } = data
 
   const fields =
-    keyword === 'init' || keyword === 'setSceneState' ? scene?.fields ?? [] : events?.[keyword]?.fields ?? []
+    keyword === 'init' || keyword === 'setSceneState'
+      ? scene?.fields ?? []
+      : events?.find((e) => e.name == keyword)?.fields ?? []
 
   return (
     <div
