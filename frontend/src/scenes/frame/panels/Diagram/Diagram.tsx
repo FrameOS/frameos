@@ -108,8 +108,8 @@ export function Diagram({ sceneId }: DiagramProps) {
         inputCoords.y -= reactFlowBounds?.top ?? 0
 
         const position = reactFlowInstance?.project(inputCoords) ?? { x: 0, y: 0 }
-        position.x -= 200
-        position.y -= 0
+        position.x -= 280
+        position.y -= 80
         const newNode: Node = {
           id,
           position: position,
