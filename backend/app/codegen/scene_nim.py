@@ -93,9 +93,9 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                     node_fields_for_node = node_fields.get(node_id, {})
 
                     event_schema = None
-                    for e in events_schema:
-                        if e.get('name') == event:
-                            event_schema = e
+                    for schema in events_schema:
+                        if schema.get('name') == event:
+                            event_schema = schema
                             break
 
                     event_payload_pairs = []
@@ -107,28 +107,8 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                             type = field.get('type', 'string')
                             value = config.get(key, None)
 
-                            if key in field_inputs_for_node:
-                                event_payload_pairs += [f"\"{key}\": {field_inputs_for_node[key]}"]
-                            elif key in source_field_inputs_for_node:
-                                (source_id, source_key) = source_field_inputs_for_node[key]
-                                event_payload_pairs += [f"\"{key}\": self.node{node_id_to_integer(source_id)}.appConfig.{source_key}"]
-                            elif type == "node" and key in node_fields_for_node:
-                                outgoing_node_id = node_fields_for_node[key]
-                                event_payload_pairs += [f"\"{key}\": {node_id_to_integer(outgoing_node_id)}.NodeId"]
-                            elif type == "node" and key not in node_fields_for_node:
-                                event_payload_pairs += [f"\"{key}\": 0.NodeId"]
-                            elif type == "integer":
-                                event_payload_pairs += [f"\"{key}\": {int(value)}"]
-                            elif type == "float":
-                                event_payload_pairs += [f"\"{key}\": {float(value)}"]
-                            elif type == "boolean":
-                                event_payload_pairs += [f"\"{key}\": {'true' if value == 'true' else 'false'}"]
-                            elif type == "color":
-                                event_payload_pairs += [f"\"{key}\": parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"]
-                            elif type == "scene":
-                                event_payload_pairs += [f"\"{key}\": \"{sanitize_nim_string(str(value))}\".SceneId"]
-                            else:
-                                event_payload_pairs += [f"\"{key}\": \"{sanitize_nim_string(str(value))}\""]
+                            event_payload_pairs.append(sanitize_nim_field(key, type, value, field_inputs_for_node,
+                                             node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, True))
 
                     next_node_id = next_nodes.get(node_id, None)
                     run_node_lines += [
@@ -191,30 +171,11 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                     continue
                 type = config_types[key]
 
-                if key in field_inputs_for_node:
-                    app_config_pairs += [f"{key}: {field_inputs_for_node[key]}"]
-                elif type == "node" and key in node_fields_for_node:
-                    outgoing_node_id = node_fields_for_node[key]
-                    app_config_pairs += [f"{key}: {node_id_to_integer(outgoing_node_id)}.NodeId"]
-                elif type == "node" and key not in node_fields_for_node:
-                    app_config_pairs += [f"{key}: 0.NodeId"]
-                elif type == "integer":
-                    app_config_pairs += [f"{key}: {int(value)}"]
-                elif type == "float":
-                    app_config_pairs += [f"{key}: {float(value)}"]
-                elif type == "boolean":
-                    app_config_pairs += [f"{key}: {'true' if value == 'true' else 'false'}"]
-                elif type == "color":
-                    app_config_pairs += [f"{key}: parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"]
-                elif type == "node":
-                    app_config_pairs += [f"{key}: -1.NodeId"]
-                elif type == "scene":
-                    app_config_pairs += [f"{key}: \"{sanitize_nim_string(str(value))}\".SceneId"]
-                else:
-                    app_config_pairs += [f"{key}: \"{sanitize_nim_string(str(value))}\""]
+                app_config_pairs.append(sanitize_nim_field(key, type, value, field_inputs_for_node,
+                                                              node_fields_for_node, source_field_inputs_for_node,
+                                                              node_id_to_integer, False))
 
             if len(sources) > 0:
-                node_app_id = "nodeapp_" + node_id.replace('-', '_')
                 init_apps += [
                     f"scene.{app_id} = nodeApp{node_id_to_integer(node_id)}.init({node_integer}.NodeId, scene.FrameScene, nodeApp{node_id_to_integer(node_id)}.AppConfig({', '.join(app_config_pairs)}))"
                 ]
@@ -389,6 +350,33 @@ var exportedScene* = ExportedScene(
 )
 """
     return scene_source
+
+
+def sanitize_nim_field(key, type, value, field_inputs_for_node, node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, key_with_quotes: bool) -> str:
+    key_str = f"\"{sanitize_nim_string(str(key))}\"" if key_with_quotes else sanitize_nim_string(str(key))
+    if key in field_inputs_for_node:
+        return f"{key_str}: {field_inputs_for_node[key]}"
+    elif key in source_field_inputs_for_node:
+        (source_id, source_key) = source_field_inputs_for_node[key]
+        return f"{key_str}: self.node{node_id_to_integer(source_id)}.appConfig.{source_key}"
+    elif type == "node" and key in node_fields_for_node:
+        outgoing_node_id = node_fields_for_node[key]
+        return f"{key_str}: {node_id_to_integer(outgoing_node_id)}.NodeId"
+    elif type == "node" and key not in node_fields_for_node:
+        return f"{key_str}: 0.NodeId"
+    elif type == "integer":
+        return f"{key_str}: {int(value)}"
+    elif type == "float":
+        return f"{key_str}: {float(value)}"
+    elif type == "boolean":
+        return f"{key_str}: {'true' if value == 'true' else 'false'}"
+    elif type == "color":
+        return f"{key_str}: parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"
+    elif type == "scene":
+        return f"{key_str}: \"{sanitize_nim_string(str(value))}\".SceneId"
+    else:
+        return f"{key_str}: \"{sanitize_nim_string(str(value))}\""
+
 
 def write_scenes_nim(frame: Frame) -> str:
     rows = ""
