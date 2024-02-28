@@ -2,11 +2,13 @@ import { useValues } from 'kea'
 import { NodeProps, Handle, Position } from 'reactflow'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
-
+import copy from 'copy-to-clipboard'
 import { FrameEvent } from '../../../../types'
 import { fieldTypeToGetter } from '../../../../utils/fieldTypes'
 
 import _events from '../../../../../schema/events.json'
+import { ClipboardIcon } from '@heroicons/react/24/solid'
+import React from 'react'
 const events: FrameEvent[] = _events as any
 
 export function EventNode(props: NodeProps): JSX.Element {
@@ -49,6 +51,14 @@ export function EventNode(props: NodeProps): JSX.Element {
           <div className="flex items-center justify-end space-x-1 w-full">
             <code className="text-xs mr-2 text-gray-400 flex-1">{field.type}</code>
             <div title={field.label}>{field.name}</div>
+            <ClipboardIcon
+              className="w-5 h-5 cursor-pointer"
+              onClick={() =>
+                copy(
+                  `context.payload{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
+                )
+              }
+            />
             <Handle
               type="source"
               position={Position.Right}

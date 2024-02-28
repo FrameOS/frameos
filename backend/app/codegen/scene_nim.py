@@ -46,8 +46,9 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
         source_handle = edge.get('sourceHandle', None)
         target_handle = edge.get('targetHandle', None)
         if source and target:
-            if source_handle == 'next' and target_handle == 'prev':
-                next_nodes[source] = target
+            if target_handle == 'prev':
+                if source_handle == 'next':
+                    next_nodes[source] = target
                 prev_nodes[target] = source
             if source_handle == 'fieldOutput' and target_handle.startswith('fieldInput/'):
                 field = target_handle.replace('fieldInput/', '')
