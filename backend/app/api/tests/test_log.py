@@ -1,3 +1,4 @@
+from app import db
 from app.tests.base import BaseTestCase
 from app.models import new_frame, update_frame, Log
 
@@ -44,20 +45,23 @@ class TestLogAPI(BaseTestCase):
         assert Log.query.filter_by(frame=self.frame).filter(Log.type != 'welcome').count() == 0
 
     def test_api_log_limits(self):
+        for old_log in Log.query.all():
+            db.session.delete(old_log)
+        db.session.commit()
         headers = {'Authorization': 'Bearer testkey'}
         data = {'logs': [{'event': 'log', 'message': 'banana'}] * 1200}
         response = self.client.post('/api/log', json=data, headers=headers)
         assert response.status_code == 200
-        assert Log.query.filter_by(frame=self.frame).filter(Log.type != 'welcome').count() == 1100
+        assert Log.query.filter_by(frame=self.frame).count() == 1100
 
         data = {'logs': [{'event': 'log', 'message': 'banana'}] * 50}
         self.client.post('/api/log', json=data, headers=headers)
-        assert Log.query.filter_by(frame=self.frame).filter(Log.type != 'welcome').count() == 1050
+        assert Log.query.filter_by(frame=self.frame).count() == 1050
 
         data = {'logs': [{'event': 'log', 'message': 'banana'}] * 40}
         self.client.post('/api/log', json=data, headers=headers)
-        assert Log.query.filter_by(frame=self.frame).filter(Log.type != 'welcome').count() == 1090
+        assert Log.query.filter_by(frame=self.frame).count() == 1090
 
         data = {'logs': [{'event': 'log', 'message': 'banana'}] * 30}
         self.client.post('/api/log', json=data, headers=headers)
-        assert Log.query.filter_by(frame=self.frame).filter(Log.type != 'welcome').count() == 1020
+        assert Log.query.filter_by(frame=self.frame).count() == 1020
