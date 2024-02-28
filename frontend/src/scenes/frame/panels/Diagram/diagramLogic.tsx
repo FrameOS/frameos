@@ -41,7 +41,6 @@ export const diagramLogic = kea<diagramLogicType>([
     rearrangeCurrentScene: true,
     fitDiagramView: true,
     keywordDropped: (keyword: string, type: string, position: XYPosition) => ({ keyword, type, position }),
-    showNewNode: (position: XYPosition) => ({ position }),
     updateNodeData: (id: string, data: Record<string, any>) => ({ id, data }),
     updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
     copyAppJSON: (nodeId: string) => ({ nodeId }),
@@ -99,7 +98,6 @@ export const diagramLogic = kea<diagramLogicType>([
       },
     ],
     fitViewCounter: [0, { fitDiagramView: (state) => state + 1 }],
-    newNodePosition: [null as XYPosition | null, { showNewNode: (_, { position }) => position }],
   }),
   selectors(() => ({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
