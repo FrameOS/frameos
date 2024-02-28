@@ -19,18 +19,12 @@ export function Events() {
     <div className="space-y-2">
       <Tabs className="border border-t-0 border-l-0 border-r-0 border-b-1 border-gray-700 pl-2">
         <Tab onClick={showListen} active={tab === 'listen'} activeColorClass="bg-[#4a4b8c]" className="mb-[-1px]">
-          Listen
+          Listen to an event
         </Tab>
         <Tab onClick={showDispatch} active={tab === 'dispatch'} activeColorClass="bg-[#4a4b8c]" className="mb-[-1px]">
-          Dispatch
+          Dispatch an event
         </Tab>
       </Tabs>
-
-      {tab === 'listen' ? (
-        <div>Drag an event onto the scene to listen for it.</div>
-      ) : (
-        <div>Drag an event onto the scene to dispatch it.</div>
-      )}
 
       {Object.values(events).map(({ name, description, fields, type }) => (
         <Box

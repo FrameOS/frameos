@@ -54,9 +54,12 @@ export function Control(): JSX.Element {
           title={
             <>
               The fields seen here are be available as <code className="text-xs">{'state{"fieldName"}.getStr()'}</code>{' '}
-              in any app in this scene. The state is just Nim's <code className="text-xs">JsonNode</code>, so access it
-              accordingly. This means use <code className="text-xs">{'state{"field"}.getStr()'}</code> to access values,
-              and <pre className="text-xs">{'state{"field"} = %*("str")'}</pre>
+              in any app in this scene. The state is just Nim's{' '}
+              <a href="https://nim-lang.org/docs/json.html" target="_blank" rel="noreferer">
+                <code className="text-xs underline">JsonNode</code>
+              </a>
+              , so access it accordingly. This means use <code className="text-xs">{'state{"field"}.getStr()'}</code> to
+              access values, and <pre className="text-xs">{'state{"field"} = %*("str")'}</pre>
               to store values.
             </>
           }
