@@ -8,6 +8,9 @@ import { v4 as uuidv4 } from 'uuid'
 import { panelsLogic } from '../panelsLogic'
 import { Option } from '../../../../components/Select'
 
+import _sceneTemplates from './templates.json'
+const sceneTemplates: Record<string, Record<string, any>> = _sceneTemplates
+
 export interface ScenesLogicProps {
   frameId: number
 }
@@ -34,14 +37,18 @@ export const scenesLogic = kea<scenesLogicType>([
     newScene: {
       defaults: {
         name: '',
+        template: Object.keys(sceneTemplates)[0],
       },
       errors: (values) => ({
         name: !values.name ? 'Name is required' : undefined,
       }),
-      submit: ({ name }, breakpoint) => {
+      submit: ({ name, template }, breakpoint) => {
         const scenes: FrameScene[] = values.frameForm.scenes || []
         const id = uuidv4()
-        actions.setFrameFormValues({ scenes: [...scenes, { id, name, nodes: [], edges: [], fields: [] }] })
+        const templateData = sceneTemplates[template] ?? {}
+        actions.setFrameFormValues({
+          scenes: [...scenes, { id, name, nodes: [], edges: [], fields: [], ...templateData }],
+        })
         actions.editScene(id)
         actions.resetNewScene()
       },
@@ -51,7 +58,10 @@ export const scenesLogic = kea<scenesLogicType>([
     frameId: [() => [(_, props: ScenesLogicProps) => props.frameId], (frameId) => frameId],
     editingFrame: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm || frame || null],
     scenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame.scenes ?? []],
-    sceneTemplateOptions: [() => [], (): Option[] => [{ label: 'Blank', value: '' }]],
+    sceneTemplateOptions: [
+      () => [],
+      (): Option[] => Object.keys(sceneTemplates).map((key) => ({ label: key, value: key })),
+    ],
   }),
   listeners(({ actions, values }) => ({
     setAsDefault: ({ sceneId }) => {

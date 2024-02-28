@@ -1,0 +1,77 @@
+{
+  "Default": {
+    "nodes": [
+      {
+        "id": "73ad360a-2668-451e-8119-f424b1b6334f",
+        "type": "event",
+        "position": {
+          "x": 73,
+          "y": 180
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 71,
+        "height": 72
+      },
+      {
+        "id": "d58334c5-356c-4f7b-b7e2-aa487c05c3c6",
+        "type": "app",
+        "position": {
+          "x": 288.5,
+          "y": 176
+        },
+        "data": {
+          "keyword": "unsplash",
+          "config": {}
+        },
+        "width": 409,
+        "height": 130,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 288.5,
+          "y": 176
+        },
+        "dragging": false
+      },
+      {
+        "id": "86a2e17b-1fa7-441a-89a8-c231bf020247",
+        "type": "app",
+        "position": {
+          "x": 808.7646319316875,
+          "y": 166.31434273371403
+        },
+        "data": {
+          "keyword": "clock",
+          "config": {}
+        },
+        "width": 372,
+        "height": 404,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 808.7646319316875,
+          "y": 166.31434273371403
+        },
+        "dragging": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "67237a32-2a1f-4497-9c0c-83e9fe932c62",
+        "source": "73ad360a-2668-451e-8119-f424b1b6334f",
+        "sourceHandle": "next",
+        "target": "d58334c5-356c-4f7b-b7e2-aa487c05c3c6",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "96cfe6cc-1ac2-4059-9616-117e30a2c544",
+        "source": "d58334c5-356c-4f7b-b7e2-aa487c05c3c6",
+        "sourceHandle": "next",
+        "target": "86a2e17b-1fa7-441a-89a8-c231bf020247",
+        "targetHandle": "prev"
+      }
+    ]
+  },
+  "Blank": {
+  }
+}
