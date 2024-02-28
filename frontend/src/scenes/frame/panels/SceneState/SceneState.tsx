@@ -68,7 +68,7 @@ export function SceneState(): JSX.Element {
       </div>
       <div className="flex justify-between w-full items-center gap-2 mb-2">
         <div className="flex items-center gap-1">
-          <H6>Fields for "{scene?.name || 'Unnamed Scene'}"</H6>
+          <H6>Scene "{scene?.name || 'Unnamed Scene'}"</H6>
         </div>
         <div className="flex items-center gap-2">
           <Button
