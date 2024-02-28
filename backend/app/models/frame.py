@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 from datetime import timezone
 from app import db, socketio
@@ -124,6 +125,13 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
     db.session.add(frame)
     db.session.commit()
     socketio.emit('new_frame', frame.to_dict())
+
+    from app.models import new_log
+    new_log(frame.id, "welcome", f"Frame \"{frame.name}\" added!")
+    new_log(frame.id, "welcome", "-> Press 'Save & Deploy' to deploy the default scene")
+    new_log(frame.id, "welcome", "-> Install additional scenes in the 'Scenes' panel")
+    new_log(frame.id, "welcome", "-> Drag 'Apps' and 'Events' onto the active scene to customize")
+
     return frame
 
 
@@ -148,52 +156,23 @@ def delete_frame(frame_id: int):
     return False
 
 
+def get_templates_json() -> dict:
+    templates_schema_path = os.path.join("..", "frontend", "schema", "templates.json")
+    if os.path.exists(templates_schema_path):
+        with open(templates_schema_path, 'r') as file:
+            return json.load(file)
+    else:
+        return {}
+
 def create_default_scene() -> dict:
-    event_uuid = str(uuid.uuid4())
-    unsplash_uuid = str(uuid.uuid4())
-    edge_uuid = str(uuid.uuid4())
+    templates = get_templates_json()
+    first_template = list(templates.values())[0]
+
     return {
         "name": "Default Scene",
         "id": str(uuid.uuid4()),
         "default": True,
-        "edges": [
-            {
-                "id": edge_uuid,
-                "source": event_uuid,
-                "sourceHandle": "next",
-                "target": unsplash_uuid,
-                "targetHandle": "prev"
-            }
-        ],
-        "nodes": [
-            {
-                "id": event_uuid,
-                "type": "event",
-                "position": {
-                    "x": 259.18108974358967,
-                    "y": 379.3192307692308
-                },
-                "data": {
-                    "keyword": "render"
-                },
-                "width": 132,
-                "height": 72
-            },
-            {
-                "id": unsplash_uuid,
-                "type": "app",
-                "position": {
-                    "x": 598.6810897435896,
-                    "y": 412.8192307692308
-                },
-                "data": {
-                    "keyword": "unsplash",
-                    "config": {}
-                },
-                "width": 133,
-                "height": 102
-            }
-        ]
+        **first_template,
     }
 
 

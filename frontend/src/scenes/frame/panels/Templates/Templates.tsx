@@ -27,6 +27,7 @@ export function Templates() {
 
   return (
     <>
+      <div className="p-2 mb-4 text-yellow-300">Note! This panel needs a big overhaul!</div>
       <div className="space-y-2 float-right">
         <Button size="small" onClick={saveAsNewTemplate}>
           Save as template...

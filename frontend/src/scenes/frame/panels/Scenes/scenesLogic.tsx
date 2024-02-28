@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { panelsLogic } from '../panelsLogic'
 import { Option } from '../../../../components/Select'
 
-import _sceneTemplates from './templates.json'
+import _sceneTemplates from '../../../../../schema/templates.json'
 const sceneTemplates: Record<string, Record<string, any>> = _sceneTemplates
 
 export interface ScenesLogicProps {
