@@ -8,7 +8,7 @@ import { fieldTypeToGetter } from '../../../../utils/fieldTypes'
 
 import _events from '../../../../../schema/events.json'
 import { ClipboardIcon } from '@heroicons/react/24/solid'
-import React from 'react'
+
 const events: FrameEvent[] = _events as any
 
 export function EventNode(props: NodeProps): JSX.Element {

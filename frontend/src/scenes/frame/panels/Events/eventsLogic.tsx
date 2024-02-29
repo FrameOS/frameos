@@ -25,8 +25,8 @@ export const eventsLogic = kea<eventsLogicType>([
       (s) => [s.tab],
       (tab): FrameEvent[] => {
         return tab === 'listen'
-          ? events.filter((event) => event.type === 'input' || event.type === 'both')
-          : events.filter((event) => event.type === 'output' || event.type === 'both')
+          ? events.filter((event) => event.canListen)
+          : events.filter((event) => event.canDispatch)
       },
     ],
   }),

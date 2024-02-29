@@ -171,8 +171,10 @@ export interface FrameEvent {
   description?: string
   /** Fields for app in diagram editor */
   fields?: ConfigField[]
-  /** Can this event be listened to and/or dispatched */
-  type?: 'input' | 'output' | 'both'
+  /** Can this event be dispatched */
+  canDispatch?: boolean
+  /** Can this event be listened to */
+  canListen?: boolean
 }
 
 export enum Area {

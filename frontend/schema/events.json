@@ -2,19 +2,20 @@
     {
         "name": "init",
         "description": "Scene initialization. Triggered when the scene is loaded.",
-        "type": "input",
+        "canListen": true,
         "fields": []
     },
     {
         "name": "render",
         "description": "Render the scene. Triggered according to the frame's refresh interval, or when explicitly requested.",
-        "type": "both",
+        "canListen": true,
+        "canDispatch": true,
         "fields": []
     },
     {
         "name": "keyDown",
         "description": "When a key is pressed on a keyboard",
-        "type": "input",
+        "canListen": true,
         "fields": [
             {
                 "name": "key",
@@ -33,7 +34,7 @@
     {
         "name": "keyUp",
         "description": "When a key is released on a keyboard",
-        "type": "input",
+        "canListen": true,
         "fields": [
             {
                 "name": "key",
@@ -52,7 +53,7 @@
     {
         "name": "mouseMove",
         "description": "When a mouse moves",
-        "type": "input",
+        "canListen": true,
         "fields": [
             {
                 "name": "x",
@@ -71,7 +72,7 @@
     {
         "name": "mouseDown",
         "description": "When a mouse button is pressed",
-        "type": "input",
+        "canListen": true,
         "fields": [
             {
                 "name": "button",
@@ -84,7 +85,7 @@
     {
         "name": "mouseUp",
         "description": "When a mouse button is released",
-        "type": "input",
+        "canListen": true,
         "fields": [
             {
                 "name": "button",
@@ -97,19 +98,21 @@
     {
         "name": "turnOn",
         "description": "Turn the screen on",
-        "type": "both",
+        "canListen": true,
+        "canDispatch": true,
         "fields": []
     },   
     {
         "name": "turnOff",
         "description": "Turn the screen off",
-        "type": "both",
+        "canListen": true,
+        "canDispatch": true,
         "fields": []
     },
     {
         "name": "button",
         "description": "When a GPIO button is pressed or released",
-        "type": "input",
+        "canListen": true,
         "fields": [
             {
                 "name": "pin",
@@ -134,13 +137,13 @@
     {
         "name": "setSceneState",
         "description": "Set the scene's public state. This is not used for private state changes.",
-        "type": "output",
+        "canDispatch": true,
         "fields": []
     },
     {
         "name": "setCurrentScene",
         "description": "Set the scene's public state. This is not used for private state changes.",
-        "type": "output",
+        "canDispatch": true,
         "fields": [
             {
                 "name": "sceneId",
