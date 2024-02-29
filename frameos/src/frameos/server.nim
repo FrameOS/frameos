@@ -17,6 +17,7 @@ import frameos/config
 import frameos/utils/image
 from net import Port
 from frameos/runner import getLastImagePng, getLastPublicState
+from scenes/scenes import sceneOptions
 
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
@@ -126,7 +127,7 @@ router myrouter:
       resp Http401, "Unauthorized"
     var fieldsHtml = ""
     var fieldsSubmitHtml = ""
-    let (_, values, fields) = getLastPublicState()
+    let (currentSceneId, values, fields) = getLastPublicState()
     for field in fields:
       let key = field.name
       let label = if field.label != "": field.label else: key
@@ -161,11 +162,17 @@ router myrouter:
       else:
         fieldsHtml.add(fmt"<input type='text' id='{h($key)}' placeholder='{h(placeholder)}' value='{h(stringValue)}' /><br/><br/>")
 
+    var sceneOptionsHtml = ""
+    for (sceneId, sceneName) in sceneOptions:
+      let selected = if sceneId == currentSceneId: " selected" else: ""
+      sceneOptionsHtml.add(fmt"<option value='{h(sceneId.string)}'{selected}>{h(sceneName)}</option>")
+
     fieldsHtml.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
     {.gcsafe.}: # We're only reading static assets. It's fine.
       let controlHtml = webAssets.getAsset("assets/web/control.html").
         replace("/*$$fieldsHtml$$*/", fieldsHtml).
         replace("/*$$fieldsSubmitHtml$$*/", fieldsSubmitHtml).
+        replace("/*$$sceneOptionsHtml$$*/", sceneOptionsHtml).
         replace("Frame Control", if globalFrameConfig.name != "": h(globalFrameConfig.name) else: "Frame Control")
       resp Http200, controlHtml
 

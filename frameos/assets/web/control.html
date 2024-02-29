@@ -37,12 +37,27 @@
             }); 
             document.getElementById('setSceneState').value = 'Now wait a while...'; 
         }
+        function postSetCurrentScene() { 
+            var data={sceneId: document.getElementById('currentSceneId').value};
+            fetch('/event/setCurrentScene', { 
+                method: 'POST', 
+                headers: headers, 
+                body: JSON.stringify(data) 
+            }); 
+            document.getElementById('setCurrentScene').value = 'Reloading in 5'; 
+            window.setTimeout(() => { 
+                document.getElementById('setCurrentScene').value = 'Reloading...'; 
+                window.location.reload();
+            }, 5000);
+        }
     </script>
 </head>
 <body>
     <h1>Frame Control</h1>
     <h2>Actions:</h2>
     <form onSubmit='postRender(); return false'><input type='submit' value='Render'></form>
+    <h2>Scene</h2>
+    <form onSubmit='postSetCurrentScene(); return false'><select id="currentSceneId">/*$$sceneOptionsHtml$$*/</select><input type='submit' id="setCurrentScene" value='Set Scene'></form>
     <h2>State</h2>
     <form onSubmit='postSetSceneState(); return false'>/*$$fieldsHtml$$*/</form>
 </body>

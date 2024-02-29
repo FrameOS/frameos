@@ -4,6 +4,10 @@ import tables
 
 let defaultSceneId* = "default".SceneId
 
+const sceneOptions* = [
+  ("753d9439-8470-4834-8c5d-73264875c5b1".SceneId, "Default Scene"),
+]
+
 proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result = initTable[SceneId, ExportedScene]()
   result[defaultSceneId] = defaultScene.exportedScene
