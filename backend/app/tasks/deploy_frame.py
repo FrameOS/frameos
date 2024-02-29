@@ -208,7 +208,7 @@ def make_local_modifications(frame: Frame, source_dir: str):
         scene_source = write_scene_nim(frame, scene)
         id = re.sub(r'\W+', '', scene.get('id', 'default'))
 
-        with open(os.path.join(source_dir, "src", "scenes", f"{id}.nim"), "w") as file:
+        with open(os.path.join(source_dir, "src", "scenes", f"scene_{id}.nim"), "w") as file:
             file.write(scene_source)
     with open(os.path.join(source_dir, "src", "scenes", "scenes.nim"), "w") as file:
         file.write(write_scenes_nim(frame))
