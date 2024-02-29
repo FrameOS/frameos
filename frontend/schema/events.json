@@ -1,7 +1,7 @@
 [
     {
         "name": "init",
-        "description": "Scene initialization. Triggered when the scene is loaded.",
+        "description": "Triggered when the scene is first loaded.",
         "canListen": true,
         "fields": []
     },
@@ -10,6 +10,18 @@
         "description": "Render the scene. Triggered according to the frame's refresh interval, or when explicitly requested.",
         "canListen": true,
         "canDispatch": true,
+        "fields": []
+    },
+    {
+        "name": "openScene",
+        "description": "Right after the scene is opened for the second time.",
+        "canListen": true,
+        "fields": []
+    },
+    {
+        "name": "closeScene",
+        "description": "Right before the scene is closed.",
+        "canListen": true,
         "fields": []
     },
     {
@@ -52,7 +64,7 @@
     },
     {
         "name": "mouseMove",
-        "description": "When a mouse moves",
+        "description": "When a mouse moves (not logged)",
         "canListen": true,
         "fields": [
             {
@@ -71,7 +83,7 @@
     },
     {
         "name": "mouseDown",
-        "description": "When a mouse button is pressed",
+        "description": "When a mouse button is pressed (not logged)",
         "canListen": true,
         "fields": [
             {
@@ -84,7 +96,7 @@
     },
     {
         "name": "mouseUp",
-        "description": "When a mouse button is released",
+        "description": "When a mouse button is released (not logged)",
         "canListen": true,
         "fields": [
             {

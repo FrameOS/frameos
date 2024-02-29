@@ -119,7 +119,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
         if (app) {
           return app?.fields ?? configJson?.fields ?? null
         } else if (event) {
-          if (event.name === 'init' || event.name === 'setSceneState') {
+          if (event.name === 'setSceneState') {
             return scene?.fields ?? null
           }
           return event?.fields ?? null

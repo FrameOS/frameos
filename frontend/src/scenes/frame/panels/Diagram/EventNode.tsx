@@ -16,10 +16,9 @@ export function EventNode(props: NodeProps): JSX.Element {
   const { selectedNodeId, scene } = useValues(diagramLogic)
   const { keyword } = data
 
-  const fields =
-    keyword === 'init' || keyword === 'setSceneState'
-      ? scene?.fields ?? []
-      : events?.find((e) => e.name == keyword)?.fields ?? []
+  const isEventWithStateFields = keyword === 'init' || keyword === 'setSceneState' || keyword === 'render'
+
+  const fields = isEventWithStateFields ? scene?.fields ?? [] : events?.find((e) => e.name == keyword)?.fields ?? []
 
   return (
     <div
@@ -55,16 +54,24 @@ export function EventNode(props: NodeProps): JSX.Element {
               className="w-5 h-5 cursor-pointer"
               onClick={() =>
                 copy(
-                  `context.payload{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
+                  isEventWithStateFields
+                    ? `state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
+                    : `context.payload{"${field.name}"}${
+                        fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
+                      }`
                 )
               }
             />
             <Handle
               type="source"
               position={Position.Right}
-              id={`code/context.payload{"${field.name}"}${
-                fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
-              }`}
+              id={
+                isEventWithStateFields
+                  ? `code/state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
+                  : `code/context.payload{"${field.name}"}${
+                      fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
+                    }`
+              }
               style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#000000' }}
             />
           </div>
