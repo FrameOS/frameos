@@ -28,6 +28,9 @@ type
     thread*: Thread[FrameConfig]
     channel*: Channel[JsonNode]
     log*: proc (payload: JsonNode)
+    enabled*: bool
+    enable*: proc ()
+    disable*: proc ()
 
   MetricsLogger* = ref object
     frameConfig*: FrameConfig
@@ -51,7 +54,7 @@ type
     persistedStateKeys*: seq[string]
     runEvent*: proc (context: var ExecutionContext): void
     render*: proc (self: FrameScene): Image
-    init*: proc (sceneId: SceneId, frameConfig: FrameConfig, persistedState: JsonNode): FrameScene
+    init*: proc (sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene
 
   ExecutionContext* = ref object
     scene*: FrameScene
@@ -73,6 +76,7 @@ type
 
   RunnerThread* = ref object
     frameConfig*: FrameConfig
+    logger*: Logger
     scenes*: Table[SceneId, FrameScene]
     currentSceneId*: SceneId
     lastRenderAt*: float

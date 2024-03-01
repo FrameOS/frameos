@@ -5,6 +5,7 @@ from scenes/scenes import getExportedScenes, defaultSceneId
 import frameos/channels
 import frameos/types
 import frameos/config
+import frameos/logger
 import frameos/utils/image
 
 import drivers/drivers as drivers
@@ -22,7 +23,7 @@ const SCENE_STATE_JSON_FOLDER = "./state"
 let exportedScenes*: Table[SceneId, ExportedScene] = getExportedScenes()
 
 var
-  thread: Thread[FrameConfig]
+  thread: Thread[(FrameConfig, Logger)]
   lastImageLock: Lock
   lastImage {.guard: lastImageLock.} = newImage(1, 1)
   lastImagePresent = false
@@ -97,7 +98,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   let sceneTimer = epochTime()
   let requiredWidth = self.frameConfig.renderWidth()
   let requiredHeight = self.frameConfig.renderHeight()
-  log(%*{"event": "render", "width": requiredWidth, "height": requiredHeight})
+  self.logger.log(%*{"event": "render", "width": requiredWidth, "height": requiredHeight})
 
   try:
     let image = exportedScene.render(scene)
@@ -112,12 +113,12 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
       result = image.rotateDegrees(self.frameConfig.rotate)
   except Exception as e:
     result = renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}")
-    log(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
+    self.logger.log(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
   self.lastRenderAt = epochTime()
-  log(%*{"event": "render:done", "ms": round((epochTime() - sceneTimer) * 1000, 3)})
+  self.logger.log(%*{"event": "render:done", "ms": round((epochTime() - sceneTimer) * 1000, 3)})
 
 proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
-  log(%*{"event": "startRenderLoop"})
+  self.logger.log(%*{"event": "startRenderLoop"})
   var timer = 0.0
   var driverTimer = 0.0
   var sleepDuration = 0.0
@@ -135,11 +136,11 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
       raise newException(Exception, &"Scene {sceneId} not found")
     let exportedScene = exportedScenes[sceneId]
     if lastSceneId != sceneId:
-      log(%*{"event": "sceneChange", "sceneId": sceneId.string})
+      self.logger.log(%*{"event": "sceneChange", "sceneId": sceneId.string})
       if self.scenes.hasKey(sceneId):
         currentScene = self.scenes[sceneId]
       else:
-        currentScene = exportedScenes[sceneId].init(sceneId, self.frameConfig, loadPersistedState(sceneId))
+        currentScene = exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
         self.scenes[sceneId] = currentScene
         currentScene.updateLastPublicState()
       lastSceneId = sceneId
@@ -164,10 +165,10 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     try:
       # TODO: render the driver part in another thread
       drivers.render(lastRotatedImage)
-      log(%*{"event": "render:driver",
+      self.logger.log(%*{"event": "render:driver",
         "device": self.frameConfig.device, "ms": round((epochTime() - driverTimer) * 1000, 3)})
     except Exception as e:
-      log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
+      self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
     if self.frameConfig.interval < 1:
       let now = epochTime()
@@ -176,17 +177,17 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
         # Two fast scenes in a row
         if fastSceneCount == 2:
           # TODO: capture logs per _scene_ and log if slow
-          log(%*{"event": "pause", "message": "Rendering fast. Pausing all logs for 10s"})
-          pauseLogging()
+          self.logger.log(%*{"event": "pause", "message": "Rendering fast. Pausing all scene render logs for 10 seconds."})
+          self.logger.disable()
           fastSceneResumeAt = now + 10
         elif fastSceneResumeAt != 0.0 and now > fastSceneResumeAt:
           fastSceneCount = 0
           fastSceneResumeAt = 0.0
-          resumeLogging()
+          self.logger.enable()
       else:
         fastSceneCount = 0
         fastSceneResumeAt = 0.0
-        resumeLogging()
+        self.logger.enable()
 
     # Gives a chance for the gathered events to be collected
     await sleepAsync(0.001)
@@ -206,7 +207,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
 
     # Sleep until the next frame
     sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) * 1000, 0.1)
-    log(%*{"event": "sleep", "ms": round(sleepDuration, 3)})
+    self.logger.log(%*{"event": "sleep", "ms": round(sleepDuration, 3)})
     # Calculate once more to subtract the time it took to log the message
     sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) * 1000, 0.1)
     let future = sleepAsync(sleepDuration)
@@ -218,13 +219,13 @@ proc triggerRender*(self: RunnerThread): void =
   if self.sleepFuture.isSome:
     self.sleepFuture.get().complete()
   else:
-    log(%*{"event": "render", "error": "Render already in progress, ignoring."})
+    self.logger.log(%*{"event": "render", "error": "Render already in progress, ignoring."})
 
 proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: string, payload: JsonNode) =
   let targetSceneId: SceneId = if sceneId.isSome: sceneId.get() else: self.currentSceneId
   if not self.scenes.hasKey(targetSceneId):
-    log(%*{"event": "dispatchEvent:error", "error": "Scene not initialized", "sceneId": targetSceneId.string,
-        "event": event, "payload": payload})
+    self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not initialized",
+        "sceneId": targetSceneId.string, "event": event, "payload": payload})
     return
   let scene = self.scenes[targetSceneId]
   let exportedScene = exportedScenes[targetSceneId]
@@ -249,7 +250,7 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
     if success:
       waitTime = 1
       if not event.startsWith("mouse"):
-        log(%*{"event": "event:" & event, "payload": payload})
+        self.logger.log(%*{"event": "event:" & event, "payload": payload})
       try:
         case event:
           of "render":
@@ -268,12 +269,12 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
             if sceneId == self.currentSceneId:
               continue
             if not exportedScenes.hasKey(sceneId):
-              log(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
+              self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
                   "event": event, "payload": payload})
               continue
             self.dispatchSceneEvent(some(self.currentSceneId), "closeScene", payload)
             if not self.scenes.hasKey(sceneId):
-              let scene = exportedScenes[sceneId].init(sceneId, self.frameConfig, loadPersistedState(sceneId))
+              let scene = exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
               self.scenes[sceneId] = scene
               scene.updateLastPublicState()
             self.currentSceneId = sceneId
@@ -283,7 +284,7 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
           else: discard
         self.dispatchSceneEvent(sceneId, event, payload)
       except Exception as e:
-        log(%*{"event": "event:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
+        self.logger.log(%*{"event": "event:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
     # after we have processed all queued messages
     if not success:
@@ -295,21 +296,24 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
         if waitTime < 200:
           waitTime += 5
 
-proc createRunnerThread*(frameConfig: FrameConfig) =
+proc createRunnerThread*(args: (FrameConfig, Logger)) =
   {.cast(gcsafe).}:
     var runnerThread = RunnerThread(
-      frameConfig: frameConfig,
+      frameConfig: args[0],
       scenes: initTable[SceneId, FrameScene](),
       currentSceneId: defaultSceneId,
       lastRenderAt: 0,
       sleepFuture: none(Future[void]),
       isRendering: false,
       triggerRenderNext: false,
+      logger: args[1]
     )
     waitFor runnerThread.startRenderLoop() and runnerThread.startMessageLoop()
 
 proc newRunner*(frameConfig: FrameConfig): RunnerControl =
+  # create a separate logger, so we can pause it when rendering fast
+  var logger = newLogger(frameConfig)
   result = RunnerControl(
-    start: proc () = createThread(thread, createRunnerThread, frameConfig),
+    start: proc () = createThread(thread, createRunnerThread, (frameConfig, logger)),
   )
   setLastImage(renderError(frameConfig.renderWidth(), frameConfig.renderHeight(), "FrameOS booting..."))

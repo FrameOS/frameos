@@ -67,7 +67,7 @@ proc runNode*(self: Scene, nodeId: NodeId,
     else:
       nextNode = -1.NodeId
     if DEBUG:
-      log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
 proc runEvent*(context: var ExecutionContext) =
   let self = Scene(context.scene)
@@ -102,16 +102,12 @@ proc render*(self: FrameScene): Image =
   runEvent(context)
   return context.image
 
-proc init*(sceneId: SceneId, frameConfig: FrameConfig, persistedState: JsonNode): FrameScene =
+proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
   var state = %*{"background": %*("fish"), "message": %*("pas op voor de prikkelvis")}
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
-  let scene = Scene(
-    id: sceneId,
-    frameConfig: frameConfig,
-    state: state,
-  )
+  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger)
   let self = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene
