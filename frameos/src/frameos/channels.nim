@@ -19,21 +19,12 @@ proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) =
 
 var logChannel*: Channel[JsonNode]
 logChannel.open()
-var loggingPaused = false
 
 proc log*(event: JsonNode) =
-  if not loggingPaused:
-    logChannel.send(event)
+  logChannel.send(event)
 
 proc debug*(message: string) =
-  if not loggingPaused:
-    logChannel.send(%*{"event": "debug", "message": message})
-
-proc pauseLogging*() =
-  loggingPaused = true
-
-proc resumeLogging*() =
-  loggingPaused = false
+  logChannel.send(%*{"event": "debug", "message": message})
 
 # Server
 
