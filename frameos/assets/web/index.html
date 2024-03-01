@@ -32,14 +32,8 @@
 <script>  
     let accessKey = ""
     let accessKeyPart = ""
-    if (window.location.search) {
-        for (const [key, value] of window.location.search.substring(1).split("&").map(p => p.split("="))) {
-            if (key === 'k') {
-                accessKey = value;
-                accessKeyPart = "?k=" + encodeURIComponent(value);
-            }
-        }
-    }
+    let scalingMode = "/*$scalingMode*/contain"
+    let requestedScaling = ""
 
     function connectWebSocket() {
         var loc = window.location;
@@ -72,13 +66,21 @@
         };
     }
 
-    function toggleImageSize() {
+    function getImageSize() {
         const image1 = document.getElementById('image1');
         const image2 = document.getElementById('image2');
         
         let currentSize = window.getComputedStyle(image1, null).getPropertyValue('background-size');
+        return currentSize.trim();
+    }
 
-        if (currentSize.trim() === 'cover') {
+    function toggleImageSize() {
+        const image1 = document.getElementById('image1');
+        const image2 = document.getElementById('image2');
+        
+        let currentSize = getImageSize()
+
+        if (currentSize === 'cover') {
             image1.style.backgroundSize = 'contain';
             image2.style.backgroundSize = 'contain';
         } else {
@@ -86,6 +88,7 @@
             image2.style.backgroundSize = 'cover';
         }
     }
+
     function refreshImage() {
         const imageUrl = '/image?t=' + new Date().getTime() + (accessKey ? '&k=' + encodeURIComponent(accessKey) : '');
         const tempImage = new Image();
@@ -97,6 +100,21 @@
             oldImageElem.style.opacity = '0';
             newImageElem.style.opacity = '1';
         };
+    }
+
+    if (window.location.search) {
+        for (const [key, value] of window.location.search.substring(1).split("&").map(p => p.split("="))) {
+            if (key === 'k') {
+                accessKey = value
+                accessKeyPart = "?k=" + encodeURIComponent(value)
+            } else if (key === "s") {
+                requestedScaling = value
+            }
+        }
+    }
+
+    if ((requestedScaling.includes('cover') && scalingMode.includes('contain')) || (requestedScaling.includes('contain') && scalingMode.includes('cover'))) {
+        toggleImageSize()
     }
 
     connectWebSocket();
