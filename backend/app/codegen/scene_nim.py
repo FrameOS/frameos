@@ -271,6 +271,13 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
     else:
         public_state_fields_seq = "@[]"
 
+    # If there's an "open" event, dispatch it in init
+    open_event_in_init = ""
+    if len(event_nodes.get('open', [])) > 0:
+        open_event_in_init = """var openContext = ExecutionContext(scene: scene, event: "open", payload: %*{"sceneId": sceneId}, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+  runEvent(openContext)
+"""
+
     scene_source = f"""
 import pixie, json, times, strformat
 
@@ -340,6 +347,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
   {(newline + "  ").join(init_apps)}
   runEvent(context)
+  {open_event_in_init}
 {{.pop.}}
 
 var exportedScene* = ExportedScene(

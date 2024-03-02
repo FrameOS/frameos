@@ -276,14 +276,14 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
               self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
                   "event": event, "payload": payload})
               continue
-            self.dispatchSceneEvent(some(self.currentSceneId), "closeScene", payload)
+            self.dispatchSceneEvent(some(self.currentSceneId), "close", payload)
             if not self.scenes.hasKey(sceneId):
               let scene = exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
               self.scenes[sceneId] = scene
               scene.updateLastPublicState()
             self.currentSceneId = sceneId
             self.triggerRenderNext = true
-            self.dispatchSceneEvent(some(sceneId), "openScene", payload)
+            self.dispatchSceneEvent(some(sceneId), "open", payload)
             continue # don't dispatch this event to the scene
           else: discard
         self.dispatchSceneEvent(sceneId, event, payload)
