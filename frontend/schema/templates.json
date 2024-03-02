@@ -74,46 +74,25 @@
     ]
   },
   "QR-controlled message board": {
-    "fields": [
-      {
-        "name": "background",
-        "label": "Background Image (only one word!)",
-        "type": "string",
-        "value": "nature",
-        "placeholder": "one word, e.g. nature",
-        "persist": "disk",
-        "access": "public"
-      },
-      {
-        "name": "text",
-        "label": "Text to display",
-        "type": "text",
-        "value": "Keep at it!",
-        "persist": "disk",
-        "access": "public"
-      },
-      {
-        "name": "fontSize",
-        "label": "Font size",
-        "type": "integer",
-        "value": "90",
-        "persist": "disk",
-        "access": "public"
-      }
-    ],
     "nodes": [
       {
         "id": "8174a506-d5d4-4264-8472-8ae5a0b5f645",
         "type": "event",
         "position": {
-          "x": 64,
-          "y": 290
+          "x": 5.588973116178522,
+          "y": 269.13891897006386
         },
         "data": {
           "keyword": "render"
         },
-        "width": 71,
-        "height": 72
+        "width": 197,
+        "height": 144,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 5.588973116178522,
+          "y": 269.13891897006386
+        },
+        "dragging": false
       },
       {
         "id": "933a782b-a6c4-4a42-b1b1-0db075c6d90c",
@@ -132,29 +111,6 @@
         "positionAbsolute": {
           "x": 290.35503152122044,
           "y": 271.054620234034
-        },
-        "dragging": false
-      },
-      {
-        "id": "45378259-fe3e-4c77-9cd2-d27cc30e1710",
-        "position": {
-          "x": -71.42312038516602,
-          "y": 480.36176583617623
-        },
-        "type": "code",
-        "data": {
-          "code": "state{\"background\"}.getStr()"
-        },
-        "style": {
-          "width": 300,
-          "height": 130
-        },
-        "width": 300,
-        "height": 130,
-        "selected": false,
-        "positionAbsolute": {
-          "x": -71.42312038516602,
-          "y": 480.36176583617623
         },
         "dragging": false
       },
@@ -179,46 +135,6 @@
           "y": 258.3135115441166
         },
         "dragging": false
-      },
-      {
-        "id": "c17b54ac-e2d6-49a9-94fd-059bf880816d",
-        "position": {
-          "x": 470.7781519063865,
-          "y": 494.3269801740282
-        },
-        "type": "code",
-        "data": {
-          "code": "state{\"text\"}.getStr()"
-        },
-        "style": {
-          "width": 300,
-          "height": 130
-        },
-        "width": 300,
-        "height": 130,
-        "selected": false,
-        "positionAbsolute": {
-          "x": 470.7781519063865,
-          "y": 494.3269801740282
-        },
-        "dragging": false
-      },
-      {
-        "id": "808e6400-31d1-431c-8d4a-876aafe63d83",
-        "position": {
-          "x": 486.1399177425627,
-          "y": 661.1118663953704
-        },
-        "type": "code",
-        "data": {
-          "code": "state{\"fontSize\"}.getFloat()"
-        },
-        "style": {
-          "width": 300,
-          "height": 130
-        },
-        "width": 300,
-        "height": 130
       },
       {
         "id": "500000cd-2952-496a-95c3-0575e1f63571",
@@ -268,13 +184,6 @@
     ],
     "edges": [
       {
-        "id": "45378259-fe3e-4c77-9cd2-d27cc30e1710",
-        "target": "933a782b-a6c4-4a42-b1b1-0db075c6d90c",
-        "targetHandle": "fieldInput/keyword",
-        "source": "45378259-fe3e-4c77-9cd2-d27cc30e1710",
-        "sourceHandle": "fieldOutput"
-      },
-      {
         "id": "ce55c95a-d890-4eaf-bf1b-13ffcba51dc9",
         "source": "8174a506-d5d4-4264-8472-8ae5a0b5f645",
         "sourceHandle": "next",
@@ -289,20 +198,6 @@
         "targetHandle": "prev"
       },
       {
-        "id": "c17b54ac-e2d6-49a9-94fd-059bf880816d",
-        "target": "eb54d359-2986-4012-8b49-a034437ebdeb",
-        "targetHandle": "fieldInput/text",
-        "source": "c17b54ac-e2d6-49a9-94fd-059bf880816d",
-        "sourceHandle": "fieldOutput"
-      },
-      {
-        "id": "808e6400-31d1-431c-8d4a-876aafe63d83",
-        "target": "eb54d359-2986-4012-8b49-a034437ebdeb",
-        "targetHandle": "fieldInput/fontSize",
-        "source": "808e6400-31d1-431c-8d4a-876aafe63d83",
-        "sourceHandle": "fieldOutput"
-      },
-      {
         "id": "f16ee7aa-c727-49dc-8a4b-bc5815a982c8",
         "source": "eb54d359-2986-4012-8b49-a034437ebdeb",
         "sourceHandle": "next",
@@ -315,6 +210,54 @@
         "sourceHandle": "next",
         "target": "6359b0d1-62c4-4e2e-a9b7-379a4f012049",
         "targetHandle": "prev"
+      },
+      {
+        "id": "40ba622b-079c-4bdc-b06c-33542f3c3118",
+        "source": "8174a506-d5d4-4264-8472-8ae5a0b5f645",
+        "sourceHandle": "code/state{\"background\"}.getStr()",
+        "target": "933a782b-a6c4-4a42-b1b1-0db075c6d90c",
+        "targetHandle": "fieldInput/keyword"
+      },
+      {
+        "id": "61b1d749-dd2f-40d5-a11a-2f381ddb5b18",
+        "source": "8174a506-d5d4-4264-8472-8ae5a0b5f645",
+        "sourceHandle": "code/state{\"text\"}.getStr()",
+        "target": "eb54d359-2986-4012-8b49-a034437ebdeb",
+        "targetHandle": "fieldInput/text"
+      },
+      {
+        "id": "27e04186-e571-4612-a1da-de7a61395b2f",
+        "source": "8174a506-d5d4-4264-8472-8ae5a0b5f645",
+        "sourceHandle": "code/state{\"fontSize\"}.getFloat()",
+        "target": "eb54d359-2986-4012-8b49-a034437ebdeb",
+        "targetHandle": "fieldInput/fontSize"
+      }
+    ],
+    "fields": [
+      {
+        "name": "background",
+        "label": "Background Image (only one word!)",
+        "type": "string",
+        "value": "nature",
+        "placeholder": "one word, e.g. nature",
+        "persist": "disk",
+        "access": "public"
+      },
+      {
+        "name": "text",
+        "label": "Text to display",
+        "type": "text",
+        "value": "Keep at it!",
+        "persist": "disk",
+        "access": "public"
+      },
+      {
+        "name": "fontSize",
+        "label": "Font size",
+        "type": "float",
+        "value": "90",
+        "persist": "disk",
+        "access": "public"
       }
     ]
   }
