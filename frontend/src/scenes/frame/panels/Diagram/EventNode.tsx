@@ -42,7 +42,15 @@ export function EventNode(props: NodeProps): JSX.Element {
               type="source"
               position={Position.Right}
               id="next"
-              style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
+              style={{
+                position: 'relative',
+                transform: 'none',
+                right: 0,
+                top: 0,
+                background: '#cccccc',
+                borderBottomLeftRadius: 0,
+                borderTopLeftRadius: 0,
+              }}
             />
           </div>
         </div>
