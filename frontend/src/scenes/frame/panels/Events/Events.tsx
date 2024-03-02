@@ -26,7 +26,7 @@ export function Events() {
         </Tab>
       </Tabs>
 
-      {Object.values(events).map(({ name, description, fields, type }) => (
+      {Object.values(events).map(({ name, description, fields }) => (
         <Box
           key={name}
           className="bg-gray-900 px-3 py-2 dndnode cursor-move"

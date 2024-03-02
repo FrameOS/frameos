@@ -21,19 +21,14 @@ export const scenesLogic = kea<scenesLogicType>([
   key((props) => props.frameId),
   connect(({ frameId }: ScenesLogicProps) => ({
     values: [frameLogic({ frameId }), ['frame', 'frameForm'], appsModel, ['apps']],
-    actions: [
-      frameLogic({ frameId }),
-      ['setFrameFormValues', 'applyTemplate'],
-      panelsLogic({ frameId }),
-      ['editScene'],
-    ],
+    actions: [frameLogic({ frameId }), ['applyTemplate'], panelsLogic({ frameId }), ['editScene']],
   })),
   actions({
     setAsDefault: (sceneId: string) => ({ sceneId }),
     deleteScene: (sceneId: string) => ({ sceneId }),
     renameScene: (sceneId: string) => ({ sceneId }),
   }),
-  forms(({ actions, values }) => ({
+  forms(({ actions, values, props }) => ({
     newScene: {
       defaults: {
         name: '',
@@ -46,7 +41,7 @@ export const scenesLogic = kea<scenesLogicType>([
         const scenes: FrameScene[] = values.frameForm.scenes || []
         const id = uuidv4()
         const templateData = sceneTemplates[template] ?? {}
-        actions.setFrameFormValues({
+        frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
           scenes: [...scenes, { id, name, nodes: [], edges: [], fields: [], ...templateData }],
         })
         actions.editScene(id)
@@ -63,9 +58,9 @@ export const scenesLogic = kea<scenesLogicType>([
       (): Option[] => Object.keys(sceneTemplates).map((key) => ({ label: key, value: key })),
     ],
   }),
-  listeners(({ actions, values }) => ({
+  listeners(({ props, values }) => ({
     setAsDefault: ({ sceneId }) => {
-      actions.setFrameFormValues({
+      frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
         scenes: values.scenes.map((s) =>
           s.id === sceneId ? { ...s, default: true } : s['default'] ? { ...s, default: false } : s
         ),
@@ -76,12 +71,12 @@ export const scenesLogic = kea<scenesLogicType>([
       if (!sceneName) {
         return
       }
-      actions.setFrameFormValues({
+      frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
         scenes: values.scenes.map((s) => (s.id === sceneId ? { ...s, name: sceneName } : s)),
       })
     },
     deleteScene: ({ sceneId }) => {
-      actions.setFrameFormValues({
+      frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
         scenes: values.scenes.filter((s) => s.id !== sceneId),
       })
     },
