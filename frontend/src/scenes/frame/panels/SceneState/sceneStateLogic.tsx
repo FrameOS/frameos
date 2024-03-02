@@ -17,12 +17,11 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
   props({} as SceneStateLogicProps),
   key((props) => `${props.frameId}-${props.sceneId}`),
   connect(({ frameId }: SceneStateLogicProps) => ({
-    values: [frameLogic({ frameId }), ['frame', 'frameForm']],
+    values: [frameLogic({ frameId }), ['frame', 'frameForm', 'frameFormErrors']],
     actions: [frameLogic({ frameId }), ['updateScene']],
   })),
   actions({
-    resetField: (index: number) => ({ index }),
-    submitField: (index: number) => ({ index }),
+    setFields: (fields: StateField[]) => ({ fields }),
     editField: (index: number) => ({ index }),
     closeField: (index: number) => ({ index }),
     removeField: (index: number) => ({ index }),
@@ -33,8 +32,6 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
       {
         editField: (state, { index }) => ({ ...state, [index]: true }),
         closeField: (state, { index }) => ({ ...state, [index]: false }),
-        resetField: (state, { index }) => ({ ...state, [index]: false }),
-        submitField: (state, { index }) => ({ ...state, [index]: false }),
         removeField: (state, { index }) =>
           Object.fromEntries(
             Object.entries(state)
@@ -50,28 +47,21 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
       (s, p) => [s.scenes, p.sceneId],
       (scenes, sceneId): FrameScene | null => scenes?.find((scene) => scene.id === sceneId) ?? null,
     ],
+    sceneIndex: [
+      (s, p) => [s.scenes, p.sceneId],
+      (scenes, sceneId): number => scenes?.findIndex((scene) => scene.id === sceneId) ?? 0,
+    ],
   }),
-  forms(({ selectors, actions, values, props }) => ({
-    sceneForm: {
-      defaults: ((state: any) => {
-        const def: Record<string, any> = selectors.scene(state) || {}
-        return { fields: def.fields ?? [] }
-      }) as any as Partial<FrameScene>,
-      errors: (state: any) => ({
-        fields: (state.fields ?? []).map((field: Record<string, any>) => ({
-          name: field.name ? '' : 'Name is required',
-          label: field.label ? '' : 'Label is required',
-          type: field.type ? '' : 'Type is required',
-        })),
-      }),
-      submit: async (formValues) => {},
-    },
-  })),
   selectors({
     fieldsWithErrors: [
-      (s) => [s.sceneFormErrors, s.sceneForm],
-      (errors: Record<string, any>, form: Partial<FrameScene>): Record<string, boolean> => {
-        const fields = form.fields ?? []
+      (s) => [s.frameFormErrors, s.sceneIndex, s.scene],
+      (
+        frameFormErrors: Record<string, any>,
+        sceneIndex: number,
+        scene: Partial<FrameScene>
+      ): Record<string, boolean> => {
+        const errors = frameFormErrors.scenes?.[sceneIndex] ?? {}
+        const fields = scene.fields ?? []
         return Object.fromEntries(
           fields.map((field, index) => {
             const fieldErrors = errors.fields?.[index] ?? {}
@@ -82,31 +72,15 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
     ],
   }),
   listeners(({ values, actions, props }) => ({
-    resetField: ({ index }) => {
-      const sceneFields = values.scene?.fields ?? []
-      actions.resetSceneForm({
-        fields: (values.sceneForm.fields ?? [])
-          .map((field, i) => (i === index ? sceneFields[index] : field))
-          .filter(Boolean) as StateField[],
-      })
-    },
-    submitField: ({ index }) => {
-      const sceneFields = values.sceneForm?.fields ?? []
+    setFields: ({ fields }) => {
       if (props.sceneId) {
-        actions.updateScene(props.sceneId, {
-          fields: (values.sceneForm.fields ?? [])
-            .map((field, i) => (index === i ? sceneFields[index] : field))
-            .filter(Boolean) as StateField[],
-        })
+        actions.updateScene(props.sceneId, { fields })
       }
     },
     removeField({ index }) {
-      const sceneFields = values.sceneForm?.fields ?? []
+      const sceneFields = values.scene?.fields ?? []
       const newFields = sceneFields.map((f, i) => (i === index ? undefined : f)).filter(Boolean) as StateField[]
-      actions.setSceneFormValue('fields', newFields)
-      if (props.sceneId) {
-        actions.updateScene(props.sceneId, { fields: newFields })
-      }
+      actions.setFields(newFields)
     },
   })),
 ])

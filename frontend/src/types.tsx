@@ -147,6 +147,11 @@ export interface DispatchNodeData {
   config: Record<string, any>
 }
 
+export interface FrameSceneSettings {
+  renderInterval?: number
+  backgroundColor?: string
+}
+
 export interface FrameScene {
   id: string
   name: string
@@ -154,6 +159,7 @@ export interface FrameScene {
   edges: Edge[]
   fields?: StateField[]
   default?: boolean
+  settings?: FrameSceneSettings
 }
 
 export interface FrameSceneIndexed {

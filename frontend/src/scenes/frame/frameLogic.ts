@@ -35,6 +35,18 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'debug',
 ]
 
+export function sanitizeScene(scene: Partial<FrameScene>): FrameScene {
+  return {
+    ...scene,
+    id: scene.id ?? uuidv4(),
+    name: scene.name || 'Untitled scene',
+    nodes: scene.nodes ?? [],
+    edges: scene.edges ?? [],
+    fields: scene.fields ?? [],
+    settings: scene.settings ?? {},
+  }
+}
+
 export const frameLogic = kea<frameLogicType>([
   path(['src', 'scenes', 'frame', 'frameLogic']),
   props({} as FrameLogicProps),
@@ -56,6 +68,15 @@ export const frameLogic = kea<frameLogicType>([
         showErrorsOnTouch: true,
       },
       defaults: {} as FrameType,
+      errors: (state: Partial<FrameType>) => ({
+        scenes: (state.scenes ?? []).map((scene: Record<string, any>) => ({
+          fields: (scene.fields ?? []).map((field: Record<string, any>) => ({
+            name: field.name ? '' : 'Name is required',
+            label: field.label ? '' : 'Label is required',
+            type: field.type ? '' : 'Type is required',
+          })),
+        })),
+      }),
       submit: async (frame, breakpoint) => {
         const json: Record<string, any> = {}
         for (const key of FRAME_KEYS) {
@@ -121,8 +142,8 @@ export const frameLogic = kea<frameLogicType>([
       const hasScene = frame.scenes?.some(({ id }) => id === sceneId)
       actions.setFrameFormValues({
         scenes: hasScene
-          ? frame.scenes?.map((s) => (s.id === sceneId ? { ...s, ...scene } : s))
-          : [...(frame.scenes ?? []), { ...scene, id: sceneId }],
+          ? frame.scenes?.map((s) => (s.id === sceneId ? sanitizeScene({ ...s, ...scene }) : s))
+          : [...(frame.scenes ?? []), sanitizeScene({ ...scene, id: sceneId })],
       })
     },
     updateNodeData: ({ sceneId, nodeId, nodeData }) => {
@@ -160,7 +181,7 @@ export const frameLogic = kea<frameLogicType>([
     },
   })),
   afterMount(({ actions, values }) => {
-    const defaultScene = values.frame?.scenes?.find((scene) => scene.id === 'default')
+    const defaultScene = values.frame?.scenes?.find((scene) => scene.id === 'default' && !scene.default)
     if (defaultScene) {
       const { name, id, default: _def, ...rest } = defaultScene
       actions.updateScene('default', { name: 'Default Scene', id: uuidv4(), default: true, ...rest })
