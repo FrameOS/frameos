@@ -108,7 +108,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     let image = exportedScene.render(scene)
     if image.width != requiredWidth or image.height != requiredHeight:
       let resizedImage = newImage(requiredWidth, requiredHeight)
-      resizedImage.fill(self.frameConfig.backgroundColor)
+      resizedImage.fill(scene.backgroundColor)
       scaleAndDrawImage(resizedImage, image, self.frameConfig.scalingMode)
       setLastImage(resizedImage)
       result = resizedImage.rotateDegrees(self.frameConfig.rotate)
@@ -154,8 +154,9 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     currentScene.isRendering = true
     self.triggerRenderNext = false # used to debounce render events received while rendering
 
+    let interval = currentScene.refreshInterval
     let lastRotatedImage = self.renderSceneImage(exportedScene, currentScene)
-    if self.frameConfig.interval < 1:
+    if interval < 1:
       let now = epochTime()
       if now >= nextServerRenderAt:
         nextServerRenderAt = nextServerRenderAt + SERVER_RENDER_DELAY_SECONDS
@@ -174,7 +175,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     except Exception as e:
       self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
-    if self.frameConfig.interval < 1:
+    if interval < 1:
       let now = epochTime()
       if now - timer < FAST_SCENE_CUTOFF_SECONDS:
         fastSceneCount += 1
@@ -210,10 +211,10 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
       continue
 
     # Sleep until the next frame
-    sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) * 1000, 0.1)
+    sleepDuration = max((interval - (epochTime() - timer)) * 1000, 0.1)
     self.logger.log(%*{"event": "sleep", "ms": round(sleepDuration, 3)})
     # Calculate once more to subtract the time it took to log the message
-    sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) * 1000, 0.1)
+    sleepDuration = max((interval - (epochTime() - timer)) * 1000, 0.1)
     let future = sleepAsync(sleepDuration)
     self.sleepFuture = some(future)
     await future

@@ -127,7 +127,7 @@ export function FrameDetails({ className }: DetailsProps) {
                 </td>
               </tr>
               <tr>
-                <td className="text-blue-200 text-right">Refresh interval:</td>
+                <td className="text-blue-200 text-right">Default refresh interval:</td>
                 <td className="break-words">{frame.interval} seconds</td>
               </tr>
               <tr>
@@ -141,10 +141,6 @@ export function FrameDetails({ className }: DetailsProps) {
               <tr>
                 <td className="text-blue-200 text-right">Rotate:</td>
                 <td className="break-words">{frame.rotate}</td>
-              </tr>
-              <tr>
-                <td className="text-blue-200 text-right">Background color:</td>
-                <td className="break-words">{frame.background_color}</td>
               </tr>
               <tr>
                 <td className="text-blue-200 text-right">Debug logging:</td>

@@ -35,7 +35,8 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'debug',
 ]
 
-export function sanitizeScene(scene: Partial<FrameScene>): FrameScene {
+export function sanitizeScene(scene: Partial<FrameScene>, frame: FrameType): FrameScene {
+  const settings = scene.settings ?? {}
   return {
     ...scene,
     id: scene.id ?? uuidv4(),
@@ -43,8 +44,12 @@ export function sanitizeScene(scene: Partial<FrameScene>): FrameScene {
     nodes: scene.nodes ?? [],
     edges: scene.edges ?? [],
     fields: scene.fields ?? [],
-    settings: scene.settings ?? {},
-  }
+    settings: {
+      ...settings,
+      refreshInterval: settings.refreshInterval || frame.interval || 60,
+      backgroundColor: settings.backgroundColor || frame.background_color || '#ffffff',
+    },
+  } satisfies FrameScene
 }
 
 export const frameLogic = kea<frameLogicType>([
@@ -125,9 +130,9 @@ export const frameLogic = kea<frameLogicType>([
     ],
   })),
   subscriptions(({ actions }) => ({
-    frame: (frame, oldFrame) => {
+    frame: (frame?: FrameType, oldFrame?: FrameType) => {
       if (frame && !oldFrame) {
-        actions.resetFrameForm(frame)
+        actions.resetFrameForm({ ...frame, scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [] })
       }
     },
   })),
@@ -142,8 +147,8 @@ export const frameLogic = kea<frameLogicType>([
       const hasScene = frame.scenes?.some(({ id }) => id === sceneId)
       actions.setFrameFormValues({
         scenes: hasScene
-          ? frame.scenes?.map((s) => (s.id === sceneId ? sanitizeScene({ ...s, ...scene }) : s))
-          : [...(frame.scenes ?? []), sanitizeScene({ ...scene, id: sceneId })],
+          ? frame.scenes?.map((s) => (s.id === sceneId ? sanitizeScene({ ...s, ...scene }, frame) : s))
+          : [...(frame.scenes ?? []), sanitizeScene({ ...scene, id: sceneId }, frame)],
       })
     },
     updateNodeData: ({ sceneId, nodeId, nodeData }) => {
@@ -169,15 +174,9 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
     applyTemplate: ({ template }) => {
-      actions.setFrameFormValues({
-        ...('scenes' in template ? { scenes: template.scenes } : {}),
-        ...('interval' in (template.config ?? {}) ? { interval: template.config?.interval } : {}),
-        ...('scaling_mode' in (template.config ?? {}) ? { scaling_mode: template.config?.scaling_mode } : {}),
-        ...('rotate' in (template.config ?? {}) ? { rotate: template.config?.rotate } : {}),
-        ...('background_color' in (template.config ?? {})
-          ? { background_color: template.config?.background_color }
-          : {}),
-      })
+      if ('scenes' in template) {
+        actions.setFrameFormValues({ scenes: template.scenes })
+      }
     },
   })),
   afterMount(({ actions, values }) => {

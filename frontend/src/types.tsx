@@ -23,7 +23,7 @@ export interface FrameType {
   metrics_interval: number
   scaling_mode: string
   rotate?: number
-  background_color: string
+  background_color: string // deprecated, serves as fallback for scenes
   scenes?: FrameScene[]
   debug?: boolean
   last_log_at?: string
@@ -148,7 +148,7 @@ export interface DispatchNodeData {
 }
 
 export interface FrameSceneSettings {
-  renderInterval?: number
+  refreshInterval?: number
   backgroundColor?: string
 }
 

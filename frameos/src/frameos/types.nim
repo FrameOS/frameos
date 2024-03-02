@@ -14,11 +14,9 @@ type
     width*: int
     height*: int
     device*: string
-    interval*: float
     metricsInterval*: float
     rotate*: int
     scalingMode*: string
-    backgroundColor*: Color
     settings*: JsonNode
     debug*: bool
 
@@ -45,6 +43,8 @@ type
     frameConfig*: FrameConfig
     logger*: Logger
     state*: JsonNode
+    refreshInterval*: float
+    backgroundColor*: Color
     execNode*: proc(nodeId: NodeId, context: var ExecutionContext)
     lastPublicStateUpdate*: float
     lastPersistedStateUpdate*: float

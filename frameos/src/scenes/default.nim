@@ -98,7 +98,7 @@ proc render*(self: FrameScene): Image =
     loopIndex: 0,
     loopKey: "."
   )
-  context.image.fill(self.frameConfig.backgroundColor)
+  context.image.fill(self.backgroundColor)
   runEvent(context)
   return context.image
 
@@ -107,7 +107,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
-  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger)
+  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 30.0,
+      backgroundColor: parseHtmlColor("#ffffff"))
   let self = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   result = scene

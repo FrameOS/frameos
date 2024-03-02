@@ -1,5 +1,6 @@
 import json
 import os
+import math
 import re
 
 from app.models.frame import Frame
@@ -278,6 +279,16 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
   runEvent(openContext)
 """
 
+    render_interval = float(scene.get('settings', {}).get('refreshInterval', None) or frame.interval or 300)
+    if math.isnan(render_interval):
+        render_interval = 300.0
+    if render_interval < 0.001:
+        render_interval = 0.001
+    scene_render_interval = str(render_interval)
+
+    background_color = scene.get('settings', {}).get('backgroundColor', None) or frame.background_color or '#000000'
+    scene_background_color = f"parseHtmlColor(\"{sanitize_nim_string(str(background_color))}\")"
+
     scene_source = f"""
 import pixie, json, times, strformat
 
@@ -332,7 +343,7 @@ proc render*(self: FrameScene): Image =
     loopIndex: 0,
     loopKey: "."
   )
-  context.image.fill(self.frameConfig.backgroundColor)
+  context.image.fill(self.backgroundColor)
   runEvent(context)
   return context.image
 
@@ -341,7 +352,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
-  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger)
+  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: {scene_render_interval}, backgroundColor: {scene_background_color})
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))

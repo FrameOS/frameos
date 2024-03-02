@@ -37,7 +37,6 @@ class Frame(db.Model):
     interval = db.Column(db.Double, default=300)
     metrics_interval = db.Column(db.Double, default=60)
     scaling_mode = db.Column(db.String(64), nullable=True)  # contain (default), cover, stretch, center
-    background_color = db.Column(db.String(64), nullable=True)
     rotate = db.Column(db.Integer, nullable=True)
     debug = db.Column(db.Boolean, nullable=True)
     last_log_at = db.Column(db.DateTime, nullable=True)
@@ -47,6 +46,7 @@ class Frame(db.Model):
 
     # deprecated
     image_url = db.Column(db.String(256), nullable=True)
+    background_color = db.Column(db.String(64), nullable=True) # still used as fallback in frontend
 
     def to_dict(self):
         return {
@@ -191,8 +191,6 @@ def get_frame_json(frame: Frame) -> dict:
         "height": frame.height,
         "device": frame.device or "web_only",
         "color": frame.color or "black",
-        "backgroundColor": frame.background_color or "white",
-        "interval": frame.interval or 30.0,
         "metricsInterval": frame.metrics_interval or 60.0,
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",

@@ -30,11 +30,9 @@ proc start*(self: FrameOS) {.async.} =
     "width": self.frameConfig.width,
     "height": self.frameConfig.height,
     "device": self.frameConfig.device,
-    "interval": self.frameConfig.interval,
     "metricsInterval": self.frameConfig.metricsInterval,
     "scalingMode": self.frameConfig.scalingMode,
     "rotate": self.frameConfig.rotate,
-    "backgroundColor": self.frameConfig.backgroundColor.toHtmlHex.toLowerAscii,
     "debug": self.frameConfig.debug,
   }}
   self.logger.log(message)
