@@ -72,6 +72,10 @@ proc updateLastPublicState*(self: FrameScene) =
         lastSceneState[key] = copy(self.state[key])
   self.lastPublicStateUpdate = epochTime()
 
+proc sanitizePathString*(s: string): string =
+  return s.multiReplace(("/", "_"), ("\\", "_"), (":", "_"), ("*", "_"), ("?", "_"), ("\"", "_"), ("<", "_"), (">",
+      "_"), ("|", "_"))
+
 proc updateLastPersistedState*(self: FrameScene) =
   if not exportedScenes.hasKey(self.id):
     return
@@ -85,12 +89,12 @@ proc updateLastPersistedState*(self: FrameScene) =
       persistedState[key] = copy(self.state[key])
       hasChanges = true
   if hasChanges:
-    writeFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{self.id}.json", $persistedState)
+    writeFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(self.id.string)}.json", $persistedState)
   self.lastPersistedStateUpdate = epochTime()
 
 proc loadPersistedState*(sceneId: SceneId): JsonNode =
   try:
-    return parseJson(readFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sceneId}.json"))
+    return parseJson(readFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json"))
   except IOError:
     return %*{}
 
