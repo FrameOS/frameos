@@ -29,9 +29,19 @@ const ACCESS_OPTIONS = [
 export function SceneState(): JSX.Element {
   const { frameId } = useValues(frameLogic)
   const { selectedSceneId: sceneId } = useValues(panelsLogic({ frameId }))
-  const { sceneForm, scene, isSceneFormSubmitting, sceneFormChanged, sceneFormHasErrors, showSceneFormErrors } =
-    useValues(sceneStateLogic({ frameId, sceneId }))
-  const { setSceneFormValue, resetFields, submitSceneForm } = useActions(sceneStateLogic({ frameId, sceneId }))
+  const {
+    sceneForm,
+    scene,
+    isSceneFormSubmitting,
+    sceneFormChanged,
+    sceneFormHasErrors,
+    showSceneFormErrors,
+    editingFields,
+    fieldsWithErrors,
+  } = useValues(sceneStateLogic({ frameId, sceneId }))
+  const { setSceneFormValue, resetField, submitField, editField, closeField, removeField } = useActions(
+    sceneStateLogic({ frameId, sceneId })
+  )
 
   let fieldCount = (sceneForm.fields ?? []).length
 
@@ -73,7 +83,9 @@ export function SceneState(): JSX.Element {
         <div className="flex items-center gap-2">
           <Button
             onClick={() => {
-              setSceneFormValue('fields', [...(sceneForm.fields ?? []), { name: '', label: '', type: 'string' }])
+              const oldFields = sceneForm.fields ?? []
+              setSceneFormValue('fields', [...oldFields, { name: '', label: '', type: 'string' }])
+              editField(oldFields.length)
             }}
             size="small"
             color="secondary"
@@ -85,136 +97,137 @@ export function SceneState(): JSX.Element {
       <Form logic={sceneStateLogic} props={{ frameId, sceneId }} formKey="sceneForm" className="space-y-4">
         {sceneForm.fields?.map((field, index) => (
           <Group name={['fields', index]}>
-            <div className="flex items-center gap-1">
-              <ClipboardDocumentIcon
-                className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block"
-                onClick={() =>
-                  copy(`state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`)
-                }
-              />
-              <code className="text-sm text-gray-400 break-words">{`state{"${field.name}"}${
-                fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
-              }`}</code>
+            <div className="flex items-center gap-1 justify-between">
+              <div className="flex items-center gap-1">
+                <ClipboardDocumentIcon
+                  className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block"
+                  onClick={() =>
+                    copy(`state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`)
+                  }
+                />
+                <code className="text-sm text-gray-400 break-words">{`state{"${field.name}"}${
+                  fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
+                }`}</code>
+              </div>
+              <Button
+                onClick={editingFields[index] ? () => closeField(index) : () => editField(index)}
+                size="small"
+                color={'secondary'}
+              >
+                {editingFields[index] ? 'Close' : 'Edit'}
+              </Button>
             </div>
-            <div className="bg-gray-900 p-2 space-y-4">
-              <Field name="label" label="Field label (human readable)">
-                {({ value, onChange }) => (
-                  <TextInput
-                    placeholder="e.g. Search Term"
-                    value={value}
-                    onChange={(value) => {
-                      if (!field.name || field.name === camelize(field.label)) {
-                        setSceneFormValue('fields', [
-                          ...(sceneForm.fields ?? []).map((f, i) =>
-                            i === index ? { ...f, name: camelize(value), label: value } : f
-                          ),
-                        ])
-                      } else {
-                        onChange(value)
-                      }
-                    }}
-                  />
-                )}
-              </Field>
-              <Field name="name" label="Field name (for use in code)">
-                <TextInput placeholder="e.g. search" />
-              </Field>
-              <Field name="type" label="Field type">
-                <Select options={configFieldTypes.filter((f) => f !== 'node').map((k) => ({ label: k, value: k }))} />
-              </Field>
-              {field.type === 'select' ? (
-                <Field name="options" label="Options (one per line)">
-                  <TextArea
-                    value={(field.options ?? []).join('\n')}
-                    rows={3}
-                    onChange={(value) =>
-                      setSceneFormValue(
-                        'fields',
-                        (sceneForm.fields ?? []).map((field, i) =>
-                          i === index ? { ...field, options: value.split('\n') } : field
-                        )
-                      )
-                    }
-                  />
+            {editingFields[index] ? (
+              <div className="bg-gray-900 p-2 space-y-4">
+                <Field name="label" label="Field label (human readable)">
+                  {({ value, onChange }) => (
+                    <TextInput
+                      placeholder="e.g. Search Term"
+                      value={value}
+                      onChange={(value) => {
+                        if (!field.name || field.name === camelize(field.label)) {
+                          setSceneFormValue('fields', [
+                            ...(sceneForm.fields ?? []).map((f, i) =>
+                              i === index ? { ...f, name: camelize(value), label: value } : f
+                            ),
+                          ])
+                        } else {
+                          onChange(value)
+                        }
+                      }}
+                    />
+                  )}
                 </Field>
-              ) : null}
-              <Field name="value" label="Initial value">
-                <TextInput />
-              </Field>
-              <Field name="placeholder" label="Placeholder">
-                <TextInput />
-              </Field>
-              <Field
-                name="persist"
-                label="Perist"
-                tooltip={<>Persisting to disk reduces the lifetime of your SD card</>}
-              >
-                <Select options={PERSIST_OPTIONS} />
-              </Field>
-              <Field
-                name="access"
-                label="Access"
-                tooltip={
-                  <>
-                    Whether this field is just usable within the scene (private), or if it can also be controlled
-                    externally, for example from the frame's settings page.
-                  </>
-                }
-              >
-                <Select options={ACCESS_OPTIONS} />
-              </Field>
-              <div className="flex justify-end items-center w-full gap-2">
-                {index === fieldCount - 1 ? (
+                <Field name="name" label="Field name (for use in code)">
+                  <TextInput placeholder="e.g. search" />
+                </Field>
+                <Field name="type" label="Field type">
+                  <Select options={configFieldTypes.filter((f) => f !== 'node').map((k) => ({ label: k, value: k }))} />
+                </Field>
+                {field.type === 'select' ? (
+                  <Field name="options" label="Options (one per line)">
+                    <TextArea
+                      value={(field.options ?? []).join('\n')}
+                      rows={3}
+                      onChange={(value) =>
+                        setSceneFormValue(
+                          'fields',
+                          (sceneForm.fields ?? []).map((field, i) =>
+                            i === index ? { ...field, options: value.split('\n') } : field
+                          )
+                        )
+                      }
+                    />
+                  </Field>
+                ) : null}
+                <Field name="value" label="Initial value">
+                  <TextInput />
+                </Field>
+                <Field name="placeholder" label="Placeholder">
+                  <TextInput />
+                </Field>
+                <Field
+                  name="persist"
+                  label="Perist"
+                  tooltip={<>Persisting to disk reduces the lifetime of your SD card</>}
+                >
+                  <Select options={PERSIST_OPTIONS} />
+                </Field>
+                <Field
+                  name="access"
+                  label="Access"
+                  tooltip={
+                    <>
+                      Whether this field is just usable within the scene (private), or if it can also be controlled
+                      externally, for example from the frame's settings page.
+                    </>
+                  }
+                >
+                  <Select options={ACCESS_OPTIONS} />
+                </Field>
+                <div className="flex justify-end items-center w-full gap-2">
                   <Button
                     onClick={() => {
-                      setSceneFormValue('fields', [
-                        ...(sceneForm.fields ?? []),
-                        { name: '', label: '', type: 'string' },
-                      ])
+                      removeField(index)
                     }}
                     size="small"
                     color="secondary"
                   >
-                    Add field
+                    <span className="text-red-300">Remove field</span>
                   </Button>
+                </div>
+                {sceneFormHasErrors && showSceneFormErrors && fieldsWithErrors[field.name] ? (
+                  <div className="text-red-400">
+                    <p>There are errors in the form. Please fix them before saving.</p>
+                  </div>
                 ) : null}
-                <Button
-                  onClick={() => {
-                    setSceneFormValue(
-                      'fields',
-                      (sceneForm.fields ?? []).map((f, i) => (i === index ? undefined : f)).filter(Boolean)
-                    )
-                  }}
-                  size="small"
-                  color="secondary"
-                >
-                  <span className="text-red-300">Remove field</span>
-                </Button>
+                <div className="flex w-full items-center gap-2">
+                  <Button
+                    onClick={() => submitField(index)}
+                    color={sceneFormChanged ? 'primary' : 'secondary'}
+                    size="small"
+                    disabled={isSceneFormSubmitting || fieldsWithErrors[field.name]}
+                  >
+                    Save changes
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      resetField(index)
+                    }}
+                    color="secondary"
+                    size="small"
+                  >
+                    Reset
+                  </Button>
+                  <div>
+                    <Tooltip title="Remember, after saving changes here, you must also save the scene for these changes to persist" />
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : null}
           </Group>
         ))}
         {(sceneForm.fields ?? []).length === 0 ? <div>No fields yet. Add one to get started.</div> : null}
-        {sceneFormHasErrors && showSceneFormErrors ? (
-          <div className="text-red-400">
-            <p>There are errors in the form. Please fix them before saving.</p>
-          </div>
-        ) : null}
-        <div className="flex w-full items-center gap-2">
-          <Button
-            onClick={submitSceneForm}
-            color={sceneFormChanged ? 'primary' : 'secondary'}
-            disabled={isSceneFormSubmitting}
-          >
-            Save changes
-          </Button>
-          <Button onClick={resetFields} color="secondary">
-            Cancel
-          </Button>
-          <div>
-            <Tooltip title="Remember, after saving changes here, you must also save the scene for these changes to persist" />
-          </div>
-        </div>
       </Form>
     </div>
   )
