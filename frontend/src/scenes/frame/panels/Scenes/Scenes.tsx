@@ -28,7 +28,11 @@ export function Scenes() {
               <div>
                 <H6 className="cursor-pointer" onClick={() => editScene(scene.id)}>
                   {scene.name || scene.id}
-                  {scene.default ? <Tag className="ml-2">default</Tag> : null}
+                  {scene.default ? (
+                    <Tag className="ml-2" color="primary">
+                      default
+                    </Tag>
+                  ) : null}
                 </H6>
                 <div className="text-xs text-gray-400">id: {scene.id}</div>
               </div>

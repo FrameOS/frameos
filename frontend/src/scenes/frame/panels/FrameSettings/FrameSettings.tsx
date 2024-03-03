@@ -84,7 +84,6 @@ export function FrameSettings({ className }: DetailsProps) {
             </Button>
             <Button
               type="button"
-              color="red"
               size="small"
               className="flex-0"
               onClick={() => {
@@ -93,7 +92,7 @@ export function FrameSettings({ className }: DetailsProps) {
                 }
               }}
             >
-              Delete frame
+              <span className="text-red-500">Delete frame</span>
             </Button>
           </div>
           <Form formKey="frameForm" logic={frameLogic} props={{ frameId }} className="space-y-4" enableFormOnSubmit>

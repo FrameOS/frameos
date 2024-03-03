@@ -15,6 +15,7 @@ import { TextArea } from '../../../../components/TextArea'
 import { panelsLogic } from '../panelsLogic'
 import { H6 } from '../../../../components/H6'
 import { camelize } from '../../../../utils/camelize'
+import { Tag } from '../../../../components/Tag'
 
 const PERSIST_OPTIONS = [
   { label: 'memory (reset on boot)', value: 'memory' },
@@ -122,27 +123,62 @@ export function SceneState(): JSX.Element {
             <div className="space-y-4">
               {scene?.fields?.map((field, index) => (
                 <Group name={['fields', index]}>
-                  <div className="flex items-center gap-1 justify-between max-w-full w-full">
-                    <div className="flex items-center gap-1 max-w-full w-full overflow-hidden">
-                      <ClipboardDocumentIcon
-                        className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block"
-                        onClick={() =>
-                          copy(
-                            `state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
-                          )
-                        }
-                      />
-                      <code className="text-sm text-gray-400 break-words truncate">{`state{"${field.name}"}${
-                        fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
-                      }`}</code>
+                  <div>
+                    <div className="flex items-center gap-1 justify-between max-w-full w-full">
+                      <div className="flex items-center gap-1 max-w-full w-full overflow-hidden">
+                        <ClipboardDocumentIcon
+                          className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block"
+                          onClick={() =>
+                            copy(
+                              `state{"${field.name}"}${
+                                fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
+                              }`
+                            )
+                          }
+                        />
+                        <code className="text-sm text-gray-400 break-words truncate">{`state{"${field.name}"}${
+                          fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
+                        }`}</code>
+                      </div>
+                      <Button
+                        onClick={editingFields[index] ? () => closeField(index) : () => editField(index)}
+                        size="small"
+                        color={'secondary'}
+                      >
+                        {editingFields[index] ? 'Close' : 'Edit'}
+                      </Button>
                     </div>
-                    <Button
-                      onClick={editingFields[index] ? () => closeField(index) : () => editField(index)}
-                      size="small"
-                      color={'secondary'}
-                    >
-                      {editingFields[index] ? 'Close' : 'Edit'}
-                    </Button>
+                    {!editingFields[index] ? (
+                      <div className="flex gap-2 ml-5">
+                        <Tooltip
+                          title={
+                            field.persist === 'disk' ? (
+                              <>Changes to this field are persisted and restored after a reboot.</>
+                            ) : (
+                              <>
+                                Changes to this field are kept in memory. The default value is restored after a reboot.
+                              </>
+                            )
+                          }
+                        >
+                          <Tag color={field.persist === 'disk' ? 'blue' : 'gray'}>{field.persist}</Tag>
+                        </Tooltip>
+                        <Tooltip
+                          title={
+                            field.access === 'public' ? (
+                              <>This field can be modified with the frame's Control URL.</>
+                            ) : (
+                              <>
+                                This field is not visible to nor controllable from the frame's Control URL. It is only
+                                accessible inside the scene.
+                              </>
+                            )
+                          }
+                        >
+                          <Tag color={field.access === 'private' ? 'gray' : 'blue'}>{field.access}</Tag>
+                        </Tooltip>
+                      </div>
+                    ) : null}
                   </div>
                   {fieldsWithErrors[field.name] ? (
                     <div className="text-red-400">
