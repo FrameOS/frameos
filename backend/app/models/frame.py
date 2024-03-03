@@ -130,7 +130,7 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
     new_log(frame.id, "welcome", f"Frame \"{frame.name}\" added!")
     new_log(frame.id, "welcome", "-> Press 'Save & Deploy' to deploy the default scene")
     new_log(frame.id, "welcome", "-> Install additional scenes in the 'Scenes' panel")
-    new_log(frame.id, "welcome", "-> Drag 'Apps' and 'Events' onto the active scene to customize")
+    new_log(frame.id, "welcome", "-> Drag & Drop 'Apps' and 'Events' onto a scene")
     new_log(frame.id, "welcome", "-> Click 'Edit App' to clone an app and edit its source")
 
     return frame
