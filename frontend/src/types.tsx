@@ -37,12 +37,6 @@ export interface TemplateType {
   image?: any
   image_width?: number
   image_height?: number
-  config?: {
-    interval?: number
-    background_color?: string
-    scaling_mode?: string
-    rotate?: number
-  }
 }
 
 export interface RepositoryType {
