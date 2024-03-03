@@ -31,6 +31,7 @@ export function FrameSettings({ className }: DetailsProps) {
             <Button
               type="button"
               size="small"
+              color="secondary"
               className="flex-0"
               onClick={() => {
                 function handleFileSelect(event: Event): void {
@@ -75,6 +76,7 @@ export function FrameSettings({ className }: DetailsProps) {
             <Button
               type="button"
               size="small"
+              color="secondary"
               className="flex-0"
               onClick={() => {
                 downloadJson(frame, `${frame.name || `frame-${frame.id}`}.json`)
@@ -85,6 +87,7 @@ export function FrameSettings({ className }: DetailsProps) {
             <Button
               type="button"
               size="small"
+              color="secondary"
               className="flex-0"
               onClick={() => {
                 if (confirm('Are you sure you want to DELETE this frame?')) {
@@ -92,7 +95,7 @@ export function FrameSettings({ className }: DetailsProps) {
                 }
               }}
             >
-              <span className="text-red-500">Delete frame</span>
+              <span className="text-red-300">Delete frame</span>
             </Button>
           </div>
           <Form formKey="frameForm" logic={frameLogic} props={{ frameId }} className="space-y-4" enableFormOnSubmit>

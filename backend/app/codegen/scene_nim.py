@@ -286,7 +286,11 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
         render_interval = 0.001
     scene_render_interval = str(render_interval)
 
-    background_color = scene.get('settings', {}).get('backgroundColor', None) or frame.background_color or '#000000'
+    background_color = scene.get('settings', {}).get('backgroundColor', None)
+    if background_color is None and frame.background_color is not None and frame.background_color.startswith('#'):
+        background_color = frame.background_color
+    if background_color is None:
+        background_color = '#000000'
     scene_background_color = f"parseHtmlColor(\"{sanitize_nim_string(str(background_color))}\")"
 
     scene_source = f"""

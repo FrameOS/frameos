@@ -146,7 +146,9 @@
         "data": {
           "keyword": "qr",
           "config": {
-            "position": "top-left"
+            "size": "1",
+            "position": "top-left",
+            "padding": "2"
           }
         },
         "width": 430,
@@ -169,7 +171,8 @@
           "keyword": "clock",
           "config": {
             "position": "top-right",
-            "fontSize": "16"
+            "fontSize": "24",
+            "padding": "5"
           }
         },
         "width": 372,
@@ -255,7 +258,7 @@
         "name": "fontSize",
         "label": "Font size",
         "type": "float",
-        "value": "90",
+        "value": "90.0",
         "persist": "disk",
         "access": "public"
       }
