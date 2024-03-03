@@ -1,15 +1,16 @@
-import { actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { framesModel } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
 import { FrameScene, FrameType, TemplateType } from '../../types'
 import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
+import { v4 as uuidv4 } from 'uuid'
 
 export interface FrameLogicProps {
   frameId: number
 }
-const FRAME_KEYS = [
+const FRAME_KEYS: (keyof FrameType)[] = [
   'name',
   'frame_host',
   'frame_port',
@@ -34,6 +35,23 @@ const FRAME_KEYS = [
   'debug',
 ]
 
+export function sanitizeScene(scene: Partial<FrameScene>, frame: FrameType): FrameScene {
+  const settings = scene.settings ?? {}
+  return {
+    ...scene,
+    id: scene.id ?? uuidv4(),
+    name: scene.name || 'Untitled scene',
+    nodes: scene.nodes ?? [],
+    edges: scene.edges ?? [],
+    fields: scene.fields ?? [],
+    settings: {
+      ...settings,
+      refreshInterval: settings.refreshInterval || frame.interval || 60,
+      backgroundColor: settings.backgroundColor || frame.background_color || '#ffffff',
+    },
+  } satisfies FrameScene
+}
+
 export const frameLogic = kea<frameLogicType>([
   path(['src', 'scenes', 'frame', 'frameLogic']),
   props({} as FrameLogicProps),
@@ -55,6 +73,15 @@ export const frameLogic = kea<frameLogicType>([
         showErrorsOnTouch: true,
       },
       defaults: {} as FrameType,
+      errors: (state: Partial<FrameType>) => ({
+        scenes: (state.scenes ?? []).map((scene: Record<string, any>) => ({
+          fields: (scene.fields ?? []).map((field: Record<string, any>) => ({
+            name: field.name ? '' : 'Name is required',
+            label: field.label ? '' : 'Label is required',
+            type: field.type ? '' : 'Type is required',
+          })),
+        })),
+      }),
       submit: async (frame, breakpoint) => {
         const json: Record<string, any> = {}
         for (const key of FRAME_KEYS) {
@@ -74,9 +101,7 @@ export const frameLogic = kea<frameLogicType>([
       },
     },
   })),
-
   reducers({
-    currentScene: ['default', {}],
     nextAction: [
       null as 'render' | 'restart' | 'stop' | 'deploy' | null,
       {
@@ -96,13 +121,18 @@ export const frameLogic = kea<frameLogicType>([
       (frame, frameForm) =>
         FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], frameForm?.[key as keyof FrameType])),
     ],
+    defaultScene: [
+      (s) => [s.frame, s.frameForm],
+      (frame, frameForm) => {
+        const allScenes = frameForm?.scenes ?? frame?.scenes ?? []
+        return (allScenes.find((scene) => scene.id === 'default' || scene.default) || allScenes[0])?.id ?? null
+      },
+    ],
   })),
   subscriptions(({ actions }) => ({
-    frame: (frame, oldFrame) => {
-      if (frame) {
-        if (FRAME_KEYS.some((key) => JSON.stringify(frame[key]) !== JSON.stringify(oldFrame?.[key]))) {
-          actions.resetFrameForm(frame)
-        }
+    frame: (frame?: FrameType, oldFrame?: FrameType) => {
+      if (frame && !oldFrame) {
+        actions.resetFrameForm({ ...frame, scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [] })
       }
     },
   })),
@@ -117,8 +147,8 @@ export const frameLogic = kea<frameLogicType>([
       const hasScene = frame.scenes?.some(({ id }) => id === sceneId)
       actions.setFrameFormValues({
         scenes: hasScene
-          ? frame.scenes?.map((s) => (s.id === sceneId ? { ...s, ...scene } : s))
-          : [...(frame.scenes ?? []), { ...scene, id: sceneId }],
+          ? frame.scenes?.map((s) => (s.id === sceneId ? sanitizeScene({ ...s, ...scene }, frame) : s))
+          : [...(frame.scenes ?? []), sanitizeScene({ ...scene, id: sceneId }, frame)],
       })
     },
     updateNodeData: ({ sceneId, nodeId, nodeData }) => {
@@ -144,15 +174,16 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
     applyTemplate: ({ template }) => {
-      actions.setFrameFormValues({
-        ...('scenes' in template ? { scenes: template.scenes } : {}),
-        ...('interval' in (template.config ?? {}) ? { interval: template.config?.interval } : {}),
-        ...('scaling_mode' in (template.config ?? {}) ? { scaling_mode: template.config?.scaling_mode } : {}),
-        ...('rotate' in (template.config ?? {}) ? { rotate: template.config?.rotate } : {}),
-        ...('background_color' in (template.config ?? {})
-          ? { background_color: template.config?.background_color }
-          : {}),
-      })
+      if ('scenes' in template) {
+        actions.setFrameFormValues({ scenes: template.scenes })
+      }
     },
   })),
+  afterMount(({ actions, values }) => {
+    const defaultScene = values.frame?.scenes?.find((scene) => scene.id === 'default' && !scene.default)
+    if (defaultScene) {
+      const { name, id, default: _def, ...rest } = defaultScene
+      actions.updateScene('default', { name: 'Default Scene', id: uuidv4(), default: true, ...rest })
+    }
+  }),
 ])

@@ -1,6 +1,6 @@
 import { useActions, useValues } from 'kea'
 import { NodeProps, Handle, Position } from 'reactflow'
-import { AppNodeData } from '../../../../types'
+import { AppNodeData, DispatchNodeData } from '../../../../types'
 import clsx from 'clsx'
 import { RevealDots } from '../../../../components/Reveal'
 import { diagramLogic } from './diagramLogic'
@@ -14,21 +14,24 @@ import { Markdown } from '../../../../components/Markdown'
 import { ClipboardDocumentIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
 
-export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JSX.Element {
-  const { frameId, sceneId } = useValues(diagramLogic)
+export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
+  const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
   const { updateNodeConfig, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const { editApp } = useActions(panelsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { appName, appFields, isCustomApp, configJsonError, isSelected, codeFields, fieldInputFields } = useValues(
-    appNodeLogic(appNodeLogicProps)
-  )
+  const { isDispatch, name, fields, isCustomApp, configJsonError, isSelected, codeFields, fieldInputFields } =
+    useValues(appNodeLogic(appNodeLogicProps))
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
 
   return (
     <div
       className={clsx(
         'shadow-lg border border-2',
-        isSelected
+        isDispatch
+          ? isSelected
+            ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
+            : 'bg-black bg-opacity-70 border-red-900 shadow-red-700/50 '
+          : isSelected
           ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
           : isCustomApp
           ? 'bg-black bg-opacity-70 border-teal-900 shadow-teal-700/50 '
@@ -38,22 +41,35 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
       <div
         className={clsx(
           'frameos-node-title text-xl p-1 gap-1',
-          isSelected ? 'bg-indigo-900' : isCustomApp ? 'bg-teal-900' : 'bg-sky-900',
+          isDispatch
+            ? isSelected
+              ? 'bg-indigo-900'
+              : 'bg-red-900'
+            : isSelected
+            ? 'bg-indigo-900'
+            : isCustomApp
+            ? 'bg-teal-900'
+            : 'bg-sky-900',
           'flex w-full justify-between items-center'
         )}
       >
         <div>
-          {appName}
+          {name}
           {isCustomApp ? ' (edited)' : ''}
         </div>
         <DropdownMenu
           className="w-fit"
+          buttonColor={isDispatch && !isSelected ? 'red' : 'primary'}
           items={[
-            {
-              label: 'Edit App',
-              onClick: () => editApp(sceneId, id, data),
-              icon: <PencilSquareIcon className="w-5 h-5" />,
-            },
+            ...(isDispatch
+              ? []
+              : [
+                  {
+                    label: 'Edit App',
+                    onClick: () => editApp(sceneId, id, data),
+                    icon: <PencilSquareIcon className="w-5 h-5" />,
+                  },
+                ]),
             {
               label: 'Copy as JSON',
               onClick: () => copyAppJSON(id),
@@ -73,15 +89,30 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
             type="target"
             position={Position.Left}
             id="prev"
-            style={{ position: 'relative', transform: 'none', left: 0, top: 0, background: 'white' }}
-            onConnect={(params) => console.log('handle onConnect', params)}
+            style={{
+              position: 'relative',
+              transform: 'none',
+              left: 0,
+              top: 0,
+              background: 'white',
+              borderBottomLeftRadius: 0,
+              borderTopLeftRadius: 0,
+            }}
             isConnectable={isConnectable}
           />
           <Handle
             type="source"
             position={Position.Right}
             id="next"
-            style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#cccccc' }}
+            style={{
+              position: 'relative',
+              transform: 'none',
+              right: 0,
+              top: 0,
+              background: '#cccccc',
+              borderBottomLeftRadius: 0,
+              borderTopLeftRadius: 0,
+            }}
             isConnectable={isConnectable}
           />
         </div>
@@ -92,10 +123,10 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
             {configJsonError}
           </div>
         ) : null}
-        {appFields ? (
+        {fields ? (
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5 w-full">
             <tbody>
-              {appFields.map((field, i) => (
+              {fields.map((field, i) => (
                 <React.Fragment key={i}>
                   {'markdown' in field ? (
                     <tr>
@@ -118,7 +149,6 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                             background: 'black',
                             borderColor: 'white',
                           }}
-                          onConnect={(params) => console.log('handle onConnect', params)}
                           isConnectable
                         />
                       </td>
@@ -165,6 +195,14 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData>): JS
                               placeholder={field.placeholder}
                               value={field.name in data.config ? data.config[field.name] : field.value}
                               options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
+                              onChange={(value) => updateNodeConfig(id, field.name, value)}
+                            />
+                          ) : field.type === 'scene' ? (
+                            <Select
+                              theme="node"
+                              placeholder={field.placeholder}
+                              value={field.name in data.config ? data.config[field.name] : field.value}
+                              options={sceneOptions}
                               onChange={(value) => updateNodeConfig(id, field.name, value)}
                             />
                           ) : field.type === 'text' ? (

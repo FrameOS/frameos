@@ -1,97 +1,114 @@
-import json, pixie, times, options, asyncdispatch, strformat, strutils, locks
+import json, pixie, times, options, asyncdispatch, strformat, strutils, locks, tables
 import pixie/fileformats/png
-import scenes/default as defaultScene
+from scenes/scenes import getExportedScenes, defaultSceneId
 
 import frameos/channels
 import frameos/types
 import frameos/config
+import frameos/logger
 import frameos/utils/image
 
 import drivers/drivers as drivers
 
-const FAST_SCENE = 0.5
-const SERVER_RENDER_DELAY = 1.0
-const SCENE_STATE_JSON_PATH = "./state/scene.json"
+# How fast must a scene render to be condidered fast. Two in a row pauses logging for 10s.
+const FAST_SCENE_CUTOFF_SECONDS = 0.5
 
-type
-  RunnerThread = ref object
-    frameConfig: FrameConfig
-    logger: Logger
-    scene: FrameScene
-    lastRenderAt: float
-    sleepFuture: Option[Future[void]]
-    isRendering: bool = false
-    triggerRenderNext: bool = false
+# How frequently we announce a new render via websockets
+const SERVER_RENDER_DELAY_SECONDS = 1.0
+
+# Where to store the persisted states
+const SCENE_STATE_JSON_FOLDER = "./state"
+
+# All scenes that are compiled into the FrameOS binary
+let exportedScenes*: Table[SceneId, ExportedScene] = getExportedScenes()
 
 var
   thread: Thread[(FrameConfig, Logger)]
-  pngLock: Lock
-  pngImage = newImage(1, 1)
-  hasPngImage = false
-  lastPublicState = %*{}
-  lastPublicStateLock: Lock
-  lastPublicStateUpdate = 0.0
-  lastPersistedState = %*{}
-  lastPersistedStateUpdate = 0.0
+  lastImageLock: Lock
+  lastImage {.guard: lastImageLock.} = newImage(1, 1)
+  lastImagePresent = false
+  lastPublicStatesLock: Lock
+  lastPublicStates {.guard: lastPublicStatesLock.} = %*{}
+  lastPublicSceneId {.guard: lastPublicStatesLock.} = "".SceneId
+  lastPersistedStates = %*{}
 
 proc setLastImage(image: Image) =
-  withLock pngLock:
-    if pngImage.width != image.width or pngImage.height != image.height:
-      pngImage = newImage(image.width, image.height)
-    pngImage.draw(image)
-    hasPngImage = true
+  withLock lastImageLock:
+    if lastImage.width != image.width or lastImage.height != image.height:
+      lastImage = newImage(image.width, image.height)
+    lastImage.draw(image)
+    lastImagePresent = true
 
-proc getLastPng*(): string =
-  if not hasPngImage:
+proc getLastImagePng*(): string =
+  if not lastImagePresent:
     raise newException(Exception, "No image rendered yet")
   var copy: seq[ColorRGBX]
-  withLock pngLock:
-    copy = pngImage.data
-  return encodePng(pngImage.width, pngImage.height, 4, copy[0].addr, copy.len * 4)
+  var width, height: int
+  withLock lastImageLock:
+    copy = lastImage.data
+    width = lastImage.width
+    height = lastImage.height
+  return encodePng(width, height, 4, copy[0].addr, copy.len * 4)
 
-proc updateLastPublicState*(state: JsonNode) =
-  withLock lastPublicStateLock:
-    for field in defaultScene.PUBLIC_STATE_FIELDS:
+proc getLastPublicState*(): (SceneId, JsonNode, seq[StateField]) =
+  {.gcsafe.}: # It's fine: state is copied and .publicStateFields don't change
+    var state = %*{}
+    withLock lastPublicStatesLock:
+      if lastPublicStates.hasKey(lastPublicSceneId.string):
+        state = lastPublicStates[lastPublicSceneId.string].copy()
+      return (lastPublicSceneId, state, exportedScenes[lastPublicSceneId].publicStateFields)
+
+proc updateLastPublicState*(self: FrameScene) =
+  if not exportedScenes.hasKey(self.id):
+    return
+  let sceneExport = exportedScenes[self.id]
+  withLock lastPublicStatesLock:
+    if not lastPublicStates.hasKey(self.id.string):
+      lastPublicStates[self.id.string] = %*{}
+    let lastSceneState = lastPublicStates[self.id.string]
+    for field in sceneExport.publicStateFields:
       let key = field.name
-      if state.hasKey(key) and state[key] != lastPublicState{key}:
-        lastPublicState[key] = copy(state[key])
+      if self.state.hasKey(key) and self.state[key] != lastSceneState{key}:
+        lastSceneState[key] = copy(self.state[key])
+  self.lastPublicStateUpdate = epochTime()
 
-proc getLastPublicState*(): JsonNode =
-  {.gcsafe.}:
-    withLock lastPublicStateLock:
-      return lastPublicState.copy()
+proc sanitizePathString*(s: string): string =
+  return s.multiReplace(("/", "_"), ("\\", "_"), (":", "_"), ("*", "_"), ("?", "_"), ("\"", "_"), ("<", "_"), (">",
+      "_"), ("|", "_"))
 
-proc getPublicStateFields*(): seq[StateField] =
-  {.gcsafe.}:
-    return defaultScene.PUBLIC_STATE_FIELDS
-
-proc updateLastPersistedState*(state: JsonNode) =
+proc updateLastPersistedState*(self: FrameScene) =
+  if not exportedScenes.hasKey(self.id):
+    return
+  let sceneExport = exportedScenes[self.id]
   var hasChanges = false
-  for key in defaultScene.PERSISTED_STATE_KEYS:
-    if state.hasKey(key) and state{key} != lastPersistedState{key}:
-      lastPersistedState[key] = copy(state[key])
+  if not lastPersistedStates.hasKey(self.id.string):
+    lastPersistedStates[self.id.string] = %*{}
+  let persistedState = lastPersistedStates[self.id.string]
+  for key in sceneExport.persistedStateKeys:
+    if self.state.hasKey(key) and self.state[key] != persistedState{key}:
+      persistedState[key] = copy(self.state[key])
       hasChanges = true
   if hasChanges:
-    writeFile(SCENE_STATE_JSON_PATH, $state)
-  lastPersistedStateUpdate = epochTime()
+    writeFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(self.id.string)}.json", $persistedState)
+  self.lastPersistedStateUpdate = epochTime()
 
-proc loadPersistedState*(): JsonNode =
+proc loadPersistedState*(sceneId: SceneId): JsonNode =
   try:
-    return parseJson(readFile(SCENE_STATE_JSON_PATH))
+    return parseJson(readFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json"))
   except IOError:
     return %*{}
 
-proc renderScene*(self: RunnerThread): Image =
+proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene): Image =
   let sceneTimer = epochTime()
   let requiredWidth = self.frameConfig.renderWidth()
   let requiredHeight = self.frameConfig.renderHeight()
   self.logger.log(%*{"event": "render", "width": requiredWidth, "height": requiredHeight})
 
   try:
-    let image = defaultScene.render(defaultScene.Scene(self.scene))
+    let image = exportedScene.render(scene)
     if image.width != requiredWidth or image.height != requiredHeight:
       let resizedImage = newImage(requiredWidth, requiredHeight)
-      resizedImage.fill(self.frameConfig.backgroundColor)
+      resizedImage.fill(scene.backgroundColor)
       scaleAndDrawImage(resizedImage, image, self.frameConfig.scalingMode)
       setLastImage(resizedImage)
       result = resizedImage.rotateDegrees(self.frameConfig.rotate)
@@ -112,40 +129,60 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   var fastSceneCount = 0
   var fastSceneResumeAt = 0.0
   var nextServerRenderAt = 0.0
+  var lastSceneId = "".SceneId
+  var currentScene: FrameScene
 
   while true:
     timer = epochTime()
     self.isRendering = true
-    self.scene.isRendering = true
+    let sceneId = self.currentSceneId
+    if not exportedScenes.hasKey(sceneId):
+      raise newException(Exception, &"Scene {sceneId} not found")
+    let exportedScene = exportedScenes[sceneId]
+    if lastSceneId != sceneId:
+      self.logger.log(%*{"event": "sceneChange", "sceneId": sceneId.string})
+      if self.scenes.hasKey(sceneId):
+        currentScene = self.scenes[sceneId]
+      else:
+        currentScene = exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+        self.scenes[sceneId] = currentScene
+        currentScene.updateLastPublicState()
+      lastSceneId = sceneId
+      withLock lastPublicStatesLock:
+        lastPublicSceneId = sceneId
+
+    currentScene.isRendering = true
     self.triggerRenderNext = false # used to debounce render events received while rendering
-    let lastRotatedImage = self.renderScene()
-    if self.frameConfig.interval < 1:
+
+    let interval = currentScene.refreshInterval
+    let lastRotatedImage = self.renderSceneImage(exportedScene, currentScene)
+    if interval < 1:
       let now = epochTime()
       if now >= nextServerRenderAt:
-        nextServerRenderAt = nextServerRenderAt + SERVER_RENDER_DELAY
+        nextServerRenderAt = nextServerRenderAt + SERVER_RENDER_DELAY_SECONDS
         if nextServerRenderAt < now:
-          nextServerRenderAt = now + SERVER_RENDER_DELAY
+          nextServerRenderAt = now + SERVER_RENDER_DELAY_SECONDS
         triggerServerRender()
     else:
       triggerServerRender()
 
     driverTimer = epochTime()
-    # TODO: render the driver part in another thread if fast rendering is enabled
     try:
+      # TODO: render the driver part in another thread
       drivers.render(lastRotatedImage)
       self.logger.log(%*{"event": "render:driver",
         "device": self.frameConfig.device, "ms": round((epochTime() - driverTimer) * 1000, 3)})
     except Exception as e:
       self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
-    if self.frameConfig.interval < 1:
+    if interval < 1:
       let now = epochTime()
-      if now - timer < FAST_SCENE:
+      if now - timer < FAST_SCENE_CUTOFF_SECONDS:
         fastSceneCount += 1
         # Two fast scenes in a row
         if fastSceneCount == 2:
-          # TODO: capture logs per scene and log if slow
-          self.logger.log(%*{"event": "pause", "message": "Rendering fast. Pausing logging for 10s"})
+          # TODO: capture logs per _scene_ and log if slow
+          self.logger.log(%*{"event": "pause", "message": "Rendering fast. Pausing all scene render logs for 10 seconds."})
           self.logger.disable()
           fastSceneResumeAt = now + 10
         elif fastSceneResumeAt != 0.0 and now > fastSceneResumeAt:
@@ -160,15 +197,13 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     # Gives a chance for the gathered events to be collected
     await sleepAsync(0.001)
     self.isRendering = false
-    self.scene.isRendering = false
+    currentScene.isRendering = false
 
-    if epochTime() > lastPublicStateUpdate + 1.0:
-      updateLastPublicState(defaultScene.getPublicState(defaultScene.Scene(self.scene)))
-      lastPublicStateUpdate = epochTime()
+    if epochTime() > currentScene.lastPublicStateUpdate + 1.0:
+      currentScene.updateLastPublicState()
 
-    if epochTime() > lastPersistedStateUpdate + 1.0:
-      updateLastPersistedState(defaultScene.getPersistedState(defaultScene.Scene(self.scene)))
-      lastPersistedStateUpdate = epochTime()
+    if epochTime() > currentScene.lastPersistedStateUpdate + 1.0:
+      currentScene.updateLastPersistedState()
 
     # While we were rendering an event to trigger a render was dispatched
     if self.triggerRenderNext:
@@ -176,10 +211,10 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
       continue
 
     # Sleep until the next frame
-    sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) * 1000, 0.1)
+    sleepDuration = max((interval - (epochTime() - timer)) * 1000, 0.1)
     self.logger.log(%*{"event": "sleep", "ms": round(sleepDuration, 3)})
     # Calculate once more to subtract the time it took to log the message
-    sleepDuration = max((self.frameConfig.interval - (epochTime() - timer)) * 1000, 0.1)
+    sleepDuration = max((interval - (epochTime() - timer)) * 1000, 0.1)
     let future = sleepAsync(sleepDuration)
     self.sleepFuture = some(future)
     await future
@@ -191,29 +226,32 @@ proc triggerRender*(self: RunnerThread): void =
   else:
     self.logger.log(%*{"event": "render", "error": "Render already in progress, ignoring."})
 
-proc dispatchSceneEvent*(self: RunnerThread, event: string, payload: JsonNode) =
+proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: string, payload: JsonNode) =
+  let targetSceneId: SceneId = if sceneId.isSome: sceneId.get() else: self.currentSceneId
+  if not self.scenes.hasKey(targetSceneId):
+    self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not initialized",
+        "sceneId": targetSceneId.string, "event": event, "payload": payload})
+    return
+  let scene = self.scenes[targetSceneId]
+  let exportedScene = exportedScenes[targetSceneId]
   var context = ExecutionContext(
-    scene: self.scene,
+    scene: scene,
     event: event,
     payload: payload,
     image: newImage(1, 1),
     loopIndex: 0,
     loopKey: "."
   )
-  let scene = defaultScene.Scene(self.scene)
-  defaultScene.runEvent(scene, context)
-
+  exportedScene.runEvent(context)
   if event == "setSceneState":
-    updateLastPublicState(defaultScene.getPublicState(defaultScene.Scene(self.scene)))
-    lastPublicStateUpdate = epochTime()
-    updateLastPersistedState(defaultScene.getPersistedState(defaultScene.Scene(self.scene)))
-    lastPersistedStateUpdate = epochTime()
+    scene.updateLastPublicState()
+    scene.updateLastPersistedState()
 
 proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
   var waitTime = 10
 
   while true:
-    let (success, (event, payload)) = eventChannel.tryRecv()
+    let (success, (sceneId, event, payload)) = eventChannel.tryRecv()
     if success:
       waitTime = 1
       if not event.startsWith("mouse"):
@@ -231,12 +269,27 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
             if self.frameConfig.width > 0 and self.frameConfig.height > 0:
               payload["x"] = %*((self.frameConfig.width.float * payload["x"].getInt().float / 32767.0).int)
               payload["y"] = %*((self.frameConfig.height.float * payload["y"].getInt().float / 32767.0).int)
+          of "setCurrentScene":
+            let sceneId = SceneId(payload["sceneId"].getStr())
+            if sceneId == self.currentSceneId:
+              continue
+            if not exportedScenes.hasKey(sceneId):
+              self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
+                  "event": event, "payload": payload})
+              continue
+            self.dispatchSceneEvent(some(self.currentSceneId), "close", payload)
+            if not self.scenes.hasKey(sceneId):
+              let scene = exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+              self.scenes[sceneId] = scene
+              scene.updateLastPublicState()
+            self.currentSceneId = sceneId
+            self.triggerRenderNext = true
+            self.dispatchSceneEvent(some(sceneId), "open", payload)
+            continue # don't dispatch this event to the scene
           else: discard
-
-        self.dispatchSceneEvent(event, payload)
+        self.dispatchSceneEvent(sceneId, event, payload)
       except Exception as e:
-        self.logger.log(%*{"event": "event:error", "error": $e.msg,
-            "stacktrace": e.getStackTrace()})
+        self.logger.log(%*{"event": "event:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
     # after we have processed all queued messages
     if not success:
@@ -248,34 +301,24 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
         if waitTime < 200:
           waitTime += 5
 
-proc createThreadRunner*(args: (FrameConfig, Logger)) =
+proc createRunnerThread*(args: (FrameConfig, Logger)) =
   {.cast(gcsafe).}:
-    var scene = defaultScene.init(
-      args[0],
-      args[1],
-      proc(event: string, payload: JsonNode) = eventChannel.send((event, payload)),
-      loadPersistedState()
-    ).FrameScene
-    updateLastPublicState(defaultScene.getPublicState(defaultScene.Scene(scene)))
-    lastPublicStateUpdate = epochTime()
     var runnerThread = RunnerThread(
       frameConfig: args[0],
-      logger: args[1],
-      scene: scene,
+      scenes: initTable[SceneId, FrameScene](),
+      currentSceneId: defaultSceneId,
       lastRenderAt: 0,
       sleepFuture: none(Future[void]),
+      isRendering: false,
+      triggerRenderNext: false,
+      logger: args[1]
     )
     waitFor runnerThread.startRenderLoop() and runnerThread.startMessageLoop()
 
-proc newRunner*(frameConfig: FrameConfig, logger: Logger): RunnerControl =
-  var runner = RunnerControl(
-    logger: logger,
-    frameConfig: frameConfig,
-    start: proc () = createThread(thread, createThreadRunner, (frameConfig, logger)),
-    sendEvent: proc (event: string, payload: JsonNode) = eventChannel.send((event, payload)),
+proc newRunner*(frameConfig: FrameConfig): RunnerControl =
+  # create a separate logger, so we can pause it when rendering fast
+  var logger = newLogger(frameConfig)
+  result = RunnerControl(
+    start: proc () = createThread(thread, createRunnerThread, (frameConfig, logger)),
   )
   setLastImage(renderError(frameConfig.renderWidth(), frameConfig.renderHeight(), "FrameOS booting..."))
-  return runner
-
-proc triggerRender*(self: RunnerControl): void =
-  self.sendEvent("render", %*{})

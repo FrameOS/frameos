@@ -19,7 +19,7 @@ proc newFrameOS*(): FrameOS =
     metricsLogger: metricsLogger
   )
   drivers.init(result)
-  result.runner = newRunner(frameConfig, logger)
+  result.runner = newRunner(frameConfig)
   result.server = newServer(result)
 
 proc start*(self: FrameOS) {.async.} =
@@ -30,16 +30,14 @@ proc start*(self: FrameOS) {.async.} =
     "width": self.frameConfig.width,
     "height": self.frameConfig.height,
     "device": self.frameConfig.device,
-    "interval": self.frameConfig.interval,
     "metricsInterval": self.frameConfig.metricsInterval,
     "scalingMode": self.frameConfig.scalingMode,
     "rotate": self.frameConfig.rotate,
-    "backgroundColor": self.frameConfig.backgroundColor.toHtmlHex.toLowerAscii,
     "debug": self.frameConfig.debug,
   }}
   self.logger.log(message)
   self.runner.start()
-  self.server.startServer()
+  result = self.server.startServer()
 
 proc startFrameOS*() {.async.} =
   var frameOS = newFrameOS()

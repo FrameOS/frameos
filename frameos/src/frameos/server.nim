@@ -16,7 +16,8 @@ import frameos/channels
 import frameos/config
 import frameos/utils/image
 from net import Port
-from frameos/runner import getLastPng, getLastPublicState, getPublicStateFields, triggerRender
+from frameos/runner import getLastImagePng, getLastPublicState
+from scenes/scenes import sceneOptions
 
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
@@ -103,7 +104,7 @@ router myrouter:
           raise newException(Exception, "No image available")
       except Exception:
         try:
-          resp Http200, {"Content-Type": "image/png"}, getLastPng()
+          resp Http200, {"Content-Type": "image/png"}, getLastImagePng()
         except Exception as e:
           resp Http200, {"Content-Type": "image/png"}, renderError(globalFrameConfig.renderWidth(),
             globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
@@ -117,14 +118,16 @@ router myrouter:
   get "/state":
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"
-    resp Http200, {"Content-Type": "application/json"}, $getLastPublicState()
+    log(%*{"event": "http", "get": request.pathInfo})
+    {.gcsafe.}: # It's a copy of the state, so it's fine.
+      let (sceneId, state, _) = getLastPublicState()
+      resp Http200, {"Content-Type": "application/json"}, $(%*{"sceneId": $sceneId, "state": state})
   get "/c":
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"
     var fieldsHtml = ""
     var fieldsSubmitHtml = ""
-    let fields = getPublicStateFields()
-    let values = getLastPublicState()
+    let (currentSceneId, values, fields) = getLastPublicState()
     for field in fields:
       let key = field.name
       let label = if field.label != "": field.label else: key
@@ -159,11 +162,17 @@ router myrouter:
       else:
         fieldsHtml.add(fmt"<input type='text' id='{h($key)}' placeholder='{h(placeholder)}' value='{h(stringValue)}' /><br/><br/>")
 
+    var sceneOptionsHtml = ""
+    for (sceneId, sceneName) in sceneOptions:
+      let selected = if sceneId == currentSceneId: " selected" else: ""
+      sceneOptionsHtml.add(fmt"<option value='{h(sceneId.string)}'{selected}>{h(sceneName)}</option>")
+
     fieldsHtml.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
     {.gcsafe.}: # We're only reading static assets. It's fine.
       let controlHtml = webAssets.getAsset("assets/web/control.html").
         replace("/*$$fieldsHtml$$*/", fieldsHtml).
         replace("/*$$fieldsSubmitHtml$$*/", fieldsSubmitHtml).
+        replace("/*$$sceneOptionsHtml$$*/", sceneOptionsHtml).
         replace("Frame Control", if globalFrameConfig.name != "": h(globalFrameConfig.name) else: "Frame Control")
       resp Http200, controlHtml
 
@@ -181,9 +190,9 @@ proc listenForRender*() {.async.} =
       if dataAvailable:
         asyncCheck sendToAll("render")
         log(%*{"event": "websocket:send", "message": "render"})
-      await sleepAsync(0.1)
+      await sleepAsync(10)
     else:
-      await sleepAsync(2)
+      await sleepAsync(100)
 
 proc newServer*(frameOS: FrameOS): Server =
   globalFrameConfig = frameOS.frameConfig

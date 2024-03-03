@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 from datetime import timezone
 from app import db, socketio
@@ -36,7 +37,6 @@ class Frame(db.Model):
     interval = db.Column(db.Double, default=300)
     metrics_interval = db.Column(db.Double, default=60)
     scaling_mode = db.Column(db.String(64), nullable=True)  # contain (default), cover, stretch, center
-    background_color = db.Column(db.String(64), nullable=True)
     rotate = db.Column(db.Integer, nullable=True)
     debug = db.Column(db.Boolean, nullable=True)
     last_log_at = db.Column(db.DateTime, nullable=True)
@@ -46,6 +46,7 @@ class Frame(db.Model):
 
     # deprecated
     image_url = db.Column(db.String(256), nullable=True)
+    background_color = db.Column(db.String(64), nullable=True) # still used as fallback in frontend
 
     def to_dict(self):
         return {
@@ -124,6 +125,14 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
     db.session.add(frame)
     db.session.commit()
     socketio.emit('new_frame', frame.to_dict())
+
+    from app.models import new_log
+    new_log(frame.id, "welcome", f"Frame \"{frame.name}\" added!")
+    new_log(frame.id, "welcome", "-> Press 'Save & Deploy' to deploy the default scene")
+    new_log(frame.id, "welcome", "-> Install additional scenes in the 'Scenes' panel")
+    new_log(frame.id, "welcome", "-> Drag & Drop 'Apps' and 'Events' onto a scene")
+    new_log(frame.id, "welcome", "-> Click 'Edit App' to clone an app and edit its source")
+
     return frame
 
 
@@ -148,50 +157,23 @@ def delete_frame(frame_id: int):
     return False
 
 
+def get_templates_json() -> dict:
+    templates_schema_path = os.path.join("..", "frontend", "schema", "templates.json")
+    if os.path.exists(templates_schema_path):
+        with open(templates_schema_path, 'r') as file:
+            return json.load(file)
+    else:
+        return {}
+
 def create_default_scene() -> dict:
-    event_uuid = str(uuid.uuid4())
-    unsplash_uuid = str(uuid.uuid4())
-    edge_uuid = str(uuid.uuid4())
+    templates = get_templates_json()
+    first_template = list(templates.values())[0]
+
     return {
-        "id": "default",
-        "edges": [
-            {
-                "id": edge_uuid,
-                "source": event_uuid,
-                "sourceHandle": "next",
-                "target": unsplash_uuid,
-                "targetHandle": "prev"
-            }
-        ],
-        "nodes": [
-            {
-                "id": event_uuid,
-                "type": "event",
-                "position": {
-                    "x": 259.18108974358967,
-                    "y": 379.3192307692308
-                },
-                "data": {
-                    "keyword": "render"
-                },
-                "width": 132,
-                "height": 72
-            },
-            {
-                "id": unsplash_uuid,
-                "type": "app",
-                "position": {
-                    "x": 598.6810897435896,
-                    "y": 412.8192307692308
-                },
-                "data": {
-                    "keyword": "unsplash",
-                    "config": {}
-                },
-                "width": 133,
-                "height": 102
-            }
-        ]
+        "name": "Default Scene",
+        "id": str(uuid.uuid4()),
+        "default": True,
+        **first_template,
     }
 
 
@@ -209,8 +191,6 @@ def get_frame_json(frame: Frame) -> dict:
         "height": frame.height,
         "device": frame.device or "web_only",
         "color": frame.color or "black",
-        "backgroundColor": frame.background_color or "white",
-        "interval": frame.interval or 30.0,
         "metricsInterval": frame.metrics_interval or 60.0,
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",

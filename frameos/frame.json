@@ -9,9 +9,10 @@
     "device": "web_only",
     "color": null,
     "backgroundColor": "blue",
-    "interval": 30.0,
+    "interval": 1.0,
     "metricsInterval": 60.0,
     "scalingMode": "cover",
+    "frameAccess": "public",
     "rotate": 0,
     "settings": {
         "sentry": {

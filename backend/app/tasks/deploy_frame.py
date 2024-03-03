@@ -18,7 +18,7 @@ from scp import SCPClient
 
 from app import create_app
 from app.codegen.drivers_nim import write_drivers_nim
-from app.codegen.scene_nim import write_scene_nim
+from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.drivers.devices import drivers_for_device
 from app.drivers.waveshare import write_waveshare_driver_nim
 from app.huey import huey
@@ -206,8 +206,12 @@ def make_local_modifications(frame: Frame, source_dir: str):
     # only one scene called "default" for now
     for scene in frame.scenes:
         scene_source = write_scene_nim(frame, scene)
-        with open(os.path.join(source_dir, "src", "scenes", f"{scene.get('id')}.nim"), "w") as file:
+        id = re.sub(r'\W+', '', scene.get('id', 'default'))
+
+        with open(os.path.join(source_dir, "src", "scenes", f"scene_{id}.nim"), "w") as file:
             file.write(scene_source)
+    with open(os.path.join(source_dir, "src", "scenes", "scenes.nim"), "w") as file:
+        file.write(write_scenes_nim(frame))
 
     drivers = drivers_for_device(frame.device)
     with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as file:

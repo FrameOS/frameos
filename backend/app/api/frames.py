@@ -47,7 +47,7 @@ def api_frame_get_image(id: int):
     frame = Frame.query.get_or_404(id)
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
     url = f'http://{frame.frame_host}:{frame.frame_port}/image'
-    if frame.frame_access == "private":
+    if frame.frame_access != "public" and frame.frame_access != "protected" and frame.frame_access_key is not None:
         url += "?k=" + frame.frame_access_key
 
     try:
@@ -76,7 +76,7 @@ def api_frame_get_state(id: int):
     frame = Frame.query.get_or_404(id)
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:state'
     url = f'http://{frame.frame_host}:{frame.frame_port}/state'
-    if (frame.frame_access == "private" or frame.frame_access == "protected" )and frame.frame_access_key is not None:
+    if frame.frame_access != "public" and frame.frame_access_key is not None:
         url += "?k=" + frame.frame_access_key
 
     try:
@@ -122,10 +122,10 @@ def api_frame_event(id: int, event: str):
 @login_required
 def api_frame_scene_source(id: int, scene: str):
     frame = Frame.query.get_or_404(id)
-    scene = [scene for scene in frame.scenes if scene.get('id') == 'default'][0]
-    if not scene:
-        return jsonify({'error': f'Scene {scene} not found'}), HTTPStatus.NOT_FOUND
-    return jsonify({'source': write_scene_nim(frame, scene)})
+    for scene_json in frame.scenes:
+         if scene_json.get('id') == scene:
+            return jsonify({'source': write_scene_nim(frame, scene_json)})
+    return jsonify({'error': f'Scene {scene} not found'}), HTTPStatus.NOT_FOUND
 
 @api.route('/frames/<int:id>/reset', methods=['POST'])
 @login_required
@@ -173,7 +173,7 @@ def api_frame_update(id: int):
     frame = Frame.query.get_or_404(id)
     fields = ['scenes', 'name', 'frame_host', 'frame_port', 'frame_access_key', 'frame_access', 'ssh_user', 'ssh_pass', 'ssh_port', 'server_host',
               'server_port', 'server_api_key', 'width', 'height', 'rotate', 'color', 'interval', 'metrics_interval',
-              'scaling_mode', 'background_color', 'device', 'debug']
+              'scaling_mode', 'device', 'debug']
     defaults = {'frame_port': 8787, 'ssh_port': 22}
     try:
         payload = request.json

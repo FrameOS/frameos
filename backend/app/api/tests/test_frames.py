@@ -33,7 +33,7 @@ class TestFrames(BaseTestCase):
         response = self.client.get(f'/api/frames/{self.frame.id}/logs')
         data = json.loads(response.data)
         assert response.status_code == 200
-        assert data == {"logs": [log1.to_dict(), log2.to_dict()]}
+        assert [log for log in data['logs'] if log['type'] != 'welcome'] == [log1.to_dict(), log2.to_dict()]
 
     def test_api_frame_get_logs_limit(self):
         for i in range(0, 1010):
@@ -131,7 +131,6 @@ class TestFrames(BaseTestCase):
             'device': 'framebuffer',
             'scaling_mode': 'contain',
             'rotate': '90',
-            'background_color': 'black',
             'scenes': json.dumps([{"sceneName": "Scene1"}, {"sceneName": "Scene2"}]),
         })
         assert response.status_code == 200
@@ -146,7 +145,6 @@ class TestFrames(BaseTestCase):
         assert updated_frame.device == 'framebuffer'
         assert updated_frame.scaling_mode == 'contain'
         assert updated_frame.rotate == 90
-        assert updated_frame.background_color == 'black'
         assert updated_frame.scenes == [{"sceneName": "Scene1"}, {"sceneName": "Scene2"}]
 
     def test_api_frame_update_scenes_json_format(self):

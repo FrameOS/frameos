@@ -14,6 +14,7 @@ type
 
 const LOG_FLUSH_SECONDS = 1.0
 
+var threadInitDone = false
 var thread: Thread[FrameConfig]
 
 proc run(self: LoggerThread) =
@@ -87,7 +88,9 @@ proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
       sleep(1000)
 
 proc newLogger*(frameConfig: FrameConfig): Logger =
-  createThread(thread, createThreadRunner, frameConfig)
+  if not threadInitDone:
+    createThread(thread, createThreadRunner, frameConfig)
+    threadInitDone = true
   var logger = Logger(
     frameConfig: frameConfig,
     channel: logChannel,
@@ -100,4 +103,5 @@ proc newLogger*(frameConfig: FrameConfig): Logger =
     logger.enabled = true
   logger.disable = proc() =
     logger.enabled = false
+
   result = logger

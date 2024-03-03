@@ -38,6 +38,7 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
           <H6>{template.name}</H6>
           <div className="flex items-start gap-1">
             <DropdownMenu
+              buttonColor="secondary"
               items={[
                 ...(!template.id
                   ? [

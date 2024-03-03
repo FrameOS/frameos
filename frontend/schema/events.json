@@ -1,0 +1,175 @@
+[
+  {
+    "name": "init",
+    "description": "Triggered when the scene is first loaded.",
+    "canListen": true,
+    "fields": []
+  },
+  {
+    "name": "render",
+    "description": "Render the scene. Triggered according to the frame's refresh interval, or when explicitly requested.",
+    "canListen": true,
+    "canDispatch": true,
+    "fields": []
+  },
+  {
+    "name": "open",
+    "description": "Right after the scene is opened, either for the first time or after being closed and reopened.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "sceneId",
+        "label": "Scene",
+        "type": "scene",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "close",
+    "description": "Right before the scene is closed.",
+    "canListen": true,
+    "fields": []
+  },
+  {
+    "name": "keyDown",
+    "description": "When a key is pressed on a keyboard",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "key",
+        "label": "Key",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "code",
+        "label": "Code",
+        "type": "integer",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "keyUp",
+    "description": "When a key is released on a keyboard",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "key",
+        "label": "Key",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "code",
+        "label": "Code",
+        "type": "integer",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "mouseMove",
+    "description": "When a mouse moves (not logged)",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "x",
+        "label": "X",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "y",
+        "label": "Y",
+        "type": "integer",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "mouseDown",
+    "description": "When a mouse button is pressed (not logged)",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "button",
+        "label": "Button",
+        "type": "integer",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "mouseUp",
+    "description": "When a mouse button is released (not logged)",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "button",
+        "label": "Button",
+        "type": "integer",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "turnOn",
+    "description": "Turn the screen on",
+    "canListen": true,
+    "canDispatch": true,
+    "fields": []
+  },
+  {
+    "name": "turnOff",
+    "description": "Turn the screen off",
+    "canListen": true,
+    "canDispatch": true,
+    "fields": []
+  },
+  {
+    "name": "button",
+    "description": "When a GPIO button is pressed or released",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "pin",
+        "label": "Pin",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "label",
+        "label": "Label",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "level",
+        "label": "Level",
+        "type": "integer",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "setSceneState",
+    "description": "Set the scene's public state. This is not used for private state changes.",
+    "canDispatch": true,
+    "fields": []
+  },
+  {
+    "name": "setCurrentScene",
+    "description": "Set the scene's public state. This is not used for private state changes.",
+    "canDispatch": true,
+    "fields": [
+      {
+        "name": "sceneId",
+        "label": "Scene",
+        "type": "scene",
+        "required": true
+      }
+    ]
+  }
+]

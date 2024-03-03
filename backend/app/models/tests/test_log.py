@@ -23,6 +23,9 @@ class TestModelsLog(BaseTestCase):
         self.assertEqual(log_dict['frame_id'], self.frame.id)
 
     def test_old_logs_removal(self):
+        from app import db
+        for old_log in Log.query.all():
+            db.session.delete(old_log)
         for i in range(1101):
             new_log(self.frame.id, "debug", f"Log number {i}")
         logs_count = Log.query.filter_by(frame_id=self.frame.id).count()

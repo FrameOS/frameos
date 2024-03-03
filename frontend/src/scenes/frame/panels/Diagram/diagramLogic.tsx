@@ -11,11 +11,12 @@ import type { EdgeChange, NodeChange } from '@reactflow/core/dist/esm/types/chan
 import equal from 'fast-deep-equal'
 import type { diagramLogicType } from './diagramLogicType'
 import { subscriptions } from 'kea-subscriptions'
-import { AppNodeData, EventNodeData, FrameScene } from '../../../../types'
+import { AppNodeData, DispatchNodeData, EventNodeData, FrameScene } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { arrangeNodes } from '../../../../utils/arrangeNodes'
 import copy from 'copy-to-clipboard'
+import { Option } from '../../../../components/Select'
 
 export interface DiagramLogicProps {
   frameId: number
@@ -110,6 +111,7 @@ export const diagramLogic = kea<diagramLogicType>([
       (s) => [s.editingFrame, s.sceneId],
       (editingFrame, sceneId) => (editingFrame.scenes ?? []).find((s) => s.id === sceneId) || null,
     ],
+    sceneName: [(s) => [s.scene], (scene) => scene?.name || (scene?.id ? `Scene: ${scene.id}` : 'Untitled scene')],
     selectedNode: [(s) => [s.nodes], (nodes): Node | null => nodes.find((node) => node.selected) ?? null],
     selectedNodeId: [(s) => [s.selectedNode], (node) => node?.id ?? null],
     selectedEdge: [(s) => [s.edges], (edges): Edge | null => edges.find((edge) => edge.selected) ?? null],
@@ -152,6 +154,14 @@ export const diagramLogic = kea<diagramLogicType>([
     nodesWithStyle: [
       (s) => [s.nodes],
       (nodes: Node[]): Node[] => nodes.map((node) => ({ ...node, dragHandle: '.frameos-node-title' })),
+    ],
+    sceneOptions: [
+      (s) => [s.editingFrame],
+      (frame): Option[] => [
+        { label: '', value: '' },
+        ...(frame.scenes ?? []).map((s) => ({ label: s.name || 'Unnamed Scene', value: s.id || '' })),
+      ],
+      { resultEqualityCheck: equal },
     ],
   })),
   subscriptions(({ actions, values, props }) => ({
@@ -215,15 +225,23 @@ export const diagramLogic = kea<diagramLogicType>([
           id: uuidv4(),
           type: 'app',
           position,
-          data: { keyword: keyword, config: {} } as AppNodeData,
+          data: { keyword: keyword, config: {} } satisfies AppNodeData,
         }
         actions.setNodes([...values.nodes, newNode])
       } else if (type === 'event') {
         const newNode: Node = {
           id: uuidv4(),
-          type: 'event',
+          type: type,
           position,
-          data: { keyword } as EventNodeData,
+          data: { keyword } satisfies EventNodeData,
+        }
+        actions.setNodes([...values.nodes, newNode])
+      } else if (type === 'dispatch') {
+        const newNode: Node = {
+          id: uuidv4(),
+          type: type,
+          position,
+          data: { keyword, config: {} } satisfies DispatchNodeData,
         }
         actions.setNodes([...values.nodes, newNode])
       }

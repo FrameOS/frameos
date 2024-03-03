@@ -19,7 +19,6 @@ import {
 } from 'react'
 import { AppNode } from './AppNode'
 import { CodeNode } from './CodeNode'
-import { RenderNode } from './RenderNode'
 import { EventNode } from './EventNode'
 import { Button } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
@@ -27,9 +26,9 @@ import { v4 as uuidv4 } from 'uuid'
 
 const nodeTypes = {
   app: AppNode,
-  code: CodeNode,
   source: AppNode,
-  render: RenderNode,
+  dispatch: AppNode,
+  code: CodeNode,
   event: EventNode,
 }
 
@@ -47,7 +46,6 @@ export function Diagram({ sceneId }: DiagramProps) {
     useActions(diagramLogic(diagramLogicProps))
 
   const onDragOver = useCallback((event: any) => {
-    console.log(event)
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
   }, [])
@@ -70,17 +68,23 @@ export function Diagram({ sceneId }: DiagramProps) {
   const connectingNodeId = useRef<string | null>(null)
   const connectingNodeHandle = useRef<string | null>(null)
 
-  const onConnect = useCallback((connection: Connection) => {
-    connectingNodeId.current = null
-    connectingNodeHandle.current = null
-    addEdge(connection)
-  }, [])
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      connectingNodeId.current = null
+      connectingNodeHandle.current = null
+      addEdge(connection)
+    },
+    [addEdge]
+  )
 
   const onConnectStart = useCallback((_: ReactMouseEvent | ReactTouchEvent, params: OnConnectStartParams) => {
     const { nodeId, handleId, handleType } = params
     if (handleType === 'target' && handleId?.startsWith('fieldInput/')) {
       connectingNodeId.current = nodeId
       connectingNodeHandle.current = handleId
+    } else {
+      connectingNodeId.current = null
+      connectingNodeHandle.current = null
     }
   }, [])
 
@@ -102,8 +106,9 @@ export function Diagram({ sceneId }: DiagramProps) {
         }
         inputCoords.x -= reactFlowBounds?.left ?? 0
         inputCoords.y -= reactFlowBounds?.top ?? 0
+
         const position = reactFlowInstance?.project(inputCoords) ?? { x: 0, y: 0 }
-        position.x -= 200
+        position.x -= 280
         position.y -= 80
         const newNode: Node = {
           id,
@@ -125,7 +130,7 @@ export function Diagram({ sceneId }: DiagramProps) {
         })
       }
     },
-    [reactFlowInstance, nodes, edges]
+    [reactFlowInstance, nodes, edges, setNodes, addEdge]
   )
 
   useEffect(() => {
@@ -171,11 +176,12 @@ export function Diagram({ sceneId }: DiagramProps) {
 Diagram.PanelTitle = function DiagramPanelTitle({ sceneId }: DiagramProps) {
   const { frameId } = useValues(frameLogic)
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
-  const { hasChanges } = useValues(diagramLogic(diagramLogicProps))
+  const { hasChanges, sceneName } = useValues(diagramLogic(diagramLogicProps))
 
   return (
     <>
-      {hasChanges ? '* ' : ''}Scene: {sceneId}
+      {hasChanges ? '* ' : ''}
+      {sceneName}
     </>
   )
 }

@@ -216,7 +216,7 @@ export function FrameSettings({ className }: DetailsProps) {
             </Field>
             <Field
               name="interval"
-              label="Refresh interval in seconds"
+              label="Default refresh interval for new scenes"
               tooltip={
                 <>
                   How often do we trigger a refresh, in seconds. Pass a large number like "60" or even more for e-ink
@@ -254,9 +254,6 @@ export function FrameSettings({ className }: DetailsProps) {
                   { value: '270', label: '270 degrees' },
                 ]}
               />
-            </Field>
-            <Field name="background_color" label="Background color">
-              <TextInput type="color" name="background_color" className="!p-0" placeholder="white" />
             </Field>
             <Field name="debug" label="Debug logging (noisy)">
               <Select

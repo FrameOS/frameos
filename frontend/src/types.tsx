@@ -23,7 +23,7 @@ export interface FrameType {
   metrics_interval: number
   scaling_mode: string
   rotate?: number
-  background_color: string
+  background_color: string // deprecated, serves as fallback for scenes
   scenes?: FrameScene[]
   debug?: boolean
   last_log_at?: string
@@ -37,12 +37,6 @@ export interface TemplateType {
   image?: any
   image_width?: number
   image_height?: number
-  config?: {
-    interval?: number
-    background_color?: string
-    scaling_mode?: string
-    rotate?: number
-  }
 }
 
 export interface RepositoryType {
@@ -86,7 +80,7 @@ export interface ConfigField {
   /** Human readable label */
   label: string
   /** Type of the field, only 'string' is supported for now */
-  type: 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'json' | 'node'
+  type: 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'json' | 'node' | 'scene'
   /** List of options for the field, only used if type is 'select' */
   options?: string[]
   /** Whether the field is required */
@@ -133,6 +127,7 @@ export interface AppNodeData {
   config: Record<string, any>
   sources?: Record<string, string>
 }
+
 export interface CodeNodeData {
   code: string
 }
@@ -141,12 +136,24 @@ export interface EventNodeData {
   keyword: string
 }
 
+export interface DispatchNodeData {
+  keyword: string
+  config: Record<string, any>
+}
+
+export interface FrameSceneSettings {
+  refreshInterval?: number
+  backgroundColor?: string
+}
+
 export interface FrameScene {
   id: string
   name: string
   nodes: Node[]
   edges: Edge[]
   fields?: StateField[]
+  default?: boolean
+  settings?: FrameSceneSettings
 }
 
 export interface FrameSceneIndexed {
@@ -164,6 +171,10 @@ export interface FrameEvent {
   description?: string
   /** Fields for app in diagram editor */
   fields?: ConfigField[]
+  /** Can this event be dispatched */
+  canDispatch?: boolean
+  /** Can this event be listened to */
+  canListen?: boolean
 }
 
 export enum Area {
@@ -181,6 +192,7 @@ export enum Panel {
   Image = 'Image',
   Logs = 'Logs',
   SceneState = 'SceneState',
+  Control = 'Control',
   Apps = 'Apps',
   Events = 'Events',
   Metrics = 'Metrics',
@@ -188,6 +200,7 @@ export enum Panel {
   Templates = 'Templates',
   Terminal = 'Terminal',
   SceneSource = 'SceneSource',
+  Scenes = 'Scenes',
 }
 
 export type PanelWithMetadata = {

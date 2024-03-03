@@ -1,10 +1,19 @@
 import json
 import os
+import math
+import re
 
 from app.models.frame import Frame
 from app.models.apps import get_local_frame_apps, local_apps_path
 from app.codegen.utils import sanitize_nim_string, natural_keys
 
+def get_events_schema() -> list[dict]:
+    events_schema_path = os.path.join("..", "frontend", "schema", "events.json")
+    if os.path.exists(events_schema_path):
+        with open(events_schema_path, 'r') as file:
+            return json.load(file)
+    else:
+        return []
 
 def write_scene_nim(frame: Frame, scene: dict) -> str:
     from app.models.log import new_log as log
@@ -25,6 +34,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
     field_inputs: dict[str, dict[str, str]] = {}
     source_field_inputs: dict[str, dict[str, tuple[str, str]]] = {}
     node_fields: dict[str, dict[str, str]] = {}
+    events_schema = get_events_schema()
 
     def node_id_to_integer(node_id: str) -> int:
         if node_id not in node_integer_map:
@@ -37,8 +47,9 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
         source_handle = edge.get('sourceHandle', None)
         target_handle = edge.get('targetHandle', None)
         if source and target:
-            if source_handle == 'next' and target_handle == 'prev':
-                next_nodes[source] = target
+            if target_handle == 'prev':
+                if source_handle == 'next':
+                    next_nodes[source] = target
                 prev_nodes[target] = source
             if source_handle == 'fieldOutput' and target_handle.startswith('fieldInput/'):
                 field = target_handle.replace('fieldInput/', '')
@@ -66,22 +77,46 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
 
     for node in nodes:
         node_id = node['id']
-        if node.get('type') == 'event':
+        if node.get('type') == 'event' or node.get('type') == 'dispatch':
             event = node.get('data', {}).get('keyword', None)
             if event:
                 # only if a source node
-                if node_id in next_nodes:
+                if node.get('type') == 'event' and node_id in next_nodes:
                     if not event_nodes.get(event):
                         event_nodes[event] = []
                     event_nodes[event].append(node)
 
-                # only if a target node
+                # only if a target node (plus legacy support for using 'event' as a target node)
                 if node_id in prev_nodes:
                     node_integer = node_id_to_integer(node_id)
+                    config = node.get('data', {}).get('config', {}).copy()
+                    field_inputs_for_node = field_inputs.get(node_id, {})
+                    source_field_inputs_for_node = source_field_inputs.get(node_id, {})
+                    node_fields_for_node = node_fields.get(node_id, {})
+
+                    event_schema = None
+                    for schema in events_schema:
+                        if schema.get('name') == event:
+                            event_schema = schema
+                            break
+
+                    event_payload_pairs = []
+                    if event_schema:
+                        for field in event_schema.get('fields', []):
+                            key = field.get('name', None)
+                            if key not in config:
+                                config[key] = field.get('value', None)
+                            type = field.get('type', 'string')
+                            value = config.get(key, None)
+
+                            event_payload_pairs.append(sanitize_nim_field(key, type, value, field_inputs_for_node,
+                                             node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, True))
+
+                    next_node_id = next_nodes.get(node_id, None)
                     run_node_lines += [
                         f"of {node_integer}.NodeId: # {event}",
-                        f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{}'})",
-                        "  nextNode = -1.NodeId"
+                        f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{'+(','.join(event_payload_pairs))+'}'})",
+                        f"  nextNode = {-1 if next_node_id is None else node_id_to_integer(next_node_id)}.NodeId"
                     ]
 
         elif node.get('type') == 'app':
@@ -138,34 +173,17 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                     continue
                 type = config_types[key]
 
-                if key in field_inputs_for_node:
-                    app_config_pairs += [f"{key}: {field_inputs_for_node[key]}"]
-                elif type == "node" and key in node_fields_for_node:
-                    outgoing_node_id = node_fields_for_node[key]
-                    app_config_pairs += [f"{key}: {node_id_to_integer(outgoing_node_id)}.NodeId"]
-                elif type == "node" and key not in node_fields_for_node:
-                    app_config_pairs += [f"{key}: 0.NodeId"]
-                elif type == "integer":
-                    app_config_pairs += [f"{key}: {int(value)}"]
-                elif type == "float":
-                    app_config_pairs += [f"{key}: {float(value)}"]
-                elif type == "boolean":
-                    app_config_pairs += [f"{key}: {'true' if value == 'true' else 'false'}"]
-                elif type == "color":
-                    app_config_pairs += [f"{key}: parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"]
-                elif type == "node":
-                    app_config_pairs += [f"{key}: -1.NodeId"]
-                else:
-                    app_config_pairs += [f"{key}: \"{sanitize_nim_string(str(value))}\""]
+                app_config_pairs.append(sanitize_nim_field(key, type, value, field_inputs_for_node,
+                                                              node_fields_for_node, source_field_inputs_for_node,
+                                                              node_id_to_integer, False))
 
             if len(sources) > 0:
-                node_app_id = "nodeapp_" + node_id.replace('-', '_')
                 init_apps += [
-                    f"scene.{app_id} = nodeApp{node_id_to_integer(node_id)}.init({node_integer}.NodeId, scene, nodeApp{node_id_to_integer(node_id)}.AppConfig({', '.join(app_config_pairs)}))"
+                    f"scene.{app_id} = nodeApp{node_id_to_integer(node_id)}.init({node_integer}.NodeId, scene.FrameScene, nodeApp{node_id_to_integer(node_id)}.AppConfig({', '.join(app_config_pairs)}))"
                 ]
             else:
                 init_apps += [
-                    f"scene.{app_id} = {name}App.init({node_integer}.NodeId, scene, {name}App.AppConfig({', '.join(app_config_pairs)}))"
+                    f"scene.{app_id} = {name}App.init({node_integer}.NodeId, scene.FrameScene, {name}App.AppConfig({', '.join(app_config_pairs)}))"
                 ]
 
             run_node_lines += [
@@ -254,6 +272,23 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
     else:
         public_state_fields_seq = "@[]"
 
+    # If there's an "open" event, dispatch it in init
+    open_event_in_init = ""
+    if len(event_nodes.get('open', [])) > 0:
+        open_event_in_init = """var openContext = ExecutionContext(scene: scene, event: "open", payload: %*{"sceneId": sceneId}, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+  runEvent(openContext)
+"""
+
+    render_interval = float(scene.get('settings', {}).get('refreshInterval', None) or frame.interval or 300)
+    if math.isnan(render_interval):
+        render_interval = 300.0
+    if render_interval < 0.001:
+        render_interval = 0.001
+    scene_render_interval = str(render_interval)
+
+    background_color = scene.get('settings', {}).get('backgroundColor', None) or frame.background_color or '#000000'
+    scene_background_color = f"parseHtmlColor(\"{sanitize_nim_string(str(background_color))}\")"
+
     scene_source = f"""
 import pixie, json, times, strformat
 
@@ -290,38 +325,14 @@ proc runNode*(self: Scene, nodeId: NodeId,
     if DEBUG:
       self.logger.log(%*{{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
 
-proc runEvent*(self: Scene, context: var ExecutionContext) =
+proc runEvent*(context: var ExecutionContext) =
+  let self = Scene(context.scene)
   case context.event:
   {(newline + "  ").join(run_event_lines)}
   else: discard
 
-proc init*(frameConfig: FrameConfig, logger: Logger, dispatchEvent: proc(event: string, payload: JsonNode), persistedState: JsonNode): Scene =
-  var state = %*{{{", ".join(state_init_fields)}}}
-  if persistedState.kind == JObject:
-    for key in persistedState.keys:
-      state[key] = persistedState[key]
-  let scene = Scene(frameConfig: frameConfig, logger: logger, state: state, dispatchEvent: dispatchEvent)
-  let self = scene
-  var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
-  result = scene
-  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  {(newline + "  ").join(init_apps)}
-  runEvent(scene, context)
-
-proc getPublicState*(self: Scene): JsonNode =
-  result = %*{{}}
-  for field in PUBLIC_STATE_FIELDS:
-    let key = field.name
-    if self.state.hasKey(key):
-      result[key] = self.state{{key}}
-
-proc getPersistedState*(self: Scene): JsonNode =
-  result = %*{{}}
-  for key in PERSISTED_STATE_KEYS:
-    if self.state.hasKey(key):
-      result[key] = self.state{{key}}
-
-proc render*(self: Scene): Image =
+proc render*(self: FrameScene): Image =
+  let self = Scene(self)
   var context = ExecutionContext(
     scene: self,
     event: "render",
@@ -332,9 +343,96 @@ proc render*(self: Scene): Image =
     loopIndex: 0,
     loopKey: "."
   )
-  context.image.fill(self.frameConfig.backgroundColor)
-  runEvent(self, context)
+  context.image.fill(self.backgroundColor)
+  runEvent(context)
   return context.image
+
+proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
+  var state = %*{{{", ".join(state_init_fields)}}}
+  if persistedState.kind == JObject:
+    for key in persistedState.keys:
+      state[key] = persistedState[key]
+  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: {scene_render_interval}, backgroundColor: {scene_background_color})
+  result = scene
+  var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
+  {(newline + "  ").join(init_apps)}
+  runEvent(context)
+  {open_event_in_init}
 {{.pop.}}
+
+var exportedScene* = ExportedScene(
+  publicStateFields: PUBLIC_STATE_FIELDS,
+  persistedStateKeys: PERSISTED_STATE_KEYS,
+  init: init,
+  runEvent: runEvent,
+  render: render
+)
 """
     return scene_source
+
+
+def sanitize_nim_field(key, type, value, field_inputs_for_node, node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, key_with_quotes: bool) -> str:
+    key_str = f"\"{sanitize_nim_string(str(key))}\"" if key_with_quotes else sanitize_nim_string(str(key))
+    if key in field_inputs_for_node:
+        return f"{key_str}: {field_inputs_for_node[key]}"
+    elif key in source_field_inputs_for_node:
+        (source_id, source_key) = source_field_inputs_for_node[key]
+        return f"{key_str}: self.node{node_id_to_integer(source_id)}.appConfig.{source_key}"
+    elif type == "node" and key in node_fields_for_node:
+        outgoing_node_id = node_fields_for_node[key]
+        return f"{key_str}: {node_id_to_integer(outgoing_node_id)}.NodeId"
+    elif type == "node" and key not in node_fields_for_node:
+        return f"{key_str}: 0.NodeId"
+    elif type == "integer":
+        return f"{key_str}: {int(value)}"
+    elif type == "float":
+        return f"{key_str}: {float(value)}"
+    elif type == "boolean":
+        return f"{key_str}: {'true' if value == 'true' else 'false'}"
+    elif type == "color":
+        return f"{key_str}: parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"
+    elif type == "scene":
+        return f"{key_str}: \"{sanitize_nim_string(str(value))}\".SceneId"
+    else:
+        return f"{key_str}: \"{sanitize_nim_string(str(value))}\""
+
+
+def write_scenes_nim(frame: Frame) -> str:
+    rows = ""
+    imports = ""
+    sceneOptionTuples = ""
+    default_scene = None
+    for scene in frame.scenes:
+        if default_scene is None:
+            default_scene = scene
+        if scene.get('default', False):
+            default_scene = scene
+
+        scene_id = scene.get('id', 'default')
+        scene_id = re.sub(r'[^a-zA-Z0-9\-\_]', '_', scene_id)
+        scene_id_import = re.sub(r'\W+', '', scene_id)
+        imports += f"import scenes/scene_{scene_id_import} as scene_{scene_id_import}\n"
+        rows += f"  result[\"{scene_id}\".SceneId] = scene_{scene_id_import}.exportedScene\n"
+        sceneOptionTuples += f"  (\"{scene_id}\".SceneId, \"{scene.get('name', 'Default')}\"),"
+
+    default_scene_id = default_scene.get('id', 'default')
+    default_scene_id = re.sub(r'[^a-zA-Z0-9\-\_]', '_', default_scene_id)
+
+    scenes_source = f"""
+import frameos/types
+import tables
+{imports}
+
+let defaultSceneId* = "{default_scene_id}".SceneId
+
+const sceneOptions* = [
+{sceneOptionTuples}
+]
+
+proc getExportedScenes*(): Table[SceneId, ExportedScene] =
+  result = initTable[SceneId, ExportedScene]()
+{rows}
+"""
+
+    return scenes_source

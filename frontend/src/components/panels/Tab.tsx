@@ -10,14 +10,24 @@ interface TabProps {
   onDoubleClick?: () => void
   onClose?: () => void
   closable?: boolean
+  activeColorClass?: string
 }
-export function Tab({ children, active, className, onClick, onDoubleClick, onClose, closable }: TabProps): JSX.Element {
+export function Tab({
+  children,
+  active,
+  className,
+  onClick,
+  onDoubleClick,
+  onClose,
+  closable,
+  activeColorClass,
+}: TabProps): JSX.Element {
   return (
     <div
       className={clsx(
         'flex gap-1 w-auto text-white focus:ring-4 focus:outline-none font-medium px-2 py-1 text-base text-center cursor-pointer border border-b-0',
         active
-          ? 'bg-gray-800 border-gray-700 hover:bg-gray-500 focus:ring-gray-500'
+          ? `${activeColorClass || 'bg-gray-800'} border-gray-700 hover:bg-gray-500 focus:ring-gray-500`
           : 'border-transparent hover:bg-gray-500 focus:ring-gray-500',
         className
       )}
