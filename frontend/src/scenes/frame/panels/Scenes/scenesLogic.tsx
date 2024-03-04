@@ -1,4 +1,4 @@
-import { actions, connect, kea, key, listeners, path, props, selectors } from 'kea'
+import { actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import type { scenesLogicType } from './scenesLogicType'
 import { FrameScene } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
@@ -27,6 +27,8 @@ export const scenesLogic = kea<scenesLogicType>([
     setAsDefault: (sceneId: string) => ({ sceneId }),
     deleteScene: (sceneId: string) => ({ sceneId }),
     renameScene: (sceneId: string) => ({ sceneId }),
+    addNewScene: true,
+    closeNewScene: true,
   }),
   forms(({ actions, values, props }) => ({
     newScene: {
@@ -58,7 +60,7 @@ export const scenesLogic = kea<scenesLogicType>([
       (): Option[] => Object.keys(sceneTemplates).map((key) => ({ label: key, value: key })),
     ],
   }),
-  listeners(({ props, values }) => ({
+  listeners(({ actions, props, values }) => ({
     setAsDefault: ({ sceneId }) => {
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
         scenes: values.scenes.map((s) =>
@@ -80,5 +82,21 @@ export const scenesLogic = kea<scenesLogicType>([
         scenes: values.scenes.filter((s) => s.id !== sceneId),
       })
     },
+    addNewScene: () => {
+      actions.resetNewScene({ name: '', template: Object.keys(sceneTemplates)[1] })
+    },
+    closeNewScene: () => {
+      actions.resetNewScene({ name: '', template: Object.keys(sceneTemplates)[1] })
+    },
   })),
+  reducers({
+    showNewSceneForm: [
+      false,
+      {
+        addNewScene: () => true,
+        closeNewScene: () => false,
+        submitNewSceneSuccess: () => false,
+      },
+    ],
+  }),
 ])

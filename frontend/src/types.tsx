@@ -201,7 +201,6 @@ export enum Panel {
   Events = 'Events',
   Metrics = 'Metrics',
   EditApp = 'EditApp',
-  Templates = 'Templates',
   Terminal = 'Terminal',
   SceneSource = 'SceneSource',
   Scenes = 'Scenes',

@@ -24,7 +24,7 @@ export function EditTemplate() {
       {showingModal ? (
         <Form logic={templatesLogic} props={{ frameId }} formKey="templateForm">
           <Modal
-            title={newTemplate ? <>Save as new template</> : <>Edit template</>}
+            title={newTemplate ? <>New template</> : <>Edit template</>}
             onClose={hideModal}
             open={showingModal}
             footer={
@@ -47,7 +47,7 @@ export function EditTemplate() {
               </Field>
               {newTemplate ? (
                 <>
-                  <Field name="exportScenes" label="Scenes included in exported template">
+                  <Field name="exportScenes" label="Scenes included in template">
                     {({ value, onChange }) => (
                       <>
                         {(frameForm.scenes || []).map((scene, index) => {

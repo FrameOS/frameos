@@ -127,8 +127,9 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
     socketio.emit('new_frame', frame.to_dict())
 
     from app.models import new_log
-    new_log(frame.id, "welcome", f"Frame \"{frame.name}\" added!")
-    new_log(frame.id, "welcome", "-> Press 'Save & Deploy' to deploy the default scene")
+    new_log(frame.id, "welcome", f"The frame \"{frame.name}\" has been created!")
+    new_log(frame.id, "welcome", "-> You're looking at the default scene, which is a QR Message Board. You can edit the message if you scan the QR code and visit the link.")
+    new_log(frame.id, "welcome", "-> Check that you're happy with how things are under 'Frame Settings', then press 'Save & Deploy' to deploy it to the raspberry.")
     new_log(frame.id, "welcome", "-> Install additional scenes in the 'Scenes' panel")
     new_log(frame.id, "welcome", "-> Drag & Drop 'Apps' and 'Events' onto a scene")
     new_log(frame.id, "welcome", "-> Click 'Edit App' to clone an app and edit its source")

@@ -24,6 +24,12 @@ export const templatesLogic = kea<templatesLogicType>([
     editLocalTemplate: (template: TemplateType) => ({ template }),
     hideModal: true,
     applyRemoteTemplate: (repository: RepositoryType, template: TemplateType) => ({ repository, template }),
+    showRemoteTemplate: true,
+    hideRemoteTemplate: true,
+    showUploadTemplate: true,
+    hideUploadTemplate: true,
+    showAddRepository: true,
+    hideAddRepository: true,
   }),
   forms(({ actions, values, props }) => ({
     templateForm: {
@@ -162,6 +168,30 @@ export const templatesLogic = kea<templatesLogicType>([
         description: template.description,
       }),
     },
+    showingUploadTemplate: [
+      false,
+      {
+        showUploadTemplate: () => true,
+        hideUploadTemplate: () => false,
+        submitAddTemplateUrlFormSuccess: () => false,
+      },
+    ],
+    showingRemoteTemplate: [
+      false,
+      {
+        showRemoteTemplate: () => true,
+        hideRemoteTemplate: () => false,
+        submitUploadTemplateFormSuccess: () => false,
+      },
+    ],
+    showingAddRepository: [
+      false,
+      {
+        showAddRepository: () => true,
+        hideAddRepository: () => false,
+        submitAddRepositoryFormSuccess: () => false,
+      },
+    ],
   }),
   listeners(({ actions, values, props }) => ({
     applyRemoteTemplate: async ({ template, repository }) => {
@@ -177,6 +207,15 @@ export const templatesLogic = kea<templatesLogicType>([
     },
     saveAsNewTemplate: () => {
       actions.setTemplateFormValues({ exportScenes: values.frame?.scenes?.map((s) => s.id) || [] })
+    },
+    showAddRepository: () => {
+      actions.setAddRepositoryFormValues({ name: '', url: '' })
+    },
+    showRemoteTemplate: () => {
+      actions.setUploadTemplateFormValues({ file: null })
+    },
+    showUploadTemplate: () => {
+      actions.setAddTemplateUrlFormValues({ url: '' })
     },
   })),
 ])

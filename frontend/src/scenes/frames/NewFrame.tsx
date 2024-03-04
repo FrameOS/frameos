@@ -28,19 +28,6 @@ export function NewFrame(): JSX.Element {
           <Field name="device" label="Driver">
             <Select name="device" options={devices} />
           </Field>
-          <Field
-            name="interval"
-            label="Refresh interval in seconds"
-            tooltip={
-              <>
-                How often do we trigger a refresh, in seconds. Pass a large number like "60" or even more for e-ink
-                frames. A number below 1 activates realtime mode (0.041s = 24fps, 0.016s = 60fps). This should be used
-                when you're certain of your setup and only if your hardware supports it.
-              </>
-            }
-          >
-            <TextInput name="interval" />
-          </Field>
           <div className="flex gap-2">
             <Button type="submit">Add Frame</Button>
             <Button

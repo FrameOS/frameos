@@ -1,7 +1,6 @@
 import { TemplateType } from '../../../../types'
 import { H6 } from '../../../../components/H6'
 
-import React, { useState } from 'react'
 import { ArrowDownTrayIcon, DocumentArrowDownIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 
