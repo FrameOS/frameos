@@ -46,7 +46,7 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: FrameType): Fra
     fields: scene.fields ?? [],
     settings: {
       ...settings,
-      refreshInterval: settings.refreshInterval || frame.interval || 60,
+      refreshInterval: settings.refreshInterval || frame.interval || 300,
       backgroundColor: settings.backgroundColor || frame.background_color || '#ffffff',
     },
   } satisfies FrameScene

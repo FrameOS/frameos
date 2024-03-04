@@ -28,7 +28,7 @@ const ACCESS_OPTIONS = [
 ]
 
 export function SceneState(): JSX.Element {
-  const { frameId } = useValues(frameLogic)
+  const { frameId, frameForm } = useValues(frameLogic)
   const { selectedSceneId: sceneId } = useValues(panelsLogic({ frameId }))
   const { sceneIndex, scene, editingFields, fieldsWithErrors } = useValues(sceneStateLogic({ frameId, sceneId }))
   const { setFields, editField, closeField, removeField } = useActions(sceneStateLogic({ frameId, sceneId }))
@@ -57,7 +57,11 @@ export function SceneState(): JSX.Element {
                     </>
                   }
                 >
-                  <TextInput name="refreshInterval" placeholder="300" style={{ width: 70 }} />
+                  <TextInput
+                    name="refreshInterval"
+                    placeholder={String(frameForm.interval || 300)}
+                    style={{ width: 70 }}
+                  />
                 </Field>
                 <Field
                   className="flex flex-row gap-2 w-full justify-between"
