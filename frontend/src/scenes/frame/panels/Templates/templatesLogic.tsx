@@ -2,7 +2,7 @@ import { actions, kea, reducers, path, key, props, connect, listeners } from 'ke
 import { forms } from 'kea-forms'
 
 import type { templatesLogicType } from './templatesLogicType'
-import { RepositoryType, TemplateType } from '../../../../types'
+import { RepositoryType, TemplateForm, TemplateType } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { templatesModel } from '../../../../models/templatesModel'
 import { repositoriesModel } from '../../../../models/repositoriesModel'
@@ -27,7 +27,7 @@ export const templatesLogic = kea<templatesLogicType>([
   }),
   forms(({ actions, values, props }) => ({
     templateForm: {
-      defaults: {} as TemplateType,
+      defaults: {} as TemplateForm,
       errors: (templateForm) => ({
         name: !templateForm.name ? 'Name is required' : null,
       }),
@@ -54,7 +54,7 @@ export const templatesLogic = kea<templatesLogicType>([
           const request: TemplateType & Record<string, any> = {
             name: formValues.name,
             description: formValues.description,
-            scenes: values.frame.scenes,
+            scenes: (values.frame.scenes || []).filter((scene) => formValues.exportScenes?.includes(scene.id)),
             from_frame_id: props.frameId,
           }
           const response = await fetch(`/api/templates`, {
@@ -155,7 +155,7 @@ export const templatesLogic = kea<templatesLogicType>([
       },
     ],
     templateForm: {
-      saveAsNewTemplate: () => ({ name: '' }),
+      saveAsNewTemplate: () => ({ id: '', name: '', description: '', exportScenes: undefined }),
       editLocalTemplate: (_, { template }) => ({
         id: template.id,
         name: template.name,
@@ -174,6 +174,9 @@ export const templatesLogic = kea<templatesLogicType>([
         actions.setAddTemplateUrlFormValues({ url: zipPath })
         actions.submitAddTemplateUrlForm()
       }
+    },
+    saveAsNewTemplate: () => {
+      actions.setTemplateFormValues({ exportScenes: values.frame?.scenes?.map((s) => s.id) || [] })
     },
   })),
 ])

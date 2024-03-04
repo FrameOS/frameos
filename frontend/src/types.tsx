@@ -39,6 +39,10 @@ export interface TemplateType {
   image_height?: number
 }
 
+export interface TemplateForm extends TemplateType {
+  exportScenes?: string[]
+}
+
 export interface RepositoryType {
   id?: string
   name: string
