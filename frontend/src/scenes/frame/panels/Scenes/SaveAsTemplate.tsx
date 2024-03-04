@@ -17,7 +17,7 @@ export function SaveAsTemplate(props: TemplatesProps) {
     <div {...props}>
       <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={saveAsNewTemplate}>
         <DocumentPlusIcon className="w-4 h-4" />
-        Save scenes as local template
+        Save current scenes as local template
       </Button>
       <EditTemplate />
     </div>

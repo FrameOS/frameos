@@ -10,6 +10,7 @@ from flask_login import login_required
 from . import api
 from app import db, redis
 from app.models.template import Template
+from app.models.frame import Frame
 from PIL import Image
 
 # Create (POST)
@@ -63,7 +64,10 @@ def create_template():
 
     if data.get('from_frame_id'):
         frame_id = data.get('from_frame_id')
-        last_image = redis.get(f'frame:{frame_id}:image')
+        frame = Frame.query.get_or_404(frame_id)
+        # TODO: move to shared util
+        cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+        last_image = redis.get(cache_key)
         if last_image:
             try:
                 image = Image.open(io.BytesIO(last_image))
@@ -135,7 +139,8 @@ def export_template(template_id):
         template_dict['image'] = './image.jpg'
         zf.writestr(f"{template_name}/scenes.json", json.dumps(scenes, indent=2))
         zf.writestr(f"{template_name}/template.json", json.dumps(template_dict, indent=2))
-        zf.writestr(f"{template_name}/image.jpg", template.image)
+        if template.image:
+            zf.writestr(f"{template_name}/image.jpg", template.image)
     in_memory.seek(0)
     return Response(in_memory.getvalue(), content_type='application/zip', headers={"Content-Disposition": f"attachment; filename={template_name}.zip"})
 

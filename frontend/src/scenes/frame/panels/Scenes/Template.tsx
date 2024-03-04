@@ -72,7 +72,7 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
                   ? [
                       {
                         label: 'Download .zip',
-                        onClick: () => (template.id ? exportTemplate(template.id) : null),
+                        onClick: () => (template.id ? exportTemplate(template.id, 'zip') : null),
                         icon: <DocumentArrowDownIcon className="w-5 h-5" />,
                       },
                     ]
