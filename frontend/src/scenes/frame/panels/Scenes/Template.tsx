@@ -1,12 +1,13 @@
 import { TemplateType } from '../../../../types'
 import { H6 } from '../../../../components/H6'
 
-import { ArrowDownTrayIcon, DocumentArrowDownIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { ArrowDownTrayIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { DocumentArrowDownIcon, CloudArrowDownIcon, DocumentPlusIcon, DocumentIcon } from '@heroicons/react/24/outline'
 
 interface TemplateProps {
   template: TemplateType
-  applyTemplate: (template: TemplateType) => void
+  applyTemplate: (template: TemplateType, wipe?: boolean) => void
   exportTemplate?: (id: string, format?: string) => void
   removeTemplate?: (id: string) => void
   editTemplate?: (template: TemplateType) => void
@@ -52,10 +53,26 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
                 ...(template.id
                   ? [
                       {
-                        label: 'Install on frame',
-                        confirm: `Replace the frame's contents with the template "${template.name}"? Changes will be unsaved.`,
+                        label: `Add to frame (+${(template.scenes || []).length} scene${
+                          (template.scenes || []).length === 1 ? '' : 's'
+                        })`,
                         onClick: () => applyTemplate(template),
-                        icon: <ArrowDownTrayIcon className="w-5 h-5" />,
+                        icon: <DocumentPlusIcon className="w-5 h-5" />,
+                      },
+                      {
+                        label: `Replace existing scenes`,
+                        confirm: 'Are you sure? This will erase all scenes from the frame and install this template.',
+                        onClick: () => applyTemplate(template, true),
+                        icon: <DocumentIcon className="w-5 h-5" />,
+                      },
+                    ]
+                  : []),
+                ...(exportTemplate
+                  ? [
+                      {
+                        label: 'Download .zip',
+                        onClick: () => (template.id ? exportTemplate(template.id, 'zip') : null),
+                        icon: <CloudArrowDownIcon className="w-5 h-5" />,
                       },
                     ]
                   : []),
@@ -65,15 +82,6 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
                         label: 'Edit metadata',
                         onClick: () => editTemplate(template),
                         icon: <PencilSquareIcon className="w-5 h-5" />,
-                      },
-                    ]
-                  : []),
-                ...(exportTemplate
-                  ? [
-                      {
-                        label: 'Download .zip',
-                        onClick: () => (template.id ? exportTemplate(template.id, 'zip') : null),
-                        icon: <DocumentArrowDownIcon className="w-5 h-5" />,
                       },
                     ]
                   : []),

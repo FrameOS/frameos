@@ -125,6 +125,8 @@ export interface App {
   fields?: (ConfigField | MarkdownField)[]
 }
 
+export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event'
+
 export interface AppNodeData {
   keyword: string
   name?: string
@@ -145,6 +147,10 @@ export interface DispatchNodeData {
   config: Record<string, any>
 }
 
+export type NodeData = AppNodeData | CodeNodeData | EventNodeData | DispatchNodeData
+
+export type DiagramNode = Node<NodeData, NodeType>
+
 export interface FrameSceneSettings {
   refreshInterval?: number
   backgroundColor?: string
@@ -153,7 +159,7 @@ export interface FrameSceneSettings {
 export interface FrameScene {
   id: string
   name: string
-  nodes: Node[]
+  nodes: DiagramNode[]
   edges: Edge[]
   fields?: StateField[]
   default?: boolean
@@ -163,7 +169,7 @@ export interface FrameScene {
 export interface FrameSceneIndexed {
   id: string
   name: string
-  nodes: Record<string, Node[]>
+  nodes: Record<string, DiagramNode>
   edges: Record<string, Edge[]>
 }
 

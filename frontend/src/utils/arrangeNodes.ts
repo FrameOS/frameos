@@ -1,13 +1,14 @@
-import { Node } from '@reactflow/core/dist/esm/types/nodes'
 import { Edge } from '@reactflow/core/dist/esm/types/edges'
+import { DiagramNode } from '../types'
 
 const SPACE_BETWEEN_NODES = 100
 const SPACE_BETWEEN_CHAINS = 50
 
-export function arrangeNodes(nodes: Node[], edges: Edge[]): Node[] {
+// TODO: this works poorly
+export function arrangeNodes(nodes: DiagramNode[], edges: Edge[]): DiagramNode[] {
   let visited = new Set<string>()
 
-  function dfs(currentNodeId: string, chain: Node[]): Node[] {
+  function dfs(currentNodeId: string, chain: DiagramNode[]): DiagramNode[] {
     visited.add(currentNodeId)
 
     // Add the current node to the chain
@@ -26,11 +27,11 @@ export function arrangeNodes(nodes: Node[], edges: Edge[]): Node[] {
   }
 
   // Step 1: Identify chains
-  let chains: Node[][] = []
-  let singles: Node[] = []
+  let chains: DiagramNode[][] = []
+  let singles: DiagramNode[] = []
   for (let node of nodes) {
     if (!visited.has(node.id)) {
-      let chain: Node[] = []
+      let chain: DiagramNode[] = []
       chain = dfs(node.id, chain)
 
       // Add the chain only if it contains more than one node or doesn't have any incoming or outgoing connections
@@ -43,7 +44,7 @@ export function arrangeNodes(nodes: Node[], edges: Edge[]): Node[] {
   }
 
   // Step 2: Position nodes
-  const newNodes: Node[] = []
+  const newNodes: DiagramNode[] = []
   let currentY = SPACE_BETWEEN_CHAINS
   for (let chain of chains) {
     let currentX = SPACE_BETWEEN_NODES

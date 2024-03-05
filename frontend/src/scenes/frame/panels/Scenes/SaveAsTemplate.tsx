@@ -3,7 +3,7 @@ import { frameLogic } from '../../frameLogic'
 import { Button } from '../../../../components/Button'
 import { templatesLogic } from './templatesLogic'
 import { EditTemplate } from './EditTemplate'
-import { ArrowDownTrayIcon, DocumentPlusIcon } from '@heroicons/react/24/outline'
+import { FolderArrowDownIcon } from '@heroicons/react/24/outline'
 
 interface TemplatesProps extends React.HTMLAttributes<HTMLDivElement> {
   className?: string
@@ -16,8 +16,8 @@ export function SaveAsTemplate(props: TemplatesProps) {
   return (
     <div {...props}>
       <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={saveAsNewTemplate}>
-        <DocumentPlusIcon className="w-4 h-4" />
-        Save current scenes as local template
+        <FolderArrowDownIcon className="w-4 h-4" />
+        Export scenes as a local template
       </Button>
       <EditTemplate />
     </div>

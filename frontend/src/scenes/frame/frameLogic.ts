@@ -6,6 +6,7 @@ import { FrameScene, FrameType, TemplateType } from '../../types'
 import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
 import { v4 as uuidv4 } from 'uuid'
+import { duplicateScenes } from '../../utils/duplicateScenes'
 
 export interface FrameLogicProps {
   frameId: number
@@ -65,7 +66,10 @@ export const frameLogic = kea<frameLogicType>([
     restartFrame: true,
     stopFrame: true,
     deployFrame: true,
-    applyTemplate: (template: TemplateType) => ({ template }),
+    applyTemplate: (template: TemplateType, replaceScenes?: boolean) => ({
+      template,
+      replaceScenes: replaceScenes ?? false,
+    }),
   }),
   forms(({ actions, values }) => ({
     frameForm: {
@@ -173,9 +177,30 @@ export const frameLogic = kea<frameLogicType>([
         console.error(`Node ${nodeId} not found in scene ${sceneId}`)
       }
     },
-    applyTemplate: ({ template }) => {
+    applyTemplate: ({ template, replaceScenes }) => {
       if ('scenes' in template) {
-        actions.setFrameFormValues({ scenes: template.scenes })
+        const oldScenes = values.frameForm?.scenes || []
+        const newScenes = duplicateScenes(template.scenes ?? [])
+        if (newScenes.length === 1) {
+          newScenes[0].name = template?.name || newScenes[0].name || 'Untitled scene'
+        }
+        if (replaceScenes) {
+          if (newScenes.some((scene) => scene.default)) {
+            newScenes[0].default = true
+          }
+          actions.setFrameFormValues({ scenes: newScenes })
+        } else {
+          if (oldScenes.some((scene) => scene.default)) {
+            for (const scene of newScenes) {
+              if ('default' in scene) {
+                delete scene.default
+              }
+            }
+          }
+          actions.setFrameFormValues({
+            scenes: [...oldScenes, ...newScenes],
+          })
+        }
       }
     },
   })),

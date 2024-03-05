@@ -5,6 +5,7 @@ import ReactFlow, {
   BackgroundVariant,
   ReactFlowInstance,
   Connection,
+  NodeProps,
   OnConnectStartParams,
 } from 'reactflow'
 import type { Node } from '@reactflow/core/dist/esm/types/nodes'
@@ -23,8 +24,9 @@ import { EventNode } from './EventNode'
 import { Button } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { v4 as uuidv4 } from 'uuid'
+import { DiagramNode, NodeType } from '../../../../types'
 
-const nodeTypes = {
+const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
   source: AppNode,
   dispatch: AppNode,
@@ -110,11 +112,11 @@ export function Diagram({ sceneId }: DiagramProps) {
         const position = reactFlowInstance?.project(inputCoords) ?? { x: 0, y: 0 }
         position.x -= 280
         position.y -= 80
-        const newNode: Node = {
+        const newNode: DiagramNode = {
           id,
           position: position,
           type: 'code',
-          data: {},
+          data: { code: '' },
           style: {
             width: 300,
             height: 130,

@@ -24,7 +24,7 @@ export function EditTemplate() {
       {showingModal ? (
         <Form logic={templatesLogic} props={{ frameId }} formKey="templateForm">
           <Modal
-            title={newTemplate ? <>New template</> : <>Edit template</>}
+            title={newTemplate ? <>Export scenes</> : <>Edit template</>}
             onClose={hideModal}
             open={showingModal}
             footer={
@@ -33,7 +33,7 @@ export function EditTemplate() {
                   Close
                 </Button>
                 <Button color="primary" onClick={submitTemplateForm}>
-                  Save Changes
+                  {newTemplate ? 'Export scenes as template' : 'Save changes'}
                 </Button>
               </div>
             }

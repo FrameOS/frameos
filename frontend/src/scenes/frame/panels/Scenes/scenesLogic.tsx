@@ -1,6 +1,6 @@
 import { actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import type { scenesLogicType } from './scenesLogicType'
-import { FrameScene } from '../../../../types'
+import { FrameScene, Panel } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { forms } from 'kea-forms'
@@ -21,7 +21,7 @@ export const scenesLogic = kea<scenesLogicType>([
   key((props) => props.frameId),
   connect(({ frameId }: ScenesLogicProps) => ({
     values: [frameLogic({ frameId }), ['frame', 'frameForm'], appsModel, ['apps']],
-    actions: [frameLogic({ frameId }), ['applyTemplate'], panelsLogic({ frameId }), ['editScene']],
+    actions: [frameLogic({ frameId }), ['applyTemplate'], panelsLogic({ frameId }), ['editScene', 'closePanel']],
   })),
   actions({
     setAsDefault: (sceneId: string) => ({ sceneId }),
@@ -81,6 +81,7 @@ export const scenesLogic = kea<scenesLogicType>([
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
         scenes: values.scenes.filter((s) => s.id !== sceneId),
       })
+      actions.closePanel({ panel: Panel.Diagram, key: sceneId })
     },
     addNewScene: () => {
       actions.resetNewScene({ name: '', template: Object.keys(sceneTemplates)[1] })
