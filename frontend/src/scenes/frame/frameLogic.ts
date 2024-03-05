@@ -70,6 +70,7 @@ export const frameLogic = kea<frameLogicType>([
       template,
       replaceScenes: replaceScenes ?? false,
     }),
+    closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
   }),
   forms(({ actions, values }) => ({
     frameForm: {
@@ -185,9 +186,10 @@ export const frameLogic = kea<frameLogicType>([
           newScenes[0].name = template?.name || newScenes[0].name || 'Untitled scene'
         }
         if (replaceScenes) {
-          if (newScenes.some((scene) => scene.default)) {
+          if (newScenes.length > 0 && !newScenes.some((scene) => scene.default)) {
             newScenes[0].default = true
           }
+          actions.closeScenePanels(oldScenes.map((scene) => scene.id))
           actions.setFrameFormValues({ scenes: newScenes })
         } else {
           if (oldScenes.some((scene) => scene.default)) {

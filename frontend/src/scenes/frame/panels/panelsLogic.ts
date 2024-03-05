@@ -42,6 +42,7 @@ export const panelsLogic = kea<panelsLogicType>([
   key((props) => props.frameId),
   connect((props: PanelsLogicProps) => ({
     values: [frameLogic(props), ['defaultScene']],
+    actions: [frameLogic(props), ['closeScenePanels']],
   })),
   actions({
     setPanel: (area: Area, panel: PanelWithMetadata) => ({ area, panel }),
@@ -152,7 +153,7 @@ export const panelsLogic = kea<panelsLogicType>([
         selectedSceneId ? frame?.scenes?.find((s) => s.id === selectedSceneId)?.name ?? null : null,
     ],
   })),
-  listeners(({ cache }) => ({
+  listeners(({ actions, cache }) => ({
     persistUntilClosed: ({ panel, logic }) => {
       if (!cache.closeListeners) {
         cache.closeListeners = {} as Record<string, () => void>
@@ -165,6 +166,11 @@ export const panelsLogic = kea<panelsLogicType>([
       if (cache.closeListeners && cache.closeListeners[`${panel.panel}.${panel.key}`]) {
         cache.closeListeners[`${panel.panel}.${panel.key}`]()
         delete cache.closeListeners[`${panel.panel}.${panel.key}`]
+      }
+    },
+    closeScenePanels: ({ sceneIds }) => {
+      for (const sceneId of sceneIds) {
+        actions.closePanel({ panel: Panel.Diagram, key: sceneId })
       }
     },
   })),
