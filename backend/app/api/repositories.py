@@ -62,15 +62,15 @@ def get_repository(repository_id):
 @login_required
 def update_repository(repository_id):
     data = request.json or {}
-    if not data:
-        return jsonify({'error': 'No data provided'}), 400
     try:
         repository = Repository.query.get(repository_id)
         if not repository:
             return jsonify({"error": "Repository not found"}), 404
 
-        repository.name = data.get('name', repository.name)
-        repository.url = data.get('url', repository.url)
+        if data.get('name'):
+            repository.name = data.get('name', repository.name)
+        if data.get('url'):
+            repository.url = data.get('url', repository.url)
         repository.update_templates()
         db.session.commit()
         return jsonify(repository.to_dict())

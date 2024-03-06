@@ -43,8 +43,7 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
                 ...(!template.id
                   ? [
                       {
-                        label: 'Save locally',
-                        confirm: 'This will add this template to the list of local templates. You can then install it',
+                        label: 'Save as local template',
                         onClick: () => applyTemplate(template),
                         icon: <ArrowDownTrayIcon className="w-5 h-5" />,
                       },
