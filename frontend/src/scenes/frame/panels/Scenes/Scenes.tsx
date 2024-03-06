@@ -69,7 +69,7 @@ export function Scenes() {
               <Field
                 label="Template"
                 name="template"
-                hint="This list contains basic system templates. Click 'add to frame' next to templates from repositories below."
+                hint="This list contains basic system templates. Scroll below for more templates."
               >
                 <Select options={sceneTemplateOptions} />
               </Field>
