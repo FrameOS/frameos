@@ -211,6 +211,7 @@ export enum Panel {
   Terminal = 'Terminal',
   SceneSource = 'SceneSource',
   Scenes = 'Scenes',
+  Templates = 'Templates',
 }
 
 export type PanelWithMetadata = {

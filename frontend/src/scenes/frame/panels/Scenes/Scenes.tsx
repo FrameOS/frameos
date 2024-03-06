@@ -12,7 +12,6 @@ import { Field } from '../../../../components/Field'
 import { H6 } from '../../../../components/H6'
 import { Tag } from '../../../../components/Tag'
 import { Select } from '../../../../components/Select'
-import { Templates } from './Templates'
 import {
   CloudArrowDownIcon,
   DocumentDuplicateIcon,
@@ -22,6 +21,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { EditTemplateModal } from './EditTemplateModal'
 import { templatesLogic } from './templatesLogic'
+import React from 'react'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
@@ -41,11 +41,6 @@ export function Scenes() {
             className="mr-3"
             items={[
               {
-                label: 'Add new scene',
-                onClick: toggleNewScene,
-                icon: <PlusIcon className="w-5 h-5" />,
-              },
-              {
                 label: 'Save as a local template',
                 onClick: () => saveAsLocalTemplate({ name: frameForm.name }),
                 icon: <FolderArrowDownIcon className="w-5 h-5" />,
@@ -59,31 +54,6 @@ export function Scenes() {
           />
         </div>
         <EditTemplateModal />
-        {showNewSceneForm ? (
-          <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">
-            <Box className="p-4 space-y-4 bg-gray-900">
-              <H6>New scene</H6>
-              <Field label="Name" name="name">
-                <TextInput placeholder="e.g. Camera view" />
-              </Field>
-              <Field
-                label="Template"
-                name="template"
-                hint="This list contains basic system templates. Scroll below for more templates."
-              >
-                <Select options={sceneTemplateOptions} />
-              </Field>
-              <div className="flex gap-2">
-                <Button size="small" color="primary" onClick={submitNewScene} disabled={isNewSceneSubmitting}>
-                  Add Scene
-                </Button>
-                <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={closeNewScene}>
-                  Close
-                </Button>
-              </div>
-            </Box>
-          </Form>
-        ) : null}
         {scenes.map((scene) => (
           <Box key={scene.id} className="p-2 pl-4 pr-3 space-y-2 bg-gray-900">
             <div className="flex items-start justify-between gap-1">
@@ -152,8 +122,37 @@ export function Scenes() {
             </div>
           </Box>
         ))}
+        {showNewSceneForm ? (
+          <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">
+            <Box className="p-4 space-y-4 bg-gray-900">
+              <H6>New scene</H6>
+              <Field label="Name" name="name">
+                <TextInput placeholder="e.g. Camera view" />
+              </Field>
+              <Field
+                label="Template"
+                name="template"
+                hint='This list contains basic system templates. Use the "Templates" panel on the right to install fancier ones.'
+              >
+                <Select options={sceneTemplateOptions} />
+              </Field>
+              <div className="flex gap-2">
+                <Button size="small" color="primary" onClick={submitNewScene} disabled={isNewSceneSubmitting}>
+                  Add Scene
+                </Button>
+                <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={closeNewScene}>
+                  Close
+                </Button>
+              </div>
+            </Box>
+          </Form>
+        ) : (
+          <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={toggleNewScene}>
+            <PlusIcon className="w-4 h-4" />
+            Add new scene
+          </Button>
+        )}
       </div>
-      <Templates />
     </div>
   )
 }

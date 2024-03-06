@@ -38,7 +38,7 @@ export function Templates() {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-2 mt-8">
+      <div className="space-y-2">
         <div className="flex justify-between w-full items-center">
           <H6>Local templates (in this server)</H6>
           <DropdownMenu
@@ -181,9 +181,9 @@ export function Templates() {
           >
             <H6>Add templates repository</H6>
             <div>
-              Read more about creating repositories at{' '}
+              Read more about creating repositories{' '}
               <a href="https://github.com/FrameOS/frameos-repo" target="_blank" rel="noreferrer" className="underline">
-                <code>https://github.com/FrameOS/frameos-repo</code>
+                here.
               </a>
             </div>
             <Field label="" name="name">
