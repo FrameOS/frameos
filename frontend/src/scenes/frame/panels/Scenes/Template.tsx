@@ -7,12 +7,20 @@ import { DocumentArrowDownIcon, CloudArrowDownIcon, DocumentPlusIcon, DocumentIc
 
 interface TemplateProps {
   template: TemplateType
-  applyTemplate: (template: TemplateType, wipe?: boolean) => void
+  applyTemplate?: (template: TemplateType, wipe?: boolean) => void
+  saveAsLocal?: (template: TemplateType) => void
   exportTemplate?: (id: string, format?: string) => void
   removeTemplate?: (id: string) => void
   editTemplate?: (template: TemplateType) => void
 }
-export function Template({ template, exportTemplate, removeTemplate, applyTemplate, editTemplate }: TemplateProps) {
+export function Template({
+  template,
+  exportTemplate,
+  removeTemplate,
+  applyTemplate,
+  editTemplate,
+  saveAsLocal,
+}: TemplateProps) {
   return (
     <div
       className="shadow bg-gray-900 break-inside-avoid dndnode relative rounded-lg"
@@ -36,67 +44,68 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
       >
         <div className="flex items-start justify-between">
           <H6>{template.name}</H6>
-          <div className="flex items-start gap-1">
-            <DropdownMenu
-              buttonColor="secondary"
-              items={[
-                ...(!template.id
-                  ? [
-                      {
-                        label: 'Save as local template',
-                        onClick: () => applyTemplate(template),
-                        icon: <ArrowDownTrayIcon className="w-5 h-5" />,
-                      },
-                    ]
-                  : []),
-                ...(template.id
-                  ? [
-                      {
-                        label: `Add to frame (+${(template.scenes || []).length} scene${
-                          (template.scenes || []).length === 1 ? '' : 's'
-                        })`,
-                        onClick: () => applyTemplate(template),
-                        icon: <DocumentPlusIcon className="w-5 h-5" />,
-                      },
-                      {
-                        label: `Replace existing scenes`,
-                        confirm: 'Are you sure? This will erase all scenes from the frame and install this template.',
-                        onClick: () => applyTemplate(template, true),
-                        icon: <DocumentIcon className="w-5 h-5" />,
-                      },
-                    ]
-                  : []),
-                ...(exportTemplate
-                  ? [
-                      {
-                        label: 'Download .zip',
-                        onClick: () => (template.id ? exportTemplate(template.id, 'zip') : null),
-                        icon: <CloudArrowDownIcon className="w-5 h-5" />,
-                      },
-                    ]
-                  : []),
-                ...(editTemplate
-                  ? [
-                      {
-                        label: 'Edit metadata',
-                        onClick: () => editTemplate(template),
-                        icon: <PencilSquareIcon className="w-5 h-5" />,
-                      },
-                    ]
-                  : []),
-                ...(removeTemplate
-                  ? [
-                      {
-                        label: 'Delete',
-                        confirm: `Are you sure you want to delete the template "${template.name}"?`,
-                        onClick: () => template.id && removeTemplate(template.id),
-                        icon: <TrashIcon className="w-5 h-5" />,
-                      },
-                    ]
-                  : []),
-              ]}
-            />
-          </div>
+          <DropdownMenu
+            buttonColor="secondary"
+            items={[
+              ...(applyTemplate
+                ? [
+                    {
+                      label:
+                        'scenes' in template
+                          ? `Add to frame (+${(template.scenes || []).length} scene${
+                              (template.scenes || []).length === 1 ? '' : 's'
+                            })`
+                          : 'Add to frame',
+                      onClick: () => applyTemplate(template),
+                      icon: <DocumentPlusIcon className="w-5 h-5" />,
+                    },
+                    {
+                      label: `Replace existing scenes`,
+                      confirm: 'Are you sure? This will erase all scenes from the frame and install this template.',
+                      onClick: () => applyTemplate(template, true),
+                      icon: <DocumentIcon className="w-5 h-5" />,
+                    },
+                  ]
+                : []),
+              ...(saveAsLocal
+                ? [
+                    {
+                      label: 'Save as local template',
+                      onClick: () => saveAsLocal(template),
+                      icon: <ArrowDownTrayIcon className="w-5 h-5" />,
+                    },
+                  ]
+                : []),
+              ...(exportTemplate
+                ? [
+                    {
+                      label: 'Download .zip',
+                      onClick: () => (template.id ? exportTemplate(template.id, 'zip') : null),
+                      icon: <CloudArrowDownIcon className="w-5 h-5" />,
+                    },
+                  ]
+                : []),
+              ...(editTemplate
+                ? [
+                    {
+                      label: 'Edit metadata',
+                      onClick: () => editTemplate(template),
+                      icon: <PencilSquareIcon className="w-5 h-5" />,
+                    },
+                  ]
+                : []),
+              ...(removeTemplate
+                ? [
+                    {
+                      label: 'Delete',
+                      confirm: `Are you sure you want to delete the template "${template.name}"?`,
+                      onClick: () => template.id && removeTemplate(template.id),
+                      icon: <TrashIcon className="w-5 h-5" />,
+                    },
+                  ]
+                : []),
+            ]}
+          />
         </div>
         {template.description && <div className="text-white text-sm">{template.description}</div>}
       </div>

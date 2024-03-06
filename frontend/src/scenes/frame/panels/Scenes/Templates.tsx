@@ -38,7 +38,84 @@ export function Templates() {
   return (
     <div className="space-y-4">
       <div className="space-y-2 mt-8">
-        <H6>Local templates (in this server)</H6>
+        <div className="flex justify-between w-full items-center">
+          <H6>Local templates (in this server)</H6>
+          <DropdownMenu
+            buttonColor="secondary"
+            className="mr-2"
+            items={[
+              {
+                label: 'Add template from URL',
+                onClick: showRemoteTemplate,
+                icon: <PlusIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Upload template .zip',
+                onClick: showUploadTemplate,
+                icon: <ArrowPathIcon className="w-5 h-5" />,
+              },
+            ]}
+          />
+        </div>
+        {showingRemoteTemplate ? (
+          <Box className="p-4 space-y-2 bg-gray-900">
+            <H6>Add template from URL</H6>
+            <Form
+              logic={templatesLogic}
+              props={{ frameId }}
+              formKey="addTemplateUrlForm"
+              enableFormOnSubmit
+              className="space-y-2"
+            >
+              <Field label="" name="url">
+                <TextInput placeholder="https://url/to/template.zip" />
+              </Field>
+              <div className="flex gap-2">
+                <Button type="submit" size="small" color="primary">
+                  Add template
+                </Button>
+                <Button color="secondary" size="small" onClick={hideRemoteTemplate}>
+                  Cancel
+                </Button>
+              </div>
+            </Form>
+          </Box>
+        ) : null}
+        {showingUploadTemplate ? (
+          <Box className="p-4 space-y-2 bg-gray-900">
+            <H6>Upload template</H6>
+            <Form
+              logic={templatesLogic}
+              props={{ frameId }}
+              formKey="uploadTemplateForm"
+              enableFormOnSubmit
+              className="space-y-2"
+            >
+              <Field label="" name="file">
+                {({ onChange }) => (
+                  <input
+                    type="file"
+                    accept=".zip"
+                    onChange={(e: React.FormEvent<HTMLInputElement>) => {
+                      const target = e.target as HTMLInputElement & {
+                        files: FileList
+                      }
+                      onChange(target.files[0])
+                    }}
+                  />
+                )}
+              </Field>
+              <div className="flex gap-2">
+                <Button type="submit" size="small" color="primary">
+                  Upload template
+                </Button>
+                <Button color="secondary" size="small" onClick={hideUploadTemplate}>
+                  Cancel
+                </Button>
+              </div>
+            </Form>
+          </Box>
+        ) : null}
         {templates.map((template) => (
           <Template
             template={template}
@@ -50,103 +127,33 @@ export function Templates() {
         ))}
         {templates.length === 0 ? <div className="text-muted">You have no local templates.</div> : null}
       </div>
-      {showingRemoteTemplate ? (
-        <Box className="p-4 space-y-2 bg-gray-900">
-          <H6>Add template from URL</H6>
-          <Form
-            logic={templatesLogic}
-            props={{ frameId }}
-            formKey="addTemplateUrlForm"
-            enableFormOnSubmit
-            className="space-y-2"
-          >
-            <Field label="" name="url">
-              <TextInput placeholder="https://url/to/template.zip" />
-            </Field>
-            <div className="flex gap-2">
-              <Button type="submit" size="small" color="primary">
-                Add template
-              </Button>
-              <Button color="secondary" size="small" onClick={hideRemoteTemplate}>
-                Cancel
-              </Button>
-            </div>
-          </Form>
-        </Box>
-      ) : (
-        <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={showRemoteTemplate}>
-          <PlusIcon className="w-4 h-4" />
-          Add template from URL
-        </Button>
-      )}
-      {showingUploadTemplate ? (
-        <Box className="p-4 space-y-2 bg-gray-900">
-          <H6>Upload template</H6>
-          <Form
-            logic={templatesLogic}
-            props={{ frameId }}
-            formKey="uploadTemplateForm"
-            enableFormOnSubmit
-            className="space-y-2"
-          >
-            <Field label="" name="file">
-              {({ onChange }) => (
-                <input
-                  type="file"
-                  accept=".zip"
-                  onChange={(e: React.FormEvent<HTMLInputElement>) => {
-                    const target = e.target as HTMLInputElement & {
-                      files: FileList
-                    }
-                    onChange(target.files[0])
-                  }}
-                />
-              )}
-            </Field>
-            <div className="flex gap-2">
-              <Button type="submit" size="small" color="primary">
-                Upload template
-              </Button>
-              <Button color="secondary" size="small" onClick={hideUploadTemplate}>
-                Cancel
-              </Button>
-            </div>
-          </Form>
-        </Box>
-      ) : (
-        <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={showUploadTemplate}>
-          <PlusIcon className="w-4 h-4" />
-          Upload template .zip
-        </Button>
-      )}
       {(repositories ?? []).map((repository) => (
-        <div className="space-y-2 mt-8">
+        <div className="space-y-2 !mt-8">
           <div className="flex gap-2 items-start justify-between">
             <H6>{repository.name}</H6>
-            <div className="flex gap-2">
-              <DropdownMenu
-                buttonColor="secondary"
-                items={[
-                  {
-                    label: 'Refresh',
-                    onClick: () => repository.id && refreshRepository(repository.id),
-                    icon: <ArrowPathIcon className="w-5 h-5" />,
-                    title: `Last refresh: ${repository.last_updated_at}`,
-                  },
-                  {
-                    label: 'Copy repository URL',
-                    title: repository.url,
-                    onClick: async () => repository.url && copy(repository.url),
-                    icon: <ClipboardDocumentCheckIcon className="w-5 h-5" />,
-                  },
-                  {
-                    label: 'Remove',
-                    onClick: () => repository.id && removeRepository(repository.id),
-                    icon: <TrashIcon className="w-5 h-5" />,
-                  },
-                ]}
-              />
-            </div>
+            <DropdownMenu
+              buttonColor="secondary"
+              className="mr-2"
+              items={[
+                {
+                  label: 'Refresh',
+                  onClick: () => repository.id && refreshRepository(repository.id),
+                  icon: <ArrowPathIcon className="w-5 h-5" />,
+                  title: `Last refresh: ${repository.last_updated_at}`,
+                },
+                {
+                  label: 'Copy repository URL',
+                  title: repository.url,
+                  onClick: async () => repository.url && copy(repository.url),
+                  icon: <ClipboardDocumentCheckIcon className="w-5 h-5" />,
+                },
+                {
+                  label: 'Remove',
+                  onClick: () => repository.id && removeRepository(repository.id),
+                  icon: <TrashIcon className="w-5 h-5" />,
+                },
+              ]}
+            />
           </div>
           <div className="text-sm whitespace-nowrap p-2 overflow-x-auto bg-black text-white">
             <ClipboardDocumentCheckIcon
@@ -158,7 +165,7 @@ export function Templates() {
             {repository.url}
           </div>
           {(repository.templates || []).map((template) => (
-            <Template template={template} applyTemplate={(template) => applyRemoteTemplate(repository, template)} />
+            <Template template={template} saveAsLocal={(template) => applyRemoteTemplate(repository, template)} />
           ))}
           {repository.templates?.length === 0 ? (
             <div className="text-muted">This repository has no templates.</div>
@@ -174,15 +181,12 @@ export function Templates() {
             enableFormOnSubmit
             className="space-y-2"
           >
-            <H6>Add repository</H6>
+            <H6>Add templates repository</H6>
             <div>
-              A better flow coming really soon! For now clone the structure of{' '}
-              <a href="https://github.com/FrameOS/frameos-repo" target="_blank" rel="noreferrer">
+              Read more about creating repositories at{' '}
+              <a href="https://github.com/FrameOS/frameos-repo" target="_blank" rel="noreferrer" className="underline">
                 <code>https://github.com/FrameOS/frameos-repo</code>
               </a>
-              , place your extracted templates under <code>repo/versions/YOU_CHOOSE/templates</code> and run{' '}
-              <code>bin/build.sh</code> to generate the <code>templates.json</code> file. Then upload the resulting
-              files somewhere, and paste the URL here.
             </div>
             <Field label="" name="name">
               <TextInput placeholder="Official goods" />

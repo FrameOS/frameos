@@ -23,16 +23,13 @@ class Repository(db.Model):
         }
 
     def update_templates(self):
-        try:
-            response = requests.get(self.url)
-            if response.status_code == 200:
-                self.last_updated_at = datetime.utcnow()
-                self.templates = response.json()
+        response = requests.get(self.url)
+        if response.status_code == 200:
+            self.last_updated_at = datetime.utcnow()
+            self.templates = response.json()
 
-                for template in self.templates:
-                    if template.get('image', '').startswith('./'):
-                        template['image'] = urljoin(self.url, template['image'])
-                    if template.get('zip', '').startswith('./'):
-                        template['zip'] = urljoin(self.url, template['zip'])
-        except:
-            pass
+            for template in self.templates:
+                if template.get('image', '').startswith('./'):
+                    template['image'] = urljoin(self.url, template['image'])
+                if template.get('zip', '').startswith('./'):
+                    template['zip'] = urljoin(self.url, template['zip'])
