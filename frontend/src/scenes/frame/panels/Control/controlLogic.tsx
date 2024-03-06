@@ -100,13 +100,13 @@ export const controlLogic = kea<controlLogicType>([
         for (const field of fields) {
           if (field.access === 'public') {
             if (field.type === 'boolean') {
-              state[field.name] = formValues[field.name] === 'true'
+              state[field.name] = formValues[field.name] === 'true' || field.value
             } else if (field.type === 'integer') {
-              state[field.name] = parseInt(formValues[field.name])
+              state[field.name] = parseInt(formValues[field.name] ?? field.value)
             } else if (field.type === 'float') {
-              state[field.name] = parseFloat(formValues[field.name])
+              state[field.name] = parseFloat(formValues[field.name] ?? field.value)
             } else {
-              state[field.name] = formValues[field.name]
+              state[field.name] = formValues[field.name] ?? field.value
             }
           }
         }

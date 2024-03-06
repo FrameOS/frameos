@@ -104,7 +104,7 @@ def api_frame_event(id: int, event: str):
     frame = Frame.query.get_or_404(id)
     try:
         headers = {}
-        if (frame.frame_access == "protected" or frame.frame_access == "private") and frame.frame_access_key is not None:
+        if frame.frame_access != "public" and frame.frame_access_key is not None:
             headers["Authorization"] = f'Bearer {frame.frame_access_key}'
         if request.is_json:
             headers["Content-Type"] = "application/json"
