@@ -22,8 +22,9 @@ export function Templates() {
   const { templates } = useValues(templatesModel)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
   const {
+    applyRemoteToFrame,
     editLocalTemplate,
-    applyRemoteTemplate,
+    saveRemoteAsLocal,
     showRemoteTemplate,
     showUploadTemplate,
     hideRemoteTemplate,
@@ -156,7 +157,13 @@ export function Templates() {
             />
           </div>
           {(repository.templates || []).map((template) => (
-            <Template template={template} saveAsLocal={(template) => applyRemoteTemplate(repository, template)} />
+            <Template
+              template={template}
+              saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
+              applyTemplate={(template, replace) => {
+                applyRemoteToFrame(repository, template, replace)
+              }}
+            />
           ))}
           {repository.templates?.length === 0 ? (
             <div className="text-muted">This repository has no templates.</div>

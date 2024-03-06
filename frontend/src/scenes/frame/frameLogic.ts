@@ -66,7 +66,7 @@ export const frameLogic = kea<frameLogicType>([
     restartFrame: true,
     stopFrame: true,
     deployFrame: true,
-    applyTemplate: (template: TemplateType, replaceScenes?: boolean) => ({
+    applyTemplate: (template: Partial<TemplateType>, replaceScenes?: boolean) => ({
       template,
       replaceScenes: replaceScenes ?? false,
     }),

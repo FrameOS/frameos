@@ -110,8 +110,10 @@ def create_template():
         image_height=data.get('imageHeight', data.get('image_height')),
     )
 
-    if data.get('format') == 'zip':
+    if request.json.get('format') == 'zip':
         return respond_with_template(new_template)
+    elif request.json.get('format') == 'scenes':
+        return jsonify(new_template.scenes), 201
     else:
         db.session.add(new_template)
         db.session.commit()

@@ -17,14 +17,26 @@ export const templatesLogic = kea<templatesLogicType>([
   key((props) => props.frameId),
   connect((props: TemplateLogicProps) => ({
     values: [frameLogic(props), ['frameForm']],
-    actions: [templatesModel, ['updateTemplate'], repositoriesModel, ['updateRepository']],
+    actions: [
+      templatesModel,
+      ['updateTemplate'],
+      repositoriesModel,
+      ['updateRepository'],
+      frameLogic(props),
+      ['applyTemplate'],
+    ],
   })),
   actions({
     saveAsLocalTemplate: (template?: Partial<TemplateForm>) => ({ template: template ?? {} }),
     saveAsZip: (template?: Partial<TemplateForm>) => ({ template: template ?? {} }),
     editLocalTemplate: (template: TemplateType) => ({ template }),
     hideModal: true,
-    applyRemoteTemplate: (repository: RepositoryType, template: TemplateType) => ({ repository, template }),
+    saveRemoteAsLocal: (repository: RepositoryType, template: TemplateType) => ({ repository, template }),
+    applyRemoteToFrame: (repository: RepositoryType, template: TemplateType, replace?: boolean) => ({
+      repository,
+      template,
+      replace,
+    }),
     showRemoteTemplate: true,
     hideRemoteTemplate: true,
     showUploadTemplate: true,
@@ -225,7 +237,7 @@ export const templatesLogic = kea<templatesLogicType>([
     ],
   }),
   listeners(({ actions, values, props }) => ({
-    applyRemoteTemplate: async ({ template, repository }) => {
+    saveRemoteAsLocal: async ({ template, repository }) => {
       if ('zip' in template) {
         let zipPath = (template as any).zip
         if (zipPath.startsWith('./')) {
@@ -235,6 +247,31 @@ export const templatesLogic = kea<templatesLogicType>([
         actions.setAddTemplateUrlFormValues({ url: zipPath })
         actions.submitAddTemplateUrlForm()
       }
+    },
+    applyRemoteToFrame: async ({ template, repository, replace }) => {
+      const request: Record<string, any> = {
+        format: 'scenes',
+      }
+      if ('zip' in template) {
+        let zipPath = (template as any).zip
+        if (zipPath.startsWith('./')) {
+          const repositoryPath = repository.url.replace(/\/[^/]+$/, '')
+          zipPath = `${repositoryPath}/${zipPath.slice(2)}`
+        }
+        request['url'] = zipPath
+      } else {
+        throw new Error('Failed to load template')
+      }
+      const response = await fetch(`/api/templates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      })
+      if (!response.ok) {
+        throw new Error('Failed to update frame')
+      }
+      const scenes = await response.json()
+      actions.applyTemplate({ scenes }, replace)
     },
     saveAsLocalTemplate: () => {
       if ((values.templateForm.exportScenes?.length ?? 0) === 0) {

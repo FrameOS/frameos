@@ -8,7 +8,7 @@ import { DocumentArrowDownIcon, CloudArrowDownIcon, DocumentPlusIcon, DocumentIc
 interface TemplateProps {
   template: TemplateType
   applyTemplate?: (template: TemplateType, wipe?: boolean) => void
-  saveAsLocal?: (template: TemplateType) => void
+  saveRemoteAsLocal?: (template: TemplateType) => void
   exportTemplate?: (id: string, format?: string) => void
   removeTemplate?: (id: string) => void
   editTemplate?: (template: TemplateType) => void
@@ -19,7 +19,7 @@ export function Template({
   removeTemplate,
   applyTemplate,
   editTemplate,
-  saveAsLocal,
+  saveRemoteAsLocal,
 }: TemplateProps) {
   return (
     <div
@@ -51,7 +51,7 @@ export function Template({
                 ? [
                     {
                       label:
-                        'scenes' in template
+                        'scenes' in template && Array.isArray(template.scenes)
                           ? `Add to frame (+${(template.scenes || []).length} scene${
                               (template.scenes || []).length === 1 ? '' : 's'
                             })`
@@ -67,11 +67,11 @@ export function Template({
                     },
                   ]
                 : []),
-              ...(saveAsLocal
+              ...(saveRemoteAsLocal
                 ? [
                     {
                       label: 'Save as local template',
-                      onClick: () => saveAsLocal(template),
+                      onClick: () => saveRemoteAsLocal(template),
                       icon: <ArrowDownTrayIcon className="w-5 h-5" />,
                     },
                   ]
