@@ -42,7 +42,7 @@ export function Templates() {
           <H6>Local templates (in this server)</H6>
           <DropdownMenu
             buttonColor="secondary"
-            className="mr-2"
+            className="mr-3"
             items={[
               {
                 label: 'Add template from URL',
@@ -133,7 +133,7 @@ export function Templates() {
             <H6>{repository.name}</H6>
             <DropdownMenu
               buttonColor="secondary"
-              className="mr-2"
+              className="mr-3"
               items={[
                 {
                   label: 'Refresh',
@@ -154,15 +154,6 @@ export function Templates() {
                 },
               ]}
             />
-          </div>
-          <div className="text-sm whitespace-nowrap p-2 overflow-x-auto bg-black text-white">
-            <ClipboardDocumentCheckIcon
-              className="w-4 h-4 mr-1 inline cursor-pointer"
-              onClick={() => {
-                repository.url && copy(repository.url)
-              }}
-            />
-            {repository.url}
           </div>
           {(repository.templates || []).map((template) => (
             <Template template={template} saveAsLocal={(template) => applyRemoteTemplate(repository, template)} />

@@ -33,7 +33,7 @@ export function Scenes() {
           <H6>Scenes on this frame</H6>
           <DropdownMenu
             buttonColor="secondary"
-            className="mr-2"
+            className="mr-3"
             items={[
               {
                 label: 'Add new scene',
@@ -80,7 +80,7 @@ export function Scenes() {
           </Form>
         ) : null}
         {scenes.map((scene) => (
-          <Box key={scene.id} className="p-2 pl-4 space-y-2 bg-gray-900">
+          <Box key={scene.id} className="p-2 pl-4 pr-3 space-y-2 bg-gray-900">
             <div className="flex items-start justify-between gap-1">
               <div>
                 <H6 className="cursor-pointer" onClick={() => editScene(scene.id)}>
