@@ -118,7 +118,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
                 title={'Talk to ChatGPT'}
                 onClick={() => setActiveFile('app.nim/suggestion')}
               >
-                {enhanceSuggestionLoading ? <Spinner className="text-white" /> : <BeakerIcon className="w-5 h-5" />}
+                {enhanceSuggestionLoading ? <Spinner color="white" /> : <BeakerIcon className="w-5 h-5" />}
               </Button>
             )}
           </div>
@@ -153,7 +153,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
             </p>
             <TextArea value={prompt} onChange={setPrompt} rows={3} />
             <Button onClick={enhanceSuggestionLoading ? () => {} : enhance}>
-              {enhanceSuggestionLoading ? <Spinner className="text-white" /> : 'Ask'}
+              {enhanceSuggestionLoading ? <Spinner color="white" /> : 'Ask'}
             </Button>
             <Markdown value={enhanceSuggestion ?? ''} />
           </div>

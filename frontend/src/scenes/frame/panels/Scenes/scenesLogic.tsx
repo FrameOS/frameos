@@ -27,7 +27,7 @@ export const scenesLogic = kea<scenesLogicType>([
     setAsDefault: (sceneId: string) => ({ sceneId }),
     deleteScene: (sceneId: string) => ({ sceneId }),
     renameScene: (sceneId: string) => ({ sceneId }),
-    addNewScene: true,
+    toggleNewScene: true,
     closeNewScene: true,
   }),
   forms(({ actions, values, props }) => ({
@@ -83,7 +83,7 @@ export const scenesLogic = kea<scenesLogicType>([
       })
       actions.closePanel({ panel: Panel.Diagram, key: sceneId })
     },
-    addNewScene: () => {
+    toggleNewScene: () => {
       actions.resetNewScene({ name: '', template: Object.keys(sceneTemplates)[1] })
     },
     closeNewScene: () => {
@@ -94,7 +94,7 @@ export const scenesLogic = kea<scenesLogicType>([
     showNewSceneForm: [
       false,
       {
-        addNewScene: () => true,
+        toggleNewScene: (state) => !state,
         closeNewScene: () => false,
         submitNewSceneSuccess: () => false,
       },

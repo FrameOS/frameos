@@ -37,8 +37,8 @@ export function Templates() {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-2">
-        <H6>Local templates</H6>
+      <div className="space-y-2 mt-8">
+        <H6>Local templates (in this server)</H6>
         {templates.map((template) => (
           <Template
             template={template}
@@ -120,7 +120,7 @@ export function Templates() {
         </Button>
       )}
       {(repositories ?? []).map((repository) => (
-        <div className="space-y-2">
+        <div className="space-y-2 mt-8">
           <div className="flex gap-2 items-start justify-between">
             <H6>{repository.name}</H6>
             <div className="flex gap-2">
@@ -175,6 +175,15 @@ export function Templates() {
             className="space-y-2"
           >
             <H6>Add repository</H6>
+            <div>
+              A better flow coming really soon! For now clone the structure of{' '}
+              <a href="https://github.com/FrameOS/frameos-repo" target="_blank" rel="noreferrer">
+                <code>https://github.com/FrameOS/frameos-repo</code>
+              </a>
+              , place your extracted templates under <code>repo/versions/YOU_CHOOSE/templates</code> and run{' '}
+              <code>bin/build.sh</code> to generate the <code>templates.json</code> file. Then upload the resulting
+              files somewhere, and paste the URL here.
+            </div>
             <Field label="" name="name">
               <TextInput placeholder="Official goods" />
             </Field>

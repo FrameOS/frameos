@@ -16,11 +16,12 @@ export const templatesLogic = kea<templatesLogicType>([
   props({} as TemplateLogicProps),
   key((props) => props.frameId),
   connect((props: TemplateLogicProps) => ({
-    values: [frameLogic(props), ['frame']],
+    values: [frameLogic(props), ['frameForm']],
     actions: [templatesModel, ['updateTemplate'], repositoriesModel, ['updateRepository']],
   })),
   actions({
-    saveAsNewTemplate: true,
+    saveAsLocalTemplate: (template?: Partial<TemplateForm>) => ({ template: template ?? {} }),
+    saveAsZip: (template?: Partial<TemplateForm>) => ({ template: template ?? {} }),
     editLocalTemplate: (template: TemplateType) => ({ template }),
     hideModal: true,
     applyRemoteTemplate: (repository: RepositoryType, template: TemplateType) => ({ repository, template }),
@@ -57,13 +58,15 @@ export const templatesLogic = kea<templatesLogicType>([
           actions.updateTemplate(await response.json())
         } else {
           // create
+          const target = values.modalTarget
           const request: TemplateType & Record<string, any> = {
             name: formValues.name,
             description: formValues.description,
-            scenes: (values.frame.scenes || []).filter((scene) => formValues.exportScenes?.includes(scene.id)),
+            scenes: (values.frameForm.scenes || []).filter((scene) => formValues.exportScenes?.includes(scene.id)),
             from_frame_id: props.frameId,
+            format: target === 'zip' ? 'zip' : 'json',
           }
-          const response = await fetch(`/api/templates`, {
+          const response = await fetch('/api/templates', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(request),
@@ -71,7 +74,19 @@ export const templatesLogic = kea<templatesLogicType>([
           if (!response.ok) {
             throw new Error('Failed to update frame')
           }
-          actions.updateTemplate(await response.json())
+          if (target === 'zip') {
+            const blob = await response.blob()
+            const url = window.URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `${formValues.name}.zip`
+            document.body.appendChild(a)
+            a.click()
+            window.URL.revokeObjectURL(url)
+            document.body.removeChild(a)
+          } else {
+            actions.updateTemplate(await response.json())
+          }
         }
         actions.hideModal()
         actions.resetTemplateForm()
@@ -155,13 +170,29 @@ export const templatesLogic = kea<templatesLogicType>([
     showingModal: [
       false,
       {
-        saveAsNewTemplate: () => true,
+        saveAsZip: () => true,
+        saveAsLocalTemplate: () => true,
         editLocalTemplate: () => true,
         hideModal: () => false,
       },
     ],
+    modalTarget: [
+      'localTemplate' as 'localTemplate' | 'zip',
+      {
+        saveAsZip: () => 'zip',
+        saveAsLocalTemplate: () => 'localTemplate',
+        editLocalTemplate: () => 'localTemplate',
+      },
+    ],
     templateForm: {
-      saveAsNewTemplate: () => ({ id: '', name: '', description: '', exportScenes: undefined }),
+      saveAsLocalTemplate: (_, { template }) => ({
+        id: '',
+        name: '',
+        description: '',
+        exportScenes: undefined,
+        ...template,
+      }),
+      saveAsZip: (_, { template }) => ({ id: '', name: '', description: '', exportScenes: undefined, ...template }),
       editLocalTemplate: (_, { template }) => ({
         id: template.id,
         name: template.name,
@@ -205,8 +236,15 @@ export const templatesLogic = kea<templatesLogicType>([
         actions.submitAddTemplateUrlForm()
       }
     },
-    saveAsNewTemplate: () => {
-      actions.setTemplateFormValues({ exportScenes: values.frame?.scenes?.map((s) => s.id) || [] })
+    saveAsLocalTemplate: () => {
+      if ((values.templateForm.exportScenes?.length ?? 0) === 0) {
+        actions.setTemplateFormValues({ exportScenes: values.frameForm?.scenes?.map((s) => s.id) || [] })
+      }
+    },
+    saveAsZip: () => {
+      if ((values.templateForm.exportScenes?.length ?? 0) === 0) {
+        actions.setTemplateFormValues({ exportScenes: values.frameForm?.scenes?.map((s) => s.id) || [] })
+      }
     },
     showAddRepository: () => {
       actions.setAddRepositoryFormValues({ name: '', url: '' })

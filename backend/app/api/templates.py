@@ -13,7 +13,28 @@ from app.models.template import Template
 from app.models.frame import Frame
 from PIL import Image
 
-# Create (POST)
+def respond_with_template(template: Template):
+    if not template:
+        return jsonify({"error": "Template not found"}), 404
+    template_name = template.name
+    safe_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
+    template_name = ''.join(c if c in safe_chars else ' ' for c in template_name).strip()
+    template_name = ' '.join(template_name.split()) or 'Template'
+
+    template_dict = template.to_dict()
+    template_dict.pop('id')
+    in_memory = io.BytesIO()
+    with zipfile.ZipFile(in_memory, 'a', zipfile.ZIP_DEFLATED) as zf:
+        scenes = template_dict.pop('scenes')
+        template_dict['scenes'] = './scenes.json'
+        template_dict['image'] = './image.jpg'
+        zf.writestr(f"{template_name}/scenes.json", json.dumps(scenes, indent=2))
+        zf.writestr(f"{template_name}/template.json", json.dumps(template_dict, indent=2))
+        if template.image:
+            zf.writestr(f"{template_name}/image.jpg", template.image)
+    in_memory.seek(0)
+    return Response(in_memory.getvalue(), content_type='application/zip', headers={"Content-Disposition": f"attachment; filename={template_name}.zip"})
+
 @api.route("/templates", methods=["POST"])
 @login_required
 def create_template():
@@ -87,11 +108,13 @@ def create_template():
         image_width=data.get('image_width'),
         image_height=data.get('image_height'),
     )
-    db.session.add(new_template)
-    db.session.commit()
 
-
-    return jsonify(new_template.to_dict()), 201
+    if data.get('format') == 'zip':
+        return respond_with_template(new_template)
+    else:
+        db.session.add(new_template)
+        db.session.commit()
+        return jsonify(new_template.to_dict()), 201
 
 # Read (GET) for all templates
 @api.route("/templates", methods=["GET"])
@@ -123,26 +146,8 @@ def get_template_image(template_id):
 @login_required
 def export_template(template_id):
     template = Template.query.get(template_id)
-    if not template:
-        return jsonify({"error": "Template not found"}), 404
-    template_name = template.name
-    safe_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
-    template_name = ''.join(c if c in safe_chars else ' ' for c in template_name).strip()
-    template_name = ' '.join(template_name.split()) or 'Template'
+    return respond_with_template(template)
 
-    template_dict = template.to_dict()
-    template_dict.pop('id')
-    in_memory = io.BytesIO()
-    with zipfile.ZipFile(in_memory, 'a', zipfile.ZIP_DEFLATED) as zf:
-        scenes = template_dict.pop('scenes')
-        template_dict['scenes'] = './scenes.json'
-        template_dict['image'] = './image.jpg'
-        zf.writestr(f"{template_name}/scenes.json", json.dumps(scenes, indent=2))
-        zf.writestr(f"{template_name}/template.json", json.dumps(template_dict, indent=2))
-        if template.image:
-            zf.writestr(f"{template_name}/image.jpg", template.image)
-    in_memory.seek(0)
-    return Response(in_memory.getvalue(), content_type='application/zip', headers={"Content-Disposition": f"attachment; filename={template_name}.zip"})
 
 # Update (PUT)
 @api.route("/templates/<template_id>", methods=["PATCH"])

@@ -13,18 +13,20 @@ import { H6 } from '../../../../components/H6'
 import { Tag } from '../../../../components/Tag'
 import { Select } from '../../../../components/Select'
 import { Templates } from './Templates'
-import { PlusIcon } from '@heroicons/react/24/outline'
+import { CloudArrowDownIcon, FolderPlusIcon, PlusIcon } from '@heroicons/react/24/outline'
 import { SaveAsTemplate } from './SaveAsTemplate'
+import { SaveAsZip } from './SaveAsZip'
+import { EditTemplateModal } from './EditTemplateModal'
+import { templatesLogic } from './templatesLogic'
 
 export function Scenes() {
   const { frameId } = useValues(frameLogic)
   const { editScene } = useActions(panelsLogic)
-  const { scenes, showNewSceneForm, isNewSceneSubmitting, newSceneHasErrors, sceneTemplateOptions } = useValues(
+  const { scenes, showNewSceneForm, isNewSceneSubmitting, sceneTemplateOptions } = useValues(scenesLogic({ frameId }))
+  const { submitNewScene, renameScene, deleteScene, setAsDefault, toggleNewScene, closeNewScene } = useActions(
     scenesLogic({ frameId })
   )
-  const { submitNewScene, renameScene, deleteScene, setAsDefault, addNewScene, closeNewScene } = useActions(
-    scenesLogic({ frameId })
-  )
+  const { saveAsLocalTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
 
   return (
     <div className="space-y-4">
@@ -52,6 +54,16 @@ export function Scenes() {
                       label: 'Open in editor',
                       onClick: () => editScene(scene.id),
                       icon: <FolderOpenIcon className="w-5 h-5" />,
+                    },
+                    {
+                      label: 'Save as a local template',
+                      onClick: () => saveAsLocalTemplate({ name: scene.name ?? '', exportScenes: [scene.id] }),
+                      icon: <FolderPlusIcon className="w-5 h-5" />,
+                    },
+                    {
+                      label: 'Download as .zip',
+                      onClick: () => saveAsZip({ name: scene.name ?? '', exportScenes: [scene.id] }),
+                      icon: <CloudArrowDownIcon className="w-5 h-5" />,
                     },
                     {
                       label: 'Rename',
@@ -84,6 +96,15 @@ export function Scenes() {
           </Box>
         ))}
       </div>
+      <div className="flex flex-wrap gap-2 items-center">
+        <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={toggleNewScene}>
+          <PlusIcon className="w-4 h-4" />
+          Add new scene
+        </Button>
+        <SaveAsTemplate />
+        <SaveAsZip />
+      </div>
+      <EditTemplateModal />
       {showNewSceneForm ? (
         <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">
           <Box className="p-4 space-y-4 bg-gray-900">
@@ -91,7 +112,11 @@ export function Scenes() {
             <Field label="Name" name="name">
               <TextInput placeholder="e.g. Camera view" />
             </Field>
-            <Field label="Template" name="template">
+            <Field
+              label="Template"
+              name="template"
+              hint="This list contains basic system templates. Click 'add to frame' next to templates from repositories below."
+            >
               <Select options={sceneTemplateOptions} />
             </Field>
             <div className="flex gap-2">
@@ -104,13 +129,7 @@ export function Scenes() {
             </div>
           </Box>
         </Form>
-      ) : (
-        <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={addNewScene}>
-          <PlusIcon className="w-4 h-4" />
-          Add new scene
-        </Button>
-      )}
-      <SaveAsTemplate />
+      ) : null}
       <Templates />
     </div>
   )

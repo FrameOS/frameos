@@ -13,10 +13,12 @@ import { H6 } from '../../../../components/H6'
 import { Tag } from '../../../../components/Tag'
 import { CheckIcon, NoSymbolIcon } from '@heroicons/react/24/solid'
 import clsx from 'clsx'
+import { Spinner } from '../../../../components/Spinner'
+import React from 'react'
 
-export function EditTemplate() {
+export function EditTemplateModal() {
   const { frameId, frameForm } = useValues(frameLogic)
-  const { showingModal, templateForm } = useValues(templatesLogic({ frameId }))
+  const { isTemplateFormSubmitting, showingModal, modalTarget, templateForm } = useValues(templatesLogic({ frameId }))
   const { hideModal, submitTemplateForm } = useActions(templatesLogic({ frameId }))
   const newTemplate = !templateForm.id
   return (
@@ -24,7 +26,13 @@ export function EditTemplate() {
       {showingModal ? (
         <Form logic={templatesLogic} props={{ frameId }} formKey="templateForm">
           <Modal
-            title={newTemplate ? <>Export scenes</> : <>Edit template</>}
+            title={
+              newTemplate
+                ? modalTarget === 'localTemplate'
+                  ? 'Save as local template'
+                  : 'Download as .zip'
+                : 'Edit template'
+            }
             onClose={hideModal}
             open={showingModal}
             footer={
@@ -32,8 +40,15 @@ export function EditTemplate() {
                 <Button color="none" onClick={hideModal}>
                   Close
                 </Button>
-                <Button color="primary" onClick={submitTemplateForm}>
-                  {newTemplate ? 'Export scenes as template' : 'Save changes'}
+                <Button color="primary" onClick={submitTemplateForm} className="flex gap-2 items-center">
+                  {isTemplateFormSubmitting ? <Spinner color="white" /> : null}
+                  <div>
+                    {newTemplate
+                      ? modalTarget === 'localTemplate'
+                        ? 'Save as local template'
+                        : 'Download .zip'
+                      : 'Save changes'}
+                  </div>
                 </Button>
               </div>
             }
@@ -47,7 +62,10 @@ export function EditTemplate() {
               </Field>
               {newTemplate ? (
                 <>
-                  <Field name="exportScenes" label="Scenes included in template">
+                  <Field
+                    name="exportScenes"
+                    label={`Scenes included in template (${templateForm.exportScenes?.length ?? 0} selected)`}
+                  >
                     {({ value, onChange }) => (
                       <>
                         {(frameForm.scenes || []).map((scene, index) => {
