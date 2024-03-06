@@ -17,6 +17,7 @@ const saturated4ColorPalette* = @[
 ]
 
 # 7-color screen colors, as presented by the manufacturer
+# we do not use these colors anywhere. They're presented for reference
 const desaturated7ColorPalette* = @[
   (0, 0, 0),
   (255, 255, 255),
@@ -28,6 +29,7 @@ const desaturated7ColorPalette* = @[
 ]
 
 # 7-color screen colors, as measured on a real display
+# We use these colors for dithering on all waveshare and inky 7-color displays
 const saturated7ColorPalette* = @[
   (57, 48, 57),
   (255, 255, 255),

@@ -17,12 +17,12 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
     <div
       className="shadow bg-gray-900 break-inside-avoid dndnode relative rounded-lg"
       style={
-        template.image_width && template.image_height
+        template.imageWidth && template.imageHeight
           ? {
               backgroundImage: `url("${template.image}")`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
-              // aspectRatio: `${template.image_width} / ${template.image_height}`,
+              // aspectRatio: `${template.imageWidth} / ${template.imageHeight}`,
             }
           : {}
       }

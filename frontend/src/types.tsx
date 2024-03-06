@@ -35,8 +35,8 @@ export interface TemplateType {
   description?: string
   scenes?: FrameScene[]
   image?: any
-  image_width?: number
-  image_height?: number
+  imageWidth?: number
+  imageHeight?: number
 }
 
 export interface TemplateForm extends TemplateType {

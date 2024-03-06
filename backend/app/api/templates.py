@@ -80,8 +80,8 @@ def create_template():
         data['image'] = image
         if image:
             img = Image.open(io.BytesIO(image))
-            data['image_width'] = img.width
-            data['image_height'] = img.height
+            data['imageWidth'] = img.width
+            data['imageHeight'] = img.height
 
     if data.get('from_frame_id'):
         frame_id = data.get('from_frame_id')
@@ -93,8 +93,8 @@ def create_template():
             try:
                 image = Image.open(io.BytesIO(last_image))
                 data['image'] = last_image
-                data['image_width'] = image.width
-                data['image_height'] = image.height
+                data['imageWidth'] = image.width
+                data['imageHeight'] = image.height
             except Exception as e:
                 print(e)
                 pass
@@ -105,8 +105,9 @@ def create_template():
         scenes=data.get('scenes'),
         config=data.get('config'),
         image=data.get('image'),
-        image_width=data.get('image_width'),
-        image_height=data.get('image_height'),
+        # older templates might have image_width and image_height
+        image_width=data.get('imageWidth', data.get('image_width')),
+        image_height=data.get('imageHeight', data.get('image_height')),
     )
 
     if data.get('format') == 'zip':
