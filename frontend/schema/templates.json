@@ -76,113 +76,117 @@
   "QR-controlled message board": {
     "nodes": [
       {
-        "id": "8174a506-d5d4-4264-8472-8ae5a0b5f645",
-        "type": "event",
-        "position": {
-          "x": 5.588973116178522,
-          "y": 269.13891897006386
-        },
         "data": {
           "keyword": "render"
         },
-        "width": 197,
+        "dragging": false,
         "height": 144,
-        "selected": false,
+        "id": "8174a506-d5d4-4264-8472-8ae5a0b5f645",
+        "position": {
+          "x": 5.588973116178522,
+          "y": 269.13891897006386
+        },
         "positionAbsolute": {
           "x": 5.588973116178522,
           "y": 269.13891897006386
         },
-        "dragging": false
+        "selected": false,
+        "type": "event",
+        "width": 197
       },
       {
+        "data": {
+          "config": {},
+          "keyword": "unsplash"
+        },
+        "dragging": false,
+        "height": 130,
         "id": "933a782b-a6c4-4a42-b1b1-0db075c6d90c",
-        "type": "app",
         "position": {
           "x": 290.35503152122044,
-          "y": 271.054620234034
+          "y": 171.83283861330813
         },
-        "data": {
-          "keyword": "unsplash",
-          "config": {}
-        },
-        "width": 400,
-        "height": 130,
-        "selected": false,
         "positionAbsolute": {
           "x": 290.35503152122044,
-          "y": 271.054620234034
+          "y": 171.83283861330813
         },
-        "dragging": false
+        "selected": false,
+        "type": "app",
+        "width": 396
       },
       {
-        "id": "eb54d359-2986-4012-8b49-a034437ebdeb",
-        "type": "app",
-        "position": {
-          "x": 871.4777406191998,
-          "y": 258.3135115441166
-        },
         "data": {
-          "keyword": "text",
           "config": {
             "borderWidth": "4"
-          }
+          },
+          "keyword": "text"
         },
-        "width": 303,
+        "dragging": false,
         "height": 332,
-        "selected": false,
+        "id": "eb54d359-2986-4012-8b49-a034437ebdeb",
+        "position": {
+          "x": 871.4777406191998,
+          "y": 258.3135115441166
+        },
         "positionAbsolute": {
           "x": 871.4777406191998,
           "y": 258.3135115441166
         },
-        "dragging": false
+        "selected": false,
+        "type": "app",
+        "width": 300
       },
       {
-        "id": "500000cd-2952-496a-95c3-0575e1f63571",
-        "type": "app",
-        "position": {
-          "x": 1262.105500453396,
-          "y": 253.92443559092328
-        },
         "data": {
-          "keyword": "qr",
           "config": {
-            "size": "1",
+            "backgroundColor": "#000000",
+            "offsetX": "0",
+            "offsetY": "0",
+            "padding": "1",
             "position": "top-left",
-            "padding": "2"
-          }
+            "qrCodeColor": "#ffffff",
+            "size": "1"
+          },
+          "keyword": "qr"
         },
-        "width": 430,
+        "dragging": false,
         "height": 444,
-        "selected": false,
+        "id": "500000cd-2952-496a-95c3-0575e1f63571",
+        "position": {
+          "x": 1262.105500453396,
+          "y": 253.92443559092328
+        },
         "positionAbsolute": {
           "x": 1262.105500453396,
           "y": 253.92443559092328
         },
-        "dragging": false
+        "selected": false,
+        "type": "app",
+        "width": 430
       },
       {
+        "data": {
+          "config": {
+            "fontSize": "24",
+            "padding": "5",
+            "position": "top-right"
+          },
+          "keyword": "clock"
+        },
+        "dragging": false,
+        "height": 404,
         "id": "6359b0d1-62c4-4e2e-a9b7-379a4f012049",
-        "type": "app",
         "position": {
           "x": 1760.2656211408262,
           "y": 251.72989761432677
         },
-        "data": {
-          "keyword": "clock",
-          "config": {
-            "position": "top-right",
-            "fontSize": "24",
-            "padding": "5"
-          }
-        },
-        "width": 372,
-        "height": 404,
-        "selected": false,
         "positionAbsolute": {
           "x": 1760.2656211408262,
           "y": 251.72989761432677
         },
-        "dragging": false
+        "selected": false,
+        "type": "app",
+        "width": 372
       }
     ],
     "edges": [
