@@ -17,7 +17,7 @@ export function Template({ template, exportTemplate, removeTemplate, applyTempla
     <div
       className="shadow bg-gray-900 break-inside-avoid dndnode relative rounded-lg"
       style={
-        template.imageWidth && template.imageHeight
+        template.image
           ? {
               backgroundImage: `url("${template.image}")`,
               backgroundSize: 'cover',

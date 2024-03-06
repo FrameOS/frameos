@@ -195,6 +195,7 @@ export enum Area {
 }
 
 export enum Panel {
+  Action = 'Action',
   Debug = 'Debug',
   Diagram = 'Diagram',
   FrameDetails = 'FrameDetails',

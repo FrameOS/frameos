@@ -49,6 +49,7 @@ export const panelsLogic = kea<panelsLogicType>([
     openPanel: (panel: PanelWithMetadata) => ({ panel }),
     closePanel: (panel: PanelWithMetadata) => ({ panel }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
+    disableFullscreenPanel: true,
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
     editScene: (sceneId: string) => ({ sceneId }),
     persistUntilClosed: (panel: PanelWithMetadata, logic: AnyBuiltLogic) => ({ panel, logic }),
@@ -116,6 +117,7 @@ export const panelsLogic = kea<panelsLogicType>([
       null as PanelWithMetadata | null,
       {
         toggleFullScreenPanel: (state, { panel }) => (state && panelsEqual(state, panel) ? null : panel),
+        disableFullscreenPanel: () => null,
       },
     ],
     lastSelectedScene: [
@@ -132,15 +134,30 @@ export const panelsLogic = kea<panelsLogicType>([
     frame: [(s) => [framesModel.selectors.frames, s.id], (frames, id) => frames[id] || null],
     panelsWithConditions: [
       (s) => [s.panels, s.fullScreenPanel],
-      (panels, fullScreenPanel): Record<Area, PanelWithMetadata[]> =>
-        fullScreenPanel
-          ? {
-              [Area.TopLeft]: panels.TopLeft.filter((p) => panelsEqual(p, fullScreenPanel)),
-              [Area.TopRight]: panels.TopRight.filter((p) => panelsEqual(p, fullScreenPanel)),
-              [Area.BottomLeft]: panels.BottomLeft.filter((p) => panelsEqual(p, fullScreenPanel)),
-              [Area.BottomRight]: panels.BottomRight.filter((p) => panelsEqual(p, fullScreenPanel)),
-            }
-          : panels,
+      (panels, fullScreenPanel): Record<Area, PanelWithMetadata[]> => {
+        if (!fullScreenPanel) {
+          return panels
+        }
+        // we keep the full screen panel in the same area to not lose any mounted focus
+        const topLeft = panels.TopLeft.filter((p) => panelsEqual(p, fullScreenPanel))
+        const topRight = panels.TopRight.filter((p) => panelsEqual(p, fullScreenPanel))
+        const bottomLeft = panels.BottomLeft.filter((p) => panelsEqual(p, fullScreenPanel))
+        const bottomRight = panels.BottomRight.filter((p) => panelsEqual(p, fullScreenPanel))
+        const goBack: PanelWithMetadata = {
+          panel: Panel.Action,
+          key: 'action:disableFullscreenPanel',
+          active: false,
+          hidden: false,
+          closable: false,
+          metadata: fullScreenPanel.metadata,
+        }
+        return {
+          [Area.TopLeft]: [...(topLeft.length > 0 ? [goBack] : []), ...topLeft],
+          [Area.TopRight]: [...(topRight.length > 0 ? [goBack] : []), ...topRight],
+          [Area.BottomLeft]: [...(bottomLeft.length > 0 ? [goBack] : []), ...bottomLeft],
+          [Area.BottomRight]: [...(bottomRight.length > 0 ? [goBack] : []), ...bottomRight],
+        }
+      },
     ],
     selectedSceneId: [
       (s) => [s.frame, s.lastSelectedScene],

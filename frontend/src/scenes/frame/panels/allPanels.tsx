@@ -31,4 +31,5 @@ export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   SceneSource,
   Metrics,
   Scenes,
+  Action: () => <div />,
 }
