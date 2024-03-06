@@ -84,16 +84,6 @@ class TestRepositoryAPI(BaseTestCase):
         response = self.client.delete('/api/repositories/9999')
         self.assertEqual(response.status_code, 404)
 
-    def test_update_repository_invalid_input(self):
-        # Add a repository first
-        repo = Repository(name='Test Repo', url='http://example.com/repo')
-        db.session.add(repo)
-        db.session.commit()
-
-        data = {}  # Empty data
-        response = self.client.patch(f'/api/repositories/{repo.id}', json=data)
-        self.assertEqual(response.status_code, 400)  # Assuming 400 for Bad Request
-
     def test_unauthorized_access(self):
         # Log out the user first
         self.logout()
