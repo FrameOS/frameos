@@ -13,7 +13,13 @@ import { H6 } from '../../../../components/H6'
 import { Tag } from '../../../../components/Tag'
 import { Select } from '../../../../components/Select'
 import { Templates } from './Templates'
-import { CloudArrowDownIcon, FolderArrowDownIcon, FolderPlusIcon, PlusIcon } from '@heroicons/react/24/outline'
+import {
+  CloudArrowDownIcon,
+  DocumentDuplicateIcon,
+  FolderArrowDownIcon,
+  FolderPlusIcon,
+  PlusIcon,
+} from '@heroicons/react/24/outline'
 import { EditTemplateModal } from './EditTemplateModal'
 import { templatesLogic } from './templatesLogic'
 
@@ -21,9 +27,8 @@ export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
   const { editScene } = useActions(panelsLogic)
   const { scenes, showNewSceneForm, isNewSceneSubmitting, sceneTemplateOptions } = useValues(scenesLogic({ frameId }))
-  const { submitNewScene, renameScene, deleteScene, setAsDefault, toggleNewScene, closeNewScene } = useActions(
-    scenesLogic({ frameId })
-  )
+  const { submitNewScene, renameScene, duplicateScene, deleteScene, setAsDefault, toggleNewScene, closeNewScene } =
+    useActions(scenesLogic({ frameId }))
   const { saveAsLocalTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
 
   return (
@@ -111,6 +116,11 @@ export function Scenes() {
                       label: 'Download as .zip',
                       onClick: () => saveAsZip({ name: scene.name ?? '', exportScenes: [scene.id] }),
                       icon: <CloudArrowDownIcon className="w-5 h-5" />,
+                    },
+                    {
+                      label: 'Duplicate',
+                      onClick: () => duplicateScene(scene.id),
+                      icon: <DocumentDuplicateIcon className="w-5 h-5" />,
                     },
                     {
                       label: 'Rename',

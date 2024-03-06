@@ -27,6 +27,7 @@ export const scenesLogic = kea<scenesLogicType>([
     setAsDefault: (sceneId: string) => ({ sceneId }),
     deleteScene: (sceneId: string) => ({ sceneId }),
     renameScene: (sceneId: string) => ({ sceneId }),
+    duplicateScene: (sceneId: string) => ({ sceneId }),
     toggleNewScene: true,
     closeNewScene: true,
   }),
@@ -66,6 +67,15 @@ export const scenesLogic = kea<scenesLogicType>([
         scenes: values.scenes.map((s) =>
           s.id === sceneId ? { ...s, default: true } : s['default'] ? { ...s, default: false } : s
         ),
+      })
+    },
+    duplicateScene: ({ sceneId }) => {
+      const scene = values.scenes.find((s) => s.id === sceneId)
+      if (!scene) {
+        return
+      }
+      frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
+        scenes: [...values.scenes, { ...scene, default: false, id: uuidv4() }],
       })
     },
     renameScene: ({ sceneId }) => {
