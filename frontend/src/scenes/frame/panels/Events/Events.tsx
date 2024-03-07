@@ -22,10 +22,10 @@ export function Events() {
       <TextInput placeholder="Search events..." onChange={setSearch} value={search} />
       <Tabs className="border border-t-0 border-l-0 border-r-0 border-b-1 border-gray-700 pl-2">
         <Tab onClick={showListen} active={tab === 'listen'} activeColorClass="bg-[#4a4b8c]" className="mb-[-1px]">
-          Listen to an event ({tabCounts.listen})
+          Listen ({tabCounts.listen})
         </Tab>
         <Tab onClick={showDispatch} active={tab === 'dispatch'} activeColorClass="bg-[#4a4b8c]" className="mb-[-1px]">
-          Dispatch an event ({tabCounts.dispatch})
+          Dispatch ({tabCounts.dispatch})
         </Tab>
       </Tabs>
 
