@@ -1,4 +1,4 @@
-import { actions, kea, reducers, path, key, props, connect, listeners } from 'kea'
+import { actions, kea, reducers, path, key, props, connect, listeners, selectors } from 'kea'
 import { forms } from 'kea-forms'
 
 import type { templatesLogicType } from './templatesLogicType'
@@ -6,17 +6,24 @@ import { RepositoryType, TemplateForm, TemplateType } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { templatesModel } from '../../../../models/templatesModel'
 import { repositoriesModel } from '../../../../models/repositoriesModel'
+import { searchInText } from '../../../../utils/searchInText'
 
 export interface TemplateLogicProps {
   frameId: number
 }
-
 export const templatesLogic = kea<templatesLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Templates', 'templatesLogic']),
   props({} as TemplateLogicProps),
   key((props) => props.frameId),
   connect((props: TemplateLogicProps) => ({
-    values: [frameLogic(props), ['frameForm']],
+    values: [
+      frameLogic(props),
+      ['frameForm'],
+      templatesModel,
+      ['templates as allTemplates'],
+      repositoriesModel,
+      ['repositories as allRepositories'],
+    ],
     actions: [
       templatesModel,
       ['updateTemplate'],
@@ -43,6 +50,7 @@ export const templatesLogic = kea<templatesLogicType>([
     hideUploadTemplate: true,
     showAddRepository: true,
     hideAddRepository: true,
+    setSearch: (search: string) => ({ search }),
   }),
   forms(({ actions, values, props }) => ({
     templateForm: {
@@ -179,6 +187,7 @@ export const templatesLogic = kea<templatesLogicType>([
     },
   })),
   reducers({
+    search: ['', { setSearch: (_, { search }) => search }],
     showingModal: [
       false,
       {
@@ -234,6 +243,41 @@ export const templatesLogic = kea<templatesLogicType>([
         hideAddRepository: () => false,
         submitAddRepositoryFormSuccess: () => false,
       },
+    ],
+  }),
+  selectors({
+    templates: [
+      (s) => [s.allTemplates, s.search],
+      (allTemplates, search) => {
+        if (search !== '') {
+          return allTemplates.filter((template) => searchInText(search, template.name))
+        }
+        return allTemplates
+      },
+    ],
+    repositories: [
+      (s) => [s.allRepositories, s.search],
+      (allRepositories, search): RepositoryType[] => {
+        if (search === '') {
+          return allRepositories
+        }
+        return allRepositories
+          .filter(
+            (repository) =>
+              searchInText(search, repository.name) ||
+              repository.templates?.some((t) => searchInText(search, t.name) || searchInText(search, t.description))
+          )
+          .map((repository) => ({
+            ...repository,
+            templates: repository.templates?.filter(
+              (t) => searchInText(search, t.name) || searchInText(search, t.description)
+            ),
+          }))
+      },
+    ],
+    hiddenRepositories: [
+      (s) => [s.allRepositories, s.repositories],
+      (allRepositories, repositories) => allRepositories.length - repositories.length,
     ],
   }),
   listeners(({ actions, values, props }) => ({

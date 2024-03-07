@@ -19,7 +19,6 @@ import { ArchiveBoxIcon, ClipboardDocumentCheckIcon } from '@heroicons/react/24/
 export function Templates() {
   const { applyTemplate } = useActions(frameLogic)
   const { frameId, frameForm } = useValues(frameLogic)
-  const { templates } = useValues(templatesModel)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
   const {
     applyRemoteToFrame,
@@ -32,13 +31,22 @@ export function Templates() {
     showAddRepository,
     hideAddRepository,
     saveAsLocalTemplate,
+    setSearch,
   } = useActions(templatesLogic({ frameId }))
-  const { showingRemoteTemplate, showingUploadTemplate, showingAddRepository } = useValues(templatesLogic({ frameId }))
-  const { repositories } = useValues(repositoriesModel)
+  const {
+    repositories,
+    hiddenRepositories,
+    showingRemoteTemplate,
+    showingUploadTemplate,
+    showingAddRepository,
+    templates,
+    search,
+  } = useValues(templatesLogic({ frameId }))
   const { removeRepository, refreshRepository } = useActions(repositoriesModel)
 
   return (
     <div className="space-y-4">
+      <TextInput placeholder="Search templates..." onChange={setSearch} value={search} />
       <div className="space-y-2">
         <div className="flex justify-between w-full items-center">
           <H6>Local templates (in this server)</H6>
@@ -132,7 +140,11 @@ export function Templates() {
             editTemplate={editLocalTemplate}
           />
         ))}
-        {templates.length === 0 ? <div className="text-muted">You have no local templates.</div> : null}
+        {templates.length === 0 ? (
+          <div className="text-muted">
+            {search === '' ? 'You have no local templates.' : 'No local templates match the search'}
+          </div>
+        ) : null}
       </div>
       {(repositories ?? []).map((repository) => (
         <div className="space-y-2 !mt-8">
@@ -176,6 +188,20 @@ export function Templates() {
           ) : null}
         </div>
       ))}
+      {repositories.length === 0 || hiddenRepositories > 0 ? (
+        <div className="space-y-2">
+          {repositories.length === 0 ? <H6>Remote repositories</H6> : null}
+          <div>
+            {hiddenRepositories > 0 ? (
+              <>
+                {hiddenRepositories} remote {hiddenRepositories === 1 ? 'repository' : 'repositories'} hidden.
+              </>
+            ) : (
+              <>You have no repositories installed.</>
+            )}
+          </div>
+        </div>
+      ) : null}
       {showingAddRepository ? (
         <Box className="p-4 bg-gray-900">
           <Form

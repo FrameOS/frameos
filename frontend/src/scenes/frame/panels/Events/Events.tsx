@@ -5,10 +5,12 @@ import { H6 } from '../../../../components/H6'
 import { eventsLogic } from './eventsLogic'
 import { Tabs } from '../../../../components/panels/Tabs'
 import { Tab } from '../../../../components/panels/Tab'
+import { TextInput } from '../../../../components/TextInput'
+import React from 'react'
 
 export function Events() {
-  const { tab, events } = useValues(eventsLogic)
-  const { showDispatch, showListen } = useActions(eventsLogic)
+  const { tab, events, search, tabCounts } = useValues(eventsLogic)
+  const { showDispatch, showListen, setSearch } = useActions(eventsLogic)
 
   const onDragStart = (event: any, type: 'event' | 'dispatch', keyword: string) => {
     event.dataTransfer.setData('application/reactflow', JSON.stringify({ type, keyword }))
@@ -17,12 +19,13 @@ export function Events() {
 
   return (
     <div className="space-y-2">
+      <TextInput placeholder="Search events..." onChange={setSearch} value={search} />
       <Tabs className="border border-t-0 border-l-0 border-r-0 border-b-1 border-gray-700 pl-2">
         <Tab onClick={showListen} active={tab === 'listen'} activeColorClass="bg-[#4a4b8c]" className="mb-[-1px]">
-          Listen to an event
+          Listen to an event ({tabCounts.listen})
         </Tab>
         <Tab onClick={showDispatch} active={tab === 'dispatch'} activeColorClass="bg-[#4a4b8c]" className="mb-[-1px]">
-          Dispatch an event
+          Dispatch an event ({tabCounts.dispatch})
         </Tab>
       </Tabs>
 
@@ -42,6 +45,13 @@ export function Events() {
           </div>
         </Box>
       ))}
+      {events.length === 0 ? (
+        search === '' ? (
+          <div>No events found</div>
+        ) : (
+          <div>No events found for "{search}"</div>
+        )
+      ) : null}
     </div>
   )
 }
