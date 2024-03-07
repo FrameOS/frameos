@@ -19,7 +19,6 @@ import {
   FolderPlusIcon,
   PlusIcon,
 } from '@heroicons/react/24/outline'
-import { EditTemplateModal } from './EditTemplateModal'
 import { templatesLogic } from './templatesLogic'
 import React from 'react'
 
@@ -53,7 +52,6 @@ export function Scenes() {
             ]}
           />
         </div>
-        <EditTemplateModal />
         {scenes.map((scene) => (
           <Box key={scene.id} className="p-2 pl-4 pr-3 space-y-2 bg-gray-900">
             <div className="flex items-start justify-between gap-1">

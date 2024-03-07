@@ -14,11 +14,11 @@ import { TrashIcon, ArrowPathIcon, PlusIcon } from '@heroicons/react/24/solid'
 import React from 'react'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import copy from 'copy-to-clipboard'
-import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
+import { ArchiveBoxIcon, ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
 
 export function Templates() {
   const { applyTemplate } = useActions(frameLogic)
-  const { frameId } = useValues(frameLogic)
+  const { frameId, frameForm } = useValues(frameLogic)
   const { templates } = useValues(templatesModel)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
   const {
@@ -31,6 +31,7 @@ export function Templates() {
     hideUploadTemplate,
     showAddRepository,
     hideAddRepository,
+    saveAsLocalTemplate,
   } = useActions(templatesLogic({ frameId }))
   const { showingRemoteTemplate, showingUploadTemplate, showingAddRepository } = useValues(templatesLogic({ frameId }))
   const { repositories } = useValues(repositoriesModel)
@@ -54,6 +55,11 @@ export function Templates() {
                 label: 'Upload template .zip',
                 onClick: showUploadTemplate,
                 icon: <ArrowPathIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Export frame as template',
+                onClick: () => saveAsLocalTemplate({ name: frameForm.name }),
+                icon: <ArchiveBoxIcon className="w-5 h-5" />,
               },
             ]}
           />
