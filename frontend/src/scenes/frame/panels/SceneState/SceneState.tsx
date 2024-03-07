@@ -16,6 +16,7 @@ import { panelsLogic } from '../panelsLogic'
 import { H6 } from '../../../../components/H6'
 import { camelize } from '../../../../utils/camelize'
 import { Tag } from '../../../../components/Tag'
+import { NumberTextInput } from '../../../../components/NumberTextInput'
 
 const PERSIST_OPTIONS = [
   { label: 'memory (reset on boot)', value: 'memory' },
@@ -61,7 +62,7 @@ export function SceneState(): JSX.Element {
                     </>
                   }
                 >
-                  <TextInput
+                  <NumberTextInput
                     name="refreshInterval"
                     placeholder={String(frameForm.interval || 300)}
                     style={{ width: 70 }}

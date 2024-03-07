@@ -62,11 +62,11 @@ export function Scenes() {
                     default
                   </Tag>
                 ) : null}
-                {scene?.settings?.refreshInterval ? (
+                {scene?.settings?.refreshInterval && Number.isFinite(scene.settings.refreshInterval) ? (
                   <Tag className="ml-2" color="secondary">
-                    {scene?.settings?.refreshInterval > 1
-                      ? `1/${scene?.settings?.refreshInterval} fps`
-                      : `${Math.round((1 / scene?.settings?.refreshInterval) * 10) / 10} fps`}
+                    {scene.settings.refreshInterval > 1
+                      ? `1/${scene.settings.refreshInterval} fps`
+                      : `${Math.round((1 / scene.settings.refreshInterval) * 10) / 10} fps`}
                   </Tag>
                 ) : null}
               </H6>

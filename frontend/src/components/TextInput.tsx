@@ -1,7 +1,7 @@
 import React from 'react'
 import { clsx } from 'clsx'
 
-interface TextInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> {
+export interface TextInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> {
   onChange?: (value: string) => void
   theme?: 'node' | 'full'
 }
