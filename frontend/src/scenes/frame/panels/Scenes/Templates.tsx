@@ -194,7 +194,8 @@ export function Templates() {
           <div>
             {hiddenRepositories > 0 ? (
               <>
-                {hiddenRepositories} remote {hiddenRepositories === 1 ? 'repository' : 'repositories'} hidden.
+                {hiddenRepositories} {hiddenRepositories === 1 ? 'repository' : 'repositories'} had no match for "
+                {search}".
               </>
             ) : (
               <>You have no repositories installed.</>
