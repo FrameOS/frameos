@@ -29,8 +29,11 @@ const ACCESS_OPTIONS = [
 
 export function SceneState(): JSX.Element {
   const { frameId, frameForm } = useValues(frameLogic)
-  const { selectedSceneId: sceneId } = useValues(panelsLogic({ frameId }))
-  const { sceneIndex, scene, editingFields, fieldsWithErrors } = useValues(sceneStateLogic({ frameId, sceneId }))
+  const { selectedStateSceneId: sceneId } = useValues(panelsLogic({ frameId }))
+  const { editStateScene } = useActions(panelsLogic({ frameId }))
+  const { sceneIndex, sceneOptions, scene, editingFields, fieldsWithErrors } = useValues(
+    sceneStateLogic({ frameId, sceneId })
+  )
   const { setFields, editField, closeField, removeField } = useActions(sceneStateLogic({ frameId, sceneId }))
 
   if (!scene || !sceneId) {
@@ -40,9 +43,10 @@ export function SceneState(): JSX.Element {
   return (
     <Form logic={frameLogic} props={{ frameId }} formKey="frameForm">
       <Group name={['scenes', sceneIndex]}>
-        <div className="space-y-8">
+        <div className="space-y-4">
+          <Select options={sceneOptions} value={sceneId} onChange={editStateScene} />
           <div className="w-full mb-2">
-            <H6>Scene "{scene?.name || 'Unnamed Scene'}" Settings</H6>
+            <H6>Scene Settings</H6>
             <div className="w-full space-y-1">
               <Group name={['settings']}>
                 <Field

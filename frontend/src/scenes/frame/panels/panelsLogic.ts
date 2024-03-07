@@ -1,5 +1,4 @@
 import { actions, afterMount, BuiltLogic, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
-import { framesModel } from '../../../models/framesModel'
 import equal from 'fast-deep-equal'
 import { AppNodeData, Area, Panel, PanelWithMetadata } from '../../../types'
 
@@ -42,7 +41,7 @@ export const panelsLogic = kea<panelsLogicType>([
   props({} as PanelsLogicProps),
   key((props) => props.frameId),
   connect((props: PanelsLogicProps) => ({
-    values: [frameLogic(props), ['defaultScene']],
+    values: [frameLogic(props), ['defaultScene', 'frame', 'frameForm']],
     actions: [frameLogic(props), ['closeScenePanels']],
   })),
   actions({
@@ -53,6 +52,7 @@ export const panelsLogic = kea<panelsLogicType>([
     disableFullscreenPanel: true,
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
     editScene: (sceneId: string) => ({ sceneId }),
+    editStateScene: (sceneId: string) => ({ sceneId }),
     persistUntilClosed: (panel: PanelWithMetadata, logic: AnyBuiltLogic) => ({ panel, logic }),
   }),
   reducers({
@@ -129,10 +129,20 @@ export const panelsLogic = kea<panelsLogicType>([
         editScene: (_, { sceneId }) => sceneId,
       },
     ],
+    lastSelectedStateScene: [
+      null as string | null,
+      {
+        openPanel: (state, { panel }) =>
+          panel.panel === Panel.Diagram || panel.panel === Panel.SceneState ? panel.key ?? state : state,
+        setPanel: (state, { panel }) =>
+          panel.panel === Panel.Diagram || panel.panel === Panel.SceneState ? panel.key ?? state : state,
+        editScene: (_, { sceneId }) => sceneId,
+        editStateScene: (_, { sceneId }) => sceneId,
+      },
+    ],
   }),
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
-    frame: [(s) => [framesModel.selectors.frames, s.id], (frames, id) => frames[id] || null],
     panelsWithConditions: [
       (s) => [s.panels, s.fullScreenPanel],
       (panels, fullScreenPanel): Record<Area, PanelWithMetadata[]> => {
@@ -161,14 +171,19 @@ export const panelsLogic = kea<panelsLogicType>([
       },
     ],
     selectedSceneId: [
-      (s) => [s.frame, s.lastSelectedScene],
-      (frame, lastSelectedScene): string | null =>
-        lastSelectedScene ?? frame?.scenes?.find((s) => s.default)?.id ?? frame?.scenes?.[0]?.id ?? null,
+      (s) => [s.frameForm, s.lastSelectedScene],
+      (frameForm, lastSelectedScene): string | null =>
+        lastSelectedScene ?? frameForm?.scenes?.find((s) => s.default)?.id ?? frameForm?.scenes?.[0]?.id ?? null,
     ],
     selectedSceneName: [
-      (s) => [s.frame, s.selectedSceneId],
-      (frame, selectedSceneId): string | null =>
-        selectedSceneId ? frame?.scenes?.find((s) => s.id === selectedSceneId)?.name ?? null : null,
+      (s) => [s.frameForm, s.selectedSceneId],
+      (frameForm, selectedSceneId): string | null =>
+        selectedSceneId ? frameForm?.scenes?.find((s) => s.id === selectedSceneId)?.name ?? null : null,
+    ],
+    selectedStateSceneId: [
+      (s) => [s.frameForm, s.lastSelectedStateScene],
+      (frameForm, lastSelectedStateScene): string | null =>
+        lastSelectedStateScene ?? frameForm?.scenes?.find((s) => s.default)?.id ?? frameForm?.scenes?.[0]?.id ?? null,
     ],
   })),
   listeners(({ actions, cache }) => ({
