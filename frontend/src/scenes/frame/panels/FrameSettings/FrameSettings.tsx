@@ -218,7 +218,7 @@ export function FrameSettings({ className }: DetailsProps) {
             </Field>
             <Field
               name="interval"
-              label="Default refresh interval for new scenes"
+              label="Default refresh interval in seconds for new scenes"
               tooltip={
                 <>
                   How often do we trigger a refresh, in seconds. Pass a large number like "60" or even more for e-ink

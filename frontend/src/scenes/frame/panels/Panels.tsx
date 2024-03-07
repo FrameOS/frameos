@@ -5,7 +5,7 @@ import { Handle } from '../../../components/panels/Handle'
 import { Area } from '../../../types'
 import { PanelArea } from './PanelArea'
 import { panelsLogic } from './panelsLogic'
-import { EditTemplateModal } from './Scenes/EditTemplateModal'
+import { EditTemplateModal } from './Templates/EditTemplateModal'
 
 export function Panels() {
   const { frameId, frame } = useValues(frameLogic)

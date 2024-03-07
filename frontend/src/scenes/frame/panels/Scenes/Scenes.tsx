@@ -19,7 +19,7 @@ import {
   FolderPlusIcon,
   PlusIcon,
 } from '@heroicons/react/24/outline'
-import { templatesLogic } from './templatesLogic'
+import { templatesLogic } from '../Templates/templatesLogic'
 import React from 'react'
 
 export function Scenes() {
@@ -53,71 +53,74 @@ export function Scenes() {
           />
         </div>
         {scenes.map((scene) => (
-          <Box key={scene.id} className="p-2 pl-4 pr-3 space-y-2 bg-gray-900">
-            <div className="flex items-start justify-between gap-1">
-              <div>
-                <H6 className="cursor-pointer" onClick={() => editScene(scene.id)}>
-                  {scene.name || scene.id}
-                  {scene.default ? (
-                    <Tag className="ml-2" color="primary">
-                      default
-                    </Tag>
-                  ) : null}
-                </H6>
-                <div className="text-xs text-gray-400">id: {scene.id}</div>
-              </div>
-              <div className="flex items-start gap-1">
-                <DropdownMenu
-                  buttonColor="secondary"
-                  items={[
-                    {
-                      label: 'Open in editor',
-                      onClick: () => editScene(scene.id),
-                      icon: <FolderOpenIcon className="w-5 h-5" />,
-                    },
-                    {
-                      label: 'Save as a local template',
-                      onClick: () => saveAsLocalTemplate({ name: scene.name ?? '', exportScenes: [scene.id] }),
-                      icon: <FolderPlusIcon className="w-5 h-5" />,
-                    },
-                    {
-                      label: 'Download as .zip',
-                      onClick: () => saveAsZip({ name: scene.name ?? '', exportScenes: [scene.id] }),
-                      icon: <CloudArrowDownIcon className="w-5 h-5" />,
-                    },
-                    {
-                      label: 'Duplicate',
-                      onClick: () => duplicateScene(scene.id),
-                      icon: <DocumentDuplicateIcon className="w-5 h-5" />,
-                    },
-                    {
-                      label: 'Rename',
-                      onClick: () => renameScene(scene.id),
-                      icon: <PencilSquareIcon className="w-5 h-5" />,
-                    },
-                    ...(!scene.default
-                      ? [
-                          {
-                            label: 'Set as default',
-                            onClick: () => setAsDefault(scene.id),
-                            icon: <FlagIcon className="w-5 h-5" />,
-                          },
-                        ]
-                      : []),
-                    ...(scenes.length > 1
-                      ? [
-                          {
-                            label: 'Delete scene',
-                            confirm: 'Are you sure you want to delete this scene?',
-                            onClick: () => deleteScene(scene.id),
-                            icon: <TrashIcon className="w-5 h-5" />,
-                          },
-                        ]
-                      : []),
-                  ]}
-                />
-              </div>
+          <Box key={scene.id} className="p-2 pl-4 pr-3 space-y-2 bg-gray-900 flex items-start justify-between gap-1">
+            <div>
+              <H6 className="cursor-pointer" onClick={() => editScene(scene.id)}>
+                {scene.name || scene.id}
+                {scene.default ? (
+                  <Tag className="ml-2" color="primary">
+                    default
+                  </Tag>
+                ) : null}
+                {scene?.settings?.refreshInterval ? (
+                  <Tag className="ml-2" color="secondary">
+                    {scene?.settings?.refreshInterval > 1
+                      ? `1/${scene?.settings?.refreshInterval} fps`
+                      : `${Math.round((1 / scene?.settings?.refreshInterval) * 10) / 10} fps`}
+                  </Tag>
+                ) : null}
+              </H6>
+              <div className="text-xs text-gray-400">id: {scene.id}</div>
             </div>
+            <DropdownMenu
+              buttonColor="secondary"
+              items={[
+                {
+                  label: 'Open in editor',
+                  onClick: () => editScene(scene.id),
+                  icon: <FolderOpenIcon className="w-5 h-5" />,
+                },
+                {
+                  label: 'Save as a local template',
+                  onClick: () => saveAsLocalTemplate({ name: scene.name ?? '', exportScenes: [scene.id] }),
+                  icon: <FolderPlusIcon className="w-5 h-5" />,
+                },
+                {
+                  label: 'Download as .zip',
+                  onClick: () => saveAsZip({ name: scene.name ?? '', exportScenes: [scene.id] }),
+                  icon: <CloudArrowDownIcon className="w-5 h-5" />,
+                },
+                {
+                  label: 'Duplicate',
+                  onClick: () => duplicateScene(scene.id),
+                  icon: <DocumentDuplicateIcon className="w-5 h-5" />,
+                },
+                {
+                  label: 'Rename',
+                  onClick: () => renameScene(scene.id),
+                  icon: <PencilSquareIcon className="w-5 h-5" />,
+                },
+                ...(!scene.default
+                  ? [
+                      {
+                        label: 'Set as default',
+                        onClick: () => setAsDefault(scene.id),
+                        icon: <FlagIcon className="w-5 h-5" />,
+                      },
+                    ]
+                  : []),
+                ...(scenes.length > 1
+                  ? [
+                      {
+                        label: 'Delete scene',
+                        confirm: 'Are you sure you want to delete this scene?',
+                        onClick: () => deleteScene(scene.id),
+                        icon: <TrashIcon className="w-5 h-5" />,
+                      },
+                    ]
+                  : []),
+              ]}
+            />
           </Box>
         ))}
         {showNewSceneForm ? (
