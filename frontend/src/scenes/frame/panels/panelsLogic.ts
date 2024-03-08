@@ -1,5 +1,4 @@
 import { actions, afterMount, BuiltLogic, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
-import { framesModel } from '../../../models/framesModel'
 import equal from 'fast-deep-equal'
 import { AppNodeData, Area, Panel, PanelWithMetadata } from '../../../types'
 
@@ -17,8 +16,8 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
   [Area.TopRight]: [
     { panel: Panel.Apps, active: true, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
-    { panel: Panel.SceneState, active: false, hidden: false },
     { panel: Panel.Templates, active: false, hidden: false },
+    { panel: Panel.SceneState, active: false, hidden: false },
     { panel: Panel.FrameDetails, active: false, hidden: false },
     { panel: Panel.FrameSettings, active: false, hidden: false },
     { panel: Panel.Control, active: false, hidden: false },
@@ -42,15 +41,18 @@ export const panelsLogic = kea<panelsLogicType>([
   props({} as PanelsLogicProps),
   key((props) => props.frameId),
   connect((props: PanelsLogicProps) => ({
-    values: [frameLogic(props), ['defaultScene']],
+    values: [frameLogic(props), ['defaultScene', 'frame', 'frameForm']],
+    actions: [frameLogic(props), ['closeScenePanels']],
   })),
   actions({
     setPanel: (area: Area, panel: PanelWithMetadata) => ({ area, panel }),
     openPanel: (panel: PanelWithMetadata) => ({ panel }),
     closePanel: (panel: PanelWithMetadata) => ({ panel }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
+    disableFullscreenPanel: true,
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
     editScene: (sceneId: string) => ({ sceneId }),
+    editStateScene: (sceneId: string) => ({ sceneId }),
     persistUntilClosed: (panel: PanelWithMetadata, logic: AnyBuiltLogic) => ({ panel, logic }),
   }),
   reducers({
@@ -116,6 +118,7 @@ export const panelsLogic = kea<panelsLogicType>([
       null as PanelWithMetadata | null,
       {
         toggleFullScreenPanel: (state, { panel }) => (state && panelsEqual(state, panel) ? null : panel),
+        disableFullscreenPanel: () => null,
       },
     ],
     lastSelectedScene: [
@@ -126,34 +129,64 @@ export const panelsLogic = kea<panelsLogicType>([
         editScene: (_, { sceneId }) => sceneId,
       },
     ],
+    lastSelectedStateScene: [
+      null as string | null,
+      {
+        openPanel: (state, { panel }) =>
+          panel.panel === Panel.Diagram || panel.panel === Panel.SceneState ? panel.key ?? state : state,
+        setPanel: (state, { panel }) =>
+          panel.panel === Panel.Diagram || panel.panel === Panel.SceneState ? panel.key ?? state : state,
+        editScene: (_, { sceneId }) => sceneId,
+        editStateScene: (_, { sceneId }) => sceneId,
+      },
+    ],
   }),
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
-    frame: [(s) => [framesModel.selectors.frames, s.id], (frames, id) => frames[id] || null],
     panelsWithConditions: [
       (s) => [s.panels, s.fullScreenPanel],
-      (panels, fullScreenPanel): Record<Area, PanelWithMetadata[]> =>
-        fullScreenPanel
-          ? {
-              [Area.TopLeft]: panels.TopLeft.filter((p) => panelsEqual(p, fullScreenPanel)),
-              [Area.TopRight]: panels.TopRight.filter((p) => panelsEqual(p, fullScreenPanel)),
-              [Area.BottomLeft]: panels.BottomLeft.filter((p) => panelsEqual(p, fullScreenPanel)),
-              [Area.BottomRight]: panels.BottomRight.filter((p) => panelsEqual(p, fullScreenPanel)),
-            }
-          : panels,
+      (panels, fullScreenPanel): Record<Area, PanelWithMetadata[]> => {
+        if (!fullScreenPanel) {
+          return panels
+        }
+        // we keep the full screen panel in the same area to not lose any mounted focus
+        const topLeft = panels.TopLeft.filter((p) => panelsEqual(p, fullScreenPanel))
+        const topRight = panels.TopRight.filter((p) => panelsEqual(p, fullScreenPanel))
+        const bottomLeft = panels.BottomLeft.filter((p) => panelsEqual(p, fullScreenPanel))
+        const bottomRight = panels.BottomRight.filter((p) => panelsEqual(p, fullScreenPanel))
+        const goBack: PanelWithMetadata = {
+          panel: Panel.Action,
+          key: 'action:disableFullscreenPanel',
+          active: false,
+          hidden: false,
+          closable: false,
+          metadata: fullScreenPanel.metadata,
+        }
+        return {
+          [Area.TopLeft]: [...(topLeft.length > 0 ? [goBack] : []), ...topLeft],
+          [Area.TopRight]: [...(topRight.length > 0 ? [goBack] : []), ...topRight],
+          [Area.BottomLeft]: [...(bottomLeft.length > 0 ? [goBack] : []), ...bottomLeft],
+          [Area.BottomRight]: [...(bottomRight.length > 0 ? [goBack] : []), ...bottomRight],
+        }
+      },
     ],
     selectedSceneId: [
-      (s) => [s.frame, s.lastSelectedScene],
-      (frame, lastSelectedScene): string | null =>
-        lastSelectedScene ?? frame?.scenes?.find((s) => s.default)?.id ?? frame?.scenes?.[0]?.id ?? null,
+      (s) => [s.frameForm, s.lastSelectedScene],
+      (frameForm, lastSelectedScene): string | null =>
+        lastSelectedScene ?? frameForm?.scenes?.find((s) => s.default)?.id ?? frameForm?.scenes?.[0]?.id ?? null,
     ],
     selectedSceneName: [
-      (s) => [s.frame, s.selectedSceneId],
-      (frame, selectedSceneId): string | null =>
-        selectedSceneId ? frame?.scenes?.find((s) => s.id === selectedSceneId)?.name ?? null : null,
+      (s) => [s.frameForm, s.selectedSceneId],
+      (frameForm, selectedSceneId): string | null =>
+        selectedSceneId ? frameForm?.scenes?.find((s) => s.id === selectedSceneId)?.name ?? null : null,
+    ],
+    selectedStateSceneId: [
+      (s) => [s.frameForm, s.lastSelectedStateScene],
+      (frameForm, lastSelectedStateScene): string | null =>
+        lastSelectedStateScene ?? frameForm?.scenes?.find((s) => s.default)?.id ?? frameForm?.scenes?.[0]?.id ?? null,
     ],
   })),
-  listeners(({ cache }) => ({
+  listeners(({ actions, cache }) => ({
     persistUntilClosed: ({ panel, logic }) => {
       if (!cache.closeListeners) {
         cache.closeListeners = {} as Record<string, () => void>
@@ -166,6 +199,11 @@ export const panelsLogic = kea<panelsLogicType>([
       if (cache.closeListeners && cache.closeListeners[`${panel.panel}.${panel.key}`]) {
         cache.closeListeners[`${panel.panel}.${panel.key}`]()
         delete cache.closeListeners[`${panel.panel}.${panel.key}`]
+      }
+    },
+    closeScenePanels: ({ sceneIds }) => {
+      for (const sceneId of sceneIds) {
+        actions.closePanel({ panel: Panel.Diagram, key: sceneId })
       }
     },
   })),

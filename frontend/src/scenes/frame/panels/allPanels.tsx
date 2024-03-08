@@ -10,11 +10,11 @@ import { Events } from './Events/Events'
 import { Panel } from '../../../types'
 import { EditApp } from './EditApp/EditApp'
 import { Debug } from './Debug/Debug'
-import { Templates } from './Templates/Templates'
 import { Terminal } from './Terminal/Terminal'
 import { SceneSource } from './SceneSource/SceneSource'
 import { Metrics } from './Metrics/Metrics'
 import { Scenes } from './Scenes/Scenes'
+import { Templates } from './Templates/Templates'
 
 export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   Diagram,
@@ -28,9 +28,10 @@ export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   Apps,
   Events,
   EditApp,
-  Templates,
   Terminal,
   SceneSource,
   Metrics,
   Scenes,
+  Templates,
+  Action: () => <div />,
 }

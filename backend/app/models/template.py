@@ -22,6 +22,6 @@ class Template(db.Model):
             'scenes': self.scenes,
             'config': self.config,
             'image': f'/api/templates/{self.id}/image' if self.image and self.image_width and self.image_height else None,
-            'image_width': self.image_width,
-            'image_height': self.image_height,
+            'imageWidth': self.image_width,
+            'imageHeight': self.image_height,
         }

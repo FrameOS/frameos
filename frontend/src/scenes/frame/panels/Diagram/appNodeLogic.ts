@@ -3,8 +3,7 @@ import { connect, kea, key, path, props, selectors } from 'kea'
 import type { appNodeLogicType } from './appNodeLogicType'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { appsModel } from '../../../../models/appsModel'
-import type { Node } from '@reactflow/core/dist/esm/types/nodes'
-import { App, ConfigField, FrameEvent, MarkdownField } from '../../../../types'
+import { App, ConfigField, DiagramNode, FrameEvent, MarkdownField } from '../../../../types'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 
 import _events from '../../../../../schema/events.json'
@@ -23,7 +22,10 @@ export const appNodeLogic = kea<appNodeLogicType>([
   })),
   selectors({
     nodeId: [() => [(_, props) => props.nodeId], (nodeId): string => nodeId],
-    node: [(s) => [s.nodes, s.nodeId], (nodes: Node[], nodeId: string) => nodes?.find((n) => n.id === nodeId) ?? null],
+    node: [
+      (s) => [s.nodes, s.nodeId],
+      (nodes: DiagramNode[], nodeId: string) => nodes?.find((n) => n.id === nodeId) ?? null,
+    ],
     nodeEdges: [
       (s) => [s.edges, s.nodeId],
       (edges: Edge[], nodeId): Edge[] => edges?.filter((e) => e.source === nodeId || e.target === nodeId) ?? [],
@@ -56,7 +58,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
     sources: [
       (s) => [s.apps, s.node],
       (apps, node): Record<string, string> | null => {
-        if (node && node.data && node.data.sources) {
+        if (node && node.data && 'sources' in node.data && node.data.sources) {
           return node.data.sources
         }
         return null
@@ -90,7 +92,14 @@ export const appNodeLogic = kea<appNodeLogicType>([
     app: [
       (s) => [s.apps, s.node],
       (apps, node): App | null => {
-        if (node && node.type === 'app' && node.data && node.data.keyword && !node.data.sources) {
+        if (
+          node &&
+          node.type === 'app' &&
+          node.data &&
+          'keyword' in node.data &&
+          node.data.keyword &&
+          !('sources' in node.data)
+        ) {
           return apps[node.data.keyword] ?? null
         }
         return null
@@ -99,8 +108,8 @@ export const appNodeLogic = kea<appNodeLogicType>([
     event: [
       (s) => [s.node],
       (node): App | null => {
-        if (node && node.type === 'dispatch' && node.data && node.data.keyword) {
-          return events.find((e) => e.name == node.data.keyword) ?? null
+        if (node && node.type === 'dispatch' && node.data && 'keyword' in node.data && node.data.keyword) {
+          return events.find((e) => 'keyword' in node.data && e.name == node.data.keyword) ?? null
         }
         return null
       },
@@ -140,7 +149,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
     isCustomApp: [
       (s) => [s.node],
       (node) => {
-        return !!node?.data?.sources
+        return 'sources' in (node?.data ?? {})
       },
     ],
   }),

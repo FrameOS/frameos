@@ -1,16 +1,21 @@
-import { useValues } from 'kea'
-import { appsModel, categoryLabels } from '../../../../models/appsModel'
+import { useActions, useValues } from 'kea'
+import { categoryLabels } from '../../../../models/appsModel'
 import { Box } from '../../../../components/Box'
 import { H6 } from '../../../../components/H6'
+import { appsLogic } from './appsLogic'
+import { TextInput } from '../../../../components/TextInput'
+import React from 'react'
 
 export function Apps() {
-  const { appsByCategory } = useValues(appsModel)
+  const { appsByCategory, search } = useValues(appsLogic)
+  const { setSearch } = useActions(appsLogic)
   const onDragStart = (event: any, keyword: string) => {
     event.dataTransfer.setData('application/reactflow', JSON.stringify({ type: 'app', keyword }))
     event.dataTransfer.effectAllowed = 'move'
   }
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
+      <TextInput placeholder="Search apps..." onChange={setSearch} value={search} />
       {Object.entries(appsByCategory).map(([category, apps]) => (
         <div className="space-y-2">
           <H6 className="capitalize">{categoryLabels[category] ?? category}</H6>

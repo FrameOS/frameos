@@ -279,12 +279,12 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
   runEvent(openContext)
 """
 
-    render_interval = float(scene.get('settings', {}).get('refreshInterval', None) or frame.interval or 300)
-    if math.isnan(render_interval):
-        render_interval = 300.0
-    if render_interval < 0.001:
-        render_interval = 0.001
-    scene_render_interval = str(render_interval)
+    refresh_interval = float(scene.get('settings', {}).get('refreshInterval', None) or frame.interval or 300)
+    if math.isnan(refresh_interval):
+        refresh_interval = 300.0
+    if refresh_interval < 0.001:
+        refresh_interval = 0.001
+    scene_refresh_interval = str(refresh_interval)
 
     background_color = scene.get('settings', {}).get('backgroundColor', None)
     if background_color is None and frame.background_color is not None and frame.background_color.startswith('#'):
@@ -356,7 +356,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
-  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: {scene_render_interval}, backgroundColor: {scene_background_color})
+  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: {scene_refresh_interval}, backgroundColor: {scene_background_color})
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))

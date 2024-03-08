@@ -10,9 +10,31 @@ from flask_login import login_required
 from . import api
 from app import db, redis
 from app.models.template import Template
+from app.models.frame import Frame
 from PIL import Image
 
-# Create (POST)
+def respond_with_template(template: Template):
+    if not template:
+        return jsonify({"error": "Template not found"}), 404
+    template_name = template.name
+    safe_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
+    template_name = ''.join(c if c in safe_chars else ' ' for c in template_name).strip()
+    template_name = ' '.join(template_name.split()) or 'Template'
+
+    template_dict = template.to_dict()
+    template_dict.pop('id')
+    in_memory = io.BytesIO()
+    with zipfile.ZipFile(in_memory, 'a', zipfile.ZIP_DEFLATED) as zf:
+        scenes = template_dict.pop('scenes')
+        template_dict['scenes'] = './scenes.json'
+        template_dict['image'] = './image.jpg'
+        zf.writestr(f"{template_name}/scenes.json", json.dumps(scenes, indent=2))
+        zf.writestr(f"{template_name}/template.json", json.dumps(template_dict, indent=2))
+        if template.image:
+            zf.writestr(f"{template_name}/image.jpg", template.image)
+    in_memory.seek(0)
+    return Response(in_memory.getvalue(), content_type='application/zip', headers={"Content-Disposition": f"attachment; filename={template_name}.zip"})
+
 @api.route("/templates", methods=["POST"])
 @login_required
 def create_template():
@@ -58,18 +80,21 @@ def create_template():
         data['image'] = image
         if image:
             img = Image.open(io.BytesIO(image))
-            data['image_width'] = img.width
-            data['image_height'] = img.height
+            data['imageWidth'] = img.width
+            data['imageHeight'] = img.height
 
     if data.get('from_frame_id'):
         frame_id = data.get('from_frame_id')
-        last_image = redis.get(f'frame:{frame_id}:image')
+        frame = Frame.query.get_or_404(frame_id)
+        # TODO: move to shared util
+        cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+        last_image = redis.get(cache_key)
         if last_image:
             try:
                 image = Image.open(io.BytesIO(last_image))
                 data['image'] = last_image
-                data['image_width'] = image.width
-                data['image_height'] = image.height
+                data['imageWidth'] = image.width
+                data['imageHeight'] = image.height
             except Exception as e:
                 print(e)
                 pass
@@ -80,14 +105,19 @@ def create_template():
         scenes=data.get('scenes'),
         config=data.get('config'),
         image=data.get('image'),
-        image_width=data.get('image_width'),
-        image_height=data.get('image_height'),
+        # older templates might have image_width and image_height
+        image_width=data.get('imageWidth', data.get('image_width')),
+        image_height=data.get('imageHeight', data.get('image_height')),
     )
-    db.session.add(new_template)
-    db.session.commit()
 
-
-    return jsonify(new_template.to_dict()), 201
+    if request.json.get('format') == 'zip':
+        return respond_with_template(new_template)
+    elif request.json.get('format') == 'scenes':
+        return jsonify(new_template.scenes), 201
+    else:
+        db.session.add(new_template)
+        db.session.commit()
+        return jsonify(new_template.to_dict()), 201
 
 # Read (GET) for all templates
 @api.route("/templates", methods=["GET"])
@@ -119,25 +149,8 @@ def get_template_image(template_id):
 @login_required
 def export_template(template_id):
     template = Template.query.get(template_id)
-    if not template:
-        return jsonify({"error": "Template not found"}), 404
-    template_name = template.name
-    safe_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
-    template_name = ''.join(c if c in safe_chars else ' ' for c in template_name).strip()
-    template_name = ' '.join(template_name.split()) or 'Template'
+    return respond_with_template(template)
 
-    template_dict = template.to_dict()
-    template_dict.pop('id')
-    in_memory = io.BytesIO()
-    with zipfile.ZipFile(in_memory, 'a', zipfile.ZIP_DEFLATED) as zf:
-        scenes = template_dict.pop('scenes')
-        template_dict['scenes'] = './scenes.json'
-        template_dict['image'] = './image.jpg'
-        zf.writestr(f"{template_name}/scenes.json", json.dumps(scenes, indent=2))
-        zf.writestr(f"{template_name}/template.json", json.dumps(template_dict, indent=2))
-        zf.writestr(f"{template_name}/image.jpg", template.image)
-    in_memory.seek(0)
-    return Response(in_memory.getvalue(), content_type='application/zip', headers={"Content-Disposition": f"attachment; filename={template_name}.zip"})
 
 # Update (PUT)
 @api.route("/templates/<template_id>", methods=["PATCH"])

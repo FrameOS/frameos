@@ -16,6 +16,7 @@ import { panelsLogic } from '../panelsLogic'
 import { H6 } from '../../../../components/H6'
 import { camelize } from '../../../../utils/camelize'
 import { Tag } from '../../../../components/Tag'
+import { NumberTextInput } from '../../../../components/NumberTextInput'
 
 const PERSIST_OPTIONS = [
   { label: 'memory (reset on boot)', value: 'memory' },
@@ -28,9 +29,12 @@ const ACCESS_OPTIONS = [
 ]
 
 export function SceneState(): JSX.Element {
-  const { frameId } = useValues(frameLogic)
-  const { selectedSceneId: sceneId } = useValues(panelsLogic({ frameId }))
-  const { sceneIndex, scene, editingFields, fieldsWithErrors } = useValues(sceneStateLogic({ frameId, sceneId }))
+  const { frameId, frameForm } = useValues(frameLogic)
+  const { selectedStateSceneId: sceneId } = useValues(panelsLogic({ frameId }))
+  const { editStateScene } = useActions(panelsLogic({ frameId }))
+  const { sceneIndex, sceneOptions, scene, editingFields, fieldsWithErrors } = useValues(
+    sceneStateLogic({ frameId, sceneId })
+  )
   const { setFields, editField, closeField, removeField } = useActions(sceneStateLogic({ frameId, sceneId }))
 
   if (!scene || !sceneId) {
@@ -40,9 +44,10 @@ export function SceneState(): JSX.Element {
   return (
     <Form logic={frameLogic} props={{ frameId }} formKey="frameForm">
       <Group name={['scenes', sceneIndex]}>
-        <div className="space-y-8">
+        <div className="space-y-4">
+          <Select options={sceneOptions} value={sceneId} onChange={editStateScene} />
           <div className="w-full mb-2">
-            <H6>Scene "{scene?.name || 'Unnamed Scene'}" Settings</H6>
+            <H6>Scene Settings</H6>
             <div className="w-full space-y-1">
               <Group name={['settings']}>
                 <Field
@@ -57,7 +62,11 @@ export function SceneState(): JSX.Element {
                     </>
                   }
                 >
-                  <TextInput name="refreshInterval" placeholder="300" style={{ width: 70 }} />
+                  <NumberTextInput
+                    name="refreshInterval"
+                    placeholder={String(frameForm.interval || 300)}
+                    style={{ width: 70 }}
+                  />
                 </Field>
                 <Field
                   className="flex flex-row gap-2 w-full justify-between"

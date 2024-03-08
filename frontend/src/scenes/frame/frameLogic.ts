@@ -6,6 +6,7 @@ import { FrameScene, FrameType, TemplateType } from '../../types'
 import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
 import { v4 as uuidv4 } from 'uuid'
+import { duplicateScenes } from '../../utils/duplicateScenes'
 
 export interface FrameLogicProps {
   frameId: number
@@ -46,7 +47,7 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: FrameType): Fra
     fields: scene.fields ?? [],
     settings: {
       ...settings,
-      refreshInterval: settings.refreshInterval || frame.interval || 60,
+      refreshInterval: settings.refreshInterval || frame.interval || 300,
       backgroundColor: settings.backgroundColor || frame.background_color || '#ffffff',
     },
   } satisfies FrameScene
@@ -65,7 +66,11 @@ export const frameLogic = kea<frameLogicType>([
     restartFrame: true,
     stopFrame: true,
     deployFrame: true,
-    applyTemplate: (template: TemplateType) => ({ template }),
+    applyTemplate: (template: Partial<TemplateType>, replaceScenes?: boolean) => ({
+      template,
+      replaceScenes: replaceScenes ?? false,
+    }),
+    closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
   }),
   forms(({ actions, values }) => ({
     frameForm: {
@@ -173,9 +178,31 @@ export const frameLogic = kea<frameLogicType>([
         console.error(`Node ${nodeId} not found in scene ${sceneId}`)
       }
     },
-    applyTemplate: ({ template }) => {
+    applyTemplate: ({ template, replaceScenes }) => {
       if ('scenes' in template) {
-        actions.setFrameFormValues({ scenes: template.scenes })
+        const oldScenes = values.frameForm?.scenes || []
+        const newScenes = duplicateScenes(template.scenes ?? [])
+        if (newScenes.length === 1) {
+          newScenes[0].name = template?.name || newScenes[0].name || 'Untitled scene'
+        }
+        if (replaceScenes) {
+          if (newScenes.length > 0 && !newScenes.some((scene) => scene.default)) {
+            newScenes[0].default = true
+          }
+          actions.closeScenePanels(oldScenes.map((scene) => scene.id))
+          actions.setFrameFormValues({ scenes: newScenes })
+        } else {
+          if (oldScenes.some((scene) => scene.default)) {
+            for (const scene of newScenes) {
+              if ('default' in scene) {
+                delete scene.default
+              }
+            }
+          }
+          actions.setFrameFormValues({
+            scenes: [...oldScenes, ...newScenes],
+          })
+        }
       }
     },
   })),

@@ -11,7 +11,7 @@ import type { EdgeChange, NodeChange } from '@reactflow/core/dist/esm/types/chan
 import equal from 'fast-deep-equal'
 import type { diagramLogicType } from './diagramLogicType'
 import { subscriptions } from 'kea-subscriptions'
-import { AppNodeData, DispatchNodeData, EventNodeData, FrameScene } from '../../../../types'
+import { AppNodeData, DiagramNode, DispatchNodeData, EventNodeData, FrameScene } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { arrangeNodes } from '../../../../utils/arrangeNodes'
@@ -32,7 +32,7 @@ export const diagramLogic = kea<diagramLogicType>([
     actions: [frameLogic({ frameId }), ['setFrameFormValues', 'applyTemplate']],
   })),
   actions({
-    setNodes: (nodes: Node[]) => ({ nodes }),
+    setNodes: (nodes: DiagramNode[]) => ({ nodes }),
     setEdges: (edges: Edge[]) => ({ edges }),
     addEdge: (edge: Edge | Connection) => ({ edge }),
     onNodesChange: (changes: NodeChange[]) => ({ changes }),
@@ -48,12 +48,12 @@ export const diagramLogic = kea<diagramLogicType>([
   }),
   reducers({
     nodes: [
-      [] as Node[],
+      [] as DiagramNode[],
       {
         setNodes: (_, { nodes }) => nodes,
         onNodesChange: (state, { changes }) => {
           const newNodes = applyNodeChanges(changes, state)
-          return equal(state, newNodes) ? state : newNodes
+          return equal(state, newNodes) ? state : (newNodes as DiagramNode[])
         },
         deselectNode: (state) => {
           const newNodes = state.map((node) => ({ ...node, selected: false }))
@@ -68,7 +68,13 @@ export const diagramLogic = kea<diagramLogicType>([
         updateNodeConfig: (state, { id, field, value }) => {
           const newNodes = state.map((node) =>
             node.id === id
-              ? { ...node, data: { ...(node.data ?? {}), config: { ...(node.data.config ?? {}), [field]: value } } }
+              ? {
+                  ...node,
+                  data: {
+                    ...(node.data ?? {}),
+                    config: { ...('config' in node.data ? node.data?.config ?? {} : {}), [field]: value },
+                  },
+                }
               : node
           )
           return equal(state, newNodes) ? state : newNodes
@@ -99,7 +105,7 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
     fitViewCounter: [0, { fitDiagramView: (state) => state + 1 }],
   }),
-  selectors(() => ({
+  selectors({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
     sceneId: [() => [(_, props) => props.sceneId], (sceneId) => sceneId],
     originalFrame: [(s) => [framesModel.selectors.frames, s.frameId], (frames, frameId) => frames[frameId] || null],
@@ -128,11 +134,11 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
     nodesById: [
       (s) => [s.nodes],
-      (nodes: Node[]): Record<string, Node[]> => {
+      (nodes: DiagramNode[]): Record<string, DiagramNode[]> => {
         return nodes.reduce((acc, node) => {
           acc[node.id] = [...(acc[node.id] ?? []), node]
           return acc
-        }, {} as Record<string, Node[]>)
+        }, {} as Record<string, DiagramNode[]>)
       },
     ],
     hasChanges: [
@@ -153,7 +159,7 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
     nodesWithStyle: [
       (s) => [s.nodes],
-      (nodes: Node[]): Node[] => nodes.map((node) => ({ ...node, dragHandle: '.frameos-node-title' })),
+      (nodes: DiagramNode[]): DiagramNode[] => nodes.map((node) => ({ ...node, dragHandle: '.frameos-node-title' })),
     ],
     sceneOptions: [
       (s) => [s.editingFrame],
@@ -163,9 +169,9 @@ export const diagramLogic = kea<diagramLogicType>([
       ],
       { resultEqualityCheck: equal },
     ],
-  })),
+  }),
   subscriptions(({ actions, values, props }) => ({
-    nodes: (nodes: Node[], oldNodes: Node[]) => {
+    nodes: (nodes: DiagramNode[], oldNodes: DiagramNode[]) => {
       // Upon first render of a new scene, the nodes will have x = -9999, y = -9999, width = undefined, height = undefined
       // Upon second render, the width and height will have been set, but x and y will still be -9999 for all nodes
       // If we detect that case, automatically rearrange the scene.
@@ -182,7 +188,10 @@ export const diagramLogic = kea<diagramLogicType>([
           scenes: values.editingFrame.scenes?.map((scene) =>
             scene.id === props.sceneId && !equal(scene.nodes, nodes)
               ? // set the nodes on the scene's form, and remove the selected flag from all
-                { ...scene, nodes: nodes.map((n) => (n.selected ? { ...n, selected: false } : n)) }
+                ({
+                  ...scene,
+                  nodes: nodes.map((n) => (n.selected ? { ...n, selected: false } : n)),
+                } satisfies FrameScene)
               : scene
           ),
         })
@@ -221,7 +230,7 @@ export const diagramLogic = kea<diagramLogicType>([
     },
     keywordDropped: ({ keyword, type, position }) => {
       if (type === 'app') {
-        const newNode: Node = {
+        const newNode: DiagramNode = {
           id: uuidv4(),
           type: 'app',
           position,
@@ -229,7 +238,7 @@ export const diagramLogic = kea<diagramLogicType>([
         }
         actions.setNodes([...values.nodes, newNode])
       } else if (type === 'event') {
-        const newNode: Node = {
+        const newNode: DiagramNode = {
           id: uuidv4(),
           type: type,
           position,
@@ -237,7 +246,7 @@ export const diagramLogic = kea<diagramLogicType>([
         }
         actions.setNodes([...values.nodes, newNode])
       } else if (type === 'dispatch') {
-        const newNode: Node = {
+        const newNode: DiagramNode = {
           id: uuidv4(),
           type: type,
           position,

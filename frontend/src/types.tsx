@@ -35,8 +35,12 @@ export interface TemplateType {
   description?: string
   scenes?: FrameScene[]
   image?: any
-  image_width?: number
-  image_height?: number
+  imageWidth?: number
+  imageHeight?: number
+}
+
+export interface TemplateForm extends TemplateType {
+  exportScenes?: string[]
 }
 
 export interface RepositoryType {
@@ -121,6 +125,8 @@ export interface App {
   fields?: (ConfigField | MarkdownField)[]
 }
 
+export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event'
+
 export interface AppNodeData {
   keyword: string
   name?: string
@@ -141,6 +147,10 @@ export interface DispatchNodeData {
   config: Record<string, any>
 }
 
+export type NodeData = AppNodeData | CodeNodeData | EventNodeData | DispatchNodeData
+
+export type DiagramNode = Node<NodeData, NodeType>
+
 export interface FrameSceneSettings {
   refreshInterval?: number
   backgroundColor?: string
@@ -149,7 +159,7 @@ export interface FrameSceneSettings {
 export interface FrameScene {
   id: string
   name: string
-  nodes: Node[]
+  nodes: DiagramNode[]
   edges: Edge[]
   fields?: StateField[]
   default?: boolean
@@ -159,7 +169,7 @@ export interface FrameScene {
 export interface FrameSceneIndexed {
   id: string
   name: string
-  nodes: Record<string, Node[]>
+  nodes: Record<string, DiagramNode>
   edges: Record<string, Edge[]>
 }
 
@@ -185,6 +195,7 @@ export enum Area {
 }
 
 export enum Panel {
+  Action = 'Action',
   Debug = 'Debug',
   Diagram = 'Diagram',
   FrameDetails = 'FrameDetails',
@@ -197,10 +208,10 @@ export enum Panel {
   Events = 'Events',
   Metrics = 'Metrics',
   EditApp = 'EditApp',
-  Templates = 'Templates',
   Terminal = 'Terminal',
   SceneSource = 'SceneSource',
   Scenes = 'Scenes',
+  Templates = 'Templates',
 }
 
 export type PanelWithMetadata = {

@@ -6,6 +6,7 @@ import { Area, PanelWithMetadata } from '../../../types'
 import { useActions, useValues } from 'kea'
 import { panelsLogic } from './panelsLogic'
 import { frameLogic } from '../frameLogic'
+import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 
 export interface PanelAreaProps {
   area: Area
@@ -19,7 +20,7 @@ function pascalCaseToTitleCase(pascalCase: string): string {
 
 export function PanelArea({ area, areaPanels }: PanelAreaProps): JSX.Element {
   const { frameId } = useValues(frameLogic)
-  const { setPanel, closePanel, toggleFullScreenPanel } = useActions(panelsLogic({ frameId }))
+  const { setPanel, closePanel, toggleFullScreenPanel, disableFullscreenPanel } = useActions(panelsLogic({ frameId }))
 
   // Don't look at panel.active directly, as many might have it set
   const activePanel = areaPanels.find((panel) => panel.active) ?? areaPanels.find((panel) => !panel.hidden)
@@ -40,13 +41,17 @@ export function PanelArea({ area, areaPanels }: PanelAreaProps): JSX.Element {
                 <Tab
                   key={panel.key}
                   active={activePanel === panel}
-                  onClick={() => setPanel(area, panel)}
+                  onClick={() =>
+                    panel.key === 'action:disableFullscreenPanel' ? disableFullscreenPanel() : setPanel(area, panel)
+                  }
                   onDoubleClick={() => toggleFullScreenPanel(panel)}
                   className="select-none"
                   closable={panel.closable}
                   onClose={() => closePanel(panel)}
                 >
-                  {PanelTitle ? (
+                  {panel.key === 'action:disableFullscreenPanel' ? (
+                    <ArrowLeftIcon className="w-5 h-5" />
+                  ) : PanelTitle ? (
                     <PanelTitle panel={panel} {...(panel?.metadata ?? {})} />
                   ) : (
                     <>{panel.title ?? pascalCaseToTitleCase(panel.panel)}</>

@@ -33,24 +33,6 @@ export const appsModel = kea<appsModelType>([
       },
     ],
   })),
-  selectors({
-    appsByCategory: [
-      (s) => [s.apps],
-      (apps: Record<string, App>): Record<string, Record<string, App>> => {
-        const defaultEntries: Record<string, Record<string, App>> = Object.fromEntries(
-          Object.keys(categoryLabels).map((c) => [c, {}])
-        )
-        return Object.entries(apps).reduce((acc, [keyword, app]) => {
-          const category = (app.category || 'other').toLowerCase()
-          if (!acc[category]) {
-            acc[category] = {}
-          }
-          acc[category][keyword] = app
-          return acc
-        }, defaultEntries)
-      },
-    ],
-  }),
   afterMount(({ actions }) => {
     actions.loadApps()
   }),

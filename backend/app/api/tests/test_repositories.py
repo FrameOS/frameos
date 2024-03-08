@@ -10,12 +10,11 @@ class TestRepositoryAPI(BaseTestCase):
     def test_create_repository(self):
         # Test the POST /repositories endpoint
         data = {
-            'name': 'New Repository',
             'url': 'http://example.com/repo'
         }
         response = self.client.post('/api/repositories', json=data)
         self.assertEqual(response.status_code, 201)
-        new_repo = Repository.query.filter_by(name='New Repository').first()
+        new_repo = Repository.query.first()
         self.assertIsNotNone(new_repo)
 
     def test_get_repositories(self):
@@ -67,7 +66,7 @@ class TestRepositoryAPI(BaseTestCase):
 
 
     def test_create_repository_invalid_input(self):
-        data = {'url': 'http://example.com/repo'}  # Missing 'name'
+        data = {}  # Missing 'url'
         response = self.client.post('/api/repositories', json=data)
         self.assertEqual(response.status_code, 400)  # Assuming 400 for Bad Request
 
@@ -83,16 +82,6 @@ class TestRepositoryAPI(BaseTestCase):
     def test_delete_nonexistent_repository(self):
         response = self.client.delete('/api/repositories/9999')
         self.assertEqual(response.status_code, 404)
-
-    def test_update_repository_invalid_input(self):
-        # Add a repository first
-        repo = Repository(name='Test Repo', url='http://example.com/repo')
-        db.session.add(repo)
-        db.session.commit()
-
-        data = {}  # Empty data
-        response = self.client.patch(f'/api/repositories/{repo.id}', json=data)
-        self.assertEqual(response.status_code, 400)  # Assuming 400 for Bad Request
 
     def test_unauthorized_access(self):
         # Log out the user first

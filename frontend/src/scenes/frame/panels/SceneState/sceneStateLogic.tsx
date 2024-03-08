@@ -42,7 +42,11 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
     ],
   }),
   selectors({
-    scenes: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm.scenes ?? frame.scenes],
+    scenes: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm.scenes ?? frame.scenes ?? []],
+    sceneOptions: [
+      (s) => [s.scenes],
+      (scenes) => scenes.map((scene) => ({ label: scene.name || scene.id, value: scene.id })),
+    ],
     scene: [
       (s, p) => [s.scenes, p.sceneId],
       (scenes, sceneId): FrameScene | null => scenes?.find((scene) => scene.id === sceneId) ?? null,
