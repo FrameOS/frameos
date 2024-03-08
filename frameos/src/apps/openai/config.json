@@ -33,10 +33,10 @@
     {
       "name": "cacheSeconds",
       "type": "float",
-      "value": "60",
+      "value": "3600",
       "required": false,
       "label": "Seconds to cache the result",
-      "placeholder": "Default: 60. Use 0 for no cache"
+      "placeholder": "Default: 3600. Use 0 for no cache"
     }
   ]
 }
