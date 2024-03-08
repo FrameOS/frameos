@@ -28,7 +28,7 @@ export function Scenes() {
   const { scenes, showNewSceneForm, isNewSceneSubmitting, sceneTemplateOptions } = useValues(scenesLogic({ frameId }))
   const { submitNewScene, renameScene, duplicateScene, deleteScene, setAsDefault, toggleNewScene, closeNewScene } =
     useActions(scenesLogic({ frameId }))
-  const { saveAsLocalTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
+  const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
 
   return (
     <div className="space-y-4">
@@ -40,8 +40,8 @@ export function Scenes() {
             className="mr-3"
             items={[
               {
-                label: 'Save as a local template',
-                onClick: () => saveAsLocalTemplate({ name: frameForm.name }),
+                label: 'Save as template',
+                onClick: () => saveAsTemplate({ name: frameForm.name }),
                 icon: <FolderArrowDownIcon className="w-5 h-5" />,
               },
               {
@@ -81,8 +81,8 @@ export function Scenes() {
                   icon: <FolderOpenIcon className="w-5 h-5" />,
                 },
                 {
-                  label: 'Save as a local template',
-                  onClick: () => saveAsLocalTemplate({ name: scene.name ?? '', exportScenes: [scene.id] }),
+                  label: 'Save as template',
+                  onClick: () => saveAsTemplate({ name: scene.name ?? '', exportScenes: [scene.id] }),
                   icon: <FolderPlusIcon className="w-5 h-5" />,
                 },
                 {

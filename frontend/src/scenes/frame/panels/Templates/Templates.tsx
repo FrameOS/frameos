@@ -30,7 +30,7 @@ export function Templates() {
     hideUploadTemplate,
     showAddRepository,
     hideAddRepository,
-    saveAsLocalTemplate,
+    saveAsTemplate,
     setSearch,
   } = useActions(templatesLogic({ frameId }))
   const {
@@ -49,7 +49,7 @@ export function Templates() {
       <TextInput placeholder="Search templates..." onChange={setSearch} value={search} />
       <div className="space-y-2">
         <div className="flex justify-between w-full items-center">
-          <H6>Local templates (in this server)</H6>
+          <H6>Saved templates</H6>
           <DropdownMenu
             buttonColor="secondary"
             className="mr-3"
@@ -66,7 +66,7 @@ export function Templates() {
               },
               {
                 label: 'Export frame as template',
-                onClick: () => saveAsLocalTemplate({ name: frameForm.name }),
+                onClick: () => saveAsTemplate({ name: frameForm.name }),
                 icon: <ArchiveBoxIcon className="w-5 h-5" />,
               },
             ]}
@@ -142,7 +142,7 @@ export function Templates() {
         ))}
         {templates.length === 0 ? (
           <div className="text-muted">
-            {search === '' ? 'You have no local templates.' : 'No local templates match the search'}
+            {search === '' ? 'You have no saved templates.' : `No saved templates match "${search}"`}
           </div>
         ) : null}
       </div>

@@ -34,7 +34,7 @@ export const templatesLogic = kea<templatesLogicType>([
     ],
   })),
   actions({
-    saveAsLocalTemplate: (template?: Partial<TemplateForm>) => ({ template: template ?? {} }),
+    saveAsTemplate: (template?: Partial<TemplateForm>) => ({ template: template ?? {} }),
     saveAsZip: (template?: Partial<TemplateForm>) => ({ template: template ?? {} }),
     editLocalTemplate: (template: TemplateType) => ({ template }),
     hideModal: true,
@@ -189,7 +189,7 @@ export const templatesLogic = kea<templatesLogicType>([
       false,
       {
         saveAsZip: () => true,
-        saveAsLocalTemplate: () => true,
+        saveAsTemplate: () => true,
         editLocalTemplate: () => true,
         hideModal: () => false,
       },
@@ -198,12 +198,12 @@ export const templatesLogic = kea<templatesLogicType>([
       'localTemplate' as 'localTemplate' | 'zip',
       {
         saveAsZip: () => 'zip',
-        saveAsLocalTemplate: () => 'localTemplate',
+        saveAsTemplate: () => 'localTemplate',
         editLocalTemplate: () => 'localTemplate',
       },
     ],
     templateForm: {
-      saveAsLocalTemplate: (_, { template }) => ({
+      saveAsTemplate: (_, { template }) => ({
         id: '',
         name: '',
         description: '',
@@ -314,7 +314,7 @@ export const templatesLogic = kea<templatesLogicType>([
       const scenes = await response.json()
       actions.applyTemplate({ scenes }, replace)
     },
-    saveAsLocalTemplate: () => {
+    saveAsTemplate: () => {
       if ((values.templateForm.exportScenes?.length ?? 0) === 0) {
         actions.setTemplateFormValues({ exportScenes: values.frameForm?.scenes?.map((s) => s.id) || [] })
       }

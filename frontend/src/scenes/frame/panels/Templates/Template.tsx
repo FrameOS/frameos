@@ -52,15 +52,15 @@ export function Template({
                     {
                       label:
                         'scenes' in template && Array.isArray(template.scenes)
-                          ? `Add to frame (+${(template.scenes || []).length} scene${
+                          ? `Add +${(template.scenes || []).length} scene${
                               (template.scenes || []).length === 1 ? '' : 's'
-                            })`
-                          : 'Add to frame',
+                            } to frame`
+                          : 'Add scenes to frame',
                       onClick: () => applyTemplate(template),
                       icon: <DocumentPlusIcon className="w-5 h-5" />,
                     },
                     {
-                      label: `Replace existing scenes`,
+                      label: `Add & clear existing`,
                       confirm: 'Are you sure? This will erase all scenes from the frame and install this template.',
                       onClick: () => applyTemplate(template, true),
                       icon: <DocumentIcon className="w-5 h-5" />,
@@ -70,7 +70,7 @@ export function Template({
               ...(saveRemoteAsLocal
                 ? [
                     {
-                      label: 'Save as local template',
+                      label: 'Save template locally',
                       onClick: () => saveRemoteAsLocal(template),
                       icon: <ArrowDownTrayIcon className="w-5 h-5" />,
                     },
