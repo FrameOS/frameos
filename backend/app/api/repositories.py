@@ -43,7 +43,7 @@ def get_repositories():
 
         # We have not created a new repo URL
         if not Settings.query.filter_by(key="@system/repository_samples_done").first():
-            repository = Repository( url=FRAMEOS_REPOSITORY_URL)
+            repository = Repository(name="", url=FRAMEOS_REPOSITORY_URL)
             repository.update_templates()
             db.session.add(repository)
             db.session.add(Settings(key="@system/repository_samples_done", value="true"))

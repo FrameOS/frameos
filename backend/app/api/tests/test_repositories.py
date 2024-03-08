@@ -10,12 +10,11 @@ class TestRepositoryAPI(BaseTestCase):
     def test_create_repository(self):
         # Test the POST /repositories endpoint
         data = {
-            'name': 'New Repository',
             'url': 'http://example.com/repo'
         }
         response = self.client.post('/api/repositories', json=data)
         self.assertEqual(response.status_code, 201)
-        new_repo = Repository.query.filter_by(name='New Repository').first()
+        new_repo = Repository.query.first()
         self.assertIsNotNone(new_repo)
 
     def test_get_repositories(self):
@@ -67,7 +66,7 @@ class TestRepositoryAPI(BaseTestCase):
 
 
     def test_create_repository_invalid_input(self):
-        data = {'url': 'http://example.com/repo'}  # Missing 'name'
+        data = {}  # Missing 'url'
         response = self.client.post('/api/repositories', json=data)
         self.assertEqual(response.status_code, 400)  # Assuming 400 for Bad Request
 
