@@ -71,7 +71,11 @@
         "target": "86a2e17b-1fa7-441a-89a8-c231bf020247",
         "targetHandle": "prev"
       }
-    ]
+    ],
+    "settings": {
+      "backgroundColor": "#000000",
+      "refreshInterval": 3600
+    }
   },
   "QR-controlled message board": {
     "nodes": [
@@ -266,6 +270,10 @@
         "persist": "disk",
         "access": "public"
       }
-    ]
+    ],
+    "settings": {
+      "backgroundColor": "#000000",
+      "refreshInterval": 3600
+    }
   }
 }
