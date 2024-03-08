@@ -215,15 +215,12 @@ export function Templates() {
             <H6>Add templates repository</H6>
             <div>
               Read more about creating repositories{' '}
-              <a href="https://github.com/FrameOS/frameos-repo" target="_blank" rel="noreferrer" className="underline">
+              <a href="https://github.com/FrameOS/repo" target="_blank" rel="noreferrer" className="underline">
                 here.
               </a>
             </div>
-            <Field label="" name="name">
-              <TextInput placeholder="Official goods" />
-            </Field>
             <Field label="" name="url">
-              <TextInput placeholder="https://url/to/templates.json" />
+              <TextInput placeholder="https://repo.frameos.net/samples/repository.json" />
             </Field>
             <div className="flex gap-2">
               <Button type="submit" size="small" color="primary">

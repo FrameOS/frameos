@@ -161,16 +161,13 @@ export const templatesLogic = kea<templatesLogicType>([
     },
     addRepositoryForm: {
       defaults: {
-        name: '',
         url: '',
       } as { name: string; url: string },
       errors: (formValues) => ({
-        name: !formValues.name ? 'Name is required' : null,
         url: !formValues.url ? 'URL is required' : null,
       }),
       submit: async (formValues) => {
         const request = {
-          name: formValues.name,
           url: formValues.url,
         }
         const response = await fetch(`/api/repositories`, {
