@@ -36,7 +36,7 @@
       "value": "3600",
       "required": false,
       "label": "Seconds to cache the result",
-      "placeholder": "Default: 3600. Use 0 for no cache"
+      "placeholder": "Default: 3600 (1h). Use 0 for no cache"
     }
   ]
 }

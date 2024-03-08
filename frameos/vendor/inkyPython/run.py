@@ -31,7 +31,7 @@ if __name__ == "__main__":
     inky = init()
     log({ "inky": True, "width": inky.resolution[0], "height": inky.resolution[1], "color": inky.colour })
     data = read_binary_data()
-    log({ "bytesReceived": len(data) })
+    log({ "bytesReceived": len(data), "message": "rendering on eink display" })
 
     try:
         from PIL import Image
