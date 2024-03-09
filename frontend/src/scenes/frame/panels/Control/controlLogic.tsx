@@ -98,7 +98,7 @@ export const controlLogic = kea<controlLogicType>([
         const state: Record<string, any> = {}
         const fields = values.scene?.fields ?? []
         for (const field of fields) {
-          if (field.access === 'public') {
+          if (field.name in formValues && field.access === 'public') {
             if (field.type === 'boolean') {
               state[field.name] = formValues[field.name] === 'true' || field.value
             } else if (field.type === 'integer') {

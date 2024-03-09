@@ -36,7 +36,7 @@ export function Control(): JSX.Element {
       <div className="space-y-2 mb-4">
         <div className="flex justify-between w-full items-center gap-2 mb-2">
           <H6>Currently active scene:</H6>
-          <Button onClick={sync} disabled={stateRecordLoading} size="small">
+          <Button onClick={sync} disabled={stateRecordLoading} color="secondary" size="small">
             {loading ? <Spinner color="white" /> : 'Sync'}
           </Button>
         </div>
