@@ -14,6 +14,7 @@ export function Debug() {
       <H6>Scenes</H6>
       <ReactJson
         src={frameForm?.scenes ?? frame.scenes ?? []}
+        collapsed={2}
         theme="ocean"
         name="scenes"
         style={{ background: 'none' }}

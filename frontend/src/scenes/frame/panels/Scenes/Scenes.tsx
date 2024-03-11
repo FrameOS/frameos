@@ -63,9 +63,9 @@ export function Scenes() {
                   </Tag>
                 ) : null}
                 {scene?.settings?.refreshInterval && Number.isFinite(scene.settings.refreshInterval) ? (
-                  <Tag className="ml-2" color="secondary">
+                  <Tag className="ml-2" color={scene.settings.refreshInterval > 1 ? 'secondary' : 'red'}>
                     {scene.settings.refreshInterval > 1
-                      ? `1/${scene.settings.refreshInterval} fps`
+                      ? `${scene.settings.refreshInterval}`
                       : `${Math.round((1 / scene.settings.refreshInterval) * 10) / 10} fps`}
                   </Tag>
                 ) : null}
