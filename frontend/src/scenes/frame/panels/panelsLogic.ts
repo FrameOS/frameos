@@ -50,6 +50,7 @@ export const panelsLogic = kea<panelsLogicType>([
     closePanel: (panel: PanelWithMetadata) => ({ panel }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
     disableFullscreenPanel: true,
+    openTemplates: true,
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
     editScene: (sceneId: string) => ({ sceneId }),
     editStateScene: (sceneId: string) => ({ sceneId }),
@@ -112,6 +113,14 @@ export const panelsLogic = kea<panelsLogicType>([
                 },
               ],
         }),
+        openTemplates: (state, _) => ({
+          ...(Object.fromEntries(
+            Object.entries(state).map(([k, v]) => [k, v.map((p) => (p.active ? { ...p, active: false } : p))])
+          ) as Record<Area, PanelWithMetadata[]>),
+          [Area.TopRight]: state[Area.TopRight].map((a) =>
+            a.panel === Panel.Templates ? { ...a, active: true } : a.active ? { ...a, active: false } : a
+          ),
+        }),
       },
     ],
     fullScreenPanel: [
@@ -119,6 +128,7 @@ export const panelsLogic = kea<panelsLogicType>([
       {
         toggleFullScreenPanel: (state, { panel }) => (state && panelsEqual(state, panel) ? null : panel),
         disableFullscreenPanel: () => null,
+        openTemplates: () => null,
       },
     ],
     lastSelectedScene: [

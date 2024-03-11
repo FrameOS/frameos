@@ -19,6 +19,7 @@ import {
   FolderArrowDownIcon,
   FolderPlusIcon,
   PlusIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
 import { SceneSettings } from './SceneSettings'
@@ -26,7 +27,7 @@ import React from 'react'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
-  const { editScene } = useActions(panelsLogic)
+  const { editScene, openTemplates } = useActions(panelsLogic)
   const { scenes, showNewSceneForm, isNewSceneSubmitting, sceneTemplateOptions, showingSettings } = useValues(
     scenesLogic({ frameId })
   )
@@ -183,10 +184,16 @@ export function Scenes() {
             </Box>
           </Form>
         ) : (
-          <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={toggleNewScene}>
-            <PlusIcon className="w-4 h-4" />
-            Add new scene
-          </Button>
+          <div className="flex gap-2">
+            <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={toggleNewScene}>
+              <PlusIcon className="w-4 h-4" />
+              Add new scene
+            </Button>
+            <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={openTemplates}>
+              <SparklesIcon className="w-4 h-4" />
+              Explore templates
+            </Button>
+          </div>
         )}
       </div>
     </div>
