@@ -17,6 +17,7 @@ export interface ControlLogicProps {
 export interface StateRecord {
   sceneId: string
   state: Record<string, any>
+  fields: any[]
 }
 
 export const controlLogic = kea<controlLogicType>([
@@ -29,72 +30,102 @@ export const controlLogic = kea<controlLogicType>([
   })),
   actions({
     sync: true,
-    setCurrentScene: (sceneId: string) => ({ sceneId }),
-    currentSceneChanged: (sceneId: string) => ({ sceneId }),
+    setSelectedSceneId: (sceneId: string) => ({ sceneId }),
+    setCurrentSceneId: (sceneId: string) => ({ sceneId }),
   }),
-  loaders(({ props, values }) => ({
-    stateRecord: [
-      {} as StateRecord,
+  loaders(({ actions, props, values }) => ({
+    stateRecords: [
+      {} as Record<string, StateRecord>,
       {
         sync: async (_, breakpoint) => {
           await breakpoint(100)
           try {
-            const response = await fetch(`/api/frames/${props.frameId}/state`)
+            const { selectedSceneId, currentSceneId } = values
+            const response = await fetch(
+              `/api/frames/${props.frameId}/state` +
+                (selectedSceneId ? `?sceneId=${encodeURIComponent(selectedSceneId)}` : '')
+            )
             if (!response.ok) {
-              throw new Error('Failed to fetch logs')
+              throw new Error('Failed to sync state')
             }
-            return await response.json()
+            breakpoint()
+            const json: StateRecord = await response.json()
+            if (!selectedSceneId && json.sceneId && currentSceneId !== json.sceneId) {
+              actions.setCurrentSceneId(json.sceneId)
+              actions.setSelectedSceneId(json.sceneId)
+            }
+            return {
+              ...values.stateRecords,
+              [json.sceneId]: json,
+            }
           } catch (error) {
             console.error(error)
-            return values.stateRecord
+            return values.stateRecords
           }
         },
       },
     ],
   })),
   reducers({
-    stateRecord: [
-      {} as StateRecord,
+    selectedSceneId: [
+      null as string | null,
       {
-        currentSceneChanged: (state, { sceneId }) => ({ ...state, sceneId }),
+        setSelectedSceneId: (_, { sceneId }) => sceneId,
       },
     ],
-    sceneChanging: [
-      false,
+    currentSceneId: [
+      null as string | null,
       {
-        setCurrentScene: () => true,
-        syncSuccess: () => false,
-        syncFailure: () => false,
-        currentSceneChanged: () => false,
+        setCurrentSceneId: (_, { sceneId }) => sceneId,
+      },
+    ],
+    stateRecords: [
+      {} as Record<string, StateRecord>,
+      {
+        setSelectedSceneId: (state, { sceneId }) =>
+          sceneId in state ? state : { [sceneId]: { sceneId, state: {}, fields: [] } },
+      },
+    ],
+    stateChanges: [
+      {} as Record<string, Record<string, any>>,
+      {
+        setSelectedSceneId: (state, { sceneId }) => (sceneId in state ? state : { [sceneId]: {} }),
       },
     ],
   }),
   selectors({
-    scenes: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm.scenes ?? frame.scenes],
+    scenes: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm.scenes ?? frame.scenes ?? []],
     scene: [
-      (s) => [s.scenes, s.sceneId],
+      (s) => [s.scenes, s.selectedSceneId],
       (scenes, sceneId): FrameScene | null => scenes?.find((scene) => scene.id === sceneId) ?? null,
     ],
     fields: [(s) => [s.scene], (scene) => (scene?.fields ?? []).filter((field) => field.access === 'public')],
+    state: [
+      (s) => [s.stateRecords, s.selectedSceneId],
+      (stateRecords, sceneId) => (sceneId && stateRecords[sceneId]?.state) || {},
+    ],
+    loading: [
+      (s) => [s.selectedSceneId, s.stateRecords, s.stateRecordsLoading],
+      (selectedSceneId, stateRecords, stateRecordLoading) =>
+        (selectedSceneId && !stateRecords[selectedSceneId]) || stateRecordLoading,
+    ],
     scenesAsOptions: [
-      (s) => [s.scenes],
-      (scenes): { label: string; value: string }[] =>
-        (scenes ?? []).map((scene) => ({
-          label: scene.name || 'Unnamed Scene',
+      (s) => [s.scenes, s.selectedSceneId, s.currentSceneId],
+      (scenes, selectedSceneId, currentSceneId): { label: string; value: string }[] => [
+        ...(!selectedSceneId ? [{ label: '...', value: '' }] : []),
+        ...(scenes ?? []).map((scene) => ({
+          label: (scene.name || 'Unnamed Scene') + (currentSceneId === scene.id ? ' (active)' : ''),
           value: scene.id || '',
         })),
-    ],
-    state: [(s) => [s.stateRecord], (stateRecord) => stateRecord?.state ?? {}],
-    sceneId: [(s) => [s.stateRecord], (stateRecord) => stateRecord?.sceneId ?? null],
-    loading: [
-      (s) => [s.stateRecord, s.sceneChanging, s.stateRecordLoading],
-      (stateRecord, stateRecordLoading, sceneChanging) => !stateRecord?.sceneId || stateRecordLoading || sceneChanging,
+      ],
     ],
   }),
   forms(({ values, props }) => ({
     stateChanges: {
-      defaults: {} as Record<string, any>,
-      submit: async (formValues) => {
+      defaults: {} as Record<string, Record<string, any>>,
+      submit: async (_formValues) => {
+        const formValues: Record<string, any> =
+          (values.selectedSceneId ? _formValues[values.selectedSceneId] : null) ?? {}
         const state: Record<string, any> = {}
         const fields = values.scene?.fields ?? []
         for (const field of fields) {
@@ -110,41 +141,57 @@ export const controlLogic = kea<controlLogicType>([
             }
           }
         }
-        const response = await fetch(`/api/frames/${props.frameId}/event/setSceneState`, {
+        const sceneId = values.selectedSceneId
+        const response = await fetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ render: true, state }),
+          body: JSON.stringify({ render: true, sceneId, state }),
         })
         await response.json()
       },
     },
   })),
-  listeners(({ actions, props, values }) => ({
-    setCurrentScene: async ({ sceneId }) => {
-      const response = await fetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sceneId }),
-      })
-      await response.text()
-    },
+  listeners(({ actions, values }) => ({
     [socketLogic.actionTypes.newLog]: ({ log }) => {
       try {
         const { event, sceneId } = JSON.parse(log.line)
         if (event === 'sceneChange') {
-          if (sceneId !== values.sceneId) {
-            actions.currentSceneChanged(sceneId)
+          if (sceneId !== values.currentSceneId) {
+            actions.setCurrentSceneId(sceneId)
             actions.sync()
-          } else {
-            actions.currentSceneChanged(sceneId)
+          }
+        } else if (event === 'event:setCurrentScene') {
+          const { payload } = JSON.parse(log.line)
+          const { sceneId, state } = payload ?? {}
+
+          const currentChanges = values.stateChanges[sceneId] ?? {}
+
+          // debugger
+
+          actions.setStateChangesValues({
+            stateChanges: {
+              ...values.stateChanges,
+              [sceneId]: {
+                ...currentChanges,
+                ...state,
+              },
+            },
+          })
+          // debugger
+          if (sceneId !== values.currentSceneId) {
+            actions.setCurrentSceneId(sceneId)
+            actions.sync()
           }
         } else if (event === 'event:setSceneState') {
           actions.sync()
         }
-        console.log({ event })
       } catch (error) {}
     },
+    setSelectedSceneId: () => {
+      actions.sync()
+    },
   })),
+
   afterMount(({ actions }) => {
     actions.sync()
   }),

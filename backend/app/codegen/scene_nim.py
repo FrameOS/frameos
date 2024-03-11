@@ -110,7 +110,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                             value = config.get(key, None)
 
                             event_payload_pairs.append(sanitize_nim_field(key, type, value, field_inputs_for_node,
-                                             node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, True))
+                                             node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, True, False))
 
                     next_node_id = next_nodes.get(node_id, None)
                     run_node_lines += [
@@ -175,7 +175,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
 
                 app_config_pairs.append(sanitize_nim_field(key, type, value, field_inputs_for_node,
                                                               node_fields_for_node, source_field_inputs_for_node,
-                                                              node_id_to_integer, False))
+                                                              node_id_to_integer, False, False))
 
             if len(sources) > 0:
                 init_apps += [
@@ -251,14 +251,23 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
         else:
             state_init_fields += [f"\"{sanitize_nim_string(name)}\": %*(\"{sanitize_nim_string(str(value))}\")"]
         if field.get('access', 'private') == 'public':
+            field_type = field.get('type', 'string')
             opts = ""
             if field.get('type', 'string') == 'select':
                 opts = ", ".join([f"\"{sanitize_nim_string(option)}\"" for option in field.get('options', [])])
 
+            if field.get('value', None) is not None:
+                default_value_sanitized = sanitize_nim_field(key, type, value, {}, {}, {}, node_id_to_integer, False, True)
+                # TODO: check it supports colors
+                default_value_sanitized = f"%*({default_value_sanitized})"
+            else:
+                default_value_sanitized = "%*(\"\")"
             public_state_fields.append(
                 f"StateField(name: \"{sanitize_nim_string(field.get('name', ''))}\", " \
                 f"label: \"{sanitize_nim_string(field.get('label', field.get('name', '')))}\", " \
-                f"fieldType: \"{sanitize_nim_string(field.get('type', 'string'))}\", options: @[{opts}], " \
+                f"fieldType: \"{sanitize_nim_string(field_type)}\", " \
+                f"options: @[{opts}], " \
+                f"defaultValue: {default_value_sanitized}, " \
                 f"placeholder: \"{sanitize_nim_string(field.get('placeholder', ''))}\", " \
                 f"required: {'true' if field.get('required', False) else 'false'}, " \
                 f"secret: {'true' if field.get('secret', False) else 'false'})"
@@ -376,30 +385,36 @@ var exportedScene* = ExportedScene(
     return scene_source
 
 
-def sanitize_nim_field(key, type, value, field_inputs_for_node, node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, key_with_quotes: bool) -> str:
-    key_str = f"\"{sanitize_nim_string(str(key))}\"" if key_with_quotes else sanitize_nim_string(str(key))
+def sanitize_nim_field(key, type, value, field_inputs_for_node, node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, key_with_quotes: bool, only_values = False) -> str:
+    if only_values:
+        key_str = ""
+    elif key_with_quotes:
+        key_str = f"\"{sanitize_nim_string(str(key))}\": "
+    else:
+        key_str = f"{sanitize_nim_string(str(key))}: "
+
     if key in field_inputs_for_node:
-        return f"{key_str}: {field_inputs_for_node[key]}"
+        return f"{key_str}{field_inputs_for_node[key]}"
     elif key in source_field_inputs_for_node:
         (source_id, source_key) = source_field_inputs_for_node[key]
-        return f"{key_str}: self.node{node_id_to_integer(source_id)}.appConfig.{source_key}"
+        return f"{key_str}self.node{node_id_to_integer(source_id)}.appConfig.{source_key}"
     elif type == "node" and key in node_fields_for_node:
         outgoing_node_id = node_fields_for_node[key]
-        return f"{key_str}: {node_id_to_integer(outgoing_node_id)}.NodeId"
+        return f"{key_str}{node_id_to_integer(outgoing_node_id)}.NodeId"
     elif type == "node" and key not in node_fields_for_node:
-        return f"{key_str}: 0.NodeId"
+        return f"{key_str}0.NodeId"
     elif type == "integer":
-        return f"{key_str}: {int(value)}"
+        return f"{key_str}{int(value)}"
     elif type == "float":
-        return f"{key_str}: {float(value)}"
+        return f"{key_str}{float(value)}"
     elif type == "boolean":
-        return f"{key_str}: {'true' if value == 'true' else 'false'}"
+        return f"{key_str}{'true' if value == 'true' else 'false'}"
     elif type == "color":
-        return f"{key_str}: parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"
+        return f"{key_str}parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"
     elif type == "scene":
-        return f"{key_str}: \"{sanitize_nim_string(str(value))}\".SceneId"
+        return f"{key_str}\"{sanitize_nim_string(str(value))}\".SceneId"
     else:
-        return f"{key_str}: \"{sanitize_nim_string(str(value))}\""
+        return f"{key_str}\"{sanitize_nim_string(str(value))}\""
 
 
 def write_scenes_nim(frame: Frame) -> str:

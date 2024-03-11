@@ -169,6 +169,12 @@
         "label": "Scene",
         "type": "scene",
         "required": true
+      },
+      {
+        "name": "state",
+        "label": "State JSON",
+        "type": "text",
+        "required": false
       }
     ]
   }

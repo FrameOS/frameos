@@ -15,8 +15,9 @@ import frameos/types
 import frameos/channels
 import frameos/config
 import frameos/utils/image
+import frameos/runner
+
 from net import Port
-from frameos/runner import getLastImagePng, getLastPublicState
 from scenes/scenes import sceneOptions
 
 var globalFrameConfig: FrameConfig
@@ -120,8 +121,15 @@ router myrouter:
       resp Http401, "Unauthorized"
     log(%*{"event": "http", "get": request.pathInfo})
     {.gcsafe.}: # It's a copy of the state, so it's fine.
-      let (sceneId, state, _) = getLastPublicState()
-      resp Http200, {"Content-Type": "application/json"}, $(%*{"sceneId": $sceneId, "state": state})
+      let paramsTable = request.params()
+      if paramsTable.contains("sceneId"):
+        let nextSceneId = paramsTable["sceneId"].SceneId
+        let (nextState, fields) = getLastPublicStateForScene(nextSceneId)
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"sceneId": nextSceneId, "state": nextState,
+            "fields": fields})
+      else:
+        let (sceneId, state, fields) = getLastPublicState()
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"sceneId": $sceneId, "state": state, "fields": fields})
   get "/c":
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"

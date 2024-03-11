@@ -98,6 +98,23 @@ proc loadPersistedState*(sceneId: SceneId): JsonNode =
   except IOError:
     return %*{}
 
+proc getLastPublicStateForScene*(sceneId: SceneId): (JsonNode, seq[StateField]) =
+  {.gcsafe.}:
+    withLock lastPublicStatesLock:
+      if lastPublicStates.hasKey(sceneId.string):
+        let state = lastPublicStates[sceneId.string].copy()
+        return (state, exportedScenes[sceneId].publicStateFields)
+      else:
+        let persistedState = loadPersistedState(sceneId)
+        let publicFields = exportedScenes[sceneId].publicStateFields
+        var newState = %*{}
+        for field in publicFields:
+          if persistedState.hasKey(field.name):
+            newState[field.name] = copy(persistedState[field.name])
+          else:
+            newState[field.name] = field.defaultValue
+        return (newState, publicFields)
+
 proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene): Image =
   let sceneTimer = epochTime()
   let requiredWidth = self.frameConfig.renderWidth()
@@ -271,20 +288,46 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
               payload["y"] = %*((self.frameConfig.height.float * payload["y"].getInt().float / 32767.0).int)
           of "setCurrentScene":
             let sceneId = SceneId(payload["sceneId"].getStr())
-            if sceneId == self.currentSceneId:
+            if sceneId == self.currentSceneId and not payload.hasKey("state"):
               continue
             if not exportedScenes.hasKey(sceneId):
               self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
                   "event": event, "payload": payload})
               continue
-            self.dispatchSceneEvent(some(self.currentSceneId), "close", payload)
+            if self.currentSceneId != sceneId:
+              self.dispatchSceneEvent(some(self.currentSceneId), "close", payload)
+
+            var nextState = %*{}
+            let fields = exportedScenes[sceneId].publicStateFields
+            if payload.hasKey("state"):
+              var requestedState = %*{}
+              if payload["state"].getStr() != "":
+                requestedState = parseJson(payload["state"].getStr())
+              else:
+                requestedState = payload["state"].copy()
+
+              for field in fields:
+                if requestedState.hasKey(field.name):
+                  nextState[field.name] = requestedState[field.name].copy()
+
             if not self.scenes.hasKey(sceneId):
-              let scene = exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+              let persistedState = loadPersistedState(sceneId)
+              for field in fields:
+                if not nextState.hasKey(field.name) and persistedState.hasKey(field.name):
+                  nextState[field.name] = copy(persistedState[field.name])
+              let scene = exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, nextState)
               self.scenes[sceneId] = scene
               scene.updateLastPublicState()
+            else:
+              let scene = self.scenes[sceneId]
+              for field in fields:
+                if nextState.hasKey(field.name):
+                  scene.state[field.name] = copy(nextState[field.name])
+              scene.updateLastPublicState()
+              scene.updateLastPersistedState()
             self.currentSceneId = sceneId
             self.triggerRenderNext = true
-            self.dispatchSceneEvent(some(sceneId), "open", payload)
+            self.dispatchSceneEvent(some(sceneId), "open", nextState)
             continue # don't dispatch this event to the scene
           else: discard
         self.dispatchSceneEvent(sceneId, event, payload)

@@ -1,5 +1,6 @@
 import json
 import requests
+import urllib.parse
 
 from http import HTTPStatus
 from flask import jsonify, request, Response
@@ -76,14 +77,24 @@ def api_frame_get_state(id: int):
     frame = Frame.query.get_or_404(id)
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:state'
     url = f'http://{frame.frame_host}:{frame.frame_port}/state'
+    params = {}
     if frame.frame_access != "public" and frame.frame_access_key is not None:
-        url += "?k=" + frame.frame_access_key
+        params["k"] = frame.frame_access_key
+
+    sceneId = request.args.get('sceneId')
+    if sceneId and frame.scenes and len(frame.scenes) > 0:
+        for scene_json in frame.scenes:
+            if scene_json.get('id') == sceneId:
+                params['sceneId'] = sceneId
+                cache_key += f':{sceneId}'
+                break
 
     try:
         last_state = redis.get(cache_key)
         if last_state:
             return Response(last_state, content_type='application/json')
-
+        if len(params) > 0:
+            url += f"?{urllib.parse.urlencode(params)}"
         response = requests.get(url, timeout=15)
         if response.status_code == 200:
             redis.set(cache_key, response.content, ex=1)  # cache for 1 second

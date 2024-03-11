@@ -69,6 +69,7 @@ type
     name*: string
     label*: string
     fieldType*: string
+    defaultValue*: JsonNode
     options*: seq[string]
     placeholder*: string
     required*: bool
