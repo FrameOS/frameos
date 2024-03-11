@@ -67,7 +67,7 @@ export function Control(): JSX.Element {
       </div>
 
       {fieldCount === 0 ? (
-        <div>This scene does not export publicly controllable state. Use the "State" tab to configure.</div>
+        <div>This scene does not export publicly controllable state. Use the "State" panel to configure.</div>
       ) : (
         <Form logic={controlLogic} props={{ frameId, sceneId }} formKey="stateChanges" className="space-y-4">
           {scene?.fields?.map((field) => (

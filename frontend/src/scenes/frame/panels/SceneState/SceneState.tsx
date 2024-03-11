@@ -34,7 +34,7 @@ export function SceneState(): JSX.Element {
   const { sceneIndex, sceneOptions, scene, editingFields, fieldsWithErrors } = useValues(
     sceneStateLogic({ frameId, sceneId })
   )
-  const { setFields, editField, closeField, removeField } = useActions(sceneStateLogic({ frameId, sceneId }))
+  const { setFields, addField, editField, closeField, removeField } = useActions(sceneStateLogic({ frameId, sceneId }))
 
   if (!scene || !sceneId) {
     return <></>
@@ -75,15 +75,7 @@ export function SceneState(): JSX.Element {
             </div>
           </H6>
           <div>
-            <Button
-              onClick={() => {
-                const oldFields = scene?.fields ?? []
-                setFields([...oldFields, { name: '', label: '', type: 'string' }])
-                editField(oldFields.length)
-              }}
-              size="small"
-              color="secondary"
-            >
+            <Button onClick={() => addField()} size="small" color="secondary">
               Add field
             </Button>
           </div>
