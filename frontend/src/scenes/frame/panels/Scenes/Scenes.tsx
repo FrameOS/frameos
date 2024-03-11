@@ -13,6 +13,7 @@ import { H6 } from '../../../../components/H6'
 import { Tag } from '../../../../components/Tag'
 import { Select } from '../../../../components/Select'
 import {
+  AdjustmentsHorizontalIcon,
   CloudArrowDownIcon,
   DocumentDuplicateIcon,
   FolderArrowDownIcon,
@@ -20,14 +21,25 @@ import {
   PlusIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
+import { SceneSettings } from './SceneSettings'
 import React from 'react'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
   const { editScene } = useActions(panelsLogic)
-  const { scenes, showNewSceneForm, isNewSceneSubmitting, sceneTemplateOptions } = useValues(scenesLogic({ frameId }))
-  const { submitNewScene, renameScene, duplicateScene, deleteScene, setAsDefault, toggleNewScene, closeNewScene } =
-    useActions(scenesLogic({ frameId }))
+  const { scenes, showNewSceneForm, isNewSceneSubmitting, sceneTemplateOptions, showingSettings } = useValues(
+    scenesLogic({ frameId })
+  )
+  const {
+    toggleSettings,
+    submitNewScene,
+    renameScene,
+    duplicateScene,
+    deleteScene,
+    setAsDefault,
+    toggleNewScene,
+    closeNewScene,
+  } = useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
 
   return (
@@ -53,75 +65,98 @@ export function Scenes() {
           />
         </div>
         {scenes.map((scene) => (
-          <Box key={scene.id} className="p-2 pl-4 pr-3 space-y-2 bg-gray-900 flex items-start justify-between gap-1">
-            <div>
-              <H6 className="cursor-pointer" onClick={() => editScene(scene.id)}>
-                {scene.name || scene.id}
-                {scene.default ? (
-                  <Tag className="ml-2" color="primary">
-                    default
-                  </Tag>
-                ) : null}
-                {scene?.settings?.refreshInterval && Number.isFinite(scene.settings.refreshInterval) ? (
-                  <Tag className="ml-2" color={scene.settings.refreshInterval > 1 ? 'secondary' : 'red'}>
-                    {scene.settings.refreshInterval > 1
-                      ? `${scene.settings.refreshInterval}`
-                      : `${Math.round((1 / scene.settings.refreshInterval) * 10) / 10} fps`}
-                  </Tag>
-                ) : null}
-              </H6>
-              <div className="text-xs text-gray-400">id: {scene.id}</div>
-            </div>
-            <DropdownMenu
-              buttonColor="secondary"
-              items={[
-                {
-                  label: 'Open in editor',
-                  onClick: () => editScene(scene.id),
-                  icon: <FolderOpenIcon className="w-5 h-5" />,
-                },
-                {
-                  label: 'Save as template',
-                  onClick: () => saveAsTemplate({ name: scene.name ?? '', exportScenes: [scene.id] }),
-                  icon: <FolderPlusIcon className="w-5 h-5" />,
-                },
-                {
-                  label: 'Download as .zip',
-                  onClick: () => saveAsZip({ name: scene.name ?? '', exportScenes: [scene.id] }),
-                  icon: <CloudArrowDownIcon className="w-5 h-5" />,
-                },
-                {
-                  label: 'Duplicate',
-                  onClick: () => duplicateScene(scene.id),
-                  icon: <DocumentDuplicateIcon className="w-5 h-5" />,
-                },
-                {
-                  label: 'Rename',
-                  onClick: () => renameScene(scene.id),
-                  icon: <PencilSquareIcon className="w-5 h-5" />,
-                },
-                ...(!scene.default
-                  ? [
-                      {
-                        label: 'Set as default',
-                        onClick: () => setAsDefault(scene.id),
-                        icon: <FlagIcon className="w-5 h-5" />,
-                      },
-                    ]
-                  : []),
-                ...(scenes.length > 1
-                  ? [
-                      {
-                        label: 'Delete scene',
-                        confirm: 'Are you sure you want to delete this scene?',
-                        onClick: () => deleteScene(scene.id),
-                        icon: <TrashIcon className="w-5 h-5" />,
-                      },
-                    ]
-                  : []),
-              ]}
-            />
-          </Box>
+          <React.Fragment key={scene.id}>
+            <Box className="p-2 pl-4 pr-3 space-y-2 bg-gray-900 flex items-start justify-between gap-1">
+              <div>
+                <H6>
+                  <span className="cursor-pointer" onClick={() => editScene(scene.id)}>
+                    {scene.name || scene.id}
+                  </span>
+                  {scene.default ? (
+                    <Tag className="ml-2" color="primary">
+                      default
+                    </Tag>
+                  ) : null}
+                  {scene?.settings?.refreshInterval && Number.isFinite(scene.settings.refreshInterval) ? (
+                    <Tag
+                      className="ml-2 cursor-pointer"
+                      color={scene.settings.refreshInterval > 1 ? 'secondary' : 'red'}
+                      onClick={() => toggleSettings(scene.id)}
+                    >
+                      {scene.settings.refreshInterval > 1
+                        ? `${scene.settings.refreshInterval}`
+                        : `${Math.round((1 / scene.settings.refreshInterval) * 10) / 10} fps`}
+                    </Tag>
+                  ) : null}
+                </H6>
+                <div className="text-xs text-gray-400">id: {scene.id}</div>
+              </div>
+              <div className="flex gap-1">
+                <Button size="small" className="!px-1" color="secondary" onClick={() => toggleSettings(scene.id)}>
+                  <AdjustmentsHorizontalIcon className="w-5 h-5" />
+                </Button>
+                <DropdownMenu
+                  buttonColor="secondary"
+                  items={[
+                    {
+                      label: 'Open in editor',
+                      onClick: () => editScene(scene.id),
+                      icon: <FolderOpenIcon className="w-5 h-5" />,
+                    },
+                    {
+                      label: 'Toggle settings',
+                      onClick: () => toggleSettings(scene.id),
+                      icon: <AdjustmentsHorizontalIcon className="w-5 h-5" />,
+                    },
+                    {
+                      label: 'Save as template',
+                      onClick: () => saveAsTemplate({ name: scene.name ?? '', exportScenes: [scene.id] }),
+                      icon: <FolderPlusIcon className="w-5 h-5" />,
+                    },
+                    {
+                      label: 'Download as .zip',
+                      onClick: () => saveAsZip({ name: scene.name ?? '', exportScenes: [scene.id] }),
+                      icon: <CloudArrowDownIcon className="w-5 h-5" />,
+                    },
+                    {
+                      label: 'Duplicate',
+                      onClick: () => duplicateScene(scene.id),
+                      icon: <DocumentDuplicateIcon className="w-5 h-5" />,
+                    },
+                    {
+                      label: 'Rename',
+                      onClick: () => renameScene(scene.id),
+                      icon: <PencilSquareIcon className="w-5 h-5" />,
+                    },
+                    ...(!scene.default
+                      ? [
+                          {
+                            label: 'Set as default',
+                            onClick: () => setAsDefault(scene.id),
+                            icon: <FlagIcon className="w-5 h-5" />,
+                          },
+                        ]
+                      : []),
+                    ...(scenes.length > 1
+                      ? [
+                          {
+                            label: 'Delete scene',
+                            confirm: 'Are you sure you want to delete this scene?',
+                            onClick: () => deleteScene(scene.id),
+                            icon: <TrashIcon className="w-5 h-5" />,
+                          },
+                        ]
+                      : []),
+                  ]}
+                />
+              </div>
+            </Box>
+            {showingSettings[scene.id] ? (
+              <Box className="p-2 pl-4 pr-3 space-y-2 bg-gray-900 flex items-start justify-between gap-1 ml-4">
+                <SceneSettings sceneId={scene.id} />
+              </Box>
+            ) : null}
+          </React.Fragment>
         ))}
         {showNewSceneForm ? (
           <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">

@@ -72,7 +72,11 @@ export function Settings() {
                     <Field name="url" label="Home assistant URL">
                       <TextInput placeholder="http://homeassistant.local:8123" />
                     </Field>
-                    <Field name="accessToken" label="Access token" secret={!!savedSettings?.homeAssistant?.accessToken}>
+                    <Field
+                      name="accessToken"
+                      label="Access token (Profile -> Long-Lived Access Tokens)"
+                      secret={!!savedSettings?.homeAssistant?.accessToken}
+                    >
                       <TextInput autoFocus={!!savedSettings?.homeAssistant?.accessToken} />
                     </Field>
                   </Box>

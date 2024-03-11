@@ -29,9 +29,9 @@ export function Button({ size, color, children, className, disabled, full, ...pr
   const colorClassName = buttonColor(color)
   const sizeClassName =
     size === 'small'
-      ? 'text-white focus:ring-1 focus:outline-none font-medium rounded-lg text-sm px-2 py-1 text-center'
+      ? 'text-white focus:ring-1 focus:outline-none font-medium rounded-md text-sm px-2 py-1 text-center'
       : size === 'tiny'
-      ? 'text-white focus:ring-1 focus:outline-none font-medium rounded-lg text-sm px-1 py-1 text-center'
+      ? 'text-white focus:ring-1 focus:outline-none font-medium rounded-md text-sm px-1 py-1 text-center'
       : 'text-white focus:ring-2 focus:outline-none font-medium rounded-lg text-sm px-5 py-2.5 text-center'
   return (
     <button

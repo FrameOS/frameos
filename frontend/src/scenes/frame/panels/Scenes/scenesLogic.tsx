@@ -24,6 +24,7 @@ export const scenesLogic = kea<scenesLogicType>([
     actions: [frameLogic({ frameId }), ['applyTemplate'], panelsLogic({ frameId }), ['editScene', 'closePanel']],
   })),
   actions({
+    toggleSettings: (sceneId: string) => ({ sceneId }),
     setAsDefault: (sceneId: string) => ({ sceneId }),
     deleteScene: (sceneId: string) => ({ sceneId }),
     renameScene: (sceneId: string) => ({ sceneId }),
@@ -107,6 +108,12 @@ export const scenesLogic = kea<scenesLogicType>([
         toggleNewScene: (state) => !state,
         closeNewScene: () => false,
         submitNewSceneSuccess: () => false,
+      },
+    ],
+    showingSettings: [
+      {} as Record<string, boolean>,
+      {
+        toggleSettings: (state, { sceneId }) => ({ ...state, [sceneId]: !state[sceneId] }),
       },
     ],
   }),
