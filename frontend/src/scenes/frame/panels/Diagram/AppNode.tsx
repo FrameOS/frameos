@@ -13,13 +13,14 @@ import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Markdown } from '../../../../components/Markdown'
 import { ClipboardDocumentIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
+import { fieldTypeToGetter } from '../../../../utils/fieldTypes'
 
 export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
   const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
   const { updateNodeConfig, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const { editApp } = useActions(panelsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { isDispatch, name, fields, isCustomApp, configJsonError, isSelected, codeFields, fieldInputFields } =
+  const { isDispatch, name, fields, exports, isCustomApp, configJsonError, isSelected, codeFields, fieldInputFields } =
     useValues(appNodeLogic(appNodeLogicProps))
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
 
@@ -265,6 +266,35 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                   )}
                 </React.Fragment>
               ))}
+              {exports?.length
+                ? exports.map((field, i) => (
+                    <tr key={i}>
+                      <td></td>
+                      <td className="font-sm text-indigo-200">{field.label}</td>
+                      <td>
+                        <code className="text-xs mr-2 text-gray-400 flex-1">{field.type}</code>
+                      </td>
+                      <td>
+                        <Handle
+                          type="source"
+                          position={Position.Right}
+                          id={`code/$thisNode.getExport("${field.name}")${
+                            fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
+                          }`}
+                          style={{
+                            position: 'relative',
+                            transform: 'none',
+                            right: 0,
+                            top: 0,
+                            background: '#000000',
+                            borderBottomLeftRadius: 0,
+                            borderTopLeftRadius: 0,
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  ))
+                : null}
             </tbody>
           </table>
         ) : null}

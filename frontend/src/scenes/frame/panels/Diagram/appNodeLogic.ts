@@ -3,7 +3,7 @@ import { connect, kea, key, path, props, selectors } from 'kea'
 import type { appNodeLogicType } from './appNodeLogicType'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { appsModel } from '../../../../models/appsModel'
-import { App, ConfigField, DiagramNode, FrameEvent, MarkdownField } from '../../../../types'
+import { App, ConfigField, DiagramNode, ExportField, FrameEvent, MarkdownField } from '../../../../types'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 
 import _events from '../../../../../schema/events.json'
@@ -132,6 +132,12 @@ export const appNodeLogic = kea<appNodeLogicType>([
           return event?.fields ?? null
         }
         return app?.fields ?? configJson?.fields ?? null
+      },
+    ],
+    exports: [
+      (s) => [s.app, s.configJson],
+      (app, configJson): ExportField[] | null => {
+        return app?.exports ?? configJson?.exports ?? null
       },
     ],
     name: [

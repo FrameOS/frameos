@@ -76,7 +76,10 @@ export const configFieldTypes = [
   'select',
   'json',
   'node',
+  'scene',
 ] as const
+
+export type ConfigFieldType = (typeof configFieldTypes)[number]
 
 export interface ConfigField {
   /** Unique config field keyword */
@@ -84,7 +87,7 @@ export interface ConfigField {
   /** Human readable label */
   label: string
   /** Type of the field, only 'string' is supported for now */
-  type: 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'json' | 'node' | 'scene'
+  type: ConfigFieldType
   /** List of options for the field, only used if type is 'select' */
   options?: string[]
   /** Whether the field is required */
@@ -97,6 +100,15 @@ export interface ConfigField {
   placeholder?: string
   /** Number of rows for the field, only used if type is 'text' */
   rows?: number
+}
+
+export interface ExportField {
+  /** Unique config field keyword */
+  name: string
+  /** Human readable label */
+  label: string
+  /** Type of the field, only 'string' is supported for now */
+  type: ConfigFieldType
 }
 
 export interface StateField extends ConfigField {
@@ -123,6 +135,8 @@ export interface App {
   settings?: string[]
   /** Fields for app in diagram editor */
   fields?: (ConfigField | MarkdownField)[]
+  /** Exported fields you can pull in to other apps */
+  exports?: ExportField[]
 }
 
 export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event'

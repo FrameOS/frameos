@@ -14,7 +14,7 @@ type
     appConfig*: AppConfig
     frameConfig*: FrameConfig
     lastFetchAt*: float
-    json: Option[JsonNode]
+    fetchedJson: Option[JsonNode]
 
 proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
@@ -23,7 +23,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
     appConfig: appConfig,
     frameConfig: scene.frameConfig,
     lastFetchAt: 0,
-    json: none(JsonNode),
+    fetchedJson: none(JsonNode),
   )
 
 proc log*(self: App, message: string) =
@@ -52,7 +52,7 @@ proc run*(self: App, context: ExecutionContext) =
     ])
     let url = &"{haUrl}/api/states/{self.appConfig.entityId}"
 
-    if self.json.isNone or self.lastFetchAt == 0 or self.lastFetchAt +
+    if self.fetchedJson.isNone or self.lastFetchAt == 0 or self.lastFetchAt +
         self.appConfig.cacheSeconds < epochTime():
       try:
         let response = client.request(url)
@@ -60,19 +60,25 @@ proc run*(self: App, context: ExecutionContext) =
           self.error "Error fetching Home Assistant status: HTTP " &
               $response.status
           return
-        self.json = some(parseJson(response.body))
+        self.fetchedJson = some(parseJson(response.body))
         self.lastFetchAt = epochTime()
       except CatchableError as e:
         self.error "Error fetching Home Assistant status: " & $e.msg
         return
 
-    if self.json.isSome:
+    if self.fetchedJson.isSome:
       let stateKey = if self.appConfig.stateKey ==
           "": "state" else: self.appConfig.stateKey
-      self.scene.state[stateKey] = self.json.get()
+      self.scene.state[stateKey] = self.fetchedJson.get()
       if self.appConfig.debug:
         self.log($self.scene.state[stateKey])
     else:
       self.error "No JSON response from Home Assistant"
   finally:
     client.close()
+
+proc getExport*(self: App, key: string): JsonNode =
+  if key == "state" and self.fetchedJson.isSome:
+    return self.fetchedJson.get()
+  else:
+    return JsonNode(nil)

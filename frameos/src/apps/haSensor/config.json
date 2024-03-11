@@ -6,7 +6,7 @@
     "settings": ["homeAssistant"],
     "fields": [
         {
-          "markdown": "Find the [entity id here](http://homeassistant.local:8123/config/entities). Then use code like:\n\nscene.state{\"water_heater\"}{\"state\"}.getStr"
+          "markdown": "Find the [entity id here](http://homeassistant.local:8123/config/entities). Then use code like:\n\nstate{\"water_heater\"}{\"state\"}.getStr()"
         },
         {
           "name": "entityId",
@@ -17,7 +17,7 @@
         },
         {
           "name": "stateKey",
-          "type": "text",
+          "type": "string",
           "required": true,
           "label": "State key to store the json in",
           "value": "sensor",
@@ -37,6 +37,13 @@
             "value": "false",
             "required": false,
             "label": "Debug logging"
+        }
+    ],
+    "exports": [
+        {
+            "name": "state",
+            "type": "json",
+            "label": "Exported sensor state"
         }
     ]
 }
