@@ -125,25 +125,19 @@ export const appNodeLogic = kea<appNodeLogicType>([
     fields: [
       (s) => [s.app, s.event, s.scene, s.configJson],
       (app, event, scene, configJson): (ConfigField | MarkdownField)[] | null => {
-        if (app) {
-          return app?.fields ?? configJson?.fields ?? null
-        } else if (event) {
+        if (event) {
           if (event.name === 'setSceneState') {
             return scene?.fields ?? null
           }
           return event?.fields ?? null
         }
-        return null
+        return app?.fields ?? configJson?.fields ?? null
       },
     ],
     name: [
       (s) => [s.app, s.event, s.configJson],
       (app, event, configJson): string => {
-        return app
-          ? String(app?.name ?? configJson?.name ?? 'App')
-          : event
-          ? `Dispatch: ${String(event?.name ?? 'Event')}`
-          : 'Node'
+        return event ? `Dispatch: ${String(event?.name ?? 'Event')}` : String(app?.name ?? configJson?.name ?? 'App')
       },
     ],
     isCustomApp: [
