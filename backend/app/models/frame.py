@@ -168,7 +168,7 @@ def get_templates_json() -> dict:
 
 def create_default_scene() -> dict:
     templates = get_templates_json()
-    template = templates['QR-controlled message board'] or list(templates.values())[0]
+    template = templates.get('QR-controlled message board') or list(templates.values())[0] or {}
 
     return {
         "name": "QR Message Board",
