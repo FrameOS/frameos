@@ -18,8 +18,13 @@ if __name__ == '__main__':
         with open(file_path, 'r') as file:
             scene = json.load(file)
             scene['id'] = file_path.stem
+            scene['default'] = False
             scenes[file_path.stem] = scene
     
+    scene_list = list(scenes.values())
+    scene_list.sort(key=lambda x: x['id'])
+    scene_list[0]['default'] = True
+
     frame = Frame(
         name="Test frame",
         scenes=list(scenes.values())
