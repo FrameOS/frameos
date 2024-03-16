@@ -416,8 +416,8 @@ def write_scenes_nim(frame: Frame) -> str:
         scene_id = scene.get('id', 'default')
         scene_id = re.sub(r'[^a-zA-Z0-9\-\_]', '_', scene_id)
         scene_id_import = re.sub(r'\W+', '', scene_id)
-        imports.append(f"import scenes/scene_{scene_id_import} as scene_{scene_id_import}\n")
-        rows.append(f"  result[\"{scene_id}\".SceneId] = scene_{scene_id_import}.exportedScene\n")
+        imports.append(f"import scenes/scene_{scene_id_import} as scene_{scene_id_import}")
+        rows.append(f"  result[\"{scene_id}\".SceneId] = scene_{scene_id_import}.exportedScene")
         sceneOptionTuples.append(f"  (\"{scene_id}\".SceneId, \"{scene.get('name', 'Default')}\"),")
 
     default_scene_id = default_scene.get('id', 'default')

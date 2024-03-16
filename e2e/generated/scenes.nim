@@ -2,22 +2,20 @@
 
 import frameos/types
 import tables
-import scenes/scene_qrboard as scene_qrboard
-import scenes/scene_imageError as scene_imageError
 import scenes/scene_image as scene_image
-
+import scenes/scene_imageError as scene_imageError
+import scenes/scene_qrboard as scene_qrboard
 
 let defaultSceneId* = "image".SceneId
 
 const sceneOptions* = [
-  ("qrboard".SceneId, "QR Message Board"),
-  ("imageError".SceneId, "TEST"),
   ("image".SceneId, "TEST"),
+  ("imageError".SceneId, "TEST"),
+  ("qrboard".SceneId, "QR Message Board"),
 ]
 
 proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result = initTable[SceneId, ExportedScene]()
-  result["qrboard".SceneId] = scene_qrboard.exportedScene
-  result["imageError".SceneId] = scene_imageError.exportedScene
   result["image".SceneId] = scene_image.exportedScene
-
+  result["imageError".SceneId] = scene_imageError.exportedScene
+  result["qrboard".SceneId] = scene_qrboard.exportedScene
