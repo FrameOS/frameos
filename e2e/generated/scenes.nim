@@ -10,7 +10,7 @@ import scenes/scene_image as scene_image
 let defaultSceneId* = "image".SceneId
 
 const sceneOptions* = [
-  ("qrboard".SceneId, "QR Message Board"),  ("imageError".SceneId, "TEST"),  ("image".SceneId, "TEST"),
+  ("qrboard".SceneId, "QR Message Board"), ("imageError".SceneId, "TEST"), ("image".SceneId, "TEST"),
 ]
 
 proc getExportedScenes*(): Table[SceneId, ExportedScene] =
