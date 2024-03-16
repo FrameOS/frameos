@@ -6,6 +6,7 @@ nim_scenes:
 	export PYTHONPATH="../backend:${PYTHONPATH}" && python3 ./makescenes.py
 
 snapshots:
+	mkdir -p ./tmp && \
 	tmpdir=$$(mktemp -d -p ./tmp) && \
 	cp -r ../frameos/* "$$tmpdir" && \
 	rm -rf "$$tmpdir/src/scenes" && \
