@@ -28,7 +28,7 @@ def main():
             print(f"Failed to set scene {scene_id}")
             continue  # Skip this scene if the request failed
 
-        time.sleep(2)  # Wait for the scene to fully load
+        time.sleep(1)  # Wait for the scene to fully load
 
         # Get the current scene as an image
         image_response = requests.get('http://localhost:8787/image')
