@@ -78,7 +78,7 @@
   ],
   "fields": [],
   "settings": {
-    "backgroundColor": "#000000",
+    "backgroundColor": "#ff00ff",
     "refreshInterval": 3600
   },
   "default": true
