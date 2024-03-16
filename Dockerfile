@@ -50,8 +50,8 @@ COPY frontend/ ./
 COPY version.json ../
 RUN npm run build
 
-# Delete all files except the dist folder
-RUN find . -maxdepth 1 ! -name 'dist' ! -name '.' ! -name '..' -exec rm -rf {} \;
+# Delete all files except the dist and schema folders
+RUN find . -maxdepth 1 ! -name 'dist' ! -name 'schema' ! -name '.' ! -name '..' -exec rm -rf {} \;
 
 # Cleanup node installations and build tools
 RUN apt-get remove -y nodejs curl build-essential libffi-dev ca-certificates gnupg \
