@@ -422,6 +422,7 @@ def write_scenes_nim(frame: Frame) -> str:
 
     default_scene_id = default_scene.get('id', 'default')
     default_scene_id = re.sub(r'[^a-zA-Z0-9\-\_]', '_', default_scene_id)
+    newline = "\n"
 
     scenes_source = f"""
 import frameos/types
@@ -431,7 +432,7 @@ import tables
 let defaultSceneId* = "{default_scene_id}".SceneId
 
 const sceneOptions* = [
-{"\n".join(sceneOptionTuples)}
+{newline.join(sceneOptionTuples)}
 ]
 
 proc getExportedScenes*(): Table[SceneId, ExportedScene] =
