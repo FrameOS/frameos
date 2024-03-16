@@ -44,16 +44,17 @@ jobs:
           nim-version: '2.0.2'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run script
+      - name: Visual regression tests
         run: |
           cd e2e
           make
 
-      - name: Check for modifications
+      - name: Check for snapshot modifications
         run: |
           if [[ `git status --porcelain` ]]; then
             echo "Changes detected in the repository after running the script."
             git status
+            git diff
             echo "changes_detected=true" >> $GITHUB_ENV
           else
             echo "No changes detected in the repository."
