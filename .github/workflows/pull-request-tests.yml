@@ -50,16 +50,16 @@ jobs:
           make
 
       - name: Check for modifications
-        id: check_mod
         run: |
           if [[ `git status --porcelain` ]]; then
             echo "Changes detected in the repository after running the script."
-            echo "::set-output name=changes_detected::true"
+            git status
+            echo "changes_detected=true" >> $GITHUB_ENV
           else
             echo "No changes detected in the repository."
-            echo "::set-output name=changes_detected::false"
+            echo "changes_detected=false" >> $GITHUB_ENV
           fi
 
       - name: Fail if changes detected
-        if: steps.check_mod.outputs.changes_detected == 'true'
+        if: env.changes_detected == 'true'
         run: exit 1
