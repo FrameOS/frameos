@@ -27,7 +27,7 @@ if __name__ == '__main__':
 
     frame = Frame(
         name="Test frame",
-        scenes=list(scenes.values())
+        scenes=scene_list
     )
 
     for scene_name, scene_data in scenes.items():
