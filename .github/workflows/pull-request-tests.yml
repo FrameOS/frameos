@@ -51,6 +51,7 @@ jobs:
 
       - name: Check for snapshot modifications
         run: |
+          rm init.sh
           if [[ `git status --porcelain` ]]; then
             echo "Changes detected in the repository after running the script."
             git status
