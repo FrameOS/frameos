@@ -17,4 +17,3 @@ snapshots:
 
 	ls -l ./tmp/frameos	
 	python3 ./makesnapshots.py
-	killall frameos
