@@ -16,7 +16,5 @@ snapshots:
 	rm -rf "$$tmpdir"
 
 	ls -l ./tmp/frameos	
-	"tmp/frameos" &
-	sleep 2 && \
-	python3 ./makesnapshots.py && \
+	python3 ./makesnapshots.py
 	killall frameos
