@@ -16,7 +16,7 @@ def is_similar_image(img_path1, img_content2):
 
 def main():
     # Start the frameos binary in the background
-    process = subprocess.Popen(['./tmp/frameos'])
+    process = subprocess.Popen(['./tmp/frameos', '--debug'])
     print(f"Started frameos with PID {process.pid}")
     time.sleep(2)
 
