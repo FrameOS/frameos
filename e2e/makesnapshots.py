@@ -9,8 +9,8 @@ import signal
 
 def is_similar_image(img_path1, img_content2):
     """Check if two images are visually similar."""
-    hash0 = imagehash.average_hash(Image.open(img_path1))
-    hash1 = imagehash.average_hash(Image.open(img_content2))
+    hash0 = imagehash.dhash(Image.open(img_path1))
+    hash1 = imagehash.dhash(Image.open(img_content2))
     cutoff = 5
     return hash0 - hash1 < cutoff
 
