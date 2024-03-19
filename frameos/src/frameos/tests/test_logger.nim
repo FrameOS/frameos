@@ -1,8 +1,8 @@
-from ../logger import Logger, newLogger, log
-from ../config import loadConfig
+import ../logger
+import ../config
 
 let testConfig = loadConfig("./frame.json")
 
 block test_basic_things:
     let logger = newLogger(testConfig)
-    # doAssert logger.config == testConfig
+    doAssert logger.enabled == true
