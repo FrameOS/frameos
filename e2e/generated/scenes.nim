@@ -5,6 +5,7 @@ import tables
 import scenes/scene_image as scene_image
 import scenes/scene_imageError as scene_imageError
 import scenes/scene_qrboard as scene_qrboard
+import scenes/scene_text as scene_text
 
 let defaultSceneId* = "image".SceneId
 
@@ -12,6 +13,7 @@ const sceneOptions* = [
   ("image".SceneId, "TEST"),
   ("imageError".SceneId, "TEST"),
   ("qrboard".SceneId, "QR Message Board"),
+  ("text".SceneId, "Text test"),
 ]
 
 proc getExportedScenes*(): Table[SceneId, ExportedScene] =
@@ -19,3 +21,4 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result["image".SceneId] = scene_image.exportedScene
   result["imageError".SceneId] = scene_imageError.exportedScene
   result["qrboard".SceneId] = scene_qrboard.exportedScene
+  result["text".SceneId] = scene_text.exportedScene
