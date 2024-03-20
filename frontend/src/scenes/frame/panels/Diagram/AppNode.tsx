@@ -40,7 +40,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
     >
       <div
         className={clsx(
-          'frameos-node-title text-xl p-1 gap-2',
+          'frameos-node-title text-xl p-1 px-2 gap-2',
           isDispatch
             ? isSelected
               ? 'bg-indigo-900'
@@ -62,8 +62,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
             transform: 'none',
             left: 0,
             top: 0,
-            width: 24,
-            height: 24,
+            width: 20,
+            height: 20,
             background: 'rgba(180, 180, 180, 0.8)',
             borderBottomLeftRadius: 0,
             borderTopLeftRadius: 0,
@@ -106,8 +106,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
           style={{
             position: 'relative',
             transform: 'none',
-            width: 24,
-            height: 24,
+            width: 20,
+            height: 20,
             right: 0,
             top: 0,
             background: 'rgba(200, 200, 200, 0.8)',
@@ -117,15 +117,15 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
           isConnectable={isConnectable}
         />
       </div>
-      <div className="p-1">
-        {configJsonError !== null ? (
-          <div className="text-red-400">
-            Error parsing config.json:
-            <br />
-            {configJsonError}
-          </div>
-        ) : null}
-        {fields ? (
+      {configJsonError !== null ? (
+        <div className="text-red-400 p-1">
+          Error parsing config.json:
+          <br />
+          {configJsonError}
+        </div>
+      ) : null}
+      {fields && fields.length > 0 ? (
+        <div className="p-1">
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5 w-full">
             <tbody>
               {fields.map((field, i) => (
@@ -269,8 +269,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
               ))}
             </tbody>
           </table>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   )
 }
