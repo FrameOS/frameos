@@ -47,6 +47,8 @@ jobs:
       - name: FrameOS nim tests
         run: |
           cd frameos
+          nimble install -d
+          nimble setup
           nimble test
   
       - name: Visual regression tests
