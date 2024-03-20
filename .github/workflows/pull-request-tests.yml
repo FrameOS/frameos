@@ -53,7 +53,11 @@ jobs:
         run: |
           rm init.sh
           if [[ `git status --porcelain` ]]; then
-            echo "Changes detected in the repository after running the script."
+            echo "Changes detected in the repository after running visual regression tests."
+            echo "Run the following locally to fix:"
+            echo "- cd e2e"
+            echo "- source ../backend/env/bin/activate"
+            echo "- make"
             git status
             git diff
             echo "changes_detected=true" >> $GITHUB_ENV
