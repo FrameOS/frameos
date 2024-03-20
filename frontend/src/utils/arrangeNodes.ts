@@ -4,7 +4,7 @@ import { DiagramNode } from '../types'
 const SPACE_BETWEEN_NODES = 100
 const SPACE_BETWEEN_CHAINS = 50
 
-// TODO: this works poorly
+// TODO: this works poorly and doesn't know about code nodes
 export function arrangeNodes(nodes: DiagramNode[], edges: Edge[]): DiagramNode[] {
   let visited = new Set<string>()
 

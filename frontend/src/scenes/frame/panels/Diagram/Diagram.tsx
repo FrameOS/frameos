@@ -25,6 +25,9 @@ import { Button } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { v4 as uuidv4 } from 'uuid'
 import { DiagramNode, NodeType } from '../../../../types'
+import { AdjustmentsHorizontalIcon, MagnifyingGlassMinusIcon } from '@heroicons/react/24/outline'
+import { Tooltip } from '../../../../components/Tooltip'
+import { SceneSettings } from '../Scenes/SceneSettings'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -44,8 +47,9 @@ export function Diagram({ sceneId }: DiagramProps) {
   const { frameId } = useValues(frameLogic)
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
   const { nodes, nodesWithStyle, edges, fitViewCounter } = useValues(diagramLogic(diagramLogicProps))
-  const { onEdgesChange, onNodesChange, setNodes, addEdge, rearrangeCurrentScene, fitDiagramView, keywordDropped } =
-    useActions(diagramLogic(diagramLogicProps))
+  const { onEdgesChange, onNodesChange, setNodes, addEdge, fitDiagramView, keywordDropped } = useActions(
+    diagramLogic(diagramLogicProps)
+  )
 
   const onDragOver = useCallback((event: any) => {
     event.preventDefault()
@@ -162,12 +166,14 @@ export function Diagram({ sceneId }: DiagramProps) {
         >
           <Background id="1" gap={24} color="#cccccc" variant={BackgroundVariant.Dots} />
           <div className="absolute top-1 right-1 z-10 flex gap-2">
-            <Button size="small" onClick={rearrangeCurrentScene} title="Rearrange (R)" color="gray">
-              Rearrange
+            <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
+              <MagnifyingGlassMinusIcon className="w-5 h-5" />
             </Button>
-            <Button size="small" onClick={fitDiagramView} title="Fit to View (F)" color="gray">
-              Zoom out
-            </Button>
+            <Tooltip tooltipColor="gray" title={<SceneSettings sceneId={sceneId} />}>
+              <Button size="tiny" title="Scene Settings" color="secondary">
+                <AdjustmentsHorizontalIcon className="w-5 h-5" />
+              </Button>
+            </Tooltip>
           </div>
         </ReactFlow>
       </div>
