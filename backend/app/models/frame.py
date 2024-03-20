@@ -128,11 +128,10 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
 
     from app.models import new_log
     new_log(frame.id, "welcome", f"The frame \"{frame.name}\" has been created!")
-    new_log(frame.id, "welcome", "-> You're looking at the default scene, which is a QR Message Board. You can edit the message if you scan the QR code and visit the link.")
-    new_log(frame.id, "welcome", "-> Check that you're happy with how things are under 'Frame Settings', then press 'Save & Deploy' to deploy it to the raspberry.")
-    new_log(frame.id, "welcome", "-> Install additional scenes in the 'Scenes' panel")
-    new_log(frame.id, "welcome", "-> Drag & Drop 'Apps' and 'Events' onto a scene")
-    new_log(frame.id, "welcome", "-> Click 'Edit App' to clone an app and edit its source")
+    new_log(frame.id, "welcome", "-> It comes with one scene by default: the QR message board.")
+    new_log(frame.id, "welcome", "-> Click \"Save & Deploy\" to deploy it onto the frame.")
+    new_log(frame.id, "welcome", "-> Use the \"Templates\" panel to install new scenes.")
+    new_log(frame.id, "welcome", "-> Click into a scene to edit its source.")
 
     return frame
 
