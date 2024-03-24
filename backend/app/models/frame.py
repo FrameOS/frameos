@@ -119,7 +119,7 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         scenes=[create_default_scene()],
         scaling_mode="contain",
         rotate=0,
-        background_color="white",
+        background_color="#ffffff",
         device=device or "web_only",
     )
     db.session.add(frame)
