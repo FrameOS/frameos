@@ -54,6 +54,7 @@ VARIANT_COLORS = {
     "EPD_13in3k": "Black",
 
     "EPD_10in2b": "Black", # and red
+    "EPD_12in48b": "Black",
 
     "EPD_4in01f": "SevenColor",
     "EPD_7in3f": "SevenColor",
@@ -177,6 +178,7 @@ def write_waveshare_driver_nim(drivers: dict[str, Driver]) -> str:
         raise Exception("No waveshare driver found")
 
     variant = convert_waveshare_source(driver.variant)
+
     color_warning = ""
     if variant.color_option == "Unknown":
         color_warning = "\n\n# NOTE! We could not detect the correct color options. Assuming 1-bit Black.\n\n"
