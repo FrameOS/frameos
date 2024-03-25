@@ -4,7 +4,7 @@
     "serverHost": "localhost",
     "serverPort": 8989,
     "serverApiKey": "test-api-key",
-    "width": 800,
+    "width": 320,
     "height": 480,
     "device": "web_only",
     "color": null,

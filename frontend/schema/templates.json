@@ -1,5 +1,21 @@
 {
-  "Blank": {},
+  "Blank": {
+    "nodes":[
+      {
+        "id": "1d66354f-9726-4596-bae5-cda67c11d82f",
+        "type": "event",
+        "position": {
+          "x": 58,
+          "y": 59
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 71,
+        "height": 72
+      }
+    ]
+  },
   "Nature + Clock": {
     "nodes": [
       {

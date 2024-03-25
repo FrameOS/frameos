@@ -1,6 +1,7 @@
 import pixie
 import json
 import std/strformat
+import std/strutils
 import times
 import options
 import frameos/utils/image
@@ -39,6 +40,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   )
   if result.appConfig.keyword == "":
     result.appConfig.keyword = "random"
+  result.appConfig.keyword = result.appConfig.keyword.strip()
 
 proc run*(self: App, context: ExecutionContext) =
   let image = context.image

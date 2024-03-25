@@ -4,10 +4,10 @@
 #
 #    pip-compile requirements.in
 #
---no-binary gevent
-
 alembic==1.11.2
     # via flask-migrate
+appnope==0.1.4
+    # via ipython
 asttokens==2.4.0
     # via stack-data
 backcall==0.2.0
@@ -84,9 +84,7 @@ gevent==23.7.0
 gevent-websocket==0.10.1
     # via -r requirements.in
 greenlet==2.0.2
-    # via
-    #   gevent
-    #   sqlalchemy
+    # via gevent
 honcho==1.1.0
     # via -r requirements.in
 huey==2.4.5
@@ -97,6 +95,8 @@ idna==3.4
     # via
     #   email-validator
     #   requests
+imagehash==4.3.1
+    # via -r requirements.in
 iniconfig==2.0.0
     # via pytest
 ipdb==0.13.13
@@ -124,6 +124,11 @@ matplotlib-inline==0.1.6
     # via ipython
 nodeenv==1.8.0
     # via pre-commit
+numpy==1.26.4
+    # via
+    #   imagehash
+    #   pywavelets
+    #   scipy
 packaging==23.2
     # via
     #   build
@@ -139,7 +144,9 @@ pexpect==4.8.0
 pickleshare==0.7.5
     # via ipython
 pillow==9.5.0
-    # via -r requirements.in
+    # via
+    #   -r requirements.in
+    #   imagehash
 pip-tools==7.3.0
     # via -r requirements.in
 platformdirs==4.1.0
@@ -168,6 +175,8 @@ python-engineio==4.5.1
     # via python-socketio
 python-socketio==5.8.0
     # via flask-socketio
+pywavelets==1.5.0
+    # via imagehash
 pyyaml==6.0.1
     # via pre-commit
 redis==4.6.0
@@ -176,6 +185,8 @@ requests==2.31.0
     # via -r requirements.in
 ruff==0.1.14
     # via -r requirements.in
+scipy==1.12.0
+    # via imagehash
 scp==0.14.5
     # via -r requirements.in
 sentry-sdk[flask]==1.35.0

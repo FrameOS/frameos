@@ -1,0 +1,164 @@
+{
+  "id": "bf5ebb6f-2041-4168-943a-84839772654c",
+  "name": "Test If Else",
+  "nodes": [
+    {
+      "id": "1d66354f-9726-4596-bae5-cda67c11d82f",
+      "type": "event",
+      "position": {
+        "x": 58,
+        "y": 59
+      },
+      "data": {
+        "keyword": "render"
+      },
+      "width": 99,
+      "height": 40
+    },
+    {
+      "id": "7d83592b-3fc0-4eb1-b9a6-d46a881bb4ba",
+      "type": "app",
+      "position": {
+        "x": 244.5,
+        "y": 55
+      },
+      "data": {
+        "keyword": "split",
+        "config": {
+          "rows": "3",
+          "columns": "3",
+          "width_ratios": "1 2 1",
+          "height_ratios": "2 1 2"
+        }
+      },
+      "width": 264,
+      "height": 246,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 244.5,
+        "y": 55
+      },
+      "dragging": false
+    },
+    {
+      "id": "23d7a06b-e73c-4c5d-9662-fc758b06ab10",
+      "type": "app",
+      "position": {
+        "x": 713.5,
+        "y": 23
+      },
+      "data": {
+        "keyword": "ifElse",
+        "config": {}
+      },
+      "width": 166,
+      "height": 134,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 713.5,
+        "y": 23
+      },
+      "dragging": false
+    },
+    {
+      "id": "ee5eaac4-def2-4cec-a9da-c542a0874de9",
+      "type": "app",
+      "position": {
+        "x": 986.5,
+        "y": 60
+      },
+      "data": {
+        "keyword": "color",
+        "config": {
+          "color": "#aba12b"
+        }
+      },
+      "width": 163,
+      "height": 81,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 986.5,
+        "y": 60
+      },
+      "dragging": false
+    },
+    {
+      "id": "f8dcefba-afd1-460d-9d8a-efa26c7ab46b",
+      "position": {
+        "x": 584.5,
+        "y": 213
+      },
+      "type": "code",
+      "data": {
+        "code": "context.loopIndex mod 2 == 0"
+      },
+      "style": {
+        "width": 300,
+        "height": 130
+      },
+      "width": 300,
+      "height": 130,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 584.5,
+        "y": 213
+      },
+      "dragging": false
+    },
+    {
+      "id": "75055185-c284-42f6-ab96-96f9b361674e",
+      "type": "app",
+      "position": {
+        "x": 995.5,
+        "y": 195
+      },
+      "data": {
+        "keyword": "color",
+        "config": {
+          "color": "#814141"
+        }
+      },
+      "width": 163,
+      "height": 81
+    }
+  ],
+  "edges": [
+    {
+      "id": "d51fb0de-11b6-4563-ac58-828900642bc2",
+      "source": "1d66354f-9726-4596-bae5-cda67c11d82f",
+      "sourceHandle": "next",
+      "target": "7d83592b-3fc0-4eb1-b9a6-d46a881bb4ba",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "f8dcefba-afd1-460d-9d8a-efa26c7ab46b",
+      "target": "23d7a06b-e73c-4c5d-9662-fc758b06ab10",
+      "targetHandle": "fieldInput/condition",
+      "source": "f8dcefba-afd1-460d-9d8a-efa26c7ab46b",
+      "sourceHandle": "fieldOutput"
+    },
+    {
+      "id": "452b2be0-3fbb-4049-824a-78e111e5ac09",
+      "source": "7d83592b-3fc0-4eb1-b9a6-d46a881bb4ba",
+      "sourceHandle": "field/render_function",
+      "target": "23d7a06b-e73c-4c5d-9662-fc758b06ab10",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "a1789af6-99d6-4b80-862b-bdc4bdbd981d",
+      "source": "23d7a06b-e73c-4c5d-9662-fc758b06ab10",
+      "sourceHandle": "field/thenNode",
+      "target": "ee5eaac4-def2-4cec-a9da-c542a0874de9",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "862db78a-4a35-4f0b-9e6d-40897a52c67a",
+      "source": "23d7a06b-e73c-4c5d-9662-fc758b06ab10",
+      "sourceHandle": "field/elseNode",
+      "target": "75055185-c284-42f6-ab96-96f9b361674e",
+      "targetHandle": "prev"
+    }
+  ],
+  "fields": [],
+  "default": true
+}

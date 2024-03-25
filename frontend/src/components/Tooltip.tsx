@@ -4,14 +4,16 @@ import ReactDOM from 'react-dom'
 import React, { useState } from 'react'
 import { usePopper } from 'react-popper'
 import clsx from 'clsx'
+import { ButtonProps, buttonColor } from './Button'
 
 export interface TooltipProps {
   title: JSX.Element | string
   children?: React.ReactNode
   className?: string
+  tooltipColor?: ButtonProps['color']
 }
 
-export function Tooltip({ children, title, className }: TooltipProps) {
+export function Tooltip({ children, title, className, tooltipColor }: TooltipProps) {
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
   const { styles, attributes } = usePopper(referenceElement, popperElement, { strategy: 'fixed' })
@@ -41,7 +43,10 @@ export function Tooltip({ children, title, className }: TooltipProps) {
             >
               <Popover.Panel
                 static
-                className="absolute right-0 w-56 mt-2 origin-top-right bg-gray-600 divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+                className={clsx(
+                  'absolute right-0 w-56 mt-2 origin-top-right divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none',
+                  buttonColor(tooltipColor || 'light-gray')
+                )}
                 ref={setPopperElement}
                 style={styles.popper}
                 {...attributes.popper}

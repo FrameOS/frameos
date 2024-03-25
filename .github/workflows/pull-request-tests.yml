@@ -38,3 +38,41 @@ jobs:
         run: |
           cd backend
           TEST=1 pytest
+
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: '2.0.2'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: FrameOS nim tests
+        run: |
+          cd frameos
+          nimble install -d
+          nimble setup
+          nimble test
+  
+      - name: Visual regression tests
+        run: |
+          cd e2e
+          make
+
+      - name: Check for snapshot modifications
+        run: |
+          rm init.sh
+          if [[ `git status --porcelain` ]]; then
+            echo "Changes detected in the repository after running visual regression tests."
+            echo "Run the following locally to fix:"
+            echo "- cd e2e"
+            echo "- source ../backend/env/bin/activate"
+            echo "- make"
+            git status
+            git diff
+            echo "changes_detected=true" >> $GITHUB_ENV
+          else
+            echo "No changes detected in the repository."
+            echo "changes_detected=false" >> $GITHUB_ENV
+          fi
+
+      - name: Fail if changes detected
+        if: env.changes_detected == 'true'
+        run: exit 1

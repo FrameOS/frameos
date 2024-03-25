@@ -1,0 +1,296 @@
+{
+    "edges": [
+      {
+        "id": "e5082268-7313-4796-b203-5b668b909bf7",
+        "source": "bc7d8761-0385-420e-889c-5ba802e94214",
+        "sourceHandle": "next",
+        "target": "4aa2670a-b205-447c-8e98-07d008b8e284",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "c1bcc56f-1e7f-4f29-a088-af981159cb28",
+        "source": "4aa2670a-b205-447c-8e98-07d008b8e284",
+        "sourceHandle": "next",
+        "target": "926af3e9-b948-4cd7-bb35-7f069197f58d",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "1d83879c-7736-47ea-9f25-fc427e3163c8",
+        "source": "926af3e9-b948-4cd7-bb35-7f069197f58d",
+        "sourceHandle": "next",
+        "target": "90b81092-bca0-45f0-b08e-bfe1895bac1a",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "7fc393b0-56fd-4c95-9ba4-f1cad2bd79cf",
+        "source": "90b81092-bca0-45f0-b08e-bfe1895bac1a",
+        "sourceHandle": "next",
+        "target": "6cd0eda8-baaf-43a1-be45-e7d7afd7c902",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "bfd69116-a95c-4f88-a1b6-b5f1b0e2fc33",
+        "source": "6cd0eda8-baaf-43a1-be45-e7d7afd7c902",
+        "sourceHandle": "next",
+        "target": "c5dcacf2-00ef-47f4-aba5-6aa1ec6ef6d6",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "2e268da8-64fd-4c50-9658-4a453e45fdfa",
+        "source": "c5dcacf2-00ef-47f4-aba5-6aa1ec6ef6d6",
+        "sourceHandle": "next",
+        "target": "9e124b0d-1950-40c4-bd6a-0fffd5177f70",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "7e81cd9d-89ca-41ac-906a-c24dd489867e",
+        "source": "9e124b0d-1950-40c4-bd6a-0fffd5177f70",
+        "sourceHandle": "next",
+        "target": "6f8f3b76-44fc-41d2-b612-75f915ee707b",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "933fbbab-a87d-4c1b-8c9e-632fbb5cd217",
+        "source": "6f8f3b76-44fc-41d2-b612-75f915ee707b",
+        "sourceHandle": "next",
+        "target": "7ab8124d-98c9-417f-b985-83003d45e795",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "8f691c13-a65a-4a09-8588-b65faa89cf41",
+        "source": "7ab8124d-98c9-417f-b985-83003d45e795",
+        "sourceHandle": "next",
+        "target": "1e3f6e9f-f980-440c-b96d-19492855406a",
+        "targetHandle": "prev"
+      }
+    ],
+    "fields": [],
+    "id": "1796c713-1a50-4c56-806f-72cc83e93fab",
+    "name": "Text test",
+    "nodes": [
+      {
+        "data": {
+          "keyword": "render"
+        },
+        "height": 72,
+        "id": "bc7d8761-0385-420e-889c-5ba802e94214",
+        "position": {
+          "x": 155,
+          "y": 154
+        },
+        "type": "event",
+        "width": 71
+      },
+      {
+        "data": {
+          "config": {
+            "position": "top-left",
+            "text": "topleft",
+            "fontSize": "16"
+          },
+          "keyword": "text"
+        },
+        "dragging": false,
+        "height": 380,
+        "id": "4aa2670a-b205-447c-8e98-07d008b8e284",
+        "position": {
+          "x": 317.6622031163628,
+          "y": 136.21627082181703
+        },
+        "positionAbsolute": {
+          "x": 317.6622031163628,
+          "y": 136.21627082181703
+        },
+        "selected": false,
+        "type": "app",
+        "width": 338
+      },
+      {
+        "data": {
+          "config": {
+            "position": "top-center",
+            "text": "topcenter",
+            "padding": "5",
+            "fontSize": "20"
+          },
+          "keyword": "text"
+        },
+        "height": 380,
+        "id": "926af3e9-b948-4cd7-bb35-7f069197f58d",
+        "position": {
+          "x": 838.6849436037273,
+          "y": 215.60763030910118
+        },
+        "type": "app",
+        "width": 338
+      },
+      {
+        "data": {
+          "config": {
+            "position": "top-right",
+            "text": "topright",
+            "borderWidth": "5",
+            "fontSize": "15"
+          },
+          "keyword": "text"
+        },
+        "height": 380,
+        "id": "90b81092-bca0-45f0-b08e-bfe1895bac1a",
+        "position": {
+          "x": 1379.463621763837,
+          "y": 205.48610424728093
+        },
+        "type": "app",
+        "width": 344
+      },
+      {
+        "data": {
+          "config": {
+            "position": "bottom-center",
+            "text": "bottomcenter",
+            "fontSize": "20",
+            "fontColor": "#00ff62"
+          },
+          "keyword": "text"
+        },
+        "dragging": false,
+        "height": 380,
+        "id": "7ab8124d-98c9-417f-b985-83003d45e795",
+        "position": {
+          "x": 1738.7574504154002,
+          "y": 800.1940364198947
+        },
+        "positionAbsolute": {
+          "x": 1738.7574504154002,
+          "y": 800.1940364198947
+        },
+        "selected": false,
+        "type": "app",
+        "width": 338
+      },
+      {
+        "data": {
+          "config": {
+            "position": "center-left",
+            "text": "centerleft",
+            "offsetX": "-10",
+            "fontSize": "20"
+          },
+          "keyword": "text"
+        },
+        "dragging": false,
+        "height": 380,
+        "id": "6cd0eda8-baaf-43a1-be45-e7d7afd7c902",
+        "position": {
+          "x": 1803.4363191865573,
+          "y": 206.65010483196812
+        },
+        "positionAbsolute": {
+          "x": 1803.4363191865573,
+          "y": 206.65010483196812
+        },
+        "selected": false,
+        "type": "app",
+        "width": 338
+      },
+      {
+        "data": {
+          "config": {
+            "text": "centercenter",
+            "borderColor": "#ff0000",
+            "fontColor": "#000000",
+            "fontSize": "20"
+          },
+          "keyword": "text"
+        },
+        "height": 380,
+        "id": "c5dcacf2-00ef-47f4-aba5-6aa1ec6ef6d6",
+        "position": {
+          "x": 336.9184219032643,
+          "y": 797.1506740920552
+        },
+        "type": "app",
+        "width": 343
+      },
+      {
+        "data": {
+          "config": {
+            "position": "center-right",
+            "text": "centerright",
+            "offsetX": "10",
+            "offsetY": "10",
+            "fontSize": "20"
+          },
+          "keyword": "text"
+        },
+        "dragging": false,
+        "height": 380,
+        "id": "9e124b0d-1950-40c4-bd6a-0fffd5177f70",
+        "position": {
+          "x": 791.1496290264082,
+          "y": 845.8183034266777
+        },
+        "positionAbsolute": {
+          "x": 791.1496290264082,
+          "y": 845.8183034266777
+        },
+        "selected": false,
+        "type": "app",
+        "width": 338
+      },
+      {
+        "data": {
+          "config": {
+            "position": "bottom-left",
+            "text": "bottomleft",
+            "fontSize": "20",
+            "fontColor": "#ff0026"
+          },
+          "keyword": "text"
+        },
+        "dragging": false,
+        "height": 380,
+        "id": "6f8f3b76-44fc-41d2-b612-75f915ee707b",
+        "position": {
+          "x": 1297.292974106483,
+          "y": 806.8841999589797
+        },
+        "positionAbsolute": {
+          "x": 1297.292974106483,
+          "y": 806.8841999589797
+        },
+        "selected": false,
+        "type": "app",
+        "width": 338
+      },
+      {
+        "data": {
+          "config": {
+            "position": "bottom-right",
+            "text": "bottomright",
+            "fontSize": "20",
+            "fontColor": "#0062ff"
+          },
+          "keyword": "text"
+        },
+        "dragging": false,
+        "height": 380,
+        "id": "1e3f6e9f-f980-440c-b96d-19492855406a",
+        "position": {
+          "x": 2185.4870023940807,
+          "y": 842.4283632072236
+        },
+        "positionAbsolute": {
+          "x": 2185.4870023940807,
+          "y": 842.4283632072236
+        },
+        "selected": false,
+        "type": "app",
+        "width": 338
+      }
+    ],
+    "settings": {
+      "refreshInterval": 10.016,
+      "backgroundColor": "#1230ab"
+    }
+  }

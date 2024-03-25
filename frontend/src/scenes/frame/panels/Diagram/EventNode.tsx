@@ -29,62 +29,64 @@ export function EventNode(props: NodeProps): JSX.Element {
           : 'bg-black bg-opacity-70 border-red-900 shadow-red-700/50 '
       )}
     >
-      <div className={clsx('frameos-node-title text-xl p-1', selectedNodeId === id ? 'bg-indigo-900' : 'bg-red-900')}>
-        {keyword}
+      <div
+        className={clsx(
+          'flex gap-2 justify-between items-center frameos-node-title text-xl p-1',
+          selectedNodeId === id ? 'bg-indigo-900' : 'bg-red-900'
+        )}
+      >
+        <div>{keyword}</div>
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="next"
+          style={{
+            position: 'relative',
+            transform: 'none',
+            width: 20,
+            height: 20,
+            right: 0,
+            top: 0,
+            background: 'rgba(200, 200, 200, 0.8)',
+            borderBottomLeftRadius: 0,
+            borderTopLeftRadius: 0,
+          }}
+        />
       </div>
-      <div className="p-1">
-        <div className="flex justify-between">
-          <div className="flex items-center space-x-1">
-            <span>&nbsp;</span>
-          </div>
-          <div className="flex items-center space-x-1">
-            <Handle
-              type="source"
-              position={Position.Right}
-              id="next"
-              style={{
-                position: 'relative',
-                transform: 'none',
-                right: 0,
-                top: 0,
-                background: '#cccccc',
-                borderBottomLeftRadius: 0,
-                borderTopLeftRadius: 0,
-              }}
-            />
-          </div>
-        </div>
-        {fields.map((field: Record<string, any>) => (
-          <div className="flex items-center justify-end space-x-1 w-full">
-            <code className="text-xs mr-2 text-gray-400 flex-1">{field.type}</code>
-            <div title={field.label}>{field.name}</div>
-            <ClipboardIcon
-              className="w-5 h-5 cursor-pointer"
-              onClick={() =>
-                copy(
+      {fields.length > 0 ? (
+        <div className="p-1">
+          {fields.map((field: Record<string, any>) => (
+            <div className="flex items-center justify-end space-x-1 w-full">
+              <code className="text-xs mr-2 text-gray-400 flex-1">{field.type}</code>
+              <div title={field.label}>{field.name}</div>
+              <ClipboardIcon
+                className="w-5 h-5 cursor-pointer"
+                onClick={() =>
+                  copy(
+                    isEventWithStateFields
+                      ? `state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
+                      : `context.payload{"${field.name}"}${
+                          fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
+                        }`
+                  )
+                }
+              />
+              <Handle
+                type="source"
+                position={Position.Right}
+                id={
                   isEventWithStateFields
-                    ? `state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
-                    : `context.payload{"${field.name}"}${
+                    ? `code/state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
+                    : `code/context.payload{"${field.name}"}${
                         fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
                       }`
-                )
-              }
-            />
-            <Handle
-              type="source"
-              position={Position.Right}
-              id={
-                isEventWithStateFields
-                  ? `code/state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
-                  : `code/context.payload{"${field.name}"}${
-                      fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
-                    }`
-              }
-              style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#000000' }}
-            />
-          </div>
-        ))}
-      </div>
+                }
+                style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#000000' }}
+              />
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }

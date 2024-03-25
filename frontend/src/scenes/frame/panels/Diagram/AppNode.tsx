@@ -40,7 +40,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
     >
       <div
         className={clsx(
-          'frameos-node-title text-xl p-1 gap-1',
+          'frameos-node-title text-xl p-1 px-2 gap-2',
           isDispatch
             ? isSelected
               ? 'bg-indigo-900'
@@ -53,7 +53,24 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
           'flex w-full justify-between items-center'
         )}
       >
-        <div>
+        <Handle
+          type="target"
+          position={Position.Left}
+          id="prev"
+          style={{
+            position: 'relative',
+            transform: 'none',
+            left: 0,
+            top: 0,
+            width: 20,
+            height: 20,
+            background: 'rgba(180, 180, 180, 0.8)',
+            borderBottomLeftRadius: 0,
+            borderTopLeftRadius: 0,
+          }}
+          isConnectable={isConnectable}
+        />{' '}
+        <div className="flex-1">
           {name}
           {isCustomApp ? ' (edited)' : ''}
         </div>
@@ -82,48 +99,33 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
             },
           ]}
         />
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="next"
+          style={{
+            position: 'relative',
+            transform: 'none',
+            width: 20,
+            height: 20,
+            right: 0,
+            top: 0,
+            background: 'rgba(200, 200, 200, 0.8)',
+            borderBottomLeftRadius: 0,
+            borderTopLeftRadius: 0,
+          }}
+          isConnectable={isConnectable}
+        />
       </div>
-      <div className="p-1">
-        <div className="flex justify-between px-1 py-1">
-          <Handle
-            type="target"
-            position={Position.Left}
-            id="prev"
-            style={{
-              position: 'relative',
-              transform: 'none',
-              left: 0,
-              top: 0,
-              background: 'white',
-              borderBottomLeftRadius: 0,
-              borderTopLeftRadius: 0,
-            }}
-            isConnectable={isConnectable}
-          />
-          <Handle
-            type="source"
-            position={Position.Right}
-            id="next"
-            style={{
-              position: 'relative',
-              transform: 'none',
-              right: 0,
-              top: 0,
-              background: '#cccccc',
-              borderBottomLeftRadius: 0,
-              borderTopLeftRadius: 0,
-            }}
-            isConnectable={isConnectable}
-          />
+      {configJsonError !== null ? (
+        <div className="text-red-400 p-1">
+          Error parsing config.json:
+          <br />
+          {configJsonError}
         </div>
-        {configJsonError !== null ? (
-          <div className="text-red-400">
-            Error parsing config.json:
-            <br />
-            {configJsonError}
-          </div>
-        ) : null}
-        {fields ? (
+      ) : null}
+      {fields && fields.length > 0 ? (
+        <div className="p-1">
           <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5 w-full">
             <tbody>
               {fields.map((field, i) => (
@@ -249,6 +251,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                               right: 0,
                               top: 0,
                               background: '#cccccc',
+                              borderBottomLeftRadius: 0,
+                              borderTopLeftRadius: 0,
                             }}
                             isConnectable={isConnectable}
                           />
@@ -267,8 +271,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
               ))}
             </tbody>
           </table>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   )
 }
