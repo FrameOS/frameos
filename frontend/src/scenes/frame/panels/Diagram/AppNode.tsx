@@ -251,6 +251,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                               right: 0,
                               top: 0,
                               background: '#cccccc',
+                              borderBottomLeftRadius: 0,
+                              borderTopLeftRadius: 0,
                             }}
                             isConnectable={isConnectable}
                           />
