@@ -55,6 +55,7 @@ VARIANT_COLORS = {
 
     "EPD_10in2b": "Black", # and red
     "EPD_12in48": "Black",
+    "EPD_12in48b": "BlackWhiteRed",
 
     "EPD_4in01f": "SevenColor",
     "EPD_7in3f": "SevenColor",
