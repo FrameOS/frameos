@@ -18,12 +18,12 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
     { panel: Panel.Events, active: false, hidden: false },
     { panel: Panel.Templates, active: false, hidden: false },
     { panel: Panel.SceneState, active: false, hidden: false },
-    { panel: Panel.FrameDetails, active: false, hidden: false },
     { panel: Panel.FrameSettings, active: false, hidden: false },
     { panel: Panel.Control, active: false, hidden: false },
   ],
   [Area.BottomLeft]: [
     { panel: Panel.Logs, active: true, hidden: false },
+    { panel: Panel.FrameDetails, active: false, hidden: false },
     { panel: Panel.Metrics, active: false, hidden: false },
     { panel: Panel.Terminal, active: false, hidden: false },
     { panel: Panel.Debug, active: false, hidden: false },
@@ -114,9 +114,7 @@ export const panelsLogic = kea<panelsLogicType>([
               ],
         }),
         openTemplates: (state, _) => ({
-          ...(Object.fromEntries(
-            Object.entries(state).map(([k, v]) => [k, v.map((p) => (p.active ? { ...p, active: false } : p))])
-          ) as Record<Area, PanelWithMetadata[]>),
+          ...state,
           [Area.TopRight]: state[Area.TopRight].map((a) =>
             a.panel === Panel.Templates ? { ...a, active: true } : a.active ? { ...a, active: false } : a
           ),
@@ -153,11 +151,27 @@ export const panelsLogic = kea<panelsLogicType>([
   }),
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
-    panelsWithConditions: [
+    diagramOpen: [
       (s) => [s.panels, s.fullScreenPanel],
-      (panels, fullScreenPanel): Record<Area, PanelWithMetadata[]> => {
+      (panels, fullScreenPanel): boolean =>
+        fullScreenPanel?.panel === Panel.Diagram ||
+        !!panels[Area.TopLeft].find(
+          (p) => p.panel === Panel.Diagram && (p.active || panels[Area.TopLeft].length === 1)
+        ),
+    ],
+    panelsWithConditions: [
+      (s) => [s.panels, s.fullScreenPanel, s.diagramOpen],
+      (panels, fullScreenPanel, diagramOpen): Record<Area, PanelWithMetadata[]> => {
         if (!fullScreenPanel) {
-          return panels
+          return {
+            ...panels,
+            [Area.TopRight]: panels[Area.TopRight].filter((p) =>
+              diagramOpen ? p.panel !== Panel.Templates : p.panel !== Panel.Apps && p.panel !== Panel.Events
+            ),
+            [Area.BottomLeft]: panels[Area.BottomLeft].filter((p) =>
+              diagramOpen ? true : p.panel !== Panel.SceneSource
+            ),
+          }
         }
         // we keep the full screen panel in the same area to not lose any mounted focus
         const topLeft = panels.TopLeft.filter((p) => panelsEqual(p, fullScreenPanel))
@@ -218,13 +232,9 @@ export const panelsLogic = kea<panelsLogicType>([
     },
   })),
   afterMount(({ values, actions }) => {
-    if (values.defaultScene) {
-      actions.editScene(values.defaultScene)
-    } else {
-      const scenesPanel = values.panels[Area.TopRight].find((p) => p.panel === Panel.Scenes)
-      if (scenesPanel) {
-        actions.setPanel(Area.TopRight, scenesPanel)
-      }
+    const scenesPanel = values.panels[Area.TopRight].find((p) => p.panel === Panel.Scenes)
+    if (scenesPanel) {
+      actions.setPanel(Area.TopRight, scenesPanel)
     }
   }),
 ])

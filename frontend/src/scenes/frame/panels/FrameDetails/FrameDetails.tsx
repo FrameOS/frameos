@@ -21,7 +21,7 @@ export function FrameDetails({ className }: DetailsProps) {
         `Loading frame ${frameId}...`
       ) : (
         <>
-          <table className="w-full border-separate border-spacing-x-1 border-spacing-y-0.5">
+          <table className="max-w-full border-separate border-spacing-x-1 border-spacing-y-0.5">
             <tbody>
               <tr>
                 <td className="text-blue-200 text-right max-w-[200px]">Name:</td>
@@ -29,7 +29,7 @@ export function FrameDetails({ className }: DetailsProps) {
               </tr>
               <tr>
                 <td className="text-blue-200 text-right">Frame URL:</td>
-                <td className="truncate max-w-0">
+                <td className="truncate">
                   {url ? (
                     <a href={url} target="_blank" rel="noreferer noopener">
                       {url}
@@ -41,7 +41,7 @@ export function FrameDetails({ className }: DetailsProps) {
               </tr>
               <tr>
                 <td className="text-blue-200 text-right">Control URL:</td>
-                <td className="truncate max-w-0">
+                <td className="truncate">
                   {controlUrl ? (
                     <a href={controlUrl} target="_blank" rel="noreferer noopener">
                       {controlUrl}
@@ -152,4 +152,8 @@ export function FrameDetails({ className }: DetailsProps) {
       )}
     </div>
   )
+}
+
+FrameDetails.PanelTitle = function FrameDetailsPanelTitle(): JSX.Element {
+  return <>Details</>
 }

@@ -32,3 +32,4 @@ dist-ssr
 
 # Nim
 frameos/tmp/
+e2e/tmp/

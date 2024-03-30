@@ -47,7 +47,7 @@ export function Scenes() {
     <div className="space-y-4">
       <div className="space-y-2">
         <div className="flex justify-between w-full items-center">
-          <H6>Scenes on this frame</H6>
+          <H6>Installed scenes</H6>
           <DropdownMenu
             buttonColor="secondary"
             className="mr-3"

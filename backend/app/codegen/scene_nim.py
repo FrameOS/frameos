@@ -403,9 +403,9 @@ def sanitize_nim_field(key, type, value, field_inputs_for_node, node_fields_for_
 
 
 def write_scenes_nim(frame: Frame) -> str:
-    rows = ""
-    imports = ""
-    sceneOptionTuples = ""
+    rows = []
+    imports = []
+    sceneOptionTuples = []
     default_scene = None
     for scene in frame.scenes:
         if default_scene is None:
@@ -416,27 +416,28 @@ def write_scenes_nim(frame: Frame) -> str:
         scene_id = scene.get('id', 'default')
         scene_id = re.sub(r'[^a-zA-Z0-9\-\_]', '_', scene_id)
         scene_id_import = re.sub(r'\W+', '', scene_id)
-        imports += f"import scenes/scene_{scene_id_import} as scene_{scene_id_import}\n"
-        rows += f"  result[\"{scene_id}\".SceneId] = scene_{scene_id_import}.exportedScene\n"
-        sceneOptionTuples += f"  (\"{scene_id}\".SceneId, \"{scene.get('name', 'Default')}\"),"
+        imports.append(f"import scenes/scene_{scene_id_import} as scene_{scene_id_import}")
+        rows.append(f"  result[\"{scene_id}\".SceneId] = scene_{scene_id_import}.exportedScene")
+        sceneOptionTuples.append(f"  (\"{scene_id}\".SceneId, \"{scene.get('name', 'Default')}\"),")
 
     default_scene_id = default_scene.get('id', 'default')
     default_scene_id = re.sub(r'[^a-zA-Z0-9\-\_]', '_', default_scene_id)
+    newline = "\n"
 
     scenes_source = f"""
 import frameos/types
 import tables
-{imports}
+{newline.join(sorted(imports))}
 
 let defaultSceneId* = "{default_scene_id}".SceneId
 
 const sceneOptions* = [
-{sceneOptionTuples}
+{newline.join(sorted(sceneOptionTuples))}
 ]
 
 proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result = initTable[SceneId, ExportedScene]()
-{rows}
+{newline.join(sorted(rows))}
 """
 
     return scenes_source
