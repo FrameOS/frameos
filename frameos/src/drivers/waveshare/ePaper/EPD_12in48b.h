@@ -32,15 +32,15 @@
 
 #include "DEV_Config.h"
 
-// Display resolution
+
 #define EPD_12in48B_MAX_WIDTH       1304
 #define EPD_12in48B_MAX_HEIGHT      984
 
 #define EPD_12in48B_M1_WIDTH       648
 #define EPD_12in48B_M1_HEIGHT      (EPD_MAX_HEIGHT / 2)
-#define EPD_12in48B_S1_WIDTH       (EPD_12in48B_MAX_WIDTH - 648)    //656
+#define EPD_12in48B_S1_WIDTH       (EPD_12in48B_MAX_WIDTH - 648)    
 #define EPD_12in48B_S1_HEIGHT      (EPD_MAX_HEIGHT / 2)
-#define EPD_12in48B_M2_WIDTH       (EPD_12in48B_MAX_WIDTH - 648)    //656
+#define EPD_12in48B_M2_WIDTH       (EPD_12in48B_MAX_WIDTH - 648)    
 #define EPD_12in48B_M2_HEIGHT      (EPD_MAX_HEIGHT / 2)
 #define EPD_12in48B_S2_WIDTH       648
 #define EPD_12in48B_S2_HEIGHT      (EPD_MAX_HEIGHT / 2)
