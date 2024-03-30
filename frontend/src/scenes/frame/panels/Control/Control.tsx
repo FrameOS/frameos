@@ -49,7 +49,7 @@ export function Control(): JSX.Element {
       </div>
 
       <div className="flex justify-between w-full items-center gap-2 mb-2">
-        <H6>Active scene's state:</H6>
+        <H6>Control the active scene:</H6>
         <Tooltip
           title={
             <>
@@ -73,12 +73,10 @@ export function Control(): JSX.Element {
           {scene?.fields?.map((field) => (
             <div className="bg-gray-900 p-2 space-y-2">
               <div className="flex items-center w-full gap-2">
-                <div>
-                  {field.label || field.name}
-                  {field.name in stateChanges && stateChanges[field.name] !== (state[field.name] ?? field.value)
-                    ? ' (modified)'
-                    : ''}
-                </div>
+                {field.label || field.name}
+                {field.name in stateChanges && stateChanges[field.name] !== (state[field.name] ?? field.value)
+                  ? ' (modified)'
+                  : ''}
                 {field.access !== 'public' ? (
                   <Tooltip title="This is a private field whose state is not shared externally" />
                 ) : null}
@@ -118,17 +116,7 @@ export function Control(): JSX.Element {
                   </Field>
                 )}
               </div>
-              <div className="flex items-center gap-1">
-                <ClipboardDocumentIcon
-                  className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block"
-                  onClick={() =>
-                    copy(`state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`)
-                  }
-                />
-                <code className="text-sm text-gray-400 break-words">{`state{"${field.name}"}${
-                  fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
-                }`}</code>
-              </div>
+              <div className="flex items-center gap-1"></div>
             </div>
           ))}
           {fieldCount > 0 ? (
