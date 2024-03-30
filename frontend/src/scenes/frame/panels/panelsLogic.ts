@@ -114,9 +114,7 @@ export const panelsLogic = kea<panelsLogicType>([
               ],
         }),
         openTemplates: (state, _) => ({
-          ...(Object.fromEntries(
-            Object.entries(state).map(([k, v]) => [k, v.map((p) => (p.active ? { ...p, active: false } : p))])
-          ) as Record<Area, PanelWithMetadata[]>),
+          ...state,
           [Area.TopRight]: state[Area.TopRight].map((a) =>
             a.panel === Panel.Templates ? { ...a, active: true } : a.active ? { ...a, active: false } : a
           ),

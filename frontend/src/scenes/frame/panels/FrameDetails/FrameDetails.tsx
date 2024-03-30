@@ -155,5 +155,5 @@ export function FrameDetails({ className }: DetailsProps) {
 }
 
 FrameDetails.PanelTitle = function FrameDetailsPanelTitle(): JSX.Element {
-  return <>Info</>
+  return <>Details</>
 }
