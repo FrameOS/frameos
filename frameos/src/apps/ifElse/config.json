@@ -13,12 +13,12 @@
             "required": true
         },
         {
-            "label": "Then",
+            "label": "Truthy",
             "name": "thenNode",
             "type": "node"
         },
         {
-            "label": "Else",
+            "label": "Falsy",
             "name": "elseNode",
             "type": "node"
         }

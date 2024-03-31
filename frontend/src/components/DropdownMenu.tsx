@@ -1,5 +1,5 @@
 import { Menu, Transition } from '@headlessui/react'
-import { EllipsisVerticalIcon } from '@heroicons/react/24/solid'
+import { EllipsisHorizontalIcon, EllipsisVerticalIcon } from '@heroicons/react/24/solid'
 import ReactDOM from 'react-dom'
 import React, { useState } from 'react'
 import { usePopper } from 'react-popper'
@@ -18,9 +18,10 @@ export interface DropdownMenuProps {
   items: DropdownMenuItem[]
   className?: string
   buttonColor?: ButtonProps['color']
+  horizontal?: boolean
 }
 
-export function DropdownMenu({ items, className, buttonColor: _buttonColor }: DropdownMenuProps) {
+export function DropdownMenu({ items, className, horizontal, buttonColor: _buttonColor }: DropdownMenuProps) {
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
   const { styles, attributes } = usePopper(referenceElement, popperElement, { strategy: 'fixed' })
@@ -37,7 +38,11 @@ export function DropdownMenu({ items, className, buttonColor: _buttonColor }: Dr
               className
             )}
           >
-            <EllipsisVerticalIcon className="w-5 h-5" aria-label="Menu" />
+            {horizontal ? (
+              <EllipsisHorizontalIcon className="w-5 h-5" aria-label="Menu" />
+            ) : (
+              <EllipsisVerticalIcon className="w-5 h-5" aria-label="Menu" />
+            )}
           </Menu.Button>
           {ReactDOM.createPortal(
             <Transition

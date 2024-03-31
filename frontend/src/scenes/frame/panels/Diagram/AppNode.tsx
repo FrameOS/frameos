@@ -76,7 +76,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
         </div>
         <DropdownMenu
           className="w-fit"
-          buttonColor={isDispatch && !isSelected ? 'red' : 'primary'}
+          buttonColor="none"
+          horizontal
           items={[
             ...(isDispatch
               ? []
@@ -139,20 +140,22 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                   ) : (
                     <tr>
                       <td>
-                        <Handle
-                          type="target"
-                          position={Position.Left}
-                          id={`fieldInput/${field.name}`}
-                          style={{
-                            position: 'relative',
-                            transform: 'none',
-                            left: 0,
-                            top: 0,
-                            background: 'black',
-                            borderColor: 'white',
-                          }}
-                          isConnectable
-                        />
+                        {field.type !== 'node' ? (
+                          <Handle
+                            type="target"
+                            position={Position.Left}
+                            id={`fieldInput/${field.name}`}
+                            style={{
+                              position: 'relative',
+                              transform: 'none',
+                              left: 0,
+                              top: 0,
+                              background: 'black',
+                              borderColor: 'white',
+                            }}
+                            isConnectable
+                          />
+                        ) : null}
                       </td>
                       <td
                         className={clsx(

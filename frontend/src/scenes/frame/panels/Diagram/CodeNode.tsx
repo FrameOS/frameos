@@ -29,7 +29,7 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
           : 'bg-black bg-opacity-70 border-sky-900 shadow-sky-700/50 '
       )}
     >
-      <NodeResizer minWidth={300} minHeight={130} />
+      <NodeResizer minWidth={200} minHeight={130} />
       <div
         className={clsx(
           'frameos-node-title text-xl p-1 gap-1',
@@ -38,55 +38,49 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
         )}
       >
         <div>{targetFunction ?? 'Custom code'}</div>
-        <DropdownMenu
-          className="w-fit"
-          items={[
-            {
-              label: 'Copy as JSON',
-              onClick: () => copyAppJSON(id),
-              icon: <ClipboardDocumentIcon className="w-5 h-5" />,
-            },
-            {
-              label: 'Delete Node',
-              onClick: () => deleteApp(id),
-              icon: <TrashIcon className="w-5 h-5" />,
-            },
-          ]}
-        />
+        <div className="flex gap-1 items-center">
+          <DropdownMenu
+            className="w-fit"
+            buttonColor="none"
+            horizontal
+            items={[
+              {
+                label: 'Copy as JSON',
+                onClick: () => copyAppJSON(id),
+                icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Delete Node',
+                onClick: () => deleteApp(id),
+                icon: <TrashIcon className="w-5 h-5" />,
+              },
+            ]}
+          />
+          <Handle
+            type="source"
+            position={Position.Right}
+            id={`fieldOutput`}
+            style={{
+              position: 'relative',
+              transform: 'none',
+              right: 0,
+              top: 0,
+              background: 'black',
+              borderColor: 'white',
+            }}
+            isConnectable={isConnectable}
+          />
+        </div>
       </div>
       <div className="p-1 h-full">
-        <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5 h-full w-full">
-          <tbody>
-            <tr>
-              <td className="cursor-text">
-                <TextArea
-                  theme="node"
-                  className="w-full h-full font-mono"
-                  placeholder={`&"{context.image.width} x {state{"magic3"}.getStr()}"`}
-                  value={data.code ?? ''}
-                  rows={3}
-                  onChange={(value) => updateNodeData(id, { code: value.replaceAll('\n', '') })}
-                />
-              </td>
-              <td className="w-0">
-                <Handle
-                  type="source"
-                  position={Position.Right}
-                  id={`fieldOutput`}
-                  style={{
-                    position: 'relative',
-                    transform: 'none',
-                    right: 0,
-                    top: 0,
-                    background: 'black',
-                    borderColor: 'white',
-                  }}
-                  isConnectable={isConnectable}
-                />
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <TextArea
+          theme="node"
+          className="w-full h-full font-mono resize-none"
+          placeholder={`&"{context.image.width} x {state{"magic3"}.getStr()}"`}
+          value={data.code ?? ''}
+          rows={3}
+          onChange={(value) => updateNodeData(id, { code: value.replaceAll('\n', '') })}
+        />
       </div>
     </div>
   )
