@@ -54,6 +54,7 @@ VARIANT_COLORS = {
     "EPD_13in3k": "Black",
 
     "EPD_10in2b": "Black", # and red
+    "EPD_12in48": "Black",
 
     "EPD_4in01f": "SevenColor",
     "EPD_7in3f": "SevenColor",
@@ -122,11 +123,18 @@ def convert_waveshare_source(variant_key: str) -> WaveshareVariant:
                 lines.append(line)
 
         for line in lines:
-            if "_WIDTH* = " in line:
-                variant.width = int(line.split(" = ")[1].strip())
-                variant.prefix = line.split("_WIDTH")[0].strip() # this is always the first and before any proc
-            if "_HEIGHT* = " in line:
-                variant.height = int(line.split(" = ")[1].strip())
+            if variant.width is None:
+                if "_MAX_WIDTH* = " in line:
+                    variant.width = int(line.split(" = ")[1].strip())
+                    variant.prefix = line.split("_MAX_WIDTH")[0].strip() # this is always the first and before any proc
+                elif "_WIDTH* = " in line:
+                    variant.width = int(line.split(" = ")[1].strip())
+                    variant.prefix = line.split("_WIDTH")[0].strip() # this is always the first and before any proc
+            if variant.height is None:
+                if "_MAX_HEIGHT* = " in line:
+                    variant.height = int(line.split(" = ")[1].strip())
+                elif "_HEIGHT* = " in line:
+                    variant.height = int(line.split(" = ")[1].strip())
             if line.startswith("proc"):
                 proc_name = line.split("*(")[0].split(" ")[1]
                 if proc_name.lower() == f"{variant.prefix}_Init".lower() and variant.init_function is None:
@@ -177,6 +185,7 @@ def write_waveshare_driver_nim(drivers: dict[str, Driver]) -> str:
         raise Exception("No waveshare driver found")
 
     variant = convert_waveshare_source(driver.variant)
+
     color_warning = ""
     if variant.color_option == "Unknown":
         color_warning = "\n\n# NOTE! We could not detect the correct color options. Assuming 1-bit Black.\n\n"

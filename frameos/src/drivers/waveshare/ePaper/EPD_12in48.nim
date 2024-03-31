@@ -1,14 +1,13 @@
-{.compile: "EPD_2in13_V3.c".}
+{.compile: "EPD_12in48.c".}
 ## ***************************************************************************
-##  | File      	:   EPD_2Iin13_V3.h
+##  | File      	:	EPD_12in48.h
 ##  | Author      :   Waveshare team
-##  | Function    :   2.13inch e-paper V3
+##  | Function    :   Electronic paper driver
 ##  | Info        :
 ## ----------------
-##  |	This version:   V1.1
-##  | Date        :   2021-10-30
+##  |	This version:   V1.0
+##  | Date        :   2018-11-29
 ##  | Info        :
-##  -----------------------------------------------------------------------------
 ## #
 ## # Permission is hereby granted, free of charge, to any person obtaining a copy
 ## # of this software and associated documnetation files (the "Software"), to deal
@@ -34,14 +33,19 @@ import
   DEV_Config
 
 const
-  EPD_2in13_V3_WIDTH* = 122
-  EPD_2in13_V3_HEIGHT* = 250
+  EPD_12in48_MAX_WIDTH* = 1304
+  EPD_12in48_MAX_HEIGHT* = 984
+  EPD_12in48_M1_WIDTH* = 648
+  EPD_12in48_M1_HEIGHT* = (EPD_MAX_HEIGHT div 2)
+  EPD_12in48_S1_WIDTH* = (EPD_MAX_WIDTH - 648)
+  EPD_12in48_S1_HEIGHT* = (EPD_MAX_HEIGHT div 2)
+  EPD_12in48_M2_WIDTH* = (EPD_MAX_WIDTH - 648)
+  EPD_12in48_M2_HEIGHT* = (EPD_MAX_HEIGHT div 2)
+  EPD_12in48_S2_WIDTH* = 648
+  EPD_12in48_S2_HEIGHT* = (EPD_MAX_HEIGHT div 2)
 
-proc EPD_2in13_V3_Init*() {.importc: "EPD_2in13_V3_Init".}
-proc EPD_2in13_V3_Clear*() {.importc: "EPD_2in13_V3_Clear".}
-proc EPD_2in13_V3_Display*(Image: ptr UBYTE) {.importc: "EPD_2in13_V3_Display".}
-proc EPD_2in13_V3_Display_Base*(Image: ptr UBYTE) {.
-    importc: "EPD_2in13_V3_Display_Base".}
-proc EPD_2in13_V3_Display_Partial*(Image: ptr UBYTE) {.
-    importc: "EPD_2in13_V3_Display_Partial".}
-proc EPD_2in13_V3_Sleep*() {.importc: "EPD_2in13_V3_Sleep".}
+proc EPD_12in48_Init*(): UBYTE {.importc: "EPD_12in48_Init".}
+proc EPD_12in48_Clear*() {.importc: "EPD_12in48_Clear".}
+proc EPD_12in48_Display*(Image: ptr UBYTE) {.importc: "EPD_12in48_Display".}
+proc EPD_12in48_TurnOnDisplay*() {.importc: "EPD_12in48_TurnOnDisplay".}
+proc EPD_12in48_Sleep*() {.importc: "EPD_12in48_Sleep".}
