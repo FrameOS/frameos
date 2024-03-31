@@ -8,7 +8,6 @@ import ReactFlow, {
   NodeProps,
   OnConnectStartParams,
 } from 'reactflow'
-import type { Node } from '@reactflow/core/dist/esm/types/nodes'
 import { frameLogic } from '../../frameLogic'
 import {
   MouseEvent as ReactMouseEvent,
