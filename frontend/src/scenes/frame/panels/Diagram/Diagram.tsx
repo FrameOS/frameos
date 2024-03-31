@@ -7,6 +7,7 @@ import ReactFlow, {
   Connection,
   NodeProps,
   OnConnectStartParams,
+  EdgeProps,
 } from 'reactflow'
 import { frameLogic } from '../../frameLogic'
 import {
@@ -23,12 +24,13 @@ import { EventNode } from './EventNode'
 import { Button, buttonColor, buttonSize } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { v4 as uuidv4 } from 'uuid'
-import { DiagramNode, NodeType } from '../../../../types'
+import { DiagramNode, NodeType, EdgeType } from '../../../../types'
 import { AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
 import { Tooltip } from '../../../../components/Tooltip'
 import { SceneSettings } from '../Scenes/SceneSettings'
 import { ZoomOutArea } from '../../../../icons/ZoomOutArea'
 import clsx from 'clsx'
+import CustomEdge from './CustomEdge'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -36,6 +38,10 @@ const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   dispatch: AppNode,
   code: CodeNode,
   event: EventNode,
+}
+
+const edgeTypes: Record<EdgeType, (props: EdgeProps) => JSX.Element> = {
+  edge: CustomEdge,
 }
 
 interface DiagramProps {
@@ -164,6 +170,7 @@ export function Diagram({ sceneId }: DiagramProps) {
           maxZoom={4}
           proOptions={{ hideAttribution: true }}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
         >
           <Background id="1" gap={24} color="#cccccc" variant={BackgroundVariant.Dots} />
           <div className="absolute top-1 right-1 z-10 flex gap-2">
