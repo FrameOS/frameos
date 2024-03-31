@@ -37,6 +37,7 @@ export const diagramLogic = kea<diagramLogicType>([
     addEdge: (edge: Edge | Connection) => ({ edge }),
     onNodesChange: (changes: NodeChange[]) => ({ changes }),
     onEdgesChange: (changes: EdgeChange[]) => ({ changes }),
+    selectNode: (nodeId: string) => ({ nodeId }),
     deselectNode: true,
     rearrangeCurrentScene: true,
     fitDiagramView: true,
@@ -54,6 +55,12 @@ export const diagramLogic = kea<diagramLogicType>([
         onNodesChange: (state, { changes }) => {
           const newNodes = applyNodeChanges(changes, state)
           return equal(state, newNodes) ? state : (newNodes as DiagramNode[])
+        },
+        selectNode: (state, { nodeId }) => {
+          const newNodes = state.map((node) =>
+            node.id === nodeId ? { ...node, selected: true } : node.selected ? { ...node, selected: false } : node
+          )
+          return equal(state, newNodes) ? state : newNodes
         },
         deselectNode: (state) => {
           const newNodes = state.map((node) => ({ ...node, selected: false }))

@@ -19,12 +19,23 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
   const { updateNodeConfig, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const { editApp } = useActions(panelsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { isDispatch, name, fields, isCustomApp, configJsonError, isSelected, codeFields, fieldInputFields } =
-    useValues(appNodeLogic(appNodeLogicProps))
+  const {
+    isDispatch,
+    name,
+    fields,
+    isCustomApp,
+    configJsonError,
+    isSelected,
+    codeFields,
+    fieldInputFields,
+    fieldOutputFields,
+  } = useValues(appNodeLogic(appNodeLogicProps))
+  const { select } = useActions(appNodeLogic(appNodeLogicProps))
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
 
   return (
     <div
+      onClick={select}
       className={clsx(
         'shadow-lg border-2',
         isSelected
@@ -152,11 +163,13 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                           'font-sm text-indigo-200',
                           field.type === 'node' ||
                             codeFields.includes(field.name) ||
-                            fieldInputFields.includes(field.name)
+                            fieldInputFields.includes(field.name) ||
+                            fieldOutputFields.includes(field.name)
                             ? 'w-full'
                             : '',
                           codeFields.includes(field.name) ||
                             fieldInputFields.includes(field.name) ||
+                            fieldOutputFields.includes(field.name) ||
                             (field.name in data.config && data.config[field.name] !== field.value)
                             ? 'underline font-bold'
                             : ''
