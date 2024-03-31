@@ -21,13 +21,15 @@ import {
 import { AppNode } from './AppNode'
 import { CodeNode } from './CodeNode'
 import { EventNode } from './EventNode'
-import { Button } from '../../../../components/Button'
+import { Button, buttonColor, buttonSize } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { v4 as uuidv4 } from 'uuid'
 import { DiagramNode, NodeType } from '../../../../types'
-import { AdjustmentsHorizontalIcon, MagnifyingGlassMinusIcon } from '@heroicons/react/24/outline'
+import { AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
 import { Tooltip } from '../../../../components/Tooltip'
 import { SceneSettings } from '../Scenes/SceneSettings'
+import { ZoomOutArea } from '../../../../icons/ZoomOutArea'
+import clsx from 'clsx'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -167,12 +169,14 @@ export function Diagram({ sceneId }: DiagramProps) {
           <Background id="1" gap={24} color="#cccccc" variant={BackgroundVariant.Dots} />
           <div className="absolute top-1 right-1 z-10 flex gap-2">
             <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
-              <MagnifyingGlassMinusIcon className="w-5 h-5" />
+              <ZoomOutArea className="w-5 h-5" />
             </Button>
-            <Tooltip tooltipColor="gray" title={<SceneSettings sceneId={sceneId} />}>
-              <Button size="tiny" title="Scene Settings" color="secondary">
-                <AdjustmentsHorizontalIcon className="w-5 h-5" />
-              </Button>
+            <Tooltip
+              tooltipColor="gray"
+              className={clsx(buttonSize('tiny'), buttonColor('secondary'))}
+              title={<SceneSettings sceneId={sceneId} />}
+            >
+              <AdjustmentsHorizontalIcon className="w-5 h-5" />
             </Tooltip>
           </div>
         </ReactFlow>
