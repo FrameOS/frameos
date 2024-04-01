@@ -51,7 +51,7 @@ const
 
 proc EPD_12in48B_Init*() {.importc: "EPD_12in48B_Init".}
 proc EPD_12in48B_Clear*() {.importc: "EPD_12in48B_Clear".}
-proc EPD_12in48B_Display*(Image: ptr UBYTE; RedImage: ptr UBYTE) {.
+proc EPD_12in48B_Display*(BlackImage: ptr UBYTE; RedImage: ptr UBYTE) {.
     importc: "EPD_12in48B_Display".}
 proc EPD_12in48B_TurnOnDisplay*() {.importc: "EPD_12in48B_TurnOnDisplay".}
 proc EPD_12in48B_Sleep*() {.importc: "EPD_12in48B_Sleep".}

@@ -49,7 +49,7 @@ const
 
 proc EPD_12in48_Init*() {.importc: "EPD_12in48_Init".}
 proc EPD_12in48_Clear*() {.importc: "EPD_12in48_Clear".}
-proc EPD_12in48_Display*(Image: ptr UBYTE; RedImage: ptr UBYTE) {.
+proc EPD_12in48_Display*(Image: ptr UBYTE) {.
     importc: "EPD_12in48_Display".}
 
 proc EPD_12in48_Sleep*() {.importc: "EPD_12in48_Sleep".}
