@@ -9,7 +9,7 @@
 * | Info        :
 *----------------
 * Version   : V1.1
-* Date      : 2022-09-13 
+* Date      : 2022-09-13
 * Log       : Added support for V2
 *----------------
 #
@@ -35,7 +35,7 @@
 #include "EPD_12in48b.h"
 #include "Debug.h"
 
-extern int Version;
+// extern int Version;
 
 static void EPD_Reset(void);
 static void EPD_M1_SendCommand(UBYTE Reg);
@@ -154,7 +154,7 @@ UBYTE EPD_12in48B_Init(void)
         EPD_M1_SendData(0x1c);
         EPD_M2_SendCommand(0x82);
         EPD_M2_SendData(0x1c);
-        
+
         EPD_SetLut();
     }
     else if(Version == 2) {
@@ -167,7 +167,7 @@ UBYTE EPD_12in48B_Init(void)
         // EPD_M2_SendData(0x07);
         // EPD_S2_SendCommand(0x00);
         // EPD_S2_SendData(0x07);
-        
+
         // panel setting for Display
         EPD_M1_SendCommand(0x00);
         EPD_M1_SendData(0x0f);  //KW-3f   KWR-2F    BWROTP 0f   BWOTP 1f
@@ -224,7 +224,7 @@ UBYTE EPD_12in48B_Init(void)
 
         EPD_M1S1M2S2_SendCommand(0xE3);
         EPD_M1S1M2S2_SendData(0x00);
-        
+
         EPD_M1_ReadTemperature();
     }
     return 0;
@@ -340,7 +340,7 @@ void EPD_12in48B_Display(const UBYTE *BlackImage, const UBYTE *RedImage)
         for(x = 81; x < 163; x++) {
             EPD_S1_SendData(~*(RedImage + (y*163 + x)));
         }
-        
+
     //M1 part 648*492
     EPD_M1_SendCommand(0x10);
     for(y = 492; y < 984; y++)
@@ -537,7 +537,7 @@ static void EPD_M1_ReadBusy(void)
     } while(0);
     Debug("M1 Busy free\r\n");
     DEV_Delay_ms(200);
-    
+
 }
 static void EPD_M2_ReadBusy(void)
 {

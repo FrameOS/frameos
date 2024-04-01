@@ -33,6 +33,8 @@
 int GPIO_Handle;
 int SPI_Handle;
 
+SOFTWARE_SPI software_spi;
+
 /**
  * GPIO
  **/
@@ -41,22 +43,6 @@ int EPD_DC_PIN;
 int EPD_CS_PIN;
 int EPD_BUSY_PIN;
 int EPD_PWR_PIN;
-
-UWORD EPD_M1_CS_PIN;
-UWORD EPD_S1_CS_PIN;
-UWORD EPD_M2_CS_PIN;
-UWORD EPD_S2_CS_PIN;
-
-UWORD EPD_M1S1_DC_PIN;
-UWORD EPD_M2S2_DC_PIN;
-
-UWORD EPD_M1S1_RST_PIN;
-UWORD EPD_M2S2_RST_PIN;
-
-UWORD EPD_M1_BUSY_PIN;
-UWORD EPD_S1_BUSY_PIN;
-UWORD EPD_M2_BUSY_PIN;
-UWORD EPD_S2_BUSY_PIN;
 
 /**
  * GPIO read and write
@@ -86,6 +72,32 @@ void DEV_SPI_Write_nByte(uint8_t *pData, uint32_t Len)
     lgSpiWrite(SPI_Handle, (char *)pData, Len);
 }
 
+UBYTE DEV_SPI_ReadByte(UBYTE Reg)
+{
+  unsigned char i, j;
+  // set mosi pin intput
+  DEV_GPIO_Mode(software_spi.MOSI_PIN, 0);
+  j = 0;
+  DEV_Delay_us(5);
+  for (i = 0; i < 8; i++)
+  {
+    DEV_Digital_Write(software_spi.SCLK_PIN, 0);
+    DEV_Delay_us(10);
+    j = j << 1;
+    if (DEV_Digital_Read(software_spi.MOSI_PIN) == 1)
+      j |= 0x01;
+    else
+      j &= 0xfe;
+    DEV_Delay_us(10);
+    DEV_Digital_Write(software_spi.SCLK_PIN, 1);
+    DEV_Delay_us(10);
+  }
+
+  // set mosi pin output
+  DEV_GPIO_Mode(software_spi.MOSI_PIN, 1);
+  return j;
+}
+
 /**
  * GPIO Mode
  **/
@@ -101,6 +113,21 @@ void DEV_GPIO_Mode(UWORD Pin, UWORD Mode)
         lgGpioClaimOutput(GPIO_Handle, LFLAGS, Pin, LG_LOW);
         // printf("OUT Pin = %d\r\n",Pin);
     }
+}
+/******************************************************************************
+function:	Microsecond delay
+parameter:
+Info:
+******************************************************************************/
+void DEV_Delay_us(UWORD xus)
+{
+  UWORD i;
+  while (xus)
+  {
+    for (i = 0; i < software_spi.Clock; i++)
+      ;
+    xus--;
+  }
 }
 
 /**
@@ -211,6 +238,12 @@ UBYTE DEV_Module_Init(void)
         }
     }
     SPI_Handle = lgSpiOpen(0, 0, 10000000, 0);
+    software_spi.SCLK_PIN = EPD_SCK_PIN;
+    software_spi.MOSI_PIN = EPD_MOSI_PIN;
+    software_spi.Mode = Mode0;
+    software_spi.Type = Master;
+    software_spi.Clock = 10;
+
     DEV_GPIO_Init();
     return 0;
 }

@@ -76,21 +76,55 @@ extern int EPD_CS_PIN;
 extern int EPD_BUSY_PIN;
 extern int EPD_PWR_PIN;
 
-extern UWORD EPD_M1_CS_PIN;
-extern UWORD EPD_S1_CS_PIN;
-extern UWORD EPD_M2_CS_PIN;
-extern UWORD EPD_S2_CS_PIN;
+#define EPD_SCK_PIN  11
+#define EPD_MOSI_PIN  10
 
-extern UWORD EPD_M1S1_DC_PIN;
-extern UWORD EPD_M2S2_DC_PIN;
+#define EPD_M1_CS_PIN  8
+#define EPD_S1_CS_PIN  7
+#define EPD_M2_CS_PIN  17
+#define EPD_S2_CS_PIN  18
 
-extern UWORD EPD_M1S1_RST_PIN;
-extern UWORD EPD_M2S2_RST_PIN;
+#define EPD_M1S1_DC_PIN  13
+#define EPD_M2S2_DC_PIN  22
 
-extern UWORD EPD_M1_BUSY_PIN;
-extern UWORD EPD_S1_BUSY_PIN;
-extern UWORD EPD_M2_BUSY_PIN;
-extern UWORD EPD_S2_BUSY_PIN;
+#define EPD_M1S1_RST_PIN 6
+#define EPD_M2S2_RST_PIN 23
+
+#define EPD_M1_BUSY_PIN  5
+#define EPD_S1_BUSY_PIN  19
+#define EPD_M2_BUSY_PIN  27
+#define EPD_S2_BUSY_PIN  24
+
+/**
+ * SPI communication mode
+**/
+typedef enum {
+    Mode0,   /* Clock Polarity is 0 and Clock Phase is 0 */
+    Mode1,   /* Clock Polarity is 0 and Clock Phase is 1 */
+    Mode2,   /* Clock Polarity is 1 and Clock Phase is 0 */
+    Mode3,   /* Clock Polarity is 1 and Clock Phase is 1 */
+} SPIMode;
+
+/**
+ * Define SPI type
+**/
+typedef enum {
+    Master,
+    Slave,
+} SPIType;
+
+/**
+ * Define SPI attribute
+**/
+typedef struct SPIStruct {
+    UWORD SCLK_PIN;
+    UWORD MOSI_PIN;
+    UWORD MISO_PIN;
+    UWORD CS_PIN;
+    SPIMode Mode;
+    SPIType Type;
+    UWORD Clock;
+} SOFTWARE_SPI;
 
 /*------------------------------------------------------------------------------------------------------*/
 void DEV_Digital_Write(UWORD Pin, UBYTE Value);
@@ -98,6 +132,9 @@ UBYTE DEV_Digital_Read(UWORD Pin);
 
 void DEV_SPI_WriteByte(UBYTE Value);
 void DEV_SPI_Write_nByte(uint8_t *pData, uint32_t Len);
+UBYTE DEV_SPI_ReadByte(UBYTE Reg);
+
+void DEV_Delay_us(UWORD xus);
 void DEV_Delay_ms(UDOUBLE xms);
 
 UBYTE DEV_Module_Init(void);
