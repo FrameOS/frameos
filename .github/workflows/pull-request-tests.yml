@@ -12,6 +12,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
+      - name: Set up Node
+        uses: actions/setup-node@v2
+        with:
+          node-version: '16.x'
+
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
@@ -76,3 +81,9 @@ jobs:
       - name: Fail if changes detected
         if: env.changes_detected == 'true'
         run: exit 1
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
