@@ -32,6 +32,8 @@
 
 #include "DEV_Config.h"
 
+#define Version 2
+
 #define EPD_M1_CS_PIN 8
 #define EPD_S1_CS_PIN 7
 #define EPD_M2_CS_PIN 17
