@@ -1,4 +1,4 @@
-import { useValues } from 'kea'
+import { useActions, useValues } from 'kea'
 import { NodeProps, Handle, Position } from 'reactflow'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
@@ -14,6 +14,7 @@ const events: FrameEvent[] = _events as any
 export function EventNode(props: NodeProps): JSX.Element {
   const { data, id } = props
   const { selectedNodeId, scene } = useValues(diagramLogic)
+  const { selectNode } = useActions(diagramLogic)
   const { keyword } = data
 
   const isEventWithStateFields = keyword === 'init' || keyword === 'setSceneState' || keyword === 'render'
@@ -22,8 +23,13 @@ export function EventNode(props: NodeProps): JSX.Element {
 
   return (
     <div
+      onClick={() => {
+        if (selectedNodeId !== id) {
+          selectNode(id)
+        }
+      }}
       className={clsx(
-        'shadow-lg border border-2',
+        'shadow-lg border-2',
         selectedNodeId === id
           ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
           : 'bg-black bg-opacity-70 border-red-900 shadow-red-700/50 '

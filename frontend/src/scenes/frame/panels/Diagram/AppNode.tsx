@@ -19,20 +19,29 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
   const { updateNodeConfig, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const { editApp } = useActions(panelsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { isDispatch, name, fields, isCustomApp, configJsonError, isSelected, codeFields, fieldInputFields } =
-    useValues(appNodeLogic(appNodeLogicProps))
+  const {
+    isDispatch,
+    name,
+    fields,
+    isCustomApp,
+    configJsonError,
+    isSelected,
+    codeFields,
+    fieldInputFields,
+    fieldOutputFields,
+  } = useValues(appNodeLogic(appNodeLogicProps))
+  const { select } = useActions(appNodeLogic(appNodeLogicProps))
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
 
   return (
     <div
+      onClick={select}
       className={clsx(
-        'shadow-lg border border-2',
-        isDispatch
-          ? isSelected
-            ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
-            : 'bg-black bg-opacity-70 border-red-900 shadow-red-700/50 '
-          : isSelected
+        'shadow-lg border-2',
+        isSelected
           ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
+          : isDispatch
+          ? 'bg-black bg-opacity-70 border-green-900 shadow-green-700/50 '
           : isCustomApp
           ? 'bg-black bg-opacity-70 border-teal-900 shadow-teal-700/50 '
           : 'bg-black bg-opacity-70 border-sky-900 shadow-sky-700/50 '
@@ -41,15 +50,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
       <div
         className={clsx(
           'frameos-node-title text-xl p-1 px-2 gap-2',
-          isDispatch
-            ? isSelected
-              ? 'bg-indigo-900'
-              : 'bg-red-900'
-            : isSelected
-            ? 'bg-indigo-900'
-            : isCustomApp
-            ? 'bg-teal-900'
-            : 'bg-sky-900',
+          isSelected ? 'bg-indigo-900' : isDispatch ? 'bg-green-900' : isCustomApp ? 'bg-teal-900' : 'bg-sky-900',
           'flex w-full justify-between items-center'
         )}
       >
@@ -162,11 +163,13 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                           'font-sm text-indigo-200',
                           field.type === 'node' ||
                             codeFields.includes(field.name) ||
-                            fieldInputFields.includes(field.name)
+                            fieldInputFields.includes(field.name) ||
+                            fieldOutputFields.includes(field.name)
                             ? 'w-full'
                             : '',
                           codeFields.includes(field.name) ||
                             fieldInputFields.includes(field.name) ||
+                            fieldOutputFields.includes(field.name) ||
                             (field.name in data.config && data.config[field.name] !== field.value)
                             ? 'underline font-bold'
                             : ''

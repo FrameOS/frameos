@@ -25,14 +25,17 @@ export function buttonColor(color: ButtonProps['color']): string {
     : 'bg-[#4a4b8c] hover:bg-[#484984] focus:ring-[#484984]'
 }
 
+export function buttonSize(size: 'normal' | 'small' | 'tiny' | undefined): string {
+  return size === 'small'
+    ? 'text-white focus:ring-1 focus:outline-none font-medium rounded-md text-sm px-2 py-1 text-center'
+    : size === 'tiny'
+    ? 'text-white focus:ring-1 focus:outline-none font-medium rounded-md text-sm px-1 py-1 text-center'
+    : 'text-white focus:ring-2 focus:outline-none font-medium rounded-lg text-sm px-5 py-2.5 text-center'
+}
+
 export function Button({ size, color, children, className, disabled, full, ...props }: ButtonProps) {
   const colorClassName = buttonColor(color)
-  const sizeClassName =
-    size === 'small'
-      ? 'text-white focus:ring-1 focus:outline-none font-medium rounded-md text-sm px-2 py-1 text-center'
-      : size === 'tiny'
-      ? 'text-white focus:ring-1 focus:outline-none font-medium rounded-md text-sm px-1 py-1 text-center'
-      : 'text-white focus:ring-2 focus:outline-none font-medium rounded-lg text-sm px-5 py-2.5 text-center'
+  const sizeClassName = buttonSize(size)
   return (
     <button
       className={clsx(sizeClassName, colorClassName, full && 'w-full', disabled && 'opacity-30', className)}

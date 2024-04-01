@@ -126,6 +126,7 @@ export interface App {
 }
 
 export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event'
+export type EdgeType = 'edge'
 
 export interface AppNodeData {
   keyword: string

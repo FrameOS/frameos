@@ -14,6 +14,7 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
   const { updateNodeData, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const { isSelected, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
+  const { select } = useActions(appNodeLogic(appNodeLogicProps))
 
   const targetNode = nodeEdges.find(
     (edge) => edge.sourceHandle === 'fieldOutput' && edge.targetHandle?.startsWith('fieldInput/')
@@ -22,6 +23,7 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
 
   return (
     <div
+      onClick={select}
       className={clsx(
         'shadow-lg border-2 h-full flex flex-col',
         isSelected

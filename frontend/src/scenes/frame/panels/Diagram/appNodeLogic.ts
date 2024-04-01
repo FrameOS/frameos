@@ -1,4 +1,4 @@
-import { connect, kea, key, path, props, selectors } from 'kea'
+import { actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
 import type { appNodeLogicType } from './appNodeLogicType'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
@@ -19,7 +19,11 @@ export const appNodeLogic = kea<appNodeLogicType>([
   key((props) => `${props.frameId}/${props.sceneId}/${props.nodeId}`),
   connect(({ sceneId, frameId }: DiagramLogicProps) => ({
     values: [appsModel, ['apps'], diagramLogic({ frameId, sceneId }), ['nodes', 'edges', 'selectedNodeId', 'scene']],
+    actions: [diagramLogic({ frameId, sceneId }), ['selectNode']],
   })),
+  actions({
+    select: true,
+  }),
   selectors({
     nodeId: [() => [(_, props) => props.nodeId], (nodeId): string => nodeId],
     node: [
@@ -29,6 +33,10 @@ export const appNodeLogic = kea<appNodeLogicType>([
     nodeEdges: [
       (s) => [s.edges, s.nodeId],
       (edges: Edge[], nodeId): Edge[] => edges?.filter((e) => e.source === nodeId || e.target === nodeId) ?? [],
+    ],
+    nodeConfig: [
+      (s) => [s.node],
+      (node): Record<string, any> => (node && 'config' in node?.data ? node?.data.config ?? {} : {}),
     ],
     codeFields: [
       (s) => [s.nodeEdges, s.nodeId],
@@ -53,6 +61,15 @@ export const appNodeLogic = kea<appNodeLogicType>([
               edge.targetHandle?.startsWith('fieldInput/')
           )
           .map((edge) => edge.targetHandle?.replace('fieldInput/', '') ?? ''),
+    ],
+    fieldOutputFields: [
+      (s) => [s.nodeEdges, s.nodeId],
+      (nodeEdges, nodeId) =>
+        nodeEdges
+          .filter(
+            (edge) => edge.sourceHandle?.startsWith('field/') && nodeId == edge.source && edge.targetHandle === 'prev'
+          )
+          .map((edge) => edge.sourceHandle?.replace('field/', '') ?? ''),
     ],
     isSelected: [(s) => [s.selectedNodeId, s.nodeId], (selectedNodeId, nodeId) => selectedNodeId === nodeId],
     sources: [
@@ -147,4 +164,11 @@ export const appNodeLogic = kea<appNodeLogicType>([
       },
     ],
   }),
+  listeners(({ actions, values }) => ({
+    select: () => {
+      if (!values.isSelected) {
+        actions.selectNode(values.nodeId)
+      }
+    },
+  })),
 ])
