@@ -55,12 +55,12 @@ export function Template({
                           ? `Add +${(template.scenes || []).length} scene${
                               (template.scenes || []).length === 1 ? '' : 's'
                             } to frame`
-                          : 'Add scenes to frame',
+                          : 'Add to frame',
                       onClick: () => applyTemplate(template),
                       icon: <DocumentPlusIcon className="w-5 h-5" />,
                     },
                     {
-                      label: `Add & clear existing`,
+                      label: `Clear frame & add`,
                       confirm: 'Are you sure? This will erase all scenes from the frame and install this template.',
                       onClick: () => applyTemplate(template, true),
                       icon: <DocumentIcon className="w-5 h-5" />,
