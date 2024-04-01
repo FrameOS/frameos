@@ -58,23 +58,39 @@
 
 #include <lgpio.h>
 #define LFLAGS 0
-#define NUM_MAXBUF  4
+#define NUM_MAXBUF 4
 
 /**
  * data
-**/
-#define UBYTE   uint8_t
-#define UWORD   uint16_t
+ **/
+#define UBYTE uint8_t
+#define UWORD uint16_t
 #define UDOUBLE uint32_t
 
 /**
  * GPIOI config
-**/
+ **/
 extern int EPD_RST_PIN;
 extern int EPD_DC_PIN;
 extern int EPD_CS_PIN;
 extern int EPD_BUSY_PIN;
 extern int EPD_PWR_PIN;
+
+extern UWORD EPD_M1_CS_PIN;
+extern UWORD EPD_S1_CS_PIN;
+extern UWORD EPD_M2_CS_PIN;
+extern UWORD EPD_S2_CS_PIN;
+
+extern UWORD EPD_M1S1_DC_PIN;
+extern UWORD EPD_M2S2_DC_PIN;
+
+extern UWORD EPD_M1S1_RST_PIN;
+extern UWORD EPD_M2S2_RST_PIN;
+
+extern UWORD EPD_M1_BUSY_PIN;
+extern UWORD EPD_S1_BUSY_PIN;
+extern UWORD EPD_M2_BUSY_PIN;
+extern UWORD EPD_S2_BUSY_PIN;
 
 /*------------------------------------------------------------------------------------------------------*/
 void DEV_Digital_Write(UWORD Pin, UBYTE Value);
@@ -86,6 +102,5 @@ void DEV_Delay_ms(UDOUBLE xms);
 
 UBYTE DEV_Module_Init(void);
 void DEV_Module_Exit(void);
-
 
 #endif

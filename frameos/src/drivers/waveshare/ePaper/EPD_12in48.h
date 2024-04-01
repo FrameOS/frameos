@@ -32,6 +32,22 @@
 
 #include "DEV_Config.h"
 
+#define EPD_M1_CS_PIN 8
+#define EPD_S1_CS_PIN 7
+#define EPD_M2_CS_PIN 17
+#define EPD_S2_CS_PIN 18
+
+#define EPD_M1S1_DC_PIN 13
+#define EPD_M2S2_DC_PIN 22
+
+#define EPD_M1S1_RST_PIN 6
+#define EPD_M2S2_RST_PIN 23
+
+#define EPD_M1_BUSY_PIN 5
+#define EPD_S1_BUSY_PIN 19
+#define EPD_M2_BUSY_PIN 27
+#define EPD_S2_BUSY_PIN 24
+
 // Display resolution
 #define EPD_12in48_MAX_WIDTH 1304
 #define EPD_12in48_MAX_HEIGHT 984
