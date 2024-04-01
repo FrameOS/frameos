@@ -129,7 +129,7 @@ export const diagramLogic = kea<diagramLogicType>([
     selectedNodeId: [(s) => [s.selectedNode], (node) => node?.id ?? null],
     edges: [
       (s) => [s.rawEdges],
-      (rawEdges) => rawEdges.map((edge) => (edge.type !== 'edge' ? { ...edge, type: 'edge' } : edge)),
+      (rawEdges): Edge[] => rawEdges.map((edge) => (edge.type !== 'edge' ? { ...edge, type: 'edge' } : edge)),
     ],
     selectedEdge: [(s) => [s.edges], (edges): Edge | null => edges.find((edge) => edge.selected) ?? null],
     selectedEdgeId: [(s) => [s.selectedEdge], (edge) => edge?.id ?? null],
