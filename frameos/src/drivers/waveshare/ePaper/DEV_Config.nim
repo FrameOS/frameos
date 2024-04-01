@@ -67,21 +67,21 @@ var EPD_CS_PIN*: cint
 var EPD_BUSY_PIN*: cint
 var EPD_PWR_PIN*: cint
 
-var EPD_M1_CS_PIN*: cint;
-var EPD_S1_CS_PIN*: cint;
-var EPD_M2_CS_PIN*: cint;
-var EPD_S2_CS_PIN*: cint;
+var EPD_M1_CS_PIN*: UWORD;
+var EPD_S1_CS_PIN*: UWORD;
+var EPD_M2_CS_PIN*: UWORD;
+var EPD_S2_CS_PIN*: UWORD;
 
-var EPD_M1S1_DC_PIN*: cint;
-var EPD_M2S2_DC_PIN*: cint;
+var EPD_M1S1_DC_PIN*: UWORD;
+var EPD_M2S2_DC_PIN*: UWORD;
 
-var EPD_M1S1_RST_PIN*: cint;
-var EPD_M2S2_RST_PIN*: cint;
+var EPD_M1S1_RST_PIN*: UWORD;
+var EPD_M2S2_RST_PIN*: UWORD;
 
-var EPD_M1_BUSY_PIN*: cint;
-var EPD_S1_BUSY_PIN*: cint;
-var EPD_M2_BUSY_PIN*: cint;
-var EPD_S2_BUSY_PIN*: cint;
+var EPD_M1_BUSY_PIN*: UWORD;
+var EPD_S1_BUSY_PIN*: UWORD;
+var EPD_M2_BUSY_PIN*: UWORD;
+var EPD_S2_BUSY_PIN*: UWORD;
 
 ## ------------------------------------------------------------------------------------------------------
 
