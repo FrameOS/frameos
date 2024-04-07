@@ -6,6 +6,7 @@ type
   AppConfig* = object
     rows*: int
     columns*: int
+    renderFunctions*: seq[seq[NodeId]]
     renderFunction*: NodeId
     gap*: string
     margin*: string

@@ -140,15 +140,65 @@ export const appNodeLogic = kea<appNodeLogicType>([
       },
     ],
     fields: [
-      (s) => [s.app, s.event, s.scene, s.configJson],
-      (app, event, scene, configJson): (ConfigField | MarkdownField)[] | null => {
+      (s) => [s.app, s.event, s.scene, s.configJson, s.nodeConfig],
+      (app, event, scene, configJson, nodeConfig): (ConfigField | MarkdownField)[] | null => {
+        let fields: (ConfigField | MarkdownField)[] = []
         if (event) {
           if (event.name === 'setSceneState') {
-            return scene?.fields ?? null
+            fields = scene?.fields ?? []
+          } else {
+            fields = event?.fields ?? []
           }
-          return event?.fields ?? null
+        } else {
+          fields = app?.fields ?? configJson?.fields ?? []
         }
-        return app?.fields ?? configJson?.fields ?? null
+
+        let realFields: (ConfigField | MarkdownField)[] = []
+        for (const field of fields) {
+          if ('seq' in field && Array.isArray(field.seq)) {
+            let seqs: [string, number[]][] = []
+            for (const [name, _min, _max] of field.seq) {
+              let min = typeof _min === 'number' ? _min : parseInt(nodeConfig[_min] ?? '1')
+              let max = typeof _max === 'number' ? _max : parseInt(nodeConfig[_max] ?? '1')
+              let numbers = []
+              for (let i = min; i <= max; i++) {
+                numbers.push(i)
+              }
+              seqs.push([name, numbers])
+            }
+            let existing: number[][] = []
+            for (let i = 0; i < seqs.length; i++) {
+              const numbers = seqs[i][1]
+              const newExisting = []
+              if (existing.length > 0) {
+                for (const ext of existing) {
+                  for (const num of numbers) {
+                    newExisting.push([...ext, num])
+                  }
+                }
+              } else {
+                for (const num of numbers) {
+                  newExisting.push([num])
+                }
+              }
+              existing = newExisting
+            }
+            for (const values of existing) {
+              let label = field.label
+              for (let i = 0; i < values.length; i++) {
+                label = label.replace(`{${seqs[i][0]}}`, String(values[i]))
+              }
+              realFields.push({
+                ...field,
+                label: label,
+                name: `${field.name}[${values.join('][')}]`,
+              })
+            }
+          } else {
+            realFields.push(field)
+          }
+        }
+        return realFields
       },
     ],
     name: [

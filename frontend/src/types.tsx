@@ -97,6 +97,8 @@ export interface ConfigField {
   placeholder?: string
   /** Number of rows for the field, only used if type is 'text' */
   rows?: number
+  /** Turn the field into a multidimensional array of fields. seq=[1, "rows"] --> for 1 to rows */
+  seq?: [string, number | string, number | string][]
 }
 
 export interface StateField extends ConfigField {
