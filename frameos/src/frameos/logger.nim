@@ -1,4 +1,5 @@
 import httpclient, zippy, json, sequtils, os, times, math
+import asyncdispatch, asynchttpserver, ws
 
 import frameos/channels
 import frameos/types
@@ -17,7 +18,21 @@ const LOG_FLUSH_SECONDS = 1.0
 var threadInitDone = false
 var thread: Thread[FrameConfig]
 
-proc run(self: LoggerThread) =
+proc run(self: LoggerThread) {.async.} =
+  let protocol = if self.frameConfig.serverPort mod 1000 == 443: "wss" else: "ws"
+  let url = protocol & "://" & self.frameConfig.serverHost & ":" & $self.frameConfig.serverPort & "/echo"
+
+  echo "1"
+  var ws = await newWebSocket(url)
+  echo "2"
+  # echo await ws.receiveStrPacket()
+  await ws.send("Hi, how are you?")
+  echo "3"
+  echo await ws.receiveStrPacket()
+  echo "4"
+  ws.close()
+  echo "5"
+
   var attempt = 0
   while true:
     let logCount = (self.logs.len + self.erroredLogs.len)
@@ -82,7 +97,7 @@ proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
   )
   while true:
     try:
-      run(loggerThread)
+      waitFor run(loggerThread)
     except Exception as e:
       echo "Error in logger thread: " & $e.msg
       sleep(1000)

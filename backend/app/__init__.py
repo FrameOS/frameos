@@ -11,6 +11,7 @@ from flask import Flask
 from flask_login import LoginManager
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
+from flask_sock import Sock
 from flask_socketio import SocketIO
 from config import Config, get_config
 from urllib.parse import urlparse
@@ -22,6 +23,7 @@ login_manager = LoginManager()
 login_manager.login_view = 'api.login'
 migrate = Migrate()
 socketio = SocketIO(async_mode='gevent')
+sock = Sock()
 
 DEFAULT_REDIS_URL = 'redis://localhost:6379/0'
 
@@ -52,7 +54,6 @@ def create_app(config: Optional[Config] = None):
     config = config or get_config()
     app = Flask(__name__, static_folder='../../frontend/dist', static_url_path='/', template_folder='../templates')
     app.config.from_object(config)
-
     db.init_app(app)
     with app.app_context():
         os.makedirs('../db', exist_ok=True)
@@ -60,6 +61,7 @@ def create_app(config: Optional[Config] = None):
         db.create_all()
     login_manager.init_app(app)
     migrate.init_app(app, db)
+    sock.init_app(app)
     socketio.init_app(app, cors_allowed_origins="*", message_queue=os.environ.get('REDIS_URL', DEFAULT_REDIS_URL))
     initialize_sentry(app)
 

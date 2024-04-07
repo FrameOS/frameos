@@ -61,6 +61,7 @@ flask==2.3.2
     #   -r requirements.in
     #   flask-login
     #   flask-migrate
+    #   flask-sock
     #   flask-socketio
     #   flask-sqlalchemy
     #   flask-wtf
@@ -68,6 +69,8 @@ flask==2.3.2
 flask-login==0.6.3
     # via -r requirements.in
 flask-migrate==4.0.4
+    # via -r requirements.in
+flask-sock==0.7.0
     # via -r requirements.in
 flask-socketio==5.3.5
     # via -r requirements.in
@@ -85,6 +88,8 @@ gevent-websocket==0.10.1
     # via -r requirements.in
 greenlet==2.0.2
     # via gevent
+h11==0.14.0
+    # via wsproto
 honcho==1.1.0
     # via -r requirements.in
 huey==2.4.5
@@ -191,6 +196,8 @@ scp==0.14.5
     # via -r requirements.in
 sentry-sdk[flask]==1.35.0
     # via -r requirements.in
+simple-websocket==1.0.0
+    # via flask-sock
 six==1.16.0
     # via asttokens
 sqlalchemy==2.0.19
@@ -222,6 +229,8 @@ werkzeug==2.3.6
     #   flask-login
 wheel==0.41.3
     # via pip-tools
+wsproto==1.2.0
+    # via simple-websocket
 wtforms==3.0.1
     # via
     #   -r requirements.in

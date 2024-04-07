@@ -24,3 +24,4 @@ pip-tools
 pre-commit
 ruff
 imagehash
+flask-sock
