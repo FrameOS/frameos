@@ -109,8 +109,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                             type = field.get('type', 'string')
                             value = config.get(key, None)
 
-                            # TODO: event seq fields
-
+                            # TODO: add event seq fields when we get custom events that can support them
                             event_payload_pairs.append(sanitize_nim_field(key, type, value, field_inputs_for_node,
                                              node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, {}, True))
 

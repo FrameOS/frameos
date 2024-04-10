@@ -213,6 +213,7 @@ export enum Panel {
   EditApp = 'EditApp',
   Terminal = 'Terminal',
   SceneSource = 'SceneSource',
+  SceneJSON = 'SceneJSON',
   Scenes = 'Scenes',
   Templates = 'Templates',
 }

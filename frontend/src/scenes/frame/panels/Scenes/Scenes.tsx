@@ -16,6 +16,7 @@ import {
   AdjustmentsHorizontalIcon,
   CloudArrowDownIcon,
   DocumentDuplicateIcon,
+  DocumentMagnifyingGlassIcon,
   FolderArrowDownIcon,
   FolderPlusIcon,
   PlusIcon,
@@ -27,7 +28,7 @@ import React from 'react'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
-  const { editScene, openTemplates } = useActions(panelsLogic)
+  const { editScene, editSceneJSON, openTemplates } = useActions(panelsLogic)
   const { scenes, showNewSceneForm, isNewSceneSubmitting, sceneTemplateOptions, showingSettings } = useValues(
     scenesLogic({ frameId })
   )
@@ -100,9 +101,14 @@ export function Scenes() {
                   buttonColor="secondary"
                   items={[
                     {
-                      label: 'Open in editor',
+                      label: 'Edit scene',
                       onClick: () => editScene(scene.id),
                       icon: <FolderOpenIcon className="w-5 h-5" />,
+                    },
+                    {
+                      label: 'Edit scene as JSON',
+                      onClick: () => editSceneJSON(scene.id),
+                      icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
                     },
                     {
                       label: 'Toggle settings',
@@ -154,7 +160,7 @@ export function Scenes() {
             </Box>
             {showingSettings[scene.id] ? (
               <Box className="p-2 pl-4 pr-3 space-y-2 bg-gray-900 flex items-start justify-between gap-1 ml-4">
-                <SceneSettings sceneId={scene.id} />
+                <SceneSettings sceneId={scene.id} onClose={() => toggleSettings(scene.id)} />
               </Box>
             ) : null}
           </React.Fragment>
