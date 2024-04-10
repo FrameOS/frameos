@@ -4,7 +4,6 @@ import { scenesLogic } from './scenesLogic'
 import { Button } from '../../../../components/Button'
 import { Box } from '../../../../components/Box'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { PencilSquareIcon, TrashIcon, FlagIcon, FolderOpenIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import { TextInput } from '../../../../components/TextInput'
 import { Form } from 'kea-forms'
@@ -15,33 +14,22 @@ import { Select } from '../../../../components/Select'
 import {
   AdjustmentsHorizontalIcon,
   CloudArrowDownIcon,
-  DocumentDuplicateIcon,
-  DocumentMagnifyingGlassIcon,
   FolderArrowDownIcon,
-  FolderPlusIcon,
   PlusIcon,
   SparklesIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
 import { SceneSettings } from './SceneSettings'
 import React from 'react'
+import { SceneDropDown } from './SceneDropDown'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
-  const { editScene, editSceneJSON, openTemplates } = useActions(panelsLogic)
+  const { editScene, openTemplates } = useActions(panelsLogic)
   const { scenes, showNewSceneForm, isNewSceneSubmitting, sceneTemplateOptions, showingSettings } = useValues(
     scenesLogic({ frameId })
   )
-  const {
-    toggleSettings,
-    submitNewScene,
-    renameScene,
-    duplicateScene,
-    deleteScene,
-    setAsDefault,
-    toggleNewScene,
-    closeNewScene,
-  } = useActions(scenesLogic({ frameId }))
+  const { toggleSettings, submitNewScene, toggleNewScene, closeNewScene } = useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
 
   return (
@@ -97,65 +85,7 @@ export function Scenes() {
                 <Button size="small" className="!px-1" color="secondary" onClick={() => toggleSettings(scene.id)}>
                   <AdjustmentsHorizontalIcon className="w-5 h-5" />
                 </Button>
-                <DropdownMenu
-                  buttonColor="secondary"
-                  items={[
-                    {
-                      label: 'Edit scene',
-                      onClick: () => editScene(scene.id),
-                      icon: <FolderOpenIcon className="w-5 h-5" />,
-                    },
-                    {
-                      label: 'Edit scene as JSON',
-                      onClick: () => editSceneJSON(scene.id),
-                      icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
-                    },
-                    {
-                      label: 'Toggle settings',
-                      onClick: () => toggleSettings(scene.id),
-                      icon: <AdjustmentsHorizontalIcon className="w-5 h-5" />,
-                    },
-                    {
-                      label: 'Save as template',
-                      onClick: () => saveAsTemplate({ name: scene.name ?? '', exportScenes: [scene.id] }),
-                      icon: <FolderPlusIcon className="w-5 h-5" />,
-                    },
-                    {
-                      label: 'Download as .zip',
-                      onClick: () => saveAsZip({ name: scene.name ?? '', exportScenes: [scene.id] }),
-                      icon: <CloudArrowDownIcon className="w-5 h-5" />,
-                    },
-                    {
-                      label: 'Duplicate',
-                      onClick: () => duplicateScene(scene.id),
-                      icon: <DocumentDuplicateIcon className="w-5 h-5" />,
-                    },
-                    {
-                      label: 'Rename',
-                      onClick: () => renameScene(scene.id),
-                      icon: <PencilSquareIcon className="w-5 h-5" />,
-                    },
-                    ...(!scene.default
-                      ? [
-                          {
-                            label: 'Set as default',
-                            onClick: () => setAsDefault(scene.id),
-                            icon: <FlagIcon className="w-5 h-5" />,
-                          },
-                        ]
-                      : []),
-                    ...(scenes.length > 1
-                      ? [
-                          {
-                            label: 'Delete scene',
-                            confirm: 'Are you sure you want to delete this scene?',
-                            onClick: () => deleteScene(scene.id),
-                            icon: <TrashIcon className="w-5 h-5" />,
-                          },
-                        ]
-                      : []),
-                  ]}
-                />
+                <SceneDropDown context="scenes" sceneId={scene.id} />
               </div>
             </Box>
             {showingSettings[scene.id] ? (

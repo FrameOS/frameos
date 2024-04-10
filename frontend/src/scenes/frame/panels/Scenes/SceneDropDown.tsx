@@ -1,0 +1,104 @@
+import { useActions, useValues } from 'kea'
+import { frameLogic } from '../../frameLogic'
+import { scenesLogic } from './scenesLogic'
+import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { PencilSquareIcon, TrashIcon, FlagIcon, FolderOpenIcon } from '@heroicons/react/24/solid'
+import { panelsLogic } from '../panelsLogic'
+import {
+  AdjustmentsHorizontalIcon,
+  CloudArrowDownIcon,
+  DocumentDuplicateIcon,
+  DocumentMagnifyingGlassIcon,
+  FolderPlusIcon,
+} from '@heroicons/react/24/outline'
+import { templatesLogic } from '../Templates/templatesLogic'
+
+interface SceneDropDownProps {
+  sceneId: string
+  context: 'scenes' | 'editDiagram'
+}
+
+function isNotNull<T>(value: T | null): value is T {
+  return value !== null
+}
+
+export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
+  const { frameId } = useValues(frameLogic)
+  const { editScene, editSceneJSON } = useActions(panelsLogic)
+  const { scenes } = useValues(scenesLogic({ frameId }))
+  const { toggleSettings, renameScene, duplicateScene, deleteScene, setAsDefault } = useActions(
+    scenesLogic({ frameId })
+  )
+  const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
+  const scene = scenes.find((s) => s.id === sceneId)
+  if (!scene) {
+    return null
+  }
+  return (
+    <DropdownMenu
+      buttonColor="secondary"
+      items={[
+        context === 'scenes'
+          ? {
+              label: 'Edit scene',
+              onClick: () => editScene(scene.id),
+              icon: <FolderOpenIcon className="w-5 h-5" />,
+            }
+          : null,
+        {
+          label: 'Edit scene as JSON',
+          onClick: () => editSceneJSON(scene.id),
+          icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
+        },
+        context === 'scenes'
+          ? {
+              label: 'Toggle settings',
+              onClick: () => toggleSettings(scene.id),
+              icon: <AdjustmentsHorizontalIcon className="w-5 h-5" />,
+            }
+          : null,
+        {
+          label: 'Save as template',
+          onClick: () => saveAsTemplate({ name: scene.name ?? '', exportScenes: [scene.id] }),
+          icon: <FolderPlusIcon className="w-5 h-5" />,
+        },
+        {
+          label: 'Download as .zip',
+          onClick: () => saveAsZip({ name: scene.name ?? '', exportScenes: [scene.id] }),
+          icon: <CloudArrowDownIcon className="w-5 h-5" />,
+        },
+        context === 'scenes'
+          ? {
+              label: 'Duplicate',
+              onClick: () => duplicateScene(scene.id),
+              icon: <DocumentDuplicateIcon className="w-5 h-5" />,
+            }
+          : null,
+        {
+          label: 'Rename',
+          onClick: () => renameScene(scene.id),
+          icon: <PencilSquareIcon className="w-5 h-5" />,
+        },
+        ...(!scene.default
+          ? [
+              {
+                label: 'Set as default',
+                onClick: () => setAsDefault(scene.id),
+                icon: <FlagIcon className="w-5 h-5" />,
+              },
+            ]
+          : []),
+        ...(scenes.length > 1
+          ? [
+              {
+                label: 'Delete scene',
+                confirm: 'Are you sure you want to delete this scene?',
+                onClick: () => deleteScene(scene.id),
+                icon: <TrashIcon className="w-5 h-5" />,
+              },
+            ]
+          : []),
+      ].filter(isNotNull)}
+    />
+  )
+}
