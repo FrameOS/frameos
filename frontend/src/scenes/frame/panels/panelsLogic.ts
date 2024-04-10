@@ -19,7 +19,6 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
     { panel: Panel.Templates, active: false, hidden: false },
     { panel: Panel.SceneState, active: false, hidden: false },
     { panel: Panel.FrameSettings, active: false, hidden: false },
-    { panel: Panel.Control, active: false, hidden: false },
   ],
   [Area.BottomLeft]: [
     { panel: Panel.Logs, active: true, hidden: false },
@@ -29,7 +28,10 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
     { panel: Panel.Debug, active: false, hidden: false },
     { panel: Panel.SceneSource, active: false, hidden: false },
   ],
-  [Area.BottomRight]: [{ panel: Panel.Image, active: true, hidden: false }],
+  [Area.BottomRight]: [
+    { panel: Panel.Image, active: true, hidden: false },
+    { panel: Panel.Control, active: false, hidden: false },
+  ],
 }
 
 function panelsEqual(panel1: PanelWithMetadata, panel2: PanelWithMetadata) {
@@ -233,7 +235,7 @@ export const panelsLogic = kea<panelsLogicType>([
         lastSelectedStateScene ?? frameForm?.scenes?.find((s) => s.default)?.id ?? frameForm?.scenes?.[0]?.id ?? null,
     ],
   })),
-  listeners(({ actions, cache }) => ({
+  listeners(({ actions, cache, values }) => ({
     persistUntilClosed: ({ panel, logic }) => {
       if (!cache.closeListeners) {
         cache.closeListeners = {} as Record<string, () => void>
@@ -251,6 +253,12 @@ export const panelsLogic = kea<panelsLogicType>([
     closeScenePanels: ({ sceneIds }) => {
       for (const sceneId of sceneIds) {
         actions.closePanel({ panel: Panel.Diagram, key: sceneId })
+      }
+    },
+    openTemplates: () => {
+      const templatesPanel = values.panels[Area.TopRight].find((p) => p.panel === Panel.Templates)
+      if (templatesPanel) {
+        actions.toggleFullScreenPanel(templatesPanel)
       }
     },
   })),

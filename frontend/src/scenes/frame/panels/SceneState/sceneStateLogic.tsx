@@ -60,13 +60,9 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
   selectors({
     fieldsWithErrors: [
       (s) => [s.frameFormErrors, s.sceneIndex, s.scene],
-      (
-        frameFormErrors: Record<string, any>,
-        sceneIndex: number,
-        scene: Partial<FrameScene>
-      ): Record<string, boolean> => {
+      (frameFormErrors: Record<string, any>, sceneIndex: number, scene: FrameScene | null): Record<string, boolean> => {
         const errors = frameFormErrors.scenes?.[sceneIndex] ?? {}
-        const fields = scene.fields ?? []
+        const fields = scene?.fields ?? []
         return Object.fromEntries(
           fields.map((field, index) => {
             const fieldErrors = errors.fields?.[index] ?? {}

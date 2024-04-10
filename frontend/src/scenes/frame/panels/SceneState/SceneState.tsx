@@ -37,7 +37,7 @@ export function SceneState(): JSX.Element {
   const { setFields, addField, editField, closeField, removeField } = useActions(sceneStateLogic({ frameId, sceneId }))
 
   if (!scene || !sceneId) {
-    return <></>
+    return <div>Add a scene first</div>
   }
 
   return (

@@ -42,6 +42,8 @@ export function Template({
             'linear-gradient(to bottom, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.6) 30%, rgba(0, 0, 0, 0.7) 70%, rgba(0, 0, 0, 0.8) 100%)',
         }}
       >
+        <img src={template.image} alt={template.name} className="w-full max-h-full border" />
+
         <div className="flex items-start justify-between">
           <H6>{template.name}</H6>
           <DropdownMenu
@@ -52,15 +54,15 @@ export function Template({
                     {
                       label:
                         'scenes' in template && Array.isArray(template.scenes)
-                          ? `Add +${(template.scenes || []).length} scene${
+                          ? `Install ${(template.scenes || []).length} scene${
                               (template.scenes || []).length === 1 ? '' : 's'
-                            } to frame`
-                          : 'Add to frame',
+                            }`
+                          : 'Install to frame',
                       onClick: () => applyTemplate(template),
                       icon: <DocumentPlusIcon className="w-5 h-5" />,
                     },
                     {
-                      label: `Clear frame & add`,
+                      label: `Clear frame & install`,
                       confirm: 'Are you sure? This will erase all scenes from the frame and install this template.',
                       onClick: () => applyTemplate(template, true),
                       icon: <DocumentIcon className="w-5 h-5" />,

@@ -36,17 +36,15 @@ export const scenesLogic = kea<scenesLogicType>([
     newScene: {
       defaults: {
         name: '',
-        template: Object.keys(sceneTemplates)[0],
       },
       errors: (values) => ({
         name: !values.name ? 'Name is required' : undefined,
       }),
-      submit: ({ name, template }, breakpoint) => {
+      submit: ({ name }, breakpoint) => {
         const scenes: FrameScene[] = values.frameForm.scenes || []
         const id = uuidv4()
-        const templateData = sceneTemplates[template] ?? {}
         frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
-          scenes: [...scenes, { id, name, nodes: [], edges: [], fields: [], ...templateData }],
+          scenes: [...scenes, { id, name, nodes: [], edges: [], fields: [] }],
         })
         actions.editScene(id)
         actions.resetNewScene()
@@ -57,10 +55,6 @@ export const scenesLogic = kea<scenesLogicType>([
     frameId: [() => [(_, props: ScenesLogicProps) => props.frameId], (frameId) => frameId],
     editingFrame: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm || frame || null],
     scenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame.scenes ?? []],
-    sceneTemplateOptions: [
-      () => [],
-      (): Option[] => Object.keys(sceneTemplates).map((key) => ({ label: key, value: key })),
-    ],
   }),
   listeners(({ actions, props, values }) => ({
     setAsDefault: ({ sceneId }) => {
@@ -95,10 +89,10 @@ export const scenesLogic = kea<scenesLogicType>([
       actions.closePanel({ panel: Panel.Diagram, key: sceneId })
     },
     toggleNewScene: () => {
-      actions.resetNewScene({ name: '', template: Object.keys(sceneTemplates)[1] })
+      actions.resetNewScene({ name: '' })
     },
     closeNewScene: () => {
-      actions.resetNewScene({ name: '', template: Object.keys(sceneTemplates)[1] })
+      actions.resetNewScene({ name: '' })
     },
   })),
   reducers({

@@ -88,16 +88,12 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
               },
             ]
           : []),
-        ...(scenes.length > 1
-          ? [
-              {
-                label: 'Delete scene',
-                confirm: 'Are you sure you want to delete this scene?',
-                onClick: () => deleteScene(scene.id),
-                icon: <TrashIcon className="w-5 h-5" />,
-              },
-            ]
-          : []),
+        {
+          label: 'Delete scene',
+          confirm: 'Are you sure you want to delete this scene?',
+          onClick: () => deleteScene(scene.id),
+          icon: <TrashIcon className="w-5 h-5" />,
+        },
       ].filter(isNotNull)}
     />
   )

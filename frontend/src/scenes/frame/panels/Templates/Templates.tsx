@@ -14,7 +14,9 @@ import { TrashIcon, ArrowPathIcon, PlusIcon } from '@heroicons/react/24/solid'
 import React from 'react'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import copy from 'copy-to-clipboard'
-import { ArchiveBoxIcon, ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
+import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
+import { panelsLogic } from '../panelsLogic'
+import { TemplateType } from '../../../../types'
 
 export function Templates() {
   const { applyTemplate } = useActions(frameLogic)
@@ -30,7 +32,6 @@ export function Templates() {
     hideUploadTemplate,
     showAddRepository,
     hideAddRepository,
-    saveAsTemplate,
     setSearch,
   } = useActions(templatesLogic({ frameId }))
   const {
@@ -42,11 +43,72 @@ export function Templates() {
     templates,
     search,
   } = useValues(templatesLogic({ frameId }))
+  const { fullScreenPanel } = useValues(panelsLogic({ frameId }))
+  const { disableFullscreenPanel } = useActions(panelsLogic({ frameId }))
   const { removeRepository, refreshRepository } = useActions(repositoriesModel)
 
   return (
     <div className="space-y-4">
       <TextInput placeholder="Search templates..." onChange={setSearch} value={search} />
+      {showingRemoteTemplate ? (
+        <Box className="p-4 space-y-2 bg-gray-900">
+          <H6>Add template from URL</H6>
+          <Form
+            logic={templatesLogic}
+            props={{ frameId }}
+            formKey="addTemplateUrlForm"
+            enableFormOnSubmit
+            className="space-y-2"
+          >
+            <Field label="" name="url">
+              <TextInput placeholder="https://url/to/template.zip" />
+            </Field>
+            <div className="flex gap-2">
+              <Button type="submit" size="small" color="primary">
+                Add template
+              </Button>
+              <Button color="secondary" size="small" onClick={hideRemoteTemplate}>
+                Cancel
+              </Button>
+            </div>
+          </Form>
+        </Box>
+      ) : null}
+      {showingUploadTemplate ? (
+        <Box className="p-4 space-y-2 bg-gray-900">
+          <H6>Upload template</H6>
+          <Form
+            logic={templatesLogic}
+            props={{ frameId }}
+            formKey="uploadTemplateForm"
+            enableFormOnSubmit
+            className="space-y-2"
+          >
+            <Field label="" name="file">
+              {({ onChange }) => (
+                <input
+                  type="file"
+                  accept=".zip"
+                  onChange={(e: React.FormEvent<HTMLInputElement>) => {
+                    const target = e.target as HTMLInputElement & {
+                      files: FileList
+                    }
+                    onChange(target.files[0])
+                  }}
+                />
+              )}
+            </Field>
+            <div className="flex gap-2">
+              <Button type="submit" size="small" color="primary">
+                Upload template
+              </Button>
+              <Button color="secondary" size="small" onClick={hideUploadTemplate}>
+                Cancel
+              </Button>
+            </div>
+          </Form>
+        </Box>
+      ) : null}
       <div className="space-y-2">
         <div className="flex justify-between w-full items-center">
           <H6>Saved templates</H6>
@@ -64,88 +126,35 @@ export function Templates() {
                 onClick: showUploadTemplate,
                 icon: <ArrowPathIcon className="w-5 h-5" />,
               },
-              {
-                label: 'Export frame as template',
-                onClick: () => saveAsTemplate({ name: frameForm.name }),
-                icon: <ArchiveBoxIcon className="w-5 h-5" />,
-              },
             ]}
           />
         </div>
-        {showingRemoteTemplate ? (
-          <Box className="p-4 space-y-2 bg-gray-900">
-            <H6>Add template from URL</H6>
-            <Form
-              logic={templatesLogic}
-              props={{ frameId }}
-              formKey="addTemplateUrlForm"
-              enableFormOnSubmit
-              className="space-y-2"
-            >
-              <Field label="" name="url">
-                <TextInput placeholder="https://url/to/template.zip" />
-              </Field>
-              <div className="flex gap-2">
-                <Button type="submit" size="small" color="primary">
-                  Add template
-                </Button>
-                <Button color="secondary" size="small" onClick={hideRemoteTemplate}>
-                  Cancel
-                </Button>
-              </div>
-            </Form>
-          </Box>
-        ) : null}
-        {showingUploadTemplate ? (
-          <Box className="p-4 space-y-2 bg-gray-900">
-            <H6>Upload template</H6>
-            <Form
-              logic={templatesLogic}
-              props={{ frameId }}
-              formKey="uploadTemplateForm"
-              enableFormOnSubmit
-              className="space-y-2"
-            >
-              <Field label="" name="file">
-                {({ onChange }) => (
-                  <input
-                    type="file"
-                    accept=".zip"
-                    onChange={(e: React.FormEvent<HTMLInputElement>) => {
-                      const target = e.target as HTMLInputElement & {
-                        files: FileList
-                      }
-                      onChange(target.files[0])
-                    }}
-                  />
-                )}
-              </Field>
-              <div className="flex gap-2">
-                <Button type="submit" size="small" color="primary">
-                  Upload template
-                </Button>
-                <Button color="secondary" size="small" onClick={hideUploadTemplate}>
-                  Cancel
-                </Button>
-              </div>
-            </Form>
-          </Box>
-        ) : null}
-        {templates.map((template) => (
-          <Template
-            template={template}
-            exportTemplate={exportTemplate}
-            removeTemplate={removeTemplate}
-            applyTemplate={applyTemplate}
-            editTemplate={editLocalTemplate}
-          />
-        ))}
+
+        <div
+          className={
+            fullScreenPanel ? 'columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4' : ''
+          }
+        >
+          {templates.map((template) => (
+            <Template
+              template={template}
+              exportTemplate={exportTemplate}
+              removeTemplate={removeTemplate}
+              applyTemplate={(template: TemplateType, wipe?: boolean) => {
+                applyTemplate(template, wipe)
+                disableFullscreenPanel()
+              }}
+              editTemplate={editLocalTemplate}
+            />
+          ))}
+        </div>
         {templates.length === 0 ? (
           <div className="text-muted">
             {search === '' ? 'You have no saved templates.' : `No saved templates match "${search}"`}
           </div>
         ) : null}
       </div>
+
       {(repositories ?? []).map((repository) => (
         <div className="space-y-2 !mt-8">
           <div className="flex gap-2 items-start justify-between">
@@ -174,15 +183,22 @@ export function Templates() {
               ]}
             />
           </div>
-          {(repository.templates || []).map((template) => (
-            <Template
-              template={template}
-              saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
-              applyTemplate={(template, replace) => {
-                applyRemoteToFrame(repository, template, replace)
-              }}
-            />
-          ))}
+          <div
+            className={
+              fullScreenPanel ? 'columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4' : ''
+            }
+          >
+            {(repository.templates || []).map((template) => (
+              <Template
+                template={template}
+                saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
+                applyTemplate={(template, replace) => {
+                  applyRemoteToFrame(repository, template, replace)
+                  disableFullscreenPanel()
+                }}
+              />
+            ))}
+          </div>
           {repository.templates?.length === 0 ? (
             <div className="text-muted">This repository has no templates.</div>
           ) : null}

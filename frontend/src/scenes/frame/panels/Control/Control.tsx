@@ -7,13 +7,11 @@ import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import { Button } from '../../../../components/Button'
 import { Tooltip } from '../../../../components/Tooltip'
-import { fieldTypeToGetter } from '../../../../utils/fieldTypes'
-import { ClipboardDocumentIcon } from '@heroicons/react/24/outline'
-import copy from 'copy-to-clipboard'
 import { Spinner } from '../../../../components/Spinner'
 import { TextArea } from '../../../../components/TextArea'
 import { H6 } from '../../../../components/H6'
 
+// TODO: replace this with the actual proxied frame control URL
 export function Control(): JSX.Element {
   const { frameId } = useValues(frameLogic)
   const {

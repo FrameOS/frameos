@@ -1,6 +1,5 @@
 import json
 import os
-import uuid
 from datetime import timezone
 from app import db, socketio
 from typing import Optional
@@ -116,7 +115,7 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         interval=interval or 60,
         status="uninitialized",
         apps=[],
-        scenes=[create_default_scene()],
+        scenes=[],
         scaling_mode="contain",
         rotate=0,
         background_color="#ffffff",
@@ -128,10 +127,6 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
 
     from app.models import new_log
     new_log(frame.id, "welcome", f"The frame \"{frame.name}\" has been created!")
-    new_log(frame.id, "welcome", "-> It comes with one scene by default: the QR message board.")
-    new_log(frame.id, "welcome", "-> Click \"Save & Deploy\" to deploy it onto the frame.")
-    new_log(frame.id, "welcome", "-> Use the \"Templates\" panel to install new scenes.")
-    new_log(frame.id, "welcome", "-> Click into a scene to edit its source.")
 
     return frame
 
@@ -164,18 +159,6 @@ def get_templates_json() -> dict:
             return json.load(file)
     else:
         return {}
-
-def create_default_scene() -> dict:
-    templates = get_templates_json()
-    template = templates.get('QR-controlled message board') or list(templates.values())[0] or {}
-
-    return {
-        "name": "QR Message Board",
-        "id": str(uuid.uuid4()),
-        "default": True,
-        **template,
-    }
-
 
 def get_frame_json(frame: Frame) -> dict:
     frame_json = {
