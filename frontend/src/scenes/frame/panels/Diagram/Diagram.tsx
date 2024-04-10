@@ -31,6 +31,7 @@ import { SceneSettings } from '../Scenes/SceneSettings'
 import { ZoomOutArea } from '../../../../icons/ZoomOutArea'
 import clsx from 'clsx'
 import CustomEdge from './CustomEdge'
+import { SceneDropDown } from '../Scenes/SceneDropDown'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -184,6 +185,7 @@ export function Diagram({ sceneId }: DiagramProps) {
             >
               <AdjustmentsHorizontalIcon className="w-5 h-5" />
             </Tooltip>
+            <SceneDropDown sceneId={sceneId} context="editDiagram" />
           </div>
         </ReactFlow>
       </div>

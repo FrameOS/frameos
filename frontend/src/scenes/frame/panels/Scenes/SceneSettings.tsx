@@ -7,12 +7,14 @@ import { TextInput } from '../../../../components/TextInput'
 import { panelsLogic } from '../panelsLogic'
 import { H6 } from '../../../../components/H6'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
+import { Button } from '../../../../components/Button'
 
 export interface SceneSettingsProps {
   sceneId: string
+  onClose?: () => void
 }
 
-export function SceneSettings({ sceneId }: SceneSettingsProps): JSX.Element {
+export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Element {
   const { frameId, frameForm } = useValues(frameLogic)
   const { sceneIndex, scene } = useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
@@ -56,6 +58,11 @@ export function SceneSettings({ sceneId }: SceneSettingsProps): JSX.Element {
               />
             </Field>
           </Group>
+          {onClose ? (
+            <Button size="small" onClick={onClose}>
+              Close
+            </Button>
+          ) : null}
         </div>
       </Group>
     </Form>

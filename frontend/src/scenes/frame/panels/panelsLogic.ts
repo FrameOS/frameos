@@ -53,6 +53,7 @@ export const panelsLogic = kea<panelsLogicType>([
     openTemplates: true,
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
     editScene: (sceneId: string) => ({ sceneId }),
+    editSceneJSON: (sceneId: string) => ({ sceneId }),
     editStateScene: (sceneId: string) => ({ sceneId }),
     persistUntilClosed: (panel: PanelWithMetadata, logic: AnyBuiltLogic) => ({ panel, logic }),
   }),
@@ -113,6 +114,26 @@ export const panelsLogic = kea<panelsLogicType>([
                 },
               ],
         }),
+        editSceneJSON: (state, { sceneId }) => ({
+          ...state,
+          [Area.TopLeft]: state[Area.TopLeft].find(
+            (a) => a.panel === Panel.SceneJSON && a.metadata?.sceneId === sceneId
+          )
+            ? state[Area.TopLeft].map((a) =>
+                a.metadata?.sceneId === sceneId ? { ...a, active: true } : a.active ? { ...a, active: false } : a
+              )
+            : [
+                ...state[Area.TopLeft].map((a) => ({ ...a, active: false })),
+                {
+                  panel: Panel.SceneJSON,
+                  key: sceneId,
+                  active: true,
+                  hidden: false,
+                  closable: true,
+                  metadata: { sceneId },
+                },
+              ],
+        }),
         openTemplates: (state, _) => ({
           ...state,
           [Area.TopRight]: state[Area.TopRight].map((a) =>
@@ -135,6 +156,7 @@ export const panelsLogic = kea<panelsLogicType>([
         openPanel: (state, { panel }) => (panel.panel === Panel.Diagram ? panel.key ?? state : state),
         setPanel: (state, { panel }) => (panel.panel === Panel.Diagram ? panel.key ?? state : state),
         editScene: (_, { sceneId }) => sceneId,
+        editSceneJSON: (_, { sceneId }) => sceneId,
       },
     ],
     lastSelectedStateScene: [
@@ -145,6 +167,7 @@ export const panelsLogic = kea<panelsLogicType>([
         setPanel: (state, { panel }) =>
           panel.panel === Panel.Diagram || panel.panel === Panel.SceneState ? panel.key ?? state : state,
         editScene: (_, { sceneId }) => sceneId,
+        editSceneJSON: (_, { sceneId }) => sceneId,
         editStateScene: (_, { sceneId }) => sceneId,
       },
     ],

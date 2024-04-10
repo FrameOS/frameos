@@ -102,6 +102,9 @@ export function FrameSettings({ className }: DetailsProps) {
             <Field name="name" label="Name">
               <TextInput name="name" placeholder="Hallway frame" required />
             </Field>
+            <Field name="device" label="Device">
+              <Select name="device" options={devices} />
+            </Field>
             <Field name="frame_host" label="Frame host">
               <TextInput name="frame_host" placeholder="127.0.0.1" required />
             </Field>
@@ -231,9 +234,6 @@ export function FrameSettings({ className }: DetailsProps) {
             </Field>
             <Field name="metrics_interval" label="Metrics reporting interval in seconds, 0 to disable">
               <TextInput name="metrics_interval" placeholder="60" />
-            </Field>
-            <Field name="device" label="Device">
-              <Select name="device" options={devices} />
             </Field>
             <Field name="scaling_mode" label="Scaling mode">
               <Select

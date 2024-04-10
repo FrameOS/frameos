@@ -36,22 +36,34 @@ proc rotateDegrees*(image: Image, degrees: int): Image {.raises: [PixieError].} 
   else:
     result = image
 
-proc renderError*(width, height: int, message: string): Image =
+proc writeError*(image: Image, width, height: int, message: string) =
   let typeface = getDefaultTypeface()
-  let font = newFont(typeface, 32, parseHtmlColor("#ffffff"))
+  let font = newFont(typeface, 32, parseHtmlColor("#000000"))
+  let borderFont = newFont(typeface, 32, parseHtmlColor("#ffffff"))
   let padding = 10.0
-  result = newImage(width, height)
-  result.fill(parseHtmlColor("#000000"))
-  result.fillText(
-    typeset(
+  let types = typeset(
       spans = [newSpan(message, font)],
       bounds = vec2(width.toFloat() - 2 * padding,
       height.toFloat() - 2 * padding),
       hAlign = CenterAlign,
       vAlign = MiddleAlign,
-    ),
-    translate(vec2(padding, padding))
-  )
+    )
+  let borderTypes = typeset(
+      spans = [newSpan(message, borderFont)],
+      bounds = vec2(width.toFloat() - 2 * padding,
+      height.toFloat() - 2 * padding),
+      hAlign = CenterAlign,
+      vAlign = MiddleAlign,
+    )
+  for dx in (-1)..(1):
+    for dy in (-1)..(1):
+      image.fillText(borderTypes, translate(vec2(padding + dx.toFloat(), padding + dy.toFloat())))
+  image.fillText(types, translate(vec2(padding, padding)))
+
+proc renderError*(width, height: int, message: string): Image =
+  result = newImage(width, height)
+  result.fill(parseHtmlColor("#ffffff"))
+  writeError(result, width, height, message)
 
 proc scaleAndDrawImage*(targetImage: Image, srcImage: Image,
     scalingMode: string) {.raises: [PixieError].} =

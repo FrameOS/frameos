@@ -1,11 +1,14 @@
 import strutils
 import pixie
+import frameos/config
 import frameos/types
+import frameos/utils/image
 
 type
   AppConfig* = object
     rows*: int
     columns*: int
+    renderFunctions*: seq[seq[NodeId]]
     renderFunction*: NodeId
     gap*: string
     margin*: string
@@ -115,6 +118,14 @@ proc run*(self: App, context: var ExecutionContext) =
     rows = self.appConfig.rows
     columns = self.appConfig.columns
     renderFunction = self.appConfig.renderFunction
+    renderFunctions = self.appConfig.renderFunctions
+
+  if rows <= 0:
+    writeError(context.image, self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), "Split: Invalid rows value")
+    return
+  if columns <= 0:
+    writeError(context.image, self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), "Split: Invalid columns value")
+    return
 
   # Calculate cell dimensions
   let
@@ -131,7 +142,9 @@ proc run*(self: App, context: var ExecutionContext) =
     for column in 0..<columns:
       let (cellWidth, cellHeight) = cellDims[row * columns + column]
       let image = context.image.subImage(cellX.toInt, cellY.toInt, cellWidth, cellHeight)
-      if renderFunction != 0:
+      let renderer: NodeId = if row >= 0 and row < renderFunctions.len and column >= 0 and column < renderFunctions[
+          row].len and renderFunctions[row][column] == 0: renderFunction else: renderFunctions[row][column]
+      if renderer != 0:
         var cellContext = ExecutionContext(
             scene: context.scene,
             image: image,
@@ -141,7 +154,7 @@ proc run*(self: App, context: var ExecutionContext) =
             loopIndex: row * columns + column,
             loopKey: context.loopKey & "/" & $(row * columns + column)
         )
-        self.scene.execNode(renderFunction, cellContext)
+        self.scene.execNode(renderer, cellContext)
       context.image.draw(
         image,
         translate(vec2(cellX, cellY))

@@ -20,7 +20,13 @@
             "required": true
         },
         {
-            "label": "Render {row} x {column}",
+            "label": "Render cell: {row} x {column}",
+            "name": "render_functions",
+            "type": "node",
+            "seq": [["row", 1, "rows"], ["column", 1, "columns"]]
+        },
+        {
+            "label": "Render all other cells",
             "name": "render_function",
             "type": "node"
         },
