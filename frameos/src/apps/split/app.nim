@@ -1,6 +1,8 @@
 import strutils
 import pixie
+import frameos/config
 import frameos/types
+import frameos/utils/image
 
 type
   AppConfig* = object
@@ -118,6 +120,13 @@ proc run*(self: App, context: var ExecutionContext) =
     renderFunction = self.appConfig.renderFunction
     renderFunctions = self.appConfig.renderFunctions
 
+  if rows <= 0:
+    writeError(context.image, self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), "Split: Invalid rows value")
+    return
+  if columns <= 0:
+    writeError(context.image, self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), "Split: Invalid columns value")
+    return
+
   # Calculate cell dimensions
   let
     cellDims = splitDimensions(context.image.width, context.image.height,
@@ -133,7 +142,8 @@ proc run*(self: App, context: var ExecutionContext) =
     for column in 0..<columns:
       let (cellWidth, cellHeight) = cellDims[row * columns + column]
       let image = context.image.subImage(cellX.toInt, cellY.toInt, cellWidth, cellHeight)
-      let renderer: NodeId = if renderFunctions[row][column] == 0: renderFunction else: renderFunctions[row][column]
+      let renderer: NodeId = if row >= 0 and row < renderFunctions.len and column >= 0 and column < renderFunctions[
+          row].len and renderFunctions[row][column] == 0: renderFunction else: renderFunctions[row][column]
       if renderer != 0:
         var cellContext = ExecutionContext(
             scene: context.scene,
