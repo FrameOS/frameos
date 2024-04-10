@@ -116,6 +116,7 @@ proc run*(self: App, context: var ExecutionContext) =
     rows = self.appConfig.rows
     columns = self.appConfig.columns
     renderFunction = self.appConfig.renderFunction
+    renderFunctions = self.appConfig.renderFunctions
 
   # Calculate cell dimensions
   let
@@ -132,7 +133,8 @@ proc run*(self: App, context: var ExecutionContext) =
     for column in 0..<columns:
       let (cellWidth, cellHeight) = cellDims[row * columns + column]
       let image = context.image.subImage(cellX.toInt, cellY.toInt, cellWidth, cellHeight)
-      if renderFunction != 0:
+      let renderer: NodeId = if renderFunctions[row][column] == 0: renderFunction else: renderFunctions[row][column]
+      if renderer != 0:
         var cellContext = ExecutionContext(
             scene: context.scene,
             image: image,
@@ -142,7 +144,7 @@ proc run*(self: App, context: var ExecutionContext) =
             loopIndex: row * columns + column,
             loopKey: context.loopKey & "/" & $(row * columns + column)
         )
-        self.scene.execNode(renderFunction, cellContext)
+        self.scene.execNode(renderer, cellContext)
       context.image.draw(
         image,
         translate(vec2(cellX, cellY))

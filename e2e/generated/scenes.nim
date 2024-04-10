@@ -8,6 +8,7 @@ import scenes/scene_ifElse as scene_ifElse
 import scenes/scene_image as scene_image
 import scenes/scene_imageError as scene_imageError
 import scenes/scene_qr as scene_qr
+import scenes/scene_split as scene_split
 import scenes/scene_text as scene_text
 
 let defaultSceneId* = "color".SceneId
@@ -19,6 +20,7 @@ const sceneOptions* = [
   ("image".SceneId, "TEST"),
   ("imageError".SceneId, "TEST"),
   ("qr".SceneId, "Test QR"),
+  ("split".SceneId, "Test Bananas"),
   ("text".SceneId, "Text test"),
 ]
 
@@ -30,4 +32,5 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result["image".SceneId] = scene_image.exportedScene
   result["imageError".SceneId] = scene_imageError.exportedScene
   result["qr".SceneId] = scene_qr.exportedScene
+  result["split".SceneId] = scene_split.exportedScene
   result["text".SceneId] = scene_text.exportedScene

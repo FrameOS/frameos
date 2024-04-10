@@ -109,8 +109,10 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                             type = field.get('type', 'string')
                             value = config.get(key, None)
 
+                            # TODO: event seq fields
+
                             event_payload_pairs.append(sanitize_nim_field(key, type, value, field_inputs_for_node,
-                                             node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, True))
+                                             node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, {}, True))
 
                     next_node_id = next_nodes.get(node_id, None)
                     run_node_lines += [
@@ -151,19 +153,38 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                 else:
                     config = {}
 
+            # { field: [['key1', 'from', 'to'], ['key2', 1, 5]] }
+            seq_fields_for_node: dict[str, list[list[str | int]]] = {}
+            field_inputs_for_node = field_inputs.get(node_id, {})
+            source_field_inputs_for_node = source_field_inputs.get(node_id, {})
+            node_fields_for_node = node_fields.get(node_id, {})
+
             config_types: dict[str, str] = {}
             for field in config.get('fields'):
                 key = field.get('name', None)
                 value = field.get('value', None)
                 field_type = field.get('type', 'string')
                 config_types[key] = field_type
+                seq = field.get('seq', None)
+                # set defaults for missing values
                 if (key not in app_config or app_config.get(key) is None) and (
-                        value is not None or field_type == 'node'):
+                        value is not None or field_type == 'node') and seq is None:
                     app_config[key] = value
+                # mark fields that are sequences of fields
+                if seq is not None:
+                    seq_fields_for_node[key] = seq
+                    if key not in app_config:
+                        app_config[key] = []
 
-            field_inputs_for_node = field_inputs.get(node_id, {})
-            source_field_inputs_for_node = source_field_inputs.get(node_id, {})
-            node_fields_for_node = node_fields.get(node_id, {})
+            # convert sequence field metadata from ["key", "from_key", "to_key"] to ["key", 1, 3]
+            for key, seqs in seq_fields_for_node.items():
+                for i, [seq_key, seq_from, seq_to] in enumerate(seqs):
+                    if isinstance(seq_from, str):
+                        seq_from = app_config.get(seq_from, None)
+                        seqs[i][1] = int(seq_from)
+                    if isinstance(seq_to, str):
+                        seq_to = app_config.get(seq_to, None)
+                        seqs[i][2] = int(seq_to)
 
             app_config_pairs = []
             for key, value in app_config.items():
@@ -175,7 +196,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
 
                 app_config_pairs.append(sanitize_nim_field(key, type, value, field_inputs_for_node,
                                                               node_fields_for_node, source_field_inputs_for_node,
-                                                              node_id_to_integer, False))
+                                                              node_id_to_integer, seq_fields_for_node,False))
 
             if len(sources) > 0:
                 init_apps += [
@@ -375,32 +396,60 @@ var exportedScene* = ExportedScene(
 """
     return scene_source
 
+def get_sequence_values(key, sequences, index, type, value, field_inputs_for_node, node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, seq_fields_for_node):
+    seq_start = sequences[index][1]
+    seq_end = sequences[index][2]
+    response = []
+    for i in range(seq_start, seq_end + 1):
+        if index == len(sequences) - 1:
+            response.append(
+                sanitize_nim_value(
+                    f"{key}[{i}]",
+                    type,
+                    value,
+                    field_inputs_for_node,
+                    node_fields_for_node,
+                    source_field_inputs_for_node,
+                    node_id_to_integer,
+                    seq_fields_for_node
+                )
+            )
+        else:
+            response.append(get_sequence_values(f"{key}[{i}]", sequences, index + 1, type, value, field_inputs_for_node, node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, seq_fields_for_node))
+    return "@[" + (", ".join(response)) + "]"
 
-def sanitize_nim_field(key, type, value, field_inputs_for_node, node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, key_with_quotes: bool) -> str:
-    key_str = f"\"{sanitize_nim_string(str(key))}\"" if key_with_quotes else sanitize_nim_string(str(key))
+def sanitize_nim_value(key, type, value, field_inputs_for_node, node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, seq_fields_for_node) -> str:
+    if key in seq_fields_for_node:
+        sequences = seq_fields_for_node[key]
+        return get_sequence_values(key, sequences, 0, type, value, field_inputs_for_node, node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, seq_fields_for_node)
+
     if key in field_inputs_for_node:
-        return f"{key_str}: {field_inputs_for_node[key]}"
+        return f"{field_inputs_for_node[key]}"
     elif key in source_field_inputs_for_node:
         (source_id, source_key) = source_field_inputs_for_node[key]
-        return f"{key_str}: self.node{node_id_to_integer(source_id)}.appConfig.{source_key}"
+        return f"self.node{node_id_to_integer(source_id)}.appConfig.{source_key}"
     elif type == "node" and key in node_fields_for_node:
         outgoing_node_id = node_fields_for_node[key]
-        return f"{key_str}: {node_id_to_integer(outgoing_node_id)}.NodeId"
+        return f"{node_id_to_integer(outgoing_node_id)}.NodeId"
     elif type == "node" and key not in node_fields_for_node:
-        return f"{key_str}: 0.NodeId"
+        return "0.NodeId"
     elif type == "integer":
-        return f"{key_str}: {int(value)}"
+        return f"{int(value)}"
     elif type == "float":
-        return f"{key_str}: {float(value)}"
+        return f"{float(value)}"
     elif type == "boolean":
-        return f"{key_str}: {'true' if value == 'true' else 'false'}"
+        return f"{'true' if value == 'true' else 'false'}"
     elif type == "color":
-        return f"{key_str}: parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"
+        return f"parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"
     elif type == "scene":
-        return f"{key_str}: \"{sanitize_nim_string(str(value))}\".SceneId"
+        return f"\"{sanitize_nim_string(str(value))}\".SceneId"
     else:
-        return f"{key_str}: \"{sanitize_nim_string(str(value))}\""
+        return f"\"{sanitize_nim_string(str(value))}\""
 
+def sanitize_nim_field(key, type, value, field_inputs_for_node, node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, seq_fields_for_node, key_with_quotes: bool) -> str:
+    key_str = f"\"{sanitize_nim_string(str(key))}\"" if key_with_quotes else sanitize_nim_string(str(key))
+    value_str = sanitize_nim_value(key, type, value, field_inputs_for_node, node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, seq_fields_for_node)
+    return f"{key_str}: {value_str}"
 
 def write_scenes_nim(frame: Frame) -> str:
     rows = []
