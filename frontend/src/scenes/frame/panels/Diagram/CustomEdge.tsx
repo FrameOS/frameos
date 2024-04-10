@@ -47,8 +47,8 @@ export default function CustomEdge({
         style={
           isNodeConnection
             ? selected
-              ? { strokeWidth: 10, stroke: '#ffffff' }
-              : { strokeWidth: 8, stroke: 'hsl(56 60% 70% / 1)' }
+              ? { strokeWidth: 8, stroke: '#ffffff' }
+              : { strokeWidth: 6, stroke: 'hsl(56 60% 70% / 1)' }
             : selected
             ? { strokeWidth: 4, stroke: '#ffffff' }
             : { strokeWidth: 2, stroke: '#c5c5c5' }
