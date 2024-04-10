@@ -9,6 +9,24 @@ export interface SceneJSONLogicProps {
   sceneId: string | null
 }
 
+function printScene(scene: FrameScene | null): string {
+  const { id, default: def, name, settings, fields, nodes, edges, ...rest } = scene ?? {}
+  return JSON.stringify(
+    {
+      id,
+      name,
+      ...(def ? { default: true } : {}),
+      settings,
+      fields,
+      nodes,
+      edges,
+      ...rest,
+    },
+    null,
+    2
+  )
+}
+
 export const sceneJSONLogic = kea<sceneJSONLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'SceneJSON', 'sceneJSONLogic']),
   props({} as SceneJSONLogicProps),
@@ -37,9 +55,14 @@ export const sceneJSONLogic = kea<sceneJSONLogicType>([
     ],
     sceneJSON: [
       (s) => [s.scene, s.editedSceneJSON],
-      (scene, editedSceneJSON): string => editedSceneJSON ?? JSON.stringify(scene, null, 2),
+      (scene, editedSceneJSON): string => {
+        if (editedSceneJSON !== null) {
+          return editedSceneJSON
+        }
+        return printScene(scene)
+      },
     ],
-    hasChanges: [(s) => [s.sceneJSON, s.scene], (sceneJSON, scene) => sceneJSON !== JSON.stringify(scene, null, 2)],
+    hasChanges: [(s) => [s.sceneJSON, s.scene], (sceneJSON, scene) => sceneJSON !== printScene(scene)],
     hasError: [
       (s) => [s.sceneJSON],
       (sceneJSON) => {
@@ -67,8 +90,14 @@ export const sceneJSONLogic = kea<sceneJSONLogicType>([
         if (!props.sceneId) {
           return
         }
-        const scene = JSON.parse(values.sceneJSON)
-        actions.updateScene(props.sceneId, scene)
+        const { id: _, default: __, name, ...scene } = JSON.parse(values.sceneJSON)
+        actions.updateScene(props.sceneId, {
+          id: props.sceneId,
+          name,
+          ...(values.scene?.default ? { default: true } : {}),
+          ...scene,
+        })
+        actions.setEditedSceneJSON(null)
       } catch {
         console.error('Cannot save invalid JSON')
       }

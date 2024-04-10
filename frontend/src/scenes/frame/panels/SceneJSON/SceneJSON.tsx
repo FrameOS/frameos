@@ -64,7 +64,7 @@ SceneJSON.PanelTitle = function SceneJSONPanelTitle({ sceneId }: SceneJSONProps)
     <>
       {hasChanges ? '* ' : ''}
       {hasError ? '! ' : ''}
-      {sceneName} (json)
+      Source: {sceneName}
     </>
   )
 }

@@ -46,7 +46,7 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
             }
           : null,
         {
-          label: 'Edit scene as JSON',
+          label: 'Edit source JSON',
           onClick: () => editSceneJSON(scene.id),
           icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
         },
