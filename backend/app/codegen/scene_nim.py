@@ -173,7 +173,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                 if seq is not None:
                     seq_fields_for_node[key] = seq
                     if key not in app_config:
-                        app_config[key] = []
+                        app_config[key] = None
 
             # convert sequence field metadata from ["key", "from_key", "to_key"] to ["key", 1, 3]
             for key, seqs in seq_fields_for_node.items():
@@ -195,7 +195,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
 
                 app_config_pairs.append(sanitize_nim_field(key, type, value, field_inputs_for_node,
                                                               node_fields_for_node, source_field_inputs_for_node,
-                                                              node_id_to_integer, seq_fields_for_node,False))
+                                                              node_id_to_integer, seq_fields_for_node, False))
 
             if len(sources) > 0:
                 init_apps += [
@@ -433,17 +433,17 @@ def sanitize_nim_value(key, type, value, field_inputs_for_node, node_fields_for_
     elif type == "node" and key not in node_fields_for_node:
         return "0.NodeId"
     elif type == "integer":
-        return f"{int(value)}"
+        return f"{0 if value is None else int(value)}"
     elif type == "float":
-        return f"{float(value)}"
+        return f"{0.0 if value is None else float(value)}"
     elif type == "boolean":
         return f"{'true' if value == 'true' else 'false'}"
     elif type == "color":
-        return f"parseHtmlColor(\"{sanitize_nim_string(str(value))}\")"
+        return f"parseHtmlColor(\"{'#000000' if value is None else sanitize_nim_string(str(value))}\")"
     elif type == "scene":
-        return f"\"{sanitize_nim_string(str(value))}\".SceneId"
+        return f"\"{'' if value is None else sanitize_nim_string(str(value))}\".SceneId"
     else:
-        return f"\"{sanitize_nim_string(str(value))}\""
+        return f"\"{'' if value is None else sanitize_nim_string(str(value))}\""
 
 def sanitize_nim_field(key, type, value, field_inputs_for_node, node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, seq_fields_for_node, key_with_quotes: bool) -> str:
     key_str = f"\"{sanitize_nim_string(str(key))}\"" if key_with_quotes else sanitize_nim_string(str(key))
