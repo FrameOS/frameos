@@ -1,5 +1,5 @@
 import { useActions, useValues } from 'kea'
-import { A, router } from 'kea-router'
+import { router } from 'kea-router'
 import { NewFrame } from './NewFrame'
 import { Frame } from './Frame'
 import { framesModel } from '../../models/framesModel'
@@ -8,7 +8,7 @@ import { Header } from '../../components/Header'
 import { version } from '../../../../version.json'
 import { Button } from '../../components/Button'
 import { newFrameForm } from './newFrameForm'
-import { H6 } from '../../components/H6'
+import { Masonry } from '../../components/Masonry'
 
 export function Frames() {
   const { framesList } = useValues(framesModel)
@@ -33,7 +33,7 @@ export function Frames() {
         </Panel>
         <Panel>
           <div className="overflow-auto h-full">
-            <div
+            <Masonry
               id="frames"
               className="p-4 columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4"
             >
@@ -42,7 +42,7 @@ export function Frames() {
                   <Frame frame={frame} />
                 </div>
               ))}
-            </div>
+            </Masonry>
             <div className="p-4">
               {formVisible ? (
                 <NewFrame />

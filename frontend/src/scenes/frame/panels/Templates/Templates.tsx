@@ -17,6 +17,7 @@ import copy from 'copy-to-clipboard'
 import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
 import { panelsLogic } from '../panelsLogic'
 import { TemplateType } from '../../../../types'
+import { Masonry } from '../../../../components/Masonry'
 
 export function Templates() {
   const { applyTemplate } = useActions(frameLogic)
@@ -129,12 +130,7 @@ export function Templates() {
             ]}
           />
         </div>
-
-        <div
-          className={
-            fullScreenPanel ? 'columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4' : ''
-          }
-        >
+        <Masonry>
           {templates.map((template) => (
             <Template
               template={template}
@@ -147,7 +143,7 @@ export function Templates() {
               editTemplate={editLocalTemplate}
             />
           ))}
-        </div>
+        </Masonry>
         {templates.length === 0 ? (
           <div className="text-muted">
             {search === '' ? 'You have no saved templates.' : `No saved templates match "${search}"`}
@@ -183,11 +179,7 @@ export function Templates() {
               ]}
             />
           </div>
-          <div
-            className={
-              fullScreenPanel ? 'columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4' : ''
-            }
-          >
+          <Masonry>
             {(repository.templates || []).map((template) => (
               <Template
                 template={template}
@@ -198,7 +190,7 @@ export function Templates() {
                 }}
               />
             ))}
-          </div>
+          </Masonry>
           {repository.templates?.length === 0 ? (
             <div className="text-muted">This repository has no templates.</div>
           ) : null}
