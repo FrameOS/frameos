@@ -44,7 +44,30 @@ export const scenesLogic = kea<scenesLogicType>([
         const scenes: FrameScene[] = values.frameForm.scenes || []
         const id = uuidv4()
         frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
-          scenes: [...scenes, { id, name, nodes: [], edges: [], fields: [] }],
+          scenes: [
+            ...scenes,
+            {
+              id,
+              name,
+              nodes: [
+                {
+                  id: '463556ab-e4fe-40c7-93f3-40bc723f454e',
+                  type: 'event',
+                  position: {
+                    x: 121,
+                    y: 113,
+                  },
+                  data: {
+                    keyword: 'render',
+                  },
+                  width: 99,
+                  height: 40,
+                },
+              ],
+              edges: [],
+              fields: [],
+            },
+          ],
         })
         actions.editScene(id)
         actions.resetNewScene()
