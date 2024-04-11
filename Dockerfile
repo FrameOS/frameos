@@ -62,14 +62,17 @@ RUN apt-get remove -y nodejs curl build-essential libffi-dev ca-certificates gnu
     && rm -rf /var/lib/apt/lists/* /root/.npm
 
 # Change back to the main directory
-WORKDIR /app
+WORKDIR /app/frameos
 
-COPY frameos/frameos.nimble frameos/
-COPY frameos/nimble.lock frameos/
-COPY frameos/nim.cfg frameos/
+COPY frameos/frameos.nimble ./
+COPY frameos/nimble.lock ./
+COPY frameos/nim.cfg ./
 
 # Cache nimble deps for when deploying on frame
-RUN cd frameos && nimble install -d -y && nimble setup
+RUN nimble install -d -y && nimble setup
+
+# Change back to the main directory
+WORKDIR /app
 
 # Copy the rest of the application to the container
 COPY . .
