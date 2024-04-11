@@ -35,7 +35,7 @@ WORKDIR /app/backend
 COPY backend/requirements.txt .
 RUN pip3 install --upgrade uv \
     && uv venv \
-    && uv pip3 install --no-cache-dir -r requirements.txt
+    && uv pip install --no-cache-dir -r requirements.txt
 
 # Change the working directory for npm install
 WORKDIR /tmp/frontend
@@ -64,15 +64,19 @@ RUN apt-get remove -y nodejs curl build-essential libffi-dev ca-certificates gnu
 # Change back to the main directory
 WORKDIR /app
 
+COPY frameos/frameos.nimble frameos/
+COPY frameos/nimble.lock frameos/
+COPY frameos/nim.cfg frameos/
+
+# Cache nimble deps for when deploying on frame
+RUN cd frameos && nimble install -d -y && nimble setup
+
 # Copy the rest of the application to the container
 COPY . .
 
 RUN rm -rf /app/frontend && mv /tmp/frontend /app/
 
-# Cache nimble deps for when deploying on frame
-RUN cd frameos && nimble install -d -y && nimble setup
-
 EXPOSE 8989
 
 # Start huey in the background and then run the Flask application
-CMD ["sh", "-c", "(redis-server --daemonize yes) && (cd backend && flask db upgrade) && (cd backend && huey_consumer.py app.huey.huey --worker-type=greenlet --workers=10 --flush-locks) & (cd backend && python3 run.py)"]
+CMD ["bash", "-c", "(redis-server --daemonize yes) && (cd backend && source .venv/bin/activate && flask db upgrade) && (cd backend && source .venv/bin/activate && huey_consumer.py app.huey.huey --worker-type=greenlet --workers=10 --flush-locks) & (cd backend && source .venv/bin/activate && python3 run.py)"]
