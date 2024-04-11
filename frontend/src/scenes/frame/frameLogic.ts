@@ -148,13 +148,12 @@ export const frameLogic = kea<frameLogicType>([
     restartFrame: () => actions.submitFrameForm(),
     stopFrame: () => actions.submitFrameForm(),
     updateScene: ({ sceneId, scene }) => {
-      const { frame } = values
-      const hasScene = frame.scenes?.some(({ id }) => id === sceneId)
-      actions.setFrameFormValues({
-        scenes: hasScene
-          ? frame.scenes?.map((s) => (s.id === sceneId ? sanitizeScene({ ...s, ...scene }, frame) : s))
-          : [...(frame.scenes ?? []), sanitizeScene({ ...scene, id: sceneId }, frame)],
-      })
+      const { frameForm } = values
+      const hasScene = frameForm.scenes?.some(({ id }) => id === sceneId)
+      const scenes = hasScene
+        ? frameForm.scenes?.map((s) => (s.id === sceneId ? sanitizeScene({ ...s, ...scene }, frameForm) : s))
+        : [...(frameForm.scenes ?? []), sanitizeScene({ ...scene, id: sceneId }, frameForm)]
+      actions.setFrameFormValues({ scenes })
     },
     updateNodeData: ({ sceneId, nodeId, nodeData }) => {
       const { frame, frameForm } = values
