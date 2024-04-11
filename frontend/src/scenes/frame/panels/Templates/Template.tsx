@@ -23,7 +23,7 @@ export function Template({
 }: TemplateProps) {
   return (
     <div
-      className="shadow bg-gray-900 break-inside-avoid dndnode relative rounded-lg"
+      className="shadow bg-gray-900 break-inside-avoid dndnode relative rounded-lg mb-4"
       style={
         template.image
           ? {
@@ -57,7 +57,7 @@ export function Template({
                           ? `Install ${(template.scenes || []).length} scene${
                               (template.scenes || []).length === 1 ? '' : 's'
                             }`
-                          : 'Install to frame',
+                          : 'Install on frame',
                       onClick: () => applyTemplate(template),
                       icon: <DocumentPlusIcon className="w-5 h-5" />,
                     },

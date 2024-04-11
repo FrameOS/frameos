@@ -9,6 +9,7 @@ from urllib.parse import urljoin
 class Repository(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = db.Column(db.String(128), nullable=False)
+    description = db.Column(db.Text(), nullable=True)
     url = db.Column(db.Text(), nullable=True)
     last_updated_at = db.Column(db.DateTime(), nullable=True)
     templates = db.Column(JSON, nullable=True)
@@ -17,6 +18,7 @@ class Repository(db.Model):
         return {
             'id': self.id,
             'name': self.name,
+            'description': self.description,
             'url': self.url,
             'last_updated_at': self.last_updated_at,
             'templates': self.templates,
@@ -30,8 +32,10 @@ class Repository(db.Model):
                 json_response = response.json()
                 if isinstance(json_response, dict):
                     self.templates = json_response.get('templates', [])
-                    if not self.name and 'name' in json_response:
+                    if 'name' in json_response:
                         self.name = json_response.get('name', None) or "Unnamed Repository"
+                    if 'description' in json_response:
+                        self.description = json_response.get('description', None)
                 else:
                     self.templates = json_response
             except ValueError:

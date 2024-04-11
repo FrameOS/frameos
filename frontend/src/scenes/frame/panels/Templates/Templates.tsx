@@ -112,7 +112,7 @@ export function Templates() {
       ) : null}
       <div className="space-y-2">
         <div className="flex justify-between w-full items-center">
-          <H6>Saved templates</H6>
+          <H6>My templates</H6>
           <DropdownMenu
             buttonColor="secondary"
             className="mr-3"
@@ -179,6 +179,7 @@ export function Templates() {
               ]}
             />
           </div>
+          {repository.description ? <div className="text-gray-400">{repository.description}</div> : null}
           <Masonry>
             {(repository.templates || []).map((template) => (
               <Template
@@ -192,7 +193,7 @@ export function Templates() {
             ))}
           </Masonry>
           {repository.templates?.length === 0 ? (
-            <div className="text-muted">This repository has no templates.</div>
+            <div className="text-gray-400">This repository has no templates.</div>
           ) : null}
         </div>
       ))}
