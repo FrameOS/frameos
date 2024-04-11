@@ -41,6 +41,7 @@ jobs:
       - name: Run Pytest
         run: |
           cd backend
+          source env/bin/activate
           TEST=1 pytest
 
   build:
