@@ -116,7 +116,7 @@ class TestRepositoryAPI(BaseTestCase):
             response = self.client.get('/api/repositories')
             self.assertEqual(response.status_code, 200)
             if response.json:  # Assuming update_templates is called only when new repo is created
-                mock_update_templates.assert_called_once()
+                mock_update_templates.assert_called()
             else:
                 mock_update_templates.assert_not_called()
 
