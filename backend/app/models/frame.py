@@ -173,7 +173,6 @@ def get_frame_json(frame: Frame) -> dict:
         "width": frame.width,
         "height": frame.height,
         "device": frame.device or "web_only",
-        "color": frame.color or "black",
         "metricsInterval": frame.metrics_interval or 60.0,
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",
