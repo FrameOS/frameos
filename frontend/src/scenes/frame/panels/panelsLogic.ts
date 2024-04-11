@@ -19,6 +19,7 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
     { panel: Panel.Templates, active: false, hidden: false },
     { panel: Panel.SceneState, active: false, hidden: false },
     { panel: Panel.FrameSettings, active: false, hidden: false },
+    { panel: Panel.Control, active: false, hidden: false },
   ],
   [Area.BottomLeft]: [
     { panel: Panel.Logs, active: true, hidden: false },
@@ -28,10 +29,7 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
     { panel: Panel.Debug, active: false, hidden: false },
     { panel: Panel.SceneSource, active: false, hidden: false },
   ],
-  [Area.BottomRight]: [
-    { panel: Panel.Image, active: true, hidden: false },
-    { panel: Panel.Control, active: false, hidden: false },
-  ],
+  [Area.BottomRight]: [{ panel: Panel.Image, active: true, hidden: false }],
 }
 
 function panelsEqual(panel1: PanelWithMetadata, panel2: PanelWithMetadata) {
