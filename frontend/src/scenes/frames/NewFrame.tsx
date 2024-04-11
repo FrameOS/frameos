@@ -8,6 +8,7 @@ import { newFrameForm } from './newFrameForm'
 import { Select } from '../../components/Select'
 import { useActions, useValues } from 'kea'
 import { devices } from '../../devices'
+import { A } from 'kea-router'
 
 export function NewFrame(): JSX.Element {
   const { hideForm, resetNewFrame } = useActions(newFrameForm)
@@ -19,7 +20,17 @@ export function NewFrame(): JSX.Element {
           <Field name="name" label="Name">
             <TextInput name="name" placeholder="Kitchen Frame" required />
           </Field>
-          <Field name="frame_host" label="IP address or hostname">
+          <Field
+            name="frame_host"
+            label={
+              <>
+                SSH connection string{' '}
+                <A href="/settings" className="text-blue-400 hover:underline">
+                  (setup keys)
+                </A>
+              </>
+            }
+          >
             <TextInput name="frame_host" placeholder="user:pass@127.0.0.1" required />
           </Field>
           <Field name="server_host" label="Controller IP or hostname for reverse access">
