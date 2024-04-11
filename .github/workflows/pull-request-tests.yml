@@ -43,7 +43,7 @@ jobs:
       - name: Run Pytest
         run: |
           cd backend
-          source env/bin/activate
+          source .venv/bin/activate
           TEST=1 pytest
 
       - uses: jiro4989/setup-nim-action@v1
