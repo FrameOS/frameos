@@ -7,7 +7,8 @@ from . import api
 from app.models.settings import Settings
 from app.models.repository import Repository
 
-FRAMEOS_REPOSITORY_URL = "https://repo.frameos.net/samples/repository.json"
+FRAMEOS_SAMPLES_URL = "https://repo.frameos.net/samples/repository.json"
+FRAMEOS_GALLERY_URL = "https://repo.frameos.net/gallery/repository.json"
 
 @api.route("/repositories", methods=["POST"])
 @login_required
@@ -41,12 +42,20 @@ def get_repositories():
             db.session.delete(Settings.query.filter_by(key="@system/repository_init_done").first())
             db.session.commit()
 
-        # We have not created a new repo URL
+        # We have not created a new samples repo URL
         if not Settings.query.filter_by(key="@system/repository_samples_done").first():
-            repository = Repository(name="", url=FRAMEOS_REPOSITORY_URL)
+            repository = Repository(name="", url=FRAMEOS_SAMPLES_URL)
             repository.update_templates()
             db.session.add(repository)
             db.session.add(Settings(key="@system/repository_samples_done", value="true"))
+            db.session.commit()
+
+        # We have not created a new gallery repo URL
+        if not Settings.query.filter_by(key="@system/repository_gallery_done").first():
+            repository = Repository(name="", url=FRAMEOS_GALLERY_URL)
+            repository.update_templates()
+            db.session.add(repository)
+            db.session.add(Settings(key="@system/repository_gallery_done", value="true"))
             db.session.commit()
 
         repositories = [repo.to_dict() for repo in Repository.query.all()]

@@ -154,7 +154,7 @@ export function Templates() {
       {(repositories ?? []).map((repository) => (
         <div className="space-y-2 !mt-8">
           <div className="flex gap-2 items-start justify-between">
-            <H6>{repository.name}</H6>
+            <H6>{repository.name || repository.url}</H6>
             <DropdownMenu
               buttonColor="secondary"
               className="mr-3"

@@ -26,13 +26,16 @@ class Repository(db.Model):
         response = requests.get(self.url)
         if response.status_code == 200:
             self.last_updated_at = datetime.utcnow()
-            json_response = response.json()
-            if isinstance(json_response, dict):
-                self.templates = json_response.get('templates', [])
-                if not self.name and 'name' in json_response:
-                    self.name = json_response.get('name', None) or "Unnamed Repository"
-            else:
-                self.templates = json_response
+            try:
+                json_response = response.json()
+                if isinstance(json_response, dict):
+                    self.templates = json_response.get('templates', [])
+                    if not self.name and 'name' in json_response:
+                        self.name = json_response.get('name', None) or "Unnamed Repository"
+                else:
+                    self.templates = json_response
+            except ValueError:
+                self.templates = []
 
             for template in self.templates:
                 if template.get('image', '').startswith('./'):
