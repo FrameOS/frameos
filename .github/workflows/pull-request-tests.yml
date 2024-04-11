@@ -61,6 +61,7 @@ jobs:
       - name: Visual regression tests
         run: |
           cd e2e
+          source ../backend/.venv/bin/activate
           make
 
       - name: Check for snapshot modifications
