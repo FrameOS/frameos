@@ -70,7 +70,7 @@ jobs:
             echo "Changes detected in the repository after running visual regression tests."
             echo "Run the following locally to fix:"
             echo "- cd e2e"
-            echo "- source ../backend/env/bin/activate"
+            echo "- source ../backend/.venv/bin/activate"
             echo "- make"
             git status
             git diff
