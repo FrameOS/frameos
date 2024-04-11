@@ -311,7 +311,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
         background_color = frame.background_color
     if background_color is None:
         background_color = '#000000'
-    scene_background_color = f"parseHtmlColor(\"{sanitize_nim_string(str(background_color))}\")"
+    scene_background_color = wrap_color(sanitize_nim_string(str(background_color)))
 
     scene_source = f"""
 import pixie, json, times, strformat
@@ -417,6 +417,11 @@ def get_sequence_values(key, sequences, index, type, value, field_inputs_for_nod
             response.append(get_sequence_values(f"{key}[{i}]", sequences, index + 1, type, value, field_inputs_for_node, node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, seq_fields_for_node))
     return "@[" + (", ".join(response)) + "]"
 
+def wrap_color(value: str) -> str:
+    if value.startswith("#") and len(value) == 7 and all(c in '0123456789abcdefABCDEF' for c in value[1:]):
+        return f"parseHtmlColor(\"{value}\")"
+    raise ValueError(f"Invalid color value {value}")
+
 def sanitize_nim_value(key, type, value, field_inputs_for_node, node_fields_for_node, source_field_inputs_for_node, node_id_to_integer, seq_fields_for_node) -> str:
     if key in seq_fields_for_node:
         sequences = seq_fields_for_node[key]
@@ -439,7 +444,10 @@ def sanitize_nim_value(key, type, value, field_inputs_for_node, node_fields_for_
     elif type == "boolean":
         return f"{'true' if value == 'true' else 'false'}"
     elif type == "color":
-        return f"parseHtmlColor(\"{'#000000' if value is None else sanitize_nim_string(str(value))}\")"
+        try:
+            return wrap_color('#000000' if value is None else sanitize_nim_string(str(value)))
+        except ValueError:
+            raise ValueError(f"Invalid color value {value} for key {key}")
     elif type == "scene":
         return f"\"{'' if value is None else sanitize_nim_string(str(value))}\".SceneId"
     else:

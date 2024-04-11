@@ -17,6 +17,7 @@ import copy from 'copy-to-clipboard'
 import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
 import { panelsLogic } from '../panelsLogic'
 import { TemplateType } from '../../../../types'
+import { Masonry } from '../../../../components/Masonry'
 
 export function Templates() {
   const { applyTemplate } = useActions(frameLogic)
@@ -111,7 +112,7 @@ export function Templates() {
       ) : null}
       <div className="space-y-2">
         <div className="flex justify-between w-full items-center">
-          <H6>Saved templates</H6>
+          <H6>My templates</H6>
           <DropdownMenu
             buttonColor="secondary"
             className="mr-3"
@@ -129,12 +130,7 @@ export function Templates() {
             ]}
           />
         </div>
-
-        <div
-          className={
-            fullScreenPanel ? 'columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4' : ''
-          }
-        >
+        <Masonry>
           {templates.map((template) => (
             <Template
               template={template}
@@ -147,7 +143,7 @@ export function Templates() {
               editTemplate={editLocalTemplate}
             />
           ))}
-        </div>
+        </Masonry>
         {templates.length === 0 ? (
           <div className="text-muted">
             {search === '' ? 'You have no saved templates.' : `No saved templates match "${search}"`}
@@ -158,7 +154,7 @@ export function Templates() {
       {(repositories ?? []).map((repository) => (
         <div className="space-y-2 !mt-8">
           <div className="flex gap-2 items-start justify-between">
-            <H6>{repository.name}</H6>
+            <H6>{repository.name || repository.url}</H6>
             <DropdownMenu
               buttonColor="secondary"
               className="mr-3"
@@ -183,11 +179,8 @@ export function Templates() {
               ]}
             />
           </div>
-          <div
-            className={
-              fullScreenPanel ? 'columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4' : ''
-            }
-          >
+          {repository.description ? <div className="text-gray-400">{repository.description}</div> : null}
+          <Masonry>
             {(repository.templates || []).map((template) => (
               <Template
                 template={template}
@@ -198,9 +191,9 @@ export function Templates() {
                 }}
               />
             ))}
-          </div>
+          </Masonry>
           {repository.templates?.length === 0 ? (
-            <div className="text-muted">This repository has no templates.</div>
+            <div className="text-gray-400">This repository has no templates.</div>
           ) : null}
         </div>
       ))}

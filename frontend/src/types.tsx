@@ -46,6 +46,7 @@ export interface TemplateForm extends TemplateType {
 export interface RepositoryType {
   id?: string
   name: string
+  description?: string
   url: string
   last_updated_at?: string
   templates?: TemplateType[]

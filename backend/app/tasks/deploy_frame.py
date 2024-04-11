@@ -259,10 +259,10 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
     # run "nim c --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:tmp/build_1 src/frameos.nim"
     debug_options = ""
     if frame.debug:
-        debug_options = "--lineTrace:on --debug"
+        debug_options = "--lineTrace:on"
     status, out, err = exec_local_command(
         frame,
-        f"cd {source_dir} && nimble assets -y && {nim_path} compile --os:linux --cpu:{cpu} --compileOnly --genScript --nimcache:{build_dir} {debug_options} src/frameos.nim 2>&1"
+        f"cd {source_dir} && nimble assets -y && nimble setup && {nim_path} compile --os:linux --cpu:{cpu} --compileOnly --genScript --nimcache:{build_dir} {debug_options} src/frameos.nim 2>&1"
     )
     if status != 0:
         last_line = [line for line in out.split("\n") if line != ''][-1]

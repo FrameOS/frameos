@@ -36,6 +36,18 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'debug',
 ]
 
+function cleanBackgroundColor(color: string): string {
+  // convert the format "(r: 0, g: 0, b: 0)"
+  if (color.startsWith('(r:')) {
+    const [r, g, b] = color
+      .replace(/[\(\)]/g, '')
+      .split(',')
+      .map((c) => parseInt(c.split(':')[1].trim(), 10))
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+  }
+  return color.replace(/[^#a-fA-F0-9]/g, '').toLowerCase()
+}
+
 export function sanitizeScene(scene: Partial<FrameScene>, frame: FrameType): FrameScene {
   const settings = scene.settings ?? {}
   return {
@@ -48,7 +60,7 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: FrameType): Fra
     settings: {
       ...settings,
       refreshInterval: settings.refreshInterval || frame.interval || 300,
-      backgroundColor: settings.backgroundColor || frame.background_color || '#ffffff',
+      backgroundColor: cleanBackgroundColor(settings.backgroundColor || frame.background_color || '#ffffff'),
     },
   } satisfies FrameScene
 }
@@ -148,13 +160,12 @@ export const frameLogic = kea<frameLogicType>([
     restartFrame: () => actions.submitFrameForm(),
     stopFrame: () => actions.submitFrameForm(),
     updateScene: ({ sceneId, scene }) => {
-      const { frame } = values
-      const hasScene = frame.scenes?.some(({ id }) => id === sceneId)
-      actions.setFrameFormValues({
-        scenes: hasScene
-          ? frame.scenes?.map((s) => (s.id === sceneId ? sanitizeScene({ ...s, ...scene }, frame) : s))
-          : [...(frame.scenes ?? []), sanitizeScene({ ...scene, id: sceneId }, frame)],
-      })
+      const { frameForm } = values
+      const hasScene = frameForm.scenes?.some(({ id }) => id === sceneId)
+      const scenes = hasScene
+        ? frameForm.scenes?.map((s) => (s.id === sceneId ? sanitizeScene({ ...s, ...scene }, frameForm) : s))
+        : [...(frameForm.scenes ?? []), sanitizeScene({ ...scene, id: sceneId }, frameForm)]
+      actions.setFrameFormValues({ scenes })
     },
     updateNodeData: ({ sceneId, nodeId, nodeData }) => {
       const { frame, frameForm } = values

@@ -219,7 +219,7 @@
       }
     ],
     "settings": {
-      "backgroundColor": "white",
+      "backgroundColor": "#ffffff",
       "refreshInterval": 10.016
     }
   }

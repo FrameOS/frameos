@@ -28,8 +28,9 @@ jobs:
       - name: Install python dependencies
         run: |
           cd backend
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install --upgrade uv
+          uv venv
+          uv pip install -r requirements.txt
 
       - name: Install node dependencies
         run: |
@@ -40,6 +41,7 @@ jobs:
       - name: Run Pytest
         run: |
           cd backend
+          source .venv/bin/activate
           TEST=1 pytest
 
   build:

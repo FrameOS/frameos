@@ -141,7 +141,6 @@ export const controlLogic = kea<controlLogicType>([
         } else if (event === 'event:setSceneState') {
           actions.sync()
         }
-        console.log({ event })
       } catch (error) {}
     },
   })),
