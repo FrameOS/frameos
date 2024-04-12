@@ -157,7 +157,16 @@ export function SceneState(): JSX.Element {
                   >
                     <Select options={ACCESS_OPTIONS} />
                   </Field>
-                  <div className="flex justify-end items-center w-full gap-2">
+                  <div className="flex w-full items-center justify-between gap-2">
+                    <Button
+                      onClick={() => {
+                        closeField(index)
+                      }}
+                      color="secondary"
+                      size="small"
+                    >
+                      Save & Close
+                    </Button>
                     <Button
                       onClick={() => {
                         removeField(index)
@@ -166,17 +175,6 @@ export function SceneState(): JSX.Element {
                       color="secondary"
                     >
                       <span className="text-red-300">Remove field</span>
-                    </Button>
-                  </div>
-                  <div className="flex w-full items-center gap-2">
-                    <Button
-                      onClick={() => {
-                        closeField(index)
-                      }}
-                      color="secondary"
-                      size="small"
-                    >
-                      Close
                     </Button>
                   </div>
                 </div>
