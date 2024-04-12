@@ -1,0 +1,49 @@
+{
+  "name": "OpenAI Text",
+  "description": "Text response from ChatGPT and friends",
+  "category": "utils",
+  "version": "1.0.0",
+  "settings": ["openAI"],
+  "fields": [
+    {
+      "name": "system",
+      "type": "text",
+      "rows": 6,
+      "value": "You're a smart e-ink frame running FrameOS. Reply with plain text only. Space is very limited.",
+      "required": true,
+      "label": "System Prompt",
+      "placeholder": ""
+    },
+    {
+      "name": "user",
+      "type": "text",
+      "rows": 6,
+      "value": "",
+      "required": true,
+      "label": "User Prompt",
+      "placeholder": "Write your prompt here. Keep it short and clear."
+    },
+    {
+      "name": "model",
+      "type": "string",
+      "value": "gpt-4",
+      "required": true,
+      "label": "Model"
+    },
+    {
+      "name": "stateKey",
+      "type": "string",
+      "value": "reply",
+      "required": true,
+      "label": "State key for reply"
+    },
+    {
+      "name": "cacheSeconds",
+      "type": "float",
+      "value": "3600",
+      "required": false,
+      "label": "Seconds to cache each prompt",
+      "placeholder": "Default: 3600 (1h). Use 0 for no cache"
+    }
+  ]
+}

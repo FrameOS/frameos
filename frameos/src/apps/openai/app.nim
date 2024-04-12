@@ -13,6 +13,9 @@ type
     model*: string
     scalingMode*: string
     cacheSeconds*: float
+    style*: string
+    quality*: string
+    size*: string
 
   App* = ref object
     nodeId*: NodeId
@@ -61,13 +64,32 @@ proc run*(self: App, context: ExecutionContext) =
         ("Authorization", "Bearer " & apiKey),
         ("Content-Type", "application/json"),
     ])
-    let body = %*{"prompt": prompt, "n": 1, "size": "1024x1024",
-        "model": self.appConfig.model}
+    let size = if self.appConfig.size == "best for orientation":
+                 if self.appConfig.model == "dall-e-3":
+                   if context.image.width > context.image.height: "1792x1024"
+                   elif context.image.width < context.image.height: "1024x1792"
+                   else: "1024x1024"
+                 else: "1024x1024"
+               elif self.appConfig.size != "": self.appConfig.size
+               else: "1024x1024"
+    let body = %*{
+        "prompt": prompt,
+        "n": 1,
+        "style": self.appConfig.style,
+        "size": size,
+        "quality": self.appConfig.quality,
+        "model": self.appConfig.model
+      }
     try:
       let response = client.request("https://api.openai.com/v1/images/generations",
           httpMethod = HttpPost, body = $body)
       if response.code != Http200:
-        self.error "Error making request " & $response.status
+        try:
+          let json = parseJson(response.body)
+          let error = json{"error"}{"message"}.getStr(json{"error"}.getStr($json))
+          self.error("Error making request " & $response.status & ": " & error)
+        except:
+          self.error "Error making request " & $response.status & ": " & response.body
         return
       let json = parseJson(response.body)
       let imageUrl = json{"data"}{0}{"url"}.getStr
