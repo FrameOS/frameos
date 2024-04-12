@@ -45,7 +45,10 @@ function cleanBackgroundColor(color: string): string {
       .map((c) => parseInt(c.split(':')[1].trim(), 10))
     return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
   }
-  return color.replace(/[^#a-fA-F0-9]/g, '').toLowerCase()
+  if (color.match(/^#[a-fA-F0-9]{6}$/)) {
+    return color
+  }
+  return '#000000'
 }
 
 export function sanitizeScene(scene: Partial<FrameScene>, frame: FrameType): FrameScene {
@@ -60,7 +63,7 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: FrameType): Fra
     settings: {
       ...settings,
       refreshInterval: settings.refreshInterval || frame.interval || 300,
-      backgroundColor: cleanBackgroundColor(settings.backgroundColor || frame.background_color || '#ffffff'),
+      backgroundColor: cleanBackgroundColor(settings.backgroundColor || '#000000'),
     },
   } satisfies FrameScene
 }
