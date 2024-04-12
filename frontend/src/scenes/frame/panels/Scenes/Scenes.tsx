@@ -32,7 +32,7 @@ export function Scenes() {
 
   if (scenes.length === 0 && !showNewSceneForm) {
     return (
-      <div className="flex h-full items-center">
+      <div className="flex h-full items-center justify-center">
         <div className="text-center space-y-4 mb-8">
           <H6>No scenes installed yet</H6>
           <p className="text-gray-400">
