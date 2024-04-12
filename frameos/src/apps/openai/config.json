@@ -1,6 +1,6 @@
 {
-  "name": "OpenAI",
-  "description": "Random AI generated art",
+  "name": "OpenAI Image",
+  "description": "Random AI generated art from OpenAI's DALL-E models",
   "category": "image",
   "version": "1.0.0",
   "settings": ["openAI"],
@@ -23,6 +23,13 @@
       "label": "Model"
     },
     {
+      "name": "size",
+      "type": "select",
+      "options": ["best for orientation", "1024x1024", "1792x1024", "1024x1792"],
+      "value": "best for orientation",
+      "label": "Size (dall-e-3)"
+    },
+    {
       "name": "scalingMode",
       "type": "select",
       "options": ["cover", "contain", "stretch", "center"],
@@ -31,11 +38,25 @@
       "label": "Scaling mode"
     },
     {
+      "name": "style",
+      "type": "select",
+      "options": ["vivid", "natural", ""],
+      "value": "vivid",
+      "label": "Style"
+    },
+    {
+      "name": "quality",
+      "type": "select",
+      "options": ["standard", "hd", ""],
+      "value": "standard",
+      "label": "Quality"
+    },
+    {
       "name": "cacheSeconds",
       "type": "float",
       "value": "3600",
       "required": false,
-      "label": "Seconds to cache the result",
+      "label": "Seconds to cache each prompt",
       "placeholder": "Default: 3600 (1h). Use 0 for no cache"
     }
   ]
