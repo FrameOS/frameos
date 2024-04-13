@@ -68,19 +68,16 @@ export function Control(): JSX.Element {
         <div>This scene does not export publicly controllable state. Use the "State" panel to configure.</div>
       ) : (
         <Form logic={controlLogic} props={{ frameId, sceneId }} formKey="stateChanges" className="space-y-4">
-          {scene?.fields?.map((field) => (
+          {fields.map((field) => (
             <div className="bg-gray-900 p-2 space-y-2">
               <div className="flex items-center w-full gap-2">
                 {field.label || field.name}
                 {field.name in stateChanges && stateChanges[field.name] !== (state[field.name] ?? field.value)
                   ? ' (modified)'
                   : ''}
-                {field.access !== 'public' ? (
-                  <Tooltip title="This is a private field whose state is not shared externally" />
-                ) : null}
               </div>
               <div>
-                {field.access !== 'public' ? null : field.type === 'select' ? (
+                {field.type === 'select' ? (
                   <Field name={field.name}>
                     {({ value, onChange }) => (
                       <Select
