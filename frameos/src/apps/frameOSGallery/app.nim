@@ -34,13 +34,13 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
 proc run*(self: App, context: ExecutionContext) =
   let image = context.image
 
-  let apiKey = self.frameConfig.settings{"frameOS"}{"apiKey"}.getStr
-  if apiKey == "":
-    self.scene.logger.log(%*{"event": "frameOSGallery:error",
-        "error": "FrameOS API key absent. Sign up at https://gallery.frameos.net/ to support the project."})
-    return
+  # let apiKey = self.frameConfig.settings{"frameOS"}{"apiKey"}.getStr
+  # if apiKey == "":
+  #   self.scene.logger.log(%*{"event": "frameOSGallery:error",
+  #       "error": "FrameOS API key absent. Sign up at https://gallery.frameos.net/ to support the project."})
+  #   return
 
-  let url = &"{BASE_URL}?api_key={apiKey}&category={self.appConfig.category}"
+  let url = &"{BASE_URL}?category={self.appConfig.category}"
 
   self.scene.logger.log(%*{"event": "frameOSGallery",
       "category": self.appConfig.category})
