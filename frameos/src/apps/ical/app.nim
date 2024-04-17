@@ -7,6 +7,7 @@ import httpclient
 from frameos/utils/image import scaleAndDrawImage
 import frameos/types
 import strutils, sequtils
+import chrono
 
 type
   AppConfig* = object
@@ -44,38 +45,34 @@ proc error*(self: App, message: string) =
 
 type
   Event* = object
-    startDate*: string
-    endDate*: string
+    startDate*: Timestamp
+    endDate*: Timestamp
     location*: string
     description*: string
     title*: string
-
-proc toUTC(localDateTime: DateTime, tzInfo: string): DateTime =
-  # Placeholder for timezone conversion, implement using a library if available.
-  localDateTime # .toTimezone(getTimezone(tzInfo)).toUniversal()
 
 proc extractTimeZone(dateTimeStr: string): string =
   if dateTimeStr.startsWith("TZID="):
     let parts = dateTimeStr.split(":")
     parts[0].split("=")[1]
   else:
-    "UTC" # Assume UTC if no timezone is specified
+    "UTC"
 
-proc parseDateTime(dateTimeStr: string): DateTime =
+proc parseDateTime(dateTimeStr: string, tzInfo: string): Timestamp =
   let cleanDateTimeStr = if dateTimeStr.contains(";"):
     dateTimeStr.split(";")[1]
   elif dateTimeStr.contains(":"):
     dateTimeStr.split(":")[1]
   else:
     dateTimeStr
-
   let hasZ = cleanDateTimeStr.endsWith("Z")
   let finalDateTimeStr = if hasZ: cleanDateTimeStr[0 ..< ^1] else: cleanDateTimeStr
-  let format = if 'T' in finalDateTimeStr: "yyyyMMdd'T'HHmmss" else: "yyyyMMdd"
-
+  let format = if 'T' in finalDateTimeStr:
+                  "{year/4}{month/2}{day/2}T{hour/2}{minute/2}{second/2}"
+                else:
+                  "{year/4}{month/2}{day/2}"
   try:
-    let parsedDate = finalDateTimeStr.parse(format, utc())
-    return if hasZ: parsedDate else: parsedDate # .toLocal() # Convert to local time if 'Z' is not present
+    return parseTs(format, finalDateTimeStr, tzInfo)
   except ValueError as e:
     raise newException(TimeParseError, "Failed to parse datetime string: " & dateTimeStr &
       ". Error: " & e.msg)
@@ -88,23 +85,18 @@ proc processLine*(line: string, currentEvent: var Event, inEvent: var bool, even
     inEvent = false
     events.add(currentEvent)
   elif inEvent:
-    echo "Processing line: ", line
     let arr = line.split({';', ':'}, 1)
-    echo arr
     if arr.len > 1:
-      let key = arr[0] # Handle keys like "DTSTART;TZID=Europe/Brussels"
+      let key = arr[0]
       let value = arr[1]
-      echo "Key: ", key, ", Value: ", value
       case key
       of "DTSTART", "DTEND":
-        let dateTimeValue = parseDateTime(value)
         let tzInfo = extractTimeZone(value)
-        let tzstring = "yyyy-MM-dd'T'HH:mm:ss"
-        let dateTime = &"{dateTimeValue.format(tzstring)} {tzInfo}"
+        let timestamp = parseDateTime(value, tzInfo)
         if key == "DTSTART":
-          currentEvent.startDate = dateTime
+          currentEvent.startDate = timestamp
         else:
-          currentEvent.endDate = dateTime
+          currentEvent.endDate = timestamp
       of "LOCATION":
         currentEvent.location = value
       of "SUMMARY":
@@ -119,19 +111,18 @@ proc parseICalendar*(content: string): seq[Event] =
   var events: seq[Event] = @[]
   var currentEvent: Event
   var inEvent = false
-  var propertyAccumulator = ""
+  var accumulator = ""
 
   for i, line in lines:
     if line.len > 0 and (line[0] == ' ' or line[0] == '\t'):
-      propertyAccumulator.add(line[1..^1])
+      accumulator.add(line[1..^1])
       continue
-    if propertyAccumulator != "":
-      processLine(propertyAccumulator.strip(), currentEvent, inEvent, events)
-      propertyAccumulator = ""
-    propertyAccumulator = line
-
-  if propertyAccumulator != "":
-    processLine(propertyAccumulator.strip(), currentEvent, inEvent, events)
+    if accumulator != "":
+      processLine(accumulator.strip(), currentEvent, inEvent, events)
+      accumulator = ""
+    accumulator = line
+  if accumulator != "":
+    processLine(accumulator.strip(), currentEvent, inEvent, events)
 
   return events
 
