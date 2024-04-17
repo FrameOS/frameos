@@ -77,6 +77,27 @@ proc parseDateTime(dateTimeStr: string, tzInfo: string): Timestamp =
     raise newException(TimeParseError, "Failed to parse datetime string: " & dateTimeStr &
       ". Error: " & e.msg)
 
+proc unescape*(line: string): string =
+  result = ""
+  var i = 0
+  while i < line.len:
+    if line[i] == '\\':
+      inc i
+      if i >= line.len:
+        result.add('\\')
+        break
+      case line[i]
+      of 'n': result.add('\n')
+      of 't': result.add('\t')
+      of 'r': result.add('\r')
+      of ',': result.add(',')
+      of ';': result.add(';')
+      else: result.add(line[i])
+    else:
+      result.add(line[i])
+    inc i
+  return result
+
 proc processLine*(line: string, currentEvent: var Event, inEvent: var bool, events: var seq[Event]) =
   if line.startsWith("BEGIN:VEVENT"):
     inEvent = true
@@ -98,11 +119,11 @@ proc processLine*(line: string, currentEvent: var Event, inEvent: var bool, even
         else:
           currentEvent.endDate = timestamp
       of "LOCATION":
-        currentEvent.location = value
+        currentEvent.location = unescape(value)
       of "SUMMARY":
-        currentEvent.title = value
+        currentEvent.title = unescape(value)
       of "DESCRIPTION":
-        currentEvent.description = value
+        currentEvent.description = unescape(value)
       else:
         return
 
