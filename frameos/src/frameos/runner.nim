@@ -144,9 +144,13 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
       if self.scenes.hasKey(sceneId):
         currentScene = self.scenes[sceneId]
       else:
-        currentScene = exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
-        self.scenes[sceneId] = currentScene
-        currentScene.updateLastPublicState()
+        try:
+          currentScene = exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+          self.scenes[sceneId] = currentScene
+          currentScene.updateLastPublicState()
+        except Exception as e:
+          self.logger.log(%*{"event": "render:error:scene:init", "error": $e.msg, "stacktrace": e.getStackTrace()})
+
       lastSceneId = sceneId
       withLock lastPublicStatesLock:
         lastPublicSceneId = sceneId
