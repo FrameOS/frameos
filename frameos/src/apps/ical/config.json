@@ -13,19 +13,33 @@
       "placeholder": ""
     },
     {
-      "name": "stateKey",
-      "type": "string",
-      "value": "reply",
-      "required": true,
-      "label": "State key for reply"
-    },
-    {
       "name": "cacheSeconds",
       "type": "float",
       "value": "60",
       "required": false,
-      "label": "Seconds to cache the response for",
+      "label": "Seconds to cache",
       "placeholder": "Default: 60. Use 0 for no cache"
+    },
+    {
+      "name": "exportFrom",
+      "type": "string",
+      "value": "today",
+      "required": true,
+      "label": "Export events from"
+    },
+    {
+      "name": "exportUntil",
+      "type": "string",
+      "value": "7d",
+      "required": true,
+      "label": "Export events until"
+    },
+    {
+      "name": "stateKey",
+      "type": "string",
+      "value": "reply",
+      "required": true,
+      "label": "State key to store events in"
     }
   ]
 }

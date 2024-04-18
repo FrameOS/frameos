@@ -14,6 +14,8 @@ type
     url*: string
     cacheSeconds*: float
     stateKey*: string
+    exportFrom*: string
+    exportUntil*: string
 
   App* = ref object
     nodeId*: NodeId
@@ -37,10 +39,12 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   )
 
 proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"openai:{self.nodeId}:log", "message": message})
+  echo message
+  self.scene.logger.log(%*{"event": &"ical:{self.nodeId}:log", "message": message})
 
 proc error*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"openai:{self.nodeId}:error", "error": message})
+  echo message
+  self.scene.logger.log(%*{"event": &"ical:{self.nodeId}:error", "error": message})
   self.scene.state[self.appConfig.stateKey] = %*(&"Error: {message}")
 
 type
@@ -50,6 +54,7 @@ type
     location*: string
     description*: string
     title*: string
+    rrule*: string
 
 proc extractTimeZone(dateTimeStr: string): string =
   if dateTimeStr.startsWith("TZID="):
@@ -122,6 +127,8 @@ proc processLine*(line: string, currentEvent: var Event, inEvent: var bool, even
         currentEvent.location = unescape(value)
       of "SUMMARY":
         currentEvent.title = unescape(value)
+      of "RRULE":
+        currentEvent.rrule = unescape(value)
       of "DESCRIPTION":
         currentEvent.description = unescape(value)
       else:
@@ -155,35 +162,31 @@ proc run*(self: App, context: ExecutionContext) =
   var reply = ""
   if self.appConfig.cacheSeconds > 0 and self.cachedReply != "" and
       self.cacheExpiry > epochTime() and self.cachedUrl == self.appConfig.url:
+    self.log "Cached"
     reply = self.cachedReply
   else:
-    # var client = newHttpClient(timeout = 60000)
-
-    # try:
-    #   self.scene.logger.log(%*{"event": &"ical:{self.nodeId}:request", "url": self.appConfig.url})
-    #   let response = client.request(self.appConfig.url, httpMethod = HttpGet)
-    #   if response.code != Http200:
-    #     try:
-    #       let json = parseJson(response.body)
-    #       let error = json{"error"}{"message"}.getStr(json{"error"}.getStr($json))
-    #       self.error("Error making request " & $response.status & ": " & error)
-    #     except:
-    #       self.error "Error making request " & $response.status & ": " & response.body
-    #     return
-    self.error "Error making stuff"
-
-    #   let text = response.body
-
-    #   self.log text
-
-    #   # self.log $parseICalendar(text)
-
-
-    #   self.scene.logger.log(%*{"event": &"ical:{self.nodeId}:reply", "reply": text})
-    # except CatchableError as e:
-    #   self.error "iCal fetch error: " & $e.msg
-    # finally:
-    #   client.close()
+    self.log "Starting"
+    var client = newHttpClient(timeout = 60000)
+    try:
+      self.scene.logger.log(%*{"event": &"ical:request", "url": self.appConfig.url})
+      let response = client.request(self.appConfig.url, httpMethod = HttpGet)
+      self.log "Code: " & $response.code
+      if response.code != Http200:
+        try:
+          let json = parseJson(response.body)
+          let error = json{"error"}{"message"}.getStr(json{"error"}.getStr($json))
+          self.error("Error making request " & $response.status & ": " & error)
+        except:
+          self.error "Error making request " & $response.status & ": " & response.body
+        return
+      let text = response.body
+      let entries = parseICalendar(text)
+      reply = $entries
+      self.scene.logger.log(%*{"event": &"ical:reply", "reply": reply})
+    except CatchableError as e:
+      self.error "iCal fetch error: " & $e.msg
+    finally:
+      client.close()
 
     if self.appConfig.cacheSeconds > 0:
       self.cachedReply = reply
