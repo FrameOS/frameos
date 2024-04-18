@@ -10,6 +10,15 @@ import strutils, sequtils
 import chrono
 
 type
+  Event* = object
+    startDate*: Timestamp
+    endDate*: Timestamp
+    location*: string
+    description*: string
+    title*: string
+    rrule*: string
+
+type
   AppConfig* = object
     url*: string
     cacheSeconds*: float
@@ -24,7 +33,7 @@ type
     frameConfig*: FrameConfig
 
     cacheExpiry: float
-    cachedReply: string
+    cachedEvents: seq[Event]
     cachedUrl: string
 
 proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
@@ -33,7 +42,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
     scene: scene,
     frameConfig: scene.frameConfig,
     appConfig: appConfig,
-    cachedReply: "",
+    cachedEvents: @[],
     cacheExpiry: 0.0,
     cachedUrl: "",
   )
@@ -46,15 +55,6 @@ proc error*(self: App, message: string) =
   echo message
   self.scene.logger.log(%*{"event": &"ical:{self.nodeId}:error", "error": message})
   self.scene.state[self.appConfig.stateKey] = %*(&"Error: {message}")
-
-type
-  Event* = object
-    startDate*: Timestamp
-    endDate*: Timestamp
-    location*: string
-    description*: string
-    title*: string
-    rrule*: string
 
 proc extractTimeZone(dateTimeStr: string): string =
   if dateTimeStr.startsWith("TZID="):
@@ -159,13 +159,10 @@ proc run*(self: App, context: ExecutionContext) =
     self.error("No url provided in app config.")
     return
 
-  var reply = ""
-  if self.appConfig.cacheSeconds > 0 and self.cachedReply != "" and
-      self.cacheExpiry > epochTime() and self.cachedUrl == self.appConfig.url:
+  if self.appConfig.cacheSeconds > 0 and self.cacheExpiry > epochTime() and self.cachedUrl == self.appConfig.url:
     self.log "Cached"
-    reply = self.cachedReply
   else:
-    self.log "Starting"
+    self.log "Fetching"
     var client = newHttpClient(timeout = 60000)
     try:
       self.scene.logger.log(%*{"event": &"ical:request", "url": self.appConfig.url})
@@ -179,19 +176,27 @@ proc run*(self: App, context: ExecutionContext) =
         except:
           self.error "Error making request " & $response.status & ": " & response.body
         return
-      let text = response.body
-      let entries = parseICalendar(text)
-      reply = $entries
-      self.scene.logger.log(%*{"event": &"ical:reply", "reply": reply})
+      self.cachedEvents = parseICalendar(response.body)
+      self.cachedUrl = self.appConfig.url
+      self.cacheExpiry = epochTime() + self.appConfig.cacheSeconds
     except CatchableError as e:
       self.error "iCal fetch error: " & $e.msg
     finally:
       client.close()
 
-    if self.appConfig.cacheSeconds > 0:
-      self.cachedReply = reply
-      self.cachedUrl = self.appConfig.url
-      self.cacheExpiry = epochTime() + self.appConfig.cacheSeconds
-
-  if reply != "":
-    self.scene.state[self.appConfig.stateKey] = %*(reply)
+    let exportFrom = getTime().toUnixFloat().Timestamp
+    let exportUntil = (getTime().toUnixFloat() + 7 * 86400.0).Timestamp
+    var eventsReply: JsonNode = %[]
+    for event in self.cachedEvents:
+      if (event.startDate < exportUntil and event.endDate > exportFrom):
+        eventsReply.add(%*{
+          "title": event.title,
+          "startDate": event.startDate.float,
+          "endDate": event.endDate.float,
+          "location": event.location,
+          "description": event.description,
+          "rrule": event.rrule,
+        })
+    self.scene.logger.log(%*{"event": &"ical:reply", "events": len(self.cachedEvents), "inRange": len(eventsReply)})
+    self.scene.logger.log(%*{"event": &"ical:reply", "reply": eventsReply})
+    self.scene.state[self.appConfig.stateKey] = eventsReply
