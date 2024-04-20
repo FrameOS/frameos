@@ -1,6 +1,6 @@
-{.compile: "EPD_12in48.c".}
+{.compile: "EPD_12in48b.c".}
 ## ***************************************************************************
-##  | File      	:	EPD_12in48.h
+##  | File      	:	EPD_12in48b.h
 ##  | Author      :   Waveshare team
 ##  | Function    :   Electronic paper driver
 ##  | Info        :
@@ -33,19 +33,22 @@ import
   DEV_Config
 
 const
-  EPD_12in48_MAX_WIDTH* = 1304
-  EPD_12in48_MAX_HEIGHT* = 984
-  EPD_12in48_M1_WIDTH* = 648
-  EPD_12in48_M1_HEIGHT* = (EPD_MAX_HEIGHT div 2)
-  EPD_12in48_S1_WIDTH* = (EPD_MAX_WIDTH - 648)
-  EPD_12in48_S1_HEIGHT* = (EPD_MAX_HEIGHT div 2)
-  EPD_12in48_M2_WIDTH* = (EPD_MAX_WIDTH - 648)
-  EPD_12in48_M2_HEIGHT* = (EPD_MAX_HEIGHT div 2)
-  EPD_12in48_S2_WIDTH* = 648
-  EPD_12in48_S2_HEIGHT* = (EPD_MAX_HEIGHT div 2)
+  EPD_12in48B_WIDTH* = 1304
+  EPD_12in48B_HEIGHT* = 984
+  EPD_12in48B_MAX_WIDTH* = 1304
+  EPD_12in48B_MAX_HEIGHT* = 984
+  EPD_12in48B_M1_WIDTH* = 648
+  EPD_12in48B_M1_HEIGHT* = (EPD_12in48B_MAX_HEIGHT div 2)
+  EPD_12in48B_S1_WIDTH* = (EPD_12in48B_MAX_WIDTH - 648)
+  EPD_12in48B_S1_HEIGHT* = (EPD_12in48B_MAX_HEIGHT div 2)
+  EPD_12in48B_M2_WIDTH* = (EPD_12in48B_MAX_WIDTH - 648)
+  EPD_12in48B_M2_HEIGHT* = (EPD_12in48B_MAX_HEIGHT div 2)
+  EPD_12in48B_S2_WIDTH* = 648
+  EPD_12in48B_S2_HEIGHT* = (EPD_12in48B_MAX_HEIGHT div 2)
 
-proc EPD_12in48_Init*(): UBYTE {.importc: "EPD_12in48_Init".}
-proc EPD_12in48_Clear*() {.importc: "EPD_12in48_Clear".}
-proc EPD_12in48_Display*(Image: ptr UBYTE) {.importc: "EPD_12in48_Display".}
-proc EPD_12in48_TurnOnDisplay*() {.importc: "EPD_12in48_TurnOnDisplay".}
-proc EPD_12in48_Sleep*() {.importc: "EPD_12in48_Sleep".}
+proc EPD_12in48B_Init*(): UBYTE {.importc: "EPD_12in48B_Init".}
+proc EPD_12in48B_Clear*() {.importc: "EPD_12in48B_Clear".}
+proc EPD_12in48B_Display*(BlackImage: ptr UBYTE; RedImage: ptr UBYTE) {.
+    importc: "EPD_12in48B_Display".}
+proc EPD_12in48B_TurnOnDisplay*() {.importc: "EPD_12in48B_TurnOnDisplay".}
+proc EPD_12in48B_Sleep*() {.importc: "EPD_12in48B_Sleep".}
