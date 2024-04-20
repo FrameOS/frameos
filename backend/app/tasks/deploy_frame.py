@@ -35,6 +35,10 @@ def deploy_frame(id: int):
         ssh = None
         try:
             frame = Frame.query.get_or_404(id)
+
+            if frame.scenes is None or len(frame.scenes) == 0:
+                raise Exception("You must have at least one installed scene to deploy a frame.")
+
             if frame.status == 'deploying':
                 raise Exception("Already deploying, will not deploy again. Request again to force deploy.")
 
