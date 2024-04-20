@@ -29,6 +29,7 @@
 ******************************************************************************/
 #include "EPD_12in48.h"
 #include "Debug.h"
+#include "DEV_Config.h"
 
 static void EPD_Reset(void);
 static void EPD_M1_SendCommand(UBYTE Reg);

@@ -20,7 +20,7 @@ from app import create_app
 from app.codegen.drivers_nim import write_drivers_nim
 from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.drivers.devices import drivers_for_device
-from app.drivers.waveshare import write_waveshare_driver_nim
+from app.drivers.waveshare import write_waveshare_driver_nim, get_variant_folder
 from app.huey import huey
 from app.models import get_apps_from_scenes
 from app.models.log import new_log as log
@@ -291,18 +291,14 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
     shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
 
     if waveshare := drivers.get('waveshare'):
-        files = [
-            "Debug.h", "DEV_Config.c", "DEV_Config.h"
-            # used with the GPIOD driver
-            #, "RPI_gpiod.c", "RPI_gpiod.h", "dev_hardware_SPI.c", "dev_hardware_SPI.h",
-        ]
-        for file in files:
-            shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", file), os.path.join(build_dir, file))
-
         if waveshare.variant:
-            files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
-            for file in files:
-                shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", "ePaper", file), os.path.join(build_dir, file))
+            variant_folder = get_variant_folder(waveshare.variant)
+            util_files = ["Debug.h", "DEV_Config.c", "DEV_Config.h"]
+            for file in util_files:
+                shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, file), os.path.join(build_dir, file))
+            variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
+            for file in variant_files:
+                shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, file), os.path.join(build_dir, file))
 
     # Create Makefile
     with open(os.path.join(build_dir, "Makefile"), "w") as file:
