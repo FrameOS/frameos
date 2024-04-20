@@ -149,6 +149,8 @@ def deploy_frame(id: int):
 
             if drivers.get("spi"):
                 exec_command(frame, ssh, 'sudo raspi-config nonint do_spi 0')
+            elif drivers.get("noSpi"):
+                exec_command(frame, ssh, 'sudo raspi-config nonint do_spi 1')
 
             # restart
             exec_command(frame, ssh, "sudo systemctl daemon-reload")

@@ -32,7 +32,7 @@
 # THE SOFTWARE.
 #
 ******************************************************************************/
-#include "EPD_12in48b.h"
+#include "EPD_12in48b_V2.h"
 #include "Debug.h"
 #include "DEV_Config.h"
 

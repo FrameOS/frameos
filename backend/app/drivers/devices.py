@@ -23,10 +23,13 @@ def drivers_for_device(device: str) -> dict[str, Driver]:
             waveshare.variant = "EPD_7in5_V2"
         if waveshare.variant == "epd2in13_V3":
             waveshare.variant = "EPD_2in13_V3"
-
         if waveshare.variant not in get_variant_keys():
             raise Exception(f"Unknown waveshare driver variant {waveshare.variant}")
-        device_drivers = {"waveshare": waveshare, "spi": DRIVERS["spi"]}
+
+        if waveshare.variant in ("EPD_12in48", "EPD_12in48b", "EPD_12in48b_V2"):
+            device_drivers = {"waveshare": waveshare, "noSpi": DRIVERS["noSpi"]}
+        else:
+            device_drivers = {"waveshare": waveshare, "spi": DRIVERS["spi"]}
 
     # Always enable evdev if not eink
     if device != "pimoroni.inky_imporession" and not device.startswith("waveshare."):
