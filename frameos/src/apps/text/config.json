@@ -86,6 +86,16 @@
       "required": true,
       "label": "Border width",
       "placeholder": "1"
+    },
+    {
+      "name": "overflow",
+      "type": "select",
+      "options": [
+        "fit-bounds",
+        "visible"
+      ],
+      "value": "fit-bounds",
+      "label": "Overflow"
     }
   ]
 }
