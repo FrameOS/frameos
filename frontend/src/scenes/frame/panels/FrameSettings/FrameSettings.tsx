@@ -11,11 +11,11 @@ import { Field } from '../../../../components/Field'
 import { devices } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 
-export interface DetailsProps {
+export interface FrameSettingsProps {
   className?: string
 }
 
-export function FrameSettings({ className }: DetailsProps) {
+export function FrameSettings({ className }: FrameSettingsProps) {
   const { frameId, frame, frameFormTouches } = useValues(frameLogic)
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
@@ -271,4 +271,7 @@ export function FrameSettings({ className }: DetailsProps) {
       )}
     </div>
   )
+}
+FrameSettings.PanelTitle = function FrameSettingsPanelTitle(): JSX.Element {
+  return <>Settings</>
 }
