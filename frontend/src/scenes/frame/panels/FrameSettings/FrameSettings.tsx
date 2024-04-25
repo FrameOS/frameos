@@ -257,6 +257,31 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                 ]}
               />
             </Field>
+            <Field
+              name="log_to_file"
+              label={<div>Save logs to file</div>}
+              labelRight={
+                <Button
+                  color="secondary"
+                  size="small"
+                  onClick={() => {
+                    setFrameFormValues({ log_to_file: '/srv/frameos/logs/frame.log' })
+                    touchFrameFormField('log_to_file')
+                  }}
+                >
+                  Set default
+                </Button>
+              }
+              tooltip="This is disabled by default to save the SD card from wear."
+            >
+              <TextInput
+                name="log_to_file"
+                onClick={() => touchFrameFormField('log_to_file')}
+                type="text"
+                placeholder="e.g. /srv/frameos/logs/frame.log"
+                required
+              />
+            </Field>{' '}
             <Field name="debug" label="Debug logging (noisy)">
               <Select
                 name="debug"

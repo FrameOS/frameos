@@ -100,7 +100,7 @@ def deploy_frame(id: int):
                                 exec_command(frame, ssh, command)
 
                     exec_command(frame, ssh, "if [ ! -d /srv/frameos/ ]; then sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; fi")
-                    exec_command(frame, ssh, "mkdir -p /srv/frameos/build/")
+                    exec_command(frame, ssh, "mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
                     log(id, "stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
                     scp.put(archive_path, f"/srv/frameos/build/build_{build_id}.tar.gz")
                     exec_command(frame, ssh, f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz")

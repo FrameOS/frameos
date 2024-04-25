@@ -27,6 +27,7 @@ export interface FrameType {
   scenes?: FrameScene[]
   debug?: boolean
   last_log_at?: string
+  log_to_file?: string
 }
 
 export interface TemplateType {
