@@ -16,6 +16,16 @@ const LOG_FLUSH_SECONDS = 1.0
 
 var threadInitDone = false
 var thread: Thread[FrameConfig]
+var logFile: File
+
+proc logToFile(filename: string, logJson: JsonNode) =
+  if filename.len > 0:
+    try:
+      logFile = open(filename, fmAppend)
+      logFile.write($logJson & "\n")
+      logFile.close()
+    except Exception as e:
+      echo "Error writing to log file: " & $e.msg
 
 proc run(self: LoggerThread) =
   var attempt = 0
@@ -47,9 +57,11 @@ proc run(self: LoggerThread) =
         self.lastSendAt = epochTime()
         if response.code != Http200:
           echo "Error sending logs: HTTP " & $response.status
+          logToFile(self.frameConfig.logToFile, %*{"error": "Error sending logs", "status": response.status})
           self.erroredLogs = newLogs
       except CatchableError as e:
         echo "Error sending logs: " & $e.msg
+        logToFile(self.frameConfig.logToFile, %*{"error": "Error sending logs", "message": e.msg})
         self.erroredLogs = newLogs
       finally:
         client.close()
@@ -58,6 +70,8 @@ proc run(self: LoggerThread) =
         attempt += 1
         let sleepDuration = min(100 * (2 ^ attempt), 7500)
         echo "Sleeping for " & $sleepDuration & "ms, attempt " & $attempt & ". Logs queued: " & $self.erroredLogs.len
+        logToFile(self.frameConfig.logToFile, %*{"sleep": "Error sending logs", "duration": sleepDuration,
+            "attempt": attempt, "queued": self.erroredLogs.len})
         sleep(sleepDuration)
       else:
         attempt = 0
@@ -67,6 +81,7 @@ proc run(self: LoggerThread) =
       if self.frameConfig.debug:
         echo payload
       self.logs.add(payload)
+      logToFile(self.frameConfig.logToFile, payload)
     else:
       sleep(100)
 
@@ -85,6 +100,7 @@ proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
       run(loggerThread)
     except Exception as e:
       echo "Error in logger thread: " & $e.msg
+      logToFile(frameConfig.logToFile, %*{"error": "Error in logger thread", "message": $e.msg})
       sleep(1000)
 
 proc newLogger*(frameConfig: FrameConfig): Logger =

@@ -13,6 +13,7 @@
     "metricsInterval": 60.0,
     "scalingMode": "cover",
     "frameAccess": "public",
+    "logToFile": "/tmp/frameos.log",
     "rotate": 0,
     "settings": {
         "sentry": {

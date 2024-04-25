@@ -18,6 +18,7 @@ type
     rotate*: int
     scalingMode*: string
     settings*: JsonNode
+    logToFile*: string
     debug*: bool
 
   Logger* = ref object

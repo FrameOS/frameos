@@ -32,6 +32,7 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     rotate: data{"rotate"}.getInt(),
     scalingMode: data{"scalingMode"}.getStr(),
     settings: data{"settings"},
+    logToFile: data{"logToFile"}.getStr(),
     debug: data{"debug"}.getBool() or commandLineParams().contains("--debug")
   )
   setConfigDefaults(result)

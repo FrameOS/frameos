@@ -272,7 +272,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                   Set default
                 </Button>
               }
-              tooltip="This is disabled by default to save the SD card from wear."
+              tooltip="This is disabled by default to save the SD card from wear. This is ALSO disabled because there is no log rotation, so the file will grow indefinitely. Use with caution."
             >
               <TextInput
                 name="log_to_file"
