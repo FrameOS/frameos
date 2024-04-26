@@ -10,6 +10,8 @@ import { Tooltip } from '../../../../components/Tooltip'
 import { Spinner } from '../../../../components/Spinner'
 import { TextArea } from '../../../../components/TextArea'
 import { H6 } from '../../../../components/H6'
+import { PencilSquareIcon } from '@heroicons/react/24/outline'
+import { panelsLogic } from '../panelsLogic'
 
 // TODO: replace this with the actual proxied frame control URL
 export function Control(): JSX.Element {
@@ -27,26 +29,29 @@ export function Control(): JSX.Element {
     fields,
   } = useValues(controlLogic({ frameId }))
   const { setCurrentScene, sync, submitStateChanges, resetStateChanges } = useActions(controlLogic({ frameId }))
+  const { editScene } = useActions(panelsLogic({ frameId }))
   const fieldCount = fields.length ?? 0
 
   return (
     <div>
       <div className="space-y-2 mb-4">
-        <div className="flex justify-between w-full items-center gap-2 mb-2">
+        <div className="flex justify-between w-full items-center gap-2">
           <H6>Currently active scene:</H6>
           <Button onClick={sync} disabled={stateRecordLoading} color="secondary" size="small">
             {loading ? <Spinner color="white" /> : 'Sync'}
           </Button>
         </div>
-        <Select
-          disabled={sceneChanging}
-          options={scenesAsOptions}
-          onChange={(sceneId) => setCurrentScene(sceneId)}
-          value={sceneId}
-        />
+        <div className="flex w-full items-center gap-2">
+          <Select
+            disabled={sceneChanging}
+            options={scenesAsOptions}
+            onChange={(sceneId) => setCurrentScene(sceneId)}
+            value={sceneId}
+          />
+          <PencilSquareIcon className="w-5 h-5 cursor-pointer" onClick={() => editScene(sceneId)} />
+        </div>
       </div>
-
-      <div className="flex justify-between w-full items-center gap-2 mb-2">
+      <div className="flex justify-between w-full items-center gap-2">
         <H6>Control the active scene:</H6>
         <Tooltip
           title={
