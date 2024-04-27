@@ -22,7 +22,7 @@ proc logToFile(filename: string, logJson: JsonNode) =
   if filename.len > 0:
     try:
       logFile = open(filename, fmAppend)
-      logFile.write($logJson & "\n")
+      logFile.write(now().format("yyyy-MM-dd HH:mm:ss") & " " & $logJson & "\n")
       logFile.close()
     except Exception as e:
       echo "Error writing to log file: " & $e.msg
