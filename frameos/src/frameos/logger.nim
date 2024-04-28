@@ -1,4 +1,4 @@
-import httpclient, zippy, json, sequtils, os, times, math
+import httpclient, zippy, json, sequtils, os, times, math, strutils
 
 import frameos/channels
 import frameos/types
@@ -21,8 +21,12 @@ var logFile: File
 proc logToFile(filename: string, logJson: JsonNode) =
   if filename.len > 0:
     try:
-      logFile = open(filename, fmAppend)
-      logFile.write(now().format("yyyy-MM-dd HH:mm:ss") & " " & $logJson & "\n")
+      let file = if "{date}" in filename:
+        filename.replace("{date}", now().format("yyyyMMdd"))
+      else:
+        filename
+      logFile = open(file, fmAppend)
+      logFile.write(now().format("yyyyMMdd HHmmss") & " " & $logJson & "\n")
       logFile.close()
     except Exception as e:
       echo "Error writing to log file: " & $e.msg
