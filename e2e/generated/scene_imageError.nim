@@ -85,7 +85,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
   scene.node1 = downloadImageApp.init(1.NodeId, scene.FrameScene, downloadImageApp.AppConfig(url: "https://frameos.net/assets/images/frameos-e2e-scenes-imageError-must-be-404.jpg", scalingMode: "cover", cacheSeconds: 3600.0))
-  scene.node2 = textApp.init(2.NodeId, scene.FrameScene, textApp.AppConfig(text: "Activate proton beam", position: "center-center", offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontColor: parseHtmlColor("#ffffff"), fontSize: 32.0, borderColor: parseHtmlColor("#000000"), borderWidth: 1))
+  scene.node2 = textApp.init(2.NodeId, scene.FrameScene, textApp.AppConfig(text: "Activate proton beam", position: "center-center", offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontColor: parseHtmlColor("#ffffff"), fontSize: 32.0, borderColor: parseHtmlColor("#000000"), borderWidth: 1, overflow: "fit-bounds"))
   runEvent(context)
   
 {.pop.}
