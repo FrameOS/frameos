@@ -66,6 +66,15 @@ def deploy_frame(id: int):
                 else:
                     cpu = "amd64"
 
+                total_memory = 0
+                try:
+                    mem_output = []
+                    exec_command(frame, ssh, "free -m", mem_output)
+                    total_memory = int(mem_output[1].split()[1])
+                except Exception as e:
+                    log(id, "stderr", str(e))
+                low_memory = total_memory < 512
+
                 drivers = drivers_for_device(frame.device)
 
                 # create a build .tar.gz
@@ -75,6 +84,10 @@ def deploy_frame(id: int):
                 make_local_modifications(frame, source_dir)
                 log(id, "stdout", "- Creating build archive")
                 archive_path = create_local_build_archive(frame, build_dir, build_id, nim_path, source_dir, temp_dir, cpu)
+
+                if low_memory:
+                    log(id, "stdout", "- Low memory detected, stopping FrameOS for compilation")
+                    exec_command(frame, ssh, "sudo service frameos stop")
 
                 with SCPClient(ssh.get_transport()) as scp:
                     # build the release on the server
@@ -104,7 +117,7 @@ def deploy_frame(id: int):
                     log(id, "stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
                     scp.put(archive_path, f"/srv/frameos/build/build_{build_id}.tar.gz")
                     exec_command(frame, ssh, f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz")
-                    exec_command(frame, ssh, f"cd /srv/frameos/build/build_{build_id} && PARALLEL_MEM=$(awk '/MemTotal/{{printf \"%.0f\\n\", $2/1024/150}}' /proc/meminfo) && PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && make -j$PARALLEL")
+                    exec_command(frame, ssh, f"cd /srv/frameos/build/build_{build_id} && PARALLEL_MEM=$(awk '/MemTotal/{{printf \"%.0f\\n\", $2/1024/250}}' /proc/meminfo) && PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && make -j$PARALLEL")
                     exec_command(frame, ssh, f"mkdir -p /srv/frameos/releases/release_{build_id}")
                     exec_command(frame, ssh, f"cp /srv/frameos/build/build_{build_id}/frameos /srv/frameos/releases/release_{build_id}/frameos")
                     log(id, "stdout", f"> add /srv/frameos/releases/release_{build_id}/frame.json")
@@ -151,6 +164,10 @@ def deploy_frame(id: int):
                 exec_command(frame, ssh, 'sudo raspi-config nonint do_spi 0')
             elif drivers.get("noSpi"):
                 exec_command(frame, ssh, 'sudo raspi-config nonint do_spi 1')
+
+            # disable apt-daily-upgrade (sudden +70mb memory usage, might lead a Zero W 2 to endlessly swap)
+            if low_memory:
+                exec_command(frame, ssh, "sudo systemctl disable apt-daily.service apt-daily.timer apt-daily-upgrade.timer apt-daily-upgrade.service")
 
             # restart
             exec_command(frame, ssh, "sudo systemctl daemon-reload")
