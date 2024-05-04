@@ -1,4 +1,4 @@
-import json, os, psutil, strutils, sequtils
+import json, os, psutil, strutils, sequtils, posix
 import frameos/types
 import frameos/channels
 
@@ -36,13 +36,18 @@ proc getMemoryUsage(self: MetricsLoggerThread): JsonNode =
 proc getCPUUsage(self: MetricsLoggerThread): float =
   result = psutil.cpuPercent(interval = 1)
 
+proc getNetConnections(self: MetricsLoggerThread): int =
+  let pid = getpid()
+  result = net_connections(pid = pid).len
+
 proc logMetrics(self: MetricsLoggerThread) =
   log(%*{
     "event": "metrics",
     "load": self.getLoadAverage(),
     "cpuTemperature": self.getCPUTemperature(),
     "memoryUsage": self.getMemoryUsage(),
-    "cpuUsage": self.getCPUUsage()
+    "cpuUsage": self.getCPUUsage(),
+    "netConnections": self.getNetConnections(),
   })
 
 proc start(self: MetricsLoggerThread) =
