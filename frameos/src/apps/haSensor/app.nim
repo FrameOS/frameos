@@ -1,4 +1,5 @@
-import json, strformat, httpclient, options, times
+import json, strformat, options, times
+import lib/httpclient
 import frameos/types
 
 type
