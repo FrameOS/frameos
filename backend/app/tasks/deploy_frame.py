@@ -165,9 +165,11 @@ def deploy_frame(id: int):
             elif drivers.get("noSpi"):
                 exec_command(frame, ssh, 'sudo raspi-config nonint do_spi 1')
 
-            # disable apt-daily-upgrade (sudden +70mb memory usage, might lead a Zero W 2 to endlessly swap)
             if low_memory:
+                # disable apt-daily-upgrade (sudden +70mb memory usage, might lead a Zero W 2 to endlessly swap)
                 exec_command(frame, ssh, "sudo systemctl disable apt-daily.service apt-daily.timer apt-daily-upgrade.timer apt-daily-upgrade.service")
+                # # disable swap while we're at it
+                # exec_command(frame, ssh, "sudo systemctl disable dphys-swapfile.service")
 
             # restart
             exec_command(frame, ssh, "sudo systemctl daemon-reload")
