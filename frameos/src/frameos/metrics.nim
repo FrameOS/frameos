@@ -36,9 +36,12 @@ proc getMemoryUsage(self: MetricsLoggerThread): JsonNode =
 proc getCPUUsage(self: MetricsLoggerThread): float =
   result = psutil.cpuPercent(interval = 1)
 
-proc getNetConnections(self: MetricsLoggerThread): int =
-  let pid = getpid()
-  result = net_connections(pid = pid).len
+proc getFileDescriptors(self: MetricsLoggerThread): int =
+  var fdCount = 0
+  let dir = "/proc/" & $getpid() & "/fd"
+  for _ in walkFiles(dir):
+    inc(fdCount)
+  return fdCount
 
 proc logMetrics(self: MetricsLoggerThread) =
   log(%*{
@@ -47,7 +50,7 @@ proc logMetrics(self: MetricsLoggerThread) =
     "cpuTemperature": self.getCPUTemperature(),
     "memoryUsage": self.getMemoryUsage(),
     "cpuUsage": self.getCPUUsage(),
-    "netConnections": self.getNetConnections(),
+    "fileDescriptors": self.getFileDescriptors(),
   })
 
 proc start(self: MetricsLoggerThread) =
