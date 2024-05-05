@@ -145,7 +145,7 @@ export function FrameDetails({ className }: DetailsProps) {
               <tr>
                 <td className="text-blue-200 text-right">Log to file:</td>
                 <td className="break-words">{frame.log_to_file || <em>disabled</em>}</td>
-              </tr>{' '}
+              </tr>
               <tr>
                 <td className="text-blue-200 text-right">Debug logging:</td>
                 <td className="break-words">{frame.debug ? 'enabled' : 'disabled'}</td>
