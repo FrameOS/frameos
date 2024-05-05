@@ -39,7 +39,7 @@ proc getCPUUsage(self: MetricsLoggerThread): float =
 proc getFileDescriptors(self: MetricsLoggerThread): int =
   var fdCount = 0
   let dir = "/proc/" & $getpid() & "/fd"
-  for _ in walkFiles(dir):
+  for _ in walkDir(dir):
     inc(fdCount)
   return fdCount
 
