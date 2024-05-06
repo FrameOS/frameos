@@ -37,6 +37,7 @@ class Frame(db.Model):
     metrics_interval = db.Column(db.Double, default=60)
     scaling_mode = db.Column(db.String(64), nullable=True)  # contain (default), cover, stretch, center
     rotate = db.Column(db.Integer, nullable=True)
+    log_to_file = db.Column(db.String(256), nullable=True)
     debug = db.Column(db.Boolean, nullable=True)
     last_log_at = db.Column(db.DateTime, nullable=True)
     # apps
@@ -75,6 +76,7 @@ class Frame(db.Model):
             'debug': self.debug,
             'scenes': self.scenes,
             'last_log_at': self.last_log_at.replace(tzinfo=timezone.utc).isoformat() if self.last_log_at else None,
+            'log_to_file': self.log_to_file,
         }
 
 def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:
@@ -120,6 +122,7 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         rotate=0,
         background_color="#ffffff",
         device=device or "web_only",
+        log_to_file=None, # save the SSD by default
     )
     db.session.add(frame)
     db.session.commit()
@@ -177,6 +180,7 @@ def get_frame_json(frame: Frame) -> dict:
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",
         "rotate": frame.rotate or 0,
+        "logToFile": frame.log_to_file,
     }
 
     setting_keys = set()

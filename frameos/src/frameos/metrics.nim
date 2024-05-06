@@ -1,4 +1,4 @@
-import json, os, psutil, strutils, sequtils
+import json, os, psutil, strutils, sequtils, posix
 import frameos/types
 import frameos/channels
 
@@ -36,13 +36,21 @@ proc getMemoryUsage(self: MetricsLoggerThread): JsonNode =
 proc getCPUUsage(self: MetricsLoggerThread): float =
   result = psutil.cpuPercent(interval = 1)
 
+proc getOpenFileDescriptors(self: MetricsLoggerThread): int =
+  var fdCount = 0
+  let dir = "/proc/" & $getpid() & "/fd"
+  for _ in walkDir(dir):
+    inc(fdCount)
+  return fdCount
+
 proc logMetrics(self: MetricsLoggerThread) =
   log(%*{
     "event": "metrics",
     "load": self.getLoadAverage(),
     "cpuTemperature": self.getCPUTemperature(),
     "memoryUsage": self.getMemoryUsage(),
-    "cpuUsage": self.getCPUUsage()
+    "cpuUsage": self.getCPUUsage(),
+    "openFileDescriptors": self.getOpenFileDescriptors(),
   })
 
 proc start(self: MetricsLoggerThread) =

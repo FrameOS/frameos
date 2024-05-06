@@ -34,6 +34,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'background_color',
   'scenes',
   'debug',
+  'log_to_file',
 ]
 
 function cleanBackgroundColor(color: string): string {

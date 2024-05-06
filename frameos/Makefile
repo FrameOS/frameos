@@ -4,7 +4,7 @@ run: build
 	./build/frameos --verbose
 
 build:
-	nimble build -y --verbose
+	nimble build -y --verbose --lineTrace:on
 
 test:
 	nimble test

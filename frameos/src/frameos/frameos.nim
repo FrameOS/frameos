@@ -33,6 +33,7 @@ proc start*(self: FrameOS) {.async.} =
     "metricsInterval": self.frameConfig.metricsInterval,
     "scalingMode": self.frameConfig.scalingMode,
     "rotate": self.frameConfig.rotate,
+    "logToFile": self.frameConfig.logToFile,
     "debug": self.frameConfig.debug,
   }}
   self.logger.log(message)
