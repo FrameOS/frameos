@@ -2,6 +2,7 @@
 # This is copied from Nim v2.0.4
 # This file is here until this issue is resoled: https://github.com/nim-lang/Nim/pull/23575
 # Without it, the logger keeps eating fd-s if the target is down, and the frame will eventually crash
+# This file inlines the std/net.dial function and changes a few lines.
 
 #
 #
@@ -249,7 +250,6 @@
 ##
 
 import std/private/since
-
 import std/[
   net, strutils, uri, parseutils, base64, os, mimetypes,
   math, random, httpcore, times, tables, streams, monotimes,
@@ -260,6 +260,71 @@ when defined(nimPreviewSlimSystem):
   import std/[assertions, syncio]
 
 export httpcore except parseHeader # TODO: The `except` doesn't work
+
+when defined(nimPreviewSlimSystem):
+  import std/assertions
+
+import options
+
+proc netDial*(address: string, port: Port,
+           protocol = IPPROTO_TCP, buffered = true): owned(Socket)
+           {.tags: [ReadIOEffect, WriteIOEffect].} =
+  ## Establishes connection to the specified `address`:`port` pair via the
+  ## specified protocol. The procedure iterates through possible
+  ## resolutions of the `address` until it succeeds, meaning that it
+  ## seamlessly works with both IPv4 and IPv6.
+  ## Returns Socket ready to send or receive data.
+  let sockType = protocol.toSockType()
+
+  let aiList = getAddrInfo(address, port, AF_UNSPEC, sockType, protocol)
+
+  var fdPerDomain: array[low(Domain).ord..high(Domain).ord, SocketHandle]
+  for i in low(fdPerDomain)..high(fdPerDomain):
+    fdPerDomain[i] = osInvalidSocket
+  template closeUnusedFds(domainToKeep = -1) {.dirty.} =
+    for i, fd in fdPerDomain:
+      if fd != osInvalidSocket and i != domainToKeep:
+        fd.close()
+
+  var success = false
+  var lastError: OSErrorCode
+  var it = aiList
+  var domain: Domain
+  var lastFd: SocketHandle
+  while it != nil:
+    let domainOpt = it.ai_family.toKnownDomain()
+    if domainOpt.isNone:
+      it = it.ai_next
+      continue
+    domain = domainOpt.unsafeGet()
+    lastFd = fdPerDomain[ord(domain)]
+    if lastFd == osInvalidSocket:
+      lastFd = createNativeSocket(domain, sockType, protocol)
+      if lastFd == osInvalidSocket:
+        # we always raise if socket creation failed, because it means a
+        # network system problem (e.g. not enough FDs), and not an unreachable
+        # address.
+        let err = osLastError()
+        freeAddrInfo(aiList)
+        closeUnusedFds()
+        raiseOSError(err)
+      fdPerDomain[ord(domain)] = lastFd
+    if connect(lastFd, it.ai_addr, it.ai_addrlen.SockLen) == 0'i32:
+      success = true
+      break
+    lastError = osLastError()
+    it = it.ai_next
+  freeAddrInfo(aiList)
+  closeUnusedFds(ord(domain))
+
+  if success:
+    result = newSocket(lastFd, domain, sockType, protocol, buffered)
+  elif lastError != 0.OSErrorCode:
+    lastFd.close()
+    raiseOSError(lastError)
+  else:
+    lastFd.close()
+    raise newException(IOError, "Couldn't resolve address: " & address)
 
 type
   Response* = ref object
@@ -941,7 +1006,7 @@ proc newConnection(client: HttpClient | AsyncHttpClient;
       else: nativesockets.Port(connectionUrl.port.parseInt)
 
     when client is HttpClient:
-      client.socket = await net.dial(connectionUrl.hostname, port)
+      client.socket = await netDial(connectionUrl.hostname, port)
     elif client is AsyncHttpClient:
       client.socket = await asyncnet.dial(connectionUrl.hostname, port)
     else: {.fatal: "Unsupported client type".}
