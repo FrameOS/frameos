@@ -48,6 +48,9 @@ DRIVERS = {
     "spi": Driver( # enables spi on deploy
         name="spi",
     ),
+    "noSpi": Driver( # disables spi on deploy
+        name="noSpi",
+    ),
     "i2c": Driver( # enables i2c on deploy
         name="i2c",
     ),

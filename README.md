@@ -22,7 +22,7 @@ To get started:
 
 ## Supported platforms
 
-We support all the most common e-ink displays out there.
+Supported are all the most common e-ink displays out there.
 
 - Pimoroni e-ink frames
 - Waveshare e-ink

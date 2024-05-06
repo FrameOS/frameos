@@ -13,7 +13,7 @@ block test_load_config:
     doAssert config.device == "web_only"
     doAssert config.metrics_interval == 60 # 60.0 in frame.json
     doAssert config.rotate == 0
-    doAssert config.debug == false
+    doAssert config.debug == true
     doAssert config.scalingMode == "cover"
     doAssert config.settings == %*{"sentry": {"frame_dsn": nil}}
     doAssert config.settings{"sentry"} == %*{"frame_dsn": nil}

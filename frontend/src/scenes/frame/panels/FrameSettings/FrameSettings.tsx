@@ -11,11 +11,11 @@ import { Field } from '../../../../components/Field'
 import { devices } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 
-export interface DetailsProps {
+export interface FrameSettingsProps {
   className?: string
 }
 
-export function FrameSettings({ className }: DetailsProps) {
+export function FrameSettings({ className }: FrameSettingsProps) {
   const { frameId, frame, frameFormTouches } = useValues(frameLogic)
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
@@ -257,6 +257,31 @@ export function FrameSettings({ className }: DetailsProps) {
                 ]}
               />
             </Field>
+            <Field
+              name="log_to_file"
+              label={<div>Save logs to file</div>}
+              labelRight={
+                <Button
+                  color="secondary"
+                  size="small"
+                  onClick={() => {
+                    setFrameFormValues({ log_to_file: '/srv/frameos/logs/frame-{date}.log' })
+                    touchFrameFormField('log_to_file')
+                  }}
+                >
+                  Set default
+                </Button>
+              }
+              tooltip="This is disabled by default to save the SD card from wear. This is ALSO disabled because there is no log rotation, so the file will grow indefinitely. Use with caution. The string {date} will be replaced with the current date."
+            >
+              <TextInput
+                name="log_to_file"
+                onClick={() => touchFrameFormField('log_to_file')}
+                type="text"
+                placeholder="e.g. /srv/frameos/logs/frame-{date}.log"
+                required
+              />
+            </Field>{' '}
             <Field name="debug" label="Debug logging (noisy)">
               <Select
                 name="debug"
@@ -271,4 +296,7 @@ export function FrameSettings({ className }: DetailsProps) {
       )}
     </div>
   )
+}
+FrameSettings.PanelTitle = function FrameSettingsPanelTitle(): JSX.Element {
+  return <>Settings</>
 }

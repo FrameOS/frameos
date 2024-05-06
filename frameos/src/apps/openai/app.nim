@@ -3,7 +3,7 @@ import times
 import options
 import json
 import strformat
-import httpclient
+import lib/httpclient
 from frameos/utils/image import scaleAndDrawImage
 import frameos/types
 

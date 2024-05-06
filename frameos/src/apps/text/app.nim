@@ -14,6 +14,7 @@ type
     fontSize*: float
     borderColor*: Color
     borderWidth*: int
+    overflow*: string
 
   RenderData* = object
     text*: string
@@ -57,30 +58,61 @@ proc `==`(obj1, obj2: RenderData): bool =
       obj1.fontSize == obj2.fontSize and obj1.borderColor ==
           obj2.borderColor and obj1.borderWidth == obj2.borderWidth
 
-proc generateTypeset(typeface: Typeface, renderData: RenderData,
+proc generateTypeset(self: App, typeface: Typeface, renderData: RenderData,
     border: bool): Arrangement =
+  let
+    hAlign = case renderData.position:
+      of "top-right", "center-right", "bottom-right": RightAlign
+      of "top-left", "center-left", "bottom-left": LeftAlign
+      else: CenterAlign
+    vAlign = case renderData.position:
+      of "top-left", "top-center", "top-right": TopAlign
+      of "bottom-left", "bottom-center", "bottom-right": BottomAlign
+      else: MiddleAlign
+    color = if border: renderData.borderColor else: renderData.fontColor
+    width = renderData.width.toFloat() - 2 * renderData.padding
+    height = renderData.height.toFloat() - 2 * renderData.padding
+    bounds = vec2(width, height)
+    font = newFont(typeface, renderData.fontSize, color)
 
-  let font = if border:
-    newFont(typeface, renderData.fontSize, renderData.borderColor)
-  else:
-    newFont(typeface, renderData.fontSize, renderData.fontColor)
+  if self.appConfig.overflow == "visible":
+    return typeset([newSpan(renderData.text, font)], bounds, hAlign, vAlign)
 
-  let hAlign = case renderData.position:
-    of "top-right", "center-right", "bottom-right": RightAlign
-    of "top-left", "center-left", "bottom-left": LeftAlign
-    else: CenterAlign
-  let vAlign = case renderData.position:
-    of "top-left", "top-center", "top-right": TopAlign
-    of "bottom-left", "bottom-center", "bottom-right": BottomAlign
-    else: MiddleAlign
+  else: # "fit-bounds"
+    var tooBigFontSize = 0.0
+    var tooSmallFontSize = 0.0
+    var loopIndex = 0
+    while loopIndex < 100:
+      loopIndex += 1
+      result = typeset([newSpan(renderData.text, font)], bounds, hAlign, vAlign)
+      let bounds = layoutBounds(result)
 
-  result = typeset(
-      spans = [newSpan(renderData.text, font)],
-      bounds = vec2(renderData.width.toFloat() - 2 * renderData.padding,
-          renderData.height.toFloat() - 2 * renderData.padding),
-      hAlign = hAlign,
-      vAlign = vAlign,
-  )
+      # if the text is too big, shrink the font size
+      if bounds.y > height:
+        if font.size < 2:
+          break
+
+        # try to get closer based on the ratio
+        tooBigFontSize = font.size
+        if tooSmallFontSize > 0.0:
+          font.size = (tooBigFontSize + tooSmallFontSize) / 2
+        else:
+          font.size = tooBigFontSize / 2
+        continue
+
+      # we're in bounds, and on the first run (text was never too big), so return
+      elif tooBigFontSize == 0.0:
+        break
+
+      # the text is too small, and was once too big
+      else:
+        if height - bounds.y < 1:
+          break
+        tooSmallFontSize = font.size
+        if tooBigFontSize - tooSmallFontSize < 0.5:
+          break
+        font.size = (tooBigFontSize + tooSmallFontSize) / 2
+        continue
 
 proc run*(self: App, context: ExecutionContext) =
   let renderData = RenderData(
@@ -97,11 +129,11 @@ proc run*(self: App, context: ExecutionContext) =
 
   let cacheMatch = self.cachedRender.isSome and self.cachedRender.get().renderData == renderData
   let textTypeset = if cacheMatch: self.cachedRender.get().typeset
-    else: generateTypeset(self.typeface, renderData, false)
+    else: self.generateTypeset(self.typeface, renderData, false)
   let borderTypeset = if renderData.borderWidth > 0:
       if cacheMatch:
         self.cachedRender.get().borderTypeset
-      else: some(generateTypeset(self.typeface, renderData, true))
+      else: some(self.generateTypeset(self.typeface, renderData, true))
       else: none(Arrangement)
 
   if not cacheMatch:
@@ -111,18 +143,15 @@ proc run*(self: App, context: ExecutionContext) =
       borderTypeset: borderTypeset,
     ))
 
-  if renderData.borderWidth > 0 and borderTypeset.isSome:
-    for dx in (-renderData.borderWidth)..(renderData.borderWidth):
-      for dy in (-renderData.borderWidth)..(renderData.borderWidth):
-        context.image.fillText(
-          borderTypeset.get(),
-          translate(vec2(
-            renderData.padding + self.appConfig.offsetX + dx.toFloat(),
-            renderData.padding + self.appConfig.offsetY + dy.toFloat()))
-        )
-
   context.image.fillText(
     textTypeset,
     translate(vec2(renderData.padding + self.appConfig.offsetX,
         renderData.padding + self.appConfig.offsetY))
   )
+  if renderData.borderWidth > 0 and borderTypeset.isSome:
+    context.image.strokeText(
+      borderTypeset.get(),
+      translate(vec2(renderData.padding + self.appConfig.offsetX,
+          renderData.padding + self.appConfig.offsetY)),
+      strokeWidth = float(renderData.borderWidth)
+    )

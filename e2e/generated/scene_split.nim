@@ -101,7 +101,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.node2 = colorApp.init(2.NodeId, scene.FrameScene, colorApp.AppConfig(color: parseHtmlColor("#aba12b")))
   scene.node3 = colorApp.init(3.NodeId, scene.FrameScene, colorApp.AppConfig(color: parseHtmlColor("#814141")))
   scene.node5 = colorApp.init(5.NodeId, scene.FrameScene, colorApp.AppConfig(color: parseHtmlColor("#ffffff")))
-  scene.node4 = textApp.init(4.NodeId, scene.FrameScene, textApp.AppConfig(text: "2 x 3", fontColor: parseHtmlColor("#000000"), position: "center-center", offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontSize: 32.0, borderColor: parseHtmlColor("#000000"), borderWidth: 1))
+  scene.node4 = textApp.init(4.NodeId, scene.FrameScene, textApp.AppConfig(text: "2 x 3", fontColor: parseHtmlColor("#000000"), position: "center-center", offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontSize: 32.0, borderColor: parseHtmlColor("#000000"), borderWidth: 1, overflow: "fit-bounds"))
   runEvent(context)
   
 {.pop.}

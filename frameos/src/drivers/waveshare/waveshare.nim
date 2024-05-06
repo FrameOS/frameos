@@ -114,9 +114,6 @@ proc renderBlackWhiteRed*(self: Driver, image: Image, isRed = true) =
   setLastPixels(pixels)
   self.notifyImageAvailable()
 
-  echo pixels.len
-  echo blackImage.len
-
   for y in 0..<image.height:
     for x in 0..<image.width:
       let inputIndex = y * inputRowWidth + x div 4
