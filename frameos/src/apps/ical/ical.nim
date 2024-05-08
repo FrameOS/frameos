@@ -88,7 +88,6 @@ proc parseIcalLine(line: string): PropertyComponents =
   return components
 
 proc processLine*(line: string, currentVEvent: var VEvent, inVEvent: var bool, events: var seq[VEvent]) =
-  let components = parseIcalLine(line)
   if line.startsWith("BEGIN:VEVENT"):
     inVEvent = true
     currentVEvent = VEvent()
@@ -117,8 +116,14 @@ proc processLine*(line: string, currentVEvent: var VEvent, inVEvent: var bool, e
       of "SUMMARY":
         currentVEvent.summary = unescape(value)
       of "RRULE":
-        for k, v in components.params:
-          currentVEvent.rrule[k] = v
+        let args = line.split(":", 2)
+        if args.len != 2:
+          return
+        for split in args[1].split(';'):
+          let keyValue = split.split('=', 2)
+          if keyValue.len != 2:
+            continue
+          currentVEvent.rrule[keyValue[0]] = @[keyValue[1]]
       of "DESCRIPTION":
         currentVEvent.description = unescape(value)
       else:

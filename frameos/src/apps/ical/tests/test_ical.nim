@@ -2,8 +2,8 @@ import ../ical
 import frameos/types
 import chrono
 
-block test_ical_1:
-    let iCalFile = readFile("./src/apps/ical/tests/data/test1.ics")
+block test_lincoln:
+    let iCalFile = readFile("./src/apps/ical/tests/data/lincoln.ics")
     let events = parseICalendar(iCalFile)
     doAssert len(events) == 1
     doAssert events[0].startTime == Timestamp(1202774400.0)
@@ -12,8 +12,8 @@ block test_ical_1:
     doAssert events[0].description == "Born February 12, 1809\nSixteenth President (1861-1865)\n\n\n\nhttp://AmericanHistoryCalendar.com"
     doAssert events[0].summary == "Abraham Lincoln"
 
-block test_ical_2:
-    let iCalFile = readFile("./src/apps/ical/tests/data/test2.ics")
+block test_meetings:
+    let iCalFile = readFile("./src/apps/ical/tests/data/meetings.ics")
     let events = parseICalendar(iCalFile)
     doAssert len(events) == 5
     doAssert events[0].startTime == Timestamp(1618419600.0)
@@ -41,3 +41,10 @@ block test_ical_2:
     doAssert events[4].location == "https://example.com/link-again"
     doAssert events[4].description == "Hey, let\'s do a bit of pair coding :)"
     doAssert events[4].summary == "Pairing Three / One"
+
+block test_holidays:
+    let iCalFile = readFile("./src/apps/ical/tests/data/holidays.ics")
+    let events = parseICalendar(iCalFile)
+    for event in events:
+        echo event.rrule
+    doAssert len(events) == 5
