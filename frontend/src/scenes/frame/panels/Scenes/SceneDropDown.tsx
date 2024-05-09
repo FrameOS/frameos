@@ -26,7 +26,7 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
   const { editScene, editSceneJSON } = useActions(panelsLogic)
   const { scenes } = useValues(scenesLogic({ frameId }))
-  const { toggleSettings, renameScene, duplicateScene, deleteScene, setAsDefault } = useActions(
+  const { toggleSettings, renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault } = useActions(
     scenesLogic({ frameId })
   )
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
@@ -79,15 +79,18 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
           onClick: () => renameScene(scene.id),
           icon: <PencilSquareIcon className="w-5 h-5" />,
         },
-        ...(!scene.default
-          ? [
-              {
-                label: 'Set as default',
-                onClick: () => setAsDefault(scene.id),
-                icon: <FlagIcon className="w-5 h-5" />,
-              },
-            ]
-          : []),
+
+        scene.default
+          ? {
+              label: 'Remove "start on boot"',
+              onClick: () => removeDefault(),
+              icon: <FlagIcon className="w-5 h-5" />,
+            }
+          : {
+              label: 'Set to start on boot',
+              onClick: () => setAsDefault(scene.id),
+              icon: <FlagIcon className="w-5 h-5" />,
+            },
         {
           label: 'Delete scene',
           confirm: 'Are you sure you want to delete this scene?',
