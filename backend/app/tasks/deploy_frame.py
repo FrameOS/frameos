@@ -87,7 +87,7 @@ def deploy_frame(id: int):
 
                 if low_memory:
                     log(id, "stdout", "- Low memory detected, stopping FrameOS for compilation")
-                    exec_command(frame, ssh, "sudo service frameos stop")
+                    exec_command(frame, ssh, "sudo service frameos stop", raise_on_error=False)
 
                 with SCPClient(ssh.get_transport()) as scp:
                     # build the release on the server
