@@ -24,13 +24,20 @@ def upgrade():
 
     from app.models import Frame
     from app import db
-    frames = Frame.query.all()
-    for frame in frames:
-        frame.frame_access_key = secure_token(20)
-        frame.frame_access = "private"
-        db.session.add(frame)
-        db.session.commit()
-    db.session.flush()
+
+    frames = db.session.query(Frame.id).all()
+    for (frame_id,) in frames:
+        db.session.execute(
+            sa.update(Frame).
+            where(Frame.id == frame_id).
+            values({
+                Frame.frame_access_key: secure_token(20),
+                Frame.frame_access: "private"
+            })
+        )
+
+    # Commit changes
+    db.session.commit()
     # ### end Alembic commands ###
 
 
