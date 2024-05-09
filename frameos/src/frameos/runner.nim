@@ -31,6 +31,7 @@ var
   lastPublicStates {.guard: lastPublicStatesLock.} = %*{}
   lastPublicSceneId {.guard: lastPublicStatesLock.} = "".SceneId
   lastPersistedStates = %*{}
+  lastPersistedSceneId: Option[SceneId] = none(SceneId)
 
 proc setLastImage(image: Image) =
   withLock lastImageLock:
@@ -91,12 +92,24 @@ proc updateLastPersistedState*(self: FrameScene) =
   if hasChanges:
     writeFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(self.id.string)}.json", $persistedState)
   self.lastPersistedStateUpdate = epochTime()
+  if lastPersistedSceneId.isNone() or lastPersistedSceneId.get() != self.id:
+    writeFile(&"{SCENE_STATE_JSON_FOLDER}/scene.json", $(%*{"sceneId": self.id.string}))
+    lastPersistedSceneId = some(self.id)
 
 proc loadPersistedState*(sceneId: SceneId): JsonNode =
   try:
     return parseJson(readFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json"))
   except IOError:
     return %*{}
+
+proc loadLastScene*(): Option[SceneId] =
+  try:
+    let json = parseJson(readFile(&"{SCENE_STATE_JSON_FOLDER}/scene.json"))
+    if json.hasKey("sceneId"):
+      result = some(SceneId(json["sceneId"].getStr()))
+      lastPersistedSceneId = result
+  except IOError:
+    return none(SceneId)
 
 proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene): Image =
   let sceneTimer = epochTime()
@@ -301,12 +314,23 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
         if waitTime < 200:
           waitTime += 5
 
+proc getFirstSceneId*(): SceneId =
+  if defaultSceneId.isSome():
+    return defaultSceneId.get()
+  let lastSceneId = loadLastScene()
+  if lastSceneId.isSome():
+    return lastSceneId.get()
+  if len(exportedScenes) > 0:
+    for key in keys(exportedScenes):
+      return key
+  return "".SceneId
+
 proc createRunnerThread*(args: (FrameConfig, Logger)) =
   {.cast(gcsafe).}:
     var runnerThread = RunnerThread(
       frameConfig: args[0],
       scenes: initTable[SceneId, FrameScene](),
-      currentSceneId: defaultSceneId,
+      currentSceneId: getFirstSceneId(),
       lastRenderAt: 0,
       sleepFuture: none(Future[void]),
       isRendering: false,

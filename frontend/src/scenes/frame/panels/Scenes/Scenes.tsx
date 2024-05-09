@@ -91,7 +91,7 @@ export function Scenes() {
                   </span>
                   {scene.default ? (
                     <Tag className="ml-2" color="primary">
-                      default
+                      start on boot
                     </Tag>
                   ) : null}
                   {scene?.settings?.refreshInterval && Number.isFinite(scene.settings.refreshInterval) ? (

@@ -122,7 +122,7 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         rotate=0,
         background_color="#ffffff",
         device=device or "web_only",
-        log_to_file=None, # save the SSD by default
+        log_to_file=None, # spare the SD card from load
     )
     db.session.add(frame)
     db.session.commit()
