@@ -317,7 +317,13 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
             util_files = ["Debug.h", "DEV_Config.c", "DEV_Config.h"]
             for file in util_files:
                 shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, file), os.path.join(build_dir, file))
-            variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
+
+            if waveshare.variant in ["EPD_2in9b", "EPD_2in9c", "EPD_2in13b", "EPD_2in13c", "EPD_4in2b", "EPD_4in2c", "EPD_5in83b", "EPD_5in83c", "EPD_7in5b", "EPD_7in5c"]:
+                c_file = re.sub(r'[bc]', 'bc', waveshare.variant)
+                variant_files = [f"{waveshare.variant}.nim", f"{c_file}.c", f"{c_file}.h"]
+            else:
+                variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
+
             for file in variant_files:
                 shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, file), os.path.join(build_dir, file))
 
