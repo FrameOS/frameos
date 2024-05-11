@@ -28,6 +28,17 @@ export interface FrameType {
   debug?: boolean
   last_log_at?: string
   log_to_file?: string
+  reboot?: {
+    enabled?: 'true' | 'false'
+    crontab?: string
+    type?: 'frameos' | 'raspberry'
+  }
+  control_code?: {
+    enabled?: 'true' | 'false'
+    position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center'
+    size?: string
+    padding?: string
+  }
 }
 
 export interface TemplateType {

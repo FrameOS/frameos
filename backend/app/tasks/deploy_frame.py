@@ -171,6 +171,16 @@ def deploy_frame(id: int):
                 # # disable swap while we're at it
                 # exec_command(frame, ssh, "sudo systemctl disable dphys-swapfile.service")
 
+            if frame.reboot and frame.reboot.get('enabled') == 'true':
+                cron_schedule = frame.reboot.get('crontab', '0 0 * * *')
+                if frame.reboot.get('type') == 'raspberry':
+                    crontab = f"{cron_schedule} root /sbin/shutdown -r now"
+                else:
+                    crontab = f"{cron_schedule} root systemctl restart frameos.service"
+                exec_command(frame, ssh, f"echo '{crontab}' | sudo tee /etc/cron.d/frameos-reboot")
+            else:
+                exec_command(frame, ssh, "sudo rm -f /etc/cron.d/frameos-reboot")
+
             # restart
             exec_command(frame, ssh, "sudo systemctl daemon-reload")
             exec_command(frame, ssh, "sudo systemctl enable frameos.service")

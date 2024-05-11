@@ -173,7 +173,7 @@ def api_frame_update(id: int):
     frame = Frame.query.get_or_404(id)
     fields = ['scenes', 'name', 'frame_host', 'frame_port', 'frame_access_key', 'frame_access', 'ssh_user', 'ssh_pass', 'ssh_port', 'server_host',
               'server_port', 'server_api_key', 'width', 'height', 'rotate', 'color', 'interval', 'metrics_interval', 'log_to_file',
-              'scaling_mode', 'device', 'debug']
+              'scaling_mode', 'device', 'debug', 'reboot', 'control_code']
     defaults = {'frame_port': 8787, 'ssh_port': 22}
     try:
         payload = request.json
@@ -188,7 +188,7 @@ def api_frame_update(id: int):
                     value = float(value)
                 elif field in ['debug']:
                     value = value == 'true' or value is True
-                elif field in ['scenes']:
+                elif field in ['scenes', 'reboot', 'control_code']:
                     if isinstance(value, str):
                         value = json.loads(value) if value is not None else None
                 setattr(frame, field, value)
