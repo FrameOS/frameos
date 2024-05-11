@@ -147,6 +147,31 @@ export function FrameDetails({ className }: DetailsProps) {
                 <td className="break-words">{frame.log_to_file || <em>disabled</em>}</td>
               </tr>
               <tr>
+                <td className="text-blue-200 text-right">Reboot:</td>
+                <td className="break-words">
+                  {frame.reboot?.enabled === 'true' ? (
+                    <>
+                      {String(frame.reboot?.type)} at {String(frame.reboot?.crontab)}
+                    </>
+                  ) : (
+                    'disabled'
+                  )}
+                </td>
+              </tr>
+              {/* <tr>
+                <td className="text-blue-200 text-right">QR control code:</td>
+                <td className="break-words">
+                  {frame.control_code?.enabled === 'true' ? (
+                    <>
+                      {String(frame.control_code?.position)}, size: {String(frame.control_code?.size)}, padding:{' '}
+                      {String(frame.control_code?.padding)}
+                    </>
+                  ) : (
+                    'disabled'
+                  )}
+                </td>
+              </tr> */}
+              <tr>
                 <td className="text-blue-200 text-right">Debug logging:</td>
                 <td className="break-words">{frame.debug ? 'enabled' : 'disabled'}</td>
               </tr>

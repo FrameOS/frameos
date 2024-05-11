@@ -40,6 +40,8 @@ class Frame(db.Model):
     log_to_file = db.Column(db.String(256), nullable=True)
     debug = db.Column(db.Boolean, nullable=True)
     last_log_at = db.Column(db.DateTime, nullable=True)
+    reboot = db.Column(JSON, nullable=True)
+    control_code = db.Column(JSON, nullable=True)
     # apps
     apps = db.Column(JSON, nullable=True)
     scenes = db.Column(JSON, nullable=True)
@@ -77,6 +79,8 @@ class Frame(db.Model):
             'scenes': self.scenes,
             'last_log_at': self.last_log_at.replace(tzinfo=timezone.utc).isoformat() if self.last_log_at else None,
             'log_to_file': self.log_to_file,
+            'reboot': self.reboot,
+            'control_code': self.control_code,
         }
 
 def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:
