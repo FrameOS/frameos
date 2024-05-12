@@ -370,6 +370,15 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                 </div>
               )}
             </Group> */}
+            <Field name="debug" label="Debug logging (noisy)">
+              <Select
+                name="debug"
+                options={[
+                  { value: 'false', label: 'Disabled' },
+                  { value: 'true', label: 'Enabled' },
+                ]}
+              />
+            </Field>
           </Form>
         </>
       )}
