@@ -206,11 +206,9 @@ export const frameLogic = kea<frameLogicType>([
           actions.closeScenePanels(oldScenes.map((scene) => scene.id))
           actions.setFrameFormValues({ scenes: newScenes })
         } else {
-          if (oldScenes.some((scene) => scene.default)) {
-            for (const scene of newScenes) {
-              if ('default' in scene) {
-                delete scene.default
-              }
+          for (const scene of newScenes) {
+            if ('default' in scene) {
+              delete scene.default
             }
           }
           actions.setFrameFormValues({

@@ -38,6 +38,10 @@ export interface FrameType {
     position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center'
     size?: string
     padding?: string
+    offsetX?: string
+    offsetY?: string
+    qrCodeColor?: string
+    backgroundColor?: string
   }
 }
 

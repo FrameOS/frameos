@@ -158,19 +158,21 @@ export function FrameDetails({ className }: DetailsProps) {
                   )}
                 </td>
               </tr>
-              {/* <tr>
+              <tr>
                 <td className="text-blue-200 text-right">QR control code:</td>
                 <td className="break-words">
                   {frame.control_code?.enabled === 'true' ? (
                     <>
-                      {String(frame.control_code?.position)}, size: {String(frame.control_code?.size)}, padding:{' '}
-                      {String(frame.control_code?.padding)}
+                      {String(frame.control_code?.position)}, size: {String(frame.control_code?.size)}, margin:{' '}
+                      {String(frame.control_code?.offsetX)}x{String(frame.control_code?.offsetY)}, padding:{' '}
+                      {String(frame.control_code?.padding)}, colors: {String(frame.control_code?.qrCodeColor)} /{' '}
+                      {String(frame.control_code?.backgroundColor)}
                     </>
                   ) : (
                     'disabled'
                   )}
                 </td>
-              </tr> */}
+              </tr>
               <tr>
                 <td className="text-blue-200 text-right">Debug logging:</td>
                 <td className="break-words">{frame.debug ? 'enabled' : 'disabled'}</td>

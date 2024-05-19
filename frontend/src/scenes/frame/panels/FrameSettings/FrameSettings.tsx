@@ -337,7 +337,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                 </div>
               )}
             </Group>
-            {/* <Group name="control_code">
+            <Group name="control_code">
               <Field name="enabled" label="QR Control Code">
                 <Select
                   name="enabled"
@@ -364,12 +364,34 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                   <Field name="size" label="Size of each square in pixels">
                     <TextInput name="size" placeholder="2" />
                   </Field>
-                  <Field name="padding" label="Padding in pixels">
-                    <TextInput name="padding" placeholder="0" />
+                  <Field name="padding" label="Padding around code">
+                    <TextInput name="padding" placeholder="1" />
+                  </Field>
+                  <Field name="offsetX" label="X offset">
+                    <TextInput name="offsetX" placeholder="0" />
+                  </Field>
+                  <Field name="offsetY" label="Y offset">
+                    <TextInput name="offsetY" placeholder="0" />
+                  </Field>
+                  <Field name="qrCodeColor" label="QR code color">
+                    <TextInput
+                      type="color"
+                      name="qrCodeColor"
+                      value={frameForm.control_code?.qrCodeColor ?? '#000000'}
+                      placeholder="#000000"
+                    />
+                  </Field>
+                  <Field name="backgroundColor" label="Background color">
+                    <TextInput
+                      type="color"
+                      name="backgroundColor"
+                      value={frameForm.control_code?.backgroundColor ?? '#ffffff'}
+                      placeholder="#ffffff"
+                    />
                   </Field>
                 </div>
               )}
-            </Group> */}
+            </Group>
             <Field name="debug" label="Debug logging (noisy)">
               <Select
                 name="debug"

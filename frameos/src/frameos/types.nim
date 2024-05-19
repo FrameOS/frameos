@@ -54,7 +54,7 @@ type
     publicStateFields*: seq[StateField]
     persistedStateKeys*: seq[string]
     runEvent*: proc (context: var ExecutionContext): void
-    render*: proc (self: FrameScene): Image
+    render*: proc (self: FrameScene, context: var ExecutionContext): Image
     init*: proc (sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene
 
   ExecutionContext* = ref object
