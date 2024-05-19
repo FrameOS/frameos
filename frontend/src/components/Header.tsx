@@ -15,7 +15,13 @@ export function Header({ title, right, buttons }: HeaderProps) {
       style={{ height: 60 }}
     >
       <div className="truncate flex items-center justify-center gap-3">
-        <A href="/"><img src='/img/logo/dark-mark-small.png' className="w-[28px] h-[28px] inline-block align-center" alt="FrameOS" /></A>
+        <A href="/">
+          <img
+            src="/img/logo/dark-mark-small.png"
+            className="w-[28px] h-[28px] inline-block align-center"
+            alt="FrameOS"
+          />
+        </A>
         <H5>{title}</H5>
       </div>
       <div className="flex space-x-2">

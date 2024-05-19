@@ -49,7 +49,7 @@ export function Scenes() {
           <div className="flex justify-center">
             <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={openTemplates}>
               <SparklesIcon className="w-4 h-4" />
-              Explore templates
+              Explore available scenes
             </Button>
           </div>
         </div>
@@ -147,11 +147,15 @@ export function Scenes() {
             </Button>
             <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={openTemplates}>
               <SparklesIcon className="w-4 h-4" />
-              Explore templates
+              Explore available scenes
             </Button>
           </div>
         )}
       </div>
     </div>
   )
+}
+
+Scenes.PanelTitle = function ScenesPanelTitle() {
+  return <>Installed scenes</>
 }
