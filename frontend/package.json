@@ -8,7 +8,7 @@
     "dev:kea": "kea-typegen watch --write-paths --show-ts-errors",
     "dev:esbuild": "npm run clean && node build.mjs --dev",
     "clean": "rm -rf ./dist && mkdir ./dist",
-    "build": "npm run build:lea && npm run schema && tsc && npm run build:esbuild",
+    "build": "npm run build:kea && npm run schema && tsc && npm run build:esbuild",
     "build:kea": "kea-typegen write --write-paths",
     "build:esbuild": "node build.mjs",
     "prettier": "prettier --write src",
