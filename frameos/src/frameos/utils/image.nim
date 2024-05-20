@@ -12,7 +12,6 @@ proc downloadImage*(url: string): Image =
   finally:
     client.close()
 
-
 proc rotateDegrees*(image: Image, degrees: int): Image {.raises: [PixieError].} =
   case (degrees + 1080) mod 360: # TODO: yuck
   of 90:
