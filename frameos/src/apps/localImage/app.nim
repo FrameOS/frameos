@@ -39,7 +39,7 @@ proc isImage(file: string): bool =
 # Function to return all images in a folder
 proc getImagesInFolder(folder: string): seq[string] =
   var images: seq[string] = @[]
-  for _, file in walkDir(folder, relative = true):
+  for file in walkDirRec(folder, relative = true):
     if isImage(file):
       images.add(file)
   return images
@@ -72,9 +72,9 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
 proc run*(self: App, context: ExecutionContext) =
   if self.images.len == 0:
     context.image.draw(
-      renderError(context.image.width, context.image.height, "No images found in the specified folder.")
+      renderError(context.image.width, context.image.height, "No images found in: " & self.appConfig.path)
     )
-    self.error "No images found in the specified folder."
+    self.error "No images found in: " & self.appConfig.path
     return
 
   var nextImage: Option[Image] = none(Image)
