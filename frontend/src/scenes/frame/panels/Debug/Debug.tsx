@@ -1,7 +1,9 @@
 import { H6 } from '../../../../components/H6'
-import ReactJson from 'react-json-view'
+import { default as ReactJson } from '@microlink/react-json-view'
 import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
+
+const ReactJSON: typeof ReactJson = (ReactJson as any).default
 
 export function Debug() {
   const { frame, frameForm } = useValues(frameLogic)
@@ -9,10 +11,11 @@ export function Debug() {
   const setValue = (value: any) => {
     setFrameFormValue('scenes', value)
   }
+  console.log({ ReactJson })
   return (
     <div className="space-y-2">
       <H6>Scenes</H6>
-      <ReactJson
+      <ReactJSON
         src={frameForm?.scenes ?? frame.scenes ?? []}
         collapsed={2}
         theme="ocean"

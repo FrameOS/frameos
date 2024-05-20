@@ -58,7 +58,7 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
             }
           : null,
         {
-          label: 'Save as template',
+          label: 'Save to "My scenes"',
           onClick: () => saveAsTemplate({ name: scene.name ?? '', exportScenes: [scene.id] }),
           icon: <FolderPlusIcon className="w-5 h-5" />,
         },

@@ -21,7 +21,7 @@ import { Masonry } from '../../../../components/Masonry'
 
 export function Templates() {
   const { applyTemplate } = useActions(frameLogic)
-  const { frameId, frameForm } = useValues(frameLogic)
+  const { frameId } = useValues(frameLogic)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
   const {
     applyRemoteToFrame,
@@ -112,7 +112,7 @@ export function Templates() {
       ) : null}
       <div className="space-y-2">
         <div className="flex justify-between w-full items-center">
-          <H6>My templates</H6>
+          <H6>My scenes</H6>
           <DropdownMenu
             buttonColor="secondary"
             className="mr-3"
@@ -146,7 +146,7 @@ export function Templates() {
         </Masonry>
         {templates.length === 0 ? (
           <div className="text-muted">
-            {search === '' ? 'You have no saved templates.' : `No saved templates match "${search}"`}
+            {search === '' ? 'You have no saved scenes.' : `No saved scenes match "${search}"`}
           </div>
         ) : null}
       </div>
@@ -193,7 +193,7 @@ export function Templates() {
             ))}
           </Masonry>
           {repository.templates?.length === 0 ? (
-            <div className="text-gray-400">This repository has no templates.</div>
+            <div className="text-gray-400">This repository has no scenes.</div>
           ) : null}
         </div>
       ))}
@@ -221,7 +221,7 @@ export function Templates() {
             enableFormOnSubmit
             className="space-y-2"
           >
-            <H6>Add templates repository</H6>
+            <H6>Add scenes repository</H6>
             <div>
               Read more about creating repositories{' '}
               <a href="https://github.com/FrameOS/repo" target="_blank" rel="noreferrer" className="underline">
@@ -249,4 +249,8 @@ export function Templates() {
       )}
     </div>
   )
+}
+
+Templates.PanelTitle = function TemplatesPanelTitle() {
+  return <>Available scenes</>
 }

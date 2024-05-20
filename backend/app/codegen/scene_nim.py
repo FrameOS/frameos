@@ -29,6 +29,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
     scene_object_fields = []
     init_apps = []
     run_node_lines = []
+    after_node_lines = []
     run_event_lines = []
     edges = scene.get("edges", [])
     event_nodes = {}
@@ -43,6 +44,24 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
         if node_id not in node_integer_map:
             node_integer_map[node_id] = len(node_integer_map) + 1
         return node_integer_map[node_id]
+
+    if frame.control_code and frame.control_code.get("enabled") == "true":
+        scene_object_fields += ["controlCode: qrApp.App"]
+        app_import = "import apps/qr/app as qrApp"
+        if app_import not in imports:
+            imports += [app_import]
+        init_apps += [
+            'scene.controlCode = qrApp.init(-1.NodeId, scene.FrameScene, qrApp.AppConfig(' +
+            f'backgroundColor: parseHtmlColor("{sanitize_nim_string(frame.control_code.get("backgroundColor", "#000000"))}"), ' +
+            f'qrCodeColor: parseHtmlColor("{sanitize_nim_string(frame.control_code.get("qrCodeColor", "#ffffff"))}"), ' +
+            f'offsetX: {float(frame.control_code.get("offsetX", "0"))}, ' +
+            f'offsetY: {float(frame.control_code.get("offsetY", "0"))}, ' +
+            f'padding: {int(frame.control_code.get("padding", "1"))}, ' +
+            f'position: "{sanitize_nim_string(frame.control_code.get("position", "top-left"))}", ' +
+            f'size: {float(frame.control_code.get("size", "2"))}, ' +
+            'codeType: "Frame Control URL", code: "", sizeUnit: "pixels per dot", alRad: 30.0, moRad: 0.0, moSep: 0.0))'
+        ]
+        after_node_lines += ["self.controlCode.run(context)"]
 
     for edge in edges:
         source = edge.get("source", None)
@@ -415,6 +434,7 @@ proc runNode*(self: Scene, nodeId: NodeId,
     {(newline + "    ").join(run_node_lines)}
     else:
       nextNode = -1.NodeId
+    {(newline + "    ").join(after_node_lines)}
     if DEBUG:
       self.logger.log(%*{{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
 
@@ -424,18 +444,8 @@ proc runEvent*(context: var ExecutionContext) =
   {(newline + "  ").join(run_event_lines)}
   else: discard
 
-proc render*(self: FrameScene): Image =
+proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
-  var context = ExecutionContext(
-    scene: self,
-    event: "render",
-    payload: %*{{}},
-    image: case self.frameConfig.rotate:
-      of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-      else: newImage(self.frameConfig.width, self.frameConfig.height),
-    loopIndex: 0,
-    loopKey: "."
-  )
   context.image.fill(self.backgroundColor)
   runEvent(context)
   return context.image

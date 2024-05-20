@@ -143,15 +143,16 @@ proc run*(self: App, context: ExecutionContext) =
       borderTypeset: borderTypeset,
     ))
 
+  if renderData.borderWidth > 0 and borderTypeset.isSome:
+    let ratio = if textTypeset.fonts.len > 0: textTypeset.fonts[0].size / self.appConfig.fontSize else: 1.0
+    context.image.strokeText(
+      borderTypeset.get(),
+      translate(vec2(renderData.padding + self.appConfig.offsetX,
+          renderData.padding + self.appConfig.offsetY)),
+      strokeWidth = float(renderData.borderWidth) * ratio
+    )
   context.image.fillText(
     textTypeset,
     translate(vec2(renderData.padding + self.appConfig.offsetX,
         renderData.padding + self.appConfig.offsetY))
   )
-  if renderData.borderWidth > 0 and borderTypeset.isSome:
-    context.image.strokeText(
-      borderTypeset.get(),
-      translate(vec2(renderData.padding + self.appConfig.offsetX,
-          renderData.padding + self.appConfig.offsetY)),
-      strokeWidth = float(renderData.borderWidth)
-    )

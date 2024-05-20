@@ -118,7 +118,18 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   self.logger.log(%*{"event": "render", "width": requiredWidth, "height": requiredHeight})
 
   try:
-    let image = exportedScene.render(scene)
+    var context = ExecutionContext(
+      scene: scene,
+      event: "render",
+      payload: %*{},
+      image: case self.frameConfig.rotate:
+      of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
+      else: newImage(self.frameConfig.width, self.frameConfig.height),
+      loopIndex: 0,
+      loopKey: "."
+    )
+
+    let image = exportedScene.render(scene, context)
     if image.width != requiredWidth or image.height != requiredHeight:
       let resizedImage = newImage(requiredWidth, requiredHeight)
       resizedImage.fill(scene.backgroundColor)

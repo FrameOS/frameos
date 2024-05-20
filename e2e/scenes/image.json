@@ -23,9 +23,9 @@
         "y": 169.51205274213478
       },
       "data": {
-        "keyword": "downloadImage",
+        "keyword": "localImage",
         "config": {
-          "url": "https://frameos.net/assets/images/bathroom-d9fd565b9e62d0988c096147140831cf.jpg"
+          "path": "./assets/image.png"
         }
       },
       "width": 442,

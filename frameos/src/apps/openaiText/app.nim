@@ -4,7 +4,6 @@ import options
 import json
 import strformat
 import lib/httpclient
-from frameos/utils/image import scaleAndDrawImage
 import frameos/types
 
 type

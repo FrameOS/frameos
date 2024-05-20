@@ -3,7 +3,8 @@ import { H6 } from '../../../../components/H6'
 
 import { ArrowDownTrayIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { DocumentArrowDownIcon, CloudArrowDownIcon, DocumentPlusIcon, DocumentIcon } from '@heroicons/react/24/outline'
+import { CloudArrowDownIcon, DocumentPlusIcon, DocumentIcon } from '@heroicons/react/24/outline'
+import { Button } from '../../../../components/Button'
 
 interface TemplateProps {
   template: TemplateType
@@ -20,7 +21,7 @@ export function Template({
   applyTemplate,
   editTemplate,
   saveRemoteAsLocal,
-}: TemplateProps) {
+}: TemplateProps): JSX.Element {
   return (
     <div
       className="shadow bg-gray-900 break-inside-avoid dndnode relative rounded-lg mb-4"
@@ -43,9 +44,12 @@ export function Template({
         }}
       >
         <img src={template.image} alt={template.name} className="w-full max-h-full border" />
-
-        <div className="flex items-start justify-between">
-          <H6>{template.name}</H6>
+        <div className="flex gap-2 items-right">
+          {applyTemplate ? (
+            <Button size="small" color="secondary" onClick={() => applyTemplate(template)} title="Install scene">
+              <CloudArrowDownIcon className="w-5 h-5" />
+            </Button>
+          ) : null}
           <DropdownMenu
             buttonColor="secondary"
             items={[
@@ -109,6 +113,7 @@ export function Template({
             ]}
           />
         </div>
+        <H6>{template.name}</H6>
         {template.description && <div className="text-white text-sm">{template.description}</div>}
       </div>
     </div>
