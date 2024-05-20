@@ -38,6 +38,12 @@ proc isImage(file: string): bool =
 
 # Function to return all images in a folder
 proc getImagesInFolder(folder: string): seq[string] =
+  # if folder is a file
+  if fileExists(folder):
+    if isImage(folder):
+      return @[""]
+    return @[]
+
   var images: seq[string] = @[]
   for file in walkDirRec(folder, relative = true):
     if isImage(file):

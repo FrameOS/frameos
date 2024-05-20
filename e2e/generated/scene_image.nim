@@ -4,7 +4,7 @@ import pixie, json, times, strformat
 
 import frameos/types
 import frameos/channels
-import apps/downloadImage/app as downloadImageApp
+import apps/localImage/app as localImageApp
 import apps/text/app as textApp
 
 const DEBUG = false
@@ -12,7 +12,7 @@ let PUBLIC_STATE_FIELDS*: seq[StateField] = @[]
 let PERSISTED_STATE_KEYS*: seq[string] = @[]
 
 type Scene* = ref object of FrameScene
-  node1: downloadImageApp.App
+  node1: localImageApp.App
   node2: textApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
@@ -31,7 +31,7 @@ proc runNode*(self: Scene, nodeId: NodeId,
     currentNode = nextNode
     timer = epochTime()
     case nextNode:
-    of 1.NodeId: # downloadImage
+    of 1.NodeId: # localImage
       self.node1.run(context)
       nextNode = 2.NodeId
     of 2.NodeId: # text
@@ -75,7 +75,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = downloadImageApp.init(1.NodeId, scene.FrameScene, downloadImageApp.AppConfig(url: "https://frameos.net/assets/images/bathroom-d9fd565b9e62d0988c096147140831cf.jpg", scalingMode: "cover", cacheSeconds: 3600.0))
+  scene.node1 = localImageApp.init(1.NodeId, scene.FrameScene, localImageApp.AppConfig(path: "./assets/dark-mark-small.png", order: "random", seconds: 900.0, scalingMode: "cover", counterStateKey: ""))
   scene.node2 = textApp.init(2.NodeId, scene.FrameScene, textApp.AppConfig(text: "Activate proton beam", position: "center-center", offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontColor: parseHtmlColor("#ffffff"), fontSize: 32.0, borderColor: parseHtmlColor("#000000"), borderWidth: 2, overflow: "fit-bounds"))
   runEvent(context)
   
