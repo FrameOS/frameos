@@ -112,7 +112,7 @@ export function Templates() {
       ) : null}
       <div className="space-y-2">
         <div className="flex justify-between w-full items-center">
-          <H6>Saved scenes</H6>
+          <H6>My scenes</H6>
           <DropdownMenu
             buttonColor="secondary"
             className="mr-3"

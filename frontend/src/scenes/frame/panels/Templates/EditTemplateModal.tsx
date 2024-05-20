@@ -29,7 +29,7 @@ export function EditTemplateModal() {
             title={
               newTemplate
                 ? modalTarget === 'localTemplate'
-                  ? 'Save as template'
+                  ? 'Save to "My scenes"'
                   : 'Download as .zip'
                 : 'Edit template'
             }
@@ -45,7 +45,7 @@ export function EditTemplateModal() {
                   <div>
                     {newTemplate
                       ? modalTarget === 'localTemplate'
-                        ? 'Save as template'
+                        ? 'Save to "My scenes"'
                         : 'Download .zip'
                       : 'Save changes'}
                   </div>
