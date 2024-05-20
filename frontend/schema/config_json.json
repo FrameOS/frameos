@@ -81,6 +81,26 @@
           "description": "Whether the field is a secret and is hidden from display",
           "type": "boolean"
         },
+        "seq": {
+          "description": "Turn the field into a multidimensional array of fields. seq=[1, \"rows\"] --> for 1 to rows",
+          "items": {
+            "items": [
+              {
+                "type": "string"
+              },
+              {
+                "type": ["number", "string"]
+              },
+              {
+                "type": ["number", "string"]
+              }
+            ],
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          "type": "array"
+        },
         "type": {
           "description": "Type of the field, only 'string' is supported for now",
           "enum": ["string", "text", "float", "integer", "boolean", "color", "select", "json", "node", "scene"],

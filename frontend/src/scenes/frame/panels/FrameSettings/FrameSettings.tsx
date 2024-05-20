@@ -2,7 +2,7 @@ import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
-import { Form } from 'kea-forms'
+import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import { frameLogic } from '../../frameLogic'
@@ -16,7 +16,7 @@ export interface FrameSettingsProps {
 }
 
 export function FrameSettings({ className }: FrameSettingsProps) {
-  const { frameId, frame, frameFormTouches } = useValues(frameLogic)
+  const { frameId, frame, frameForm, frameFormTouches } = useValues(frameLogic)
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
 
@@ -281,7 +281,117 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                 placeholder="e.g. /srv/frameos/logs/frame-{date}.log"
                 required
               />
-            </Field>{' '}
+            </Field>
+            <Group name="reboot">
+              <Field name="enabled" label="Automatic reboot">
+                <Select
+                  name="enabled"
+                  options={[
+                    { value: 'false', label: 'Disabled' },
+                    { value: 'true', label: 'Enabled' },
+                  ]}
+                />
+              </Field>
+              {String(frameForm.reboot?.enabled) === 'true' && (
+                <div className="pl-4 space-y-4">
+                  <Field name="crontab" label="Reboot time">
+                    <Select
+                      name="crontab"
+                      options={[
+                        { value: '0 0 * * *', label: '00:00' },
+                        { value: '1 0 * * *', label: '01:00' },
+                        { value: '2 0 * * *', label: '02:00' },
+                        { value: '3 0 * * *', label: '03:00' },
+                        { value: '4 0 * * *', label: '04:00' },
+                        { value: '5 0 * * *', label: '05:00' },
+                        { value: '6 0 * * *', label: '06:00' },
+                        { value: '7 0 * * *', label: '07:00' },
+                        { value: '8 0 * * *', label: '08:00' },
+                        { value: '9 0 * * *', label: '09:00' },
+                        { value: '10 0 * * *', label: '10:00' },
+                        { value: '11 0 * * *', label: '11:00' },
+                        { value: '12 0 * * *', label: '12:00' },
+                        { value: '13 0 * * *', label: '13:00' },
+                        { value: '14 0 * * *', label: '14:00' },
+                        { value: '15 0 * * *', label: '15:00' },
+                        { value: '16 0 * * *', label: '16:00' },
+                        { value: '17 0 * * *', label: '17:00' },
+                        { value: '18 0 * * *', label: '18:00' },
+                        { value: '19 0 * * *', label: '19:00' },
+                        { value: '20 0 * * *', label: '20:00' },
+                        { value: '21 0 * * *', label: '21:00' },
+                        { value: '22 0 * * *', label: '22:00' },
+                        { value: '23 0 * * *', label: '23:00' },
+                      ]}
+                    />
+                  </Field>
+                  <Field name="type" label="What to reboot">
+                    <Select
+                      name="type"
+                      options={[
+                        { value: 'frameos', label: 'FrameOS' },
+                        { value: 'raspberry', label: 'System reboot' },
+                      ]}
+                    />
+                  </Field>
+                </div>
+              )}
+            </Group>
+            <Group name="control_code">
+              <Field name="enabled" label="QR Control Code">
+                <Select
+                  name="enabled"
+                  options={[
+                    { value: 'false', label: 'Disabled' },
+                    { value: 'true', label: 'Enabled' },
+                  ]}
+                />
+              </Field>
+              {String(frameForm.control_code?.enabled) === 'true' && (
+                <div className="pl-4 space-y-4">
+                  <Field name="position" label="Position">
+                    <Select
+                      name="position"
+                      options={[
+                        { value: 'top-left', label: 'Top Left' },
+                        { value: 'top-right', label: 'Top Right' },
+                        { value: 'bottom-left', label: 'Bottom Left' },
+                        { value: 'bottom-right', label: 'Bottom Right' },
+                        { value: 'center', label: 'Center' },
+                      ]}
+                    />
+                  </Field>
+                  <Field name="size" label="Size of each square in pixels">
+                    <TextInput name="size" placeholder="2" />
+                  </Field>
+                  <Field name="padding" label="Padding around code">
+                    <TextInput name="padding" placeholder="1" />
+                  </Field>
+                  <Field name="offsetX" label="X offset">
+                    <TextInput name="offsetX" placeholder="0" />
+                  </Field>
+                  <Field name="offsetY" label="Y offset">
+                    <TextInput name="offsetY" placeholder="0" />
+                  </Field>
+                  <Field name="qrCodeColor" label="QR code color">
+                    <TextInput
+                      type="color"
+                      name="qrCodeColor"
+                      value={frameForm.control_code?.qrCodeColor ?? '#000000'}
+                      placeholder="#000000"
+                    />
+                  </Field>
+                  <Field name="backgroundColor" label="Background color">
+                    <TextInput
+                      type="color"
+                      name="backgroundColor"
+                      value={frameForm.control_code?.backgroundColor ?? '#ffffff'}
+                      placeholder="#ffffff"
+                    />
+                  </Field>
+                </div>
+              )}
+            </Group>
             <Field name="debug" label="Debug logging (noisy)">
               <Select
                 name="debug"

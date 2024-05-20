@@ -55,18 +55,8 @@ proc runEvent*(context: var ExecutionContext) =
       sendEvent("render", %*{})
   else: discard
 
-proc render*(self: FrameScene): Image =
+proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
-  var context = ExecutionContext(
-    scene: self,
-    event: "render",
-    payload: %*{},
-    image: case self.frameConfig.rotate:
-    of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-    else: newImage(self.frameConfig.width, self.frameConfig.height),
-    loopIndex: 0,
-    loopKey: "."
-  )
   context.image.fill(self.backgroundColor)
   runEvent(context)
   return context.image

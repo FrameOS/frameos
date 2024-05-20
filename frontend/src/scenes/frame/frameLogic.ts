@@ -35,6 +35,8 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'scenes',
   'debug',
   'log_to_file',
+  'reboot',
+  'control_code',
 ]
 
 function cleanBackgroundColor(color: string): string {
@@ -201,17 +203,12 @@ export const frameLogic = kea<frameLogicType>([
           newScenes[0].name = template?.name || newScenes[0].name || 'Untitled scene'
         }
         if (replaceScenes) {
-          if (newScenes.length > 0 && !newScenes.some((scene) => scene.default)) {
-            newScenes[0].default = true
-          }
           actions.closeScenePanels(oldScenes.map((scene) => scene.id))
           actions.setFrameFormValues({ scenes: newScenes })
         } else {
-          if (oldScenes.some((scene) => scene.default)) {
-            for (const scene of newScenes) {
-              if ('default' in scene) {
-                delete scene.default
-              }
+          for (const scene of newScenes) {
+            if ('default' in scene) {
+              delete scene.default
             }
           }
           actions.setFrameFormValues({

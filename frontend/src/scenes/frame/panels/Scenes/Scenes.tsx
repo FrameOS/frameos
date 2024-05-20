@@ -49,7 +49,7 @@ export function Scenes() {
           <div className="flex justify-center">
             <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={openTemplates}>
               <SparklesIcon className="w-4 h-4" />
-              Explore templates
+              Explore available scenes
             </Button>
           </div>
         </div>
@@ -68,7 +68,7 @@ export function Scenes() {
               className="mr-3"
               items={[
                 {
-                  label: 'Save as template',
+                  label: 'Save to "My scenes"',
                   onClick: () => saveAsTemplate({ name: frameForm.name }),
                   icon: <FolderArrowDownIcon className="w-5 h-5" />,
                 },
@@ -91,7 +91,7 @@ export function Scenes() {
                   </span>
                   {scene.default ? (
                     <Tag className="ml-2" color="primary">
-                      default
+                      start on boot
                     </Tag>
                   ) : null}
                   {scene?.settings?.refreshInterval && Number.isFinite(scene.settings.refreshInterval) ? (
@@ -147,11 +147,15 @@ export function Scenes() {
             </Button>
             <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={openTemplates}>
               <SparklesIcon className="w-4 h-4" />
-              Explore templates
+              Explore available scenes
             </Button>
           </div>
         )}
       </div>
     </div>
   )
+}
+
+Scenes.PanelTitle = function ScenesPanelTitle() {
+  return <>Installed scenes</>
 }

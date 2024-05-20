@@ -12,7 +12,6 @@ proc downloadImage*(url: string): Image =
   finally:
     client.close()
 
-
 proc rotateDegrees*(image: Image, degrees: int): Image {.raises: [PixieError].} =
   case (degrees + 1080) mod 360: # TODO: yuck
   of 90:
@@ -55,9 +54,7 @@ proc writeError*(image: Image, width, height: int, message: string) =
       hAlign = CenterAlign,
       vAlign = MiddleAlign,
     )
-  for dx in (-1)..(1):
-    for dy in (-1)..(1):
-      image.fillText(borderTypes, translate(vec2(padding + dx.toFloat(), padding + dy.toFloat())))
+  image.strokeText(borderTypes, translate(vec2(padding, padding)), strokeWidth = 2)
   image.fillText(types, translate(vec2(padding, padding)))
 
 proc renderError*(width, height: int, message: string): Image =

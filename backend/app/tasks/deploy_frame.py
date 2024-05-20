@@ -91,7 +91,7 @@ def deploy_frame(id: int):
 
                 if low_memory:
                     log(id, "stdout", "- Low memory detected, stopping FrameOS for compilation")
-                    exec_command(frame, ssh, "sudo service frameos stop")
+                    exec_command(frame, ssh, "sudo service frameos stop", raise_on_error=False)
 
                 with SCPClient(ssh.get_transport()) as scp:
                     # build the release on the server
@@ -174,6 +174,16 @@ def deploy_frame(id: int):
                 exec_command(frame, ssh, "sudo systemctl mask apt-daily-upgrade && sudo systemctl mask apt-daily && sudo systemctl disable apt-daily.service apt-daily.timer apt-daily-upgrade.timer apt-daily-upgrade.service")
                 # # disable swap while we're at it
                 # exec_command(frame, ssh, "sudo systemctl disable dphys-swapfile.service")
+
+            if frame.reboot and frame.reboot.get('enabled') == 'true':
+                cron_schedule = frame.reboot.get('crontab', '0 0 * * *')
+                if frame.reboot.get('type') == 'raspberry':
+                    crontab = f"{cron_schedule} root /sbin/shutdown -r now"
+                else:
+                    crontab = f"{cron_schedule} root systemctl restart frameos.service"
+                exec_command(frame, ssh, f"echo '{crontab}' | sudo tee /etc/cron.d/frameos-reboot")
+            else:
+                exec_command(frame, ssh, "sudo rm -f /etc/cron.d/frameos-reboot")
 
             # restart
             exec_command(frame, ssh, "sudo systemctl daemon-reload")
@@ -321,7 +331,13 @@ def create_local_build_archive(frame: Frame, build_dir: str, build_id: str, nim_
             util_files = ["Debug.h", "DEV_Config.c", "DEV_Config.h"]
             for file in util_files:
                 shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, file), os.path.join(build_dir, file))
-            variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
+
+            if waveshare.variant in ["EPD_2in9b", "EPD_2in9c", "EPD_2in13b", "EPD_2in13c", "EPD_4in2b", "EPD_4in2c", "EPD_5in83b", "EPD_5in83c", "EPD_7in5b", "EPD_7in5c"]:
+                c_file = re.sub(r'[bc]', 'bc', waveshare.variant)
+                variant_files = [f"{waveshare.variant}.nim", f"{c_file}.c", f"{c_file}.h"]
+            else:
+                variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
+
             for file in variant_files:
                 shutil.copy(os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, file), os.path.join(build_dir, file))
 

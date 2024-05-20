@@ -52,6 +52,7 @@ proc runNode*(self: Scene, nodeId: NodeId,
       nextNode = -1.NodeId
     else:
       nextNode = -1.NodeId
+    
     if DEBUG:
       self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
@@ -72,18 +73,8 @@ proc runEvent*(context: var ExecutionContext) =
       sendEvent("render", %*{})
   else: discard
 
-proc render*(self: FrameScene): Image =
+proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
-  var context = ExecutionContext(
-    scene: self,
-    event: "render",
-    payload: %*{},
-    image: case self.frameConfig.rotate:
-      of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-      else: newImage(self.frameConfig.width, self.frameConfig.height),
-    loopIndex: 0,
-    loopKey: "."
-  )
   context.image.fill(self.backgroundColor)
   runEvent(context)
   return context.image
@@ -101,7 +92,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.node2 = colorApp.init(2.NodeId, scene.FrameScene, colorApp.AppConfig(color: parseHtmlColor("#aba12b")))
   scene.node3 = colorApp.init(3.NodeId, scene.FrameScene, colorApp.AppConfig(color: parseHtmlColor("#814141")))
   scene.node5 = colorApp.init(5.NodeId, scene.FrameScene, colorApp.AppConfig(color: parseHtmlColor("#ffffff")))
-  scene.node4 = textApp.init(4.NodeId, scene.FrameScene, textApp.AppConfig(text: "2 x 3", fontColor: parseHtmlColor("#000000"), position: "center-center", offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontSize: 32.0, borderColor: parseHtmlColor("#000000"), borderWidth: 1, overflow: "fit-bounds"))
+  scene.node4 = textApp.init(4.NodeId, scene.FrameScene, textApp.AppConfig(text: "2 x 3", fontColor: parseHtmlColor("#000000"), position: "center-center", offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontSize: 32.0, borderColor: parseHtmlColor("#000000"), borderWidth: 2, overflow: "fit-bounds"))
   runEvent(context)
   
 {.pop.}

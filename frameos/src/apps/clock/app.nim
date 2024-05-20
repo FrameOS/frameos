@@ -117,15 +117,13 @@ proc run*(self: App, context: ExecutionContext) =
     ))
 
   if renderData.borderWidth > 0 and borderTypeset.isSome:
-    for dx in (-renderData.borderWidth)..(renderData.borderWidth):
-      for dy in (-renderData.borderWidth)..(renderData.borderWidth):
-        context.image.fillText(
-          borderTypeset.get(),
-          translate(vec2(
-            renderData.padding + self.appConfig.offsetX + dx.toFloat(),
-            renderData.padding + self.appConfig.offsetY + dy.toFloat()))
-        )
-
+    context.image.strokeText(
+      borderTypeset.get(),
+      translate(vec2(
+        renderData.padding + self.appConfig.offsetX,
+        renderData.padding + self.appConfig.offsetY)),
+      strokeWidth = float(renderData.borderWidth)
+    )
   context.image.fillText(
     textTypeset,
     translate(vec2(renderData.padding + self.appConfig.offsetX,
