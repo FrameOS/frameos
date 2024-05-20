@@ -39,6 +39,7 @@ proc runNode*(self: Scene, nodeId: NodeId,
       nextNode = -1.NodeId
     else:
       nextNode = -1.NodeId
+    
     if DEBUG:
       self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
@@ -59,18 +60,8 @@ proc runEvent*(context: var ExecutionContext) =
       sendEvent("render", %*{})
   else: discard
 
-proc render*(self: FrameScene): Image =
+proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
-  var context = ExecutionContext(
-    scene: self,
-    event: "render",
-    payload: %*{},
-    image: case self.frameConfig.rotate:
-      of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-      else: newImage(self.frameConfig.width, self.frameConfig.height),
-    loopIndex: 0,
-    loopKey: "."
-  )
   context.image.fill(self.backgroundColor)
   runEvent(context)
   return context.image
@@ -85,7 +76,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
   scene.node1 = downloadImageApp.init(1.NodeId, scene.FrameScene, downloadImageApp.AppConfig(url: "https://frameos.net/assets/images/bathroom-d9fd565b9e62d0988c096147140831cf.jpg", scalingMode: "cover", cacheSeconds: 3600.0))
-  scene.node2 = textApp.init(2.NodeId, scene.FrameScene, textApp.AppConfig(text: "Activate proton beam", position: "center-center", offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontColor: parseHtmlColor("#ffffff"), fontSize: 32.0, borderColor: parseHtmlColor("#000000"), borderWidth: 1, overflow: "fit-bounds"))
+  scene.node2 = textApp.init(2.NodeId, scene.FrameScene, textApp.AppConfig(text: "Activate proton beam", position: "center-center", offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontColor: parseHtmlColor("#ffffff"), fontSize: 32.0, borderColor: parseHtmlColor("#000000"), borderWidth: 2, overflow: "fit-bounds"))
   runEvent(context)
   
 {.pop.}

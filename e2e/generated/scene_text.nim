@@ -66,6 +66,7 @@ proc runNode*(self: Scene, nodeId: NodeId,
       nextNode = -1.NodeId
     else:
       nextNode = -1.NodeId
+    
     if DEBUG:
       self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
@@ -86,18 +87,8 @@ proc runEvent*(context: var ExecutionContext) =
       sendEvent("render", %*{})
   else: discard
 
-proc render*(self: FrameScene): Image =
+proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
-  var context = ExecutionContext(
-    scene: self,
-    event: "render",
-    payload: %*{},
-    image: case self.frameConfig.rotate:
-      of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-      else: newImage(self.frameConfig.width, self.frameConfig.height),
-    loopIndex: 0,
-    loopKey: "."
-  )
   context.image.fill(self.backgroundColor)
   runEvent(context)
   return context.image
@@ -111,15 +102,15 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = textApp.init(1.NodeId, scene.FrameScene, textApp.AppConfig(position: "top-left", text: "topleft", fontSize: 16.0, offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontColor: parseHtmlColor("#ffffff"), borderColor: parseHtmlColor("#000000"), borderWidth: 1, overflow: "fit-bounds"))
-  scene.node2 = textApp.init(2.NodeId, scene.FrameScene, textApp.AppConfig(position: "top-center", text: "topcenter", padding: 5.0, fontSize: 20.0, offsetX: 0.0, offsetY: 0.0, fontColor: parseHtmlColor("#ffffff"), borderColor: parseHtmlColor("#000000"), borderWidth: 1, overflow: "fit-bounds"))
+  scene.node1 = textApp.init(1.NodeId, scene.FrameScene, textApp.AppConfig(position: "top-left", text: "topleft", fontSize: 16.0, offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontColor: parseHtmlColor("#ffffff"), borderColor: parseHtmlColor("#000000"), borderWidth: 2, overflow: "fit-bounds"))
+  scene.node2 = textApp.init(2.NodeId, scene.FrameScene, textApp.AppConfig(position: "top-center", text: "topcenter", padding: 5.0, fontSize: 20.0, offsetX: 0.0, offsetY: 0.0, fontColor: parseHtmlColor("#ffffff"), borderColor: parseHtmlColor("#000000"), borderWidth: 2, overflow: "fit-bounds"))
   scene.node3 = textApp.init(3.NodeId, scene.FrameScene, textApp.AppConfig(position: "top-right", text: "topright", borderWidth: 5, fontSize: 15.0, offsetX: 0.0, offsetY: 0.0, padding: 10.0, fontColor: parseHtmlColor("#ffffff"), borderColor: parseHtmlColor("#000000"), overflow: "fit-bounds"))
-  scene.node5 = textApp.init(5.NodeId, scene.FrameScene, textApp.AppConfig(position: "bottom-center", text: "bottomcenter", fontSize: 20.0, fontColor: parseHtmlColor("#00ff62"), offsetX: 0.0, offsetY: 0.0, padding: 10.0, borderColor: parseHtmlColor("#000000"), borderWidth: 1, overflow: "fit-bounds"))
-  scene.node4 = textApp.init(4.NodeId, scene.FrameScene, textApp.AppConfig(position: "center-left", text: "centerleft", offsetX: -10.0, fontSize: 20.0, offsetY: 0.0, padding: 10.0, fontColor: parseHtmlColor("#ffffff"), borderColor: parseHtmlColor("#000000"), borderWidth: 1, overflow: "fit-bounds"))
-  scene.node7 = textApp.init(7.NodeId, scene.FrameScene, textApp.AppConfig(text: "centercenter", borderColor: parseHtmlColor("#ff0000"), fontColor: parseHtmlColor("#000000"), fontSize: 20.0, position: "center-center", offsetX: 0.0, offsetY: 0.0, padding: 10.0, borderWidth: 1, overflow: "fit-bounds"))
-  scene.node8 = textApp.init(8.NodeId, scene.FrameScene, textApp.AppConfig(position: "center-right", text: "centerright", offsetX: 10.0, offsetY: 10.0, fontSize: 20.0, padding: 10.0, fontColor: parseHtmlColor("#ffffff"), borderColor: parseHtmlColor("#000000"), borderWidth: 1, overflow: "fit-bounds"))
-  scene.node9 = textApp.init(9.NodeId, scene.FrameScene, textApp.AppConfig(position: "bottom-left", text: "bottomleft", fontSize: 20.0, fontColor: parseHtmlColor("#ff0026"), offsetX: 0.0, offsetY: 0.0, padding: 10.0, borderColor: parseHtmlColor("#000000"), borderWidth: 1, overflow: "fit-bounds"))
-  scene.node6 = textApp.init(6.NodeId, scene.FrameScene, textApp.AppConfig(position: "bottom-right", text: "bottomright", fontSize: 20.0, fontColor: parseHtmlColor("#0062ff"), offsetX: 0.0, offsetY: 0.0, padding: 10.0, borderColor: parseHtmlColor("#000000"), borderWidth: 1, overflow: "fit-bounds"))
+  scene.node5 = textApp.init(5.NodeId, scene.FrameScene, textApp.AppConfig(position: "bottom-center", text: "bottomcenter", fontSize: 20.0, fontColor: parseHtmlColor("#00ff62"), offsetX: 0.0, offsetY: 0.0, padding: 10.0, borderColor: parseHtmlColor("#000000"), borderWidth: 2, overflow: "fit-bounds"))
+  scene.node4 = textApp.init(4.NodeId, scene.FrameScene, textApp.AppConfig(position: "center-left", text: "centerleft", offsetX: -10.0, fontSize: 20.0, offsetY: 0.0, padding: 10.0, fontColor: parseHtmlColor("#ffffff"), borderColor: parseHtmlColor("#000000"), borderWidth: 2, overflow: "fit-bounds"))
+  scene.node7 = textApp.init(7.NodeId, scene.FrameScene, textApp.AppConfig(text: "centercenter", borderColor: parseHtmlColor("#ff0000"), fontColor: parseHtmlColor("#000000"), fontSize: 20.0, position: "center-center", offsetX: 0.0, offsetY: 0.0, padding: 10.0, borderWidth: 2, overflow: "fit-bounds"))
+  scene.node8 = textApp.init(8.NodeId, scene.FrameScene, textApp.AppConfig(position: "center-right", text: "centerright", offsetX: 10.0, offsetY: 10.0, fontSize: 20.0, padding: 10.0, fontColor: parseHtmlColor("#ffffff"), borderColor: parseHtmlColor("#000000"), borderWidth: 2, overflow: "fit-bounds"))
+  scene.node9 = textApp.init(9.NodeId, scene.FrameScene, textApp.AppConfig(position: "bottom-left", text: "bottomleft", fontSize: 20.0, fontColor: parseHtmlColor("#ff0026"), offsetX: 0.0, offsetY: 0.0, padding: 10.0, borderColor: parseHtmlColor("#000000"), borderWidth: 2, overflow: "fit-bounds"))
+  scene.node6 = textApp.init(6.NodeId, scene.FrameScene, textApp.AppConfig(position: "bottom-right", text: "bottomright", fontSize: 20.0, fontColor: parseHtmlColor("#0062ff"), offsetX: 0.0, offsetY: 0.0, padding: 10.0, borderColor: parseHtmlColor("#000000"), borderWidth: 2, overflow: "fit-bounds"))
   runEvent(context)
   
 {.pop.}

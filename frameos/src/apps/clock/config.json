@@ -101,10 +101,10 @@
     {
       "name": "borderWidth",
       "type": "integer",
-      "value": "1",
+      "value": "2",
       "required": true,
       "label": "Border width",
-      "placeholder": "1"
+      "placeholder": "2"
     }
   ]
 }
