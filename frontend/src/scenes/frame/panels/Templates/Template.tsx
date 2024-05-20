@@ -46,7 +46,7 @@ export function Template({
         <img src={template.image} alt={template.name} className="w-full max-h-full border" />
         <div className="flex gap-2 items-right">
           {applyTemplate ? (
-            <Button size="small" color="secondary" onClick={() => applyTemplate(template)}>
+            <Button size="small" color="secondary" onClick={() => applyTemplate(template)} title="Install scene">
               <CloudArrowDownIcon className="w-5 h-5" />
             </Button>
           ) : null}
