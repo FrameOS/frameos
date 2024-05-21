@@ -131,8 +131,9 @@ export function Templates() {
           />
         </div>
         <Masonry>
-          {templates.map((template) => (
+          {templates.map((template, index) => (
             <Template
+              key={template.id ?? -index}
               template={template}
               exportTemplate={exportTemplate}
               removeTemplate={removeTemplate}
@@ -152,7 +153,7 @@ export function Templates() {
       </div>
 
       {(repositories ?? []).map((repository) => (
-        <div className="space-y-2 !mt-8">
+        <div className="space-y-2 !mt-8" key={repository.id}>
           <div className="flex gap-2 items-start justify-between">
             <H6>{repository.name || repository.url}</H6>
             <DropdownMenu
@@ -181,8 +182,9 @@ export function Templates() {
           </div>
           {repository.description ? <div className="text-gray-400">{repository.description}</div> : null}
           <Masonry>
-            {(repository.templates || []).map((template) => (
+            {(repository.templates || []).map((template, index) => (
               <Template
+                key={template.id ?? -index}
                 template={template}
                 saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
                 applyTemplate={(template, replace) => {

@@ -23,22 +23,6 @@ export default function CustomEdge({
     targetPosition,
   })
   const isNodeConnection = sourceHandleId === 'next' && targetHandleId === 'prev'
-  console.log({
-    id,
-    sourcePosition,
-    sourceX,
-    sourceY,
-    targetPosition,
-    targetX,
-    targetY,
-    sourceHandleId,
-    targetHandleId,
-    selected,
-    edgePath,
-    labelX,
-    labelY,
-  })
-
   return (
     <>
       <BaseEdge

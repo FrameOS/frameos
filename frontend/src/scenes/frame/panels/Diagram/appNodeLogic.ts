@@ -3,7 +3,7 @@ import { actions, connect, kea, key, listeners, path, props, reducers, selectors
 import type { appNodeLogicType } from './appNodeLogicType'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { appsModel } from '../../../../models/appsModel'
-import { App, ConfigField, DiagramNode, FrameEvent, MarkdownField } from '../../../../types'
+import { App, CodeNodeData, ConfigField, DiagramNode, FrameEvent, MarkdownField } from '../../../../types'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 
 import _events from '../../../../../schema/events.json'
@@ -19,10 +19,14 @@ export const appNodeLogic = kea<appNodeLogicType>([
   key((props) => `${props.frameId}/${props.sceneId}/${props.nodeId}`),
   connect(({ sceneId, frameId }: DiagramLogicProps) => ({
     values: [appsModel, ['apps'], diagramLogic({ frameId, sceneId }), ['nodes', 'edges', 'selectedNodeId', 'scene']],
-    actions: [diagramLogic({ frameId, sceneId }), ['selectNode']],
+    actions: [
+      diagramLogic({ frameId, sceneId }),
+      ['selectNode', 'updateNodeData', 'deleteApp', 'setNodes', 'setEdges'],
+    ],
   })),
   actions({
     select: true,
+    editCodeField: (field: string) => ({ field }),
   }),
   selectors({
     nodeId: [() => [(_, props) => props.nodeId], (nodeId): string => nodeId],
@@ -218,6 +222,28 @@ export const appNodeLogic = kea<appNodeLogicType>([
     select: () => {
       if (!values.isSelected) {
         actions.selectNode(values.nodeId)
+      }
+    },
+    editCodeField: ({ field }) => {
+      const newField = prompt('Rename field:', field)
+      const codeFieldEdge = values.nodeEdges.find(
+        (edge) => edge.sourceHandle === 'fieldOutput' && edge.targetHandle?.startsWith('codeField/')
+      )
+      const codeFields = (values.node?.data as CodeNodeData)?.codeFields ?? []
+      if (newField) {
+        actions.setEdges(
+          values.edges.map((e) =>
+            e.target === values.nodeId && e.targetHandle === `codeField/${field}`
+              ? { ...e, targetHandle: `codeField/${newField}` }
+              : e
+          )
+        )
+        actions.updateNodeData(values.nodeId, { codeFields: codeFields.map((f) => (f === field ? newField : f)) })
+      } else {
+        if (codeFieldEdge?.source) {
+          actions.deleteApp(codeFieldEdge.source)
+        }
+        actions.updateNodeData(values.nodeId, { codeFields: codeFields.filter((f) => f !== field) })
       }
     },
   })),

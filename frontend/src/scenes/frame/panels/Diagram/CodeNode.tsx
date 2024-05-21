@@ -14,12 +14,14 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
   const { updateNodeData, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const { isSelected, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
-  const { select } = useActions(appNodeLogic(appNodeLogicProps))
+  const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
 
   const targetNode = nodeEdges.find(
-    (edge) => edge.sourceHandle === 'fieldOutput' && edge.targetHandle?.startsWith('fieldInput/')
+    (edge) =>
+      edge.sourceHandle === 'fieldOutput' &&
+      (edge.targetHandle?.startsWith('fieldInput/') || edge.targetHandle?.startsWith('codeField/'))
   )
-  const targetFunction = targetNode?.targetHandle?.replace('fieldInput/', '')
+  const targetFunction = targetNode?.targetHandle?.replace(/^[^\/]+\//, '')
 
   return (
     <div
@@ -34,33 +36,58 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
       <NodeResizer minWidth={200} minHeight={130} />
       <div
         className={clsx(
+          'frameos-node-title text-xl p-1 gap-2',
+          isSelected ? 'bg-indigo-900' : 'bg-sky-900',
+          'flex w-full items-center'
+        )}
+      >
+        {[...(data.codeFields ?? []), '+'].map((codeField) => (
+          <div className="flex gap-1 items-center">
+            <Handle
+              type="target"
+              position={Position.Top}
+              id={`codeField/${codeField}`}
+              style={{
+                position: 'relative',
+                transform: 'none',
+                right: 0,
+                top: 0,
+                background: 'black',
+                borderColor: 'white',
+              }}
+              isConnectable={isConnectable}
+            />
+            {codeField === '+' ? (
+              <em>+</em>
+            ) : (
+              <div className="cursor-pointer" onClick={() => editCodeField(codeField)}>
+                {codeField}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="p-1 h-full">
+        <TextArea
+          theme="node"
+          className="w-full h-full font-mono resize-none"
+          placeholder={`e.g: state{"magic3"}.getStr()`}
+          value={data.code ?? ''}
+          rows={2}
+          onChange={(value) => updateNodeData(id, { code: value.replaceAll('\n', '') })}
+        />
+      </div>
+      <div
+        className={clsx(
           'frameos-node-title text-xl p-1 gap-1',
           isSelected ? 'bg-indigo-900' : 'bg-sky-900',
           'flex w-full justify-between items-center'
         )}
       >
-        <div>{targetFunction ?? 'Custom code'}</div>
         <div className="flex gap-1 items-center">
-          <DropdownMenu
-            className="w-fit"
-            buttonColor="none"
-            horizontal
-            items={[
-              {
-                label: 'Copy as JSON',
-                onClick: () => copyAppJSON(id),
-                icon: <ClipboardDocumentIcon className="w-5 h-5" />,
-              },
-              {
-                label: 'Delete Node',
-                onClick: () => deleteApp(id),
-                icon: <TrashIcon className="w-5 h-5" />,
-              },
-            ]}
-          />
           <Handle
             type="source"
-            position={Position.Right}
+            position={Position.Bottom}
             id={`fieldOutput`}
             style={{
               position: 'relative',
@@ -72,16 +99,24 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
             }}
             isConnectable={isConnectable}
           />
+          <div>{targetFunction ?? <em>disconnected</em>}</div>
         </div>
-      </div>
-      <div className="p-1 h-full">
-        <TextArea
-          theme="node"
-          className="w-full h-full font-mono resize-none"
-          placeholder={`&"{context.image.width} x {state{"magic3"}.getStr()}"`}
-          value={data.code ?? ''}
-          rows={3}
-          onChange={(value) => updateNodeData(id, { code: value.replaceAll('\n', '') })}
+        <DropdownMenu
+          className="w-fit"
+          buttonColor="none"
+          horizontal
+          items={[
+            {
+              label: 'Copy as JSON',
+              onClick: () => copyAppJSON(id),
+              icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+            },
+            {
+              label: 'Delete Node',
+              onClick: () => deleteApp(id),
+              icon: <TrashIcon className="w-5 h-5" />,
+            },
+          ]}
         />
       </div>
     </div>

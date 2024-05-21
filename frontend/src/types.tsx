@@ -156,6 +156,7 @@ export interface AppNodeData {
 
 export interface CodeNodeData {
   code: string
+  codeFields?: string[]
 }
 
 export interface EventNodeData {
