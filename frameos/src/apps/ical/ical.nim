@@ -3,13 +3,12 @@ import times
 import tables
 import strutils
 import chrono
+import options
+import std/algorithm
+import std/lists
+
 
 type
-  PropertyComponents = object
-    name: string
-    params: Table[string, seq[string]]
-    value: string
-
   RRuleFreq* = enum
     daily, weekly, monthly, yearly
 
@@ -20,6 +19,7 @@ type
   RRule* = object
     freq*: RRuleFreq
     interval*: int
+    timeInterval*: TimeInterval
     byDay*: seq[(RRuleDay, int)]
     byMonth*: seq[int]
     byMonthDay*: seq[int]
@@ -35,14 +35,14 @@ type
     location*: string
     rrules*: seq[RRule]
 
-proc extractTimeZone(dateTimeStr: string): string =
+proc extractTimeZone*(dateTimeStr: string): string =
   if dateTimeStr.startsWith("TZID="):
     let parts = dateTimeStr.split(":")
     parts[0].split("=")[1]
   else:
     "UTC"
 
-proc parseDateTime(dateTimeStr: string, tzInfo: string): Timestamp =
+proc parseDateTime*(dateTimeStr: string, tzInfo: string): Timestamp =
   let cleanDateTimeStr = if dateTimeStr.contains(";"):
     dateTimeStr.split(";")[1]
   elif dateTimeStr.contains(":"):
@@ -82,26 +82,6 @@ proc unescape*(line: string): string =
     inc i
   return result
 
-proc parseIcalLine(line: string): PropertyComponents =
-  let splitPos = line.find(':')
-  if splitPos == -1:
-    raise newException(ValueError, "Invalid iCal line format, missing ':'.")
-
-  let arr = line.split(':', 1)
-  let (left, right) = (arr[0], arr[1])
-  let nameAndParams = left.split(';')
-
-  var components = PropertyComponents(name: nameAndParams[0].strip(), value: right.strip())
-  components.params = initTable[string, seq[string]]()
-
-  for i in 1 ..< nameAndParams.len:
-    let paramPair = nameAndParams[i].split('=')
-    if paramPair.len != 2:
-      raise newException(ValueError, "Invalid parameter format.")
-    components.params[paramPair[0].strip()] = paramPair[1].split(',')
-
-  return components
-
 proc processLine*(line: string, currentVEvent: var VEvent, inVEvent: var bool, events: var seq[VEvent]) =
   try:
     if line.startsWith("BEGIN:VEVENT"):
@@ -114,7 +94,6 @@ proc processLine*(line: string, currentVEvent: var VEvent, inVEvent: var bool, e
       let splitPos = line.find(':')
       if splitPos == -1:
         return
-
       let arr = line.split({';', ':'}, 1)
       if arr.len > 1:
         let key = arr[0]
@@ -134,7 +113,6 @@ proc processLine*(line: string, currentVEvent: var VEvent, inVEvent: var bool, e
         of "RRULE":
           var rrule = RRule(weekStart: RRuleDay.none, byDay: @[], byMonth: @[], byMonthDay: @[])
           for split in arr[1].split(';'):
-            echo split
             let keyValue = split.split('=', 2)
             if keyValue.len != 2:
               continue
@@ -185,6 +163,16 @@ proc processLine*(line: string, currentVEvent: var VEvent, inVEvent: var bool, e
               of "SA": rrule.weekStart = RRuleDay.sa
             else:
               echo "!! Unknown RRULE rule: " & split
+          if rrule.interval == 0:
+            rrule.interval = 1
+          if rrule.freq == RRuleFreq.daily:
+            rrule.timeInterval = TimeInterval(days: rrule.interval or 1)
+          elif rrule.freq == RRuleFreq.weekly:
+            rrule.timeInterval = TimeInterval(weeks: rrule.interval or 1)
+          elif rrule.freq == RRuleFreq.monthly:
+            rrule.timeInterval = TimeInterval(months: rrule.interval or 1)
+          elif rrule.freq == RRuleFreq.yearly:
+            rrule.timeInterval = TimeInterval(years: rrule.interval or 1)
           currentVEvent.rrules.add(rrule)
         of "DESCRIPTION":
           currentVEvent.description = unescape(value)
@@ -194,8 +182,8 @@ proc processLine*(line: string, currentVEvent: var VEvent, inVEvent: var bool, e
     echo "Failed to parse calendar line \"" & line & "\". Error: " & e.msg
 
 proc parseICalendar*(content: string): seq[VEvent] =
+  result = @[]
   let lines = content.splitLines()
-  var events: seq[VEvent] = @[]
   var currentVEvent: VEvent
   var inVEvent = false
   var accumulator = ""
@@ -205,10 +193,60 @@ proc parseICalendar*(content: string): seq[VEvent] =
       accumulator.add(line[1..^1])
       continue
     if accumulator != "":
-      processLine(accumulator.strip(), currentVEvent, inVEvent, events)
+      processLine(accumulator.strip(), currentVEvent, inVEvent, result)
       accumulator = ""
     accumulator = line
   if accumulator != "":
-    processLine(accumulator.strip(), currentVEvent, inVEvent, events)
+    processLine(accumulator.strip(), currentVEvent, inVEvent, result)
 
-  return events
+  result.sort(proc (a: VEvent, b: VEvent): int = cmp(a.startTime.float, b.startTime.float))
+
+proc getEvents*(events: seq[VEvent], startTime: Timestamp, endTime: Timestamp, maxCount: int = 0): seq[(Timestamp, VEvent)] =
+  result = @[]
+  var toCheck = initDoublyLinkedList[(VEvent, Option[RRule], int)]()
+
+  for event in events:
+    for rrule in event.rrules:
+      toCheck.add((event, some(rrule), 0))
+    if event.rrules.len == 0:
+      toCheck.add((event, none(RRule), 0))
+
+  while toCheck.head != nil:
+    let head = toCheck.head
+    let (event, rruleOption, intervalIndex) = head.value
+    toCheck.remove(head)
+
+    var eventStart = event.startTime
+    var eventEnd = event.endTime
+
+    if rruleOption.isNone():
+      if eventEnd > startTime and eventStart < endTime:
+        result.add((eventStart, event))
+      continue
+
+    let rrule = rruleOption.get()
+    let duration = eventEnd.float - eventStart.float
+    var cal = eventStart.calendar()
+    if intervalIndex > 0:
+      if rrule.freq == RRuleFreq.daily:
+        cal.add(TimeScale.Day, intervalIndex * rrule.interval)
+      elif rrule.freq == RRuleFreq.weekly:
+        cal.add(TimeScale.Week, intervalIndex * rrule.interval)
+      elif rrule.freq == RRuleFreq.monthly:
+        cal.add(TimeScale.Month, intervalIndex * rrule.interval)
+      elif rrule.freq == RRuleFreq.yearly:
+        cal.add(TimeScale.Year, intervalIndex * rrule.interval)
+
+    eventStart = cal.ts()
+    eventEnd = (eventStart.float + duration).Timestamp
+
+    if eventStart < startTime and eventEnd < startTime and rruleOption.isSome():
+      toCheck.add((event, rruleOption, intervalIndex + 1))
+    elif (eventEnd > startTime and eventStart < endTime):
+      result.add((eventStart, event))
+      if rruleOption.isSome():
+        toCheck.add((event, rruleOption, intervalIndex + 1))
+
+  result.sort(proc (a: (Timestamp, VEvent), b: (Timestamp, VEvent)): int = cmp(a[0].float, b[0].float))
+  if maxCount > 0 and result.len > maxCount:
+    result = result[0..maxCount]
