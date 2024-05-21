@@ -24,7 +24,7 @@ import { EventNode } from './EventNode'
 import { Button, buttonColor, buttonSize } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { v4 as uuidv4 } from 'uuid'
-import { DiagramNode, NodeType, EdgeType } from '../../../../types'
+import { DiagramNode, NodeType, EdgeType, CodeNodeData } from '../../../../types'
 import { AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
 import { Tooltip } from '../../../../components/Tooltip'
 import { SceneSettings } from '../Scenes/SceneSettings'
@@ -69,6 +69,7 @@ export function Diagram({ sceneId }: DiagramProps) {
       event.preventDefault()
       const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
       const { keyword, type } = JSON.parse(event.dataTransfer.getData('application/reactflow') ?? '{}')
+      debugger
       if (typeof keyword === 'string') {
         const position = reactFlowInstance?.project({
           x: event.clientX - (reactFlowBounds?.left ?? 0),
@@ -93,9 +94,13 @@ export function Diagram({ sceneId }: DiagramProps) {
 
   const onConnectStart = useCallback((_: ReactMouseEvent | ReactTouchEvent, params: OnConnectStartParams) => {
     const { nodeId, handleId, handleType } = params
-    if (handleType === 'target' && handleId?.startsWith('fieldInput/')) {
+    if (
+      (handleType === 'target' && handleId?.startsWith('fieldInput/')) ||
+      (handleType === 'target' && handleId?.startsWith('codeField/'))
+    ) {
       connectingNodeId.current = nodeId
       connectingNodeHandle.current = handleId
+      console.log({ nodeId, handleId })
     } else {
       connectingNodeId.current = null
       connectingNodeHandle.current = null
@@ -122,26 +127,57 @@ export function Diagram({ sceneId }: DiagramProps) {
         inputCoords.y -= reactFlowBounds?.top ?? 0
 
         const position = reactFlowInstance?.project(inputCoords) ?? { x: 0, y: 0 }
-        position.x -= 280
-        position.y -= 80
+        position.x -= 20
+        position.y -= 120
         const newNode: DiagramNode = {
           id,
           position: position,
           type: 'code',
-          data: { code: '' },
+          data: { code: '', codeFields: [] },
           style: {
             width: 300,
             height: 130,
           },
         }
-        setNodes([...nodes, newNode])
-        addEdge({
-          id,
-          target: connectingNodeId.current,
-          targetHandle: connectingNodeHandle.current,
-          source: id,
-          sourceHandle: 'fieldOutput',
-        })
+
+        if (connectingNodeHandle.current === 'codeField/+') {
+          const codeFields =
+            (nodes.find((node) => node.id === connectingNodeId.current)?.data as CodeNodeData)?.codeFields ?? []
+          function getNewField(codeFields: string[]): string {
+            let newField = 'arg'
+            let i = 1
+            while (codeFields.includes(newField)) {
+              newField = `arg${i}`
+              i++
+            }
+            return newField
+          }
+          let newField = getNewField(codeFields)
+          setNodes([
+            ...nodes.map((node) =>
+              node.id === connectingNodeId.current
+                ? { ...node, data: { ...node.data, codeFields: [...codeFields, newField] } }
+                : node
+            ),
+            newNode,
+          ])
+          addEdge({
+            id,
+            target: connectingNodeId.current,
+            targetHandle: `codeField/${newField}`,
+            source: id,
+            sourceHandle: 'fieldOutput',
+          })
+        } else {
+          setNodes([...nodes, newNode])
+          addEdge({
+            id,
+            target: connectingNodeId.current,
+            targetHandle: connectingNodeHandle.current,
+            source: id,
+            sourceHandle: 'fieldOutput',
+          })
+        }
       }
     },
     [reactFlowInstance, nodes, edges, setNodes, addEdge]

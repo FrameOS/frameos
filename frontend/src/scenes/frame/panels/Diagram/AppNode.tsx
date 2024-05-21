@@ -70,7 +70,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
             borderTopLeftRadius: 0,
           }}
           isConnectable={isConnectable}
-        />{' '}
+        />
         <div className="flex-1">
           {name}
           {isCustomApp ? ' (edited)' : ''}

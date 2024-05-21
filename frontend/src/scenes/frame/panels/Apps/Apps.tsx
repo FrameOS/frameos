@@ -17,7 +17,7 @@ export function Apps() {
     <div className="space-y-4">
       <TextInput placeholder="Search apps..." onChange={setSearch} value={search} />
       {Object.entries(appsByCategory).map(([category, apps]) => (
-        <div className="space-y-2">
+        <div className="space-y-2" key={category}>
           <H6 className="capitalize">{categoryLabels[category] ?? category}</H6>
           {Object.entries(apps).map(([keyword, { name, description }]) => (
             <Box
