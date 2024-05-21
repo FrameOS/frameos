@@ -89,8 +89,8 @@ proc run*(self: App, context: ExecutionContext) =
     for (time, event) in matchedEvents:
       let jsonEvent = %*{
         "summary": event.summary,
-        "startTime": time.format("yyyy-MM-dd'T'HH:mm:ss"),
-        "endTime": (time.float + (event.endTime.float - event.startTime.float)).TimeStamp.format(
+        "startTime": fromUnixFloat(time.float).format("yyyy-MM-dd'T'HH:mm:ss"),
+        "endTime": fromUnixFloat(time.float + (event.endTime.float - event.startTime.float)).format(
             "yyyy-MM-dd'T'HH:mm:ss"),
         "location": event.location,
         "description": event.description,

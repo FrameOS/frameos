@@ -11,10 +11,3 @@ const sceneOptions* = [
 proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result = initTable[SceneId, ExportedScene]()
   result["default".SceneId] = defaultScene.exportedScene
-
-# TODO Scene options:
-# - start at boot / start when requested
-# - stick around after closing / unmount if closed
-# - background color
-# - render interval
-
