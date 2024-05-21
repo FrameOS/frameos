@@ -7,7 +7,6 @@ from app.models.frame import Frame
 from app.models.apps import get_local_frame_apps, local_apps_path
 from app.codegen.utils import sanitize_nim_string, natural_keys
 
-
 def get_events_schema() -> list[dict]:
     events_schema_path = os.path.join("..", "frontend", "schema", "events.json")
     if os.path.exists(events_schema_path):
@@ -36,9 +35,11 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
     next_nodes = {}
     prev_nodes = {}
     field_inputs: dict[str, dict[str, str]] = {}
+    code_field_source_nodes: dict[str, dict[str, str]] = {}
     source_field_inputs: dict[str, dict[str, tuple[str, str]]] = {}
     node_fields: dict[str, dict[str, str]] = {}
     events_schema = get_events_schema()
+    newline = "\n"
 
     def node_id_to_integer(node_id: str) -> int:
         if node_id not in node_integer_map:
@@ -51,15 +52,21 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
         if app_import not in imports:
             imports += [app_import]
         init_apps += [
-            'scene.controlCode = qrApp.init(-1.NodeId, scene.FrameScene, qrApp.AppConfig(' +
-            f'backgroundColor: parseHtmlColor("{sanitize_nim_string(frame.control_code.get("backgroundColor", "#000000"))}"), ' +
-            f'qrCodeColor: parseHtmlColor("{sanitize_nim_string(frame.control_code.get("qrCodeColor", "#ffffff"))}"), ' +
-            f'offsetX: {float(frame.control_code.get("offsetX", "0"))}, ' +
-            f'offsetY: {float(frame.control_code.get("offsetY", "0"))}, ' +
-            f'padding: {int(frame.control_code.get("padding", "1"))}, ' +
-            f'position: "{sanitize_nim_string(frame.control_code.get("position", "top-left"))}", ' +
-            f'size: {float(frame.control_code.get("size", "2"))}, ' +
-            'codeType: "Frame Control URL", code: "", sizeUnit: "pixels per dot", alRad: 30.0, moRad: 0.0, moSep: 0.0))'
+            'scene.controlCode = qrApp.init(-1.NodeId, scene.FrameScene, qrApp.AppConfig(',
+            f'  backgroundColor: parseHtmlColor("{sanitize_nim_string(frame.control_code.get("backgroundColor", "#000000"))}"),',
+            f'  qrCodeColor: parseHtmlColor("{sanitize_nim_string(frame.control_code.get("qrCodeColor", "#ffffff"))}"),',
+            f'  offsetX: {float(frame.control_code.get("offsetX", "0"))},',
+            f'  offsetY: {float(frame.control_code.get("offsetY", "0"))},',
+            f'  padding: {int(frame.control_code.get("padding", "1"))},',
+            f'  position: "{sanitize_nim_string(frame.control_code.get("position", "top-left"))}",',
+            f'  size: {float(frame.control_code.get("size", "2"))},',
+            '  codeType: "Frame Control URL",',
+            '  code: "",',
+            '  sizeUnit: "pixels per dot",',
+            '  alRad: 30.0,',
+            '  moRad: 0.0,',
+            '  moSep: 0.0',
+            '))'
         ]
         after_node_lines += ["self.controlCode.run(context)"]
 
@@ -84,6 +91,15 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                     field_inputs[target][field] = code_node.get("data", {}).get(
                         "code", ""
                     )
+            if source_handle == "fieldOutput" and target_handle.startswith(
+                "codeField/"
+            ):
+                field = target_handle.replace("codeField/", "")
+                if not code_field_source_nodes.get(target):
+                    code_field_source_nodes[target] = {}
+                code_node = nodes_by_id.get(source)
+                if code_node:
+                    code_field_source_nodes[target][field] = source
             if source_handle.startswith("field/") and target_handle == "prev":
                 field = source_handle.replace("field/", "")
                 if not node_fields.get(source):
@@ -130,7 +146,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                             event_schema = schema
                             break
 
-                    event_payload_pairs = []
+                    event_payload_pairs: list[list[str]] = []
                     if event_schema:
                         for field in event_schema.get("fields", []):
                             key = field.get("name", None)
@@ -139,25 +155,27 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                             type = field.get("type", "string")
                             value = config.get(key, None)
 
-                            # TODO: add event seq fields when we get custom events that can support them
                             event_payload_pairs.append(
-                                sanitize_nim_field(
+                                [f"  {x}" for x in sanitize_nim_field(
                                     key,
                                     type,
                                     value,
                                     field_inputs_for_node,
                                     node_fields_for_node,
                                     source_field_inputs_for_node,
+                                    code_field_source_nodes,
                                     node_id_to_integer,
                                     {},
                                     True,
-                                )
+                                )]
                             )
 
                     next_node_id = next_nodes.get(node_id, None)
                     run_node_lines += [
                         f"of {node_integer}.NodeId: # {event}",
-                        f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{'+(','.join(event_payload_pairs))+'}'})",
+                        f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{'}",
+                        *[f"    {('    '+newline).join(x)}," for x in event_payload_pairs],
+                        "})",
                         f"  nextNode = {-1 if next_node_id is None else node_id_to_integer(next_node_id)}.NodeId",
                     ]
 
@@ -235,7 +253,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                         seq_to = app_config.get(seq_to, None)
                         seqs[i][2] = int(seq_to)
 
-            app_config_pairs = []
+            app_config_pairs: list[list[str]] = []
             for key, value in app_config.items():
                 if key not in config_types:
                     log(
@@ -254,6 +272,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
                         field_inputs_for_node,
                         node_fields_for_node,
                         source_field_inputs_for_node,
+                        code_field_source_nodes,
                         node_id_to_integer,
                         seq_fields_for_node,
                         False,
@@ -262,11 +281,15 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
 
             if len(sources) > 0:
                 init_apps += [
-                    f"scene.{app_id} = nodeApp{node_id_to_integer(node_id)}.init({node_integer}.NodeId, scene.FrameScene, nodeApp{node_id_to_integer(node_id)}.AppConfig({', '.join(app_config_pairs)}))"
+                    f"scene.{app_id} = nodeApp{node_id_to_integer(node_id)}.init({node_integer}.NodeId, scene.FrameScene, nodeApp{node_id_to_integer(node_id)}.AppConfig(",
+                    *[f"  {('  '+newline).join(x)}," for x in app_config_pairs],
+                    '))',
                 ]
             else:
                 init_apps += [
-                    f"scene.{app_id} = {name}App.init({node_integer}.NodeId, scene.FrameScene, {name}App.AppConfig({', '.join(app_config_pairs)}))"
+                    f"scene.{app_id} = {name}App.init({node_integer}.NodeId, scene.FrameScene, {name}App.AppConfig(",
+                    *[f"  {('  '+newline).join(x)}," for x in app_config_pairs],
+                    '))',
                 ]
 
             run_node_lines += [
@@ -486,6 +509,7 @@ def get_sequence_values(
     source_field_inputs_for_node,
     node_id_to_integer,
     seq_fields_for_node,
+    code_field_source_nodes,
 ):
     seq_start = sequences[index][1]
     seq_end = sequences[index][2]
@@ -502,6 +526,7 @@ def get_sequence_values(
                     source_field_inputs_for_node,
                     node_id_to_integer,
                     seq_fields_for_node,
+                    code_field_source_nodes,
                 )
             )
         else:
@@ -517,6 +542,7 @@ def get_sequence_values(
                     source_field_inputs_for_node,
                     node_id_to_integer,
                     seq_fields_for_node,
+                    code_field_source_nodes,
                 )
             )
     return "@[" + (", ".join(response)) + "]"
@@ -541,6 +567,7 @@ def sanitize_nim_value(
     source_field_inputs_for_node,
     node_id_to_integer,
     seq_fields_for_node,
+    code_field_source_nodes: dict[str, dict[str, str]],
 ) -> str:
     if key in seq_fields_for_node:
         sequences = seq_fields_for_node[key]
@@ -555,9 +582,13 @@ def sanitize_nim_value(
             source_field_inputs_for_node,
             node_id_to_integer,
             seq_fields_for_node,
+            code_field_source_nodes,
         )
 
     if key in field_inputs_for_node:
+        # code_field_source_nodes
+
+
         return f"{field_inputs_for_node[key]}"
     elif key in source_field_inputs_for_node:
         (source_id, source_key) = source_field_inputs_for_node[key]
@@ -593,10 +624,11 @@ def sanitize_nim_field(
     field_inputs_for_node,
     node_fields_for_node,
     source_field_inputs_for_node,
+    code_field_source_nodes: dict[str, dict[str, str]],
     node_id_to_integer,
     seq_fields_for_node,
     key_with_quotes: bool,
-) -> str:
+) -> list[str]:
     key_str = (
         f'"{sanitize_nim_string(str(key))}"'
         if key_with_quotes
@@ -611,8 +643,9 @@ def sanitize_nim_field(
         source_field_inputs_for_node,
         node_id_to_integer,
         seq_fields_for_node,
+        code_field_source_nodes,
     )
-    return f"{key_str}: {value_str}"
+    return [f"{key_str}: {value_str}"]
 
 
 def write_scenes_nim(frame: Frame) -> str:
