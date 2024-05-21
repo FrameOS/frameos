@@ -32,6 +32,7 @@ type
     endTime*: Timestamp
     location*: string
     rrules*: seq[RRule]
+    recurrenceId*: string
 
 proc extractTimeZone*(dateTimeStr: string): string =
   if dateTimeStr.startsWith("TZID="):
@@ -108,6 +109,8 @@ proc processLine*(line: string, currentVEvent: var VEvent, inVEvent: var bool, e
           currentVEvent.location = unescape(value)
         of "SUMMARY":
           currentVEvent.summary = unescape(value)
+        of "RECURRENCE-ID":
+          currentVEvent.recurrenceId = unescape(value)
         of "RRULE":
           var rrule = RRule(weekStart: RRuleDay.none, byDay: @[], byMonth: @[], byMonthDay: @[])
           for split in arr[1].split(';'):
@@ -220,7 +223,7 @@ proc getEvents*(events: seq[VEvent], startTime: Timestamp, endTime: var Timestam
     var eventStart = event.startTime
     var eventEnd = event.endTime
 
-    if rruleOption.isNone():
+    if rruleOption.isNone() or event.recurrenceId != "":
       if eventEnd > startTime and eventStart < endTime:
         result.add((eventStart, event))
       continue
