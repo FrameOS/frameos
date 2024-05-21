@@ -16,6 +16,7 @@ type
     stateKey*: string
     exportFrom*: string
     exportUntil*: string
+    exportCount*: int
 
   App* = ref object
     nodeId*: NodeId
@@ -37,6 +38,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
     cacheExpiry: 0.0,
     cachedUrl: "",
   )
+  scene.state[appConfig.stateKey] = %[]
 
 proc log*(self: App, message: string) =
   echo message
@@ -77,19 +79,23 @@ proc run*(self: App, context: ExecutionContext) =
     finally:
       client.close()
 
-    let exportFrom = getTime().toUnixFloat().Timestamp
-    let exportUntil = (getTime().toUnixFloat() + 7 * 86400.0).Timestamp
+    let timezone = now().timezone()
+    let exportFrom = (if self.appConfig.exportFrom != "": parse(self.appConfig.exportFrom, "yyyy-MM-dd",
+        timezone) else: now()).toTime().toUnixFloat().Timestamp
+    var exportUntil = if self.appConfig.exportUntil != "": parse(self.appConfig.exportUntil, "yyyy-MM-dd",
+        timezone).toTime().toUnixFloat().Timestamp else: 0.Timestamp
+    let matchedEvents = getEvents(self.cachedEvents, exportFrom, exportUntil, self.appConfig.exportCount)
     var eventsReply: JsonNode = %[]
-    for event in self.cachedEvents:
-      if (event.startTime < exportUntil and event.endTime > exportFrom):
-        eventsReply.add(%*{
-          "summary": event.summary,
-          "startTime": event.startTime.float,
-          "endTime": event.endTime.float,
-          "location": event.location,
-          "description": event.description,
-          # "rrule": event.rrule,
-        })
+    for (time, event) in matchedEvents:
+      let jsonEvent = %*{
+        "summary": event.summary,
+        "startTime": time.format("yyyy-MM-dd'T'HH:mm:ss"),
+        "endTime": (time.float + (event.endTime.float - event.startTime.float)).TimeStamp.format(
+            "yyyy-MM-dd'T'HH:mm:ss"),
+        "location": event.location,
+        "description": event.description,
+      }
+      eventsReply.add(jsonEvent)
     self.scene.logger.log(%*{"event": &"ical:reply", "events": len(self.cachedEvents), "inRange": len(eventsReply)})
     self.scene.logger.log(%*{"event": &"ical:reply", "reply": eventsReply})
     self.scene.state[self.appConfig.stateKey] = eventsReply

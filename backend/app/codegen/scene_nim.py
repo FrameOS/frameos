@@ -568,9 +568,9 @@ def sanitize_nim_value(
     elif type == "node" and key not in node_fields_for_node:
         return "0.NodeId"
     elif type == "integer":
-        return f"{0 if value is None else int(value)}"
+        return f"{0 if value is None else int(value or '0')}"
     elif type == "float":
-        return f"{0.0 if value is None else float(value)}"
+        return f"{0.0 if value is None else float(value or '0')}"
     elif type == "boolean":
         return f"{'true' if value == 'true' else 'false'}"
     elif type == "color":

@@ -1,12 +1,10 @@
 import pixie
 import times
-import tables
 import strutils
 import chrono
 import options
 import std/algorithm
 import std/lists
-
 
 type
   RRuleFreq* = enum
@@ -201,9 +199,12 @@ proc parseICalendar*(content: string): seq[VEvent] =
 
   result.sort(proc (a: VEvent, b: VEvent): int = cmp(a.startTime.float, b.startTime.float))
 
-proc getEvents*(events: seq[VEvent], startTime: Timestamp, endTime: Timestamp, maxCount: int = 0): seq[(Timestamp, VEvent)] =
+proc getEvents*(events: seq[VEvent], startTime: Timestamp, endTime: var Timestamp, maxCount: int = 1000): seq[(
+    Timestamp, VEvent)] =
   result = @[]
   var toCheck = initDoublyLinkedList[(VEvent, Option[RRule], int)]()
+  if endTime == 0.Timestamp:
+    endTime = (startTime.float + 366 * 86400).Timestamp
 
   for event in events:
     for rrule in event.rrules:

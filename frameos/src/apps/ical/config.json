@@ -17,27 +17,37 @@
       "type": "float",
       "value": "60",
       "required": false,
-      "label": "Seconds to cache",
-      "placeholder": "Default: 60. Use 0 for no cache"
+      "label": "Seconds between calendar refreshes",
+      "placeholder": "Default: 60. Use 0 to download every time."
     },
     {
       "name": "exportFrom",
       "type": "string",
-      "value": "today",
-      "required": true,
-      "label": "Export events from"
+      "value": "",
+      "placeholder": "now",
+      "required": false,
+      "label": "Export events from (YYYY-MM-DD)"
     },
     {
       "name": "exportUntil",
       "type": "string",
-      "value": "7d",
-      "required": true,
-      "label": "Export events until"
+      "value": "",
+      "placeholder": "forever",
+      "required": false,
+      "label": "Export events until (YYYY-MM-DD)"
+    },
+    {
+      "name": "exportCount",
+      "type": "integer",
+      "value": "1000",
+      "placeholder": "1000",
+      "required": false,
+      "label": "Maximum number of events to export"
     },
     {
       "name": "stateKey",
       "type": "string",
-      "value": "reply",
+      "value": "events",
       "required": true,
       "label": "State key to store events in"
     }
