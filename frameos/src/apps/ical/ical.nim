@@ -250,4 +250,4 @@ proc getEvents*(events: seq[VEvent], startTime: Timestamp, endTime: var Timestam
 
   result.sort(proc (a: (Timestamp, VEvent), b: (Timestamp, VEvent)): int = cmp(a[0].float, b[0].float))
   if maxCount > 0 and result.len > maxCount:
-    result = result[0..maxCount]
+    result = result[0..<maxCount]

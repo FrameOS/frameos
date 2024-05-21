@@ -97,5 +97,4 @@ proc run*(self: App, context: ExecutionContext) =
       }
       eventsReply.add(jsonEvent)
     self.scene.logger.log(%*{"event": &"ical:reply", "events": len(self.cachedEvents), "inRange": len(eventsReply)})
-    self.scene.logger.log(%*{"event": &"ical:reply", "reply": eventsReply})
     self.scene.state[self.appConfig.stateKey] = eventsReply

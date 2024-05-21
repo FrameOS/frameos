@@ -32,7 +32,7 @@
       "name": "exportUntil",
       "type": "string",
       "value": "",
-      "placeholder": "forever",
+      "placeholder": "1 year from now",
       "required": false,
       "label": "Export events until (YYYY-MM-DD)"
     },

@@ -402,7 +402,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
     scene_background_color = wrap_color(sanitize_nim_string(str(background_color)))
 
     scene_source = f"""
-import pixie, json, times, strformat
+import pixie, json, times, strformat, strutils, sequtils
 
 import frameos/types
 import frameos/channels
@@ -416,8 +416,6 @@ type Scene* = ref object of FrameScene
   {(newline + "  ").join(scene_object_fields)}
 
 {{.push hint[XDeclaredButNotUsed]: off.}}
-# This makes strformat available within the scene's inline code and avoids the "unused import" error
-discard &""
 
 proc runNode*(self: Scene, nodeId: NodeId,
     context: var ExecutionContext) =
