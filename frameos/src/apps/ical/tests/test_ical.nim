@@ -1,5 +1,4 @@
 import ../ical
-import frameos/types
 import chrono
 
 block test_lincoln:
@@ -21,6 +20,8 @@ block test_meetings:
     doAssert events[0].location == "https://example.com/location-url/"
     doAssert events[0].description == ""
     doAssert events[0].summary == "Team Standup"
+    doAssert events[0].rrules[0] == RRule(freq: weekly, interval: 1, byDay: @[(we, 0)], byMonth: @[], byMonthDay: @[],
+            until: Timestamp(1619621999), count: 0, weekStart: none)
     doAssert events[1].startTime == Timestamp(1624528800.0)
     doAssert events[1].endTime == Timestamp(1624532400.0)
     doAssert events[1].location == ""
@@ -45,6 +46,4 @@ block test_meetings:
 block test_holidays:
     let iCalFile = readFile("./src/apps/ical/tests/data/holidays.ics")
     let events = parseICalendar(iCalFile)
-    for event in events:
-        echo event.rrule
-    doAssert len(events) == 5
+    doAssert len(events) == 49

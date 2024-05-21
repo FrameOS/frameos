@@ -10,15 +10,30 @@ type
     params: Table[string, seq[string]]
     value: string
 
-type
+  RRuleFreq* = enum
+    daily, weekly, monthly, yearly
+
+  RRuleDay* = enum
+    none = -1
+    su = 0, mo, tu, we, th, fr, sa
+
+  RRule* = object
+    freq*: RRuleFreq
+    interval*: int
+    byDay*: seq[(RRuleDay, int)]
+    byMonth*: seq[int]
+    byMonthDay*: seq[int]
+    until*: Timestamp
+    count*: int
+    weekStart*: RRuleDay
+
   VEvent* = ref object
     summary*: string
     description*: string
     startTime*: Timestamp
     endTime*: Timestamp
     location*: string
-    rrule*: Table[string, seq[string]]
-
+    rrules*: seq[RRule]
 
 proc extractTimeZone(dateTimeStr: string): string =
   if dateTimeStr.startsWith("TZID="):
@@ -88,46 +103,95 @@ proc parseIcalLine(line: string): PropertyComponents =
   return components
 
 proc processLine*(line: string, currentVEvent: var VEvent, inVEvent: var bool, events: var seq[VEvent]) =
-  if line.startsWith("BEGIN:VEVENT"):
-    inVEvent = true
-    currentVEvent = VEvent()
-  elif line.startsWith("END:VEVENT"):
-    inVEvent = false
-    events.add(currentVEvent)
-  elif inVEvent:
-    let splitPos = line.find(':')
-    if splitPos == -1:
-      return
-
-    let arr = line.split({';', ':'}, 1)
-    if arr.len > 1:
-      let key = arr[0]
-      let value = arr[1]
-      case key
-      of "DTSTART", "DTEND":
-        let tzInfo = extractTimeZone(value)
-        let timestamp = parseDateTime(value, tzInfo)
-        if key == "DTSTART":
-          currentVEvent.startTime = timestamp
-        else:
-          currentVEvent.endTime = timestamp
-      of "LOCATION":
-        currentVEvent.location = unescape(value)
-      of "SUMMARY":
-        currentVEvent.summary = unescape(value)
-      of "RRULE":
-        let args = line.split(":", 2)
-        if args.len != 2:
-          return
-        for split in args[1].split(';'):
-          let keyValue = split.split('=', 2)
-          if keyValue.len != 2:
-            continue
-          currentVEvent.rrule[keyValue[0]] = @[keyValue[1]]
-      of "DESCRIPTION":
-        currentVEvent.description = unescape(value)
-      else:
+  try:
+    if line.startsWith("BEGIN:VEVENT"):
+      inVEvent = true
+      currentVEvent = VEvent()
+    elif line.startsWith("END:VEVENT"):
+      inVEvent = false
+      events.add(currentVEvent)
+    elif inVEvent:
+      let splitPos = line.find(':')
+      if splitPos == -1:
         return
+
+      let arr = line.split({';', ':'}, 1)
+      if arr.len > 1:
+        let key = arr[0]
+        let value = arr[1]
+        case key
+        of "DTSTART", "DTEND":
+          let tzInfo = extractTimeZone(value)
+          let timestamp = parseDateTime(value, tzInfo)
+          if key == "DTSTART":
+            currentVEvent.startTime = timestamp
+          else:
+            currentVEvent.endTime = timestamp
+        of "LOCATION":
+          currentVEvent.location = unescape(value)
+        of "SUMMARY":
+          currentVEvent.summary = unescape(value)
+        of "RRULE":
+          var rrule = RRule(weekStart: RRuleDay.none, byDay: @[], byMonth: @[], byMonthDay: @[])
+          for split in arr[1].split(';'):
+            echo split
+            let keyValue = split.split('=', 2)
+            if keyValue.len != 2:
+              continue
+            case keyValue[0]:
+            of "FREQ":
+              case keyValue[1]
+              of "DAILY":
+                rrule.freq = RRuleFreq.daily
+              of "WEEKLY":
+                rrule.freq = RRuleFreq.weekly
+              of "MONTHLY":
+                rrule.freq = RRuleFreq.monthly
+              of "YEARLY":
+                rrule.freq = RRuleFreq.yearly
+            of "INTERVAL":
+              rrule.interval = keyValue[1].parseInt()
+            of "COUNT":
+              rrule.count = keyValue[1].parseInt()
+            of "UNTIL":
+              rrule.until = parseDateTime(keyValue[1], extractTimeZone(keyValue[1]))
+            of "BYDAY":
+              # "1SU"
+              for day in keyValue[1].split(','):
+                let dayNum = if day.len > 2: day[0..^2].parseInt() else: 0
+                let day = day[^2..^1]
+                case day.toUpper():
+                of "SU": rrule.byDay.add((RRuleDay.su, dayNum))
+                of "MO": rrule.byDay.add((RRuleDay.mo, dayNum))
+                of "TU": rrule.byDay.add((RRuleDay.tu, dayNum))
+                of "WE": rrule.byDay.add((RRuleDay.we, dayNum))
+                of "TH": rrule.byDay.add((RRuleDay.th, dayNum))
+                of "FR": rrule.byDay.add((RRuleDay.fr, dayNum))
+                of "SA": rrule.byDay.add((RRuleDay.sa, dayNum))
+            of "BYMONTH":
+              for month in keyValue[1].split(','):
+                rrule.byMonth.add(month.parseInt())
+            of "BYMONTHDAY":
+              for monthDay in keyValue[1].split(','):
+                rrule.byMonthDay.add(monthDay.parseInt())
+            of "WKST":
+              case keyValue[1].toUpper()
+              of "SU": rrule.weekStart = RRuleDay.su
+              of "MO": rrule.weekStart = RRuleDay.mo
+              of "TU": rrule.weekStart = RRuleDay.tu
+              of "WE": rrule.weekStart = RRuleDay.we
+              of "TH": rrule.weekStart = RRuleDay.th
+              of "FR": rrule.weekStart = RRuleDay.fr
+              of "SA": rrule.weekStart = RRuleDay.sa
+            else:
+              echo "!! Unknown RRULE rule: " & split
+          currentVEvent.rrules.add(rrule)
+        of "DESCRIPTION":
+          currentVEvent.description = unescape(value)
+        else:
+          return
+  except CatchableError as e:
+    echo "Failed to parse calendar line \"" & line & "\". Error: " & e.msg
 
 proc parseICalendar*(content: string): seq[VEvent] =
   let lines = content.splitLines()
