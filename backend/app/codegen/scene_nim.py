@@ -7,7 +7,6 @@ from app.models.frame import Frame
 from app.models.apps import get_local_frame_apps, local_apps_path
 from app.codegen.utils import sanitize_nim_string, natural_keys
 
-
 def get_events_schema() -> list[dict]:
     events_schema_path = os.path.join("..", "frontend", "schema", "events.json")
     if os.path.exists(events_schema_path):
@@ -45,9 +44,11 @@ class SceneWriter:
     next_nodes = {}
     prev_nodes = {}
     field_inputs: dict[str, dict[str, str]] = {}
+    code_field_source_nodes: dict[str, dict[str, str]] = {}
     source_field_inputs: dict[str, dict[str, tuple[str, str]]] = {}
     node_fields: dict[str, dict[str, str]] = {}
     events_schema = get_events_schema()
+    newline = "\n"
 
     def __init__(self, frame: Frame, scene: dict) -> str:
         self.frame = frame
@@ -110,6 +111,15 @@ class SceneWriter:
                         self.field_inputs[target][field] = code_node.get("data", {}).get(
                             "code", ""
                         )
+                if source_handle == "fieldOutput" and target_handle.startswith(
+                        "codeField/"
+                ):
+                    field = target_handle.replace("codeField/", "")
+                    if not self.code_field_source_nodes.get(target):
+                        self.code_field_source_nodes[target] = {}
+                    code_node = self.nodes_by_id.get(source)
+                    if code_node:
+                        self.code_field_source_nodes[target][field] = source
                 if source_handle.startswith("field/") and target_handle == "prev":
                     field = source_handle.replace("field/", "")
                     if not self.node_fields.get(source):
@@ -132,6 +142,7 @@ class SceneWriter:
                     self.source_field_inputs[target][target_field] = (source, source_field)
 
     def read_nodes(self):
+        newline = "\n"
         for node in self.nodes:
             node_id = node["id"]
             if node.get("type") == "event" or node.get("type") == "dispatch":
@@ -157,7 +168,7 @@ class SceneWriter:
                                 event_schema = schema
                                 break
 
-                        event_payload_pairs = []
+                        event_payload_pairs: list[list[str]] = []
                         if event_schema:
                             for field in event_schema.get("fields", []):
                                 key = field.get("name", None)
@@ -166,9 +177,8 @@ class SceneWriter:
                                 type = field.get("type", "string")
                                 value = config.get(key, None)
 
-                                # TODO: add event seq fields when we get custom events that can support them
                                 event_payload_pairs.append(
-                                    self.sanitize_nim_field(
+                                    [f"  {x}" for x in self.sanitize_nim_field(
                                         key,
                                         type,
                                         value,
@@ -177,13 +187,15 @@ class SceneWriter:
                                         source_field_inputs_for_node,
                                         {},
                                         True,
-                                    )
+                                    )]
                                 )
 
                         next_node_id = self.next_nodes.get(node_id, None)
                         self.run_node_lines += [
                             f"of {node_integer}.NodeId: # {event}",
-                            f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{'+(','.join(event_payload_pairs))+'}'})",
+                            f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{'}",
+                            *[f"    {('    ' + newline).join(x)}," for x in event_payload_pairs],
+                            "})",
                             f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
                         ]
 
@@ -262,7 +274,7 @@ class SceneWriter:
                             seq_to = app_config.get(seq_to, None)
                             seqs[i][2] = int(seq_to)
 
-                app_config_pairs = []
+                app_config_pairs: list[list[str]] = []
                 for key, value in app_config.items():
                     if key not in config_types:
                         from app.models.log import new_log as log
@@ -289,11 +301,15 @@ class SceneWriter:
 
                 if len(sources) > 0:
                     self.init_apps += [
-                        f"scene.{app_id} = nodeApp{self.node_id_to_integer(node_id)}.init({node_integer}.NodeId, scene.FrameScene, nodeApp{self.node_id_to_integer(node_id)}.AppConfig({', '.join(app_config_pairs)}))"
+                        f"scene.{app_id} = nodeApp{self.node_id_to_integer(node_id)}.init({node_integer}.NodeId, scene.FrameScene, nodeApp{self.node_id_to_integer(node_id)}.AppConfig(",
+                        *[f"  {('  ' + newline).join(x)}," for x in app_config_pairs],
+                        '))',
                     ]
                 else:
                     self.init_apps += [
-                        f"scene.{app_id} = {name}App.init({node_integer}.NodeId, scene.FrameScene, {name}App.AppConfig({', '.join(app_config_pairs)}))"
+                        f"scene.{app_id} = {name}App.init({node_integer}.NodeId, scene.FrameScene, {name}App.AppConfig(",
+                        *[f"  {('  ' + newline).join(x)}," for x in app_config_pairs],
+                        '))',
                     ]
 
                 self.run_node_lines += [
@@ -572,7 +588,7 @@ var exportedScene* = ExportedScene(
             )
 
         if key in field_inputs_for_node:
-
+            # code_field_source_nodes
 
             return f"{field_inputs_for_node[key]}"
         elif key in source_field_inputs_for_node:
