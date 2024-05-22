@@ -97,19 +97,17 @@ class SceneWriter:
             target_handle = edge.get("targetHandle", None)
             if source and target:
                 # Default prev/next edge between app nodes.
-                if target_handle == "prev":
-                    if source_handle == "next":
-                        self.next_nodes[source] = target
+                if source_handle == "next" and target_handle == "prev":
+                    self.next_nodes[source] = target
                     self.prev_nodes[target] = source
 
                 # Code node connecting to app node.
                 if source_handle == "fieldOutput" and target_handle.startswith("fieldInput/"):
                     field = target_handle.replace("fieldInput/", "")
-                    if not self.field_inputs.get(target):
-                        self.field_inputs[target] = {}
-
                     code_node = self.nodes_by_id.get(source)
                     if code_node:
+                        if not self.field_inputs.get(target):
+                            self.field_inputs[target] = {}
                         self.field_inputs[target][field] = code_node.get("data", {}).get("code", "")
 
                 # Code node connecting to code node.
@@ -121,21 +119,22 @@ class SceneWriter:
                     if code_node:
                         self.code_field_source_nodes[target][field] = source
 
-                # Field node connecting to app node (e.g. "then" and "else" in if/else)
+                # App field's node connecting to app node (e.g. "then" and "else" in if/else)
                 if source_handle.startswith("field/") and target_handle == "prev":
                     field = source_handle.replace("field/", "")
                     if not self.node_fields.get(source):
                         self.node_fields[source] = {}
                     self.node_fields[source][field] = target
 
-                #
+                # Ad-hoc code nodes connecting to app field's inputs, e.g. state from a render event to an app
+                # TODO: should stop using them?
                 if source_handle.startswith("code/") and target_handle.startswith("fieldInput/"):
                     field = target_handle.replace("fieldInput/", "")
                     if not self.field_inputs.get(target):
                         self.field_inputs[target] = {}
                     self.field_inputs[target][field] = source_handle.replace("code/", "")
 
-                #
+                # App field's output to another app field's input
                 if source_handle.startswith("field/") and target_handle.startswith("fieldInput/"):
                     target_field = target_handle.replace("fieldInput/", "")
                     source_field = source_handle.replace("field/", "")
