@@ -1,7 +1,7 @@
-import { BaseEdge, EdgeLabelRenderer, EdgeProps, getSimpleBezierPath, Position, useReactFlow } from 'reactflow'
+import { BaseEdge, EdgeLabelRenderer, EdgeProps, getSmoothStepPath, useReactFlow } from 'reactflow'
 import { XCircleIcon } from '@heroicons/react/24/solid'
 
-export default function CustomEdge({
+export function CodeNodeEdge({
   id,
   sourcePosition,
   sourceX,
@@ -14,7 +14,7 @@ export default function CustomEdge({
   selected,
 }: EdgeProps) {
   const { setEdges } = useReactFlow()
-  const [edgePath, labelX, labelY] = getSimpleBezierPath({
+  const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX,
     sourceY,
     sourcePosition,
@@ -28,15 +28,7 @@ export default function CustomEdge({
       <BaseEdge
         id={id}
         path={edgePath}
-        style={
-          isNodeConnection
-            ? selected
-              ? { strokeWidth: 8, stroke: '#ffffff' }
-              : { strokeWidth: 6, stroke: 'hsl(56 60% 70% / 1)' }
-            : selected
-            ? { strokeWidth: 4, stroke: '#ffffff' }
-            : { strokeWidth: 2, stroke: '#c5c5c5' }
-        }
+        style={selected ? { strokeWidth: 6, stroke: '#ffffff' } : { strokeWidth: 4, stroke: 'hsl(220 100% 91%)' }}
       />
       <EdgeLabelRenderer>
         {selected ? (

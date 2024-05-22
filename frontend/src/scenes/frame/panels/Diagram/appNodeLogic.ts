@@ -11,6 +11,7 @@ const events: FrameEvent[] = _events as any
 
 export interface AppNodeLogicProps extends DiagramLogicProps {
   nodeId: string
+  updateNodeInternals?: (nodeId: string | string[]) => void
 }
 
 export const appNodeLogic = kea<appNodeLogicType>([
@@ -218,7 +219,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
       },
     ],
   }),
-  listeners(({ actions, values }) => ({
+  listeners(({ actions, values, props }) => ({
     select: () => {
       if (!values.isSelected) {
         actions.selectNode(values.nodeId)
@@ -245,11 +246,17 @@ export const appNodeLogic = kea<appNodeLogicType>([
             ? codeFields.filter((f) => f !== field)
             : codeFields.map((f) => (f === field ? newField : f)),
         })
+        window.requestAnimationFrame(() => {
+          props.updateNodeInternals?.(nodeId)
+        })
       } else {
         for (const edge of codeFieldEdges) {
           actions.deleteApp(edge.source)
         }
         actions.updateNodeData(nodeId, { codeFields: codeFields.filter((f) => f !== field) })
+        window.requestAnimationFrame(() => {
+          props.updateNodeInternals?.(nodeId)
+        })
       }
     },
   })),

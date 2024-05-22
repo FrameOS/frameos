@@ -132,11 +132,11 @@ export const diagramLogic = kea<diagramLogicType>([
       (rawEdges): Edge[] =>
         rawEdges.map((edge) =>
           edge.sourceHandle === 'fieldOutput' || edge.targetHandle?.startsWith('fieldInput/')
-            ? edge.type !== 'smoothstep'
-              ? { ...edge, type: 'smoothstep' }
+            ? edge.type !== 'codeNodeEdge'
+              ? { ...edge, type: 'codeNodeEdge' }
               : edge
-            : edge.type !== 'edge'
-            ? { ...edge, type: 'edge' }
+            : edge.type !== 'appNodeEdge'
+            ? { ...edge, type: 'appNodeEdge' }
             : edge
         ),
     ],

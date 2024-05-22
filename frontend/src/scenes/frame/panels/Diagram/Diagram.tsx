@@ -32,8 +32,9 @@ import { Tooltip } from '../../../../components/Tooltip'
 import { SceneSettings } from '../Scenes/SceneSettings'
 import { ZoomOutArea } from '../../../../icons/ZoomOutArea'
 import clsx from 'clsx'
-import CustomEdge from './CustomEdge'
+import { CodeNodeEdge } from './CodeNodeEdge'
 import { SceneDropDown } from '../Scenes/SceneDropDown'
+import { AppNodeEdge } from './AppNodeEdge'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -44,7 +45,8 @@ const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
 }
 
 const edgeTypes: Record<EdgeType, (props: EdgeProps) => JSX.Element> = {
-  edge: CustomEdge,
+  appNodeEdge: AppNodeEdge,
+  codeNodeEdge: CodeNodeEdge,
 }
 
 interface DiagramProps {
