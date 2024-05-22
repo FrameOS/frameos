@@ -64,12 +64,12 @@ class SceneWriter:
         return self.node_integer_map[node_id]
 
     def write_scene_nim(self) -> str:
-        self.check_control_code()
+        self.apply_control_code()
         self.read_edges()
         self.read_nodes()
         return self.write_source()
 
-    def check_control_code(self):
+    def apply_control_code(self):
         control_code = self.frame.control_code
         if control_code and control_code.get("enabled") == "true":
             self.scene_object_fields += ["controlCode: qrApp.App"]
@@ -96,45 +96,47 @@ class SceneWriter:
             source_handle = edge.get("sourceHandle", None)
             target_handle = edge.get("targetHandle", None)
             if source and target:
+                # Default prev/next edge between app nodes.
                 if target_handle == "prev":
                     if source_handle == "next":
                         self.next_nodes[source] = target
                     self.prev_nodes[target] = source
-                if source_handle == "fieldOutput" and target_handle.startswith(
-                    "fieldInput/"
-                ):
+
+                # Code node connecting to app node.
+                if source_handle == "fieldOutput" and target_handle.startswith("fieldInput/"):
                     field = target_handle.replace("fieldInput/", "")
                     if not self.field_inputs.get(target):
                         self.field_inputs[target] = {}
+
                     code_node = self.nodes_by_id.get(source)
                     if code_node:
-                        self.field_inputs[target][field] = code_node.get("data", {}).get(
-                            "code", ""
-                        )
-                if source_handle == "fieldOutput" and target_handle.startswith(
-                        "codeField/"
-                ):
+                        self.field_inputs[target][field] = code_node.get("data", {}).get("code", "")
+
+                # Code node connecting to code node.
+                if source_handle == "fieldOutput" and target_handle.startswith("codeField/"):
                     field = target_handle.replace("codeField/", "")
                     if not self.code_field_source_nodes.get(target):
                         self.code_field_source_nodes[target] = {}
                     code_node = self.nodes_by_id.get(source)
                     if code_node:
                         self.code_field_source_nodes[target][field] = source
+
+                # Field node connecting to app node (e.g. "then" and "else" in if/else)
                 if source_handle.startswith("field/") and target_handle == "prev":
                     field = source_handle.replace("field/", "")
                     if not self.node_fields.get(source):
                         self.node_fields[source] = {}
                     self.node_fields[source][field] = target
-                if source_handle.startswith("code/") and target_handle.startswith(
-                    "fieldInput/"
-                ):
+
+                #
+                if source_handle.startswith("code/") and target_handle.startswith("fieldInput/"):
                     field = target_handle.replace("fieldInput/", "")
                     if not self.field_inputs.get(target):
                         self.field_inputs[target] = {}
                     self.field_inputs[target][field] = source_handle.replace("code/", "")
-                if source_handle.startswith("field/") and target_handle.startswith(
-                    "fieldInput/"
-                ):
+
+                #
+                if source_handle.startswith("field/") and target_handle.startswith("fieldInput/"):
                     target_field = target_handle.replace("fieldInput/", "")
                     source_field = source_handle.replace("field/", "")
                     if not self.source_field_inputs.get(target):
