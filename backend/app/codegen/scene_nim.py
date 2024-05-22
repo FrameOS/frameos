@@ -28,35 +28,50 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
     return SceneWriter(frame, scene).write_scene_nim()
 
 class SceneWriter:
+    events_schema = get_events_schema()
     available_apps = get_local_frame_apps()
     scene_id: str
-    nodes = []
-    nodes_by_id = {}
-    node_integer_map: dict[str, int] = {}
-    imports = []
-    scene_object_fields = []
-    init_apps = []
-    run_node_lines = []
-    after_node_lines = []
-    run_event_lines = []
-    edges = []
-    event_nodes = {}
-    next_nodes = {}
-    prev_nodes = {}
-    field_inputs: dict[str, dict[str, str]] = {}
-    code_field_source_nodes: dict[str, dict[str, str]] = {}
-    source_field_inputs: dict[str, dict[str, tuple[str, str]]] = {}
-    node_fields: dict[str, dict[str, str]] = {}
-    events_schema = get_events_schema()
+    nodes: list
+    nodes_by_id: dict
+    node_integer_map: dict[str, int]
+    imports: list
+    scene_object_fields: list
+    init_apps: list
+    run_node_lines: list
+    after_node_lines: list
+    run_event_lines: list
+    edges: list
+    event_nodes: dict
+    next_nodes: dict
+    prev_nodes: dict
+    field_inputs: dict[str, dict[str, str]]
+    code_field_source_nodes: dict[str, dict[str, str]]
+    source_field_inputs: dict[str, dict[str, tuple[str, str]]]
+    node_fields: dict[str, dict[str, str]]
     newline = "\n"
 
-    def __init__(self, frame: Frame, scene: dict) -> str:
+    def __init__(self, frame: Frame, scene: dict):
         self.frame = frame
         self.scene = scene
         self.scene_id = scene.get("id", "default")
         self.nodes = scene.get("nodes", [])
         self.nodes_by_id = {n["id"]: n for n in self.nodes}
         self.edges = scene.get("edges", [])
+        self.node_integer_map = {}
+        self.imports = []
+        self.scene_object_fields = []
+        self.init_apps = []
+        self.run_node_lines = []
+        self.after_node_lines = []
+        self.run_event_lines = []
+        self.event_nodes = {}
+        self.next_nodes = {}
+        self.prev_nodes = {}
+        self.field_inputs = {}
+        self.code_field_source_nodes = {}
+        self.source_field_inputs = {}
+        self.node_fields = {}
+
 
     def node_id_to_integer(self, node_id: str) -> int:
         if node_id not in self.node_integer_map:
@@ -370,11 +385,9 @@ class SceneWriter:
             for node in nodes:
                 next_node = self.next_nodes.get(node["id"], "-1")
                 self.run_event_lines += [
-                    f"  try: self.runNode({self.node_id_to_integer(next_node)}.NodeId, context)"
-                ]
-                self.run_event_lines += [
-                    f'  except Exception as e: self.logger.log(%*{{"event": "{sanitize_nim_string(event)}:error",'
-                    f' "node": {self.node_id_to_integer(next_node)}, "error": $e.msg, "stacktrace": e.getStackTrace()}})'
+                    f"  try: self.runNode({self.node_id_to_integer(next_node)}.NodeId, context)",
+                    f'  except Exception as e: self.logger.log(%*{{"event": "{sanitize_nim_string(event)}:error", ' +
+                    f'"node": {self.node_id_to_integer(next_node)}, "error": $e.msg, "stacktrace": e.getStackTrace()}})'
                 ]
         if not self.event_nodes.get("setSceneState", None):
             self.run_event_lines += ['of "setSceneState":']
