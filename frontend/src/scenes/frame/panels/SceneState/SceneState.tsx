@@ -30,23 +30,21 @@ const ACCESS_OPTIONS = [
 export function SceneState(): JSX.Element {
   const { frameId } = useValues(frameLogic)
   const { selectedStateSceneId: sceneId } = useValues(panelsLogic({ frameId }))
-  const { editStateScene } = useActions(panelsLogic({ frameId }))
-  const { sceneIndex, sceneOptions, scene, editingFields, fieldsWithErrors } = useValues(
-    sceneStateLogic({ frameId, sceneId })
-  )
+  const { sceneIndex, scene, editingFields, fieldsWithErrors } = useValues(sceneStateLogic({ frameId, sceneId }))
   const { setFields, addField, editField, closeField, removeField } = useActions(sceneStateLogic({ frameId, sceneId }))
 
   if (!scene || !sceneId) {
     return <div>Add a scene first</div>
   }
 
+  const onDragStart = (event: any, type: 'code', keyword: string) => {
+    event.dataTransfer.setData('application/reactflow', JSON.stringify({ type, keyword }))
+    event.dataTransfer.effectAllowed = 'move'
+  }
+
   return (
     <Form logic={frameLogic} props={{ frameId }} formKey="frameForm">
       <Group name={['scenes', sceneIndex]}>
-        <div className="space-y-2">
-          <H6>Scene</H6>
-          <Select options={sceneOptions} value={sceneId} onChange={editStateScene} />
-        </div>
         <div className="flex justify-between w-full items-center gap-2 mb-2 mt-4">
           <H6>
             State fields{' '}
@@ -85,7 +83,7 @@ export function SceneState(): JSX.Element {
         </div>
         <div className="space-y-4">
           {scene?.fields?.map((field, index) => (
-            <Group name={['fields', index]}>
+            <Group name={['fields', index]} key={index}>
               {fieldsWithErrors[field.name] ? (
                 <div className="text-red-400">
                   <p>There are errors with this field. Please fix them to save.</p>
@@ -101,7 +99,7 @@ export function SceneState(): JSX.Element {
                         onChange={(value) => {
                           if (!field.name || field.name === camelize(field.label)) {
                             setFields([
-                              ...(scene.fields ?? []).map((f, i) =>
+                              ...(scene?.fields ?? []).map((f, i) =>
                                 i === index ? { ...f, name: camelize(value), label: value } : f
                               ),
                             ])
@@ -127,7 +125,7 @@ export function SceneState(): JSX.Element {
                         rows={3}
                         onChange={(value) =>
                           setFields(
-                            (scene.fields ?? []).map((field, i) =>
+                            (scene?.fields ?? []).map((field, i) =>
                               i === index ? { ...field, options: value.split('\n') } : field
                             )
                           )
@@ -182,7 +180,17 @@ export function SceneState(): JSX.Element {
                   </div>
                 </div>
               ) : (
-                <div className="bg-gray-900 p-2">
+                <div
+                  className="bg-gray-900 p-2 dndnode cursor-move"
+                  draggable
+                  onDragStart={(event) =>
+                    onDragStart(
+                      event,
+                      'code',
+                      `state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
+                    )
+                  }
+                >
                   <div className="flex items-center gap-1 justify-between max-w-full w-full">
                     <div className="flex items-center gap-1 max-w-full w-full overflow-hidden">
                       {field.label || field.name || 'Unnamed field'}

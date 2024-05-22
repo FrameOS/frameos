@@ -11,6 +11,7 @@ bin           = @["frameos"]
 
 # Dependencies
 
+requires "chrono >= 0.3.1"
 requires "nim >= 2.0.0"
 requires "pixie >= 5.0.6"
 requires "jester >= 0.6.0"
@@ -30,4 +31,5 @@ before build:
   exec "nimble assets"
 
 task test, "Run tests":
-  exec "testament pattern './src/**/tests/*.nim'"
+  exec "testament pattern './src/**/tests/*.nim' --lineTrace:on"
+  exec "testament pattern './src/apps/**/tests/*.nim' --lineTrace:on"

@@ -145,7 +145,7 @@ export interface App {
 }
 
 export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event'
-export type EdgeType = 'edge'
+export type EdgeType = 'appNodeEdge' | 'codeNodeEdge'
 
 export interface AppNodeData {
   keyword: string
@@ -156,6 +156,7 @@ export interface AppNodeData {
 
 export interface CodeNodeData {
   code: string
+  codeFields?: string[]
 }
 
 export interface EventNodeData {

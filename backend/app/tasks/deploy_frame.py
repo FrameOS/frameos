@@ -35,6 +35,10 @@ def deploy_frame(id: int):
         ssh = None
         try:
             frame = Frame.query.get_or_404(id)
+
+            if frame.scenes is None or len(frame.scenes) == 0:
+                raise Exception("You must have at least one installed scene to deploy a frame.")
+
             if frame.status == 'deploying':
                 raise Exception("Already deploying, will not deploy again. Request again to force deploy.")
 
@@ -167,7 +171,7 @@ def deploy_frame(id: int):
 
             if low_memory:
                 # disable apt-daily-upgrade (sudden +70mb memory usage, might lead a Zero W 2 to endlessly swap)
-                exec_command(frame, ssh, "sudo systemctl disable apt-daily.service apt-daily.timer apt-daily-upgrade.timer apt-daily-upgrade.service")
+                exec_command(frame, ssh, "sudo systemctl mask apt-daily-upgrade && sudo systemctl mask apt-daily && sudo systemctl disable apt-daily.service apt-daily.timer apt-daily-upgrade.timer apt-daily-upgrade.service")
                 # # disable swap while we're at it
                 # exec_command(frame, ssh, "sudo systemctl disable dphys-swapfile.service")
 

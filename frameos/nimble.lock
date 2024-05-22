@@ -178,6 +178,16 @@
       "checksums": {
         "sha1": "41a7a63b515a4cad66091a70509925e2dcc5a0e4"
       }
+    },
+    "chrono": {
+      "version": "0.3.1",
+      "vcsRevision": "e431d023453cf4292e58b3a0cf36f876d31c428c",
+      "url": "https://github.com/treeform/chrono",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "deac69a313df5422db074f0bf95448607cc52c18"
+      }
     }
   },
   "tasks": {

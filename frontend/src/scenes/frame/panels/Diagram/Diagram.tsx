@@ -8,6 +8,8 @@ import ReactFlow, {
   NodeProps,
   OnConnectStartParams,
   EdgeProps,
+  useUpdateNodeInternals,
+  ReactFlowProvider,
 } from 'reactflow'
 import { frameLogic } from '../../frameLogic'
 import {
@@ -24,14 +26,15 @@ import { EventNode } from './EventNode'
 import { Button, buttonColor, buttonSize } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { v4 as uuidv4 } from 'uuid'
-import { DiagramNode, NodeType, EdgeType } from '../../../../types'
+import { DiagramNode, NodeType, EdgeType, CodeNodeData } from '../../../../types'
 import { AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
 import { Tooltip } from '../../../../components/Tooltip'
 import { SceneSettings } from '../Scenes/SceneSettings'
 import { ZoomOutArea } from '../../../../icons/ZoomOutArea'
 import clsx from 'clsx'
-import CustomEdge from './CustomEdge'
+import { CodeNodeEdge } from './CodeNodeEdge'
 import { SceneDropDown } from '../Scenes/SceneDropDown'
+import { AppNodeEdge } from './AppNodeEdge'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -42,14 +45,30 @@ const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
 }
 
 const edgeTypes: Record<EdgeType, (props: EdgeProps) => JSX.Element> = {
-  edge: CustomEdge,
+  appNodeEdge: AppNodeEdge,
+  codeNodeEdge: CodeNodeEdge,
 }
 
 interface DiagramProps {
   sceneId: string
 }
+interface ConnectingNode {
+  nodeId: string | null
+  handleType: string | null
+  handleId: string | null
+}
 
-export function Diagram({ sceneId }: DiagramProps) {
+function getNewField(codeFields: string[]): string {
+  let newField = 'arg'
+  let i = 1
+  while (codeFields.includes(newField)) {
+    newField = `arg${i}`
+    i++
+  }
+  return newField
+}
+
+function Diagram_({ sceneId }: DiagramProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
   const { frameId } = useValues(frameLogic)
@@ -58,6 +77,7 @@ export function Diagram({ sceneId }: DiagramProps) {
   const { onEdgesChange, onNodesChange, setNodes, addEdge, fitDiagramView, keywordDropped } = useActions(
     diagramLogic(diagramLogicProps)
   )
+  const updateNodeInternals = useUpdateNodeInternals()
 
   const onDragOver = useCallback((event: any) => {
     event.preventDefault()
@@ -79,41 +99,62 @@ export function Diagram({ sceneId }: DiagramProps) {
     },
     [reactFlowInstance, nodes]
   )
-  const connectingNodeId = useRef<string | null>(null)
-  const connectingNodeHandle = useRef<string | null>(null)
+  const connectingNode = useRef<ConnectingNode | null>(null)
 
   const onConnect = useCallback(
     (connection: Connection) => {
-      connectingNodeId.current = null
-      connectingNodeHandle.current = null
-      addEdge(connection)
+      connectingNode.current = null
+      if (connection.targetHandle === 'codeField/+' && connection.sourceHandle === 'fieldOutput') {
+        const nodeId = connection.target
+        const codeFields = (nodes.find((node) => node.id === nodeId)?.data as CodeNodeData)?.codeFields ?? []
+        let newField = getNewField(codeFields)
+        setNodes(
+          nodes.map((node) =>
+            node.id === nodeId ? { ...node, data: { ...node.data, codeFields: [...codeFields, newField] } } : node
+          )
+        )
+        window.requestAnimationFrame(() => {
+          addEdge({
+            ...connection,
+            targetHandle: `codeField/${newField}`,
+          })
+          if (nodeId) {
+            updateNodeInternals(nodeId)
+          }
+        })
+      } else {
+        window.requestAnimationFrame(() => {
+          addEdge(connection)
+        })
+      }
     },
-    [addEdge]
+    [addEdge, nodes]
   )
 
   const onConnectStart = useCallback((_: ReactMouseEvent | ReactTouchEvent, params: OnConnectStartParams) => {
     const { nodeId, handleId, handleType } = params
-    if (handleType === 'target' && handleId?.startsWith('fieldInput/')) {
-      connectingNodeId.current = nodeId
-      connectingNodeHandle.current = handleId
-    } else {
-      connectingNodeId.current = null
-      connectingNodeHandle.current = null
-    }
+    connectingNode.current = { nodeId, handleId, handleType }
   }, [])
 
   const onConnectEnd = useCallback(
     (event: MouseEvent | TouchEvent) => {
-      if (!connectingNodeId.current) return
-      if (!connectingNodeHandle.current) return
+      if (!connectingNode.current) return
 
-      event.preventDefault()
-
+      const { nodeId, handleId, handleType } = connectingNode.current
       const targetIsPane = (event.target as HTMLElement).classList.contains('react-flow__pane')
       const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
 
+      // dropped onto the canvas
       if (targetIsPane) {
-        const id = uuidv4()
+        // we only care about code nodes dropped from field inputs and code nodes
+        if (
+          !(handleType === 'target' && handleId?.startsWith('fieldInput/')) &&
+          !(handleType === 'target' && handleId?.startsWith('codeField/'))
+        ) {
+          return
+        }
+        event.preventDefault()
+        const newNodeId = uuidv4()
         const inputCoords = {
           x: 'clientX' in event ? event.clientX : event.touches[0].clientX,
           y: 'clientY' in event ? event.clientY : event.touches[0].clientY,
@@ -122,26 +163,57 @@ export function Diagram({ sceneId }: DiagramProps) {
         inputCoords.y -= reactFlowBounds?.top ?? 0
 
         const position = reactFlowInstance?.project(inputCoords) ?? { x: 0, y: 0 }
-        position.x -= 280
-        position.y -= 80
+        position.x -= 20
+        position.y -= 120
         const newNode: DiagramNode = {
-          id,
+          id: newNodeId,
           position: position,
           type: 'code',
-          data: { code: '' },
+          data: { code: '', codeFields: [] },
           style: {
             width: 300,
             height: 130,
           },
         }
-        setNodes([...nodes, newNode])
-        addEdge({
-          id,
-          target: connectingNodeId.current,
-          targetHandle: connectingNodeHandle.current,
-          source: id,
-          sourceHandle: 'fieldOutput',
-        })
+
+        if (handleId === 'codeField/+') {
+          const codeFields = (nodes.find((node) => node.id === nodeId)?.data as CodeNodeData)?.codeFields ?? []
+          let newField = getNewField(codeFields)
+          setNodes([
+            ...nodes.map((node) =>
+              node.id === nodeId ? { ...node, data: { ...node.data, codeFields: [...codeFields, newField] } } : node
+            ),
+            newNode,
+          ])
+          window.requestAnimationFrame(() => {
+            if (nodeId) {
+              updateNodeInternals(nodeId)
+            }
+            updateNodeInternals(newNodeId)
+            addEdge({
+              id: uuidv4(),
+              target: nodeId,
+              targetHandle: `codeField/${newField}`,
+              source: newNodeId,
+              sourceHandle: 'fieldOutput',
+            })
+          })
+        } else {
+          setNodes([...nodes, newNode])
+          window.requestAnimationFrame(() => {
+            if (nodeId) {
+              updateNodeInternals(nodeId)
+            }
+            updateNodeInternals(newNodeId)
+            addEdge({
+              id: uuidv4(),
+              target: nodeId,
+              targetHandle: handleId,
+              source: newNodeId,
+              sourceHandle: 'fieldOutput',
+            })
+          })
+        }
       }
     },
     [reactFlowInstance, nodes, edges, setNodes, addEdge]
@@ -193,6 +265,13 @@ export function Diagram({ sceneId }: DiagramProps) {
   )
 }
 
+export function Diagram({ sceneId }: DiagramProps) {
+  return (
+    <ReactFlowProvider>
+      <Diagram_ sceneId={sceneId} />
+    </ReactFlowProvider>
+  )
+}
 Diagram.PanelTitle = function DiagramPanelTitle({ sceneId }: DiagramProps) {
   const { frameId } = useValues(frameLogic)
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
