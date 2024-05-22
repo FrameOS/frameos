@@ -11,7 +11,7 @@ import type { EdgeChange, NodeChange } from '@reactflow/core/dist/esm/types/chan
 import equal from 'fast-deep-equal'
 import type { diagramLogicType } from './diagramLogicType'
 import { subscriptions } from 'kea-subscriptions'
-import { AppNodeData, DiagramNode, DispatchNodeData, EventNodeData, FrameScene } from '../../../../types'
+import { AppNodeData, CodeNodeData, DiagramNode, DispatchNodeData, EventNodeData, FrameScene } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { arrangeNodes } from '../../../../utils/arrangeNodes'
@@ -129,7 +129,16 @@ export const diagramLogic = kea<diagramLogicType>([
     selectedNodeId: [(s) => [s.selectedNode], (node) => node?.id ?? null],
     edges: [
       (s) => [s.rawEdges],
-      (rawEdges): Edge[] => rawEdges.map((edge) => (edge.type !== 'edge' ? { ...edge, type: 'edge' } : edge)),
+      (rawEdges): Edge[] =>
+        rawEdges.map((edge) =>
+          edge.sourceHandle === 'fieldOutput' || edge.targetHandle?.startsWith('fieldInput/')
+            ? edge.type !== 'codeNodeEdge'
+              ? { ...edge, type: 'codeNodeEdge' }
+              : edge
+            : edge.type !== 'appNodeEdge'
+            ? { ...edge, type: 'appNodeEdge' }
+            : edge
+        ),
     ],
     selectedEdge: [(s) => [s.edges], (edges): Edge | null => edges.find((edge) => edge.selected) ?? null],
     selectedEdgeId: [(s) => [s.selectedEdge], (edge) => edge?.id ?? null],
@@ -262,6 +271,14 @@ export const diagramLogic = kea<diagramLogicType>([
           type: type,
           position,
           data: { keyword, config: {} } satisfies DispatchNodeData,
+        }
+        actions.setNodes([...values.nodes, newNode])
+      } else if (type === 'code') {
+        const newNode: DiagramNode = {
+          id: uuidv4(),
+          type: type,
+          position,
+          data: { code: keyword } satisfies CodeNodeData,
         }
         actions.setNodes([...values.nodes, newNode])
       }

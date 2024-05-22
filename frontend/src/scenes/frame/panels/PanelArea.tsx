@@ -32,14 +32,14 @@ export function PanelArea({ area, areaPanels }: PanelAreaProps): JSX.Element {
         <Tabs>
           {areaPanels
             .filter((panel) => !panel.hidden || panel.active)
-            .map((panel) => {
+            .map((panel, index) => {
               const Comp = allPanels[panel.panel]
               const PanelTitle: ((props: Record<string, any>) => JSX.Element) | null =
                 Comp && 'PanelTitle' in Comp ? (Comp.PanelTitle as any) : null
 
               return (
                 <Tab
-                  key={panel.key}
+                  key={index}
                   active={activePanel === panel}
                   onClick={() =>
                     panel.key === 'action:disableFullscreenPanel' ? disableFullscreenPanel() : setPanel(area, panel)

@@ -189,7 +189,9 @@ export const panelsLogic = kea<panelsLogicType>([
           return {
             ...panels,
             [Area.TopRight]: panels[Area.TopRight].filter((p) =>
-              diagramOpen ? p.panel !== Panel.Templates : p.panel !== Panel.Apps && p.panel !== Panel.Events
+              diagramOpen
+                ? p.panel !== Panel.Templates
+                : p.panel !== Panel.Apps && p.panel !== Panel.Events && p.panel !== Panel.SceneState
             ),
             [Area.BottomLeft]: panels[Area.BottomLeft].filter((p) =>
               diagramOpen ? true : p.panel !== Panel.SceneSource
