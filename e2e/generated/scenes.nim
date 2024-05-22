@@ -3,6 +3,7 @@
 import frameos/types
 import tables, options
 import scenes/scene_color as scene_color
+import scenes/scene_github as scene_github
 import scenes/scene_gradient as scene_gradient
 import scenes/scene_ifElse as scene_ifElse
 import scenes/scene_image as scene_image
@@ -15,6 +16,7 @@ let defaultSceneId* = some("color".SceneId)
 
 const sceneOptions* = [
   ("color".SceneId, "Test Color"),
+  ("github".SceneId, "Github Stars"),
   ("gradient".SceneId, "Test Gradient"),
   ("ifElse".SceneId, "Test If Else"),
   ("image".SceneId, "TEST"),
@@ -27,6 +29,7 @@ const sceneOptions* = [
 proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result = initTable[SceneId, ExportedScene]()
   result["color".SceneId] = scene_color.exportedScene
+  result["github".SceneId] = scene_github.exportedScene
   result["gradient".SceneId] = scene_gradient.exportedScene
   result["ifElse".SceneId] = scene_ifElse.exportedScene
   result["image".SceneId] = scene_image.exportedScene
