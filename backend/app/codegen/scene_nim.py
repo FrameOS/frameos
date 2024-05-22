@@ -77,15 +77,21 @@ class SceneWriter:
             if app_import not in self.imports:
                 self.imports += [app_import]
             self.init_apps += [
-                'scene.controlCode = qrApp.init(-1.NodeId, scene.FrameScene, qrApp.AppConfig(' +
-                f'backgroundColor: parseHtmlColor("{sanitize_nim_string(control_code.get("backgroundColor", "#000000"))}"), ' +
-                f'qrCodeColor: parseHtmlColor("{sanitize_nim_string(control_code.get("qrCodeColor", "#ffffff"))}"), ' +
-                f'offsetX: {float(control_code.get("offsetX", "0"))}, ' +
-                f'offsetY: {float(control_code.get("offsetY", "0"))}, ' +
-                f'padding: {int(control_code.get("padding", "1"))}, ' +
-                f'position: "{sanitize_nim_string(control_code.get("position", "top-left"))}", ' +
-                f'size: {float(control_code.get("size", "2"))}, ' +
-                'codeType: "Frame Control URL", code: "", sizeUnit: "pixels per dot", alRad: 30.0, moRad: 0.0, moSep: 0.0))'
+                'scene.controlCode = qrApp.init(-1.NodeId, scene.FrameScene, qrApp.AppConfig(',
+                f'  backgroundColor: parseHtmlColor("{sanitize_nim_string(control_code.get("backgroundColor", "#000000"))}"),',
+                f'  qrCodeColor: parseHtmlColor("{sanitize_nim_string(control_code.get("qrCodeColor", "#ffffff"))}"),',
+                f'  offsetX: {float(control_code.get("offsetX", "0"))},',
+                f'  offsetY: {float(control_code.get("offsetY", "0"))},',
+                f'  padding: {int(control_code.get("padding", "1"))},',
+                f'  position: "{sanitize_nim_string(control_code.get("position", "top-left"))}"',
+                f'  size: {float(control_code.get("size", "2"))}',
+                '  codeType: "Frame Control URL",',
+                '  code: "",',
+                '  sizeUnit: "pixels per dot",',
+                '  alRad: 30.0,',
+                '  moRad: 0.0,'
+                '  moSep: 0.0',
+                '))'
             ]
             self.after_node_lines += ["self.controlCode.run(context)"]
 
@@ -109,14 +115,17 @@ class SceneWriter:
                         if not self.field_inputs.get(target):
                             self.field_inputs[target] = {}
                         self.field_inputs[target][field] = code_node.get("data", {}).get("code", "")
+                        if not self.code_field_source_nodes.get(target):
+                            self.code_field_source_nodes[target] = {}
+                        self.code_field_source_nodes[target][field] = source
 
                 # Code node connecting to code node.
                 if source_handle == "fieldOutput" and target_handle.startswith("codeField/"):
                     field = target_handle.replace("codeField/", "")
-                    if not self.code_field_source_nodes.get(target):
-                        self.code_field_source_nodes[target] = {}
                     code_node = self.nodes_by_id.get(source)
                     if code_node:
+                        if not self.code_field_source_nodes.get(target):
+                            self.code_field_source_nodes[target] = {}
                         self.code_field_source_nodes[target][field] = source
 
                 # App field's node connecting to app node (e.g. "then" and "else" in if/else)
@@ -180,6 +189,7 @@ class SceneWriter:
 
                                 event_payload_pairs.append(
                                     [f"  {x}" for x in self.sanitize_nim_field(
+                                        node_id,
                                         key,
                                         type,
                                         value,
@@ -242,6 +252,7 @@ class SceneWriter:
                 # { field: [['key1', 'from', 'to'], ['key2', 1, 5]] }
                 seq_fields_for_node: dict[str, list[list[str | int]]] = {}
                 field_inputs_for_node = self.field_inputs.get(node_id, {})
+                code_fields_for_node = self.code_field_source_nodes.get(node_id, {})
                 source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
                 node_fields_for_node = self.node_fields.get(node_id, {})
 
@@ -288,7 +299,8 @@ class SceneWriter:
                     type = config_types[key]
 
                     app_config_pairs.append(
-                        self.sanitize_nim_field(
+                        [f"  {x}" for x in self.sanitize_nim_field(
+                            node_id,
                             key,
                             type,
                             value,
@@ -296,33 +308,42 @@ class SceneWriter:
                             node_fields_for_node,
                             source_field_inputs_for_node,
                             seq_fields_for_node,
+                            code_fields_for_node,
                             False,
-                        )
+                        )]
                     )
 
                 if len(sources) > 0:
-                    self.init_apps += [
-                        f"scene.{app_id} = nodeApp{self.node_id_to_integer(node_id)}.init({node_integer}.NodeId, scene.FrameScene, nodeApp{self.node_id_to_integer(node_id)}.AppConfig(",
-                        *[f"  {('  ' + newline).join(x)}," for x in app_config_pairs],
-                        '))',
-                    ]
+                    appName = f"nodeApp{self.node_id_to_integer(node_id)}"
                 else:
-                    self.init_apps += [
-                        f"scene.{app_id} = {name}App.init({node_integer}.NodeId, scene.FrameScene, {name}App.AppConfig(",
-                        *[f"  {('  ' + newline).join(x)}," for x in app_config_pairs],
-                        '))',
-                    ]
+                    appName = f"{name}App"
+                self.init_apps += [
+                    f"scene.{app_id} = {appName}.init({node_integer}.NodeId, scene.FrameScene, {appName}.AppConfig(",
+                ]
+                for x in app_config_pairs:
+                    if len(x) > 0:
+                        for line in x:
+                            self.init_apps += [line]
+                        self.init_apps[-1] = self.init_apps[-1] + ","
+                self.init_apps += ['))']
 
                 self.run_node_lines += [
                     f"of {node_integer}.NodeId: # {name}",
                 ]
+
                 for key, code in field_inputs_for_node.items():
-                    self.run_node_lines += [f"  self.{app_id}.appConfig.{key} = {code}"]
+                    if key in code_fields_for_node:
+                        code_lines = self.get_code_field_value(code_fields_for_node[key])
+                        self.run_node_lines += [f"  self.{app_id}.appConfig.{key} = {code_lines[0]}"]
+                        for line in code_lines[1:]:
+                            self.run_node_lines += [f"  {line}"]
+                    else:
+                        self.run_node_lines += [f"  self.{app_id}.appConfig.{key} = {code}"]
+
                 for key, (source_id, source_key) in source_field_inputs_for_node.items():
                     self.run_node_lines += [
                         f"  self.{app_id}.appConfig.{key} = self.node{self.node_id_to_integer(source_id)}.appConfig.{source_key}"
                     ]
-
                 next_node_id = self.next_nodes.get(node_id, None)
                 self.run_node_lines += [
                     f"  self.{app_id}.run(context)",
@@ -518,54 +539,9 @@ var exportedScene* = ExportedScene(
         return scene_source
 
 
-    def get_sequence_values(
-        self,
-        key,
-        sequences,
-        index,
-        type,
-        value,
-        field_inputs_for_node,
-        node_fields_for_node,
-        source_field_inputs_for_node,
-        seq_fields_for_node,
-    ):
-        seq_start = sequences[index][1]
-        seq_end = sequences[index][2]
-        response = []
-        for i in range(seq_start, seq_end + 1):
-            if index == len(sequences) - 1:
-                response.append(
-                    self.sanitize_nim_value(
-                        f"{key}[{i}]",
-                        type,
-                        value,
-                        field_inputs_for_node,
-                        node_fields_for_node,
-                        source_field_inputs_for_node,
-                        seq_fields_for_node,
-                    )
-                )
-            else:
-                response.append(
-                    self.get_sequence_values(
-                        f"{key}[{i}]",
-                        sequences,
-                        index + 1,
-                        type,
-                        value,
-                        field_inputs_for_node,
-                        node_fields_for_node,
-                        source_field_inputs_for_node,
-                        seq_fields_for_node,
-                    )
-                )
-        return "@[" + (", ".join(response)) + "]"
-
-
-
     def sanitize_nim_value(
         self,
+        node_id,
         key,
         type,
         value,
@@ -573,10 +549,12 @@ var exportedScene* = ExportedScene(
         node_fields_for_node,
         source_field_inputs_for_node,
         seq_fields_for_node,
-    ) -> str:
+        code_fields_for_node,
+    ) -> list[str]:
         if key in seq_fields_for_node:
             sequences = seq_fields_for_node[key]
             return self.get_sequence_values(
+                node_id,
                 key,
                 sequences,
                 0,
@@ -586,41 +564,101 @@ var exportedScene* = ExportedScene(
                 node_fields_for_node,
                 source_field_inputs_for_node,
                 seq_fields_for_node,
+                code_fields_for_node,
             )
 
         if key in field_inputs_for_node:
-            # code_field_source_nodes
+            if key in code_fields_for_node:
+                return self.get_code_field_value(code_fields_for_node[key])
 
-            return f"{field_inputs_for_node[key]}"
+            return [f"{field_inputs_for_node[key]}"]
         elif key in source_field_inputs_for_node:
             (source_id, source_key) = source_field_inputs_for_node[key]
-            return f"self.node{self.node_id_to_integer(source_id)}.appConfig.{source_key}"
+            return [f"self.node{self.node_id_to_integer(source_id)}.appConfig.{source_key}"]
         elif type == "node" and key in node_fields_for_node:
             outgoing_node_id = node_fields_for_node[key]
-            return f"{self.node_id_to_integer(outgoing_node_id)}.NodeId"
+            return [f"{self.node_id_to_integer(outgoing_node_id)}.NodeId"]
         elif type == "node" and key not in node_fields_for_node:
-            return "0.NodeId"
+            return ["0.NodeId"]
         elif type == "integer":
-            return f"{0 if value is None else int(value or '0')}"
+            return [f"{0 if value is None else int(value or '0')}"]
         elif type == "float":
-            return f"{0.0 if value is None else float(value or '0')}"
+            return [f"{0.0 if value is None else float(value or '0')}"]
         elif type == "boolean":
-            return f"{'true' if value == 'true' else 'false'}"
+            return [f"{'true' if value == 'true' else 'false'}"]
         elif type == "color":
             try:
-                return wrap_color(
+                return [wrap_color(
                     "#000000" if value is None else sanitize_nim_string(str(value))
-                )
+                )]
             except ValueError:
                 raise ValueError(f"Invalid color value {value} for key {key}")
         elif type == "scene":
-            return f"\"{'' if value is None else sanitize_nim_string(str(value))}\".SceneId"
+            return [f"\"{'' if value is None else sanitize_nim_string(str(value))}\".SceneId"]
         else:
-            return f"\"{'' if value is None else sanitize_nim_string(str(value))}\""
+            return [f"\"{'' if value is None else sanitize_nim_string(str(value))}\""]
 
+    def get_sequence_values(
+        self,
+        node_id,
+        key,
+        sequences,
+        index,
+        type,
+        value,
+        field_inputs_for_node,
+        node_fields_for_node,
+        source_field_inputs_for_node,
+        seq_fields_for_node,
+        code_fields_for_node,
+    ) -> list[str]:
+        seq_start = sequences[index][1]
+        seq_end = sequences[index][2]
+        response = []
+        for i in range(seq_start, seq_end + 1):
+            if index == len(sequences) - 1:
+                response.append(
+                    self.sanitize_nim_value(
+                        node_id,
+                        f"{key}[{i}]",
+                        type,
+                        value,
+                        field_inputs_for_node,
+                        node_fields_for_node,
+                        source_field_inputs_for_node,
+                        seq_fields_for_node,
+                        code_fields_for_node,
+                    )
+                )
+            else:
+                response.append(
+                    self.get_sequence_values(
+                        node_id,
+                        f"{key}[{i}]",
+                        sequences,
+                        index + 1,
+                        type,
+                        value,
+                        field_inputs_for_node,
+                        node_fields_for_node,
+                        source_field_inputs_for_node,
+                        seq_fields_for_node,
+                        code_fields_for_node,
+                    )
+                )
+
+        response = ["@["]
+        for x in response:
+            for line in x:
+                response += ['  ' + line]
+            if len(x) > 0:
+                response[-1] = response[-1] + ","
+        response += ["]"]
+        return response
 
     def sanitize_nim_field(
         self,
+        node_id,
         key,
         type,
         value,
@@ -628,14 +666,16 @@ var exportedScene* = ExportedScene(
         node_fields_for_node,
         source_field_inputs_for_node,
         seq_fields_for_node,
+        code_fields_for_node,
         key_with_quotes: bool,
-    ) -> str:
+    ) -> list[str]:
         key_str = (
             f'"{sanitize_nim_string(str(key))}"'
             if key_with_quotes
             else sanitize_nim_string(str(key))
         )
-        value_str = self.sanitize_nim_value(
+        value_list = self.sanitize_nim_value(
+            node_id,
             key,
             type,
             value,
@@ -643,8 +683,42 @@ var exportedScene* = ExportedScene(
             node_fields_for_node,
             source_field_inputs_for_node,
             seq_fields_for_node,
+            code_fields_for_node,
         )
-        return f"{key_str}: {value_str}"
+
+        if len(value_list) == 0:
+            return []
+        if len(value_list) > 1:
+            return [
+                f"{key_str}: {value_list[0]}",
+                *[f"{x}" for x in value_list[1:]],
+            ]
+        return [
+            f"{key_str}: {value_list[0]}"
+        ]
+
+    def get_code_field_value(self, node_id, depth = 0) -> list[str]:
+        if depth > 100:
+            raise ValueError("Code field recursion limit reached")
+        code_field_node = self.nodes_by_id.get(node_id)
+        if code_field_node:
+            code = code_field_node.get("data", {}).get("code", "")
+            code_fields = code_field_node.get("data", {}).get("codeFields", [])
+            if code_fields and len(code_fields) > 0:
+                source_lines = ["block:"]
+                code_field_sources = self.code_field_source_nodes.get(node_id, {}) or {}
+                for field in code_fields:
+                    if field in code_field_sources:
+                        code_field_source = self.get_code_field_value(code_field_sources[field], depth + 1)
+                        if len(code_field_source) == 1:
+                            source_lines += [f"  let {field} = {code_field_source[0]}"]
+                        elif len(code_field_source) > 1:
+                            source_lines += [f"  let {field} = {code_field_source[0]}"]
+                            source_lines += [f"  {x}" for x in code_field_source[1:]]
+                source_lines += ["  " + code]
+                return source_lines
+            else:
+                return [code]
 
 
 def write_scenes_nim(frame: Frame) -> str:

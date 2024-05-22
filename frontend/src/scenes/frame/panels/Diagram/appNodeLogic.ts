@@ -226,24 +226,30 @@ export const appNodeLogic = kea<appNodeLogicType>([
     },
     editCodeField: ({ field }) => {
       const newField = prompt('Rename field:', field)
-      const codeFieldEdge = values.nodeEdges.find(
-        (edge) => edge.sourceHandle === 'fieldOutput' && edge.targetHandle?.startsWith('codeField/')
+      const { nodeId, node, nodeEdges, edges } = values
+      const codeFieldEdges = nodeEdges.filter(
+        (edge) =>
+          edge.target === nodeId && edge.sourceHandle === 'fieldOutput' && edge.targetHandle === `codeField/${field}`
       )
-      const codeFields = (values.node?.data as CodeNodeData)?.codeFields ?? []
+      const codeFields = (node?.data as CodeNodeData)?.codeFields ?? []
       if (newField) {
         actions.setEdges(
-          values.edges.map((e) =>
-            e.target === values.nodeId && e.targetHandle === `codeField/${field}`
-              ? { ...e, targetHandle: `codeField/${newField}` }
-              : e
+          edges.map((edge) =>
+            edge.target === nodeId && edge.sourceHandle === 'fieldOutput' && edge.targetHandle === `codeField/${field}`
+              ? { ...edge, targetHandle: `codeField/${newField}` }
+              : edge
           )
         )
-        actions.updateNodeData(values.nodeId, { codeFields: codeFields.map((f) => (f === field ? newField : f)) })
+        actions.updateNodeData(nodeId, {
+          codeFields: codeFields.includes(newField)
+            ? codeFields.filter((f) => f !== field)
+            : codeFields.map((f) => (f === field ? newField : f)),
+        })
       } else {
-        if (codeFieldEdge?.source) {
-          actions.deleteApp(codeFieldEdge.source)
+        for (const edge of codeFieldEdges) {
+          actions.deleteApp(edge.source)
         }
-        actions.updateNodeData(values.nodeId, { codeFields: codeFields.filter((f) => f !== field) })
+        actions.updateNodeData(nodeId, { codeFields: codeFields.filter((f) => f !== field) })
       }
     },
   })),
