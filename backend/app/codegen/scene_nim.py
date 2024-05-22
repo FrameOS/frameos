@@ -660,14 +660,16 @@ var exportedScene* = ExportedScene(
                     )
                 )
 
-        response = ["@["]
+        result = ["@["]
         for x in response:
+            if isinstance(x, str):
+                raise ValueError("Invalid sequence value")
             for line in x:
-                response += ['  ' + line]
+                result += ['  ' + line]
             if len(x) > 0:
-                response[-1] = response[-1] + ","
-        response += ["]"]
-        return response
+                result[-1] = result[-1] + ","
+        result += ["]"]
+        return result
 
     def sanitize_nim_field(
         self,
