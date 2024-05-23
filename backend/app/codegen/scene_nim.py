@@ -485,6 +485,8 @@ import pixie, json, times, strformat, strutils, sequtils
 
 import frameos/types
 import frameos/channels
+import frameos/utils/image
+import frameos/utils/url
 {newline.join(self.imports)}
 
 const DEBUG = {'true' if self.frame.debug else 'false'}
