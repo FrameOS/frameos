@@ -23,7 +23,6 @@ type Scene* = ref object of FrameScene
 {.push hint[XDeclaredButNotUsed]: off.}
 
 
-
 proc runNode*(self: Scene, nodeId: NodeId,
     context: var ExecutionContext) =
   let scene = self

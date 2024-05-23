@@ -503,7 +503,6 @@ type Scene* = ref object of FrameScene
   {(newline + "  ").join(self.scene_object_fields)}
 
 {{.push hint[XDeclaredButNotUsed]: off.}}
-
 {newline.join(self.cache_fields)}
 
 proc runNode*(self: Scene, nodeId: NodeId,
