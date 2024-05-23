@@ -49,6 +49,9 @@ class SceneWriter:
     source_field_inputs: dict[str, dict[str, tuple[str, str]]]
     node_fields: dict[str, dict[str, str]]
     newline = "\n"
+    cache_counter: int = 0
+    cache_indexes: dict[str, int]
+    cache_fields: list[str]
 
     def __init__(self, frame: Frame, scene: dict):
         self.frame = frame
@@ -71,6 +74,9 @@ class SceneWriter:
         self.code_field_source_nodes = {}
         self.source_field_inputs = {}
         self.node_fields = {}
+        self.cache_counter = 0
+        self.cache_indexes = {}
+        self.cache_fields = []
 
 
     def node_id_to_integer(self, node_id: str) -> int:
@@ -481,7 +487,7 @@ class SceneWriter:
         scene_background_color = wrap_color(sanitize_nim_string(str(background_color)))
 
         scene_source = f"""
-import pixie, json, times, strformat, strutils, sequtils
+import pixie, json, times, strformat, strutils, sequtils, options
 
 import frameos/types
 import frameos/channels
@@ -497,6 +503,8 @@ type Scene* = ref object of FrameScene
   {(newline + "  ").join(self.scene_object_fields)}
 
 {{.push hint[XDeclaredButNotUsed]: off.}}
+
+{newline.join(self.cache_fields)}
 
 proc runNode*(self: Scene, nodeId: NodeId,
     context: var ExecutionContext) =
@@ -535,6 +543,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     for key in persistedState.keys:
       state[key] = persistedState[key]
   let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: {scene_refresh_interval}, backgroundColor: {scene_background_color})
+  let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
@@ -733,9 +742,83 @@ var exportedScene* = ExportedScene(
                             source_lines += [f"  let {field} = {code_field_source[0]}"]
                             source_lines += [f"  {x}" for x in code_field_source[1:]]
                 source_lines += ["  " + code]
-                return source_lines
+                result = source_lines
             else:
-                return [code]
+                result = [code]
+
+            cache_type = code_field_node.get("data", {}).get('cacheType', 'none')
+            if cache_type != 'none':
+                result = self.wrap_with_cache(node_id, result, code_field_node.get("data", {}))
+
+            return result
+
+    def wrap_with_cache(self, node_id: str, value_list: list[str], data: dict):
+        cache_type = data.get('cacheType', 'none')
+
+        if cache_type == 'none':
+            return value_list
+
+        if node_id in self.cache_indexes:
+            cache_index = self.cache_indexes[node_id]
+        else:
+            cache_index = self.cache_counter
+            self.cache_indexes[node_id] = cache_index
+            self.cache_counter += 1
+        cache_field = f"cache{cache_index}"
+
+        cache_data_type = data.get('cacheDataType', 'string')
+        if cache_data_type in ['string', 'float']:
+            pass
+        elif cache_data_type == 'integer':
+            cache_data_type = 'int'
+        else:
+            cache_data_type = 'JsonNode'
+
+        cache_var = f"var {cache_field}: Option[{cache_data_type}] = none({cache_data_type})"
+        if cache_var not in self.cache_fields:
+            self.cache_fields += [cache_var]
+
+        cache_conditions = f"{cache_field}.isNone()"
+        extra_pre_lines = []
+        extra_post_lines = []
+
+        if cache_type == 'duration' or cache_type == 'keyDuration':
+            cache_duration = data.get('cacheDuration', 60)
+            time_var = f"var {cache_field}Time: float = 0"
+            if time_var not in self.cache_fields:
+                self.cache_fields += [time_var]
+            cache_conditions += f" or epochTime() - {cache_field}Time > {cache_duration}"
+            extra_post_lines += [f"    {cache_field}Time = epochTime()"]
+
+        if cache_type == 'key' or cache_type == 'keyDuration':
+            cache_key = data.get('cacheKey', '"string"')
+            cache_key_data_type = data.get('cacheKeyDataType', 'string')
+            if cache_key_data_type in ['string', 'float']:
+                pass
+            elif cache_key_data_type == 'integer':
+                cache_key_data_type = 'int'
+            else:
+                cache_key_data_type = 'JsonNode'
+
+            key_var = f"var {cache_field}Key: {cache_key_data_type}"
+            if key_var not in self.cache_fields:
+                self.cache_fields += [key_var]
+            extra_pre_lines += [f"  let {cache_field}NewKey: {cache_key_data_type} = {cache_key}"]
+            cache_conditions += f" or {cache_field}NewKey != {cache_field}Key"
+            extra_post_lines += [f"    {cache_field}Key = {cache_field}NewKey"]
+
+        value_list[-1] = value_list[-1] + ')'
+        value_list = [
+            "block:",
+            *extra_pre_lines,
+            f"  if {cache_conditions}:",
+            f"    {cache_field} = some({value_list[0]}",
+            *[f"    {x}" for x in value_list[1:]],
+            *extra_post_lines,
+            f"  {cache_field}.get()",
+        ]
+
+        return value_list
 
 
 def write_scenes_nim(frame: Frame) -> str:

@@ -159,8 +159,9 @@ export interface CodeNodeData {
   codeFields?: string[]
   cacheType?: 'none' | 'forever' | 'duration' | 'key' | 'keyDuration'
   cacheDataType?: 'string' | 'integer' | 'float' | 'json'
-  cacheDuration?: number
+  cacheDuration?: string
   cacheKey?: string
+  cacheKeyDataType?: 'string' | 'integer' | 'float' | 'json'
 }
 
 export interface EventNodeData {

@@ -17,6 +17,10 @@ import { Select } from '../../../../components/Select'
 import { Label } from '../../../../components/Label'
 import { TextInput } from '../../../../components/TextInput'
 
+function isNumericString(value?: string | null): boolean {
+  return !!String(value || '').match(/^[0-9]+$/)
+}
+
 function CodeNodeCache({ logic }: { logic: BuiltLogic<appNodeLogicType> }): JSX.Element {
   const { updateNodeData } = useActions(logic)
   const { node } = useValues(logic)
@@ -47,26 +51,6 @@ function CodeNodeCache({ logic }: { logic: BuiltLogic<appNodeLogicType> }): JSX.
           }
         />
       </div>
-      {(data.cacheType === 'duration' || data.cacheType === 'keyDuration') && (
-        <div className="space-y-1">
-          <Label>Cache duration in seconds</Label>
-          <NumberTextInput
-            value={data.cacheDuration}
-            onChange={(value) => updateNodeData(node.id, { cacheDuration: value })}
-            placeholder="60"
-          />
-        </div>
-      )}
-      {(data.cacheType === 'key' || data.cacheType === 'keyDuration') && (
-        <div className="space-y-1">
-          <Label>Cache key (code)</Label>
-          <TextInput
-            value={data.cacheKey}
-            onChange={(value) => updateNodeData(node.id, { cacheKey: value })}
-            placeholder='"string"'
-          />
-        </div>
-      )}
       {(data.cacheType ?? 'none') !== 'none' && (
         <div className="space-y-1">
           <Label>Data type of cached value</Label>
@@ -81,6 +65,41 @@ function CodeNodeCache({ logic }: { logic: BuiltLogic<appNodeLogicType> }): JSX.
             onChange={(value) => updateNodeData(node.id, { cacheDataType: value })}
           />
         </div>
+      )}
+      {(data.cacheType === 'duration' || data.cacheType === 'keyDuration') && (
+        <div className="space-y-1">
+          <Label>Cache duration in seconds (code, return a float)</Label>
+          <TextInput
+            value={data.cacheDuration}
+            onChange={(value) => updateNodeData(node.id, { cacheDuration: value })}
+            placeholder="60"
+          />
+        </div>
+      )}
+      {(data.cacheType === 'key' || data.cacheType === 'keyDuration') && (
+        <>
+          <div className="space-y-1">
+            <Label>Cache key (code, return a string)</Label>
+            <TextInput
+              value={data.cacheKey}
+              onChange={(value) => updateNodeData(node.id, { cacheKey: value })}
+              placeholder='"string"'
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>Data type of cache key</Label>
+            <Select
+              value={data.cacheKeyDataType ?? 'string'}
+              options={[
+                { value: 'string', label: 'string' },
+                { value: 'integer', label: 'integer' },
+                { value: 'float', label: 'float' },
+                { value: 'json', label: 'json' },
+              ]}
+              onChange={(value) => updateNodeData(node.id, { cacheKeyDataType: value })}
+            />
+          </div>
+        </>
       )}
     </div>
   )
@@ -194,11 +213,11 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
               </Tag>
             ) : data.cacheType === 'keyDuration' ? (
               <Tag color="red" className="cursor-pointer">
-                Cache: {data.cacheDuration}s + key
+                Cache: {String(isNumericString(data.cacheDuration) ? data.cacheDuration + 's' : 'duration')} + key
               </Tag>
             ) : (
               <Tag color="orange" className="cursor-pointer">
-                Cache: {data.cacheDuration}s
+                Cache: {String(isNumericString(data.cacheDuration) ? data.cacheDuration + 's' : 'duration')}
               </Tag>
             )}
           </Tooltip>
