@@ -7,20 +7,16 @@ import { TextArea } from '../../../../components/TextArea'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
+import { Tag } from '../../../../components/Tag'
 
 export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
   const { updateNodeData, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { isSelected, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
-  const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
+  const { isSelected, codeOutputEdge } = useValues(appNodeLogic(appNodeLogicProps))
+  const { select, editCodeField, editCodeFieldOutput } = useActions(appNodeLogic(appNodeLogicProps))
 
-  const targetNode = nodeEdges.find(
-    (edge) =>
-      edge.sourceHandle === 'fieldOutput' &&
-      (edge.targetHandle?.startsWith('fieldInput/') || edge.targetHandle?.startsWith('codeField/'))
-  )
-  const targetFunction = targetNode?.targetHandle?.replace(/^[^\/]+\//, '')
+  const targetFunction = codeOutputEdge?.targetHandle?.replace(/^[^\/]+\//, '')
 
   return (
     <div
@@ -59,7 +55,7 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
             {codeField === '+' ? (
               <em>+</em>
             ) : (
-              <div className="cursor-pointer" onClick={() => editCodeField(codeField)}>
+              <div className="cursor-pointer hover:underline" onClick={() => editCodeField(codeField)}>
                 {codeField}
               </div>
             )}
@@ -98,25 +94,33 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
             }}
             isConnectable={isConnectable}
           />
-          <div>{targetFunction ?? <em>disconnected</em>}</div>
+          <div
+            className={targetFunction ? 'cursor-pointer hover:underline' : ''}
+            onClick={targetFunction ? () => editCodeFieldOutput(targetFunction) : undefined}
+          >
+            {targetFunction ?? <em>disconnected</em>}
+          </div>
         </div>
-        <DropdownMenu
-          className="w-fit"
-          buttonColor="none"
-          horizontal
-          items={[
-            {
-              label: 'Copy as JSON',
-              onClick: () => copyAppJSON(id),
-              icon: <ClipboardDocumentIcon className="w-5 h-5" />,
-            },
-            {
-              label: 'Delete Node',
-              onClick: () => deleteApp(id),
-              icon: <TrashIcon className="w-5 h-5" />,
-            },
-          ]}
-        />
+        <div className="flex gap-1 items-center">
+          <Tag color="red">Cache: 60s</Tag>
+          <DropdownMenu
+            className="w-fit"
+            buttonColor="none"
+            horizontal
+            items={[
+              {
+                label: 'Copy as JSON',
+                onClick: () => copyAppJSON(id),
+                icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Delete Node',
+                onClick: () => deleteApp(id),
+                icon: <TrashIcon className="w-5 h-5" />,
+              },
+            ]}
+          />
+        </div>
       </div>
     </div>
   )

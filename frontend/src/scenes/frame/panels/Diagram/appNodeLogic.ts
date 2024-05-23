@@ -5,6 +5,7 @@ import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { App, CodeNodeData, ConfigField, DiagramNode, FrameEvent, MarkdownField } from '../../../../types'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
+import type { Node } from '@reactflow/core/dist/esm/types/nodes'
 
 import _events from '../../../../../schema/events.json'
 const events: FrameEvent[] = _events as any
@@ -28,6 +29,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
   actions({
     select: true,
     editCodeField: (field: string) => ({ field }),
+    editCodeFieldOutput: (field: string) => ({ field }),
   }),
   selectors({
     nodeId: [() => [(_, props) => props.nodeId], (nodeId): string => nodeId],
@@ -218,6 +220,15 @@ export const appNodeLogic = kea<appNodeLogicType>([
         return 'sources' in (node?.data ?? {})
       },
     ],
+    codeOutputEdge: [
+      (s) => [s.nodeEdges],
+      (nodeEdges): Edge | null =>
+        nodeEdges.find(
+          (edge) =>
+            edge.sourceHandle === 'fieldOutput' &&
+            (edge.targetHandle?.startsWith('fieldInput/') || edge.targetHandle?.startsWith('codeField/'))
+        ) ?? null,
+    ],
   }),
   listeners(({ actions, values, props }) => ({
     select: () => {
@@ -257,6 +268,57 @@ export const appNodeLogic = kea<appNodeLogicType>([
         window.requestAnimationFrame(() => {
           props.updateNodeInternals?.(nodeId)
         })
+      }
+    },
+    editCodeFieldOutput: ({ field }) => {
+      const newField = prompt('Rename field:', field)
+      const { nodeId, node, nodes, nodeEdges, edges } = values
+      const codeOutputEdges = nodeEdges.filter(
+        (edge) =>
+          edge.source === nodeId && edge.sourceHandle === `fieldOutput` && edge.targetHandle === `codeField/${field}`
+      )
+
+      const updatedNodes: Record<string, DiagramNode | false> = {}
+      const updatedEdges: Record<string, Edge | false> = {}
+      for (const edge of codeOutputEdges) {
+        const otherNode = nodes.find((n) => n.id === edge.target)
+        if (!otherNode) {
+          continue
+        }
+        const codeFields = (otherNode?.data as CodeNodeData)?.codeFields ?? []
+
+        if (newField) {
+          updatedEdges[edge.id] = { ...edge, targetHandle: `codeField/${newField}` }
+          updatedNodes[edge.target] = {
+            ...otherNode,
+            data: {
+              ...otherNode.data,
+              codeFields: codeFields.map((f) => (f === field ? newField : f)),
+            },
+          }
+        } else {
+          updatedEdges[edge.id] = false
+          updatedNodes[edge.source] = false
+          updatedNodes[edge.target] = {
+            ...otherNode,
+            data: {
+              ...otherNode.data,
+              codeFields: codeFields.filter((f) => f !== field),
+            },
+          }
+        }
+      }
+
+      const newEdges = edges.map((edge) => updatedEdges[edge.id] ?? edge).filter((e): e is Edge => e !== false)
+      const newNodes = nodes.map((node) => updatedNodes[node.id] ?? node).filter((n): n is DiagramNode => n !== false)
+      actions.setEdges(newEdges)
+      actions.setNodes(newNodes)
+      if (newNodes.length > 0) {
+        window.setTimeout(() => {
+          window.requestAnimationFrame(() => {
+            props.updateNodeInternals?.(newNodes.map((n) => n.id))
+          })
+        }, 100)
       }
     },
   })),
