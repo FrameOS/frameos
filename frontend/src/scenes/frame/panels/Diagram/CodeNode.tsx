@@ -79,7 +79,7 @@ function CodeNodeCache({ logic }: { logic: BuiltLogic<appNodeLogicType> }): JSX.
       {(data.cacheType === 'key' || data.cacheType === 'keyDuration') && (
         <>
           <div className="space-y-1">
-            <Label>Cache key (code, return a string)</Label>
+            <Label>Cache key (code, return a {data.cacheKeyDataType ?? 'string'})</Label>
             <TextInput
               value={data.cacheKey}
               onChange={(value) => updateNodeData(node.id, { cacheKey: value })}
