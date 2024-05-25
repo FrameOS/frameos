@@ -727,7 +727,8 @@ var exportedScene* = ExportedScene(
             raise ValueError("Code field recursion limit reached")
         code_field_node = self.nodes_by_id.get(node_id)
         if code_field_node:
-            code = code_field_node.get("data", {}).get("code", "")
+            code = [code_field_node.get("data", {}).get("code", "")]
+            cache_type = code_field_node.get("data", {}).get('cacheType', 'none')
             code_fields = code_field_node.get("data", {}).get("codeFields", [])
             if code_fields and len(code_fields) > 0:
                 source_lines = ["block:"]
@@ -735,18 +736,25 @@ var exportedScene* = ExportedScene(
                 for field in code_fields:
                     if field in code_field_sources:
                         code_field_source = self.get_code_field_value(code_field_sources[field], depth + 1)
+
                         if len(code_field_source) == 1:
                             source_lines += [f"  let {field} = {code_field_source[0]}"]
                         elif len(code_field_source) > 1:
                             source_lines += [f"  let {field} = {code_field_source[0]}"]
                             source_lines += [f"  {x}" for x in code_field_source[1:]]
-                source_lines += ["  " + code]
+
+                if cache_type == 'duration' or cache_type == 'keyDuration' or cache_type == 'key':
+                    code = self.wrap_with_cache(node_id, code, code_field_node.get("data", {}))
+
+                for line in code:
+                    source_lines += ["  " + line]
                 result = source_lines
             else:
-                result = [code]
+                if cache_type == 'duration' or cache_type == 'keyDuration' or cache_type == 'key':
+                    code = self.wrap_with_cache(node_id, code, code_field_node.get("data", {}))
+                result = code
 
-            cache_type = code_field_node.get("data", {}).get('cacheType', 'none')
-            if cache_type != 'none':
+            if cache_type == 'forever':
                 result = self.wrap_with_cache(node_id, result, code_field_node.get("data", {}))
 
             return result
