@@ -1,4 +1,4 @@
-import { useActions, useValues } from 'kea'
+import { BuiltLogic, useActions, useValues } from 'kea'
 import { NodeProps, Handle, Position, NodeResizer } from 'reactflow'
 import { CodeNodeData } from '../../../../types'
 import clsx from 'clsx'
@@ -7,20 +7,112 @@ import { TextArea } from '../../../../components/TextArea'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
+import { Tag } from '../../../../components/Tag'
+import { Tooltip } from '../../../../components/Tooltip'
+import { buttonColor, buttonSize } from '../../../../components/Button'
+import { appNodeLogicType } from './appNodeLogicType'
+import { Field } from '../../../../components/Field'
+import { NumberTextInput } from '../../../../components/NumberTextInput'
+import { Select } from '../../../../components/Select'
+import { Label } from '../../../../components/Label'
+import { TextInput } from '../../../../components/TextInput'
+
+function isNumericString(value?: string | null): boolean {
+  return !!String(value || '').match(/^[0-9]+$/)
+}
+
+function CodeNodeCache({ logic }: { logic: BuiltLogic<appNodeLogicType> }): JSX.Element {
+  const { updateNodeData } = useActions(logic)
+  const { node } = useValues(logic)
+  if (!node) {
+    return <div />
+  }
+  const data = (node.data ?? {}) as CodeNodeData
+
+  return (
+    <div className="space-y-2">
+      <div className="space-y-1">
+        <Label>How to long to cache?</Label>
+        <Select
+          value={data.cacheType ?? 'none'}
+          options={[
+            { value: 'none', label: 'No cache (compute every time)' },
+            { value: 'forever', label: 'Cache forever (till a restart)' },
+            { value: 'duration', label: 'Cache for seconds' },
+            { value: 'key', label: 'Cache until a key changes' },
+            { value: 'keyDuration', label: 'Cache seconds + key' },
+          ]}
+          onChange={(value) =>
+            updateNodeData(node.id, {
+              cacheType: value,
+              ...(value === 'duration' || value === 'keyDuration' ? { cacheDuration: 60 } : {}),
+              ...(value === 'key' || value === 'keyDuration' ? { cacheKey: '"string"' } : {}),
+            })
+          }
+        />
+      </div>
+      {(data.cacheType ?? 'none') !== 'none' && (
+        <div className="space-y-1">
+          <Label>Data type of cached value</Label>
+          <Select
+            value={data.cacheDataType ?? 'string'}
+            options={[
+              { value: 'string', label: 'string' },
+              { value: 'integer', label: 'integer' },
+              { value: 'float', label: 'float' },
+              { value: 'json', label: 'json' },
+            ]}
+            onChange={(value) => updateNodeData(node.id, { cacheDataType: value })}
+          />
+        </div>
+      )}
+      {(data.cacheType === 'duration' || data.cacheType === 'keyDuration') && (
+        <div className="space-y-1">
+          <Label>Cache duration in seconds (code, return a float)</Label>
+          <TextInput
+            value={data.cacheDuration}
+            onChange={(value) => updateNodeData(node.id, { cacheDuration: value })}
+            placeholder="60"
+          />
+        </div>
+      )}
+      {(data.cacheType === 'key' || data.cacheType === 'keyDuration') && (
+        <>
+          <div className="space-y-1">
+            <Label>Cache key (code, return a {data.cacheKeyDataType ?? 'string'})</Label>
+            <TextInput
+              value={data.cacheKey}
+              onChange={(value) => updateNodeData(node.id, { cacheKey: value })}
+              placeholder='"string"'
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>Data type of cache key</Label>
+            <Select
+              value={data.cacheKeyDataType ?? 'string'}
+              options={[
+                { value: 'string', label: 'string' },
+                { value: 'integer', label: 'integer' },
+                { value: 'float', label: 'float' },
+                { value: 'json', label: 'json' },
+              ]}
+              onChange={(value) => updateNodeData(node.id, { cacheKeyDataType: value })}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
   const { updateNodeData, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { isSelected, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
-  const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
+  const { isSelected, codeOutputEdge } = useValues(appNodeLogic(appNodeLogicProps))
+  const { select, editCodeField, editCodeFieldOutput } = useActions(appNodeLogic(appNodeLogicProps))
 
-  const targetNode = nodeEdges.find(
-    (edge) =>
-      edge.sourceHandle === 'fieldOutput' &&
-      (edge.targetHandle?.startsWith('fieldInput/') || edge.targetHandle?.startsWith('codeField/'))
-  )
-  const targetFunction = targetNode?.targetHandle?.replace(/^[^\/]+\//, '')
+  const targetFunction = codeOutputEdge?.targetHandle?.replace(/^[^\/]+\//, '')
 
   return (
     <div
@@ -59,7 +151,7 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
             {codeField === '+' ? (
               <em>+</em>
             ) : (
-              <div className="cursor-pointer" onClick={() => editCodeField(codeField)}>
+              <div className="cursor-pointer hover:underline" onClick={() => editCodeField(codeField)}>
                 {codeField}
               </div>
             )}
@@ -98,25 +190,55 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
             }}
             isConnectable={isConnectable}
           />
-          <div>{targetFunction ?? <em>disconnected</em>}</div>
+          <div
+            className={targetFunction ? 'cursor-pointer hover:underline' : ''}
+            onClick={targetFunction ? () => editCodeFieldOutput(targetFunction) : undefined}
+          >
+            {targetFunction ?? <em>disconnected</em>}
+          </div>
         </div>
-        <DropdownMenu
-          className="w-fit"
-          buttonColor="none"
-          horizontal
-          items={[
-            {
-              label: 'Copy as JSON',
-              onClick: () => copyAppJSON(id),
-              icon: <ClipboardDocumentIcon className="w-5 h-5" />,
-            },
-            {
-              label: 'Delete Node',
-              onClick: () => deleteApp(id),
-              icon: <TrashIcon className="w-5 h-5" />,
-            },
-          ]}
-        />
+        <div className="flex gap-1 items-center">
+          <Tooltip tooltipColor="gray" title={<CodeNodeCache logic={appNodeLogic(appNodeLogicProps)} />}>
+            {(data.cacheType ?? 'none') === 'none' ? (
+              <Tag color="teal" className="cursor-pointer">
+                No cache
+              </Tag>
+            ) : data.cacheType === 'forever' ? (
+              <Tag color="red" className="cursor-pointer">
+                Cache: forever
+              </Tag>
+            ) : data.cacheType === 'key' ? (
+              <Tag color="red" className="cursor-pointer">
+                Cache: key
+              </Tag>
+            ) : data.cacheType === 'keyDuration' ? (
+              <Tag color="red" className="cursor-pointer">
+                Cache: {String(isNumericString(data.cacheDuration) ? data.cacheDuration + 's' : 'duration')} + key
+              </Tag>
+            ) : (
+              <Tag color="orange" className="cursor-pointer">
+                Cache: {String(isNumericString(data.cacheDuration) ? data.cacheDuration + 's' : 'duration')}
+              </Tag>
+            )}
+          </Tooltip>
+          <DropdownMenu
+            className="w-fit"
+            buttonColor="none"
+            horizontal
+            items={[
+              {
+                label: 'Copy as JSON',
+                onClick: () => copyAppJSON(id),
+                icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Delete Node',
+                onClick: () => deleteApp(id),
+                icon: <TrashIcon className="w-5 h-5" />,
+              },
+            ]}
+          />
+        </div>
       </div>
     </div>
   )

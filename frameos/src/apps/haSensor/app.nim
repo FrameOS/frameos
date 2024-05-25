@@ -1,4 +1,4 @@
-import json, strformat, options, times
+import json, strformat, options, times, strutils
 import lib/httpclient
 import frameos/types
 
@@ -51,7 +51,11 @@ proc run*(self: App, context: ExecutionContext) =
         ("Content-Type", "application/json"),
         ("Content-Encoding", "gzip")
     ])
-    let url = &"{haUrl}/api/states/{self.appConfig.entityId}"
+    var slashlessUrl = haUrl
+    slashlessUrl.removeSuffix("/")
+    let url = &"{slashlessUrl}/api/states/{self.appConfig.entityId}"
+    if self.appConfig.debug:
+      self.log("Fetching Home Assistant status from " & url)
 
     if self.json.isNone or self.lastFetchAt == 0 or self.lastFetchAt +
         self.appConfig.cacheSeconds < epochTime():
