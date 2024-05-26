@@ -505,8 +505,7 @@ type Scene* = ref object of FrameScene
 {{.push hint[XDeclaredButNotUsed]: off.}}
 {newline.join(self.cache_fields)}
 
-proc runNode*(self: Scene, nodeId: NodeId,
-    context: var ExecutionContext) =
+proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
   let scene = self
   let frameConfig = scene.frameConfig
   let state = scene.state

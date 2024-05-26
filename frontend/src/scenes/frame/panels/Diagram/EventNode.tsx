@@ -8,11 +8,18 @@ import { fieldTypeToGetter } from '../../../../utils/fieldTypes'
 
 import _events from '../../../../../schema/events.json'
 import { ClipboardIcon } from '@heroicons/react/24/solid'
+import { frameLogic } from '../../frameLogic'
+import { Tooltip } from '../../../../components/Tooltip'
+import { SceneSettings } from '../Scenes/SceneSettings'
+import { AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
+import { buttonColor, buttonSize } from '../../../../components/Button'
+import { showAsFps } from '../../../../decorators/refreshInterval'
 
 const events: FrameEvent[] = _events as any
 
 export function EventNode(props: NodeProps): JSX.Element {
   const { data, id } = props
+  const { frameForm } = useValues(frameLogic)
   const { selectedNodeId, scene } = useValues(diagramLogic)
   const { selectNode } = useActions(diagramLogic)
   const { keyword } = data
@@ -20,6 +27,9 @@ export function EventNode(props: NodeProps): JSX.Element {
   const isEventWithStateFields = keyword === 'init' || keyword === 'setSceneState' || keyword === 'render'
 
   const fields = isEventWithStateFields ? scene?.fields ?? [] : events?.find((e) => e.name == keyword)?.fields ?? []
+
+  const width = frameForm.rotate === 90 || frameForm.rotate === 270 ? frameForm.height : frameForm.width
+  const height = frameForm.rotate === 90 || frameForm.rotate === 270 ? frameForm.width : frameForm.height
 
   return (
     <div
@@ -59,6 +69,38 @@ export function EventNode(props: NodeProps): JSX.Element {
           }}
         />
       </div>
+      {keyword === 'render' ? (
+        // show a blank box with the dimensions of the scene
+        <div className="p-1">
+          <div
+            className="relative flex items-center justify-center text-center bg-gray-800 text-white text-2xl border border-gray-700 rounded-md"
+            style={{
+              aspectRatio: `${width} / ${height}`,
+              minWidth: 200,
+              maxWidth: 250,
+              maxHeight: 250,
+              background: scene?.settings?.backgroundColor ?? 'black',
+              textShadow: `-1px 0 black, 0 1px black, 1px 0 black, 0 -1px black, 0 0 5px black`,
+            }}
+          >
+            {scene?.id ? (
+              <div className="absolute top-0 right-0">
+                <Tooltip
+                  tooltipColor="gray"
+                  className={clsx(buttonSize('tiny'), buttonColor('secondary'))}
+                  title={<SceneSettings sceneId={scene?.id} />}
+                >
+                  <AdjustmentsHorizontalIcon className="w-5 h-5" />
+                </Tooltip>
+              </div>
+            ) : null}
+
+            {`${width}x${height}`}
+            <br />
+            {scene?.settings?.refreshInterval ? showAsFps(scene.settings.refreshInterval) : null}
+          </div>
+        </div>
+      ) : null}
       {fields.length > 0 ? (
         <div className="p-1">
           {fields.map((field: Record<string, any>) => (
