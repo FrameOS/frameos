@@ -22,6 +22,7 @@ import { templatesLogic } from '../Templates/templatesLogic'
 import { SceneSettings } from './SceneSettings'
 import React from 'react'
 import { SceneDropDown } from './SceneDropDown'
+import { showAsFps } from '../../../../decorators/refreshInterval'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
@@ -100,9 +101,7 @@ export function Scenes() {
                       color={scene.settings.refreshInterval > 1 ? 'secondary' : 'red'}
                       onClick={() => toggleSettings(scene.id)}
                     >
-                      {scene.settings.refreshInterval > 1
-                        ? `${scene.settings.refreshInterval}`
-                        : `${Math.round((1 / scene.settings.refreshInterval) * 10) / 10} fps`}
+                      {showAsFps(scene.settings.refreshInterval)}
                     </Tag>
                   ) : null}
                 </H6>
