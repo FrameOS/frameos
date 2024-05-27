@@ -1,7 +1,7 @@
 {
     "name": "Download Image",
     "description": "Download image from an URL",
-    "category": "data",
+    "category": "legacy",
     "version": "1.0.0",
     "fields": [
         {

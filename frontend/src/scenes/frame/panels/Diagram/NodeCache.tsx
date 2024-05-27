@@ -7,6 +7,7 @@ import { appNodeLogic } from './appNodeLogic'
 import { Tag } from '../../../../components/Tag'
 import { Tooltip } from '../../../../components/Tooltip'
 import { isNumericString } from '../../../../utils/isNumericString'
+import { showAsFps } from '../../../../decorators/refreshInterval'
 
 export function NodeCache(): JSX.Element {
   const { updateNodeData } = useActions(appNodeLogic)
@@ -109,11 +110,18 @@ export function NodeCache(): JSX.Element {
         </Tag>
       ) : data.cacheType === 'keyDuration' ? (
         <Tag color="red" className="cursor-pointer">
-          Cache: {String(isNumericString(data.cacheDuration) ? data.cacheDuration + 's' : 'duration')} + key
+          Cache:{' '}
+          {String(
+            isNumericString(data.cacheDuration) ? showAsFps(parseFloat(data.cacheDuration as string)) : 'duration'
+          )}{' '}
+          + key
         </Tag>
       ) : (
         <Tag color="orange" className="cursor-pointer">
-          Cache: {String(isNumericString(data.cacheDuration) ? data.cacheDuration + 's' : 'duration')}
+          Cache:{' '}
+          {String(
+            isNumericString(data.cacheDuration) ? showAsFps(parseFloat(data.cacheDuration as string)) : 'duration'
+          )}
         </Tag>
       )}
     </Tooltip>

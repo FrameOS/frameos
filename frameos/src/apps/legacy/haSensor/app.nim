@@ -28,10 +28,10 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   )
 
 proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
+  self.scene.logger.log(%*{"event": "legacy/haSensor:log", "message": message})
 
 proc error*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
+  self.scene.logger.log(%*{"event": "legacy/haSensor:error", "error": message})
 
 proc run*(self: App, context: ExecutionContext) =
   let haUrl = self.frameConfig.settings{"homeAssistant"}{"url"}.getStr

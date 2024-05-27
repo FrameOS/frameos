@@ -1,6 +1,6 @@
 {
-    "name": "Download Image",
-    "description": "Download image from an URL",
+    "name": "Fetch Image",
+    "description": "Fetch image from an URL",
     "category": "data",
     "version": "1.0.0",
     "fields": [
@@ -11,22 +11,6 @@
             "required": true,
             "label": "Image URL",
             "placeholder": "https://domain/image"
-        },
-        {
-            "name": "scalingMode",
-            "type": "select",
-            "options": ["cover", "contain", "stretch", "center"],
-            "value": "cover",
-            "required": true,
-            "label": "Scaling mode"
-        },
-        {
-            "name": "cacheSeconds",
-            "type": "float",
-            "value": "3600",
-            "required": false,
-            "label": "Seconds to cache the result",
-            "placeholder": "Default: 3600 (1h). Use 0 for no cache"
         }
     ],
     "output": [

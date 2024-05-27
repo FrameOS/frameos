@@ -1,7 +1,7 @@
 {
     "name": "HA Sensor",
     "description": "Store the state of a Home Assistant entity in the scene's state",
-    "category": "util",
+    "category": "legacy",
     "version": "1.0.0",
     "settings": ["homeAssistant"],
     "fields": [
