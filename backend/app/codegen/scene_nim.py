@@ -74,6 +74,7 @@ class SceneWriter:
         self.code_field_source_nodes = {}
         self.source_field_inputs = {}
         self.node_fields = {}
+        self.app_node_outputs = {}
         self.cache_counter = 0
         self.cache_indexes = {}
         self.cache_fields = []
@@ -94,7 +95,7 @@ class SceneWriter:
         control_code = self.frame.control_code
         if control_code and control_code.get("enabled") == "true":
             self.scene_object_fields += ["controlCode: qrApp.App"]
-            app_import = "import apps/qr/app as qrApp"
+            app_import = "import apps/render/qr/app as qrApp"
             if app_import not in self.imports:
                 self.imports += [app_import]
             self.init_apps += [
@@ -299,6 +300,7 @@ class SceneWriter:
                     self.init_apps += [line]
                 self.init_apps[-1] = self.init_apps[-1] + ","
         self.init_apps += ['))']
+        self.app_node_outputs[node_id] = config.get("output", None)
         self.process_app_run_lines(node)
 
     def process_app_run_lines(self, node, of_or_block = "of"):
@@ -335,7 +337,8 @@ class SceneWriter:
                 f"  self.{app_id}.appConfig.{key} = self.node{self.node_id_to_integer(source_id)}.appConfig.{source_key}"
             ]
         next_node_id = self.next_nodes.get(node_id, None)
-        app_output = node.get("data", {}).get("output", [])
+
+        app_output = self.app_node_outputs.get(node_id, []) or []
 
         discard_or_not = "discard " if len(app_output) > 0 else ""
         run_lines += [
