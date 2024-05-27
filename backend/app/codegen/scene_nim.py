@@ -104,13 +104,13 @@ class SceneWriter:
                 f'  offsetX: {float(control_code.get("offsetX", "0"))},',
                 f'  offsetY: {float(control_code.get("offsetY", "0"))},',
                 f'  padding: {int(control_code.get("padding", "1"))},',
-                f'  position: "{sanitize_nim_string(control_code.get("position", "top-left"))}"',
-                f'  size: {float(control_code.get("size", "2"))}',
+                f'  position: "{sanitize_nim_string(control_code.get("position", "top-left"))}",',
+                f'  size: {float(control_code.get("size", "2"))},',
                 '  codeType: "Frame Control URL",',
                 '  code: "",',
                 '  sizeUnit: "pixels per dot",',
                 '  alRad: 30.0,',
-                '  moRad: 0.0,'
+                '  moRad: 0.0,',
                 '  moSep: 0.0',
                 '))'
             ]
