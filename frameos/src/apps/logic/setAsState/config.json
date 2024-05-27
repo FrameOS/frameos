@@ -1,0 +1,28 @@
+{
+    "name": "Set as state",
+    "description": "Save the value (json node) as a state variable",
+    "category": "logic",
+    "version": "1.0.0",
+    "fields": [
+      {
+        "name": "stateKey",
+        "type": "string",
+        "required": true,
+        "label": "State key",
+        "value": "",
+        "placeholder": ""
+      },
+      {
+          "name": "valueString",
+          "type": "string",
+          "required": false,
+          "label": "Value as a string"
+        },
+        {
+          "name": "valueJson",
+          "type": "json",
+          "required": false,
+          "label": "Value as a JsonNode"
+        }
+    ]
+}

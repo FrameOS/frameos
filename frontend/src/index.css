@@ -49,10 +49,12 @@ body {
   border: 3px solid white;
   background-color: #264e17;
 }
-.react-flow__handle-bottom, .react-flow__handle-top {
+.react-flow__handle-bottom, .react-flow__handle-top,
+.react-flow__handle-left, .react-flow__handle-right {
   left: auto;
   bottom: auto;
   top: auto;
+  right: auto;
 }
 
 select.with-triangle {

@@ -1,0 +1,22 @@
+{
+    "name": "Render Image",
+    "description": "Render an image onto a canvas",
+    "category": "render",
+    "version": "1.0.0",
+    "fields": [
+        {
+            "name": "image",
+            "type": "image",
+            "required": true,
+            "label": "Image"
+        },
+        {
+            "name": "scalingMode",
+            "type": "select",
+            "options": ["cover", "contain", "stretch", "center"],
+            "value": "cover",
+            "required": true,
+            "label": "Scaling mode"
+        }
+    ]
+}

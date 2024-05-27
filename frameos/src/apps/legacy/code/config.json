@@ -1,0 +1,15 @@
+{
+  "name": "Code",
+  "description": "Clean starter to modify",
+  "category": "legacy",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "keyword",
+      "label": "Keyword",
+      "type": "string",
+      "value": "",
+      "required": false
+    }
+  ]
+}

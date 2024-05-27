@@ -208,6 +208,12 @@ export const appNodeLogic = kea<appNodeLogicType>([
         return realFields
       },
     ],
+    output: [
+      (s) => [s.configJson],
+      (configJson): ConfigField[] | null => {
+        return configJson?.output ?? null
+      },
+    ],
     name: [
       (s) => [s.app, s.event, s.configJson],
       (app, event, configJson): string => {

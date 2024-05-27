@@ -172,6 +172,183 @@ class SceneWriter:
                         self.source_field_inputs[target] = {}
                     self.source_field_inputs[target][target_field] = (source, source_field)
 
+    def process_app_init(self, node):
+        node_id = node["id"]
+        sources = node.get("data", {}).get("sources", {})
+        name = node.get("data", {}).get("keyword", f"app_{node_id}")
+        name_identifier = name.replace("/", "_")
+        node_integer = self.node_id_to_integer(node_id)
+        app_id = f"node{node_integer}"
+
+        if name not in self.available_apps and len(sources) == 0:
+            from app.models.log import new_log as log
+            log(
+                self.frame.id,
+                "stderr",
+                f'- ERROR: When generating scene {self.scene_id}. App "{name}" for node "{node_id}" not found',
+            )
+            return
+
+        if len(sources) > 0:
+            node_app_id = "nodeapp_" + node_id.replace("-", "_")
+            app_import = f"import apps/{node_app_id}/app as nodeApp{self.node_id_to_integer(node_id)}"
+            self.scene_object_fields += [
+                f"{app_id}: nodeApp{self.node_id_to_integer(node_id)}.App"
+            ]
+        else:
+            app_import = f"import apps/{name}/app as {name_identifier}App"
+            self.scene_object_fields += [f"{app_id}: {name_identifier}App.App"]
+
+        if app_import not in self.imports:
+            self.imports += [app_import]
+
+
+    def process_app_run(self, node):
+        node_id = node["id"]
+        sources = node.get("data", {}).get("sources", {})
+        name = node.get("data", {}).get("keyword", f"app_{node_id}")
+        node_integer = self.node_id_to_integer(node_id)
+        app_id = f"node{node_integer}"
+
+        app_config = node.get("data", {}).get("config", {}).copy()
+        if len(sources) > 0 and sources.get("config.json", None):
+            config = json.loads(sources.get("config.json"))
+        else:
+            config_path = os.path.join(local_apps_path, name, "config.json")
+            if os.path.exists(config_path):
+                with open(config_path, "r") as file:
+                    config = json.load(file)
+            else:
+                config = {}
+
+        # { field: [['key1', 'from', 'to'], ['key2', 1, 5]] }
+        seq_fields_for_node: dict[str, list[list[str | int]]] = {}
+        field_inputs_for_node = self.field_inputs.get(node_id, {})
+        code_fields_for_node = self.code_field_source_nodes.get(node_id, {})
+        source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
+        node_fields_for_node = self.node_fields.get(node_id, {})
+
+        config_types: dict[str, str] = {}
+        for field in config.get("fields"):
+            key = field.get("name", None)
+            value = field.get("value", None)
+            field_type = field.get("type", "string")
+            config_types[key] = field_type
+            seq = field.get("seq", None)
+            # set defaults for missing values
+            if (
+                (key not in app_config or app_config.get(key) is None)
+                and (value is not None or field_type == "node")
+                and seq is None
+            ):
+                app_config[key] = value
+            # mark fields that are sequences of fields
+            if seq is not None:
+                seq_fields_for_node[key] = seq
+                if key not in app_config:
+                    app_config[key] = None
+
+        # convert sequence field metadata from ["key", "from_key", "to_key"] to ["key", 1, 3]
+        for key, seqs in seq_fields_for_node.items():
+            for i, [seq_key, seq_from, seq_to] in enumerate(seqs):
+                if isinstance(seq_from, str):
+                    seq_from = app_config.get(seq_from, None)
+                    seqs[i][1] = int(seq_from)
+                if isinstance(seq_to, str):
+                    seq_to = app_config.get(seq_to, None)
+                    seqs[i][2] = int(seq_to)
+
+        app_config_pairs: list[list[str]] = []
+        for key, value in app_config.items():
+            if key not in config_types:
+                from app.models.log import new_log as log
+                log(
+                    self.frame.id,
+                    "stderr",
+                    f'- ERROR: When generating scene {self.scene_id}. Config key "{key}" not found for app "{name}", node "{node_id}"',
+                )
+                continue
+            type = config_types[key]
+
+            app_config_pairs.append(
+                [f"  {x}" for x in self.sanitize_nim_field(
+                    node_id,
+                    key,
+                    type,
+                    value,
+                    field_inputs_for_node,
+                    node_fields_for_node,
+                    source_field_inputs_for_node,
+                    seq_fields_for_node,
+                    code_fields_for_node,
+                    False,
+                )]
+            )
+
+        if len(sources) > 0:
+            appName = f"nodeApp{self.node_id_to_integer(node_id)}"
+        else:
+            name_identifier = name.replace("/", "_")
+            appName = f"{name_identifier}App"
+        self.init_apps += [
+            f"scene.{app_id} = {appName}.init({node_integer}.NodeId, scene.FrameScene, {appName}.AppConfig(",
+        ]
+        for x in app_config_pairs:
+            if len(x) > 0:
+                for line in x:
+                    self.init_apps += [line]
+                self.init_apps[-1] = self.init_apps[-1] + ","
+        self.init_apps += ['))']
+        self.process_app_run_lines(node)
+
+    def process_app_run_lines(self, node, of_or_block = "of"):
+        node_id = node["id"]
+        name = node.get("data", {}).get("keyword", f"app_{node_id}")
+        node_integer = self.node_id_to_integer(node_id)
+        app_id = f"node{node_integer}"
+
+        run_lines = []
+
+        if of_or_block == "of":
+            run_lines += [
+                f"of {node_integer}.NodeId: # {name}",
+            ]
+        else:
+            run_lines += [
+                "block:",
+            ]
+        field_inputs_for_node = self.field_inputs.get(node_id, {})
+        code_fields_for_node = self.code_field_source_nodes.get(node_id, {})
+        source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
+
+        for key, code in field_inputs_for_node.items():
+            if key in code_fields_for_node:
+                code_lines = self.get_code_field_value(code_fields_for_node[key])
+                run_lines += [f"  self.{app_id}.appConfig.{key} = {code_lines[0]}"]
+                for line in code_lines[1:]:
+                    run_lines += [f"  {line}"]
+            else:
+                run_lines += [f"  self.{app_id}.appConfig.{key} = {code}"]
+
+        for key, (source_id, source_key) in source_field_inputs_for_node.items():
+            run_lines += [
+                f"  self.{app_id}.appConfig.{key} = self.node{self.node_id_to_integer(source_id)}.appConfig.{source_key}"
+            ]
+        next_node_id = self.next_nodes.get(node_id, None)
+        app_output = node.get("data", {}).get("output", [])
+
+        discard_or_not = "discard " if len(app_output) > 0 else ""
+        run_lines += [
+            f"  {discard_or_not}self.{app_id}.run(context)",
+        ]
+
+        if of_or_block == "of":
+            run_lines += [
+                f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
+            ]
+
+        self.run_node_lines += run_lines
+
     def read_nodes(self):
         newline = "\n"
         for node in self.nodes:
@@ -232,144 +409,9 @@ class SceneWriter:
                         ]
 
             elif node.get("type") == "app":
-                sources = node.get("data", {}).get("sources", {})
-                name = node.get("data", {}).get("keyword", f"app_{node_id}")
-                node_integer = self.node_id_to_integer(node_id)
-                app_id = f"node{node_integer}"
+                self.process_app_init(node)
+                self.process_app_run(node)
 
-                if name not in self.available_apps and len(sources) == 0:
-                    from app.models.log import new_log as log
-                    log(
-                        self.frame.id,
-                        "stderr",
-                        f'- ERROR: When generating scene {self.scene_id}. App "{name}" for node "{node_id}" not found',
-                    )
-                    continue
-
-                if len(sources) > 0:
-                    node_app_id = "nodeapp_" + node_id.replace("-", "_")
-                    app_import = f"import apps/{node_app_id}/app as nodeApp{self.node_id_to_integer(node_id)}"
-                    self.scene_object_fields += [
-                        f"{app_id}: nodeApp{self.node_id_to_integer(node_id)}.App"
-                    ]
-                else:
-                    app_import = f"import apps/{name}/app as {name}App"
-                    self.scene_object_fields += [f"{app_id}: {name}App.App"]
-
-                if app_import not in self.imports:
-                    self.imports += [app_import]
-
-                app_config = node.get("data", {}).get("config", {}).copy()
-                if len(sources) > 0 and sources.get("config.json", None):
-                    config = json.loads(sources.get("config.json"))
-                else:
-                    config_path = os.path.join(local_apps_path, name, "config.json")
-                    if os.path.exists(config_path):
-                        with open(config_path, "r") as file:
-                            config = json.load(file)
-                    else:
-                        config = {}
-
-                # { field: [['key1', 'from', 'to'], ['key2', 1, 5]] }
-                seq_fields_for_node: dict[str, list[list[str | int]]] = {}
-                field_inputs_for_node = self.field_inputs.get(node_id, {})
-                code_fields_for_node = self.code_field_source_nodes.get(node_id, {})
-                source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
-                node_fields_for_node = self.node_fields.get(node_id, {})
-
-                config_types: dict[str, str] = {}
-                for field in config.get("fields"):
-                    key = field.get("name", None)
-                    value = field.get("value", None)
-                    field_type = field.get("type", "string")
-                    config_types[key] = field_type
-                    seq = field.get("seq", None)
-                    # set defaults for missing values
-                    if (
-                        (key not in app_config or app_config.get(key) is None)
-                        and (value is not None or field_type == "node")
-                        and seq is None
-                    ):
-                        app_config[key] = value
-                    # mark fields that are sequences of fields
-                    if seq is not None:
-                        seq_fields_for_node[key] = seq
-                        if key not in app_config:
-                            app_config[key] = None
-
-                # convert sequence field metadata from ["key", "from_key", "to_key"] to ["key", 1, 3]
-                for key, seqs in seq_fields_for_node.items():
-                    for i, [seq_key, seq_from, seq_to] in enumerate(seqs):
-                        if isinstance(seq_from, str):
-                            seq_from = app_config.get(seq_from, None)
-                            seqs[i][1] = int(seq_from)
-                        if isinstance(seq_to, str):
-                            seq_to = app_config.get(seq_to, None)
-                            seqs[i][2] = int(seq_to)
-
-                app_config_pairs: list[list[str]] = []
-                for key, value in app_config.items():
-                    if key not in config_types:
-                        from app.models.log import new_log as log
-                        log(
-                            self.frame.id,
-                            "stderr",
-                            f'- ERROR: When generating scene {self.scene_id}. Config key "{key}" not found for app "{name}", node "{node_id}"',
-                        )
-                        continue
-                    type = config_types[key]
-
-                    app_config_pairs.append(
-                        [f"  {x}" for x in self.sanitize_nim_field(
-                            node_id,
-                            key,
-                            type,
-                            value,
-                            field_inputs_for_node,
-                            node_fields_for_node,
-                            source_field_inputs_for_node,
-                            seq_fields_for_node,
-                            code_fields_for_node,
-                            False,
-                        )]
-                    )
-
-                if len(sources) > 0:
-                    appName = f"nodeApp{self.node_id_to_integer(node_id)}"
-                else:
-                    appName = f"{name}App"
-                self.init_apps += [
-                    f"scene.{app_id} = {appName}.init({node_integer}.NodeId, scene.FrameScene, {appName}.AppConfig(",
-                ]
-                for x in app_config_pairs:
-                    if len(x) > 0:
-                        for line in x:
-                            self.init_apps += [line]
-                        self.init_apps[-1] = self.init_apps[-1] + ","
-                self.init_apps += ['))']
-
-                self.run_node_lines += [
-                    f"of {node_integer}.NodeId: # {name}",
-                ]
-
-                for key, code in field_inputs_for_node.items():
-                    if key in code_fields_for_node:
-                        code_lines = self.get_code_field_value(code_fields_for_node[key])
-                        self.run_node_lines += [f"  self.{app_id}.appConfig.{key} = {code_lines[0]}"]
-                        for line in code_lines[1:]:
-                            self.run_node_lines += [f"  {line}"]
-                    else:
-                        self.run_node_lines += [f"  self.{app_id}.appConfig.{key} = {code}"]
-
-                for key, (source_id, source_key) in source_field_inputs_for_node.items():
-                    self.run_node_lines += [
-                        f"  self.{app_id}.appConfig.{key} = self.node{self.node_id_to_integer(source_id)}.appConfig.{source_key}"
-                    ]
-                next_node_id = self.next_nodes.get(node_id, None)
-                self.run_node_lines += [
-                    f"  self.{app_id}.run(context)",
-                    f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
-                ]
 
         self.scene_object_fields.sort(key=natural_keys)
 

@@ -1,0 +1,24 @@
+{
+  "name": "Rotate",
+  "description": "Rotate the image",
+  "category": "legacy",
+  "version": "1.0.0",
+  "fields": [
+      {
+          "name": "rotationDegree",
+          "type": "float",
+          "value": "0",
+          "required": true,
+          "label": "Rotation Degree",
+          "placeholder": "e.g., 45"
+      },
+      {
+          "name": "scalingMode",
+          "type": "select",
+          "options": ["expand", "cover", "contain", "stretch", "center"],
+          "value": "cover",
+          "required": true,
+          "label": "Scaling mode"
+      }
+  ]
+}

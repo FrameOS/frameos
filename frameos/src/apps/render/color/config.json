@@ -1,0 +1,15 @@
+{
+  "name": "Color",
+  "description": "Set a single color background",
+  "category": "render",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "color",
+      "type": "color",
+      "value": "#ffffff",
+      "required": true,
+      "label": "Color"
+    }
+  ]
+}

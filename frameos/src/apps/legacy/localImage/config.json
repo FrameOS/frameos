@@ -1,0 +1,47 @@
+{
+    "name": "Local Image",
+    "description": "Show an image from the SD card",
+    "category": "legacy",
+    "version": "1.0.0",
+    "fields": [
+        {
+            "name": "path",
+            "type": "text",
+            "value": "/srv/images",
+            "required": true,
+            "label": "Image filename or folder",
+            "placeholder": "/srv/images"
+        },
+        {
+            "name": "order",
+            "type": "select",
+            "options": ["random", "alphabetical"],
+            "value": "random",
+            "required": true,
+            "label": "Order of images"
+        },
+        {
+            "name": "seconds",
+            "type": "float",
+            "value": "900",
+            "required": false,
+            "label": "Seconds to show one image",
+            "placeholder": "Default: 900 (15min)"
+        },
+        {
+            "name": "scalingMode",
+            "type": "select",
+            "options": ["cover", "contain", "stretch", "center"],
+            "value": "cover",
+            "required": true,
+            "label": "Scaling mode"
+        },
+        {
+            "name": "counterStateKey",
+            "type": "string",
+            "value": "",
+            "required": false,
+            "label": "Optional state key for persistence"
+        }
+    ]
+}

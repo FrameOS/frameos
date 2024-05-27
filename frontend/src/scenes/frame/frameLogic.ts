@@ -2,7 +2,7 @@ import { actions, afterMount, connect, kea, key, listeners, path, props, reducer
 import { framesModel } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
-import { FrameScene, FrameType, TemplateType } from '../../types'
+import {AppNodeData, DiagramNode, FrameScene, FrameType, TemplateType} from '../../types'
 import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
 import { v4 as uuidv4 } from 'uuid'
@@ -54,13 +54,57 @@ function cleanBackgroundColor(color: string): string {
   return '#000000'
 }
 
+const legacyAppMapping = {
+  'downloadImage': 'legacy/downloadImage',
+  'clock': 'render/clock',
+  'color': 'legacy/color',
+  'frameOSGallery': 'legacy/frameOSGallery',
+  'gradient': 'legacy/gradient',
+  'haSensor': 'legacy/haSensor',
+  'localImage': 'legacy/localImage',
+  'openai': 'legacy/openai',
+  'openaiText': 'legacy/openaiText',
+  'qr': 'legacy/qr',
+  'unsplash': 'legacy/unsplash',
+  'breakIfRendering': 'logic/breakIfRendering',
+  'code': 'logic/code',
+  'ifElse': 'logic/ifElse',
+  'renderImage': 'render/image',
+  'logic/renderImage': 'render/image',
+  'resize': 'logic/resize',
+  'rotate': 'logic/rotate',
+  'setAsState': 'logic/setAsState',
+  'split': 'render/split',
+  'text': 'render/text',
+  'logic/text': 'render/text',
+  'legacy/clock': 'render/clock',
+}
+
+export function sanitizeNodes(nodes: DiagramNode[]): DiagramNode[] {
+  let changed = false
+  const newNodes = nodes.map((node) => {
+    if (node.type === 'app' && legacyAppMapping[(node.data as AppNodeData).keyword]) {
+      changed = true
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          keyword: legacyAppMapping[(node.data as AppNodeData).keyword],
+        },
+      } as DiagramNode
+    }
+    return node
+  })
+  return changed ? newNodes : nodes
+}
+
 export function sanitizeScene(scene: Partial<FrameScene>, frame: FrameType): FrameScene {
   const settings = scene.settings ?? {}
   return {
     ...scene,
     id: scene.id ?? uuidv4(),
     name: scene.name || 'Untitled scene',
-    nodes: scene.nodes ?? [],
+    nodes: sanitizeNodes(scene.nodes ?? []),
     edges: scene.edges ?? [],
     fields: scene.fields ?? [],
     settings: {

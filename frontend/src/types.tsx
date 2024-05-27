@@ -93,6 +93,7 @@ export const configFieldTypes = [
   'select',
   'json',
   'node',
+  'image',
 ] as const
 
 export interface ConfigField {
@@ -100,8 +101,8 @@ export interface ConfigField {
   name: string
   /** Human readable label */
   label: string
-  /** Type of the field, only 'string' is supported for now */
-  type: 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'json' | 'node' | 'scene'
+  /** Type of the field */
+  type: 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'json' | 'node' | 'scene' | 'image'
   /** List of options for the field, only used if type is 'select' */
   options?: string[]
   /** Whether the field is required */
@@ -128,6 +129,14 @@ export interface MarkdownField {
   markdown: string
 }
 
+export interface CacheConfig {
+  cacheType?: 'none' | 'forever' | 'duration' | 'key' | 'keyDuration'
+  cacheDataType?: 'string' | 'integer' | 'float' | 'json'
+  cacheDuration?: string
+  cacheKey?: string
+  cacheKeyDataType?: 'string' | 'integer' | 'float' | 'json'
+}
+
 /** config.json schema */
 export interface App {
   /** Name for this app */
@@ -142,26 +151,25 @@ export interface App {
   settings?: string[]
   /** Fields for app in diagram editor */
   fields?: (ConfigField | MarkdownField)[]
+  /** Returned fields */
+  output?: ConfigField[]
+  /** Default cache settings */
+  cache?: CacheConfig
 }
 
 export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event'
 export type EdgeType = 'appNodeEdge' | 'codeNodeEdge'
 
-export interface AppNodeData {
+export interface AppNodeData extends CacheConfig {
   keyword: string
   name?: string
   config: Record<string, any>
   sources?: Record<string, string>
 }
 
-export interface CodeNodeData {
+export interface CodeNodeData extends CacheConfig {
   code: string
   codeFields?: string[]
-  cacheType?: 'none' | 'forever' | 'duration' | 'key' | 'keyDuration'
-  cacheDataType?: 'string' | 'integer' | 'float' | 'json'
-  cacheDuration?: string
-  cacheKey?: string
-  cacheKeyDataType?: 'string' | 'integer' | 'float' | 'json'
 }
 
 export interface EventNodeData {

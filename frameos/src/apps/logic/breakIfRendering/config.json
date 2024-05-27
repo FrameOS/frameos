@@ -1,0 +1,7 @@
+{
+  "name": "Break if rendering",
+  "description": "Cancel execution if the event is dispatched when the scene is rendering",
+  "category": "logic",
+  "version": "1.0.0",
+  "fields": []
+}
