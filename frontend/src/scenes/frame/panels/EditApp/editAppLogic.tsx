@@ -47,7 +47,7 @@ export const editAppLogic = kea<editAppLogicType>([
           if (!props.keyword) {
             return values.sources
           }
-          const response = await fetch(`/api/apps/source/${encodeURIComponent(props.keyword as string)}`)
+          const response = await fetch(`/api/apps/source?keyword=${encodeURIComponent(props.keyword as string)}`)
           return await response.json()
         },
       },

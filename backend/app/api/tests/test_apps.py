@@ -13,7 +13,7 @@ class TestApps(BaseTestCase):
         assert 'clock' in data['apps']
 
     def test_api_apps_source(self):
-        response = self.client.get('/api/apps/source/code')
+        response = self.client.get('/api/apps/source?keyword=code')
         data = json.loads(response.data)
         assert response.status_code == 200
         assert 'app.nim' in data

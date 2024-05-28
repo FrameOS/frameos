@@ -41,20 +41,15 @@ def get_local_frame_apps() -> List[str]:
 
 
 def get_one_app_sources(keyword: str) -> Optional[dict[str, str]]:
-    apps = os.listdir(local_apps_path)
     sources: dict[str, str] = {}
+    apps = get_local_frame_apps()
     if keyword in apps:
         local_app_path = os.path.join(local_apps_path, keyword)
-        app_path = os.path.join(local_app_path, "app.nim")
-        if os.path.exists(app_path):
-            with open(app_path, 'r') as f:
-                sources['app.nim'] = f.read()
-        config_path = os.path.join(local_app_path, "config.json")
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                sources['config.json'] = f.read()
+        files = os.listdir(local_app_path)
+        for file in files:
+            with open(os.path.join(local_app_path, file), 'r') as f:
+                sources[file] = f.read()
     return sources
-
 
 
 def get_apps_from_scenes(scenes: List[dict]) -> dict[str, dict]:

@@ -231,6 +231,8 @@ class SceneWriter:
 
         config_types: dict[str, str] = {}
         for field in config.get("fields"):
+            if field.get('markdown'):
+                continue
             key = field.get("name", None)
             value = field.get("value", None)
             field_type = field.get("type", "string")
@@ -301,7 +303,7 @@ class SceneWriter:
                 self.init_apps[-1] = self.init_apps[-1] + ","
         self.init_apps += ['))']
         self.app_node_outputs[node_id] = config.get("output", None)
-        self.process_app_run_lines(node)
+        self.run_node_lines += self.process_app_run_lines(node)
 
     def process_app_run_lines(self, node, of_or_block = "of"):
         node_id = node["id"]
@@ -340,7 +342,7 @@ class SceneWriter:
 
         app_output = self.app_node_outputs.get(node_id, []) or []
 
-        discard_or_not = "discard " if len(app_output) > 0 else ""
+        discard_or_not = "discard " if len(app_output) > 0 and of_or_block == "of" else ""
         run_lines += [
             f"  {discard_or_not}self.{app_id}.run(context)",
         ]
@@ -350,7 +352,7 @@ class SceneWriter:
                 f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
             ]
 
-        self.run_node_lines += run_lines
+        return run_lines
 
     def read_nodes(self):
         newline = "\n"
@@ -786,6 +788,8 @@ var exportedScene* = ExportedScene(
                         elif len(code_field_source) > 1:
                             source_lines += [f"  let {field} = {code_field_source[0]}"]
                             source_lines += [f"  {x}" for x in code_field_source[1:]]
+                        else:
+                            raise ValueError("Invalid code field source")
 
                 if cache_type == 'duration' or cache_type == 'keyDuration' or cache_type == 'key':
                     code = self.wrap_with_cache(node_id, code, code_field_node.get("data", {}))
@@ -822,6 +826,8 @@ var exportedScene* = ExportedScene(
             pass
         elif cache_data_type == 'integer':
             cache_data_type = 'int'
+        elif cache_data_type == 'image':
+            cache_data_type = 'Image'
         else:
             cache_data_type = 'JsonNode'
 
