@@ -22,9 +22,6 @@ type
     cachedImage: Option[Image]
     cachedUrl: string
 
-  AppOutput* = object
-    image: Image
-
 proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
     nodeId: nodeId,
@@ -42,7 +39,7 @@ proc log*(self: App, message: string) =
 proc error*(self: App, message: string) =
   self.scene.logger.log(%*{"event": "legacy/downloadImage:error", "error": message})
 
-proc run*(self: App, context: ExecutionContext): AppOutput =
+proc run*(self: App, context: ExecutionContext) =
   try:
     let url = self.appConfig.url
 
@@ -57,7 +54,6 @@ proc run*(self: App, context: ExecutionContext): AppOutput =
         self.cachedUrl = url
         self.cacheExpiry = epochTime() + self.appConfig.cacheSeconds
 
-    result = AppOutput(image: downloadedImage.get())
     if context.image.width > 0 and context.image.height > 0:
       scaleAndDrawImage(context.image, downloadedImage.get(), self.appConfig.scalingMode)
   except:

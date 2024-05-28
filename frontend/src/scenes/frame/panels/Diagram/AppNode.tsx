@@ -25,6 +25,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
     name,
     fields,
     isCustomApp,
+    isDataApp,
     configJsonError,
     output,
     isSelected,
@@ -40,18 +41,22 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
     isSelected
       ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
       : isDispatch
-      ? 'bg-black bg-opacity-70 border-green-900 shadow-green-700/50 '
+      ? 'bg-black bg-opacity-70 border-orange-900 shadow-orange-700/50 '
       : isCustomApp
       ? 'bg-black bg-opacity-70 border-teal-900 shadow-teal-700/50 '
+      : isDataApp
+      ? 'bg-black bg-opacity-70 border-green-700 shadow-green-500/50 '
       : 'bg-black bg-opacity-70 border-sky-900 shadow-sky-700/50 '
   )
 
   const titleBackground = isSelected
     ? 'bg-indigo-900'
     : isDispatch
-    ? 'bg-green-900'
+    ? 'bg-orange-900'
     : isCustomApp
     ? 'bg-teal-900'
+    : isDataApp
+    ? 'bg-green-700'
     : 'bg-sky-900'
 
   const titleClassName = clsx(
@@ -64,23 +69,25 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
     <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>
       <div onClick={select} className={backgroundClassName}>
         <div className={titleClassName}>
-          <Handle
-            type="target"
-            position={Position.Left}
-            id="prev"
-            style={{
-              position: 'relative',
-              transform: 'none',
-              left: 0,
-              top: 0,
-              width: 20,
-              height: 20,
-              background: 'rgba(180, 180, 180, 0.8)',
-              borderBottomLeftRadius: 0,
-              borderTopLeftRadius: 0,
-            }}
-            isConnectable={isConnectable}
-          />
+          {!isDataApp ? (
+            <Handle
+              type="target"
+              position={Position.Left}
+              id="prev"
+              style={{
+                position: 'relative',
+                transform: 'none',
+                left: 0,
+                top: 0,
+                width: 20,
+                height: 20,
+                background: 'rgba(180, 180, 180, 0.8)',
+                borderBottomLeftRadius: 0,
+                borderTopLeftRadius: 0,
+              }}
+              isConnectable={isConnectable}
+            />
+          ) : null}
           <div className="flex-1">
             {name}
             {isCustomApp ? ' (edited)' : ''}
@@ -111,23 +118,25 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
               },
             ]}
           />
-          <Handle
-            type="source"
-            position={Position.Right}
-            id="next"
-            style={{
-              position: 'relative',
-              transform: 'none',
-              width: 20,
-              height: 20,
-              right: 0,
-              top: 0,
-              background: 'rgba(200, 200, 200, 0.8)',
-              borderBottomLeftRadius: 0,
-              borderTopLeftRadius: 0,
-            }}
-            isConnectable={isConnectable}
-          />
+          {!isDataApp ? (
+            <Handle
+              type="source"
+              position={Position.Right}
+              id="next"
+              style={{
+                position: 'relative',
+                transform: 'none',
+                width: 20,
+                height: 20,
+                right: 0,
+                top: 0,
+                background: 'rgba(200, 200, 200, 0.8)',
+                borderBottomLeftRadius: 0,
+                borderTopLeftRadius: 0,
+              }}
+              isConnectable={isConnectable}
+            />
+          ) : null}
         </div>
         {configJsonError !== null ? (
           <div className="text-red-400 p-1">

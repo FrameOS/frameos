@@ -42,22 +42,6 @@ export function NodeCache(): JSX.Element {
               }
             />
           </div>
-          {(data.cacheType ?? 'none') !== 'none' && (
-            <div className="space-y-1">
-              <Label>Data type of cached value</Label>
-              <Select
-                value={data.cacheDataType ?? 'string'}
-                options={[
-                  { value: 'string', label: 'string' },
-                  { value: 'integer', label: 'integer' },
-                  { value: 'float', label: 'float' },
-                  { value: 'json', label: 'json' },
-                  { value: 'image', label: 'image' },
-                ]}
-                onChange={(value) => updateNodeData(node.id, { cacheDataType: value })}
-              />
-            </div>
-          )}
           {(data.cacheType === 'duration' || data.cacheType === 'keyDuration') && (
             <div className="space-y-1">
               <Label>Cache duration in seconds (code, return a float)</Label>
@@ -92,6 +76,22 @@ export function NodeCache(): JSX.Element {
                 />
               </div>
             </>
+          )}
+          {(data.cacheType ?? 'none') !== 'none' && (
+            <div className="space-y-1">
+              <Label>Data type of cached value</Label>
+              <Select
+                value={data.cacheDataType ?? 'string'}
+                options={[
+                  { value: 'string', label: 'string' },
+                  { value: 'integer', label: 'integer' },
+                  { value: 'float', label: 'float' },
+                  { value: 'json', label: 'json' },
+                  { value: 'image', label: 'image' },
+                ]}
+                onChange={(value) => updateNodeData(node.id, { cacheDataType: value })}
+              />
+            </div>
           )}
         </div>
       }

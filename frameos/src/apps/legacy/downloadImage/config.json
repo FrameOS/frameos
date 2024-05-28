@@ -28,12 +28,5 @@
             "label": "Seconds to cache the result",
             "placeholder": "Default: 3600 (1h). Use 0 for no cache"
         }
-    ],
-    "output": [
-        {
-            "name": "image",
-            "type": "image",
-            "label": "Image"
-        }
     ]
 }

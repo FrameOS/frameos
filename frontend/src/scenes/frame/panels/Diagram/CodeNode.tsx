@@ -26,14 +26,14 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
           'shadow-lg border-2 h-full flex flex-col',
           isSelected
             ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
-            : 'bg-black bg-opacity-70 border-sky-900 shadow-sky-700/50 '
+            : 'bg-black bg-opacity-70 border-green-900 shadow-green-700/50 '
         )}
       >
         <NodeResizer minWidth={200} minHeight={130} />
         <div
           className={clsx(
             'frameos-node-title text-xl p-1 gap-2',
-            isSelected ? 'bg-indigo-900' : 'bg-sky-900',
+            isSelected ? 'bg-indigo-900' : 'bg-green-900',
             'flex w-full items-center'
           )}
         >
@@ -76,7 +76,7 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
         <div
           className={clsx(
             'frameos-node-title text-xl p-1 gap-1',
-            isSelected ? 'bg-indigo-900' : 'bg-sky-900',
+            isSelected ? 'bg-indigo-900' : 'bg-green-900',
             'flex w-full justify-between items-center'
           )}
         >

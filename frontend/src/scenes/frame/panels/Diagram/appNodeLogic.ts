@@ -214,6 +214,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
         return configJson?.output ?? null
       },
     ],
+    isDataApp: [(s) => [s.node, s.output], (node, output) => node?.type === 'app' && !!output && output.length > 0],
     name: [
       (s) => [s.app, s.event, s.configJson],
       (app, event, configJson): string => {

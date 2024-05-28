@@ -20,9 +20,6 @@ type
     cachedImage: Option[Image]
     cachedUrl: string
 
-  AppOutput* = object
-    image: Image
-
 proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
     nodeId: nodeId,
@@ -50,6 +47,5 @@ proc run*(self: App, context: ExecutionContext): AppOutput =
       self.cachedUrl = url
       self.cacheExpiry = epochTime() + self.appConfig.cacheSeconds
 
-  result = AppOutput(image: downloadedImage.get())
   if context.image.width > 0 and context.image.height > 0:
     scaleAndDrawImage(context.image, downloadedImage.get(), self.appConfig.scalingMode)
