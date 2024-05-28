@@ -287,20 +287,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                               }}
                               isConnectable={isConnectable}
                             />
-                          ) : (
-                            <Handle
-                              type="source"
-                              position={Position.Right}
-                              id={`field/${field.name}`}
-                              style={{
-                                position: 'relative',
-                                transform: 'none',
-                                right: 0,
-                                top: 0,
-                                background: '#000000',
-                              }}
-                            />
-                          )}
+                          ) : null}
                         </td>
                       </tr>
                     )}

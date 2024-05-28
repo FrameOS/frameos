@@ -51,7 +51,7 @@ export function EventNode(props: NodeProps): JSX.Element {
           selectedNodeId === id ? 'bg-indigo-900' : 'bg-red-900'
         )}
       >
-        <div>{keyword}</div>
+        <div>{keyword} (event)</div>
         <div className="flex items-center justify-center gap-2">
           {scene?.id ? (
             <Tooltip

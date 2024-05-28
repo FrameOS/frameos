@@ -33,6 +33,7 @@ class SceneWriter:
     scene_id: str
     nodes: list
     nodes_by_id: dict
+    app_configs: dict[str, dict]
     node_integer_map: dict[str, int]
     imports: list
     scene_object_fields: list
@@ -59,6 +60,7 @@ class SceneWriter:
         self.scene_id = scene.get("id", "default")
         self.nodes = scene.get("nodes", [])
         self.nodes_by_id = {n["id"]: n for n in self.nodes}
+        self.app_configs = {}
         self.edges = scene.get("edges", [])
         self.node_integer_map = {}
         self.imports = []
@@ -206,6 +208,9 @@ class SceneWriter:
 
     def process_app_run(self, node):
         node_id = node["id"]
+        if node_id in self.app_configs:
+            return
+
         sources = node.get("data", {}).get("sources", {})
         name = node.get("data", {}).get("keyword", f"app_{node_id}")
         node_integer = self.node_id_to_integer(node_id)
@@ -221,6 +226,7 @@ class SceneWriter:
                     config = json.load(file)
             else:
                 config = {}
+        self.app_configs[node_id] = config
 
         # { field: [['key1', 'from', 'to'], ['key2', 1, 5]] }
         seq_fields_for_node: dict[str, list[list[str | int]]] = {}
@@ -303,9 +309,8 @@ class SceneWriter:
                 self.init_apps[-1] = self.init_apps[-1] + ","
         self.init_apps += ['))']
         self.app_node_outputs[node_id] = config.get("output", None)
-        self.run_node_lines += self.process_app_run_lines(node)
 
-    def process_app_run_lines(self, node, of_or_block = "of"):
+    def process_app_run_lines(self, node, case_or_block = "case"):
         node_id = node["id"]
         name = node.get("data", {}).get("keyword", f"app_{node_id}")
         node_integer = self.node_id_to_integer(node_id)
@@ -313,7 +318,7 @@ class SceneWriter:
 
         run_lines = []
 
-        if of_or_block == "of":
+        if case_or_block == "case":
             run_lines += [
                 f"of {node_integer}.NodeId: # {name}",
             ]
@@ -342,12 +347,11 @@ class SceneWriter:
 
         app_output = self.app_node_outputs.get(node_id, []) or []
 
-        discard_or_not = "discard " if len(app_output) > 0 and of_or_block == "of" else ""
-        run_lines += [
-            f"  {discard_or_not}self.{app_id}.run(context)",
-        ]
+        discard_or_not = "discard " if len(app_output) > 0 and case_or_block == "case" else ""
+        output_field_access = f".{app_output[0].get('name', '')}" if len(app_output) > 0 else ""
+        run_lines += [f"  {discard_or_not}self.{app_id}.run(context){output_field_access}"]
 
-        if of_or_block == "of":
+        if case_or_block == "case":
             run_lines += [
                 f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
             ]
@@ -417,6 +421,12 @@ class SceneWriter:
                 self.process_app_init(node)
                 self.process_app_run(node)
 
+                app_outputs = self.app_node_outputs.get(node_id, []) or []
+
+                # Ignore if it's a data node that's used elsewhere.
+                # Otherwise, add this node to the big case statement
+                if len(app_outputs) == 0:
+                    self.run_node_lines += self.process_app_run_lines(node, "case")
 
         self.scene_object_fields.sort(key=natural_keys)
 
@@ -534,6 +544,7 @@ class SceneWriter:
         scene_background_color = wrap_color(sanitize_nim_string(str(background_color)))
 
         scene_source = f"""
+{{.warning[UnusedImport]: off.}}
 import pixie, json, times, strformat, strutils, sequtils, options
 
 import frameos/types
@@ -773,7 +784,11 @@ var exportedScene* = ExportedScene(
             raise ValueError("Code field recursion limit reached")
         code_field_node = self.nodes_by_id.get(node_id)
         if code_field_node:
-            code = [code_field_node.get("data", {}).get("code", "")]
+            if code_field_node.get("type") == "app":
+                self.process_app_run(code_field_node)
+                code = self.process_app_run_lines(code_field_node, "block")
+            else:
+                code = [code_field_node.get("data", {}).get("code", "")]
             cache_type = code_field_node.get("data", {}).get('cacheType', 'none')
             code_fields = code_field_node.get("data", {}).get("codeFields", [])
             if code_fields and len(code_fields) > 0:

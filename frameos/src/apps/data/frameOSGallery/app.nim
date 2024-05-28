@@ -21,7 +21,7 @@ type
     cachedUrl: string
 
   AppOutput* = object
-    image: Image
+    image*: Image
 
 proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
