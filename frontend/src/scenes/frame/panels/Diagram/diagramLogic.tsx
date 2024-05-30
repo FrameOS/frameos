@@ -485,10 +485,15 @@ export const diagramLogic = kea<diagramLogicType>([
         newNode.type = 'code'
         newNode.data = { code: value.startsWith('code/') ? value.substring(5) : '', codeFields: [] }
       } else if (value.startsWith('app/')) {
+        newNode.position.x -= 20
+        newNode.position.y -= 100
         const keyword = value.substring(4)
         const app = values.apps[keyword]
         newNode.type = 'app'
         newNode.data = { keyword, config: {} }
+        for (const field of app.fields ?? []) {
+          newNode.position.y -= 30 + ('type' in field && field.type === 'text' ? 60 : 0)
+        }
       } else {
         return
       }
