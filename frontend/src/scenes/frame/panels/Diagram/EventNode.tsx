@@ -3,8 +3,8 @@ import { NodeProps, Handle, Position } from 'reactflow'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import copy from 'copy-to-clipboard'
-import { FrameEvent } from '../../../../types'
-import { fieldTypeToGetter } from '../../../../utils/fieldTypes'
+import { FrameEvent, StateField } from '../../../../types'
+import { stateFieldAccess } from '../../../../utils/fieldTypes'
 
 import _events from '../../../../../schema/events.json'
 import { ClipboardIcon } from '@heroicons/react/24/solid'
@@ -112,7 +112,7 @@ export function EventNode(props: NodeProps): JSX.Element {
       ) : null}
       {fields.length > 0 ? (
         <div className="p-1">
-          {fields.map((field: Record<string, any>) => (
+          {fields.map((field: StateField) => (
             <div className="flex items-center justify-end space-x-1 w-full">
               <code className="text-xs mr-2 text-gray-400 flex-1">{field.type}</code>
               <div title={field.label}>{field.name}</div>
@@ -121,10 +121,8 @@ export function EventNode(props: NodeProps): JSX.Element {
                 onClick={() =>
                   copy(
                     isEventWithStateFields
-                      ? `state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
-                      : `context.payload{"${field.name}"}${
-                          fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
-                        }`
+                      ? stateFieldAccess(field, 'state')
+                      : stateFieldAccess(field, 'context.payload')
                   )
                 }
               />
@@ -133,10 +131,8 @@ export function EventNode(props: NodeProps): JSX.Element {
                 position={Position.Right}
                 id={
                   isEventWithStateFields
-                    ? `code/state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
-                    : `code/context.payload{"${field.name}"}${
-                        fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
-                      }`
+                    ? `code/${stateFieldAccess(field, 'state')}`
+                    : `code/${stateFieldAccess(field, 'context.payload')}`
                 }
                 style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#000000' }}
               />

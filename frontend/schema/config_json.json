@@ -6,6 +6,10 @@
       "additionalProperties": false,
       "description": "config.json schema",
       "properties": {
+        "cache": {
+          "$ref": "#/definitions/CacheConfig",
+          "description": "Default cache settings"
+        },
         "category": {
           "description": "Category for this app",
           "type": "string"
@@ -32,6 +36,13 @@
           "description": "Name for this app",
           "type": "string"
         },
+        "output": {
+          "description": "Returned fields",
+          "items": {
+            "$ref": "#/definitions/ConfigField"
+          },
+          "type": "array"
+        },
         "settings": {
           "description": "List of top level settings exported for this app",
           "items": {
@@ -45,6 +56,30 @@
         }
       },
       "required": ["name"],
+      "type": "object"
+    },
+    "CacheConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "cacheDataType": {
+          "enum": ["string", "integer", "float", "json"],
+          "type": "string"
+        },
+        "cacheDuration": {
+          "type": "string"
+        },
+        "cacheKey": {
+          "type": "string"
+        },
+        "cacheKeyDataType": {
+          "enum": ["string", "integer", "float", "json"],
+          "type": "string"
+        },
+        "cacheType": {
+          "enum": ["none", "forever", "duration", "key", "keyDuration"],
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "ConfigField": {
@@ -102,8 +137,20 @@
           "type": "array"
         },
         "type": {
-          "description": "Type of the field, only 'string' is supported for now",
-          "enum": ["string", "text", "float", "integer", "boolean", "color", "select", "json", "node", "scene"],
+          "description": "Type of the field",
+          "enum": [
+            "string",
+            "text",
+            "float",
+            "integer",
+            "boolean",
+            "color",
+            "select",
+            "json",
+            "node",
+            "scene",
+            "image"
+          ],
           "type": "string"
         },
         "value": {

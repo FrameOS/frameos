@@ -11,16 +11,67 @@ import type { EdgeChange, NodeChange } from '@reactflow/core/dist/esm/types/chan
 import equal from 'fast-deep-equal'
 import type { diagramLogicType } from './diagramLogicType'
 import { subscriptions } from 'kea-subscriptions'
-import { AppNodeData, CodeNodeData, DiagramNode, DispatchNodeData, EventNodeData, FrameScene } from '../../../../types'
+import {
+  App,
+  AppNodeData,
+  CodeNodeData,
+  DiagramNode,
+  DispatchNodeData,
+  EventNodeData,
+  FrameScene,
+  StateField,
+} from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { arrangeNodes } from '../../../../utils/arrangeNodes'
 import copy from 'copy-to-clipboard'
 import { Option } from '../../../../components/Select'
+import { stateFieldAccess } from '../../../../utils/fieldTypes'
 
 export interface DiagramLogicProps {
   frameId: number
   sceneId: string
+  updateNodeInternals?: (nodeId: string) => void
+}
+
+export interface NewNodePicker {
+  screenX: number
+  screenY: number
+  diagramX: number
+  diagramY: number
+  handleId: string
+  handleType: string
+  nodeId: string
+}
+
+export function getNewField(codeFields: string[]): string {
+  let newField = 'arg'
+  let i = 1
+  while (codeFields.includes(newField)) {
+    newField = `arg${i}`
+    i++
+  }
+  return newField
+}
+
+function getAppsForType(apps: Record<string, App>, returnType: string = 'image'): Record<string, App> {
+  const imageApps: Record<string, App> = {}
+  for (const [keyword, app] of Object.entries(apps)) {
+    if (app.output && app.output.length > 0 && app.output[0].type === returnType) {
+      imageApps[keyword] = app
+    }
+  }
+  return imageApps
+}
+function toBaseType(type: string): string {
+  if (['string', 'select', 'text'].includes(type)) {
+    return 'string'
+  }
+  return type
+}
+
+function typesMatch(type1: string, type2: string): boolean {
+  return toBaseType(type1) === toBaseType(type2)
 }
 
 export const diagramLogic = kea<diagramLogicType>([
@@ -46,6 +97,29 @@ export const diagramLogic = kea<diagramLogicType>([
     updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
     copyAppJSON: (nodeId: string) => ({ nodeId }),
     deleteApp: (id: string) => ({ id }),
+    openNewNodePicker: (
+      screenX: number,
+      screenY: number,
+      diagramX: number,
+      diagramY: number,
+      nodeId: string,
+      handleId: string,
+      handleType: string
+    ) => ({
+      screenX,
+      screenY,
+      diagramX,
+      diagramY,
+      nodeId,
+      handleId,
+      handleType,
+    }),
+    selectNewNodeOption: (newNodePicker: NewNodePicker, value: string, label: string) => ({
+      newNodePicker,
+      value,
+      label,
+    }),
+    closeNewNodePicker: true,
   }),
   reducers({
     nodes: [
@@ -111,6 +185,27 @@ export const diagramLogic = kea<diagramLogicType>([
       },
     ],
     fitViewCounter: [0, { fitDiagramView: (state) => state + 1 }],
+    newNodePicker: [
+      null as NewNodePicker | null,
+      {
+        openNewNodePicker: (_, { screenX, screenY, diagramX, diagramY, handleId, handleType, nodeId }) => ({
+          screenX,
+          screenY,
+          diagramX,
+          diagramY,
+          handleId,
+          handleType,
+          nodeId,
+        }),
+        closeNewNodePicker: () => null,
+      },
+    ],
+    newNodePickerIndex: [
+      0,
+      {
+        openNewNodePicker: (state) => state + 1,
+      },
+    ],
   }),
   selectors({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
@@ -189,6 +284,95 @@ export const diagramLogic = kea<diagramLogicType>([
       ],
       { resultEqualityCheck: equal },
     ],
+    newNodeHandleDataType: [
+      (s) => [s.newNodePicker, s.nodesById, s.apps, s.scene],
+      (newNodePicker, nodesById, apps, scene): string | null => {
+        if (!newNodePicker) {
+          return null
+        }
+        const { handleId, handleType, nodeId } = newNodePicker
+        const [node] = nodesById[nodeId] ?? []
+        if (!node) {
+          return null
+        }
+        if (handleType === 'target' && handleId.startsWith('fieldInput/')) {
+          const key = handleId.split('/', 2)[1]
+          if (node.type === 'app' && (node.data as AppNodeData)?.sources?.['config.json']) {
+            try {
+              const json = JSON.parse((node.data as AppNodeData)?.sources?.['config.json'] ?? '{}')
+              const field = json.fields?.find((f) => 'name' in f && f.name === key)
+              const type = field && 'type' in field ? field.type || null : null
+              return type ? toBaseType(type) : null
+            } catch (e) {
+              console.error(e)
+            }
+          } else if (node.type === 'app' && node.data && 'keyword' in node.data && apps[node.data?.keyword]) {
+            const app = apps[node.data.keyword]
+            const field = app.fields?.find((f) => 'name' in f && f.name === key)
+            const type = field && 'type' in field ? field.type || null : null
+            return type ? toBaseType(type) : null
+          }
+        }
+        if (handleType === 'target' && handleId.startsWith('codeField/')) {
+          console.error('Must add type support to code field arguments!')
+        }
+        return null
+      },
+    ],
+    newNodeOptions: [
+      (s) => [s.newNodePicker, s.nodesById, s.apps, s.scene, s.newNodeHandleDataType],
+      (newNodePicker, nodesById, apps, scene, newNodeHandleDataType): Option[] => {
+        if (!newNodePicker) {
+          return []
+        }
+        const { handleId, handleType, nodeId } = newNodePicker
+        const [node] = nodesById[nodeId] ?? []
+        console.log({ node, handleId, handleType, apps })
+        const options: Option[] = []
+
+        // Pulling out a field to the left of an app to specify a custom input
+        if (handleType === 'target' && (handleId.startsWith('fieldInput/') || handleId.startsWith('codeField/'))) {
+          const key = handleId.split('/', 2)[1]
+
+          options.push({ label: 'Code', value: 'code' })
+          if (newNodeHandleDataType) {
+            const imageApps = getAppsForType(apps, newNodeHandleDataType)
+            for (const [keyword, app] of Object.entries(imageApps)) {
+              options.push({ label: `App: ${app.name}`, value: `app/${keyword}` })
+            }
+            for (const field of (scene?.fields ?? []).filter(
+              (f) => 'type' in f && typesMatch(f.type, newNodeHandleDataType)
+            )) {
+              options.push({
+                label: `State: ${field.label}`,
+                value: `code/${stateFieldAccess(field)}`,
+              })
+            }
+          } else if (handleId === 'codeField/+') {
+            for (const [keyword, app] of Object.entries(apps)) {
+              if (app.output && app.output.length > 0) {
+                options.push({ label: `App: ${app.name}`, value: `app/${keyword}` })
+              }
+            }
+            for (const field of scene?.fields ?? []) {
+              options.push({
+                label: `State: ${field.label}`,
+                value: `code/${stateFieldAccess(field)}`,
+              })
+            }
+          } else {
+            options.push({ label: 'Error: unknown new node data type', value: 'app' })
+            console.log(`Unknown handle type ${handleType} or handle id ${handleId}. Node: ${nodeId}`)
+          }
+        } else {
+          options.push({ label: 'Error: unknown everything', value: 'app' })
+          console.log(`Unknown handle type ${handleType} or handle id ${handleId}. Node: ${nodeId}`)
+        }
+
+        return options
+      },
+      { resultEqualityCheck: equal },
+    ],
   }),
   subscriptions(({ actions, values, props }) => ({
     nodes: (nodes: DiagramNode[], oldNodes: DiagramNode[]) => {
@@ -243,7 +427,7 @@ export const diagramLogic = kea<diagramLogicType>([
       }
     },
   })),
-  listeners(({ actions, values }) => ({
+  listeners(({ actions, values, props }) => ({
     rearrangeCurrentScene: () => {
       actions.setNodes(arrangeNodes(values.nodes, values.edges))
       actions.fitDiagramView()
@@ -281,6 +465,71 @@ export const diagramLogic = kea<diagramLogicType>([
           data: { code: keyword } satisfies CodeNodeData,
         }
         actions.setNodes([...values.nodes, newNode])
+      }
+    },
+    selectNewNodeOption: ({ newNodePicker: { diagramX, diagramY, nodeId, handleId, handleType }, label, value }) => {
+      const newNode: DiagramNode = {
+        id: uuidv4(),
+        position: { x: diagramX, y: diagramY },
+        data: {} as any,
+        style: {
+          width: 300,
+          height: 130,
+        },
+      }
+      let newNodeOutputHandle = 'fieldOutput'
+
+      if (value === 'code' || value.startsWith('code/')) {
+        newNode.position.x -= 20
+        newNode.position.y -= 100
+        newNode.type = 'code'
+        newNode.data = { code: value.startsWith('code/') ? value.substring(5) : '', codeFields: [] }
+      } else if (value.startsWith('app/')) {
+        const keyword = value.substring(4)
+        const app = values.apps[keyword]
+        newNode.type = 'app'
+        newNode.data = { keyword, config: {} }
+      } else {
+        return
+      }
+
+      if (handleId === 'codeField/+') {
+        const codeFields = (values.nodes.find((node) => node.id === nodeId)?.data as CodeNodeData)?.codeFields ?? []
+        let newField = getNewField(codeFields)
+        actions.setNodes([
+          ...values.nodes.map((node) =>
+            node.id === nodeId ? { ...node, data: { ...node.data, codeFields: [...codeFields, newField] } } : node
+          ),
+          newNode,
+        ])
+        window.requestAnimationFrame(() => {
+          actions.addEdge({
+            id: uuidv4(),
+            target: nodeId,
+            targetHandle: `codeField/${newField}`,
+            source: newNode.id,
+            sourceHandle: newNodeOutputHandle,
+          })
+          window.setTimeout(() => {
+            props.updateNodeInternals?.(nodeId)
+            props.updateNodeInternals?.(newNode.id)
+          }, 200)
+        })
+      } else {
+        actions.setNodes([...values.nodes, newNode])
+        window.requestAnimationFrame(() => {
+          actions.addEdge({
+            id: uuidv4(),
+            target: nodeId,
+            targetHandle: handleId,
+            source: newNode.id,
+            sourceHandle: newNodeOutputHandle,
+          })
+          window.setTimeout(() => {
+            props.updateNodeInternals?.(nodeId)
+            props.updateNodeInternals?.(newNode.id)
+          }, 200)
+        })
       }
     },
     applyTemplate: () => {

@@ -8,7 +8,7 @@ import { Select } from '../../../../components/Select'
 import { configFieldTypes } from '../../../../types'
 import { Button } from '../../../../components/Button'
 import { Tooltip } from '../../../../components/Tooltip'
-import { fieldTypeToGetter } from '../../../../utils/fieldTypes'
+import { stateFieldAccess } from '../../../../utils/fieldTypes'
 import { ClipboardDocumentIcon } from '@heroicons/react/24/outline'
 import copy from 'copy-to-clipboard'
 import { TextArea } from '../../../../components/TextArea'
@@ -183,13 +183,7 @@ export function SceneState(): JSX.Element {
                 <div
                   className="bg-gray-900 p-2 dndnode cursor-move"
                   draggable
-                  onDragStart={(event) =>
-                    onDragStart(
-                      event,
-                      'code',
-                      `state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
-                    )
-                  }
+                  onDragStart={(event) => onDragStart(event, 'code', stateFieldAccess(field, 'state'))}
                 >
                   <div className="flex items-center gap-1 justify-between max-w-full w-full">
                     <div className="flex items-center gap-1 max-w-full w-full overflow-hidden">
@@ -206,15 +200,9 @@ export function SceneState(): JSX.Element {
                   <div className="flex items-center gap-1 max-w-full w-full overflow-hidden">
                     <ClipboardDocumentIcon
                       className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block"
-                      onClick={() =>
-                        copy(
-                          `state{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
-                        )
-                      }
+                      onClick={() => copy(stateFieldAccess(field))}
                     />
-                    <code className="text-sm text-gray-400 break-words truncate">{`state{"${field.name}"}${
-                      fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
-                    }`}</code>
+                    <code className="text-sm text-gray-400 break-words truncate">{stateFieldAccess(field)}</code>
                   </div>
                   <div className="flex gap-2 mt-1">
                     <Tooltip

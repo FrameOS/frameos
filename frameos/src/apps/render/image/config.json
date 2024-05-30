@@ -1,5 +1,5 @@
 {
-    "name": "Render Image",
+    "name": "Image",
     "description": "Render an image onto a canvas",
     "category": "render",
     "version": "1.0.0",

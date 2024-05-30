@@ -55,30 +55,33 @@ function cleanBackgroundColor(color: string): string {
 }
 
 const legacyAppMapping: Record<string, string> = {
+  // image data apps. todo: convert, migrate to two nodes
   downloadImage: 'legacy/downloadImage',
-  clock: 'render/clock',
-  color: 'legacy/color',
-  frameOSGallery: 'legacy/frameOSGallery',
-  gradient: 'legacy/gradient',
-  haSensor: 'legacy/haSensor',
-  localImage: 'legacy/localImage',
-  openai: 'legacy/openai',
-  openaiText: 'legacy/openaiText',
-  qr: 'render/qr',
-  'legacy/qr': 'render/qr',
   unsplash: 'legacy/unsplash',
-  breakIfRendering: 'logic/breakIfRendering',
-  code: 'logic/code',
-  ifElse: 'logic/ifElse',
-  renderImage: 'render/image',
-  'logic/renderImage': 'render/image',
+  frameOSGallery: 'legacy/frameOSGallery',
+  openai: 'legacy/openai',
   resize: 'logic/resize',
   rotate: 'logic/rotate',
-  setAsState: 'logic/setAsState',
-  split: 'render/split',
+  localImage: 'legacy/localImage',
+  qr: 'render/qr',
+  color: 'legacy/color',
+  gradient: 'legacy/gradient',
+
+  // text data apps
+  haSensor: 'legacy/haSensor',
+  openaiText: 'legacy/openaiText',
+  clock: 'render/clock',
+
+  // render app
   text: 'render/text',
-  'logic/text': 'render/text',
-  'legacy/clock': 'render/clock',
+  renderImage: 'render/image',
+  split: 'render/split', // todo: rename to grid
+
+  // logic app
+  setAsState: 'logic/setAsState',
+  breakIfRendering: 'logic/breakIfRendering',
+  code: 'logic/code', // todo: clean up
+  ifElse: 'logic/ifElse',
 }
 
 export function sanitizeNodes(nodes: DiagramNode[]): DiagramNode[] {

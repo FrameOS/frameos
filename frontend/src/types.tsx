@@ -96,7 +96,18 @@ export const configFieldTypes = [
   'image',
 ] as const
 
-type ConfigFieldType = 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'json' | 'node' | 'scene' | 'image'
+type ConfigFieldType =
+  | 'string'
+  | 'text'
+  | 'float'
+  | 'integer'
+  | 'boolean'
+  | 'color'
+  | 'select'
+  | 'json'
+  | 'node'
+  | 'scene'
+  | 'image'
 
 export interface ConfigField {
   /** Unique config field keyword */

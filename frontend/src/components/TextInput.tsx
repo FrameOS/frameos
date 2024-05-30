@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { forwardRef } from 'react'
 import { clsx } from 'clsx'
 
 export interface TextInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> {
@@ -6,7 +6,10 @@ export interface TextInputProps extends Omit<React.InputHTMLAttributes<HTMLInput
   theme?: 'node' | 'full'
 }
 
-export function TextInput({ className, onChange, theme, type, ...props }: TextInputProps) {
+export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(function TextInput(
+  { className, onChange, theme, type, ...props }: TextInputProps,
+  ref
+) {
   return (
     <input
       className={clsx(
@@ -18,7 +21,8 @@ export function TextInput({ className, onChange, theme, type, ...props }: TextIn
       size={theme === 'node' ? 15 : 20}
       type={type ?? 'text'}
       onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+      ref={ref}
       {...props}
     />
   )
-}
+})

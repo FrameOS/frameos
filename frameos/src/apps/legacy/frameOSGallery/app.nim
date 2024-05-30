@@ -31,7 +31,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
     cachedUrl: "",
   )
 
-proc run*(self: App, context: ExecutionContext): AppOutput =
+proc run*(self: App, context: ExecutionContext) =
   let url = &"{BASE_URL}?category={self.appConfig.category}"
 
   self.scene.logger.log(%*{"event": "legacy/frameOSGallery", "category": self.appConfig.category})

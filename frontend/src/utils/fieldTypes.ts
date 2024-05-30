@@ -1,3 +1,5 @@
+import { StateField } from '../types'
+
 export const fieldTypeToGetter: Record<string, string> = {
   integer: '.getInt()',
   string: '.getStr()',
@@ -6,4 +8,8 @@ export const fieldTypeToGetter: Record<string, string> = {
   float: '.getFloat()',
   select: '.getStr()',
   json: '',
+}
+
+export function stateFieldAccess(field: StateField, objectName = 'state'): string {
+  return `${objectName}{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
 }

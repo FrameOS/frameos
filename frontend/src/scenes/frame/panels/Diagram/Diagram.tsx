@@ -24,9 +24,8 @@ import { AppNode } from './AppNode'
 import { CodeNode } from './CodeNode'
 import { EventNode } from './EventNode'
 import { Button, buttonColor, buttonSize } from '../../../../components/Button'
-import { diagramLogic, DiagramLogicProps } from './diagramLogic'
-import { v4 as uuidv4 } from 'uuid'
-import { DiagramNode, NodeType, EdgeType, CodeNodeData } from '../../../../types'
+import { diagramLogic, DiagramLogicProps, getNewField } from './diagramLogic'
+import { NodeType, EdgeType, CodeNodeData } from '../../../../types'
 import { AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
 import { Tooltip } from '../../../../components/Tooltip'
 import { SceneSettings } from '../Scenes/SceneSettings'
@@ -35,6 +34,7 @@ import clsx from 'clsx'
 import { CodeNodeEdge } from './CodeNodeEdge'
 import { SceneDropDown } from '../Scenes/SceneDropDown'
 import { AppNodeEdge } from './AppNodeEdge'
+import { NewNodePicker } from './NewNodePicker'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -58,26 +58,15 @@ interface ConnectingNode {
   handleId: string | null
 }
 
-function getNewField(codeFields: string[]): string {
-  let newField = 'arg'
-  let i = 1
-  while (codeFields.includes(newField)) {
-    newField = `arg${i}`
-    i++
-  }
-  return newField
-}
-
 function Diagram_({ sceneId }: DiagramProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
   const { frameId } = useValues(frameLogic)
-  const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
-  const { nodes, nodesWithStyle, edges, fitViewCounter } = useValues(diagramLogic(diagramLogicProps))
-  const { onEdgesChange, onNodesChange, setNodes, addEdge, fitDiagramView, keywordDropped } = useActions(
-    diagramLogic(diagramLogicProps)
-  )
   const updateNodeInternals = useUpdateNodeInternals()
+  const diagramLogicProps: DiagramLogicProps = { frameId, sceneId, updateNodeInternals }
+  const { nodes, nodesWithStyle, edges, fitViewCounter, newNodePicker } = useValues(diagramLogic(diagramLogicProps))
+  const { onEdgesChange, onNodesChange, setNodes, addEdge, fitDiagramView, keywordDropped, openNewNodePicker } =
+    useActions(diagramLogic(diagramLogicProps))
 
   const onDragOver = useCallback((event: any) => {
     event.preventDefault()
@@ -153,67 +142,22 @@ function Diagram_({ sceneId }: DiagramProps) {
         ) {
           return
         }
-        event.preventDefault()
-        const newNodeId = uuidv4()
-        const inputCoords = {
+        if (!nodeId) {
+          return
+        }
+
+        const eventCoords = {
           x: 'clientX' in event ? event.clientX : event.touches[0].clientX,
           y: 'clientY' in event ? event.clientY : event.touches[0].clientY,
         }
-        inputCoords.x -= reactFlowBounds?.left ?? 0
-        inputCoords.y -= reactFlowBounds?.top ?? 0
-
+        const inputCoords = {
+          x: eventCoords.x - (reactFlowBounds?.left ?? 0),
+          y: eventCoords.y - (reactFlowBounds?.top ?? 0),
+        }
         const position = reactFlowInstance?.project(inputCoords) ?? { x: 0, y: 0 }
-        position.x -= 20
-        position.y -= 120
-        const newNode: DiagramNode = {
-          id: newNodeId,
-          position: position,
-          type: 'code',
-          data: { code: '', codeFields: [] },
-          style: {
-            width: 300,
-            height: 130,
-          },
-        }
 
-        if (handleId === 'codeField/+') {
-          const codeFields = (nodes.find((node) => node.id === nodeId)?.data as CodeNodeData)?.codeFields ?? []
-          let newField = getNewField(codeFields)
-          setNodes([
-            ...nodes.map((node) =>
-              node.id === nodeId ? { ...node, data: { ...node.data, codeFields: [...codeFields, newField] } } : node
-            ),
-            newNode,
-          ])
-          window.requestAnimationFrame(() => {
-            if (nodeId) {
-              updateNodeInternals(nodeId)
-            }
-            updateNodeInternals(newNodeId)
-            addEdge({
-              id: uuidv4(),
-              target: nodeId,
-              targetHandle: `codeField/${newField}`,
-              source: newNodeId,
-              sourceHandle: 'fieldOutput',
-            })
-          })
-        } else {
-          setNodes([...nodes, newNode])
-          window.requestAnimationFrame(() => {
-            if (nodeId) {
-              updateNodeInternals(nodeId)
-            }
-            updateNodeInternals(newNodeId)
-            addEdge({
-              id: uuidv4(),
-              target: nodeId,
-              targetHandle: handleId,
-              source: newNodeId,
-              sourceHandle: 'fieldOutput',
-            })
-          })
-        }
+        event.preventDefault()
+        openNewNodePicker(eventCoords.x, eventCoords.y, position.x, position.y, nodeId, handleId, handleType)
       }
     },
     [reactFlowInstance, nodes, edges, setNodes, addEdge]
@@ -261,6 +205,7 @@ function Diagram_({ sceneId }: DiagramProps) {
           </div>
         </ReactFlow>
       </div>
+      {newNodePicker && <NewNodePicker />}
     </BindLogic>
   )
 }
