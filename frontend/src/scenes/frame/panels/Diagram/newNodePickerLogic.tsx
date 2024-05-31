@@ -221,7 +221,10 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             options.push({ label: 'Error: unknown new node data type', value: 'app' })
             console.log(`Unknown handle type ${handleType} or handle id ${handleId}. Node: ${nodeId}`)
           }
-        } else if (handleType === 'source' && handleId === 'next') {
+        } else if (
+          (handleType === 'source' && handleId === 'next') ||
+          (handleType === 'target' && handleId === 'prev')
+        ) {
           for (const [keyword, app] of Object.entries(apps)) {
             if (!app.output || app.output.length == 0) {
               options.push({ label: `${app.category ?? 'app'}: ${app.name}`, value: `app/${keyword}` })
@@ -293,10 +296,14 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         newNode.data = { code: value.startsWith('code/') ? value.substring(5) : '', codeFields: [] }
       } else if (value.startsWith('app/')) {
         const keyword = value.substring(4)
-        newNode.position.x -= 20
-        if (newNodeOutputHandle === 'prev' || newNodeOutputHandle === 'next') {
+        if (newNodeOutputHandle === 'prev') {
+          newNode.position.x -= 20
+          newNode.position.y -= 20
+        } else if (newNodeOutputHandle === 'next') {
+          newNode.position.x -= 270
           newNode.position.y -= 20
         } else {
+          newNode.position.x -= 20
           newNode.position.y -= 100
           const app = values.apps[keyword]
           for (const field of app.fields ?? []) {
