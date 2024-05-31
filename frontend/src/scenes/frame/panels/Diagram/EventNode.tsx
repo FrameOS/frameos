@@ -94,13 +94,6 @@ export function EventNode(props: NodeProps): JSX.Element {
               textShadow: `-1px 0 black, 0 1px black, 1px 0 black, 0 -1px black, 0 0 5px black`,
             }}
           >
-            <Handle
-              type="source"
-              position={Position.Right}
-              id={'code/context.image'}
-              title="context.image"
-              style={{ position: 'absolute', transform: 'none', right: 0, bottom: 0, background: '#000000' }}
-            />
             <div className="text-2xl mb-1">{`${width}x${height}`}</div>
             {scene?.settings?.refreshInterval ? (
               <div className="text-xl">

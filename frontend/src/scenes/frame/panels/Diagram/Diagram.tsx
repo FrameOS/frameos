@@ -158,7 +158,7 @@ function Diagram_({ sceneId }: DiagramProps) {
 
   useEffect(() => {
     if (fitViewCounter > 0) {
-      reactFlowInstance?.fitView({ maxZoom: 1 })
+      reactFlowInstance?.fitView({ maxZoom: 1, padding: 0.2 })
     }
   }, [fitViewCounter, reactFlowInstance])
 

@@ -221,14 +221,49 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             options.push({ label: 'Error: unknown new node data type', value: 'app' })
             console.log(`Unknown handle type ${handleType} or handle id ${handleId}. Node: ${nodeId}`)
           }
+        } else if (handleType === 'source' && handleId === 'next') {
+          for (const [keyword, app] of Object.entries(apps)) {
+            if (!app.output || app.output.length == 0) {
+              options.push({ label: `${app.category ?? 'app'}: ${app.name}`, value: `app/${keyword}` })
+            }
+          }
         } else {
-          options.push({ label: 'Error: unknown everything', value: 'app' })
+          options.push({ label: `handleId: ${handleId}, handleType: ${handleType}`, value: 'app' })
           console.log(`Unknown handle type ${handleType} or handle id ${handleId}. Node: ${nodeId}`)
         }
 
         return options
       },
       { resultEqualityCheck: equal },
+    ],
+    searchPlaceholder: [
+      (s) => [s.newNodePicker, s.targetFieldName, s.newNodeHandleDataType],
+      (newNodePicker, targetFieldName, newNodeHandleDataType): string => {
+        if (!newNodePicker) {
+          return 'New node'
+        }
+        const { handleId, handleType } = newNodePicker
+        if (handleType === 'source' && handleId === 'next') {
+          return 'Select next node'
+        }
+        if (handleType === 'target' && handleId === 'prev') {
+          return 'Select previous node'
+        }
+        return `${targetFieldName ?? 'select'}${newNodeHandleDataType ? ` (${newNodeHandleDataType})` : ''}`
+      },
+    ],
+    placement: [
+      (s) => [s.newNodePicker],
+      (newNodePicker): string => {
+        if (!newNodePicker) {
+          return 'New node'
+        }
+        const { handleId, handleType } = newNodePicker
+        if (handleType === 'source') {
+          return 'bottom-start'
+        }
+        return 'bottom-start'
+      },
     ],
   }),
   listeners(({ actions, values, props }) => ({
@@ -244,21 +279,32 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       }
       let newNodeOutputHandle = 'fieldOutput'
 
+      if (handleType === 'source' && handleId === 'next') {
+        newNodeOutputHandle = 'prev'
+      }
+      if (handleType === 'target' && handleId === 'prev') {
+        newNodeOutputHandle = 'next'
+      }
+
       if (value === 'code' || value.startsWith('code/')) {
         newNode.position.x -= 20
-        newNode.position.y -= 100
+        newNode.position.y -= 120
         newNode.type = 'code'
         newNode.data = { code: value.startsWith('code/') ? value.substring(5) : '', codeFields: [] }
       } else if (value.startsWith('app/')) {
-        newNode.position.x -= 20
-        newNode.position.y -= 100
         const keyword = value.substring(4)
-        const app = values.apps[keyword]
+        newNode.position.x -= 20
+        if (newNodeOutputHandle === 'prev' || newNodeOutputHandle === 'next') {
+          newNode.position.y -= 20
+        } else {
+          newNode.position.y -= 100
+          const app = values.apps[keyword]
+          for (const field of app.fields ?? []) {
+            newNode.position.y -= 30 + ('type' in field && field.type === 'text' ? (field.rows ?? 3) * 20 : 0)
+          }
+        }
         newNode.type = 'app'
         newNode.data = { keyword, config: {} }
-        for (const field of app.fields ?? []) {
-          newNode.position.y -= 30 + ('type' in field && field.type === 'text' ? 60 : 0)
-        }
       } else {
         return
       }
@@ -288,13 +334,23 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       } else {
         actions.setNodes([...values.nodes, newNode])
         window.requestAnimationFrame(() => {
-          actions.addEdge({
-            id: uuidv4(),
-            target: nodeId,
-            targetHandle: handleId,
-            source: newNode.id,
-            sourceHandle: newNodeOutputHandle,
-          })
+          if (handleType === 'source') {
+            actions.addEdge({
+              id: uuidv4(),
+              source: nodeId,
+              sourceHandle: handleId,
+              target: newNode.id,
+              targetHandle: newNodeOutputHandle,
+            })
+          } else {
+            actions.addEdge({
+              id: uuidv4(),
+              target: nodeId,
+              targetHandle: handleId,
+              source: newNode.id,
+              sourceHandle: newNodeOutputHandle,
+            })
+          }
           window.setTimeout(() => {
             props.updateNodeInternals?.(nodeId)
             props.updateNodeInternals?.(newNode.id)

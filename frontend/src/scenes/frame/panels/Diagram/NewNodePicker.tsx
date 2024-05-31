@@ -11,14 +11,14 @@ import { newNodePickerLogic } from './newNodePickerLogic'
 export function NewNodePicker() {
   const { sceneId, frameId } = useValues(diagramLogic)
   const { closeNewNodePicker, selectNewNodeOption } = useActions(newNodePickerLogic({ sceneId, frameId }))
-  const { targetFieldName, newNodePicker, newNodeOptions, newNodePickerIndex, newNodeHandleDataType } = useValues(
+  const { searchPlaceholder, placement, newNodePicker, newNodeOptions, newNodePickerIndex } = useValues(
     newNodePickerLogic({ sceneId, frameId })
   )
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [searchElement, setSearchElement] = useState<HTMLInputElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
   const [searchValue, setSearchValue] = useState('')
-  const { styles, attributes } = usePopper(referenceElement, popperElement, { strategy: 'fixed' })
+  const { styles, attributes } = usePopper(referenceElement, popperElement, { strategy: 'fixed', placement })
 
   useEffect(() => {
     if (!referenceElement) return
@@ -47,7 +47,7 @@ export function NewNodePicker() {
             style={{
               position: 'fixed',
               top: y - 60,
-              left: x,
+              left: x - 5,
             }}
           />
           {ReactDOM.createPortal(
@@ -62,9 +62,7 @@ export function NewNodePicker() {
                 >
                   <div>
                     <TextInput
-                      placeholder={`${targetFieldName ?? 'select'}${
-                        newNodeHandleDataType ? ` (${newNodeHandleDataType})` : ''
-                      }`}
+                      placeholder={searchPlaceholder}
                       className="w-full"
                       ref={setSearchElement}
                       value={searchValue}
