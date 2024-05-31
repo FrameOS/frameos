@@ -112,8 +112,8 @@ export function EventNode(props: NodeProps): JSX.Element {
       ) : null}
       {fields.length > 0 ? (
         <div className="p-1">
-          {fields.map((field: StateField) => (
-            <div className="flex items-center justify-end space-x-1 w-full">
+          {fields.map((field: StateField, i) => (
+            <div key={i} className="flex items-center justify-end space-x-1 w-full">
               <code className="text-xs mr-2 text-gray-400 flex-1">{field.type}</code>
               <div title={field.label}>{field.name}</div>
               <ClipboardIcon

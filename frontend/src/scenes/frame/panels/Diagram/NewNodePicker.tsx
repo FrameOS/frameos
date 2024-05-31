@@ -1,15 +1,19 @@
-import { Menu, Transition } from '@headlessui/react'
+import { Menu } from '@headlessui/react'
 import ReactDOM from 'react-dom'
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePopper } from 'react-popper'
 import { useActions, useValues } from 'kea'
 import { diagramLogic } from './diagramLogic'
 import clsx from 'clsx'
 import { TextInput } from '../../../../components/TextInput'
+import { newNodePickerLogic } from './newNodePickerLogic'
 
 export function NewNodePicker() {
-  const { closeNewNodePicker, selectNewNodeOption } = useActions(diagramLogic)
-  const { newNodePicker, newNodeOptions, newNodePickerIndex, newNodeHandleDataType } = useValues(diagramLogic)
+  const { sceneId, frameId } = useValues(diagramLogic)
+  const { closeNewNodePicker, selectNewNodeOption } = useActions(newNodePickerLogic({ sceneId, frameId }))
+  const { targetFieldName, newNodePicker, newNodeOptions, newNodePickerIndex, newNodeHandleDataType } = useValues(
+    newNodePickerLogic({ sceneId, frameId })
+  )
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [searchElement, setSearchElement] = useState<HTMLInputElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
@@ -58,7 +62,9 @@ export function NewNodePicker() {
                 >
                   <div>
                     <TextInput
-                      placeholder={`Add${newNodeHandleDataType ? ` a ${newNodeHandleDataType}` : ''}...`}
+                      placeholder={`${targetFieldName ?? 'select'}${
+                        newNodeHandleDataType ? ` (${newNodeHandleDataType})` : ''
+                      }`}
                       className="w-full"
                       ref={setSearchElement}
                       value={searchValue}
@@ -75,7 +81,6 @@ export function NewNodePicker() {
                           if (newNodePicker) {
                             selectNewNodeOption(newNodePicker, options[0].value, options[0].label)
                           }
-                          console.log({ label: options[0].label, value: options[0].value })
                         }
                       }}
                     />

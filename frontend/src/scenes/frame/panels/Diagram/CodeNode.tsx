@@ -37,8 +37,8 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
             'flex w-full items-center'
           )}
         >
-          {[...(data.codeFields ?? []), '+'].map((codeField) => (
-            <div className="flex gap-1 items-center">
+          {[...(data.codeFields ?? []), '+'].map((codeField, i) => (
+            <div key={i} className="flex gap-1 items-center">
               <Handle
                 type="target"
                 position={Position.Top}

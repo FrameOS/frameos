@@ -300,8 +300,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
         {output ? (
           <div className={clsx(titleClassName, 'pb-0.5')}>
             <div className="flex gap-2 items-center">
-              {output.map((config) => (
-                <div className="flex gap-1 items-center">
+              {output.map((config, i) => (
+                <div className="flex gap-1 items-center" key={i}>
                   <Handle
                     type="source"
                     position={Position.Bottom}

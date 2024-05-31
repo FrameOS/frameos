@@ -24,7 +24,7 @@ import { AppNode } from './AppNode'
 import { CodeNode } from './CodeNode'
 import { EventNode } from './EventNode'
 import { Button, buttonColor, buttonSize } from '../../../../components/Button'
-import { diagramLogic, DiagramLogicProps, getNewField } from './diagramLogic'
+import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { NodeType, EdgeType, CodeNodeData } from '../../../../types'
 import { AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
 import { Tooltip } from '../../../../components/Tooltip'
@@ -35,6 +35,7 @@ import { CodeNodeEdge } from './CodeNodeEdge'
 import { SceneDropDown } from '../Scenes/SceneDropDown'
 import { AppNodeEdge } from './AppNodeEdge'
 import { NewNodePicker } from './NewNodePicker'
+import { getNewField, newNodePickerLogic } from './newNodePickerLogic'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -52,6 +53,7 @@ const edgeTypes: Record<EdgeType, (props: EdgeProps) => JSX.Element> = {
 interface DiagramProps {
   sceneId: string
 }
+
 interface ConnectingNode {
   nodeId: string | null
   handleType: string | null
@@ -64,9 +66,12 @@ function Diagram_({ sceneId }: DiagramProps) {
   const { frameId } = useValues(frameLogic)
   const updateNodeInternals = useUpdateNodeInternals()
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId, updateNodeInternals }
-  const { nodes, nodesWithStyle, edges, fitViewCounter, newNodePicker } = useValues(diagramLogic(diagramLogicProps))
-  const { onEdgesChange, onNodesChange, setNodes, addEdge, fitDiagramView, keywordDropped, openNewNodePicker } =
-    useActions(diagramLogic(diagramLogicProps))
+  const { nodes, nodesWithStyle, edges, fitViewCounter } = useValues(diagramLogic(diagramLogicProps))
+  const { onEdgesChange, onNodesChange, setNodes, addEdge, fitDiagramView, keywordDropped } = useActions(
+    diagramLogic(diagramLogicProps)
+  )
+  const { newNodePicker } = useValues(newNodePickerLogic(diagramLogicProps))
+  const { openNewNodePicker } = useActions(newNodePickerLogic(diagramLogicProps))
 
   const onDragOver = useCallback((event: any) => {
     event.preventDefault()
@@ -130,22 +135,10 @@ function Diagram_({ sceneId }: DiagramProps) {
       if (!connectingNode.current) return
 
       const { nodeId, handleId, handleType } = connectingNode.current
-      const targetIsPane = (event.target as HTMLElement).classList.contains('react-flow__pane')
+      const targetIsDiagramCanvas = (event.target as HTMLElement).classList.contains('react-flow__pane')
       const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
 
-      // dropped onto the canvas
-      if (targetIsPane) {
-        // we only care about code nodes dropped from field inputs and code nodes
-        if (
-          !(handleType === 'target' && handleId?.startsWith('fieldInput/')) &&
-          !(handleType === 'target' && handleId?.startsWith('codeField/'))
-        ) {
-          return
-        }
-        if (!nodeId) {
-          return
-        }
-
+      if (targetIsDiagramCanvas) {
         const eventCoords = {
           x: 'clientX' in event ? event.clientX : event.touches[0].clientX,
           y: 'clientY' in event ? event.clientY : event.touches[0].clientY,
