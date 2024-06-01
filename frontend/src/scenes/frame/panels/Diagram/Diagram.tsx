@@ -138,7 +138,7 @@ function Diagram_({ sceneId }: DiagramProps) {
       const targetIsDiagramCanvas = (event.target as HTMLElement).classList.contains('react-flow__pane')
       const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
 
-      if (targetIsDiagramCanvas) {
+      if (nodeId && handleId && handleType && targetIsDiagramCanvas) {
         const eventCoords = {
           x: 'clientX' in event ? event.clientX : event.touches[0].clientX,
           y: 'clientY' in event ? event.clientY : event.touches[0].clientY,

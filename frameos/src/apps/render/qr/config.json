@@ -1,7 +1,7 @@
 {
   "name": "QR Code",
   "description": "Display QR codes. Default to link to self.",
-  "category": "legacy",
+  "category": "render",
   "version": "1.0.0",
   "fields": [
     {

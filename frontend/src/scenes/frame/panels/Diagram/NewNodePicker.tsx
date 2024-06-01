@@ -10,15 +10,19 @@ import { newNodePickerLogic } from './newNodePickerLogic'
 
 export function NewNodePicker() {
   const { sceneId, frameId } = useValues(diagramLogic)
-  const { closeNewNodePicker, selectNewNodeOption } = useActions(newNodePickerLogic({ sceneId, frameId }))
-  const { searchPlaceholder, placement, newNodePicker, newNodeOptions, newNodePickerIndex } = useValues(
+  const { closeNewNodePicker, selectNewNodeOption, setSearchValue } = useActions(
+    newNodePickerLogic({ sceneId, frameId })
+  )
+  const { searchPlaceholder, placement, newNodePicker, newNodeOptions, newNodePickerIndex, searchValue } = useValues(
     newNodePickerLogic({ sceneId, frameId })
   )
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [searchElement, setSearchElement] = useState<HTMLInputElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
-  const [searchValue, setSearchValue] = useState('')
-  const { styles, attributes } = usePopper(referenceElement, popperElement, { strategy: 'fixed', placement })
+  const { styles, attributes } = usePopper(referenceElement, popperElement, {
+    strategy: 'fixed',
+    placement: placement as any,
+  })
 
   useEffect(() => {
     if (!referenceElement) return
@@ -30,11 +34,6 @@ export function NewNodePicker() {
     searchElement.focus()
   }, [searchElement])
 
-  const lowerSearch = searchValue.toLowerCase()
-
-  const options = newNodeOptions.filter(
-    ({ value, label }) => value.toLowerCase().includes(lowerSearch) || label.includes(lowerSearch)
-  )
   const x = newNodePicker?.screenX ?? 0
   const y = newNodePicker?.screenY ?? 0
 
@@ -72,19 +71,19 @@ export function NewNodePicker() {
                         if (activeOptions && activeOptions.length > 0) {
                           return // The button click will handle the selection
                         }
-                        if (e.key === 'Enter' && options.length >= 1) {
+                        if (e.key === 'Enter' && Object.keys(newNodeOptions).length >= 1) {
                           e.preventDefault()
                           close()
                           closeNewNodePicker()
                           if (newNodePicker) {
-                            selectNewNodeOption(newNodePicker, options[0].value, options[0].label)
+                            selectNewNodeOption(newNodePicker, newNodeOptions[0].value, newNodeOptions[0].label)
                           }
                         }
                       }}
                     />
                   </div>
                   <div className="py-1" style={{ maxHeight: 200, overflowX: 'auto', overflowY: 'auto' }}>
-                    {options.map(({ label, value }) => (
+                    {newNodeOptions.map(({ label, value }) => (
                       <Menu.Item key={value || label}>
                         {({ active }) => (
                           <a

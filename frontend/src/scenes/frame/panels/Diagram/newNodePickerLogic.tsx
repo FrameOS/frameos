@@ -9,6 +9,9 @@ import { appsModel } from '../../../../models/appsModel'
 import { Option } from '../../../../components/Select'
 import { stateFieldAccess } from '../../../../utils/fieldTypes'
 import { diagramLogic } from './diagramLogic'
+import Fuse from 'fuse.js'
+
+export interface LocalFuse extends Fuse<Option> {}
 
 export interface NewNodePickerLogicProps {
   frameId: number
@@ -101,6 +104,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       label,
     }),
     closeNewNodePicker: true,
+    setSearchValue: (searchValue: string) => ({ searchValue }),
   }),
   reducers({
     newNodePicker: [
@@ -124,13 +128,19 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         openNewNodePicker: (state) => state + 1,
       },
     ],
+    searchValue: [
+      '',
+      {
+        setSearchValue: (_, { searchValue }) => searchValue,
+      },
+    ],
   }),
   selectors({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
     sceneId: [() => [(_, props) => props.sceneId], (sceneId) => sceneId],
     newNodeHandleDataType: [
-      (s) => [s.newNodePicker, s.nodesById, s.apps, s.scene],
-      (newNodePicker, nodesById, apps, scene): string | null => {
+      (s) => [s.newNodePicker, s.nodesById, s.apps],
+      (newNodePicker, nodesById, apps): string | null => {
         if (!newNodePicker) {
           return null
         }
@@ -163,9 +173,9 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         return null
       },
     ],
-    newNodeOptions: [
-      (s) => [s.newNodePicker, s.nodesById, s.apps, s.scene, s.newNodeHandleDataType],
-      (newNodePicker, nodesById, apps, scene, newNodeHandleDataType): Option[] => {
+    allNewNodeOptions: [
+      (s) => [s.newNodePicker, s.apps, s.scene, s.newNodeHandleDataType],
+      (newNodePicker, apps, scene, newNodeHandleDataType): Option[] => {
         if (!newNodePicker) {
           return []
         }
@@ -217,26 +227,39 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         } else {
           options.push({ label: `handleId: ${handleId}, handleType: ${handleType}`, value: 'app' })
         }
-
-        const priority = ['render', 'logic', 'legacy']
-
-        options.sort((a, b) => {
-          const a1 = a.label.split(':')[0]
-          const b1 = b.label.split(':')[0]
-
-          const aPriority = priority.indexOf(a1)
-          const bPriority = priority.indexOf(b1)
-
-          if (aPriority !== -1 && bPriority === -1) return -1
-          if (aPriority === -1 && bPriority !== -1) return 1
-          if (aPriority !== -1 && bPriority !== -1) return aPriority - bPriority
-
-          return a.label.localeCompare(b.label)
-        })
-
         return options
       },
       { resultEqualityCheck: equal },
+    ],
+    sortedNewNodeOptions: [
+      (s) => [s.allNewNodeOptions],
+      (allNewNodeOptions): Option[] => {
+        const priority: Record<string, Option[]> = { render: [], logic: [], legacy: [], other: [] }
+        for (const option of allNewNodeOptions) {
+          const type = option.label.split(':')[0]
+          if (priority[type]) {
+            priority[type].push(option)
+          } else {
+            priority['other'].push(option)
+          }
+        }
+        return Object.values(priority).flat()
+      },
+    ],
+    fuse: [
+      (s) => [s.allNewNodeOptions],
+      (allNewNodeOptions): LocalFuse => {
+        return new Fuse(allNewNodeOptions, {
+          keys: ['label', 'value'],
+          threshold: 0.3,
+        })
+      },
+    ],
+    newNodeOptions: [
+      (s) => [s.allNewNodeOptions, s.fuse, s.searchValue],
+      (allNewNodeOptions, fuse, searchValue): Option[] => {
+        return searchValue ? fuse.search(searchValue).map((result) => result.item) : allNewNodeOptions
+      },
     ],
     targetFieldName: [
       (s) => [s.newNodePicker],
@@ -376,6 +399,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           }, 200)
         })
       }
+      actions.setSearchValue('')
     },
   })),
 ])
