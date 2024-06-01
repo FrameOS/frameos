@@ -128,19 +128,6 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
   selectors({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
     sceneId: [() => [(_, props) => props.sceneId], (sceneId) => sceneId],
-    targetFieldName: [
-      (s) => [s.newNodePicker],
-      (newNodePicker): string | null => {
-        if (!newNodePicker) {
-          return null
-        }
-        const { handleId, handleType } = newNodePicker
-        if (handleType === 'target' && handleId.startsWith('fieldInput/')) {
-          return handleId.split('/')[1]
-        }
-        return null
-      },
-    ],
     newNodeHandleDataType: [
       (s) => [s.newNodePicker, s.nodesById, s.apps, s.scene],
       (newNodePicker, nodesById, apps, scene): string | null => {
@@ -222,7 +209,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             console.log(`Unknown handle type ${handleType} or handle id ${handleId}. Node: ${nodeId}`)
           }
         } else if (
-          (handleType === 'source' && handleId === 'next') ||
+          (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) ||
           (handleType === 'target' && handleId === 'prev')
         ) {
           for (const [keyword, app] of Object.entries(apps)) {
@@ -239,6 +226,19 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       },
       { resultEqualityCheck: equal },
     ],
+    targetFieldName: [
+      (s) => [s.newNodePicker],
+      (newNodePicker): string | null => {
+        if (!newNodePicker) {
+          return null
+        }
+        const { handleId, handleType } = newNodePicker
+        if (handleType === 'target' && handleId.startsWith('fieldInput/')) {
+          return handleId.split('/')[1]
+        }
+        return null
+      },
+    ],
     searchPlaceholder: [
       (s) => [s.newNodePicker, s.targetFieldName, s.newNodeHandleDataType],
       (newNodePicker, targetFieldName, newNodeHandleDataType): string => {
@@ -246,7 +246,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           return 'New node'
         }
         const { handleId, handleType } = newNodePicker
-        if (handleType === 'source' && handleId === 'next') {
+        if (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) {
           return 'Select next node'
         }
         if (handleType === 'target' && handleId === 'prev') {
@@ -282,7 +282,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       }
       let newNodeOutputHandle = 'fieldOutput'
 
-      if (handleType === 'source' && handleId === 'next') {
+      if (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) {
         newNodeOutputHandle = 'prev'
       }
       if (handleType === 'target' && handleId === 'prev') {
