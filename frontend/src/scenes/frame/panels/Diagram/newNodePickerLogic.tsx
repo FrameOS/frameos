@@ -169,9 +169,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         if (!newNodePicker) {
           return []
         }
-        const { handleId, handleType, nodeId } = newNodePicker
-        const [node] = nodesById[nodeId] ?? []
-        console.log({ node, handleId, handleType, apps })
+        const { handleId, handleType } = newNodePicker
         const options: Option[] = []
 
         // Pulling out a field to the left of an app to specify a custom input
@@ -206,7 +204,6 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             }
           } else {
             options.push({ label: 'Error: unknown new node data type', value: 'app' })
-            console.log(`Unknown handle type ${handleType} or handle id ${handleId}. Node: ${nodeId}`)
           }
         } else if (
           (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) ||
@@ -219,8 +216,23 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           }
         } else {
           options.push({ label: `handleId: ${handleId}, handleType: ${handleType}`, value: 'app' })
-          console.log(`Unknown handle type ${handleType} or handle id ${handleId}. Node: ${nodeId}`)
         }
+
+        const priority = ['render', 'logic', 'legacy']
+
+        options.sort((a, b) => {
+          const a1 = a.label.split(':')[0]
+          const b1 = b.label.split(':')[0]
+
+          const aPriority = priority.indexOf(a1)
+          const bPriority = priority.indexOf(b1)
+
+          if (aPriority !== -1 && bPriority === -1) return -1
+          if (aPriority === -1 && bPriority !== -1) return 1
+          if (aPriority !== -1 && bPriority !== -1) return aPriority - bPriority
+
+          return a.label.localeCompare(b.label)
+        })
 
         return options
       },
