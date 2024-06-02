@@ -246,7 +246,9 @@ export const frameLogic = kea<frameLogicType>([
     applyTemplate: ({ template, replaceScenes }) => {
       if ('scenes' in template) {
         const oldScenes = values.frameForm?.scenes || []
-        const newScenes = duplicateScenes(template.scenes ?? [])
+        const newScenes = duplicateScenes(
+          (template.scenes ?? []).map((scene) => sanitizeScene(scene, values.frameForm))
+        )
         if (newScenes.length === 1) {
           newScenes[0].name = template?.name || newScenes[0].name || 'Untitled scene'
         }

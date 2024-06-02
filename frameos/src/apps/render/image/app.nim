@@ -1,7 +1,6 @@
 import json
 import strformat
 import pixie
-import times
 import options
 import frameos/utils/image
 import frameos/types
@@ -35,4 +34,6 @@ proc run*(self: App, context: ExecutionContext) =
   try:
     scaleAndDrawImage(context.image, self.appConfig.image, self.appConfig.scalingMode)
   except:
-    self.error "An error occurred while downloading image."
+    self.error "An error occurred while rendering image."
+    scaleAndDrawImage(context.image, renderError(context.image.width, context.image.height,
+        "An error occurred while rendering image."), self.appConfig.scalingMode)

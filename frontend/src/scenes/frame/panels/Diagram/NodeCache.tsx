@@ -29,9 +29,9 @@ export function NodeCache(): JSX.Element {
               options={[
                 { value: 'none', label: 'No cache (compute every time)' },
                 { value: 'forever', label: 'Cache forever (till a restart)' },
-                { value: 'duration', label: 'Cache for seconds' },
                 { value: 'key', label: 'Cache until a key changes' },
-                { value: 'keyDuration', label: 'Cache seconds + key' },
+                { value: 'duration', label: 'Cache for a duration' },
+                { value: 'keyDuration', label: 'Cache for a duration + key' },
               ]}
               onChange={(value) =>
                 updateNodeData(node.id, {

@@ -39,3 +39,4 @@ proc run*(self: App, context: ExecutionContext): AppOutput =
     return AppOutput(image: downloadImage(url))
   except:
     self.error "An error occurred while downloading image."
+    return AppOutput(image: renderText("An error occurred while downloading image."))
