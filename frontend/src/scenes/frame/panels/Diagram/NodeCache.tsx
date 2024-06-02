@@ -44,7 +44,7 @@ export function NodeCache(): JSX.Element {
           </div>
           {(data.cacheType === 'duration' || data.cacheType === 'keyDuration') && (
             <div className="space-y-1">
-              <Label>Cache duration in seconds (code, return a float)</Label>
+              <Label>Cache duration in seconds (nim code, return a float)</Label>
               <TextInput
                 value={data.cacheDuration}
                 onChange={(value) => updateNodeData(node.id, { cacheDuration: value })}
@@ -54,14 +54,6 @@ export function NodeCache(): JSX.Element {
           )}
           {(data.cacheType === 'key' || data.cacheType === 'keyDuration') && (
             <>
-              <div className="space-y-1">
-                <Label>Cache key (code, return a {data.cacheKeyDataType ?? 'string'})</Label>
-                <TextInput
-                  value={data.cacheKey}
-                  onChange={(value) => updateNodeData(node.id, { cacheKey: value })}
-                  placeholder='"string"'
-                />
-              </div>
               <div className="space-y-1">
                 <Label>Data type of cache key</Label>
                 <Select
@@ -73,6 +65,14 @@ export function NodeCache(): JSX.Element {
                     { value: 'json', label: 'json' },
                   ]}
                   onChange={(value) => updateNodeData(node.id, { cacheKeyDataType: value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Cache key (nim code)</Label>
+                <TextInput
+                  value={data.cacheKey}
+                  onChange={(value) => updateNodeData(node.id, { cacheKey: value })}
+                  placeholder='"string"'
                 />
               </div>
             </>

@@ -97,7 +97,7 @@ export function EventNode(props: NodeProps): JSX.Element {
             <div className="text-2xl mb-1">{`${width}x${height}`}</div>
             {scene?.settings?.refreshInterval ? (
               <div className="text-xl">
-                {(scene.settings.refreshInterval >= 1 ? 'refresh: ' : '') + showAsFps(scene.settings.refreshInterval)}
+                {(scene.settings.refreshInterval >= 1 ? 'every ' : '') + showAsFps(scene.settings.refreshInterval)}
               </div>
             ) : null}
           </div>

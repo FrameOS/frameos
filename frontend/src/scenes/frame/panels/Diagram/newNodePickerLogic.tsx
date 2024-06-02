@@ -243,22 +243,23 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             priority['other'].push(option)
           }
         }
-        return Object.values(priority).flat()
+        return [...priority['render'], ...priority['logic'], ...priority['legacy'], ...priority['other']]
       },
     ],
     fuse: [
-      (s) => [s.allNewNodeOptions],
-      (allNewNodeOptions): LocalFuse => {
-        return new Fuse(allNewNodeOptions, {
+      (s) => [s.sortedNewNodeOptions],
+      (sortedNewNodeOptions): LocalFuse => {
+        return new Fuse(sortedNewNodeOptions, {
           keys: ['label', 'value'],
           threshold: 0.3,
+          shouldSort: false,
         })
       },
     ],
     newNodeOptions: [
-      (s) => [s.allNewNodeOptions, s.fuse, s.searchValue],
-      (allNewNodeOptions, fuse, searchValue): Option[] => {
-        return searchValue ? fuse.search(searchValue).map((result) => result.item) : allNewNodeOptions
+      (s) => [s.sortedNewNodeOptions, s.fuse, s.searchValue],
+      (sortedNewNodeOptions, fuse, searchValue): Option[] => {
+        return searchValue ? fuse.search(searchValue).map((result) => result.item) : sortedNewNodeOptions
       },
     ],
     targetFieldName: [
