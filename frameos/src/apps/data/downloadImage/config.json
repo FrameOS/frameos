@@ -1,6 +1,6 @@
 {
-    "name": "Fetch Image",
-    "description": "Fetch image from an URL",
+    "name": "Download Image",
+    "description": "Download image from an URL",
     "category": "data",
     "version": "1.0.0",
     "fields": [
