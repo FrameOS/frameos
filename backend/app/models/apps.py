@@ -24,8 +24,8 @@ def get_app_configs() -> dict[str, dict]:
     return configs
 
 
-def get_local_frame_apps() -> List[str]:
-    clean_apps: List[str] = []
+def get_local_frame_apps() -> list[str]:
+    clean_apps: list[str] = []
     for category in os.listdir(local_apps_path):
         category_app_path = os.path.join(local_apps_path, category)
         if os.path.isdir(category_app_path):

@@ -29,7 +29,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
 
 class SceneWriter:
     events_schema = get_events_schema()
-    available_apps = get_local_frame_apps()
+    available_apps: list[str]
     scene_id: str
     nodes: list
     nodes_by_id: dict
@@ -55,6 +55,7 @@ class SceneWriter:
     cache_fields: list[str]
 
     def __init__(self, frame: Frame, scene: dict):
+        self.available_apps = get_local_frame_apps()
         self.frame = frame
         self.scene = scene
         self.scene_id = scene.get("id", "default")
