@@ -1,5 +1,5 @@
-import pixie, times, options, json, strformat
-from frameos/utils/image import downloadImage, scaleAndDrawImage
+import pixie, options, json, strformat
+import frameos/utils/image
 import frameos/types
 
 const BASE_URL = "https://gallery.frameos.net/image"
@@ -7,8 +7,7 @@ const BASE_URL = "https://gallery.frameos.net/image"
 type
   AppConfig* = object
     category*: string
-    scalingMode*: string
-    cacheSeconds*: float
+    categoryOther*: string
 
   App* = ref object
     nodeId*: NodeId
@@ -32,6 +31,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   )
 
 proc run*(self: App, context: ExecutionContext): AppOutput =
-  self.scene.logger.log(%*{"event": "legacy/frameOSGallery", "category": self.appConfig.category})
-  let url = &"{BASE_URL}?category={self.appConfig.category}"
+  let category = if self.appConfig.category == "other": self.appConfig.categoryOther else: self.appConfig.category
+  self.scene.logger.log(%*{"event": "legacy/frameOSGallery", "category": category})
+  let url = &"{BASE_URL}?category={category}"
   result = AppOutput(image: downloadImage(url))

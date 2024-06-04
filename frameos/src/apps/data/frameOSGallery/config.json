@@ -11,10 +11,18 @@
         {
             "name": "category",
             "type": "select",
-            "options": ["building-art-styles", "cute", "cyberpunk-europe", "masterpieces", "space-gallery", "space-odyssey"],
+            "options": ["building-art-styles", "cute", "cyberpunk-europe", "masterpieces", "space-gallery", "space-odyssey", "other"],
             "value": "cute",
             "required": false,
             "label": "Category"
+        },
+        {
+            "name": "categoryOther",
+            "type": "string",
+            "value": "",
+            "required": false,
+            "label": "Category (if other)",
+            "placeholder": ""
         }
     ],
     "output": [

@@ -1,7 +1,7 @@
 import pixie, options, times
 
 import frameos/types
-from frameos/utils/font import getDefaultTypeface, newFont
+import frameos/utils/font
 
 type
   AppConfig* = object
