@@ -9,6 +9,9 @@ type
     category*: string
     categoryOther*: string
 
+  AppOutput* = object
+    image*: Image
+
   App* = ref object
     nodeId*: NodeId
     scene*: FrameScene
@@ -18,9 +21,6 @@ type
     cacheExpiry: float
     cachedImage: Option[Image]
     cachedUrl: string
-
-  AppOutput* = object
-    image*: Image
 
 proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(

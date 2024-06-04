@@ -13,16 +13,16 @@
         "placeholder": ""
       },
       {
-          "name": "valueString",
-          "type": "string",
-          "required": false,
-          "label": "Value as a string"
-        },
-        {
-          "name": "valueJson",
-          "type": "json",
-          "required": false,
-          "label": "Value as a JsonNode"
-        }
+        "name": "valueString",
+        "type": "string",
+        "required": false,
+        "label": "Value as a string"
+      },
+      {
+        "name": "valueJson",
+        "type": "json",
+        "required": false,
+        "label": "Value as JSON"
+      }
     ]
 }

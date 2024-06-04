@@ -4,13 +4,6 @@
   "category": "legacy",
   "version": "1.0.0",
   "settings": ["openAI"],
-  "output": [
-    {
-      "name": "image",
-      "type": "image",
-      "label": "Image"
-    }
-  ],
   "fields": [
     {
       "name": "prompt",
@@ -49,6 +42,13 @@
       "options": ["standard", "hd", ""],
       "value": "standard",
       "label": "Quality"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
     }
   ]
 }

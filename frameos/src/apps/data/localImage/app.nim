@@ -18,6 +18,9 @@ type
     seconds*: float
     counterStateKey*: string
 
+  AppOutput* = object
+    image*: Image
+
   App* = ref object
     nodeId*: NodeId
     scene*: FrameScene
@@ -28,9 +31,6 @@ type
     cachedUrl: string
     images: seq[string]
     counter: int
-
-  AppOutput* = object
-    image*: Image
 
 # Function to check if a file is an image
 proc isImage(file: string): bool =

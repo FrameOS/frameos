@@ -10,14 +10,14 @@ type
   AppConfig* = object
     url*: string
 
+  AppOutput* = object
+    image*: Image
+
   App* = ref object
     nodeId*: NodeId
     scene*: FrameScene
     appConfig*: AppConfig
     frameConfig*: FrameConfig
-
-  AppOutput* = object
-    image*: Image
 
 proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(

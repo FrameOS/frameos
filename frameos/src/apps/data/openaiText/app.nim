@@ -1,5 +1,4 @@
 import pixie
-import times
 import options
 import json
 import strformat
@@ -11,21 +10,16 @@ type
     model*: string
     system*: string
     user*: string
-    cacheSeconds*: float
     stateKey*: string
+
+  AppOutput* = object
+    reply*: string
 
   App* = ref object
     nodeId*: NodeId
     scene*: FrameScene
     appConfig*: AppConfig
     frameConfig*: FrameConfig
-
-    cacheExpiry: float
-    cachedReply: string
-    cachedPrompt: string
-
-  AppOutput* = object
-    reply*: string
 
 proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(

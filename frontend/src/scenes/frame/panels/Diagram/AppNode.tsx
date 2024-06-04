@@ -1,5 +1,5 @@
 import { BindLogic, useActions, useValues } from 'kea'
-import { NodeProps, Handle, Position } from 'reactflow'
+import { NodeProps, Handle, Position, NodeResizer } from 'reactflow'
 import { AppNodeData, DispatchNodeData } from '../../../../types'
 import clsx from 'clsx'
 import { RevealDots } from '../../../../components/Reveal'
@@ -68,6 +68,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
   return (
     <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>
       <div onClick={select} className={backgroundClassName}>
+        <NodeResizer minWidth={200} minHeight={130} />
         <div className={titleClassName}>
           {!isDataApp ? (
             <Handle

@@ -11,14 +11,15 @@ type
   AppConfig* = object
     keyword*: string
 
+  AppOutput* = object
+    image*: Image
+
   App* = ref object
     nodeId*: NodeId
     scene*: FrameScene
     appConfig*: AppConfig
     frameConfig*: FrameConfig
 
-  AppOutput* = object
-    image*: Image
 
 proc log*(self: App, message: string) =
   self.scene.logger.log(%*{"event": "unsplash:log", "message": message})
