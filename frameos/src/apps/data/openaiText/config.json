@@ -1,7 +1,7 @@
 {
   "name": "OpenAI Text",
   "description": "Text response from ChatGPT and friends",
-  "category": "legacy",
+  "category": "data",
   "version": "1.0.0",
   "settings": ["openAI"],
   "fields": [

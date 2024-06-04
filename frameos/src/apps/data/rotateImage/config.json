@@ -1,0 +1,24 @@
+{
+  "name": "Rotate",
+  "description": "Rotate the image",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    { "name": "image", "type": "image", "required": true, "label": "Image" },
+    {
+      "name": "rotationDegree",
+      "type": "float",
+      "value": "0",
+      "required": true,
+      "label": "Rotation Degree",
+      "placeholder": "e.g., 45"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}

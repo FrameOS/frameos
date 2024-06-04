@@ -3,7 +3,6 @@ import json
 import std/strformat
 import std/strutils
 import options
-import frameos/config
 import frameos/types
 import frameos/utils/image
 
@@ -19,7 +18,6 @@ type
     scene*: FrameScene
     appConfig*: AppConfig
     frameConfig*: FrameConfig
-
 
 proc log*(self: App, message: string) =
   self.scene.logger.log(%*{"event": "unsplash:log", "message": message})
@@ -40,7 +38,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
 
 proc run*(self: App, context: ExecutionContext): AppOutput =
   try:
-    let url = &"https://source.unsplash.com/random/{self.frameConfig.renderWidth()}x{self.frameConfig.renderHeight()}/?{self.appConfig.keyword}"
+    let url = &"https://source.unsplash.com/random/{context.image.width}x{context.image.height}/?{self.appConfig.keyword}"
     if self.frameConfig.debug:
       self.log(&"Downloading image: {url}")
     let unsplashImage = downloadImage(url)
@@ -49,5 +47,5 @@ proc run*(self: App, context: ExecutionContext): AppOutput =
 
     return AppOutput(image: unsplashImage)
   except CatchableError as e:
-    return AppOutput(image: renderError(self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), e.msg))
+    return AppOutput(image: renderError(context.image.width, context.image.height, e.msg))
 
