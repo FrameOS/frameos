@@ -127,7 +127,8 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         background_color="#ffffff",
         device=device or "web_only",
         log_to_file=None, # spare the SD card from load
-        control_code={"enabled": "true"}
+        control_code={"enabled": "true"},
+        reboot={"enabled": "true", "crontab": "4 0 * * *"},
     )
     db.session.add(frame)
     db.session.commit()
