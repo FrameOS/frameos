@@ -1,7 +1,5 @@
 import json
-import strformat
 import pixie
-import times
 import options
 import frameos/utils/image
 import frameos/types
@@ -28,10 +26,10 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   )
 
 proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": "apps/data/fetchImage:log", "message": message})
+  self.scene.logger.log(%*{"event": "apps/data/downloadImage:log", "message": message})
 
 proc error*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": "apps/data/fetchImage:error", "error": message})
+  self.scene.logger.log(%*{"event": "apps/data/downloadImage:error", "error": message})
 
 proc run*(self: App, context: ExecutionContext): AppOutput =
   try:

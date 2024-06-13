@@ -5,14 +5,6 @@
     "version": "1.0.0",
     "fields": [
       {
-        "name": "stateKey",
-        "type": "string",
-        "required": true,
-        "label": "State key",
-        "value": "",
-        "placeholder": ""
-      },
-      {
         "name": "valueString",
         "type": "string",
         "required": false,
@@ -23,6 +15,14 @@
         "type": "json",
         "required": false,
         "label": "Value as JSON"
+      },
+      {
+        "name": "stateKey",
+        "type": "string",
+        "required": true,
+        "label": "State key",
+        "value": "",
+        "placeholder": ""
       }
     ]
 }
