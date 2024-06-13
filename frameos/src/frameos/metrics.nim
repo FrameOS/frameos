@@ -33,6 +33,13 @@ proc getMemoryUsage(self: MetricsLoggerThread): JsonNode =
     "active": memoryInfo.active,
   }
 
+proc getProcessMemory*(): JsonNode =
+  result = %*{
+    "total": system.getTotalMem(),
+    "occupied": system.getOccupiedMem(),
+    "free": system.getFreeMem(),
+  }
+
 proc getCPUUsage(self: MetricsLoggerThread): float =
   result = psutil.cpuPercent(interval = 1)
 
@@ -49,6 +56,7 @@ proc logMetrics(self: MetricsLoggerThread) =
     "load": self.getLoadAverage(),
     "cpuTemperature": self.getCPUTemperature(),
     "memoryUsage": self.getMemoryUsage(),
+    "processMemory": getProcessMemory(),
     "cpuUsage": self.getCPUUsage(),
     "openFileDescriptors": self.getOpenFileDescriptors(),
   })
