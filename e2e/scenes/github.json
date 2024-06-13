@@ -1,54 +1,10 @@
 {
-  "edges": [
-    {
-      "id": "a9bf1ea8-137d-4ba0-92d0-7fd3322fea1e",
-      "source": "a9bf1ea8-137d-4ba0-92d0-7fd3322fea1e",
-      "sourceHandle": "fieldOutput",
-      "target": "7bae8fb3-f31c-4966-ab75-3b77fba06f79",
-      "targetHandle": "fieldInput/text",
-      "type": "codeNodeEdge"
-    },
-    {
-      "id": "e981d9ce-22ca-4994-9319-d36d1b996938",
-      "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
-      "sourceHandle": "next",
-      "target": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
-      "targetHandle": "prev",
-      "type": "appNodeEdge"
-    },
-    {
-      "id": "442dbbf5-0898-44e7-9f05-448ea1d16f83",
-      "source": "442dbbf5-0898-44e7-9f05-448ea1d16f83",
-      "sourceHandle": "fieldOutput",
-      "target": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
-      "targetHandle": "fieldInput/text",
-      "type": "codeNodeEdge"
-    },
-    {
-      "id": "155dc053-52ad-42a6-97de-2b63b8191dd7",
-      "source": "155dc053-52ad-42a6-97de-2b63b8191dd7",
-      "sourceHandle": "fieldOutput",
-      "target": "a9bf1ea8-137d-4ba0-92d0-7fd3322fea1e",
-      "targetHandle": "codeField/stars",
-      "type": "codeNodeEdge"
-    },
-    {
-      "id": "6a8737d8-ad96-4525-9302-210f89af2a0e",
-      "source": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
-      "sourceHandle": "next",
-      "target": "7bae8fb3-f31c-4966-ab75-3b77fba06f79",
-      "targetHandle": "prev",
-      "type": "appNodeEdge"
-    },
-    {
-      "id": "232228bb-254a-480e-ac55-06cc82f11d47",
-      "target": "155dc053-52ad-42a6-97de-2b63b8191dd7",
-      "targetHandle": "codeField/arg",
-      "source": "0b68fe3f-bcec-4b99-aebf-daf0e7fe57d8",
-      "sourceHandle": "fieldOutput",
-      "type": "codeNodeEdge"
-    }
-  ],
+  "id": "73d96b3c-0126-4d8f-88d1-7958e06c0b04",
+  "name": "Github Stars",
+  "settings": {
+    "backgroundColor": "#000000",
+    "refreshInterval": 60
+  },
   "fields": [
     {
       "access": "public",
@@ -68,15 +24,13 @@
       "value": "420"
     }
   ],
-  "id": "427280c2-ed88-4ca5-a148-44370c8f06fb",
-  "name": "Github Stars",
   "nodes": [
     {
       "data": {
         "keyword": "render"
       },
       "dragging": false,
-      "height": 96,
+      "height": 255,
       "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
       "position": {
         "x": 406.49647892953215,
@@ -88,12 +42,12 @@
       },
       "selected": false,
       "type": "event",
-      "width": 183
+      "width": 212
     },
     {
       "data": {
         "config": {},
-        "keyword": "text"
+        "keyword": "render/text"
       },
       "dragging": false,
       "height": 336,
@@ -108,35 +62,7 @@
       },
       "selected": false,
       "type": "app",
-      "width": 294
-    },
-    {
-      "data": {
-        "code": "if stars >= 0: $stars & \" star\" & (if stars == 1: \"\" else: \"s\") else: \"Error fetching stars\"",
-        "codeFields": [
-          "stars",
-          "arg"
-        ]
-      },
-      "dragging": false,
-      "height": 155,
-      "id": "a9bf1ea8-137d-4ba0-92d0-7fd3322fea1e",
-      "position": {
-        "x": 1212.7101897900725,
-        "y": -172.25042778391318
-      },
-      "positionAbsolute": {
-        "x": 1212.7101897900725,
-        "y": -172.25042778391318
-      },
-      "resizing": false,
-      "selected": false,
-      "style": {
-        "height": 155,
-        "width": 505
-      },
-      "type": "code",
-      "width": 505
+      "width": 278
     },
     {
       "data": {
@@ -144,7 +70,7 @@
           "fontSize": "16",
           "position": "top-left"
         },
-        "keyword": "text"
+        "keyword": "render/text"
       },
       "dragging": false,
       "height": 336,
@@ -159,81 +85,147 @@
       },
       "selected": false,
       "type": "app",
-      "width": 294
+      "width": 278
     },
     {
-      "data": {
-        "code": "state{\"repository\"}.getStr()"
-      },
-      "dragging": false,
-      "height": 130,
-      "id": "442dbbf5-0898-44e7-9f05-448ea1d16f83",
+      "id": "f52c1a14-ac00-4501-9a75-b8c6e1abc789",
       "position": {
-        "x": 663.0518223727762,
-        "y": -182.9252635128297
+        "x": 703.6431137552852,
+        "y": -124.49754225983443
       },
-      "positionAbsolute": {
-        "x": 663.0518223727762,
-        "y": -182.9252635128297
-      },
-      "resizing": false,
-      "selected": false,
-      "style": {
-        "height": 130,
-        "width": 304
-      },
-      "type": "code",
-      "width": 304
-    },
-    {
       "data": {
-        "code": "arg.getInt()",
-        "codeFields": [
-          "arg"
+        "code": "state{\"repository\"}.getStr()",
+        "codeArgs": [],
+        "codeOutputs": [
+          {
+            "name": "value",
+            "type": "string"
+          }
         ]
       },
-      "dragging": false,
-      "height": 130,
-      "id": "155dc053-52ad-42a6-97de-2b63b8191dd7",
-      "position": {
-        "x": 1175.590605360396,
-        "y": -389.32589520181864
-      },
-      "positionAbsolute": {
-        "x": 1175.590605360396,
-        "y": -389.32589520181864
-      },
-      "resizing": false,
-      "selected": false,
-      "style": {
-        "height": 130,
-        "width": 290
-      },
       "type": "code",
-      "width": 290
-    },
-    {
-      "id": "0b68fe3f-bcec-4b99-aebf-daf0e7fe57d8",
-      "position": {
-        "x": 1105.0143842936616,
-        "y": -535.450608370544
-      },
-      "type": "code",
-      "data": {
-        "code": "state{\"stars\"}",
-        "codeFields": []
-      },
       "style": {
         "width": 300,
         "height": 130
       },
       "width": 300,
       "height": 130,
-      "selected": false
+      "selected": false,
+      "positionAbsolute": {
+        "x": 703.6431137552852,
+        "y": -124.49754225983443
+      },
+      "dragging": false
+    },
+    {
+      "id": "3a2b050d-c266-41c3-8f38-4f27ea628b28",
+      "position": {
+        "x": 1161.6426921373286,
+        "y": -133.17120750691458
+      },
+      "data": {
+        "code": "if stars >= 0: $stars & \" star\" & (if stars == 1: \"\" else: \"s\") else: \"Error fetching stars\"",
+        "codeArgs": [
+          {
+            "name": "stars",
+            "type": "string"
+          }
+        ],
+        "codeOutputs": [
+          {
+            "name": "value",
+            "type": "string"
+          }
+        ]
+      },
+      "type": "code",
+      "style": {
+        "width": 496,
+        "height": 163
+      },
+      "width": 496,
+      "height": 163,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 1161.6426921373286,
+        "y": -133.17120750691458
+      },
+      "dragging": false,
+      "resizing": false
+    },
+    {
+      "id": "0989260c-f121-47c8-b62b-324ed2772343",
+      "position": {
+        "x": 1154.156018509721,
+        "y": -316.5187226639073
+      },
+      "data": {
+        "code": "state{\"stars\"}.getInt()",
+        "codeArgs": [],
+        "codeOutputs": [
+          {
+            "name": "value",
+            "type": "string"
+          }
+        ]
+      },
+      "type": "code",
+      "style": {
+        "width": 300,
+        "height": 130
+      },
+      "width": 300,
+      "height": 130
     }
   ],
-  "settings": {
-    "backgroundColor": "#000000",
-    "refreshInterval": 60
-  }
+  "edges": [
+    {
+      "id": "e981d9ce-22ca-4994-9319-d36d1b996938",
+      "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "sourceHandle": "next",
+      "target": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "6a8737d8-ad96-4525-9302-210f89af2a0e",
+      "source": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
+      "sourceHandle": "next",
+      "target": "7bae8fb3-f31c-4966-ab75-3b77fba06f79",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "c0cc7171-84d8-4ac4-b505-6ccc59da9d81",
+      "target": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
+      "targetHandle": "fieldInput/text",
+      "source": "f52c1a14-ac00-4501-9a75-b8c6e1abc789",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "42578566-287f-4092-a9d6-eb4e50424712",
+      "target": "7bae8fb3-f31c-4966-ab75-3b77fba06f79",
+      "targetHandle": "fieldInput/text",
+      "source": "3a2b050d-c266-41c3-8f38-4f27ea628b28",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "9ac0f77a-2c0b-465a-a34b-b8520eb18fc5",
+      "target": "3a2b050d-c266-41c3-8f38-4f27ea628b28",
+      "targetHandle": "codeArg/arg",
+      "source": "0989260c-f121-47c8-b62b-324ed2772343",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "6c25725d-f662-46c3-9ef1-6221b7d33266",
+      "source": "0989260c-f121-47c8-b62b-324ed2772343",
+      "sourceHandle": "fieldOutput",
+      "target": "3a2b050d-c266-41c3-8f38-4f27ea628b28",
+      "targetHandle": "codeField/[object Object]",
+      "type": "codeNodeEdge"
+    }
+  ]
 }

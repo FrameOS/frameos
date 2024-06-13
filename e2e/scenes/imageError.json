@@ -23,7 +23,7 @@
         "y": 169.51205274213478
       },
       "data": {
-        "keyword": "downloadImage",
+        "keyword": "legacy/downloadImage",
         "config": {
           "url": "https://frameos.net/assets/images/frameos-e2e-scenes-imageError-must-be-404.jpg"
         }
@@ -45,7 +45,7 @@
         "y": 166.003777036401
       },
       "data": {
-        "keyword": "text",
+        "keyword": "render/text",
         "config": {
           "text": "Activate proton beam"
         }

@@ -23,7 +23,7 @@
         "y": 169.51205274213478
       },
       "data": {
-        "keyword": "localImage",
+        "keyword": "legacy/localImage",
         "config": {
           "path": "./assets/image.png"
         }
@@ -45,7 +45,7 @@
         "y": 166.003777036401
       },
       "data": {
-        "keyword": "text",
+        "keyword": "render/text",
         "config": {
           "text": "Activate proton beam"
         }

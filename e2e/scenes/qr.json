@@ -29,7 +29,7 @@
           "y": 103
         },
         "data": {
-          "keyword": "qr",
+          "keyword": "render/qr",
           "config": {
             "position": "top-left",
             "alRad": "80",
@@ -48,7 +48,7 @@
           "y": 194.77828218133138
         },
         "data": {
-          "keyword": "qr",
+          "keyword": "render/qr",
           "config": {
             "codeType": "Frame Image URL",
             "position": "top-center",
@@ -68,7 +68,7 @@
           "y": 304.1002647264529
         },
         "data": {
-          "keyword": "qr",
+          "keyword": "render/qr",
           "config": {
             "codeType": "Custom",
             "code": "hello",
@@ -90,7 +90,7 @@
           "y": 408.7741199978865
         },
         "data": {
-          "keyword": "qr",
+          "keyword": "render/qr",
           "config": {
             "codeType": "Custom",
             "code": "world",
@@ -110,7 +110,7 @@
           "y": 1053.7741199978864
         },
         "data": {
-          "keyword": "qr",
+          "keyword": "render/qr",
           "config": {
             "moRad": "50",
             "moSep": "50",
@@ -129,7 +129,7 @@
           "y": 1223.7741199978864
         },
         "data": {
-          "keyword": "qr",
+          "keyword": "render/qr",
           "config": {
             "position": "center-right",
             "moRad": "50",
@@ -147,7 +147,7 @@
           "y": 1293.7741199978864
         },
         "data": {
-          "keyword": "qr",
+          "keyword": "render/qr",
           "config": {
             "position": "bottom-left",
             "sizeUnit": "percent",

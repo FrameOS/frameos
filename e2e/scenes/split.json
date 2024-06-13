@@ -113,7 +113,7 @@
             "rows": "3",
             "width_ratios": "1 2 1"
           },
-          "keyword": "split"
+          "keyword": "render/split"
         },
         "dragging": false,
         "height": 498,
@@ -135,7 +135,7 @@
           "config": {
             "color": "#aba12b"
           },
-          "keyword": "color"
+          "keyword": "render/color"
         },
         "dragging": false,
         "height": 81,
@@ -157,7 +157,7 @@
           "config": {
             "color": "#814141"
           },
-          "keyword": "color"
+          "keyword": "render/color"
         },
         "height": 81,
         "id": "75055185-c284-42f6-ab96-96f9b361674e",
@@ -182,7 +182,7 @@
           "y": 406.20362482208395
         },
         "data": {
-          "keyword": "color",
+          "keyword": "render/color",
           "config": {}
         },
         "width": 161,
@@ -202,7 +202,7 @@
           "y": 159.65462635352387
         },
         "data": {
-          "keyword": "text",
+          "keyword": "render/text",
           "config": {
             "text": "2 x 3",
             "fontColor": "#000000"

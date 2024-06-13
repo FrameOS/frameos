@@ -88,7 +88,7 @@
             "text": "topleft",
             "fontSize": "16"
           },
-          "keyword": "text"
+          "keyword": "render/text"
         },
         "dragging": false,
         "height": 380,
@@ -113,7 +113,7 @@
             "padding": "5",
             "fontSize": "20"
           },
-          "keyword": "text"
+          "keyword": "render/text"
         },
         "height": 380,
         "id": "926af3e9-b948-4cd7-bb35-7f069197f58d",
@@ -132,7 +132,7 @@
             "borderWidth": "5",
             "fontSize": "15"
           },
-          "keyword": "text"
+          "keyword": "render/text"
         },
         "height": 380,
         "id": "90b81092-bca0-45f0-b08e-bfe1895bac1a",
@@ -151,7 +151,7 @@
             "fontSize": "20",
             "fontColor": "#00ff62"
           },
-          "keyword": "text"
+          "keyword": "render/text"
         },
         "dragging": false,
         "height": 380,
@@ -176,7 +176,7 @@
             "offsetX": "-10",
             "fontSize": "20"
           },
-          "keyword": "text"
+          "keyword": "render/text"
         },
         "dragging": false,
         "height": 380,
@@ -201,7 +201,7 @@
             "fontColor": "#000000",
             "fontSize": "20"
           },
-          "keyword": "text"
+          "keyword": "render/text"
         },
         "height": 380,
         "id": "c5dcacf2-00ef-47f4-aba5-6aa1ec6ef6d6",
@@ -221,7 +221,7 @@
             "offsetY": "10",
             "fontSize": "20"
           },
-          "keyword": "text"
+          "keyword": "render/text"
         },
         "dragging": false,
         "height": 380,
@@ -246,7 +246,7 @@
             "fontSize": "20",
             "fontColor": "#ff0026"
           },
-          "keyword": "text"
+          "keyword": "render/text"
         },
         "dragging": false,
         "height": 380,
@@ -271,7 +271,7 @@
             "fontSize": "20",
             "fontColor": "#0062ff"
           },
-          "keyword": "text"
+          "keyword": "render/text"
         },
         "dragging": false,
         "height": 380,

@@ -23,7 +23,7 @@
           "y": 78.63119134198337
         },
         "data": {
-          "keyword": "gradient",
+          "keyword": "render/gradient",
           "config": {
             "startColor": "#2f90c1",
             "endColor": "#fbec46"

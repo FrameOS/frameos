@@ -23,7 +23,7 @@
         "y": 55
       },
       "data": {
-        "keyword": "split",
+        "keyword": "render/split",
         "config": {
           "rows": "3",
           "columns": "3",
@@ -48,7 +48,7 @@
         "y": 23
       },
       "data": {
-        "keyword": "ifElse",
+        "keyword": "logic/ifElse",
         "config": {}
       },
       "width": 166,
@@ -68,7 +68,7 @@
         "y": 60
       },
       "data": {
-        "keyword": "color",
+        "keyword": "render/color",
         "config": {
           "color": "#aba12b"
         }
@@ -113,7 +113,7 @@
         "y": 195
       },
       "data": {
-        "keyword": "color",
+        "keyword": "render/color",
         "config": {
           "color": "#814141"
         }
