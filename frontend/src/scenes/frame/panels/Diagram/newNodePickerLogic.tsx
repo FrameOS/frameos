@@ -41,7 +41,10 @@ export interface NewNodePicker {
 }
 
 export interface OptionWithType extends Option {
+  /** type of the node we're connecting to */
   type: FieldType
+  /** keyword we can use to refer to the other node, e.g. the field name */
+  keyword: string
 }
 
 export function getNewFieldName(codeArgs: CodeArg[]): string {
@@ -113,11 +116,9 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       handleId,
       handleType,
     }),
-    selectNewNodeOption: (newNodePicker: NewNodePicker, value: string, label: string, type: FieldType) => ({
+    selectNewNodeOption: (newNodePicker: NewNodePicker, option: OptionWithType) => ({
       newNodePicker,
-      value,
-      label,
-      type,
+      option,
     }),
     closeNewNodePicker: true,
     setSearchValue: (searchValue: string) => ({ searchValue }),
@@ -213,11 +214,16 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         if (handleType === 'target' && (handleId.startsWith('fieldInput/') || handleId.startsWith('codeField/'))) {
           const key = handleId.split('/', 2)[1]
 
-          options.push({ label: 'Code', value: 'code', type: newNodeHandleDataType ?? 'string' })
+          options.push({ label: 'Code', value: 'code', type: newNodeHandleDataType ?? 'string', keyword: key })
           if (newNodeHandleDataType) {
             const imageApps = getAppsForType(apps, newNodeHandleDataType)
             for (const [keyword, app] of Object.entries(imageApps)) {
-              options.push({ label: `App: ${app.name}`, value: `app/${keyword}`, type: newNodeHandleDataType })
+              options.push({
+                label: `App: ${app.name}`,
+                value: `app/${keyword}`,
+                type: newNodeHandleDataType,
+                keyword: key,
+              })
             }
             for (const field of (scene?.fields ?? []).filter(
               (f) => 'type' in f && typesMatch(f.type, newNodeHandleDataType)
@@ -226,12 +232,18 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
                 label: `State: ${field.label}`,
                 value: `code/${stateFieldAccess(field)}`,
                 type: newNodeHandleDataType,
+                keyword: key,
               })
             }
           } else if (handleId === 'codeField/+') {
             for (const [keyword, app] of Object.entries(apps)) {
               if (app.output && app.output.length > 0) {
-                options.push({ label: `App: ${app.name}`, value: `app/${keyword}`, type: app.output[0].type })
+                options.push({
+                  label: `App: ${app.name}`,
+                  value: `app/${keyword}`,
+                  type: app.output[0].type,
+                  keyword: key,
+                })
               }
             }
             for (const field of scene?.fields ?? []) {
@@ -239,10 +251,11 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
                 label: `State: ${field.label}`,
                 value: `code/${stateFieldAccess(field)}`,
                 type: toFieldType(field.type),
+                keyword: key,
               })
             }
           } else {
-            options.push({ label: 'Error: unknown new node data type', value: 'app', type: 'string' })
+            options.push({ label: 'Error: unknown new node data type', value: 'app', type: 'string', keyword: key })
           }
         } else if (
           (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) ||
@@ -254,11 +267,17 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
                 label: `${app.category ?? 'app'}: ${app.name}`,
                 value: `app/${keyword}`,
                 type: toFieldType(app.output?.[0].type ?? 'string'),
+                keyword,
               })
             }
           }
         } else {
-          options.push({ label: `handleId: ${handleId}, handleType: ${handleType}`, value: 'app', type: 'string' })
+          options.push({
+            label: `handleId: ${handleId}, handleType: ${handleType}`,
+            value: 'app',
+            type: 'string',
+            keyword: 'error',
+          })
         }
         return options
       },
@@ -341,9 +360,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
   listeners(({ actions, values, props }) => ({
     selectNewNodeOption: ({
       newNodePicker: { diagramX, diagramY, nodeId, handleId, handleType },
-      label,
-      value,
-      type,
+      option: { label, value, type, keyword },
     }) => {
       const newNode: DiagramNode = {
         id: uuidv4(),
@@ -370,7 +387,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         newNode.data = {
           code: value.startsWith('code/') ? value.substring(5) : '',
           codeArgs: [],
-          codeOutputs: [{ name: 'value', type: type ?? values.newNodeHandleDataType ?? 'string' }],
+          codeOutputs: [{ name: keyword || 'output', type: type ?? values.newNodeHandleDataType ?? 'string' }],
         }
       } else if (value.startsWith('app/')) {
         const keyword = value.substring(4)

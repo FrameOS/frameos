@@ -76,23 +76,18 @@ export function NewNodePicker() {
                           close()
                           closeNewNodePicker()
                           if (newNodePicker) {
-                            selectNewNodeOption(
-                              newNodePicker,
-                              newNodeOptions[0].value,
-                              newNodeOptions[0].label,
-                              newNodeOptions[0].type ?? 'string'
-                            )
+                            selectNewNodeOption(newNodePicker, newNodeOptions[0])
                           }
                         }
                       }}
                     />
                   </div>
                   <div className="py-1" style={{ maxHeight: 200, overflowX: 'auto', overflowY: 'auto' }}>
-                    {newNodeOptions.map(({ label, value }) => (
-                      <Menu.Item key={value || label}>
+                    {newNodeOptions.map((option) => (
+                      <Menu.Item key={option.value || option.label}>
                         {({ active }) => (
                           <a
-                            key={value || label}
+                            key={option.value || option.label}
                             href="#"
                             className={clsx(
                               active ? 'bg-[#4a4b8c] text-white' : 'text-white',
@@ -104,11 +99,11 @@ export function NewNodePicker() {
                               close()
                               closeNewNodePicker()
                               if (newNodePicker) {
-                                selectNewNodeOption(newNodePicker, value, label)
+                                selectNewNodeOption(newNodePicker, option)
                               }
                             }}
                           >
-                            {label}
+                            {option.label}
                           </a>
                         )}
                       </Menu.Item>
