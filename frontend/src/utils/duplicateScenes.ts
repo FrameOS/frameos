@@ -1,4 +1,4 @@
-import { App, AppNodeData, DispatchNodeData, FrameEvent, FrameScene, FrameType } from '../types'
+import { AppConfig, AppNodeData, DispatchNodeData, FrameEvent, FrameScene, FrameType } from '../types'
 import { v4 as uuidv4 } from 'uuid'
 
 import _events from '../../schema/events.json'
@@ -45,7 +45,7 @@ export function duplicateScenes(newScenes: FrameScene[]): FrameScene[] {
           try {
             const data = node.data as AppNodeData
             const configJsonSource = data.sources?.['config.json'] ?? '{}'
-            const configSource: App = JSON.parse(configJsonSource)
+            const configSource: AppConfig = JSON.parse(configJsonSource)
             if (configSource.fields?.find((field) => 'type' in field && field.type === 'scene')) {
               const newConfig = { ...data.config }
               for (const field of configSource.fields) {

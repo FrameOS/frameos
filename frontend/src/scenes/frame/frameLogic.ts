@@ -60,12 +60,13 @@ const legacyAppMapping: Record<string, string> = {
   unsplash: 'legacy/unsplash',
   frameOSGallery: 'legacy/frameOSGallery',
   openai: 'legacy/openai',
-  resize: 'logic/resize',
-  rotate: 'logic/rotate',
+  resize: 'legacy/resize',
+  rotate: 'legacy/rotate',
   localImage: 'legacy/localImage',
+
   qr: 'render/qr',
-  color: 'legacy/color',
-  gradient: 'legacy/gradient',
+  color: 'render/color',
+  gradient: 'render/gradient',
 
   // text data apps
   haSensor: 'legacy/haSensor',
@@ -75,12 +76,11 @@ const legacyAppMapping: Record<string, string> = {
   // render app
   text: 'render/text',
   renderImage: 'render/image',
-  split: 'render/split', // todo: rename to grid
+  split: 'render/split',
 
   // logic app
   setAsState: 'logic/setAsState',
   breakIfRendering: 'logic/breakIfRendering',
-  code: 'logic/code', // todo: clean up
   ifElse: 'logic/ifElse',
 }
 
@@ -198,6 +198,14 @@ export const frameLogic = kea<frameLogicType>([
         const allScenes = frameForm?.scenes ?? frame?.scenes ?? []
         return (allScenes.find((scene) => scene.id === 'default' || scene.default) || allScenes[0])?.id ?? null
       },
+    ],
+    width: [
+      (s) => [s.frameForm],
+      (frameForm) => (frameForm.rotate === 90 || frameForm.rotate === 270 ? frameForm.height : frameForm.width),
+    ],
+    height: [
+      (s) => [s.frameForm],
+      (frameForm) => (frameForm.rotate === 90 || frameForm.rotate === 270 ? frameForm.width : frameForm.height),
     ],
   })),
   subscriptions(({ actions }) => ({

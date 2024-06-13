@@ -28,7 +28,9 @@ export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
   const { editScene, openTemplates } = useActions(panelsLogic)
   const { scenes, showNewSceneForm, isNewSceneSubmitting, showingSettings } = useValues(scenesLogic({ frameId }))
-  const { toggleSettings, submitNewScene, toggleNewScene, closeNewScene } = useActions(scenesLogic({ frameId }))
+  const { toggleSettings, submitNewScene, toggleNewScene, createNewScene, closeNewScene } = useActions(
+    scenesLogic({ frameId })
+  )
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
 
   if (scenes.length === 0 && !showNewSceneForm) {
@@ -41,7 +43,7 @@ export function Scenes() {
             interactive thermostat.
           </p>
           <div className="flex justify-center">
-            <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={toggleNewScene}>
+            <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={createNewScene}>
               <PlusIcon className="w-4 h-4" />
               New blank scene
             </Button>

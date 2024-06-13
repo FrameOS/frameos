@@ -5,7 +5,7 @@ import { Form, Group } from 'kea-forms'
 import { Field } from '../../../../components/Field'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
-import { configFieldTypes } from '../../../../types'
+import { fieldTypes } from '../../../../types'
 import { Button } from '../../../../components/Button'
 import { Tooltip } from '../../../../components/Tooltip'
 import { stateFieldAccess } from '../../../../utils/fieldTypes'
@@ -114,9 +114,7 @@ export function SceneState(): JSX.Element {
                     <TextInput placeholder="e.g. search" />
                   </Field>
                   <Field name="type" label="Field type">
-                    <Select
-                      options={configFieldTypes.filter((f) => f !== 'node').map((k) => ({ label: k, value: k }))}
-                    />
+                    <Select options={fieldTypes.filter((f) => f !== 'node').map((k) => ({ label: k, value: k }))} />
                   </Field>
                   {field.type === 'select' ? (
                     <Field name="options" label="Options (one per line)">
