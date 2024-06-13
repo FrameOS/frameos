@@ -1,5 +1,5 @@
 {
-    "name": "HA Sensor",
+    "name": "HA Sensor (legacy)",
     "description": "Store the state of a Home Assistant entity in the scene's state",
     "category": "legacy",
     "version": "1.0.0",

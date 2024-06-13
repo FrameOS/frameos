@@ -1,5 +1,5 @@
 {
-  "name": "OpenAI Text",
+  "name": "OpenAI Text (legacy)",
   "description": "Text response from ChatGPT and friends",
   "category": "legacy",
   "version": "1.0.0",

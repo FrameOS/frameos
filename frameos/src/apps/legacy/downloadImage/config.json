@@ -1,5 +1,5 @@
 {
-    "name": "Download Image",
+    "name": "Download Image (legacy)",
     "description": "Download image from an URL",
     "category": "legacy",
     "version": "1.0.0",

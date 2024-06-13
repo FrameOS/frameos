@@ -1,5 +1,5 @@
 {
-  "name": "OpenAI Image",
+  "name": "OpenAI Image (legacy)",
   "description": "Random AI generated art from OpenAI's DALL-E models",
   "category": "legacy",
   "version": "1.0.0",
