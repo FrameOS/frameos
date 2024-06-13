@@ -1,5 +1,5 @@
 import { useActions, useValues } from 'kea'
-import { AppNodeData, CodeNodeData } from '../../../../types'
+import { AppNodeData, CacheConfig, CodeNodeData } from '../../../../types'
 import { Select } from '../../../../components/Select'
 import { Label } from '../../../../components/Label'
 import { TextInput } from '../../../../components/TextInput'
@@ -25,7 +25,7 @@ export function NodeCache(): JSX.Element {
           <div className="space-y-1">
             <Label>How to long to cache?</Label>
             <Select
-              value={data.cacheType ?? 'none'}
+              value={data.cache?.type ?? 'none'}
               options={[
                 { value: 'none', label: 'No cache (compute every time)' },
                 { value: 'forever', label: 'Cache forever (till a restart)' },
@@ -35,84 +35,80 @@ export function NodeCache(): JSX.Element {
               ]}
               onChange={(value) =>
                 updateNodeData(node.id, {
-                  cacheType: value,
-                  ...(value === 'duration' || value === 'keyDuration' ? { cacheDuration: 60 } : {}),
-                  ...(value === 'key' || value === 'keyDuration' ? { cacheKey: '"string"' } : {}),
+                  cache: {
+                    type: value as any,
+                    ...(value === 'duration' || value === 'keyDuration' ? { duration: '60' } : {}),
+                    ...(value === 'key' || value === 'keyDuration' ? { key: '"string"' } : {}),
+                  } satisfies CacheConfig,
                 })
               }
             />
           </div>
-          {(data.cacheType === 'duration' || data.cacheType === 'keyDuration') && (
+          {(data.cache?.type === 'duration' || data.cache?.type === 'keyDuration') && (
             <div className="space-y-1">
-              <Label>Cache duration in seconds (nim code, return a float)</Label>
+              <Label>Cache duration in seconds (nim code, return a number)</Label>
               <TextInput
-                value={data.cacheDuration}
-                onChange={(value) => updateNodeData(node.id, { cacheDuration: value })}
+                value={data.cache?.duration}
+                onChange={(value) =>
+                  updateNodeData(node.id, { cache: { ...((node.data as AppNodeData).cache ?? {}), duration: value } })
+                }
                 placeholder="60"
               />
             </div>
           )}
-          {(data.cacheType === 'key' || data.cacheType === 'keyDuration') && (
+          {(data.cache?.type === 'key' || data.cache?.type === 'keyDuration') && (
             <>
               <div className="space-y-1">
                 <Label>Data type of cache key</Label>
                 <Select
-                  value={data.cacheKeyDataType ?? 'string'}
+                  value={data.cache?.keyDataType ?? 'string'}
                   options={[
                     { value: 'string', label: 'string' },
                     { value: 'integer', label: 'integer' },
                     { value: 'float', label: 'float' },
                     { value: 'json', label: 'json' },
                   ]}
-                  onChange={(value) => updateNodeData(node.id, { cacheKeyDataType: value })}
+                  onChange={(value) =>
+                    updateNodeData(node.id, {
+                      cache: { ...((node.data as AppNodeData).cache ?? {}), keyDataType: value },
+                    })
+                  }
                 />
               </div>
               <div className="space-y-1">
                 <Label>Cache key (nim code)</Label>
                 <TextInput
-                  value={data.cacheKey}
-                  onChange={(value) => updateNodeData(node.id, { cacheKey: value })}
+                  value={data.cache?.keySource ?? ''}
+                  onChange={(value) =>
+                    updateNodeData(node.id, {
+                      cache: { ...((node.data as AppNodeData).cache ?? {}), keySource: value },
+                    })
+                  }
                   placeholder='"string"'
                 />
               </div>
             </>
           )}
-          {(data.cacheType ?? 'none') !== 'none' && (
-            <div className="space-y-1">
-              <Label>Data type of cached value</Label>
-              <Select
-                value={data.cacheDataType ?? 'string'}
-                options={[
-                  { value: 'string', label: 'string' },
-                  { value: 'integer', label: 'integer' },
-                  { value: 'float', label: 'float' },
-                  { value: 'json', label: 'json' },
-                  { value: 'image', label: 'image' },
-                ]}
-                onChange={(value) => updateNodeData(node.id, { cacheDataType: value })}
-              />
-            </div>
-          )}
         </div>
       }
     >
-      {(data.cacheType ?? 'none') === 'none' ? (
+      {(data.cache?.type ?? 'none') === 'none' ? (
         <Tag color="teal" className="cursor-pointer">
           No cache
         </Tag>
-      ) : data.cacheType === 'forever' ? (
+      ) : data.cache?.type === 'forever' ? (
         <Tag color="red" className="cursor-pointer">
           Cache: forever
         </Tag>
-      ) : data.cacheType === 'key' ? (
+      ) : data.cache?.type === 'key' ? (
         <Tag color="red" className="cursor-pointer">
           Cache: key
         </Tag>
-      ) : data.cacheType === 'keyDuration' ? (
+      ) : data.cache?.type === 'keyDuration' ? (
         <Tag color="red" className="cursor-pointer">
           Cache:{' '}
           {String(
-            isNumericString(data.cacheDuration) ? showAsFps(parseFloat(data.cacheDuration as string)) : 'duration'
+            isNumericString(data.cache?.duration) ? showAsFps(parseFloat(data.cache?.duration as string)) : 'duration'
           )}{' '}
           + key
         </Tag>
@@ -120,7 +116,7 @@ export function NodeCache(): JSX.Element {
         <Tag color="orange" className="cursor-pointer">
           Cache:{' '}
           {String(
-            isNumericString(data.cacheDuration) ? showAsFps(parseFloat(data.cacheDuration as string)) : 'duration'
+            isNumericString(data.cache?.duration) ? showAsFps(parseFloat(data.cache?.duration as string)) : 'duration'
           )}
         </Tag>
       )}

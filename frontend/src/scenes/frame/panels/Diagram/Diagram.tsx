@@ -35,7 +35,7 @@ import { CodeNodeEdge } from './CodeNodeEdge'
 import { SceneDropDown } from '../Scenes/SceneDropDown'
 import { AppNodeEdge } from './AppNodeEdge'
 import { NewNodePicker } from './NewNodePicker'
-import { getNewField, newNodePickerLogic } from './newNodePickerLogic'
+import { getNewFieldName, newNodePickerLogic } from './newNodePickerLogic'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -100,11 +100,13 @@ function Diagram_({ sceneId }: DiagramProps) {
       connectingNode.current = null
       if (connection.targetHandle === 'codeField/+' && connection.sourceHandle === 'fieldOutput') {
         const nodeId = connection.target
-        const codeFields = (nodes.find((node) => node.id === nodeId)?.data as CodeNodeData)?.codeFields ?? []
-        let newField = getNewField(codeFields)
+        const codeArgs = (nodes.find((node) => node.id === nodeId)?.data as CodeNodeData)?.codeArgs ?? []
+        let newField = getNewFieldName(codeArgs)
         setNodes(
           nodes.map((node) =>
-            node.id === nodeId ? { ...node, data: { ...node.data, codeFields: [...codeFields, newField] } } : node
+            node.id === nodeId
+              ? { ...node, data: { ...node.data, codeArgs: [...codeArgs, { name: newField, type: 'string' }] } }
+              : node
           )
         )
         window.requestAnimationFrame(() => {

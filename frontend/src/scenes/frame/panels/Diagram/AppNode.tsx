@@ -14,6 +14,7 @@ import { Markdown } from '../../../../components/Markdown'
 import { ClipboardDocumentIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
 import { NodeCache } from './NodeCache'
+import { CodeArg } from './CodeArg'
 
 export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
   const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
@@ -29,7 +30,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
     configJsonError,
     output,
     isSelected,
-    codeFields,
+    codeArgs,
     fieldInputFields,
     fieldOutputFields,
   } = useValues(appNodeLogic(appNodeLogicProps))
@@ -182,12 +183,12 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                           className={clsx(
                             'font-sm text-indigo-200',
                             field.type === 'node' ||
-                              codeFields.includes(field.name) ||
+                              codeArgs.includes(field.name) ||
                               fieldInputFields.includes(field.name) ||
                               fieldOutputFields.includes(field.name)
                               ? 'w-full'
                               : '',
-                            codeFields.includes(field.name) ||
+                            codeArgs.includes(field.name) ||
                               fieldInputFields.includes(field.name) ||
                               fieldOutputFields.includes(field.name) ||
                               (field.name in data.config && data.config[field.name] !== field.value)
@@ -201,7 +202,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                           }
                           colSpan={
                             field.type === 'node' ||
-                            codeFields.includes(field.name) ||
+                            codeArgs.includes(field.name) ||
                             fieldInputFields.includes(field.name)
                               ? 2
                               : 1
@@ -212,7 +213,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                           </div>
                         </td>
                         {field.type !== 'node' &&
-                        !codeFields.includes(field.name) &&
+                        field.type !== 'image' &&
+                        !codeArgs.includes(field.name) &&
                         !fieldInputFields.includes(field.name) ? (
                           <td className="cursor-text">
                             {field.secret && !secretRevealed[field.name] ? (
@@ -301,7 +303,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
         {output ? (
           <div className={clsx(titleClassName, 'pb-0.5')}>
             <div className="flex gap-2 items-center">
-              {output.map((config, i) => (
+              {output.map((out, i) => (
                 <div className="flex gap-1 items-center" key={i}>
                   <Handle
                     type="source"
@@ -317,7 +319,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                     }}
                     isConnectable={isConnectable}
                   />
-                  <div>{config.name}</div>
+                  <CodeArg codeArg={{ type: out.type, name: out.name }} />
                 </div>
               ))}
             </div>

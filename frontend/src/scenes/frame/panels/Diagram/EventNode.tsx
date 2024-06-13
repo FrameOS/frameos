@@ -19,7 +19,7 @@ const events: FrameEvent[] = _events as any
 
 export function EventNode(props: NodeProps): JSX.Element {
   const { data, id } = props
-  const { frameForm } = useValues(frameLogic)
+  const { width, height } = useValues(frameLogic)
   const { selectedNodeId, scene } = useValues(diagramLogic)
   const { selectNode } = useActions(diagramLogic)
   const { keyword } = data
@@ -27,9 +27,6 @@ export function EventNode(props: NodeProps): JSX.Element {
   const isEventWithStateFields = keyword === 'init' || keyword === 'setSceneState' || keyword === 'render'
 
   const fields = isEventWithStateFields ? scene?.fields ?? [] : events?.find((e) => e.name == keyword)?.fields ?? []
-
-  const width = frameForm.rotate === 90 || frameForm.rotate === 270 ? frameForm.height : frameForm.width
-  const height = frameForm.rotate === 90 || frameForm.rotate === 270 ? frameForm.width : frameForm.height
 
   return (
     <div
@@ -94,7 +91,8 @@ export function EventNode(props: NodeProps): JSX.Element {
               textShadow: `-1px 0 black, 0 1px black, 1px 0 black, 0 -1px black, 0 0 5px black`,
             }}
           >
-            <div className="text-2xl mb-1">{`${width}x${height}`}</div>
+            {scene?.nodes?.length === 1 ? <div className="text-md mb-1 p-2">Connect a node to get started.</div> : null}
+            {width && height ? <div className="text-2xl mb-1">{`${width}x${height}`}</div> : null}
             {scene?.settings?.refreshInterval ? (
               <div className="text-xl">
                 {(scene.settings.refreshInterval >= 1 ? 'every ' : '') + showAsFps(scene.settings.refreshInterval)}

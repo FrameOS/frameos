@@ -3,7 +3,16 @@ import { actions, connect, kea, key, listeners, path, props, reducers, selectors
 import type { appNodeLogicType } from './appNodeLogicType'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { appsModel } from '../../../../models/appsModel'
-import { App, CodeNodeData, ConfigField, DiagramNode, FrameEvent, MarkdownField } from '../../../../types'
+import {
+  AppConfig,
+  CodeNodeData,
+  AppConfigField,
+  DiagramNode,
+  FrameEvent,
+  MarkdownField,
+  OutputField,
+  CodeArg,
+} from '../../../../types'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 import type { Node } from '@reactflow/core/dist/esm/types/nodes'
 
@@ -28,8 +37,9 @@ export const appNodeLogic = kea<appNodeLogicType>([
   })),
   actions({
     select: true,
-    editCodeField: (field: string) => ({ field }),
-    editCodeFieldOutput: (field: string) => ({ field }),
+    editCodeField: (field: string, newField: string) => ({ field, newField }),
+    editCodeFieldOutput: (field: string, newField: string) => ({ field, newField }),
+    // updateCodeOutput: (index: number, codeArg: CodeArg) => ({ field, newField }),
   }),
   selectors({
     nodeId: [() => [(_, props) => props.nodeId], (nodeId): string => nodeId],
@@ -45,7 +55,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
       (s) => [s.node],
       (node): Record<string, any> => (node && 'config' in node?.data ? node?.data.config ?? {} : {}),
     ],
-    codeFields: [
+    codeArgs: [
       (s) => [s.nodeEdges, s.nodeId],
       (nodeEdges, nodeId) =>
         nodeEdges
@@ -115,7 +125,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
     ],
     app: [
       (s) => [s.apps, s.node],
-      (apps, node): App | null => {
+      (apps, node): AppConfig | null => {
         if (
           node &&
           node.type === 'app' &&
@@ -131,7 +141,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
     ],
     event: [
       (s) => [s.node],
-      (node): App | null => {
+      (node): AppConfig | null => {
         if (node && node.type === 'dispatch' && node.data && 'keyword' in node.data && node.data.keyword) {
           return events.find((e) => 'keyword' in node.data && e.name == node.data.keyword) ?? null
         }
@@ -148,8 +158,8 @@ export const appNodeLogic = kea<appNodeLogicType>([
     ],
     fields: [
       (s) => [s.app, s.event, s.scene, s.configJson, s.nodeConfig],
-      (app, event, scene, configJson, nodeConfig): (ConfigField | MarkdownField)[] | null => {
-        let fields: (ConfigField | MarkdownField)[] = []
+      (app, event, scene, configJson, nodeConfig): (AppConfigField | MarkdownField)[] | null => {
+        let fields: (AppConfigField | MarkdownField)[] = []
         if (event) {
           if (event.name === 'setSceneState') {
             fields = scene?.fields ?? []
@@ -160,7 +170,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
           fields = app?.fields ?? configJson?.fields ?? []
         }
 
-        let realFields: (ConfigField | MarkdownField)[] = []
+        let realFields: (AppConfigField | MarkdownField)[] = []
         for (const field of fields) {
           if ('seq' in field && Array.isArray(field.seq)) {
             let seqs: [string, number[]][] = []
@@ -210,7 +220,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
     ],
     output: [
       (s) => [s.configJson],
-      (configJson): ConfigField[] | null => {
+      (configJson): OutputField[] | null => {
         return configJson?.output ?? null
       },
     ],
@@ -243,14 +253,13 @@ export const appNodeLogic = kea<appNodeLogicType>([
         actions.selectNode(values.nodeId)
       }
     },
-    editCodeField: ({ field }) => {
-      const newField = prompt('Rename field:', field)
+    editCodeField: ({ field, newField }) => {
       const { nodeId, node, nodeEdges, edges } = values
       const codeFieldEdges = nodeEdges.filter(
         (edge) =>
           edge.target === nodeId && edge.sourceHandle === 'fieldOutput' && edge.targetHandle === `codeField/${field}`
       )
-      const codeFields = (node?.data as CodeNodeData)?.codeFields ?? []
+      const codeArgs = (node?.data as CodeNodeData)?.codeArgs ?? []
       if (newField) {
         actions.setEdges(
           edges.map((edge) =>
@@ -260,9 +269,9 @@ export const appNodeLogic = kea<appNodeLogicType>([
           )
         )
         actions.updateNodeData(nodeId, {
-          codeFields: codeFields.includes(newField)
-            ? codeFields.filter((f) => f !== field)
-            : codeFields.map((f) => (f === field ? newField : f)),
+          codeFields: codeArgs.find((a) => a.name === newField)
+            ? codeArgs.filter((f) => f.name !== field)
+            : codeArgs.map((f) => (f.name === field ? newField : f)),
         })
         window.requestAnimationFrame(() => {
           props.updateNodeInternals?.(nodeId)
@@ -271,14 +280,13 @@ export const appNodeLogic = kea<appNodeLogicType>([
         for (const edge of codeFieldEdges) {
           actions.deleteApp(edge.source)
         }
-        actions.updateNodeData(nodeId, { codeFields: codeFields.filter((f) => f !== field) })
+        actions.updateNodeData(nodeId, { codeArgs: codeArgs.filter((f) => f.name !== field) })
         window.requestAnimationFrame(() => {
           props.updateNodeInternals?.(nodeId)
         })
       }
     },
-    editCodeFieldOutput: ({ field }) => {
-      const newField = prompt('Rename field:', field)
+    editCodeFieldOutput: ({ field, newField }) => {
       const { nodeId, node, nodes, nodeEdges, edges } = values
       const codeOutputEdges = nodeEdges.filter(
         (edge) =>
@@ -292,7 +300,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
         if (!otherNode) {
           continue
         }
-        const codeFields = (otherNode?.data as CodeNodeData)?.codeFields ?? []
+        const codeArgs = (otherNode?.data as CodeNodeData)?.codeArgs ?? []
 
         if (newField) {
           updatedEdges[edge.id] = { ...edge, targetHandle: `codeField/${newField}` }
@@ -300,7 +308,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
             ...otherNode,
             data: {
               ...otherNode.data,
-              codeFields: codeFields.map((f) => (f === field ? newField : f)),
+              codeArgs: codeArgs.map((f) => (f.name === field ? { ...f, name: newField } : f)),
             },
           }
         } else {
@@ -310,7 +318,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
             ...otherNode,
             data: {
               ...otherNode.data,
-              codeFields: codeFields.filter((f) => f !== field),
+              codeArgs: codeArgs.filter((f) => f.name !== field),
             },
           }
         }

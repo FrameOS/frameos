@@ -83,39 +83,19 @@ export interface MetricsType {
   metrics: Record<string, any>
 }
 
-export const configFieldTypes = [
-  'string',
-  'text',
-  'float',
-  'integer',
-  'boolean',
-  'color',
-  'select',
-  'json',
-  'node',
-  'image',
-] as const
+export type FieldType = 'string' | 'float' | 'integer' | 'boolean' | 'color' | 'json' | 'node' | 'scene' | 'image'
+export const fieldTypes = ['string', 'float', 'integer', 'boolean', 'color', 'json', 'node', 'scene', 'image'] as const
+export type AppConfigFieldType = FieldType | 'text' | 'select'
+export const toFieldType: (value: string | AppConfigFieldType) => FieldType = (value) =>
+  value in fieldTypes ? (value as FieldType) : 'string'
 
-type ConfigFieldType =
-  | 'string'
-  | 'text'
-  | 'float'
-  | 'integer'
-  | 'boolean'
-  | 'color'
-  | 'select'
-  | 'json'
-  | 'node'
-  | 'scene'
-  | 'image'
-
-export interface ConfigField {
+export interface AppConfigField {
   /** Unique config field keyword */
   name: string
   /** Human readable label */
   label: string
   /** Type of the field */
-  type: ConfigFieldType
+  type: AppConfigFieldType
   /** List of options for the field, only used if type is 'select' */
   options?: string[]
   /** Whether the field is required */
@@ -132,26 +112,17 @@ export interface ConfigField {
   seq?: [string, number | string, number | string][]
 }
 
-export interface StateField extends ConfigField {
-  persist?: 'memory' | 'disk'
-  access?: 'private' | 'public'
-}
-
-export interface MarkdownField {
-  /** Block of markdown text to display between fields */
-  markdown: string
-}
-
-export interface CacheConfig {
-  cacheType?: 'none' | 'forever' | 'duration' | 'key' | 'keyDuration'
-  cacheDataType?: 'string' | 'integer' | 'float' | 'json'
-  cacheDuration?: string
-  cacheKey?: string
-  cacheKeyDataType?: 'string' | 'integer' | 'float' | 'json'
+export interface OutputField {
+  /** Name of the output field */
+  name: string
+  /** Human readable label */
+  label: string
+  /** Type of the field */
+  type: FieldType
 }
 
 /** config.json schema */
-export interface App {
+export interface AppConfig {
   /** Name for this app */
   name: string
   /** Category for this app */
@@ -163,26 +134,51 @@ export interface App {
   /** List of top level settings exported for this app */
   settings?: string[]
   /** Fields for app in diagram editor */
-  fields?: (ConfigField | MarkdownField)[]
+  fields?: (AppConfigField | MarkdownField)[]
   /** Returned fields */
-  output?: ConfigField[]
+  output?: OutputField[]
   /** Default cache settings */
   cache?: CacheConfig
+}
+
+export interface StateField extends AppConfigField {
+  persist?: 'memory' | 'disk'
+  access?: 'private' | 'public'
+}
+
+export interface MarkdownField {
+  /** Block of markdown text to display between fields */
+  markdown: string
+}
+
+export interface CacheConfig {
+  type?: 'none' | 'forever' | 'duration' | 'key' | 'keyDuration'
+  duration?: string
+  keySource?: string
+  keyDataType?: FieldType
 }
 
 export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event'
 export type EdgeType = 'appNodeEdge' | 'codeNodeEdge'
 
-export interface AppNodeData extends CacheConfig {
+export interface AppNodeData {
   keyword: string
   name?: string
   config: Record<string, any>
   sources?: Record<string, string>
+  cache?: CacheConfig
 }
 
-export interface CodeNodeData extends CacheConfig {
+export interface CodeArg {
+  name: string
+  type: FieldType
+}
+
+export interface CodeNodeData {
   code: string
-  codeFields?: string[]
+  codeArgs?: CodeArg[]
+  codeOutputs?: CodeArg[]
+  cache?: CacheConfig
 }
 
 export interface EventNodeData {
@@ -227,7 +223,7 @@ export interface FrameEvent {
   /** Description for this event */
   description?: string
   /** Fields for app in diagram editor */
-  fields?: ConfigField[]
+  fields?: AppConfigField[]
   /** Can this event be dispatched */
   canDispatch?: boolean
   /** Can this event be listened to */

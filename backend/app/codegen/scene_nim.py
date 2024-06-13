@@ -185,13 +185,13 @@ class SceneWriter:
         app_id = f"node{node_integer}"
 
         if name not in self.available_apps and len(sources) == 0:
-            from app.models.log import new_log as log
-            log(
-                self.frame.id,
-                "stderr",
-                f'- ERROR: When generating scene {self.scene_id}. App "{name}" for node "{node_id}" not found',
-            )
-            return
+            message = f'- ERROR: When generating scene {self.scene_id}. App "{name}" for node "{node_id}" not found'
+            try:
+                from app.models.log import new_log as log
+                log(self.frame.id, "stderr", message)
+                return
+            except Exception:
+                raise ValueError(message)
 
         if len(sources) > 0:
             node_app_id = "nodeapp_" + node_id.replace("-", "_")
@@ -271,13 +271,17 @@ class SceneWriter:
         app_config_pairs: list[list[str]] = []
         for key, value in app_config.items():
             if key not in config_types:
-                from app.models.log import new_log as log
-                log(
-                    self.frame.id,
-                    "stderr",
-                    f'- ERROR: When generating scene {self.scene_id}. Config key "{key}" not found for app "{name}", node "{node_id}"',
-                )
-                continue
+                message = f'- ERROR: When generating scene {self.scene_id}. Config key "{key}" not found for app "{name}", node "{node_id}"'
+                try:
+                    from app.models.log import new_log as log
+                    log(
+                        self.frame.id,
+                        "stderr",
+                        message,
+                    )
+                    continue
+                except Exception:
+                    raise ValueError(message)
             type = config_types[key]
 
             app_config_pairs.append(
@@ -790,12 +794,13 @@ var exportedScene* = ExportedScene(
                 code = self.process_app_run_lines(code_field_node, "block")
             else:
                 code = [code_field_node.get("data", {}).get("code", "")]
-            cache_type = code_field_node.get("data", {}).get('cacheType', 'none')
-            code_fields = code_field_node.get("data", {}).get("codeFields", [])
+            cache_type = code_field_node.get("data", {}).get('cache', {}).get('type', 'none')
+            code_fields = code_field_node.get("data", {}).get("codeArgs", [])
             if code_fields and len(code_fields) > 0:
                 source_lines = ["block:"]
                 code_field_sources = self.code_field_source_nodes.get(node_id, {}) or {}
-                for field in code_fields:
+                for code_field in code_fields:
+                    field = code_field.get('name')
                     if field in code_field_sources:
                         code_field_source = self.get_code_field_value(code_field_sources[field], depth + 1)
 
@@ -824,7 +829,7 @@ var exportedScene* = ExportedScene(
             return result
 
     def wrap_with_cache(self, node_id: str, value_list: list[str], data: dict):
-        cache_type = data.get('cacheType', 'none')
+        cache_type = data.get('cache', {}).get('type', 'none')
 
         if cache_type == 'none':
             return value_list
@@ -837,7 +842,13 @@ var exportedScene* = ExportedScene(
             self.cache_counter += 1
         cache_field = f"cache{cache_index}"
 
-        cache_data_type = data.get('cacheDataType', 'string')
+        cache_data_type = 'string'
+        if self.app_configs.get(node_id) is not None:
+            app_config = self.app_configs[node_id]
+            if app_config.get('output') is not None and len(app_config.get('output')) > 0:
+                output = app_config['output'][0]
+                cache_data_type = output.get('type', 'string')
+
         if cache_data_type in ['string', 'float']:
             pass
         elif cache_data_type == 'integer':
@@ -856,7 +867,7 @@ var exportedScene* = ExportedScene(
         extra_post_lines = []
 
         if cache_type == 'duration' or cache_type == 'keyDuration':
-            cache_duration = data.get('cacheDuration', 60)
+            cache_duration = data.get('cache', {}).get('duration', 60)
             time_var = f"var {cache_field}Time: float = 0"
             if time_var not in self.cache_fields:
                 self.cache_fields += [time_var]
@@ -864,8 +875,8 @@ var exportedScene* = ExportedScene(
             extra_post_lines += [f"    {cache_field}Time = epochTime()"]
 
         if cache_type == 'key' or cache_type == 'keyDuration':
-            cache_key = data.get('cacheKey', '"string"')
-            cache_key_data_type = data.get('cacheKeyDataType', 'string')
+            cache_key = data.get('cache', {}).get('keySource', '"string"')
+            cache_key_data_type = data.get('cache', {}).get('keyDataType', 'string')
             if cache_key_data_type in ['string', 'float']:
                 pass
             elif cache_key_data_type == 'integer':

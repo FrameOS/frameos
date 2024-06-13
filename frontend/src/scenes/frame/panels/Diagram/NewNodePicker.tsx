@@ -76,7 +76,12 @@ export function NewNodePicker() {
                           close()
                           closeNewNodePicker()
                           if (newNodePicker) {
-                            selectNewNodeOption(newNodePicker, newNodeOptions[0].value, newNodeOptions[0].label)
+                            selectNewNodeOption(
+                              newNodePicker,
+                              newNodeOptions[0].value,
+                              newNodeOptions[0].label,
+                              newNodeOptions[0].type ?? 'string'
+                            )
                           }
                         }
                       }}

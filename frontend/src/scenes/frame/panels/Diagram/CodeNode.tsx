@@ -8,6 +8,7 @@ import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
 import { NodeCache } from './NodeCache'
+import { CodeArg } from './CodeArg'
 
 export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
@@ -37,12 +38,12 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
             'flex w-full items-center'
           )}
         >
-          {[...(data.codeFields ?? []), '+'].map((codeField, i) => (
+          {[...(data.codeArgs ?? []), '+'].map((codeField, i) => (
             <div key={i} className="flex gap-1 items-center">
               <Handle
                 type="target"
                 position={Position.Top}
-                id={`codeField/${codeField}`}
+                id={`codeField/${typeof codeField === 'object' ? codeField.name : codeField}`}
                 style={{
                   position: 'relative',
                   transform: 'none',
@@ -55,11 +56,18 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
               />
               {codeField === '+' ? (
                 <em>+</em>
-              ) : (
-                <div className="cursor-pointer hover:underline" onClick={() => editCodeField(codeField)}>
-                  {codeField}
+              ) : typeof codeField !== 'string' ? (
+                <div className="cursor-pointer hover:underline">
+                  <CodeArg
+                    key={`${codeField.type}/${codeField.name}`}
+                    codeArg={codeField}
+                    onChange={(value) =>
+                      updateNodeData(id, { codeArgs: data.codeArgs?.map((c, j) => (i === j ? { ...c, ...value } : c)) })
+                    }
+                    onDelete={() => editCodeField(codeField.name, '')}
+                  />
                 </div>
-              )}
+              ) : null}
             </div>
           ))}
         </div>
@@ -95,12 +103,25 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
               }}
               isConnectable={isConnectable}
             />
-            <div
+            {data.codeOutputs
+              ? data.codeOutputs.map((c, i) => (
+                  <CodeArg
+                    key={`${i}/${c.type}/${c.name}`}
+                    codeArg={c}
+                    onChange={(value) => {
+                      updateNodeData(id, {
+                        codeOutputs: data.codeOutputs?.map((c, j) => (i === j ? { ...c, ...value } : c)),
+                      })
+                    }}
+                  />
+                ))
+              : null}
+            {/* <div
               className={targetFunction ? 'cursor-pointer hover:underline' : ''}
               onClick={targetFunction ? () => editCodeFieldOutput(targetFunction) : undefined}
             >
               {targetFunction ?? <em>disconnected</em>}
-            </div>
+            </div> */}
           </div>
           <div className="flex gap-1 items-center">
             <NodeCache />
