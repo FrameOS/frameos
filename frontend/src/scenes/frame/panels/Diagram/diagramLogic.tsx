@@ -141,15 +141,17 @@ export const diagramLogic = kea<diagramLogicType>([
     edges: [
       (s) => [s.rawEdges],
       (rawEdges): Edge[] =>
-        rawEdges.map((edge) =>
-          edge.sourceHandle === 'fieldOutput' || edge.targetHandle?.startsWith('fieldInput/')
-            ? edge.type !== 'codeNodeEdge'
+        rawEdges.map((edge) => {
+          const newEdge =
+            edge.targetHandle === 'prev' || edge.sourceHandle === 'next'
+              ? edge.type !== 'appNodeEdge'
+                ? { ...edge, type: 'appNodeEdge' }
+                : edge
+              : edge.type !== 'codeNodeEdge'
               ? { ...edge, type: 'codeNodeEdge' }
               : edge
-            : edge.type !== 'appNodeEdge'
-            ? { ...edge, type: 'appNodeEdge' }
-            : edge
-        ),
+          return newEdge
+        }),
     ],
     selectedEdge: [(s) => [s.edges], (edges): Edge | null => edges.find((edge) => edge.selected) ?? null],
     selectedEdgeId: [(s) => [s.selectedEdge], (edge) => edge?.id ?? null],
@@ -165,11 +167,14 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
     nodesById: [
       (s) => [s.nodes],
-      (nodes: DiagramNode[]): Record<string, DiagramNode[]> => {
+      (nodes: DiagramNode[]): Record<string, DiagramNode> => {
         return nodes.reduce((acc, node) => {
-          acc[node.id] = [...(acc[node.id] ?? []), node]
+          if (acc[node.id]) {
+            console.error('Duplicate node id found', node.id)
+          }
+          acc[node.id] = node
           return acc
-        }, {} as Record<string, DiagramNode[]>)
+        }, {} as Record<string, DiagramNode>)
       },
     ],
     hasChanges: [

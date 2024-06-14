@@ -237,15 +237,6 @@ export const appNodeLogic = kea<appNodeLogicType>([
         return 'sources' in (node?.data ?? {})
       },
     ],
-    codeOutputEdge: [
-      (s) => [s.nodeEdges],
-      (nodeEdges): Edge | null =>
-        nodeEdges.find(
-          (edge) =>
-            edge.sourceHandle === 'fieldOutput' &&
-            (edge.targetHandle?.startsWith('fieldInput/') || edge.targetHandle?.startsWith('codeField/'))
-        ) ?? null,
-    ],
   }),
   listeners(({ actions, values, props }) => ({
     select: () => {

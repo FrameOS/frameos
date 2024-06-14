@@ -15,6 +15,8 @@ import { ClipboardDocumentIcon, PencilSquareIcon, TrashIcon } from '@heroicons/r
 import { appNodeLogic } from './appNodeLogic'
 import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
+import { newNodePickerLogic } from './newNodePickerLogic'
+import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 
 export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
   const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
@@ -22,6 +24,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
   const { editApp } = useActions(panelsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const {
+    node,
+    nodeEdges,
     isDispatch,
     name,
     fields,
@@ -35,6 +39,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
     fieldOutputFields,
   } = useValues(appNodeLogic(appNodeLogicProps))
   const { select } = useActions(appNodeLogic(appNodeLogicProps))
+  const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
 
   const backgroundClassName = clsx(
@@ -73,6 +78,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
         <div className={titleClassName}>
           {!isDataApp ? (
             <Handle
+              // PrevNodeHandle
               type="target"
               position={Position.Left}
               id="prev"
@@ -88,6 +94,18 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                 borderTopLeftRadius: 0,
               }}
               isConnectable={isConnectable}
+              onClick={(e) => {
+                e.stopPropagation()
+                openNewNodePicker(
+                  e.clientX, // screenX
+                  e.clientY, // screenY
+                  (node?.position.x || 0) - 200, // diagramX
+                  (node?.position.y || 0) + 20 + Math.random() * 60 - 30, // diagramY
+                  id, // nodeId
+                  'prev', // handleId
+                  'target' // handleType
+                )
+              }}
             />
           ) : null}
           <div className="flex-1">
@@ -122,6 +140,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
           />
           {!isDataApp ? (
             <Handle
+              // NextNodeHandle
               type="source"
               position={Position.Right}
               id="next"
@@ -137,6 +156,18 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                 borderTopLeftRadius: 0,
               }}
               isConnectable={isConnectable}
+              onClick={(e) => {
+                e.stopPropagation()
+                openNewNodePicker(
+                  e.clientX, // screenX
+                  e.clientY, // screenY
+                  (node?.position.x || 0) + (node?.width || 300) + 100 + Math.random() * 60, // diagramX
+                  (node?.position.y || 0) + 20 + Math.random() * 60 - 30, // diagramY
+                  id, // nodeId
+                  'next', // handleId
+                  'source' // handleType
+                )
+              }}
             />
           ) : null}
         </div>
@@ -164,6 +195,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                         <td>
                           {field.type !== 'node' ? (
                             <Handle
+                              // AppInputHandle
                               type="target"
                               position={Position.Left}
                               id={`fieldInput/${field.name}`}
@@ -176,6 +208,21 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                                 borderColor: 'white',
                               }}
                               isConnectable
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                const existingNodeCount = nodeEdges.filter((edge) =>
+                                  edge.targetHandle?.startsWith('fieldInput/')
+                                ).length
+                                openNewNodePicker(
+                                  e.clientX, // screenX
+                                  e.clientY, // screenY
+                                  (node?.position.x || 0) - existingNodeCount * 20, // diagramX
+                                  (node?.position.y || 0) - 40 - existingNodeCount * 150, // diagramY
+                                  id, // nodeId
+                                  `fieldInput/${field.name}`, // handleId
+                                  'target' // handleType
+                                )
+                              }}
                             />
                           ) : null}
                         </td>
@@ -208,8 +255,54 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                               : 1
                           }
                         >
-                          <div className="flex justify-between items-center gap-2">
-                            <div>{field.label ?? field.name}</div>
+                          <div
+                            className={clsx(
+                              'flex items-center gap-1',
+                              field.type !== 'image' &&
+                                !codeArgs.includes(field.name) &&
+                                !fieldInputFields.includes(field.name)
+                                ? 'justify-between'
+                                : ''
+                            )}
+                          >
+                            <div title={field.type}>{field.label ?? field.name}</div>
+                            {field.type === 'node' ? (
+                              <div className="flex items-center gap-2">
+                                <FieldTypeTag type={field.type} />
+                                <Handle
+                                  type="source"
+                                  position={Position.Right}
+                                  id={`field/${field.name}`}
+                                  style={{
+                                    position: 'relative',
+                                    transform: 'none',
+                                    right: 0,
+                                    top: 0,
+                                    background: '#cccccc',
+                                    borderBottomLeftRadius: 0,
+                                    borderTopLeftRadius: 0,
+                                  }}
+                                  isConnectable={isConnectable}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    const existingNodeCount = nodeEdges.filter((edge) =>
+                                      edge.targetHandle?.startsWith('fieldInput/')
+                                    ).length
+                                    openNewNodePicker(
+                                      e.clientX, // screenX
+                                      e.clientY, // screenY
+                                      (node?.position.x || 0) + (node?.width || 300) + 20 + Math.random() * 30, // diagramX
+                                      (node?.position.y || 0) + 30 + Math.random() * 80, // diagramY
+                                      id, // nodeId
+                                      `field/${field.name}`, // handleId
+                                      'source' // handleType
+                                    )
+                                  }}
+                                />
+                              </div>
+                            ) : (
+                              <FieldTypeTag type={field.type} />
+                            )}
                           </div>
                         </td>
                         {field.type !== 'node' &&
@@ -273,25 +366,6 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                             )}
                           </td>
                         ) : null}
-                        <td>
-                          {field.type === 'node' ? (
-                            <Handle
-                              type="source"
-                              position={Position.Right}
-                              id={`field/${field.name}`}
-                              style={{
-                                position: 'relative',
-                                transform: 'none',
-                                right: 0,
-                                top: 0,
-                                background: '#cccccc',
-                                borderBottomLeftRadius: 0,
-                                borderTopLeftRadius: 0,
-                              }}
-                              isConnectable={isConnectable}
-                            />
-                          ) : null}
-                        </td>
                       </tr>
                     )}
                   </React.Fragment>

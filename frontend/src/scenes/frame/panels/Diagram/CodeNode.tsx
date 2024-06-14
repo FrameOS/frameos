@@ -9,15 +9,15 @@ import { ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
 import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
+import { newNodePickerLogic } from './newNodePickerLogic'
 
 export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
   const { updateNodeData, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { isSelected, codeOutputEdge } = useValues(appNodeLogic(appNodeLogicProps))
-  const { select, editCodeField, editCodeFieldOutput } = useActions(appNodeLogic(appNodeLogicProps))
-
-  const targetFunction = codeOutputEdge?.targetHandle?.replace(/^[^\/]+\//, '')
+  const { isSelected, node, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
+  const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
+  const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
 
   return (
     <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>
@@ -30,10 +30,10 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
             : 'bg-black bg-opacity-70 border-green-900 shadow-green-700/50 '
         )}
       >
-        <NodeResizer minWidth={200} minHeight={130} />
+        <NodeResizer minWidth={200} minHeight={119} />
         <div
           className={clsx(
-            'frameos-node-title text-xl p-1 gap-2',
+            'frameos-node-title text-xl px-1 gap-2',
             isSelected ? 'bg-indigo-900' : 'bg-green-900',
             'flex w-full items-center'
           )}
@@ -41,6 +41,7 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
           {[...(data.codeArgs ?? []), '+'].map((codeField, i) => (
             <div key={i} className="flex gap-1 items-center">
               <Handle
+                // CodeInputHandle
                 type="target"
                 position={Position.Top}
                 id={`codeField/${typeof codeField === 'object' ? codeField.name : codeField}`}
@@ -53,6 +54,21 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
                   borderColor: 'white',
                 }}
                 isConnectable={isConnectable}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const existingNodeCount = nodeEdges.filter(
+                    (edge) => edge.targetHandle?.startsWith('codeField/') && edge.target === id
+                  ).length
+                  openNewNodePicker(
+                    e.clientX, // screenX
+                    e.clientY, // screenY
+                    (node?.position.x || 0) - existingNodeCount * 20, // diagramX
+                    (node?.position.y || 0) - 40 - existingNodeCount * 150, // diagramY
+                    id, // nodeId
+                    `codeField/${typeof codeField === 'object' ? codeField.name : codeField}`, // handleId
+                    'target' // handleType
+                  )
+                }}
               />
               {codeField === '+' ? (
                 <em>+</em>
@@ -83,13 +99,14 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
         </div>
         <div
           className={clsx(
-            'frameos-node-title text-xl p-1 gap-1',
+            'frameos-node-title text-xl px-1 gap-1',
             isSelected ? 'bg-indigo-900' : 'bg-green-900',
             'flex w-full justify-between items-center'
           )}
         >
           <div className="flex gap-1 items-center">
             <Handle
+              // CodeOutputHandle
               type="source"
               position={Position.Bottom}
               id={`fieldOutput`}
@@ -102,6 +119,18 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
                 borderColor: 'white',
               }}
               isConnectable={isConnectable}
+              onClick={(e) => {
+                e.stopPropagation()
+                openNewNodePicker(
+                  e.clientX, // screenX
+                  e.clientY, // screenY
+                  (node?.position.x || 0) + Math.random() * 60 - 10, // diagramX
+                  (node?.position.y || 0) + (node?.height || 300) + Math.random() * 30 + 20, // diagramY
+                  id, // nodeId
+                  `fieldOutput`, // handleId
+                  'source' // handleType
+                )
+              }}
             />
             {data.codeOutputs
               ? data.codeOutputs.map((c, i) => (
@@ -116,12 +145,6 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
                   />
                 ))
               : null}
-            {/* <div
-              className={targetFunction ? 'cursor-pointer hover:underline' : ''}
-              onClick={targetFunction ? () => editCodeFieldOutput(targetFunction) : undefined}
-            >
-              {targetFunction ?? <em>disconnected</em>}
-            </div> */}
           </div>
           <div className="flex gap-1 items-center">
             <NodeCache />

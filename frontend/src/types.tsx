@@ -87,7 +87,7 @@ export type FieldType = 'string' | 'float' | 'integer' | 'boolean' | 'color' | '
 export const fieldTypes = ['string', 'float', 'integer', 'boolean', 'color', 'json', 'node', 'scene', 'image'] as const
 export type AppConfigFieldType = FieldType | 'text' | 'select'
 export const toFieldType: (value: string | AppConfigFieldType) => FieldType = (value) =>
-  value in fieldTypes ? (value as FieldType) : 'string'
+  fieldTypes.includes(value as any) ? (value as FieldType) : 'string'
 
 export interface AppConfigField {
   /** Unique config field keyword */
@@ -193,6 +193,82 @@ export interface DispatchNodeData {
 export type NodeData = AppNodeData | CodeNodeData | EventNodeData | DispatchNodeData
 
 export type DiagramNode = Node<NodeData, NodeType>
+export type DiagramEdge = Edge<any>
+
+export interface HandleType {
+  handleId: string
+  handleType: 'source' | 'target'
+}
+
+export interface PrevNodeHandle extends HandleType {
+  handleId: 'prev'
+  handleType: 'target'
+}
+
+export interface NextNodeHandle extends HandleType {
+  handleId: 'next'
+  handleType: 'source'
+}
+
+export interface AppInputHandle extends HandleType {
+  handleId: `fieldInput/${string}`
+  handleType: 'target'
+}
+
+export interface AppNodeOutputHandle extends HandleType {
+  handleId: `field/${string}`
+  handleType: 'source'
+}
+
+export interface NewCodeInputHandle extends HandleType {
+  handleId: `codeField/+`
+  handleType: 'target'
+}
+
+export interface CodeInputHandle extends HandleType {
+  handleId: `codeField/${string}`
+  handleType: 'target'
+}
+
+export interface CodeOutputHandle extends HandleType {
+  handleId: `fieldOutput`
+  handleType: 'source'
+}
+
+export interface EdgeConnectionType {
+  sourceHandle: HandleType & { handleType: 'source' }
+  targetHandle: HandleType & { handleType: 'target' }
+  sourceNodeType: NodeType
+  targetNodeType: NodeType
+}
+
+export interface ConnectionAppNextPrev extends EdgeConnectionType {
+  sourceHandle: NextNodeHandle
+  targetHandle: PrevNodeHandle
+  sourceNodeType: 'app' | 'source' | 'event'
+  targetNodeType: 'app' | 'source'
+}
+
+export interface ConnectionAppNodeOutputPrev extends EdgeConnectionType {
+  sourceHandle: AppNodeOutputHandle
+  targetHandle: PrevNodeHandle
+  sourceNodeType: 'app' | 'source'
+  targetNodeType: 'app' | 'source'
+}
+
+export interface ConnectionCodeInputOutput extends EdgeConnectionType {
+  sourceHandle: CodeOutputHandle
+  targetHandle: CodeInputHandle
+  sourceNodeType: 'app' | 'source' | 'event'
+  targetNodeType: 'app' | 'source'
+}
+
+export interface ConnectionCodeOutputAppInput extends EdgeConnectionType {
+  sourceHandle: CodeOutputHandle
+  targetHandle: AppInputHandle
+  sourceNodeType: 'app' | 'source' | 'event'
+  targetNodeType: 'app' | 'source'
+}
 
 export interface FrameSceneSettings {
   refreshInterval?: number
@@ -203,7 +279,7 @@ export interface FrameScene {
   id: string
   name: string
   nodes: DiagramNode[]
-  edges: Edge[]
+  edges: DiagramEdge[]
   fields?: StateField[]
   default?: boolean
   settings?: FrameSceneSettings
@@ -213,7 +289,7 @@ export interface FrameSceneIndexed {
   id: string
   name: string
   nodes: Record<string, DiagramNode>
-  edges: Record<string, Edge[]>
+  edges: Record<string, DiagramEdge[]>
 }
 
 /** config.json schema */

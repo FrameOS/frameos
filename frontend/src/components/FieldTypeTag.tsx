@@ -18,7 +18,6 @@ export interface FieldTypeTagProps {
 }
 
 export function FieldTypeTag({ type }: FieldTypeTagProps): JSX.Element {
-  console.log({ type })
   const _type = toFieldType(type)
   return <Tag color={typeColors[_type]}>{_type}</Tag>
 }

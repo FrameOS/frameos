@@ -162,8 +162,8 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           return null
         }
         const { nodeId } = newNodePicker
-        const [node] = nodesById[nodeId] ?? []
-        return node ?? null
+        const node = nodesById[nodeId] ?? null
+        return node
       },
     ],
     newNodeHandleDataType: [
@@ -173,6 +173,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           return null
         }
         const { handleId, handleType } = newNodePicker
+        // AppInputHandle
         if (handleType === 'target' && handleId.startsWith('fieldInput/')) {
           const key = handleId.split('/', 2)[1]
           if (node.type === 'app' && (node.data as AppNodeData)?.sources?.['config.json']) {
@@ -188,15 +189,22 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             const app = apps[node.data.keyword]
             const field = app.fields?.find((f) => 'name' in f && f.name === key)
             const type = field && 'type' in field ? field.type || null : null
-            console.log({
-              type,
-              full: type ? toBaseType(type) : null,
-            })
             return type ? toBaseType(type) : null
           }
         }
+        // CodeInputHandle & NewCodeInputHandle
         if (handleType === 'target' && handleId.startsWith('codeField/')) {
-          console.error('Must add type support to code field arguments!')
+          const key = handleId.split('/', 2)[1]
+          const codeArgs = (node.data as CodeNodeData)?.codeArgs ?? []
+          const arg = codeArgs.find((arg) => arg.name === key)
+          return arg?.type ? toBaseType(arg.type) : null
+        }
+        // CodeOutputHandle
+        if (handleType === 'source' && handleId.startsWith('fieldOutput')) {
+          const key = handleId.split('/', 2)[1]
+          const codeOutputs = (node.data as CodeNodeData)?.codeOutputs ?? []
+          const arg = codeOutputs[0]
+          return arg?.type ? toBaseType(arg.type) : null
         }
         return null
       },
@@ -255,7 +263,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               })
             }
           } else {
-            options.push({ label: 'Error: unknown new node data type', value: 'app', type: 'string', keyword: key })
+            options.push({ label: 'Error: unable to determine data type', value: 'app', type: 'string', keyword: key })
           }
         } else if (
           (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) ||
@@ -382,12 +390,13 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         newNode.type = 'code'
         newNode.style = {
           width: 300,
-          height: 130,
+          height: 119,
         }
+        const codeArgs = (values.nodesById[nodeId]?.data as CodeNodeData)?.codeArgs ?? []
         newNode.data = {
           code: value.startsWith('code/') ? value.substring(5) : '',
           codeArgs: [],
-          codeOutputs: [{ name: keyword || 'output', type: type ?? values.newNodeHandleDataType ?? 'string' }],
+          codeOutputs: [{ name: getNewFieldName(codeArgs), type: type ?? values.newNodeHandleDataType ?? 'string' }],
         }
       } else if (value.startsWith('app/')) {
         const keyword = value.substring(4)
@@ -424,7 +433,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           actions.addEdge({
             id: uuidv4(),
             target: nodeId,
-            targetHandle: `codeArg/${newArg.name}`,
+            targetHandle: `codeField/${newArg.name}`,
             source: newNode.id,
             sourceHandle: newNodeOutputHandle,
           })

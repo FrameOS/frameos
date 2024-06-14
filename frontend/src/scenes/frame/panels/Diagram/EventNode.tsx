@@ -14,19 +14,34 @@ import { SceneSettings } from '../Scenes/SceneSettings'
 import { EllipsisHorizontalIcon } from '@heroicons/react/24/outline'
 import { buttonColor, buttonSize } from '../../../../components/Button'
 import { showAsFps } from '../../../../decorators/refreshInterval'
+import { appNodeLogic } from './appNodeLogic'
+import { newNodePickerLogic } from './newNodePickerLogic'
 
 const events: FrameEvent[] = _events as any
 
 export function EventNode(props: NodeProps): JSX.Element {
+  const { frameId, sceneId } = useValues(diagramLogic)
   const { data, id } = props
   const { width, height } = useValues(frameLogic)
   const { selectedNodeId, scene } = useValues(diagramLogic)
   const { selectNode } = useActions(diagramLogic)
+
   const { keyword } = data
+  const appNodeLogicProps = { frameId, sceneId, nodeId: id }
+  const { node, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
+  const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
 
   const isEventWithStateFields = keyword === 'init' || keyword === 'setSceneState' || keyword === 'render'
 
   const fields = isEventWithStateFields ? scene?.fields ?? [] : events?.find((e) => e.name == keyword)?.fields ?? []
+
+  // these fields are deprecated, but keep showing nodes that are connected
+  const sourceFieldsToShow = fields.filter((field) => {
+    const fieldValue = isEventWithStateFields
+      ? stateFieldAccess(field, 'state')
+      : stateFieldAccess(field, 'context.payload')
+    return nodeEdges.some((edge) => edge.sourceHandle === `code/${fieldValue}`)
+  })
 
   return (
     <div
@@ -74,6 +89,19 @@ export function EventNode(props: NodeProps): JSX.Element {
               borderBottomLeftRadius: 0,
               borderTopLeftRadius: 0,
             }}
+            onClick={(e) => {
+              e.stopPropagation()
+              // NextNodeHandle
+              openNewNodePicker(
+                e.clientX, // screenX
+                e.clientY, // screenY
+                (node?.position.x || 0) + (node?.width || 300) + 100 + Math.random() * 60, // diagramX
+                (node?.position.y || 0) + 20 + Math.random() * 60 - 30, // diagramY
+                id, // nodeId
+                'next', // handleId
+                'source' // handleType
+              )
+            }}
           />
         </div>
       </div>
@@ -101,34 +129,35 @@ export function EventNode(props: NodeProps): JSX.Element {
           </div>
         </div>
       ) : null}
-      {fields.length > 0 ? (
+      {sourceFieldsToShow.length > 0 ? (
         <div className="p-1">
-          {fields.map((field: StateField, i) => (
-            <div key={i} className="flex items-center justify-end space-x-1 w-full">
-              <code className="text-xs mr-2 text-gray-400 flex-1">{field.type}</code>
-              <div title={field.label}>{field.name}</div>
-              <ClipboardIcon
-                className="w-5 h-5 cursor-pointer"
-                onClick={() =>
-                  copy(
-                    isEventWithStateFields
-                      ? stateFieldAccess(field, 'state')
-                      : stateFieldAccess(field, 'context.payload')
-                  )
-                }
-              />
-              <Handle
-                type="source"
-                position={Position.Right}
-                id={
-                  isEventWithStateFields
-                    ? `code/${stateFieldAccess(field, 'state')}`
-                    : `code/${stateFieldAccess(field, 'context.payload')}`
-                }
-                style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#000000' }}
-              />
-            </div>
-          ))}
+          {sourceFieldsToShow.map((field: StateField, i) => {
+            const fieldValue = isEventWithStateFields
+              ? stateFieldAccess(field, 'state')
+              : stateFieldAccess(field, 'context.payload')
+            return (
+              <div key={i} className="flex items-center justify-end space-x-1 w-full">
+                <code className="text-xs mr-2 text-gray-400 flex-1">{field.type}</code>
+                <div title={field.label}>{field.name}</div>
+                <ClipboardIcon
+                  className="w-5 h-5 cursor-pointer"
+                  onClick={() =>
+                    copy(
+                      isEventWithStateFields
+                        ? stateFieldAccess(field, 'state')
+                        : stateFieldAccess(field, 'context.payload')
+                    )
+                  }
+                />
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id={`code/${fieldValue}`}
+                  style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#000000' }}
+                />
+              </div>
+            )
+          })}
         </div>
       ) : null}
     </div>

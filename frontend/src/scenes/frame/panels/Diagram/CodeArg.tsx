@@ -1,31 +1,20 @@
-import { TagProps } from '../../../../components/Tag'
-import { CodeArg, FieldType, fieldTypes } from '../../../../types'
+import type { CodeArg, FieldType } from '../../../../types'
+import { fieldTypes } from '../../../../types'
 import { useValues } from 'kea'
 import { Select } from '../../../../components/Select'
 import { Label } from '../../../../components/Label'
 import { TextInput } from '../../../../components/TextInput'
 import { appNodeLogic } from './appNodeLogic'
-import { Tag } from '../../../../components/Tag'
 import { Tooltip } from '../../../../components/Tooltip'
 import { Button } from '../../../../components/Button'
 import { useEffect, useState } from 'react'
+import clsx from 'clsx'
+import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 
 export interface CodeArgProps {
   codeArg: CodeArg
   onChange?: (codeArg: Partial<CodeArg>) => void
   onDelete?: () => void
-}
-
-export const typeColors: Record<FieldType, TagProps['color']> = {
-  string: 'blue',
-  float: 'red',
-  integer: 'orange',
-  boolean: 'gray',
-  color: 'secondary',
-  json: 'secondary',
-  node: 'secondary',
-  scene: 'secondary',
-  image: 'primary',
 }
 
 export function CodeArg({ codeArg, onChange }: CodeArgProps): JSX.Element {
@@ -42,13 +31,14 @@ export function CodeArg({ codeArg, onChange }: CodeArgProps): JSX.Element {
     return <div />
   }
   const codeNode = (
-    <>
-      {codeArg.name} <Tag color={typeColors[codeArg.type]}>{codeArg.type}</Tag>
-    </>
+    <div className={clsx('flex items-center', onChange && 'hover:underline cursor-pointer')}>
+      <div>{codeArg.name}</div>
+      <FieldTypeTag type={codeArg.type} />
+    </div>
   )
 
   if (!onChange) {
-    return <div>{codeNode}</div>
+    return codeNode
   }
 
   return (
@@ -83,7 +73,7 @@ export function CodeArg({ codeArg, onChange }: CodeArgProps): JSX.Element {
         </div>
       }
     >
-      <div className="hover:underline cursor-pointer">{codeNode}</div>
+      {codeNode}
     </Tooltip>
   )
 }
