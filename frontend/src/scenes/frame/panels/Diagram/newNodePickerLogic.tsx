@@ -202,17 +202,23 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         // CodeOutputHandle
         if (handleType === 'source' && handleId.startsWith('fieldOutput')) {
           const key = handleId.split('/', 2)[1]
-          const codeOutputs = (node.data as CodeNodeData)?.codeOutputs ?? []
-          const arg = codeOutputs[0]
-          return arg?.type ? toBaseType(arg.type) : null
+          if (node.type === 'code') {
+            const codeOutputs = (node.data as CodeNodeData)?.codeOutputs ?? []
+            const arg = codeOutputs[0]
+            return arg?.type ? toBaseType(arg.type) : null
+          } else if (node.type === 'app') {
+            const app = apps[(node.data as AppNodeData).keyword]
+            const output = app.output?.[0]
+            return output?.type ? toBaseType(output.type) : null
+          }
         }
         return null
       },
     ],
     allNewNodeOptions: [
-      (s) => [s.newNodePicker, s.apps, s.scene, s.newNodeHandleDataType],
-      (newNodePicker, apps, scene, newNodeHandleDataType): OptionWithType[] => {
-        if (!newNodePicker) {
+      (s) => [s.newNodePicker, s.apps, s.scene, s.newNodeHandleDataType, s.node],
+      (newNodePicker, apps, scene, newNodeHandleDataType, node): OptionWithType[] => {
+        if (!newNodePicker || !node) {
           return []
         }
         const { handleId, handleType } = newNodePicker
@@ -279,6 +285,22 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               })
             }
           }
+        } else if (handleType === 'source' && handleId === 'fieldOutput') {
+          let keyword = 'output'
+          if (node.type === 'code') {
+            keyword = (node.data as CodeNodeData)?.codeOutputs?.[0].name || keyword
+          } else if (node.type === 'app') {
+            const appKeyword = (node.data as AppNodeData)?.keyword || keyword
+            const app = apps[appKeyword]
+            keyword = app.output?.[0].name || keyword
+          }
+          options.push({
+            label: 'Code',
+            value: 'code',
+            type: newNodeHandleDataType ?? 'string',
+            keyword: keyword,
+          })
+          // TODO: show all apps that can take this field type as input
         } else {
           options.push({
             label: `handleId: ${handleId}, handleType: ${handleType}`,
@@ -383,6 +405,9 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       if (handleType === 'target' && handleId === 'prev') {
         newNodeOutputHandle = 'next'
       }
+      if (handleId === 'fieldOutput') {
+        newNodeOutputHandle = `codeField/${keyword}`
+      }
 
       if (value === 'code' || value.startsWith('code/')) {
         newNode.position.x -= 20
@@ -393,15 +418,29 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           height: 119,
         }
         const codeArgs = (values.nodesById[nodeId]?.data as CodeNodeData)?.codeArgs ?? []
+
         newNode.data = {
           code: value.startsWith('code/') ? value.substring(5) : '',
           codeArgs: [],
-          codeOutputs: [
+          codeOutputs: [],
+        }
+
+        if (handleId === 'fieldOutput') {
+          newNode.data.codeArgs = [
+            {
+              name: keyword,
+              type: type ?? values.newNodeHandleDataType ?? 'string',
+            },
+          ]
+
+          debugger
+        } else {
+          newNode.data.codeOutputs = [
             {
               name: keyword === '+' ? getNewFieldName(codeArgs) : keyword,
               type: type ?? values.newNodeHandleDataType ?? 'string',
             },
-          ],
+          ]
         }
       } else if (value.startsWith('app/')) {
         const keyword = value.substring(4)
@@ -434,7 +473,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           ),
           newNode,
         ])
-        window.requestAnimationFrame(() => {
+        window.setTimeout(() => {
           actions.addEdge({
             id: uuidv4(),
             target: nodeId,
@@ -446,10 +485,11 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             props.updateNodeInternals?.(nodeId)
             props.updateNodeInternals?.(newNode.id)
           }, 200)
-        })
+        }, 200)
       } else {
         actions.setNodes([...values.nodes, newNode])
-        window.requestAnimationFrame(() => {
+        window.setTimeout(() => {
+          debugger
           if (handleType === 'source') {
             actions.addEdge({
               id: uuidv4(),
@@ -471,7 +511,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             props.updateNodeInternals?.(nodeId)
             props.updateNodeInternals?.(newNode.id)
           }, 200)
-        })
+        }, 200)
       }
       actions.setSearchValue('')
     },

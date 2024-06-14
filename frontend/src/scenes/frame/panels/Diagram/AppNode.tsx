@@ -392,6 +392,18 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                       borderColor: 'white',
                     }}
                     isConnectable={isConnectable}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      openNewNodePicker(
+                        e.clientX, // screenX
+                        e.clientY, // screenY
+                        (node?.position.x || 0) + Math.random() * 60 - 10, // diagramX
+                        (node?.position.y || 0) + (node?.height || 300) + Math.random() * 30 + 20, // diagramY
+                        id, // nodeId
+                        `fieldOutput`, // handleId
+                        'source' // handleType
+                      )
+                    }}
                   />
                   <CodeArg codeArg={{ type: out.type, name: out.name }} />
                 </div>
