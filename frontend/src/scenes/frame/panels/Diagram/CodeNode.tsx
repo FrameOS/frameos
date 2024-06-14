@@ -71,7 +71,25 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
                 }}
               />
               {codeField === '+' ? (
-                <em>+</em>
+                <em
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const existingNodeCount = nodeEdges.filter(
+                      (edge) => edge.targetHandle?.startsWith('codeField/') && edge.target === id
+                    ).length
+                    openNewNodePicker(
+                      e.clientX, // screenX
+                      e.clientY, // screenY
+                      (node?.position.x || 0) - existingNodeCount * 20, // diagramX
+                      (node?.position.y || 0) - 40 - existingNodeCount * 150, // diagramY
+                      id, // nodeId
+                      `codeField/${typeof codeField === 'object' ? codeField.name : codeField}`, // handleId
+                      'target' // handleType
+                    )
+                  }}
+                >
+                  +
+                </em>
               ) : typeof codeField !== 'string' ? (
                 <div className="cursor-pointer hover:underline">
                   <CodeArg
