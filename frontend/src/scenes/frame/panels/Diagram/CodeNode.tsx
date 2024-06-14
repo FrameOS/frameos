@@ -83,7 +83,7 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
                       (node?.position.x || 0) - existingNodeCount * 20, // diagramX
                       (node?.position.y || 0) - 40 - existingNodeCount * 150, // diagramY
                       id, // nodeId
-                      `codeField/${typeof codeField === 'object' ? codeField.name : codeField}`, // handleId
+                      `codeField/+`, // handleId
                       'target' // handleType
                     )
                   }}
