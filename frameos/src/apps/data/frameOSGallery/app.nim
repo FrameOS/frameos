@@ -9,9 +9,6 @@ type
     category*: string
     categoryOther*: string
 
-  AppOutput* = object
-    image*: Image
-
   App* = ref object
     nodeId*: NodeId
     scene*: FrameScene
@@ -30,8 +27,8 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
     appConfig: appConfig,
   )
 
-proc run*(self: App, context: ExecutionContext): AppOutput =
+proc run*(self: App, context: ExecutionContext): Image =
   let category = if self.appConfig.category == "other": self.appConfig.categoryOther else: self.appConfig.category
-  self.scene.logger.log(%*{"event": "legacy/frameOSGallery", "category": category})
+  self.scene.logger.log(%*{"event": "data/frameOSGallery", "category": category})
   let url = &"{BASE_URL}?category={category}"
-  result = AppOutput(image: downloadImage(url))
+  result = downloadImage(url)

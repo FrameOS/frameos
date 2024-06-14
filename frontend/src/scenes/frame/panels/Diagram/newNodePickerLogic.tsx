@@ -396,7 +396,12 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         newNode.data = {
           code: value.startsWith('code/') ? value.substring(5) : '',
           codeArgs: [],
-          codeOutputs: [{ name: getNewFieldName(codeArgs), type: type ?? values.newNodeHandleDataType ?? 'string' }],
+          codeOutputs: [
+            {
+              name: keyword === '+' ? getNewFieldName(codeArgs) : keyword,
+              type: type ?? values.newNodeHandleDataType ?? 'string',
+            },
+          ],
         }
       } else if (value.startsWith('app/')) {
         const keyword = value.substring(4)

@@ -12,9 +12,6 @@ type
     user*: string
     stateKey*: string
 
-  AppOutput* = object
-    reply*: string
-
   App* = ref object
     nodeId*: NodeId
     scene*: FrameScene
@@ -36,7 +33,7 @@ proc error*(self: App, message: string) =
   self.scene.logger.log(%*{"event": &"openai:{self.nodeId}:error", "error": message})
   self.scene.state[self.appConfig.stateKey] = %*(&"Error: {message}")
 
-proc run*(self: App, context: ExecutionContext): AppOutput =
+proc run*(self: App, context: ExecutionContext): string =
   if self.appConfig.user == "" and self.appConfig.system == "":
     self.error("No system or user prompt provided in app config.")
     return
@@ -79,9 +76,9 @@ proc run*(self: App, context: ExecutionContext): AppOutput =
     let json = parseJson(response.body)
     let reply = json{"choices"}{0}{"message"}{"content"}.getStr
     self.scene.logger.log(%*{"event": &"openai:{self.nodeId}:reply", "reply": reply})
-    result = AppOutput(reply: reply)
+    result = reply
   except CatchableError as e:
     self.error "OpenAI API error: " & $e.msg
-    result = AppOutput(reply: "OpenAI API error: " & $e.msg)
+    result = "OpenAI API error: " & $e.msg
   finally:
     client.close()

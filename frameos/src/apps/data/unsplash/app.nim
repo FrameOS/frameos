@@ -10,9 +10,6 @@ type
   AppConfig* = object
     keyword*: string
 
-  AppOutput* = object
-    image*: Image
-
   App* = ref object
     nodeId*: NodeId
     scene*: FrameScene
@@ -36,7 +33,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
     result.appConfig.keyword = "random"
   result.appConfig.keyword = result.appConfig.keyword.strip()
 
-proc run*(self: App, context: ExecutionContext): AppOutput =
+proc run*(self: App, context: ExecutionContext): Image =
   try:
     let url = &"https://source.unsplash.com/random/{context.image.width}x{context.image.height}/?{self.appConfig.keyword}"
     if self.frameConfig.debug:
@@ -45,7 +42,7 @@ proc run*(self: App, context: ExecutionContext): AppOutput =
     if self.frameConfig.debug:
       self.log("Image downloaded")
 
-    return AppOutput(image: unsplashImage)
+    return unsplashImage
   except CatchableError as e:
-    return AppOutput(image: renderError(context.image.width, context.image.height, e.msg))
+    return renderError(context.image.width, context.image.height, e.msg)
 

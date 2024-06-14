@@ -7,9 +7,6 @@ type
     entityId*: string
     debug*: bool
 
-  AppOutput* = object
-    state*: JsonNode
-
   App* = ref object
     nodeId*: NodeId
     scene*: FrameScene
@@ -30,11 +27,11 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
 proc log*(self: App, message: string) =
   self.scene.logger.log(%*{"event": "legacy/haSensor:log", "message": message})
 
-proc error*(self: App, message: string): AppOutput =
+proc error*(self: App, message: string): JsonNode =
   self.scene.logger.log(%*{"event": "legacy/haSensor:error", "error": message})
-  return AppOutput(state: %*{"error": message})
+  return %*{"error": message}
 
-proc run*(self: App, context: ExecutionContext): AppOutput =
+proc run*(self: App, context: ExecutionContext): JsonNode =
   let haUrl = self.frameConfig.settings{"homeAssistant"}{"url"}.getStr
   if haUrl == "":
     return self.error("Please provide a Home Assistant URL in the settings.")
@@ -63,7 +60,7 @@ proc run*(self: App, context: ExecutionContext): AppOutput =
       let responseJson = parseJson(response.body)
       if self.appConfig.debug:
         self.log($responseJson)
-      return AppOutput(state: responseJson)
+      return responseJson
 
     except CatchableError as e:
       return self.error "Error fetching Home Assistant status: " & $e.msg

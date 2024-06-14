@@ -18,9 +18,6 @@ type
     seconds*: float
     counterStateKey*: string
 
-  AppOutput* = object
-    image*: Image
-
   App* = ref object
     nodeId*: NodeId
     scene*: FrameScene
@@ -56,9 +53,9 @@ proc getImagesInFolder(folder: string): seq[string] =
 proc log*(self: App, message: string) =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
 
-proc error*(self: App, message: string): AppOutput =
+proc error*(self: App, message: string): Image =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
-  return AppOutput(image: renderError(self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), message))
+  return renderError(self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), message)
 
 proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
@@ -79,7 +76,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   elif appConfig.counterStateKey != "":
     result.counter = scene.state{appConfig.counterStateKey}.getInt() mod result.images.len
 
-proc run*(self: App, context: ExecutionContext): AppOutput =
+proc run*(self: App, context: ExecutionContext): Image =
   if self.images.len == 0:
     return self.error "No images found in: " & self.appConfig.path
 
@@ -101,4 +98,4 @@ proc run*(self: App, context: ExecutionContext): AppOutput =
     except CatchableError as e:
       return self.error "An error occurred while loading the image: " & path & "\n" & e.msg
 
-  return AppOutput(image: nextImage.get())
+  return nextImage.get()

@@ -9,9 +9,6 @@ type
     height*: int
     scalingMode*: string
 
-  AppOutput* = object
-    image*: Image
-
   App* = ref object
     nodeId*: NodeId
     frameConfig*: FrameConfig
@@ -26,10 +23,10 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
     appConfig: appConfig,
   )
 
-proc run*(self: App, context: ExecutionContext): AppOutput =
+proc run*(self: App, context: ExecutionContext): Image =
   let image = newImage(self.appConfig.width, self.appConfig.height)
   # case self.appConfig.scalingMode:
   #   of "center", "contain", "":
   #     image.fill(self.scene.backgroundColor)
   image.scaleAndDrawImage(self.appConfig.image, self.appConfig.scalingMode)
-  return AppOutput(image: image)
+  return image

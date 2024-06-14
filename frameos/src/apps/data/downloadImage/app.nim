@@ -2,14 +2,12 @@ import json
 import pixie
 import options
 import frameos/utils/image
+import frameos/config
 import frameos/types
 
 type
   AppConfig* = object
     url*: string
-
-  AppOutput* = object
-    image*: Image
 
   App* = ref object
     nodeId*: NodeId
@@ -31,10 +29,10 @@ proc log*(self: App, message: string) =
 proc error*(self: App, message: string) =
   self.scene.logger.log(%*{"event": "apps/data/downloadImage:error", "error": message})
 
-proc run*(self: App, context: ExecutionContext): AppOutput =
+proc run*(self: App, context: ExecutionContext): Image =
   try:
     let url = self.appConfig.url
-    return AppOutput(image: downloadImage(url))
+    return downloadImage(url)
   except:
     self.error "An error occurred while downloading image."
-    return AppOutput(image: renderText("An error occurred while downloading image."))
+    return renderError(self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), "An error occurred while downloading image.")

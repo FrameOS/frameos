@@ -31,7 +31,7 @@ export function CodeArg({ codeArg, onChange }: CodeArgProps): JSX.Element {
     return <div />
   }
   const codeNode = (
-    <div className={clsx('flex items-center', onChange && 'hover:underline cursor-pointer')}>
+    <div className={clsx('flex items-center gap-1', onChange && 'hover:underline cursor-pointer')}>
       <div>{codeArg.name}</div>
       <FieldTypeTag type={codeArg.type} />
     </div>

@@ -8,9 +8,6 @@ type
   AppConfig* = object
     url*: string
 
-  AppOutput* = object
-    result*: string
-
   App* = ref object
     nodeId*: NodeId
     scene*: FrameScene
@@ -31,13 +28,13 @@ proc log*(self: App, message: string) =
 proc error*(self: App, message: string) =
   self.scene.logger.log(%*{"event": "apps/data/downloadUrl:error", "error": message})
 
-proc run*(self: App, context: ExecutionContext): AppOutput =
+proc run*(self: App, context: ExecutionContext): string =
   let url = self.appConfig.url
   let client = newHttpClient(timeout = 30000)
   try:
-    return AppOutput(result: client.getContent(url))
+    return client.getContent(url)
   except CatchableError as e:
     self.error e.msg
-    return AppOutput(result: e.msg)
+    return e.msg
   finally:
     client.close()

@@ -353,7 +353,7 @@ class SceneWriter:
         app_output = self.app_node_outputs.get(node_id, []) or []
 
         discard_or_not = "discard " if len(app_output) > 0 and case_or_block == "case" else ""
-        output_field_access = f".{app_output[0].get('name', '')}" if len(app_output) > 0 else ""
+        output_field_access = f".{app_output[0].get('name', '')}" if len(app_output) > 1 else ""
         run_lines += [f"  {discard_or_not}self.{app_id}.run(context){output_field_access}"]
 
         if case_or_block == "case":

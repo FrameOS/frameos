@@ -15,9 +15,6 @@ type
     quality*: string
     size*: string
 
-  AppOutput* = object
-    image*: Image
-
   App* = ref object
     nodeId*: NodeId
     scene*: FrameScene
@@ -35,11 +32,11 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
 proc log*(self: App, message: string) =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
 
-proc error*(self: App, context: ExecutionContext, message: string): AppOutput =
+proc error*(self: App, context: ExecutionContext, message: string): Image =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
-  result = AppOutput(image: renderError(self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), message))
+  result = renderError(self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), message)
 
-proc run*(self: App, context: ExecutionContext): AppOutput =
+proc run*(self: App, context: ExecutionContext): Image =
   let prompt = self.appConfig.prompt
   if prompt == "":
     return self.error(context, "No prompt provided in app config.")
@@ -88,6 +85,6 @@ proc run*(self: App, context: ExecutionContext): AppOutput =
     defer: client2.close()
     if imageData.code != Http200:
       return self.error(context, "Error fetching image " & $imageData.status)
-    result = AppOutput(image: decodeImage(imageData.body))
+    result = decodeImage(imageData.body)
   except CatchableError as e:
     return self.error(context, "Error fetching image from OpenAI: " & $e.msg)

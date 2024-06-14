@@ -9,9 +9,6 @@ type
     rotationDegree*: float
     scalingMode*: string
 
-  AppOutput* = object
-    image*: Image
-
   App* = ref object
     nodeId*: NodeId
     scene*: FrameScene
@@ -29,7 +26,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
 proc log*(self: App, message: string) =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
 
-proc run*(self: App, context: ExecutionContext): AppOutput =
+proc run*(self: App, context: ExecutionContext): Image =
   let originalImage = self.appConfig.image
   let rotationAngle = degToRad(self.appConfig.rotationDegree).float32
 
@@ -63,5 +60,5 @@ proc run*(self: App, context: ExecutionContext): AppOutput =
     OverwriteBlend
   )
 
-  return AppOutput(image: targetImage)
+  return targetImage
 
