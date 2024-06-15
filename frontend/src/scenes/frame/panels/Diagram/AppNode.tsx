@@ -409,7 +409,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                 </div>
               ))}
             </div>
-            <NodeCache />
+            <NodeCache nodeType="app" />
           </div>
         ) : null}
       </div>

@@ -27,6 +27,35 @@ def wrap_color(value: str) -> str:
 def write_scene_nim(frame: Frame, scene: dict) -> str:
     return SceneWriter(frame, scene).write_scene_nim()
 
+
+def field_type_to_nim_type(field_type: str) -> str:
+    match field_type:
+        case 'select':
+            return 'string'
+        case 'text':
+            return 'string'
+        case 'string':
+            return 'string'
+        case 'float':
+            return 'float'
+        case 'integer':
+            return 'int'
+        case 'boolean':
+            return 'bool'
+        case 'color':
+            return 'Color'
+        case 'json':
+            return 'JsonNode'
+        case 'node':
+            return 'NodeId'
+        case 'scene':
+            return 'SceneId'
+        case 'image':
+            return 'Image'
+        case _:
+            raise ValueError(f"Invalid field type {field_type}")
+
+
 class SceneWriter:
     events_schema = get_events_schema()
     available_apps: list[str]
@@ -181,8 +210,7 @@ class SceneWriter:
         sources = node.get("data", {}).get("sources", {})
         name = node.get("data", {}).get("keyword", f"app_{node_id}")
         name_identifier = name.replace("/", "_")
-        node_integer = self.node_id_to_integer(node_id)
-        app_id = f"node{node_integer}"
+        app_id = f"node{self.node_id_to_integer(node_id)}"
 
         if name not in self.available_apps and len(sources) == 0:
             message = f'- ERROR: When generating scene {self.scene_id}. App "{name}" for node "{node_id}" not found'
@@ -314,6 +342,21 @@ class SceneWriter:
                 self.init_apps[-1] = self.init_apps[-1] + ","
         self.init_apps += ['))']
         self.app_node_outputs[node_id] = config.get("output", None)
+
+    def get_app_node_cacheable_fields_with_types(self, node_id) -> dict[str, str]:
+        field_inputs_for_node = self.field_inputs.get(node_id, {})
+        code_fields_for_node = self.code_field_source_nodes.get(node_id, {})
+        app_config = self.app_configs[node_id]
+
+        cache_fields: dict[str, str] = {}
+        for key, code in field_inputs_for_node.items():
+            if key in code_fields_for_node:
+                fields = app_config.get('fields', [])
+                for field in fields:
+                    if field.get('name') == key:
+                        cache_fields[key] = field_type_to_nim_type(field.get('type', 'string'))
+
+        return cache_fields
 
     def process_app_run_lines(self, node, case_or_block = "case"):
         node_id = node["id"]
@@ -787,15 +830,15 @@ var exportedScene* = ExportedScene(
     def get_code_field_value(self, node_id, depth = 0) -> list[str]:
         if depth > 100:
             raise ValueError("Code field recursion limit reached")
-        code_field_node = self.nodes_by_id.get(node_id)
-        if code_field_node:
-            if code_field_node.get("type") == "app":
-                self.process_app_run(code_field_node)
-                code = self.process_app_run_lines(code_field_node, "block")
+        node = self.nodes_by_id.get(node_id)
+        if node:
+            if node.get("type") == "app":
+                self.process_app_run(node)
+                code = self.process_app_run_lines(node, "block")
             else:
-                code = [code_field_node.get("data", {}).get("code", "")]
-            cache_type = code_field_node.get("data", {}).get('cache', {}).get('type', 'none')
-            code_fields = code_field_node.get("data", {}).get("codeArgs", [])
+                code = [node.get("data", {}).get("code", "")]
+            cache_type = node.get("data", {}).get('cache', {}).get('type', 'none')
+            code_fields = node.get("data", {}).get("codeArgs", [])
             if code_fields and len(code_fields) > 0:
                 source_lines = ["block:"]
                 code_field_sources = self.code_field_source_nodes.get(node_id, {}) or {}
@@ -812,19 +855,19 @@ var exportedScene* = ExportedScene(
                         else:
                             raise ValueError("Invalid code field source")
 
-                if cache_type == 'duration' or cache_type == 'keyDuration' or cache_type == 'key':
-                    code = self.wrap_with_cache(node_id, code, code_field_node.get("data", {}))
+                if cache_type in ('duration', 'keyDuration', 'key', 'input', 'inputDuration'):
+                    code = self.wrap_with_cache(node_id, code, node.get("data", {}))
 
                 for line in code:
                     source_lines += ["  " + line]
                 result = source_lines
             else:
-                if cache_type == 'duration' or cache_type == 'keyDuration' or cache_type == 'key':
-                    code = self.wrap_with_cache(node_id, code, code_field_node.get("data", {}))
+                if cache_type in ('duration', 'keyDuration', 'key', 'input', 'inputDuration'):
+                    code = self.wrap_with_cache(node_id, code, node.get("data", {}))
                 result = code
 
             if cache_type == 'forever':
-                result = self.wrap_with_cache(node_id, result, code_field_node.get("data", {}))
+                result = self.wrap_with_cache(node_id, result, node.get("data", {}))
 
             return result
 
@@ -834,6 +877,7 @@ var exportedScene* = ExportedScene(
         if cache_type == 'none':
             return value_list
 
+        # unique key
         if node_id in self.cache_indexes:
             cache_index = self.cache_indexes[node_id]
         else:
@@ -842,13 +886,13 @@ var exportedScene* = ExportedScene(
             self.cache_counter += 1
         cache_field = f"cache{cache_index}"
 
+        # data type
         cache_data_type = 'string'
         if self.app_configs.get(node_id) is not None:
             app_config = self.app_configs[node_id]
             if app_config.get('output') is not None and len(app_config.get('output')) > 0:
                 output = app_config['output'][0]
                 cache_data_type = output.get('type', 'string')
-
         if cache_data_type in ['string', 'float']:
             pass
         elif cache_data_type == 'integer':
@@ -858,6 +902,7 @@ var exportedScene* = ExportedScene(
         else:
             cache_data_type = 'JsonNode'
 
+        # where to store the cached data
         cache_var = f"var {cache_field}: Option[{cache_data_type}] = none({cache_data_type})"
         if cache_var not in self.cache_fields:
             self.cache_fields += [cache_var]
@@ -866,30 +911,48 @@ var exportedScene* = ExportedScene(
         extra_pre_lines = []
         extra_post_lines = []
 
-        if cache_type == 'duration' or cache_type == 'keyDuration':
-            cache_duration = data.get('cache', {}).get('duration', 60)
+        # duration
+        if cache_type == 'duration' or cache_type == 'keyDuration' or cache_type == 'inputDuration':
+            cache_duration = float(data.get('cache', {}).get('duration', 60))
             time_var = f"var {cache_field}Time: float = 0"
             if time_var not in self.cache_fields:
                 self.cache_fields += [time_var]
-            cache_conditions += f" or epochTime() - {cache_field}Time > {cache_duration}"
+            cache_conditions += f" or epochTime() > {cache_field}Time + {cache_duration}"
             extra_post_lines += [f"    {cache_field}Time = epochTime()"]
 
+        # expression
         if cache_type == 'key' or cache_type == 'keyDuration':
             cache_key = data.get('cache', {}).get('keySource', '"string"')
-            cache_key_data_type = data.get('cache', {}).get('keyDataType', 'string')
-            if cache_key_data_type in ['string', 'float']:
-                pass
-            elif cache_key_data_type == 'integer':
-                cache_key_data_type = 'int'
-            else:
-                cache_key_data_type = 'JsonNode'
+            cache_key_data_type = field_type_to_nim_type(data.get('cache', {}).get('keyDataType', 'string'))
 
-            key_var = f"var {cache_field}Key: {cache_key_data_type}"
+            key_var = f"var {cache_field}Expr: {cache_key_data_type}"
             if key_var not in self.cache_fields:
                 self.cache_fields += [key_var]
-            extra_pre_lines += [f"  let {cache_field}NewKey: {cache_key_data_type} = {cache_key}"]
-            cache_conditions += f" or {cache_field}NewKey != {cache_field}Key"
-            extra_post_lines += [f"    {cache_field}Key = {cache_field}NewKey"]
+            extra_pre_lines += [f"  let {cache_field}ExprNew: {cache_key_data_type} = {cache_key}"]
+            cache_conditions += f" or {cache_field}Expr != {cache_field}ExprNew"
+            extra_post_lines += [f"    {cache_field}Expr = {cache_field}ExprNew"]
+
+        # input fields
+        if cache_type == 'input' or cache_type == 'inputDuration':
+            node = self.nodes_by_id.get(node_id)
+            if node.get("type") == "app":
+                cache_fields = self.get_app_node_cacheable_fields_with_types(node_id)
+            else:
+                raise NotImplementedError("Input cache for non-app nodes not implemented")
+
+            if len(cache_fields) > 0:
+                app_id = f"node{self.node_id_to_integer(node_id)}"
+                cache_key = ", ".join(map(lambda x: f"self.{app_id}.appConfig.{x}", cache_fields.keys()))
+                cache_key_data_type = ", ".join(cache_fields.values())
+                if len(cache_fields) > 1:
+                    cache_key = f"({cache_key})"
+                    cache_key_data_type = f"({cache_key_data_type})"
+
+                key_var = f"var {cache_field}Fields: {cache_key_data_type} # {', '.join(cache_fields.keys())}"
+                if key_var not in self.cache_fields:
+                    self.cache_fields += [key_var]
+                cache_conditions += f" or {cache_field}Fields != {cache_key}"
+                extra_post_lines += [f"    {cache_field}Fields = {cache_key}"]
 
         value_list[-1] = value_list[-1] + ')'
         value_list = [

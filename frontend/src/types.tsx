@@ -152,7 +152,7 @@ export interface MarkdownField {
 }
 
 export interface CacheConfig {
-  type?: 'none' | 'forever' | 'duration' | 'key' | 'keyDuration'
+  type?: 'none' | 'forever' | 'duration' | 'key' | 'keyDuration' | 'input' | 'inputDuration'
   duration?: string
   keySource?: string
   keyDataType?: FieldType

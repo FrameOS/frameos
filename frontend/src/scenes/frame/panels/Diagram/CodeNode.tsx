@@ -182,7 +182,7 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
               : null}
           </div>
           <div className="flex gap-1 items-center">
-            <NodeCache />
+            <NodeCache nodeType="code" />
           </div>
         </div>
       </div>
