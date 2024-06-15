@@ -265,12 +265,18 @@ export const diagramLogic = kea<diagramLogicType>([
       actions.fitDiagramView()
     },
     keywordDropped: ({ keyword, type, position }) => {
+      // Whenever something is dropped on the diagram from the menu
       if (type === 'app') {
+        const app = values.apps[keyword]
+        if (!app) {
+          console.error('App not found:', keyword)
+          return
+        }
         const newNode: DiagramNode = {
           id: uuidv4(),
           type: 'app',
           position,
-          data: { keyword: keyword, config: {} } satisfies AppNodeData,
+          data: { keyword: keyword, config: {}, cache: { ...app.cache } } satisfies AppNodeData,
         }
         actions.setNodes([...values.nodes, newNode])
       } else if (type === 'event') {

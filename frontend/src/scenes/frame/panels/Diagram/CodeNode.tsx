@@ -32,46 +32,25 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
       >
         <NodeResizer minWidth={200} minHeight={119} />
         <div
-          className={clsx(
-            'frameos-node-title text-xl px-1 gap-2',
-            isSelected ? 'bg-indigo-900' : 'bg-green-900',
-            'flex w-full items-center'
-          )}
+          className={clsx('flex w-full items-center justify-between', isSelected ? 'bg-indigo-900' : 'bg-green-900')}
         >
-          {[...(data.codeArgs ?? []), '+'].map((codeField, i) => (
-            <div key={i} className="flex gap-1 items-center">
-              <Handle
-                // CodeInputHandle
-                type="target"
-                position={Position.Top}
-                id={`codeField/${typeof codeField === 'object' ? codeField.name : codeField}`}
-                style={{
-                  position: 'relative',
-                  transform: 'none',
-                  right: 0,
-                  top: 0,
-                  background: 'black',
-                  borderColor: 'white',
-                }}
-                isConnectable={isConnectable}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  const existingNodeCount = nodeEdges.filter(
-                    (edge) => edge.targetHandle?.startsWith('codeField/') && edge.target === id
-                  ).length
-                  openNewNodePicker(
-                    e.clientX, // screenX
-                    e.clientY, // screenY
-                    (node?.position.x || 0) - existingNodeCount * 20, // diagramX
-                    (node?.position.y || 0) - 40 - existingNodeCount * 150, // diagramY
-                    id, // nodeId
-                    `codeField/${typeof codeField === 'object' ? codeField.name : codeField}`, // handleId
-                    'target' // handleType
-                  )
-                }}
-              />
-              {codeField === '+' ? (
-                <em
+          <div className={clsx('frameos-node-title text-xl px-1 gap-2', 'flex w-full items-center')}>
+            {[...(data.codeArgs ?? []), '+'].map((codeField, i) => (
+              <div key={i} className="flex gap-1 items-center">
+                <Handle
+                  // CodeInputHandle
+                  type="target"
+                  position={Position.Top}
+                  id={`codeField/${typeof codeField === 'object' ? codeField.name : codeField}`}
+                  style={{
+                    position: 'relative',
+                    transform: 'none',
+                    right: 0,
+                    top: 0,
+                    background: 'black',
+                    borderColor: 'white',
+                  }}
+                  isConnectable={isConnectable}
                   onClick={(e) => {
                     e.stopPropagation()
                     const existingNodeCount = nodeEdges.filter(
@@ -83,27 +62,65 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
                       (node?.position.x || 0) - existingNodeCount * 20, // diagramX
                       (node?.position.y || 0) - 40 - existingNodeCount * 150, // diagramY
                       id, // nodeId
-                      `codeField/+`, // handleId
+                      `codeField/${typeof codeField === 'object' ? codeField.name : codeField}`, // handleId
                       'target' // handleType
                     )
                   }}
-                >
-                  +
-                </em>
-              ) : typeof codeField !== 'string' ? (
-                <div className="cursor-pointer hover:underline">
-                  <CodeArg
-                    key={`${codeField.type}/${codeField.name}`}
-                    codeArg={codeField}
-                    onChange={(value) =>
-                      updateNodeData(id, { codeArgs: data.codeArgs?.map((c, j) => (i === j ? { ...c, ...value } : c)) })
-                    }
-                    onDelete={() => editCodeField(codeField.name, '')}
-                  />
-                </div>
-              ) : null}
-            </div>
-          ))}
+                />
+                {codeField === '+' ? (
+                  <em
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      const existingNodeCount = nodeEdges.filter(
+                        (edge) => edge.targetHandle?.startsWith('codeField/') && edge.target === id
+                      ).length
+                      openNewNodePicker(
+                        e.clientX, // screenX
+                        e.clientY, // screenY
+                        (node?.position.x || 0) - existingNodeCount * 20, // diagramX
+                        (node?.position.y || 0) - 40 - existingNodeCount * 150, // diagramY
+                        id, // nodeId
+                        `codeField/+`, // handleId
+                        'target' // handleType
+                      )
+                    }}
+                  >
+                    +
+                  </em>
+                ) : typeof codeField !== 'string' ? (
+                  <div className="cursor-pointer hover:underline">
+                    <CodeArg
+                      key={`${codeField.type}/${codeField.name}`}
+                      codeArg={codeField}
+                      onChange={(value) =>
+                        updateNodeData(id, {
+                          codeArgs: data.codeArgs?.map((c, j) => (i === j ? { ...c, ...value } : c)),
+                        })
+                      }
+                      onDelete={() => editCodeField(codeField.name, '')}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          <DropdownMenu
+            className="w-fit"
+            buttonColor="none"
+            horizontal
+            items={[
+              {
+                label: 'Copy as JSON',
+                onClick: () => copyAppJSON(id),
+                icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Delete Node',
+                onClick: () => deleteApp(id),
+                icon: <TrashIcon className="w-5 h-5" />,
+              },
+            ]}
+          />
         </div>
         <div className="p-1 h-full">
           <TextArea
@@ -166,23 +183,6 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
           </div>
           <div className="flex gap-1 items-center">
             <NodeCache />
-            <DropdownMenu
-              className="w-fit"
-              buttonColor="none"
-              horizontal
-              items={[
-                {
-                  label: 'Copy as JSON',
-                  onClick: () => copyAppJSON(id),
-                  icon: <ClipboardDocumentIcon className="w-5 h-5" />,
-                },
-                {
-                  label: 'Delete Node',
-                  onClick: () => deleteApp(id),
-                  icon: <TrashIcon className="w-5 h-5" />,
-                },
-              ]}
-            />
           </div>
         </div>
       </div>

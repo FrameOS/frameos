@@ -444,6 +444,8 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         }
       } else if (value.startsWith('app/')) {
         const keyword = value.substring(4)
+        newNode.type = 'app'
+        newNode.data = { keyword, config: {} }
         if (newNodeOutputHandle === 'prev') {
           newNode.position.x -= 20
           newNode.position.y -= 20
@@ -457,9 +459,10 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           for (const field of app.fields ?? []) {
             newNode.position.y -= 30 + ('type' in field && field.type === 'text' ? (field.rows ?? 3) * 20 : 0)
           }
+          if (app.cache) {
+            ;(newNode.data as AppNodeData).cache = { ...app.cache }
+          }
         }
-        newNode.type = 'app'
-        newNode.data = { keyword, config: {} }
       } else {
         return
       }

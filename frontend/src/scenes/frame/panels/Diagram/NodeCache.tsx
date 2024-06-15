@@ -98,7 +98,7 @@ export function NodeCache(): JSX.Element {
         </Tag>
       ) : data.cache?.type === 'forever' ? (
         <Tag color="red" className="cursor-pointer">
-          Cache: forever
+          Cache: ∞
         </Tag>
       ) : data.cache?.type === 'key' ? (
         <Tag color="red" className="cursor-pointer">
@@ -106,7 +106,6 @@ export function NodeCache(): JSX.Element {
         </Tag>
       ) : data.cache?.type === 'keyDuration' ? (
         <Tag color="red" className="cursor-pointer">
-          Cache:{' '}
           {String(
             isNumericString(data.cache?.duration) ? showAsFps(parseFloat(data.cache?.duration as string)) : 'duration'
           )}{' '}
@@ -114,7 +113,6 @@ export function NodeCache(): JSX.Element {
         </Tag>
       ) : (
         <Tag color="orange" className="cursor-pointer">
-          Cache:{' '}
           {String(
             isNumericString(data.cache?.duration) ? showAsFps(parseFloat(data.cache?.duration as string)) : 'duration'
           )}
