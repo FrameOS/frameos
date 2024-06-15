@@ -230,11 +230,19 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
 
           options.push({ label: 'Code', value: 'code', type: newNodeHandleDataType ?? 'string', keyword: key })
           if (newNodeHandleDataType) {
-            const imageApps = getAppsForType(apps, newNodeHandleDataType)
-            for (const [keyword, app] of Object.entries(imageApps)) {
+            const appsForType = getAppsForType(apps, newNodeHandleDataType)
+            for (const [keyword, app] of Object.entries(appsForType)) {
               options.push({
                 label: `App: ${app.name}`,
                 value: `app/${keyword}`,
+                type: newNodeHandleDataType,
+                keyword: key,
+              })
+            }
+            if (newNodeHandleDataType === 'image') {
+              options.push({
+                label: "Render context's image",
+                value: 'code/context.image',
                 type: newNodeHandleDataType,
                 keyword: key,
               })
