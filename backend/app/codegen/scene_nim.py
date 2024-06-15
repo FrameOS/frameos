@@ -938,16 +938,21 @@ var exportedScene* = ExportedScene(
             if node.get("type") == "app":
                 cache_fields = self.get_app_node_cacheable_fields_with_types(node_id)
             else:
-                raise NotImplementedError("Input cache for non-app nodes not implemented")
+                cache_fields = {
+                    codeArg.get('name', ''): field_type_to_nim_type(codeArg.get('type', 'string'))
+                    for codeArg in node.get("data", {}).get("codeArgs", [])
+                }
 
             if len(cache_fields) > 0:
                 app_id = f"node{self.node_id_to_integer(node_id)}"
-                cache_key = ", ".join(map(lambda x: f"self.{app_id}.appConfig.{x}", cache_fields.keys()))
+                if node.get("type") == "app":
+                    cache_key = ", ".join(map(lambda x: f"self.{app_id}.appConfig.{x}", cache_fields.keys()))
+                else:
+                    cache_key = ", ".join(cache_fields.keys())
                 cache_key_data_type = ", ".join(cache_fields.values())
                 if len(cache_fields) > 1:
                     cache_key = f"({cache_key})"
                     cache_key_data_type = f"({cache_key_data_type})"
-
                 key_var = f"var {cache_field}Fields: {cache_key_data_type} # {', '.join(cache_fields.keys())}"
                 if key_var not in self.cache_fields:
                     self.cache_fields += [key_var]
