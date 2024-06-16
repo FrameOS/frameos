@@ -1,7 +1,7 @@
 {
   "name": "Clock",
   "description": "Overlay current time on the image",
-  "category": "render",
+  "category": "legacy",
   "version": "1.0.0",
   "fields": [
     {

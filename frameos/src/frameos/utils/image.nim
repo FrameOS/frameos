@@ -63,10 +63,13 @@ proc renderError*(width, height: int, message: string): Image =
   writeError(result, width, height, message)
 
 proc scaleAndDrawImage*(targetImage: Image, srcImage: Image,
-    scalingMode: string) {.raises: [PixieError].} =
+    scalingMode: string, offsetX: int = 0, offsetY: int = 0) {.raises: [PixieError].} =
   if srcImage.width == targetImage.width and srcImage.height ==
       targetImage.height:
-    targetImage.draw(srcImage)
+    if offsetX != 0 or offsetY != 0:
+      targetImage.draw(srcImage, translate(vec2(offsetX.float32, offsetY.float32)))
+    else:
+      targetImage.draw(srcImage)
   else:
     case scalingMode:
     of "cover":
@@ -80,7 +83,7 @@ proc scaleAndDrawImage*(targetImage: Image, srcImage: Image,
       let yOffset = (scaledHeight - targetImage.height.float32) / 2
       targetImage.draw(
         srcImage,
-        translate(vec2(-xOffset, -yOffset)) * scale(vec2(scaleRatio,
+        translate(vec2(-xOffset + offsetX.float32, -yOffset + offsetY.float32)) * scale(vec2(scaleRatio,
             scaleRatio)),
         OverwriteBlend
       )
@@ -96,7 +99,7 @@ proc scaleAndDrawImage*(targetImage: Image, srcImage: Image,
       let yOffset = (targetImage.height.float32 - scaledHeight) / 2
       targetImage.draw(
         srcImage,
-        scale(vec2(scaleRatio, scaleRatio)) * translate(vec2(xOffset, yOffset)),
+        scale(vec2(scaleRatio, scaleRatio)) * translate(vec2(xOffset + offsetX.float32, yOffset + offsetY.float32)),
         OverwriteBlend
       )
 
@@ -106,12 +109,11 @@ proc scaleAndDrawImage*(targetImage: Image, srcImage: Image,
         scale(vec2(
           targetImage.width.float32 / srcImage.width.float32,
           targetImage.height.float32 / srcImage.height.float32
-        )),
+        )) * translate(vec2(offsetX.float32, offsetY.float32)),
         OverwriteBlend
       )
 
     else:
       let xOffset = (targetImage.width - srcImage.width) div 2
       let yOffset = (targetImage.height - srcImage.height) div 2
-      targetImage.draw(srcImage, translate(vec2(xOffset.float32,
-          yOffset.float32)))
+      targetImage.draw(srcImage, translate(vec2(xOffset.float32 + offsetX.float32, yOffset.float32 + offsetY.float32)))
