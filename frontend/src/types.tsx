@@ -152,10 +152,16 @@ export interface MarkdownField {
 }
 
 export interface CacheConfig {
-  type?: 'none' | 'forever' | 'duration' | 'key' | 'keyDuration' | 'input' | 'inputDuration'
+  enabled?: boolean
+
+  inputEnabled?: boolean
+
+  durationEnabled?: boolean
   duration?: string
-  keySource?: string
-  keyDataType?: FieldType
+
+  expressionEnabled?: boolean
+  expression?: string
+  expressionType?: FieldType
 }
 
 export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event'

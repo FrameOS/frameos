@@ -832,50 +832,50 @@ var exportedScene* = ExportedScene(
             raise ValueError("Code field recursion limit reached")
         node = self.nodes_by_id.get(node_id)
         if node:
+            cache_enabled = node.get("data", {}).get('cache', {}).get('enabled', False)
             if node.get("type") == "app":
                 self.process_app_run(node)
-                code = self.process_app_run_lines(node, "block")
-            else:
+                result = self.process_app_run_lines(node, "block")
+                if cache_enabled:
+                    result = self.wrap_with_cache(node_id, result, node.get("data", {}))
+            elif node.get("type") == "code":
                 code = [node.get("data", {}).get("code", "")]
-            cache_type = node.get("data", {}).get('cache', {}).get('type', 'none')
-            code_fields = node.get("data", {}).get("codeArgs", [])
-            if code_fields and len(code_fields) > 0:
-                source_lines = ["block:"]
-                code_field_sources = self.code_field_source_nodes.get(node_id, {}) or {}
-                for code_field in code_fields:
-                    field = code_field.get('name')
-                    if field in code_field_sources:
-                        code_field_source = self.get_code_field_value(code_field_sources[field], depth + 1)
+                code_args = node.get("data", {}).get("codeArgs", [])
+                if code_args and len(code_args) > 0:
+                    source_lines = ["block:"]
+                    code_field_sources = self.code_field_source_nodes.get(node_id, {}) or {}
+                    for code_field in code_args:
+                        field = code_field.get('name')
+                        if field in code_field_sources:
+                            code_field_source = self.get_code_field_value(code_field_sources[field], depth + 1)
 
-                        if len(code_field_source) == 1:
-                            source_lines += [f"  let {field} = {code_field_source[0]}"]
-                        elif len(code_field_source) > 1:
-                            source_lines += [f"  let {field} = {code_field_source[0]}"]
-                            source_lines += [f"  {x}" for x in code_field_source[1:]]
-                        else:
-                            raise ValueError("Invalid code field source")
+                            if len(code_field_source) == 1:
+                                source_lines += [f"  let {field} = {code_field_source[0]}"]
+                            elif len(code_field_source) > 1:
+                                source_lines += [f"  let {field} = {code_field_source[0]}"]
+                                source_lines += [f"  {x}" for x in code_field_source[1:]]
+                            else:
+                                raise ValueError("Invalid code field source")
 
-                if cache_type in ('duration', 'keyDuration', 'key', 'input', 'inputDuration'):
-                    code = self.wrap_with_cache(node_id, code, node.get("data", {}))
+                    if cache_enabled:
+                        code = self.wrap_with_cache(node_id, code, node.get("data", {}))
 
-                for line in code:
-                    source_lines += ["  " + line]
-                result = source_lines
+                    for line in code:
+                        source_lines += ["  " + line]
+                    result = source_lines
+                else:
+                    if cache_enabled:
+                        code = self.wrap_with_cache(node_id, code, node.get("data", {}))
+                    result = code
             else:
-                if cache_type in ('duration', 'keyDuration', 'key', 'input', 'inputDuration'):
-                    code = self.wrap_with_cache(node_id, code, node.get("data", {}))
-                result = code
-
-            if cache_type == 'forever':
-                result = self.wrap_with_cache(node_id, result, node.get("data", {}))
+                raise NotImplementedError(f"Unknown node type, can't fetch fields for node {node_id}")
 
             return result
 
     def wrap_with_cache(self, node_id: str, value_list: list[str], data: dict):
-        cache_type = data.get('cache', {}).get('type', 'none')
-
-        if cache_type == 'none':
-            return value_list
+        duration_enabled = data.get('cache', {}).get('durationEnabled', False)
+        input_enabled = data.get('cache', {}).get('inputEnabled', False)
+        expression_enabled = data.get('cache', {}).get('expressionEnabled', False)
 
         # unique key
         if node_id in self.cache_indexes:
@@ -892,15 +892,7 @@ var exportedScene* = ExportedScene(
             app_config = self.app_configs[node_id]
             if app_config.get('output') is not None and len(app_config.get('output')) > 0:
                 output = app_config['output'][0]
-                cache_data_type = output.get('type', 'string')
-        if cache_data_type in ['string', 'float']:
-            pass
-        elif cache_data_type == 'integer':
-            cache_data_type = 'int'
-        elif cache_data_type == 'image':
-            cache_data_type = 'Image'
-        else:
-            cache_data_type = 'JsonNode'
+                cache_data_type = field_type_to_nim_type(output.get('type', 'string'))
 
         # where to store the cached data
         cache_var = f"var {cache_field}: Option[{cache_data_type}] = none({cache_data_type})"
@@ -912,7 +904,7 @@ var exportedScene* = ExportedScene(
         extra_post_lines = []
 
         # duration
-        if cache_type == 'duration' or cache_type == 'keyDuration' or cache_type == 'inputDuration':
+        if duration_enabled:
             cache_duration = float(data.get('cache', {}).get('duration', 60))
             time_var = f"var {cache_field}Time: float = 0"
             if time_var not in self.cache_fields:
@@ -921,7 +913,7 @@ var exportedScene* = ExportedScene(
             extra_post_lines += [f"    {cache_field}Time = epochTime()"]
 
         # expression
-        if cache_type == 'key' or cache_type == 'keyDuration':
+        if expression_enabled:
             cache_key = data.get('cache', {}).get('keySource', '"string"')
             cache_key_data_type = field_type_to_nim_type(data.get('cache', {}).get('keyDataType', 'string'))
 
@@ -933,7 +925,7 @@ var exportedScene* = ExportedScene(
             extra_post_lines += [f"    {cache_field}Expr = {cache_field}ExprNew"]
 
         # input fields
-        if cache_type == 'input' or cache_type == 'inputDuration':
+        if input_enabled:
             node = self.nodes_by_id.get(node_id)
             if node.get("type") == "app":
                 cache_fields = self.get_app_node_cacheable_fields_with_types(node_id)

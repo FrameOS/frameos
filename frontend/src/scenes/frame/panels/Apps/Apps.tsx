@@ -30,8 +30,8 @@ export function Apps() {
               <div className="w-full">
                 <div className="flex items-start justify-between">
                   <H6>{app.name}</H6>
-                  {app.output?.map((output) => (
-                    <FieldTypeTag className="mt-1" type={output.type} />
+                  {app.output?.map((output, i) => (
+                    <FieldTypeTag key={i} className="mt-1" type={output.type} />
                   ))}
                 </div>
                 <div className="text-sm">{app.description}</div>

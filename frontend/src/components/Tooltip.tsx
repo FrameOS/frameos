@@ -8,12 +8,13 @@ import { ButtonProps, buttonColor } from './Button'
 
 export interface TooltipProps {
   title: JSX.Element | string
+  titleClassName?: string
   children?: React.ReactNode
   className?: string
   tooltipColor?: ButtonProps['color']
 }
 
-export function Tooltip({ children, title, className, tooltipColor }: TooltipProps) {
+export function Tooltip({ children, title, titleClassName, className, tooltipColor }: TooltipProps) {
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
   const { styles, attributes } = usePopper(referenceElement, popperElement, { strategy: 'fixed' })
@@ -45,7 +46,8 @@ export function Tooltip({ children, title, className, tooltipColor }: TooltipPro
                 static
                 className={clsx(
                   'absolute right-0 w-56 mt-2 origin-top-right divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none',
-                  buttonColor(tooltipColor || 'light-gray')
+                  buttonColor(tooltipColor || 'light-gray'),
+                  titleClassName ? titleClassName : 'w-56'
                 )}
                 ref={setPopperElement}
                 style={styles.popper}

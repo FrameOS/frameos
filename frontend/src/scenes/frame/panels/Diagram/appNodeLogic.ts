@@ -152,8 +152,8 @@ export const appNodeLogic = kea<appNodeLogicType>([
     isDispatch: [(s) => [s.node], (node) => node?.type === 'dispatch'],
     configJson: [
       (s) => [s.app, s.sourceConfigJson],
-      (app, [config]) => {
-        return config || app || null
+      (app, [config]): AppConfig | null => {
+        return (config as AppConfig) || app || null
       },
     ],
     fields: [

@@ -1,5 +1,5 @@
 import { useActions, useValues } from 'kea'
-import { AppNodeData, CacheConfig, CodeNodeData, fieldTypes } from '../../../../types'
+import { AppConfigField, AppNodeData, CacheConfig, CodeNodeData, fieldTypes } from '../../../../types'
 import { Select } from '../../../../components/Select'
 import { Label } from '../../../../components/Label'
 import { TextInput } from '../../../../components/TextInput'
@@ -15,133 +15,121 @@ export interface NodeCacheProps {
 
 export function NodeCache({ nodeType }: NodeCacheProps): JSX.Element {
   const { updateNodeData } = useActions(appNodeLogic)
-  const { node } = useValues(appNodeLogic)
+  const { node, configJson } = useValues(appNodeLogic)
   if (!node) {
     return <div />
   }
   const data = (node.data ?? {}) as CodeNodeData | AppNodeData
+  const setValue = (name: string, value: any): void =>
+    updateNodeData(node.id, { cache: { ...((node.data as AppNodeData).cache ?? {}), [name]: value } })
+  const getValue = (name: string): any =>
+    name in (data.cache || {})
+      ? (data.cache as any)[name]
+      : node.type === 'app'
+      ? configJson?.fields?.filter((c): c is AppConfigField => 'name' in c).find((c) => c.name === name)?.value
+      : null
 
   return (
     <Tooltip
       tooltipColor="gray"
+      titleClassName="w-max"
       title={
         <div className="space-y-2">
-          <div className="space-y-1">
-            <Label>How to long to cache?</Label>
-            <Select
-              value={data.cache?.type ?? 'none'}
-              options={
-                [
-                  { value: 'none', label: 'No cache (compute every time)' },
-                  { value: 'forever', label: 'Cache forever (till a restart)' },
-                  {
-                    value: 'input',
-                    label: `Cache until ${nodeType === 'app' ? 'input fields' : 'input arguments'} change`,
-                  },
-                  {
-                    value: 'inputDuration',
-                    label: `Cache until ${
-                      nodeType === 'app' ? 'input fields' : 'input arguments'
-                    } change or time passes`,
-                  },
-                  { value: 'duration', label: 'Cache until time passes' },
-                  { value: 'key', label: 'Cache until a nim expression changes' },
-                  { value: 'keyDuration', label: 'Cache until time passes or expression changes' },
-                ] satisfies { value: CacheConfig['type']; label: string }[]
-              }
-              onChange={(value) =>
-                updateNodeData(node.id, {
-                  cache: {
-                    type: value as any,
-                    ...(value === 'duration' || value === 'inputDuration' || value === 'keyDuration'
-                      ? { duration: '60' }
-                      : {}),
-                    ...(value === 'key' || value === 'keyDuration' ? { key: '"string"' } : {}),
-                  } satisfies CacheConfig,
-                })
-              }
-            />
-          </div>
-          {(data.cache?.type === 'duration' ||
-            data.cache?.type === 'inputDuration' ||
-            data.cache?.type === 'keyDuration') && (
-            <div className="space-y-1">
-              <Label>Cache duration in seconds</Label>
-              <TextInput
-                value={data.cache?.duration}
-                onChange={(value) =>
-                  updateNodeData(node.id, { cache: { ...((node.data as AppNodeData).cache ?? {}), duration: value } })
-                }
-                placeholder="60"
+          <Label>
+            <div className="space-y-1 flex flex-row gap-1 items-center">
+              <input
+                type="checkbox"
+                checked={!!getValue('enabled')}
+                onChange={(e) => setValue('enabled', !!e.target.checked)}
               />
+              Cache returned value
             </div>
-          )}
-          {(data.cache?.type === 'key' || data.cache?.type === 'keyDuration') && (
+          </Label>
+          {getValue('enabled') ? (
             <>
-              <div className="space-y-1">
-                <Label>Nim expression</Label>
-                <TextInput
-                  value={data.cache?.keySource ?? ''}
-                  onChange={(value) =>
-                    updateNodeData(node.id, {
-                      cache: { ...((node.data as AppNodeData).cache ?? {}), keySource: value },
-                    })
-                  }
-                  placeholder='"string"'
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Return type of expression</Label>
-                <Select
-                  value={data.cache?.keyDataType ?? 'string'}
-                  options={fieldTypes.map((type) => ({ value: type, label: type }))}
-                  onChange={(value) =>
-                    updateNodeData(node.id, {
-                      cache: { ...((node.data as AppNodeData).cache ?? {}), keyDataType: value },
-                    })
-                  }
-                />
-              </div>
+              <Label>
+                <div className="space-y-1 flex flex-row gap-1 items-center">
+                  <input
+                    type="checkbox"
+                    checked={!!getValue('inputEnabled')}
+                    onChange={(e) => setValue('inputEnabled', !!e.target.checked)}
+                  />
+                  Refresh when inputs change
+                </div>
+              </Label>
+              <Label>
+                <div className="space-y-1 flex flex-row gap-1 items-center">
+                  <input
+                    type="checkbox"
+                    checked={!!getValue('durationEnabled')}
+                    onChange={(e) => setValue('durationEnabled', !!e.target.checked)}
+                  />
+                  Refresh after a time duration
+                </div>
+              </Label>
+              {getValue('durationEnabled') ? (
+                <div className="flex w-full gap-1 pl-4 items-center">
+                  <TextInput
+                    value={getValue('duration')}
+                    className="!w-16"
+                    onChange={(value) => setValue('duration', value)}
+                    placeholder="60"
+                  />
+                  seconds
+                </div>
+              ) : null}
+              <Label>
+                <div className="space-y-1 flex flex-row gap-1 items-center">
+                  <input
+                    type="checkbox"
+                    checked={!!getValue('expressionEnabled')}
+                    onChange={(e) => setValue('expressionEnabled', !!e.target.checked)}
+                  />
+                  Refresh when an expression changes
+                </div>
+              </Label>
+              {getValue('expressionEnabled') && (
+                <div className="pl-4 space-y-2">
+                  <div className="space-y-1">
+                    <Label>Nim expression</Label>
+                    <TextInput
+                      value={getValue('expression')}
+                      onChange={(value) => setValue('expression', value)}
+                      placeholder='"string"'
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Return type of expression</Label>
+                    <Select
+                      value={getValue('expressionType')}
+                      onChange={(value) => setValue('expressionType', value)}
+                      options={fieldTypes.map((type) => ({ value: type, label: type }))}
+                    />
+                  </div>
+                </div>
+              )}
             </>
-          )}
+          ) : null}
         </div>
       }
     >
-      {(data.cache?.type ?? 'none') === 'none' ? (
+      {!data.cache?.enabled ? (
         <Tag color="teal" className="cursor-pointer">
           No cache
         </Tag>
-      ) : data.cache?.type === 'forever' ? (
-        <Tag color="red" className="cursor-pointer">
-          Cache: ∞
-        </Tag>
-      ) : data.cache?.type === 'key' ? (
-        <Tag color="red" className="cursor-pointer">
-          Cache: key
-        </Tag>
-      ) : data.cache?.type === 'input' ? (
-        <Tag color="red" className="cursor-pointer">
-          Cache: inputs
-        </Tag>
-      ) : data.cache?.type === 'keyDuration' ? (
-        <Tag color="red" className="cursor-pointer">
-          {String(
-            isNumericString(data.cache?.duration) ? showAsFps(parseFloat(data.cache?.duration as string)) : 'duration'
-          )}{' '}
-          or expr
-        </Tag>
-      ) : data.cache?.type === 'inputDuration' ? (
-        <Tag color="red" className="cursor-pointer">
-          {String(
-            isNumericString(data.cache?.duration) ? showAsFps(parseFloat(data.cache?.duration as string)) : 'duration'
-          )}{' '}
-          or inputs
-        </Tag>
       ) : (
-        <Tag color="orange" className="cursor-pointer">
-          {String(
-            isNumericString(data.cache?.duration) ? showAsFps(parseFloat(data.cache?.duration as string)) : 'duration'
-          )}
+        <Tag color={data.cache?.durationEnabled ? 'red' : 'primary'} className="cursor-pointer">
+          {[
+            data.cache?.durationEnabled
+              ? isNumericString(data.cache?.duration)
+                ? showAsFps(parseFloat(data.cache?.duration as string))
+                : 'time'
+              : '',
+            data.cache?.expressionEnabled ? 'expr' : '',
+            data.cache?.inputEnabled ? 'inputs' : '',
+          ]
+            .filter(Boolean)
+            .join(', ') || 'Cache: ∞'}
         </Tag>
       )}
     </Tooltip>
