@@ -440,8 +440,6 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               type: type ?? values.newNodeHandleDataType ?? 'string',
             },
           ]
-
-          debugger
         } else {
           newNode.data.codeOutputs = [
             {
@@ -500,7 +498,6 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       } else {
         actions.setNodes([...values.nodes, newNode])
         window.setTimeout(() => {
-          debugger
           if (handleType === 'source') {
             actions.addEdge({
               id: uuidv4(),
