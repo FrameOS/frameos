@@ -126,18 +126,24 @@ class SceneWriter:
     def apply_control_code(self):
         control_code = self.frame.control_code
         if control_code and control_code.get("enabled") == "true":
-            self.scene_object_fields += ["controlCode: qrApp.App"]
-            app_import = "import apps/render/qr/app as qrApp"
+            self.scene_object_fields += ["controlCodeRender: render_imageApp.App"]
+            self.scene_object_fields += ["controlCodeData: data_qrApp.App"]
+            app_import = "import apps/render/image/app as render_imageApp"
+            if app_import not in self.imports:
+                self.imports += [app_import]
+            app_import = "import apps/data/qr/app as data_qrApp"
             if app_import not in self.imports:
                 self.imports += [app_import]
             self.init_apps += [
-                'scene.controlCode = qrApp.init(-1.NodeId, scene.FrameScene, qrApp.AppConfig(',
+                'scene.controlCodeRender = render_imageApp.init(-1.NodeId, scene.FrameScene, render_imageApp.AppConfig(',
+                f'  offsetX: {int(control_code.get("offsetX", "0"))},',
+                f'  offsetY: {int(control_code.get("offsetY", "0"))},',
+                f'  placement: "{sanitize_nim_string(control_code.get("placement", "top-left"))}",',
+                '))',
+                'scene.controlCodeData = data_qrApp.init(-1.NodeId, scene.FrameScene, data_qrApp.AppConfig(',
                 f'  backgroundColor: parseHtmlColor("{sanitize_nim_string(control_code.get("backgroundColor", "#000000"))}"),',
                 f'  qrCodeColor: parseHtmlColor("{sanitize_nim_string(control_code.get("qrCodeColor", "#ffffff"))}"),',
-                f'  offsetX: {float(control_code.get("offsetX", "0"))},',
-                f'  offsetY: {float(control_code.get("offsetY", "0"))},',
                 f'  padding: {int(control_code.get("padding", "1"))},',
-                f'  position: "{sanitize_nim_string(control_code.get("position", "top-left"))}",',
                 f'  size: {float(control_code.get("size", "2"))},',
                 '  codeType: "Frame Control URL",',
                 '  code: "",',
@@ -145,9 +151,12 @@ class SceneWriter:
                 '  alRad: 30.0,',
                 '  moRad: 0.0,',
                 '  moSep: 0.0',
-                '))'
+                '))',
             ]
-            self.after_node_lines += ["self.controlCode.run(context)"]
+            self.after_node_lines += [
+                "scene.controlCodeRender.appConfig.image = self.controlCodeData.run(context)",
+                "self.controlCodeRender.run(context)"
+            ]
 
     def read_edges(self):
         for edge in self.edges:
