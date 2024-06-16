@@ -34,8 +34,7 @@
   "output": [
     {
         "name": "reply",
-        "type": "string",
-        "label": "Reply"
+        "type": "string"
     }
   ]
 }

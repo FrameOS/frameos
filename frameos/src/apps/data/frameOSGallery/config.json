@@ -28,8 +28,7 @@
     "output": [
         {
             "name": "image",
-            "type": "image",
-            "label": "Image"
+            "type": "image"
         }
     ]
 }

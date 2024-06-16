@@ -16,8 +16,7 @@
     "output": [
         {
             "name": "result",
-            "type": "string",
-            "label": "Result"
+            "type": "string"
         }
     ]
 }

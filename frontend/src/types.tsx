@@ -115,8 +115,6 @@ export interface AppConfigField {
 export interface OutputField {
   /** Name of the output field */
   name: string
-  /** Human readable label */
-  label: string
   /** Type of the field */
   type: FieldType
 }

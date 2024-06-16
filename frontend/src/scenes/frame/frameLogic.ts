@@ -71,7 +71,7 @@ const legacyAppMapping: Record<string, string> = {
   // text data apps
   haSensor: 'legacy/haSensor',
   openaiText: 'legacy/openaiText',
-  clock: 'render/clock',
+  clock: 'legacy/clock',
 
   // render app
   text: 'render/text',

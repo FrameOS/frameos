@@ -1,0 +1,41 @@
+{
+  "name": "Clock",
+  "description": "Overlay current time on the image",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "markdown": "[Date format syntax](https://nim-lang.org/2.0.2/times.html)"
+    },
+    {
+        "name": "format",
+        "type": "select",
+        "options": [
+            "yyyy-MM-dd",
+            "yyyy-MM-dd HH:mm:ss",
+            "HH:mm:ss:fff",
+            "HH:mm:ss",
+            "HH:mm",
+            "custom"
+        ],
+        "value": "HH:mm:ss",
+        "required": true,
+        "label": "Format",
+        "placeholder": "HH:mm:ss"
+    },
+    {
+        "name": "formatCustom",
+        "type": "string",
+        "value": "",
+        "required": false,
+        "label": "Custom format",
+        "placeholder": ""
+    }
+  ],
+  "output": [
+    {
+        "name": "time",
+        "type": "string"
+    }
+  ]
+}
