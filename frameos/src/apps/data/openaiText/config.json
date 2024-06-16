@@ -36,5 +36,11 @@
         "name": "reply",
         "type": "string"
     }
-  ]
+  ],
+  "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "600"
+  }
 }

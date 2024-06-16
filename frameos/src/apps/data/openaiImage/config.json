@@ -49,5 +49,11 @@
       "name": "image",
       "type": "image"
     }
-  ]
+  ],
+  "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "3600"
+  }
 }

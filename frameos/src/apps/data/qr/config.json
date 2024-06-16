@@ -85,5 +85,9 @@
       "name": "image",
       "type": "image"
     }
-  ]
+  ],
+  "cache": {
+      "enabled": true,
+      "inputEnabled": true
+  }
 }

@@ -28,5 +28,11 @@
             "name": "state",
             "type": "json"
         }
-    ]
+    ],
+    "cache": {
+        "enabled": true,
+        "inputEnabled": true,
+        "durationEnabled": true,
+        "duration": "60"
+    }
 }

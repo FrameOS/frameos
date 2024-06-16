@@ -18,5 +18,11 @@
             "name": "result",
             "type": "string"
         }
-    ]
+    ],
+    "cache": {
+        "enabled": true,
+        "inputEnabled": true,
+        "durationEnabled": true,
+        "duration": "900"
+    }
 }
