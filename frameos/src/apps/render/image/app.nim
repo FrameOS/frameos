@@ -8,7 +8,7 @@ import frameos/types
 type
   AppConfig* = object
     image*: Image
-    scalingMode*: string
+    placement*: string
     offsetX*: int
     offsetY*: int
 
@@ -34,9 +34,9 @@ proc error*(self: App, message: string) =
 
 proc run*(self: App, context: ExecutionContext) =
   try:
-    scaleAndDrawImage(context.image, self.appConfig.image, self.appConfig.scalingMode, self.appConfig.offsetX,
+    scaleAndDrawImage(context.image, self.appConfig.image, self.appConfig.placement, self.appConfig.offsetX,
         self.appConfig.offsetY)
   except:
     self.error "An error occurred while rendering image."
     let errorImage = renderError(context.image.width, context.image.height, "An error occurred while rendering image.")
-    scaleAndDrawImage(context.image, errorImage, self.appConfig.scalingMode)
+    scaleAndDrawImage(context.image, errorImage, self.appConfig.placement)

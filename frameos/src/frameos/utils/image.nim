@@ -62,8 +62,8 @@ proc renderError*(width, height: int, message: string): Image =
   result.fill(parseHtmlColor("#ffffff"))
   writeError(result, width, height, message)
 
-proc scaleAndDrawImage*(targetImage: Image, srcImage: Image,
-    scalingMode: string, offsetX: int = 0, offsetY: int = 0) {.raises: [PixieError].} =
+proc scaleAndDrawImage*(targetImage: Image, srcImage: Image, scalingMode: string, offsetX: int = 0,
+    offsetY: int = 0) {.raises: [PixieError].} =
   if srcImage.width == targetImage.width and srcImage.height ==
       targetImage.height:
     if offsetX != 0 or offsetY != 0:
@@ -113,7 +113,41 @@ proc scaleAndDrawImage*(targetImage: Image, srcImage: Image,
         OverwriteBlend
       )
 
-    else:
+    of "top-left":
+      targetImage.draw(srcImage, translate(vec2(offsetX.float32, offsetY.float32)))
+
+    of "top-center":
+      let xOffset = (targetImage.width - srcImage.width) div 2
+      targetImage.draw(srcImage, translate(vec2(xOffset.float32 + offsetX.float32, offsetY.float32)))
+
+    of "top-right":
+      let xOffset = targetImage.width - srcImage.width
+      targetImage.draw(srcImage, translate(vec2(xOffset.float32 + offsetX.float32, offsetY.float32)))
+
+    of "center-left":
+      let yOffset = (targetImage.height - srcImage.height) div 2
+      targetImage.draw(srcImage, translate(vec2(offsetX.float32, yOffset.float32 + offsetY.float32)))
+
+    of "center-right":
+      let yOffset = (targetImage.height - srcImage.height) div 2
+      let xOffset = targetImage.width - srcImage.width
+      targetImage.draw(srcImage, translate(vec2(xOffset.float32 + offsetX.float32, yOffset.float32 + offsetY.float32)))
+
+    of "bottom-left":
+      let yOffset = targetImage.height - srcImage.height
+      targetImage.draw(srcImage, translate(vec2(offsetX.float32, yOffset.float32 + offsetY.float32)))
+
+    of "bottom-center":
+      let xOffset = (targetImage.width - srcImage.width) div 2
+      let yOffset = targetImage.height - srcImage.height
+      targetImage.draw(srcImage, translate(vec2(xOffset.float32 + offsetX.float32, yOffset.float32 + offsetY.float32)))
+
+    of "bottom-right":
+      let xOffset = targetImage.width - srcImage.width
+      let yOffset = targetImage.height - srcImage.height
+      targetImage.draw(srcImage, translate(vec2(xOffset.float32 + offsetX.float32, yOffset.float32 + offsetY.float32)))
+
+    else: # "center"
       let xOffset = (targetImage.width - srcImage.width) div 2
       let yOffset = (targetImage.height - srcImage.height) div 2
       targetImage.draw(srcImage, translate(vec2(xOffset.float32 + offsetX.float32, yOffset.float32 + offsetY.float32)))

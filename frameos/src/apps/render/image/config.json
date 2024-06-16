@@ -11,12 +11,24 @@
             "label": "Image"
         },
         {
-            "name": "scalingMode",
+            "name": "placement",
             "type": "select",
-            "options": ["cover", "contain", "stretch", "center"],
+            "options": [
+                "cover", 
+                "contain", 
+                "stretch",
+                "center",
+                "top-left",
+                "top-center",
+                "top-right",
+                "center-left",
+                "center-right",
+                "bottom-left",
+                "bottom-center",
+                "bottom-right"],
             "value": "cover",
             "required": true,
-            "label": "Scaling mode"
+            "label": "Placement"
         },
         {
             "name": "offsetX",
