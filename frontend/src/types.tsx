@@ -107,6 +107,10 @@ export interface ConfigFieldCondition {
   value?: any
 }
 
+export interface ConfigFieldConditionAnd {
+  and: ConfigFieldCondition[]
+}
+
 export interface AppConfigField {
   /** Unique config field keyword */
   name: string
@@ -129,7 +133,7 @@ export interface AppConfigField {
   /** Turn the field into a multidimensional array of fields. seq=[1, "rows"] --> for 1 to rows */
   seq?: [string, number | string, number | string][]
   /** Conditions on which to show the field */
-  showIf?: ConfigFieldCondition[]
+  showIf?: (ConfigFieldCondition | ConfigFieldConditionAnd)[]
 }
 
 export interface OutputField {

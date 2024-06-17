@@ -11,7 +11,8 @@ import {
   FrameEvent,
   MarkdownField,
   OutputField,
-  CodeArg,
+  ConfigFieldCondition,
+  ConfigFieldConditionAnd,
 } from '../../../../types'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 import type { Node } from '@reactflow/core/dist/esm/types/nodes'
@@ -292,6 +293,41 @@ export const appNodeLogic = kea<appNodeLogicType>([
         allDefaultValues,
         fieldInputFields
       ): (AppConfigField | MarkdownField)[] | null => {
+        function matchValue(condition: ConfigFieldCondition | ConfigFieldConditionAnd): boolean {
+          if ('and' in condition) {
+            return condition.and.every(matchValue)
+          }
+
+          const { value, operator, field } = condition
+
+          const actualValue =
+            field === '.meta.showOutput' ? showOutput : field === '.meta.showNextPrev' ? showNextPrev : values[field]
+          if (operator === 'eq') {
+            if (actualValue === value) return true
+          } else if (operator === 'ne') {
+            if (actualValue !== value) return true
+          } else if (operator === 'gt') {
+            if (actualValue > value) return true
+          } else if (operator === 'lt') {
+            if (actualValue < value) return true
+          } else if (operator === 'gte') {
+            if (actualValue >= value) return true
+          } else if (operator === 'lte') {
+            if (actualValue <= value) return true
+          } else if (operator === 'in') {
+            if (value.includes(actualValue)) return true
+          } else if (operator === 'not_in') {
+            if (!value.includes(actualValue)) return true
+          } else if (operator === 'empty') {
+            if (!actualValue && !fieldInputFields.includes(field)) return true
+          } else if (operator === 'not_empty') {
+            if (!!actualValue || fieldInputFields.includes(field)) return true
+          } else {
+            if (value !== undefined ? value === actualValue : !!actualValue || fieldInputFields.includes(field))
+              return true
+          }
+        }
+
         const values = { ...allDefaultValues, ...nodeConfig }
         return (
           allFields?.filter((field) => {
@@ -299,38 +335,9 @@ export const appNodeLogic = kea<appNodeLogicType>([
             if (conditions.length === 0) {
               return true
             }
-            console.log({ nodeConfig, conditions, allFields, allDefaultValues, values, fieldInputFields })
-            for (const { field, operator, value } of conditions) {
-              if (field === '.meta.showOutput' && showOutput) {
+            for (const condition of conditions) {
+              if (matchValue(condition)) {
                 return true
-              }
-              if (field === '.meta.showNextPrev' && showNextPrev) {
-                return true
-              }
-              const actualValue = values[field]
-              if (operator === 'eq') {
-                if (actualValue === value) return true
-              } else if (operator === 'ne') {
-                if (actualValue !== value) return true
-              } else if (operator === 'gt') {
-                if (actualValue > value) return true
-              } else if (operator === 'lt') {
-                if (actualValue < value) return true
-              } else if (operator === 'gte') {
-                if (actualValue >= value) return true
-              } else if (operator === 'lte') {
-                if (actualValue <= value) return true
-              } else if (operator === 'in') {
-                if (value.includes(actualValue)) return true
-              } else if (operator === 'not_in') {
-                if (!value.includes(actualValue)) return true
-              } else if (operator === 'empty') {
-                if (!actualValue && !fieldInputFields.includes(field)) return true
-              } else if (operator === 'not_empty') {
-                if (!!actualValue || fieldInputFields.includes(field)) return true
-              } else {
-                if (value !== undefined ? value === actualValue : !!actualValue || fieldInputFields.includes(field))
-                  return true
               }
             }
             return false
