@@ -182,194 +182,207 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
           <div className="p-1">
             <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5 w-full">
               <tbody>
-                {fields.map((field, i) => (
-                  <React.Fragment key={i}>
-                    {'markdown' in field ? (
-                      <tr>
-                        <td className={clsx('font-sm text-indigo-200')} colSpan={4}>
-                          <Markdown value={field.markdown} />
-                        </td>
-                      </tr>
-                    ) : (
-                      <tr>
-                        <td>
-                          {field.type !== 'node' ? (
-                            <Handle
-                              // AppInputHandle
-                              type="target"
-                              position={Position.Left}
-                              id={`fieldInput/${field.name}`}
-                              style={{
-                                position: 'relative',
-                                transform: 'none',
-                                left: 0,
-                                top: 0,
-                                background: 'black',
-                                borderColor: 'white',
-                              }}
-                              isConnectable
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                const existingNodeCount = nodeEdges.filter((edge) =>
-                                  edge.targetHandle?.startsWith('fieldInput/')
-                                ).length
-                                openNewNodePicker(
-                                  e.clientX, // screenX
-                                  e.clientY, // screenY
-                                  (node?.position.x || 0) - existingNodeCount * 20, // diagramX
-                                  (node?.position.y || 0) - 40 - existingNodeCount * 150, // diagramY
-                                  id, // nodeId
-                                  `fieldInput/${field.name}`, // handleId
-                                  'target' // handleType
-                                )
-                              }}
-                            />
-                          ) : null}
-                        </td>
-                        <td
-                          className={clsx(
-                            'font-sm text-indigo-200',
-                            field.type === 'node' ||
-                              codeArgs.includes(field.name) ||
-                              fieldInputFields.includes(field.name) ||
-                              fieldOutputFields.includes(field.name)
-                              ? 'w-full'
-                              : '',
-                            codeArgs.includes(field.name) ||
-                              fieldInputFields.includes(field.name) ||
-                              fieldOutputFields.includes(field.name) ||
-                              (field.name in data.config && data.config[field.name] !== field.value)
-                              ? 'underline font-bold'
-                              : ''
-                          )}
-                          title={
-                            field.name in data.config && data.config[field.name] !== field.value
-                              ? `${field.name} has been modified`
-                              : undefined
-                          }
-                          colSpan={
-                            field.type === 'node' ||
-                            codeArgs.includes(field.name) ||
-                            fieldInputFields.includes(field.name)
-                              ? 2
-                              : 1
-                          }
-                        >
-                          <div
+                {fields.map((field, i) => {
+                  const hasChangedValue =
+                    'name' in field &&
+                    (codeArgs.includes(field.name) ||
+                      fieldInputFields.includes(field.name) ||
+                      fieldOutputFields.includes(field.name) ||
+                      (field.name in data.config && data.config[field.name] !== field.value))
+
+                  const isFieldWithInput =
+                    'name' in field &&
+                    field.type !== 'node' &&
+                    field.type !== 'image' &&
+                    !codeArgs.includes(field.name) &&
+                    !fieldInputFields.includes(field.name)
+
+                  return (
+                    <React.Fragment key={i}>
+                      {'markdown' in field ? (
+                        <tr>
+                          <td className={clsx('font-sm text-indigo-200')} colSpan={4}>
+                            <Markdown value={field.markdown} />
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr>
+                          <td>
+                            {field.type !== 'node' ? (
+                              <Handle
+                                // AppInputHandle
+                                type="target"
+                                position={Position.Left}
+                                id={`fieldInput/${field.name}`}
+                                style={{
+                                  position: 'relative',
+                                  transform: 'none',
+                                  left: 0,
+                                  top: 0,
+                                  background: 'black',
+                                  borderColor: 'white',
+                                }}
+                                isConnectable
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  const existingNodeCount = nodeEdges.filter((edge) =>
+                                    edge.targetHandle?.startsWith('fieldInput/')
+                                  ).length
+                                  openNewNodePicker(
+                                    e.clientX, // screenX
+                                    e.clientY, // screenY
+                                    (node?.position.x || 0) - existingNodeCount * 20, // diagramX
+                                    (node?.position.y || 0) - 40 - existingNodeCount * 150, // diagramY
+                                    id, // nodeId
+                                    `fieldInput/${field.name}`, // handleId
+                                    'target' // handleType
+                                  )
+                                }}
+                              />
+                            ) : null}
+                          </td>
+                          <td
                             className={clsx(
-                              'flex items-center gap-1',
-                              field.type !== 'image' &&
-                                !codeArgs.includes(field.name) &&
-                                !fieldInputFields.includes(field.name)
-                                ? 'justify-between'
+                              'font-sm text-indigo-200',
+                              field.type === 'node' ||
+                                codeArgs.includes(field.name) ||
+                                fieldInputFields.includes(field.name) ||
+                                fieldOutputFields.includes(field.name)
+                                ? 'w-full'
                                 : ''
                             )}
+                            title={
+                              field.name in data.config && data.config[field.name] !== field.value
+                                ? `${field.name} has been modified`
+                                : undefined
+                            }
+                            colSpan={
+                              field.type === 'node' ||
+                              codeArgs.includes(field.name) ||
+                              fieldInputFields.includes(field.name)
+                                ? 2
+                                : 1
+                            }
                           >
-                            <div title={field.type}>{field.label ?? field.name}</div>
-                            {field.type === 'node' ? (
-                              <div className="flex items-center gap-2">
-                                <FieldTypeTag type={field.type} />
-                                <Handle
-                                  type="source"
-                                  position={Position.Right}
-                                  id={`field/${field.name}`}
-                                  style={{
-                                    position: 'relative',
-                                    transform: 'none',
-                                    right: 0,
-                                    top: 0,
-                                    background: '#cccccc',
-                                    borderBottomLeftRadius: 0,
-                                    borderTopLeftRadius: 0,
-                                  }}
-                                  isConnectable={isConnectable}
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    const existingNodeCount = nodeEdges.filter((edge) =>
-                                      edge.targetHandle?.startsWith('fieldInput/')
-                                    ).length
-                                    openNewNodePicker(
-                                      e.clientX, // screenX
-                                      e.clientY, // screenY
-                                      (node?.position.x || 0) + (node?.width || 300) + 20 + Math.random() * 30, // diagramX
-                                      (node?.position.y || 0) + 30 + Math.random() * 80, // diagramY
-                                      id, // nodeId
-                                      `field/${field.name}`, // handleId
-                                      'source' // handleType
-                                    )
-                                  }}
-                                />
+                            <div
+                              className={clsx(
+                                'flex items-center gap-1',
+                                field.type !== 'image' &&
+                                  !codeArgs.includes(field.name) &&
+                                  !fieldInputFields.includes(field.name)
+                                  ? 'justify-between'
+                                  : ''
+                              )}
+                            >
+                              <div title={field.type} className={hasChangedValue ? 'underline font-bold' : ''}>
+                                {field.label ?? field.name}
                               </div>
-                            ) : (
-                              <FieldTypeTag type={field.type} />
-                            )}
-                          </div>
-                        </td>
-                        {field.type !== 'node' &&
-                        field.type !== 'image' &&
-                        !codeArgs.includes(field.name) &&
-                        !fieldInputFields.includes(field.name) ? (
-                          <td className="cursor-text">
-                            {field.secret && !secretRevealed[field.name] ? (
-                              <RevealDots
-                                onClick={() => setSecretRevealed({ ...secretRevealed, [field.name]: true })}
-                              />
-                            ) : field.type === 'select' ? (
-                              <Select
-                                theme="node"
-                                placeholder={field.placeholder}
-                                value={field.name in data.config ? data.config[field.name] : field.value}
-                                options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
-                                onChange={(value) => updateNodeConfig(id, field.name, value)}
-                              />
-                            ) : field.type === 'scene' ? (
-                              <Select
-                                theme="node"
-                                placeholder={field.placeholder}
-                                value={field.name in data.config ? data.config[field.name] : field.value}
-                                options={sceneOptions}
-                                onChange={(value) => updateNodeConfig(id, field.name, value)}
-                              />
-                            ) : field.type === 'text' ? (
-                              <TextArea
-                                theme="node"
-                                placeholder={field.placeholder}
-                                value={String(
-                                  (field.name in data.config ? data.config[field.name] : field.value) ?? ''
-                                )}
-                                onChange={(value) => updateNodeConfig(id, field.name, value)}
-                                rows={field.rows ?? 3}
-                              />
-                            ) : field.type === 'boolean' ? (
-                              <input
-                                type="checkbox"
-                                checked={(field.name in data.config ? data.config[field.name] : field.value) == 'true'}
-                                onChange={(e) => updateNodeConfig(id, field.name, e.target.checked ? 'true' : 'false')}
-                              />
-                            ) : (
-                              <TextInput
-                                theme="node"
-                                placeholder={field.placeholder}
-                                value={String(
-                                  (field.name in data.config ? data.config[field.name] : field.value) ?? ''
-                                )}
-                                onChange={(value) => updateNodeConfig(id, field.name, value)}
-                                className={field.type === 'color' ? '!min-w-[50px]' : ''}
-                                type={
-                                  field.type === 'integer' || field.type === 'float'
-                                    ? 'tel'
-                                    : field.type === 'color'
-                                    ? 'color'
-                                    : 'text'
-                                }
-                              />
-                            )}
+                              {field.type === 'node' ? (
+                                <div className="flex items-center gap-2">
+                                  <FieldTypeTag type={field.type} className={hasChangedValue ? 'font-bold' : ''} />
+                                  <Handle
+                                    type="source"
+                                    position={Position.Right}
+                                    id={`field/${field.name}`}
+                                    style={{
+                                      position: 'relative',
+                                      transform: 'none',
+                                      right: 0,
+                                      top: 0,
+                                      background: '#cccccc',
+                                      borderBottomLeftRadius: 0,
+                                      borderTopLeftRadius: 0,
+                                    }}
+                                    isConnectable={isConnectable}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      const existingNodeCount = nodeEdges.filter((edge) =>
+                                        edge.targetHandle?.startsWith('fieldInput/')
+                                      ).length
+                                      openNewNodePicker(
+                                        e.clientX, // screenX
+                                        e.clientY, // screenY
+                                        (node?.position.x || 0) + (node?.width || 300) + 20 + Math.random() * 30, // diagramX
+                                        (node?.position.y || 0) + 30 + Math.random() * 80, // diagramY
+                                        id, // nodeId
+                                        `field/${field.name}`, // handleId
+                                        'source' // handleType
+                                      )
+                                    }}
+                                  />
+                                </div>
+                              ) : (
+                                <FieldTypeTag type={field.type} />
+                              )}
+                            </div>
                           </td>
-                        ) : null}
-                      </tr>
-                    )}
-                  </React.Fragment>
-                ))}
+                          {isFieldWithInput ? (
+                            <td className="cursor-text">
+                              {field.secret && !secretRevealed[field.name] ? (
+                                <RevealDots
+                                  onClick={() => setSecretRevealed({ ...secretRevealed, [field.name]: true })}
+                                />
+                              ) : field.type === 'select' ? (
+                                <Select
+                                  theme="node"
+                                  placeholder={field.placeholder}
+                                  value={field.name in data.config ? data.config[field.name] : field.value}
+                                  options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
+                                  onChange={(value) => updateNodeConfig(id, field.name, value)}
+                                />
+                              ) : field.type === 'scene' ? (
+                                <Select
+                                  theme="node"
+                                  placeholder={field.placeholder}
+                                  value={field.name in data.config ? data.config[field.name] : field.value}
+                                  options={sceneOptions}
+                                  onChange={(value) => updateNodeConfig(id, field.name, value)}
+                                />
+                              ) : field.type === 'text' ? (
+                                <TextArea
+                                  theme="node"
+                                  placeholder={field.placeholder}
+                                  value={String(
+                                    (field.name in data.config ? data.config[field.name] : field.value) ?? ''
+                                  )}
+                                  onChange={(value) => updateNodeConfig(id, field.name, value)}
+                                  rows={field.rows ?? 3}
+                                />
+                              ) : field.type === 'boolean' ? (
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    (field.name in data.config ? data.config[field.name] : field.value) == 'true'
+                                  }
+                                  onChange={(e) =>
+                                    updateNodeConfig(id, field.name, e.target.checked ? 'true' : 'false')
+                                  }
+                                />
+                              ) : (
+                                <TextInput
+                                  theme="node"
+                                  placeholder={field.placeholder}
+                                  value={String(
+                                    (field.name in data.config ? data.config[field.name] : field.value) ?? ''
+                                  )}
+                                  onChange={(value) => updateNodeConfig(id, field.name, value)}
+                                  className={field.type === 'color' ? '!min-w-[50px]' : ''}
+                                  type={
+                                    field.type === 'integer' || field.type === 'float'
+                                      ? 'tel'
+                                      : field.type === 'color'
+                                      ? 'color'
+                                      : 'text'
+                                  }
+                                />
+                              )}
+                            </td>
+                          ) : null}
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  )
+                })}
               </tbody>
             </table>
           </div>

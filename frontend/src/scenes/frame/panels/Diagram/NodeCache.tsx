@@ -8,6 +8,7 @@ import { Tag } from '../../../../components/Tag'
 import { Tooltip } from '../../../../components/Tooltip'
 import { isNumericString } from '../../../../utils/isNumericString'
 import { showAsFps } from '../../../../decorators/refreshInterval'
+import { TextArea } from '../../../../components/TextArea'
 
 export interface NodeCacheProps {
   nodeType: 'app' | 'code'
@@ -92,10 +93,12 @@ export function NodeCache({ nodeType }: NodeCacheProps): JSX.Element {
                 <div className="pl-4 space-y-2">
                   <div className="space-y-1">
                     <Label>Nim expression</Label>
-                    <TextInput
+                    <TextArea
                       value={getValue('expression')}
-                      onChange={(value) => setValue('expression', value)}
-                      placeholder='"string"'
+                      onChange={(value) => setValue('expression', value.replaceAll('\n', ''))}
+                      placeholder={`e.g. now().format("yyyy-MM-dd")`}
+                      rows={3}
+                      className="font-mono"
                     />
                   </div>
                   <div className="space-y-1">
