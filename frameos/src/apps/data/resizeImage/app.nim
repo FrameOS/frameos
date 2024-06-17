@@ -25,8 +25,5 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
 
 proc run*(self: App, context: ExecutionContext): Image =
   let image = newImage(self.appConfig.width, self.appConfig.height)
-  # case self.appConfig.scalingMode:
-  #   of "center", "contain", "":
-  #     image.fill(self.scene.backgroundColor)
   image.scaleAndDrawImage(self.appConfig.image, self.appConfig.scalingMode)
   return image

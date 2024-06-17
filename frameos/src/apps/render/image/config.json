@@ -33,14 +33,14 @@
         {
             "name": "offsetX",
             "type": "integer",
-            "value": 0,
+            "value": "0",
             "required": false,
             "label": "Offset X"
         },
         {
             "name": "offsetY",
             "type": "integer",
-            "value": 0,
+            "value": "0",
             "required": false,
             "label": "Offset Y"
         }

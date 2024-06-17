@@ -1,0 +1,41 @@
+{
+  "name": "New Image",
+  "description": "Create a new image with a single color background",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "width",
+      "type": "integer",
+      "value": "100",
+      "required": false,
+      "label": "Width",
+      "placeholder": "context width"
+    },
+    {
+      "name": "height",
+      "type": "integer",
+      "value": "100",
+      "required": false,
+      "label": "Height",
+      "placeholder": "context height"
+    },
+    {
+      "name": "color",
+      "type": "color",
+      "value": "#ffffff",
+      "required": true,
+      "label": "Color"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ],
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true
+  }
+}
