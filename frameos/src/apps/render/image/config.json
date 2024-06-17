@@ -35,14 +35,20 @@
             "type": "integer",
             "value": "0",
             "required": false,
-            "label": "Offset X"
+            "label": "Offset X",
+            "showIf": [
+                {"field": "placement", "operator": "not_in", "value": ["cover", "contain", "stretch"]}
+            ]
         },
         {
             "name": "offsetY",
             "type": "integer",
             "value": "0",
             "required": false,
-            "label": "Offset Y"
+            "label": "Offset Y",
+            "showIf": [
+                {"field": "placement", "operator": "not_in", "value": ["cover", "contain", "stretch"]}
+            ]
         }
     ]
 }

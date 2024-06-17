@@ -89,7 +89,17 @@ export type AppConfigFieldType = FieldType | 'text' | 'select'
 export const toFieldType: (value: string | AppConfigFieldType) => FieldType = (value) =>
   fieldTypes.includes(value as any) ? (value as FieldType) : 'string'
 
-export type ConfigFieldConditionOperator = 'eq' | 'ne' | 'gt' | 'lt' | 'gte' | 'lte' | 'empty' | 'not_empty'
+export type ConfigFieldConditionOperator =
+  | 'eq'
+  | 'ne'
+  | 'gt'
+  | 'lt'
+  | 'gte'
+  | 'lte'
+  | 'empty'
+  | 'not_empty'
+  | 'in'
+  | 'not_in'
 
 export interface ConfigFieldCondition {
   field: string | '.meta.showOutput' | '.meta.showNextPrev'

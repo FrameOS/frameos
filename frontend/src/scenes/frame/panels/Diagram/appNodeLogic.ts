@@ -308,25 +308,29 @@ export const appNodeLogic = kea<appNodeLogicType>([
                 return true
               }
               const actualValue = values[field]
-              switch (operator) {
-                case 'eq':
-                  if (actualValue === value) return true
-                case 'ne':
-                  if (actualValue !== value) return true
-                case 'gt':
-                  if (actualValue > value) return true
-                case 'lt':
-                  if (actualValue < value) return true
-                case 'gte':
-                  if (actualValue >= value) return true
-                case 'lte':
-                  if (actualValue <= value) return true
-                case 'empty':
-                  if (!actualValue && !fieldInputFields.includes(field)) return true
-                case 'not_empty':
-                  if (!!actualValue || fieldInputFields.includes(field)) return true
-                default:
-                  if (!!actualValue || fieldInputFields.includes(field)) return true
+              if (operator === 'eq') {
+                if (actualValue === value) return true
+              } else if (operator === 'ne') {
+                if (actualValue !== value) return true
+              } else if (operator === 'gt') {
+                if (actualValue > value) return true
+              } else if (operator === 'lt') {
+                if (actualValue < value) return true
+              } else if (operator === 'gte') {
+                if (actualValue >= value) return true
+              } else if (operator === 'lte') {
+                if (actualValue <= value) return true
+              } else if (operator === 'in') {
+                if (value.includes(actualValue)) return true
+              } else if (operator === 'not_in') {
+                if (!value.includes(actualValue)) return true
+              } else if (operator === 'empty') {
+                if (!actualValue && !fieldInputFields.includes(field)) return true
+              } else if (operator === 'not_empty') {
+                if (!!actualValue || fieldInputFields.includes(field)) return true
+              } else {
+                if (value !== undefined ? value === actualValue : !!actualValue || fieldInputFields.includes(field))
+                  return true
               }
             }
             return false
