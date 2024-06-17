@@ -37,6 +37,8 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
     codeArgs,
     fieldInputFields,
     fieldOutputFields,
+    showOutput,
+    showNextPrev,
   } = useValues(appNodeLogic(appNodeLogicProps))
   const { select } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
@@ -76,7 +78,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
       <div onClick={select} className={backgroundClassName}>
         <NodeResizer minWidth={200} minHeight={130} />
         <div className={titleClassName}>
-          {!isDataApp ? (
+          {showNextPrev ? (
             <Handle
               // PrevNodeHandle
               type="target"
@@ -138,7 +140,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
               },
             ]}
           />
-          {!isDataApp ? (
+          {showNextPrev ? (
             <Handle
               // NextNodeHandle
               type="source"
@@ -258,6 +260,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                             }
                             colSpan={
                               field.type === 'node' ||
+                              field.type === 'image' ||
                               codeArgs.includes(field.name) ||
                               fieldInputFields.includes(field.name)
                                 ? 2
@@ -267,9 +270,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                             <div
                               className={clsx(
                                 'flex items-center gap-1',
-                                field.type !== 'image' &&
-                                  !codeArgs.includes(field.name) &&
-                                  !fieldInputFields.includes(field.name)
+                                !codeArgs.includes(field.name) && !fieldInputFields.includes(field.name)
                                   ? 'justify-between'
                                   : ''
                               )}
@@ -387,7 +388,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
             </table>
           </div>
         ) : null}
-        {output ? (
+        {output && output.length > 0 && showOutput ? (
           <div className={clsx(titleClassName, 'pb-0.5')}>
             <div className="flex gap-2 items-center">
               {output.map((out, i) => (

@@ -233,7 +233,15 @@ export function SceneState(): JSX.Element {
               )}
             </Group>
           ))}
-          {(scene.fields ?? []).length === 0 ? <div>No fields yet. Add one to share data between apps.</div> : null}
+          {(scene.fields ?? []).length === 0 ? (
+            <div>
+              Use the <code>state</code> object of type{' '}
+              <a href="https://nim-lang.org/docs/json.html" className="underline" target="_blank" rel="noreferer">
+                <code>JsonNode</code>
+              </a>{' '}
+              to share data between nodes.
+            </div>
+          ) : null}
         </div>
       </Group>
     </Form>

@@ -89,6 +89,14 @@ export type AppConfigFieldType = FieldType | 'text' | 'select'
 export const toFieldType: (value: string | AppConfigFieldType) => FieldType = (value) =>
   fieldTypes.includes(value as any) ? (value as FieldType) : 'string'
 
+export type ConfigFieldConditionOperator = 'eq' | 'ne' | 'gt' | 'lt' | 'gte' | 'lte' | 'empty' | 'not_empty'
+
+export interface ConfigFieldCondition {
+  field: string | '.meta.showOutput' | '.meta.showNextPrev'
+  operator?: ConfigFieldConditionOperator
+  value?: any
+}
+
 export interface AppConfigField {
   /** Unique config field keyword */
   name: string
@@ -110,6 +118,8 @@ export interface AppConfigField {
   rows?: number
   /** Turn the field into a multidimensional array of fields. seq=[1, "rows"] --> for 1 to rows */
   seq?: [string, number | string, number | string][]
+  /** Conditions on which to show the field */
+  showIf?: ConfigFieldCondition[]
 }
 
 export interface OutputField {
@@ -147,6 +157,8 @@ export interface StateField extends AppConfigField {
 export interface MarkdownField {
   /** Block of markdown text to display between fields */
   markdown: string
+  /** Conditions on which to show the field */
+  showIf?: ConfigFieldCondition[]
 }
 
 export interface CacheConfig {

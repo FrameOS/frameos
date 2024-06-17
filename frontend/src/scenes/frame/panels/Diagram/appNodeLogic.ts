@@ -69,7 +69,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
     ],
     fieldInputFields: [
       (s) => [s.nodeEdges, s.nodeId],
-      (nodeEdges, nodeId) =>
+      (nodeEdges, nodeId): string[] =>
         nodeEdges
           .filter(
             (edge) =>
@@ -80,6 +80,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
           .map((edge) => edge.targetHandle?.replace('fieldInput/', '') ?? ''),
     ],
     fieldOutputFields: [
+      // DEPRECATED, don't use
       (s) => [s.nodeEdges, s.nodeId],
       (nodeEdges, nodeId) =>
         nodeEdges
@@ -156,7 +157,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
         return (config as AppConfig) || app || null
       },
     ],
-    fields: [
+    allFields: [
       (s) => [s.app, s.event, s.scene, s.configJson, s.nodeConfig],
       (app, event, scene, configJson, nodeConfig): (AppConfigField | MarkdownField)[] | null => {
         let fields: (AppConfigField | MarkdownField)[] = []
@@ -218,13 +219,25 @@ export const appNodeLogic = kea<appNodeLogicType>([
         return realFields
       },
     ],
+    allDefaultValues: [
+      (s) => [s.allFields],
+      (fields): Record<string, any> => {
+        return (
+          fields?.reduce((acc, field) => {
+            if ('value' in field && 'name' in field) {
+              acc[field.name] = field.value
+            }
+            return acc
+          }, {} as Record<string, any>) ?? {}
+        )
+      },
+    ],
     output: [
       (s) => [s.configJson],
       (configJson): OutputField[] | null => {
         return configJson?.output ?? null
       },
     ],
-    isDataApp: [(s) => [s.node, s.output], (node, output) => node?.type === 'app' && !!output && output.length > 0],
     name: [
       (s) => [s.app, s.event, s.configJson],
       (app, event, configJson): string => {
@@ -235,6 +248,90 @@ export const appNodeLogic = kea<appNodeLogicType>([
       (s) => [s.node],
       (node) => {
         return 'sources' in (node?.data ?? {})
+      },
+    ],
+    hasNextPrevNodeConnected: [
+      (s) => [s.nodeEdges, s.nodeId],
+      (nodeEdges, nodeId) => {
+        return nodeEdges.some(
+          (edge) =>
+            (edge.target === nodeId && edge.targetHandle === 'prev') ||
+            (edge.source === nodeId && edge.sourceHandle === 'next')
+        )
+      },
+    ],
+    hasOutputConnected: [
+      (s) => [s.nodeEdges, s.nodeId],
+      (nodeEdges, nodeId) => {
+        return nodeEdges.some((edge) => edge.source === nodeId && edge.sourceHandle === 'fieldOutput')
+      },
+    ],
+    showOutput: [
+      (s) => [s.hasNextPrevNodeConnected, s.hasOutputConnected],
+      (hasNextPrevNodeConnected, hasOutputConnected) => {
+        return hasOutputConnected || !hasNextPrevNodeConnected
+      },
+    ],
+    showNextPrev: [
+      (s) => [s.hasNextPrevNodeConnected, s.hasOutputConnected],
+      (hasNextPrevNodeConnected, hasOutputConnected) => {
+        return hasNextPrevNodeConnected || !hasOutputConnected
+      },
+    ],
+    isDataApp: [
+      (s) => [s.node, s.output, s.showOutput],
+      (node, output, showOutput) => node?.type === 'app' && !!output && output.length > 0 && showOutput,
+    ],
+    fields: [
+      (s) => [s.allFields, s.showOutput, s.showNextPrev, s.nodeConfig, s.allDefaultValues, s.fieldInputFields],
+      (
+        allFields,
+        showOutput,
+        showNextPrev,
+        nodeConfig,
+        allDefaultValues,
+        fieldInputFields
+      ): (AppConfigField | MarkdownField)[] | null => {
+        const values = { ...allDefaultValues, ...nodeConfig }
+        return (
+          allFields?.filter((field) => {
+            const conditions = field.showIf ?? []
+            if (conditions.length === 0) {
+              return true
+            }
+            console.log({ nodeConfig, conditions, allFields, allDefaultValues, values, fieldInputFields })
+            for (const { field, operator, value } of conditions) {
+              if (field === '.meta.showOutput' && showOutput) {
+                return true
+              }
+              if (field === '.meta.showNextPrev' && showNextPrev) {
+                return true
+              }
+              const actualValue = values[field]
+              switch (operator) {
+                case 'eq':
+                  if (actualValue === value) return true
+                case 'ne':
+                  if (actualValue !== value) return true
+                case 'gt':
+                  if (actualValue > value) return true
+                case 'lt':
+                  if (actualValue < value) return true
+                case 'gte':
+                  if (actualValue >= value) return true
+                case 'lte':
+                  if (actualValue <= value) return true
+                case 'empty':
+                  if (!actualValue && !fieldInputFields.includes(field)) return true
+                case 'not_empty':
+                  if (!!actualValue || fieldInputFields.includes(field)) return true
+                default:
+                  if (!!actualValue || fieldInputFields.includes(field)) return true
+              }
+            }
+            return false
+          }) ?? null
+        )
       },
     ],
   }),

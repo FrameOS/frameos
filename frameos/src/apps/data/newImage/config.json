@@ -7,18 +7,16 @@
     {
       "name": "width",
       "type": "integer",
-      "value": "100",
       "required": false,
       "label": "Width",
-      "placeholder": "context width"
+      "placeholder": "auto"
     },
     {
       "name": "height",
       "type": "integer",
-      "value": "100",
       "required": false,
       "label": "Height",
-      "placeholder": "context height"
+      "placeholder": "auto"
     },
     {
       "name": "color",
