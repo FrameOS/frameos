@@ -28,7 +28,7 @@ def write_scene_nim(frame: Frame, scene: dict) -> str:
     return SceneWriter(frame, scene).write_scene_nim()
 
 
-def field_type_to_nim_type(field_type: str) -> str:
+def field_type_to_nim_type(field_type: str, required: bool = True) -> str:
     match field_type:
         case 'select':
             return 'string'
@@ -51,6 +51,8 @@ def field_type_to_nim_type(field_type: str) -> str:
         case 'scene':
             return 'SceneId'
         case 'image':
+            if not required:
+                return 'Option[Image]'
             return 'Image'
         case _:
             raise ValueError(f"Invalid field type {field_type}")
@@ -155,7 +157,7 @@ class SceneWriter:
             ]
             self.after_node_lines += [
                 "scene.controlCodeRender.appConfig.image = self.controlCodeData.run(context)",
-                "self.controlCodeRender.run(context)"
+                "discard self.controlCodeRender.run(context)"
             ]
 
     def read_edges(self):
@@ -265,6 +267,7 @@ class SceneWriter:
             else:
                 config = {}
         self.app_configs[node_id] = config
+        self.app_node_outputs[node_id] = config.get("output", None)
 
         # { field: [['key1', 'from', 'to'], ['key2', 1, 5]] }
         seq_fields_for_node: dict[str, list[list[str | int]]] = {}
@@ -274,6 +277,7 @@ class SceneWriter:
         node_fields_for_node = self.node_fields.get(node_id, {})
 
         config_types: dict[str, str] = {}
+        required_fields: dict[str, bool] = {}
         for field in config.get("fields"):
             if field.get('markdown'):
                 continue
@@ -282,6 +286,9 @@ class SceneWriter:
             field_type = field.get("type", "string")
             config_types[key] = field_type
             seq = field.get("seq", None)
+            required = field.get("required", False)
+            if required:
+                required_fields[key] = True
             # set defaults for missing values
             if (
                 (key not in app_config or app_config.get(key) is None)
@@ -332,6 +339,7 @@ class SceneWriter:
                     source_field_inputs_for_node,
                     seq_fields_for_node,
                     code_fields_for_node,
+                    required_fields,
                     False,
                 )]
             )
@@ -350,7 +358,6 @@ class SceneWriter:
                     self.init_apps += [line]
                 self.init_apps[-1] = self.init_apps[-1] + ","
         self.init_apps += ['))']
-        self.app_node_outputs[node_id] = config.get("output", None)
 
     def get_app_node_cacheable_fields_with_types(self, node_id) -> dict[str, str]:
         field_inputs_for_node = self.field_inputs.get(node_id, {})
@@ -363,7 +370,7 @@ class SceneWriter:
                 fields = app_config.get('fields', [])
                 for field in fields:
                     if field.get('name') == key:
-                        cache_fields[key] = field_type_to_nim_type(field.get('type', 'string'))
+                        cache_fields[key] = field_type_to_nim_type(field.get('type', 'string'), field.get('required', False))
 
         return cache_fields
 
@@ -435,6 +442,7 @@ class SceneWriter:
                         field_inputs_for_node = self.field_inputs.get(node_id, {})
                         source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
                         node_fields_for_node = self.node_fields.get(node_id, {})
+                        required_fields = {}
 
                         event_schema = None
                         for schema in self.events_schema:
@@ -450,6 +458,8 @@ class SceneWriter:
                                     config[key] = field.get("value", None)
                                 type = field.get("type", "string")
                                 value = config.get(key, None)
+                                if field.get("required", False):
+                                    required_fields[key] = True
 
                                 event_payload_pairs.append(
                                     [f"  {x}" for x in self.sanitize_nim_field(
@@ -462,6 +472,7 @@ class SceneWriter:
                                         source_field_inputs_for_node,
                                         {},
                                         True,
+                                        required_fields,
                                     )]
                                 )
 
@@ -477,12 +488,7 @@ class SceneWriter:
             elif node.get("type") == "app":
                 self.process_app_init(node)
                 self.process_app_run(node)
-
-                app_outputs = self.app_node_outputs.get(node_id, []) or []
-
-                # Ignore if it's a data node that's used elsewhere.
-                # Otherwise, add this node to the big case statement
-                if len(app_outputs) == 0:
+                if self.next_nodes.get(node_id, None) or self.prev_nodes.get(node_id, None):
                     self.run_node_lines += self.process_app_run_lines(node, "case")
 
         self.scene_object_fields.sort(key=natural_keys)
@@ -687,6 +693,7 @@ var exportedScene* = ExportedScene(
         source_field_inputs_for_node,
         seq_fields_for_node,
         code_fields_for_node,
+        required_fields,
     ) -> list[str]:
         if key in seq_fields_for_node:
             sequences = seq_fields_for_node[key]
@@ -702,6 +709,7 @@ var exportedScene* = ExportedScene(
                 source_field_inputs_for_node,
                 seq_fields_for_node,
                 code_fields_for_node,
+                required_fields,
             )
 
         if key in field_inputs_for_node:
@@ -732,6 +740,10 @@ var exportedScene* = ExportedScene(
                 raise ValueError(f"Invalid color value {value} for key {key}")
         elif type == "scene":
             return [f"\"{'' if value is None else sanitize_nim_string(str(value))}\".SceneId"]
+        elif type == "image":
+            if not required_fields.get(key, False):
+                return ["none(Image)"]
+            return ["newImage(1, 1)"]
         else:
             return [f"\"{'' if value is None else sanitize_nim_string(str(value))}\""]
 
@@ -748,6 +760,7 @@ var exportedScene* = ExportedScene(
         source_field_inputs_for_node,
         seq_fields_for_node,
         code_fields_for_node,
+        required_fields,
     ) -> list[str]:
         seq_start = sequences[index][1]
         seq_end = sequences[index][2]
@@ -765,6 +778,7 @@ var exportedScene* = ExportedScene(
                         source_field_inputs_for_node,
                         seq_fields_for_node,
                         code_fields_for_node,
+                        required_fields,
                     )
                 )
             else:
@@ -781,6 +795,7 @@ var exportedScene* = ExportedScene(
                         source_field_inputs_for_node,
                         seq_fields_for_node,
                         code_fields_for_node,
+                        required_fields
                     )
                 )
 
@@ -806,6 +821,7 @@ var exportedScene* = ExportedScene(
         source_field_inputs_for_node,
         seq_fields_for_node,
         code_fields_for_node,
+        required_fields,
         key_with_quotes: bool,
     ) -> list[str]:
         key_str = (
@@ -823,6 +839,7 @@ var exportedScene* = ExportedScene(
             source_field_inputs_for_node,
             seq_fields_for_node,
             code_fields_for_node,
+            required_fields,
         )
 
         if len(value_list) == 0:

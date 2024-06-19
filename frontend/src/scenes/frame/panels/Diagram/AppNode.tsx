@@ -270,7 +270,9 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                             <div
                               className={clsx(
                                 'flex items-center gap-1',
-                                !codeArgs.includes(field.name) && !fieldInputFields.includes(field.name)
+                                !codeArgs.includes(field.name) &&
+                                  !fieldInputFields.includes(field.name) &&
+                                  field.type !== 'image'
                                   ? 'justify-between'
                                   : ''
                               )}
@@ -312,9 +314,9 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                                     }}
                                   />
                                 </div>
-                              ) : (
+                              ) : field.type !== 'boolean' ? (
                                 <FieldTypeTag type={field.type} />
-                              )}
+                              ) : null}
                             </div>
                           </td>
                           {isFieldWithInput ? (

@@ -284,7 +284,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           (handleType === 'target' && handleId === 'prev')
         ) {
           for (const [keyword, app] of Object.entries(apps)) {
-            if (app.category !== 'legacy' && (!app.output || app.output.length == 0)) {
+            if (app.category !== 'legacy' && (!app.output || app.output.length == 0 || app.category === 'render')) {
               options.push({
                 label: `${app.category ?? 'app'}: ${app.name}`,
                 value: `app/${keyword}`,
