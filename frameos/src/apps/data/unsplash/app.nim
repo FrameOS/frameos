@@ -3,6 +3,7 @@ import json
 import std/strformat
 import std/strutils
 import options
+import frameos/config
 import frameos/types
 import frameos/utils/image
 
@@ -34,8 +35,10 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result.appConfig.keyword = result.appConfig.keyword.strip()
 
 proc run*(self: App, context: ExecutionContext): Image =
+  let width = if context.hasImage: context.image.width else: self.frameConfig.renderWidth()
+  let height = if context.hasImage: context.image.height else: self.frameConfig.renderHeight()
   try:
-    let url = &"https://source.unsplash.com/random/{context.image.width}x{context.image.height}/?{self.appConfig.keyword}"
+    let url = &"https://source.unsplash.com/random/{width}x{height}/?{self.appConfig.keyword}"
     if self.frameConfig.debug:
       self.log(&"Downloading image: {url}")
     let unsplashImage = downloadImage(url)
@@ -44,5 +47,5 @@ proc run*(self: App, context: ExecutionContext): Image =
 
     return unsplashImage
   except CatchableError as e:
-    return renderError(context.image.width, context.image.height, e.msg)
+    return renderError(width, height, e.msg)
 

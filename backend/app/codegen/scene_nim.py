@@ -664,7 +664,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: {scene_refresh_interval}, backgroundColor: {scene_background_color})
   let self = scene
   result = scene
-  var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+  var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
   {(newline + "  ").join(self.init_apps)}
   runEvent(context)
@@ -940,8 +940,8 @@ var exportedScene* = ExportedScene(
 
         # expression
         if expression_enabled:
-            cache_key = data.get('cache', {}).get('keySource', '"string"')
-            cache_key_data_type = field_type_to_nim_type(data.get('cache', {}).get('keyDataType', 'string'))
+            cache_key = data.get('cache', {}).get('expression', '"string"')
+            cache_key_data_type = field_type_to_nim_type(data.get('cache', {}).get('expressionType', 'string'))
 
             key_var = f"var {cache_field}Expr: {cache_key_data_type}"
             if key_var not in self.cache_fields:

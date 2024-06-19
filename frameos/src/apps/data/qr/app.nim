@@ -1,5 +1,6 @@
 import json, strformat
 import pixie
+import frameos/config
 import frameos/types
 import QRgen
 import QRgen/renderer
@@ -52,7 +53,8 @@ proc run*(self: App, context: ExecutionContext): Image =
   let myQR = newQR(code)
 
   let width = case self.appConfig.sizeUnit
-    of "percent": self.appConfig.size / 100.0 * min(context.image.width, context.image.height).float
+    of "percent": self.appConfig.size / 100.0 * min(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
+            if context.hasImage: context.image.height else: self.frameConfig.renderHeight()).float
     of "pixels per dot": self.appConfig.size * (myQR.drawing.size.int + self.appConfig.padding * 2).float
     else: self.appConfig.size
 

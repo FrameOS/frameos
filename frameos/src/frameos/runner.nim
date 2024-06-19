@@ -136,6 +136,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
       image: case self.frameConfig.rotate:
       of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
       else: newImage(self.frameConfig.width, self.frameConfig.height),
+      hasImage: true,
       loopIndex: 0,
       loopKey: "."
     )
@@ -275,7 +276,7 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
     scene: scene,
     event: event,
     payload: payload,
-    image: newImage(1, 1),
+    hasImage: false,
     loopIndex: 0,
     loopKey: "."
   )

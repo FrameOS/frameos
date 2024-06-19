@@ -60,6 +60,7 @@ type
   ExecutionContext* = ref object
     scene*: FrameScene
     image*: Image
+    hasImage*: bool
     event*: string
     payload*: JsonNode
     parent*: ExecutionContext

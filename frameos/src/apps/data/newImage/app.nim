@@ -25,13 +25,13 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
 proc run*(self: App, context: ExecutionContext): Image =
   let width = if self.appConfig.width != 0:
                 self.appConfig.width
-              elif context.image.width > 1: # TODO: better check for has image?
+              elif context.hasImage:
                 context.image.width
               else:
                 self.frameConfig.renderWidth()
   let height = if self.appConfig.height != 0:
                  self.appConfig.height
-                elif context.image.height > 1: # TODO: better check for has image?
+                elif context.hasImage:
                   context.image.height
                 else:
                   self.frameConfig.renderHeight()
