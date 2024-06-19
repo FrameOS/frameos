@@ -34,7 +34,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
     result.appConfig.keyword = "random"
   result.appConfig.keyword = result.appConfig.keyword.strip()
 
-proc run*(self: App, context: ExecutionContext): Image =
+proc get*(self: App, context: ExecutionContext): Image =
   let width = if context.hasImage: context.image.width else: self.frameConfig.renderWidth()
   let height = if context.hasImage: context.image.height else: self.frameConfig.renderHeight()
   try:

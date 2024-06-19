@@ -1,58 +1,79 @@
 {
-    "name": "Split",
-    "description": "Render a grid",
-    "category": "render",
-    "version": "1.0.0",
-    "settings": [],
-    "fields": [
+  "name": "Split",
+  "description": "Render a grid",
+  "category": "render",
+  "version": "1.0.0",
+  "settings": [],
+  "fields": [
+    {
+      "name": "inputImage",
+      "type": "image",
+      "value": "",
+      "required": false,
+      "label": "Image to render on (optional)",
+      "showIf": [
         {
-            "label": "Rows",
-            "name": "rows",
-            "value": "1",
-            "type": "integer",
-            "required": true
-        },
-        {
-            "label": "Columns",
-            "name": "columns",
-            "value": "1",
-            "type": "integer",
-            "required": true
-        },
-        {
-            "label": "Render cell: {row} x {column}",
-            "name": "render_functions",
-            "type": "node",
-            "seq": [["row", 1, "rows"], ["column", 1, "columns"]]
-        },
-        {
-            "label": "Render all other cells",
-            "name": "render_function",
-            "type": "node"
-        },
-        {
-            "label": "Gap",
-            "name": "gap",
-            "placeholder": "0",
-            "type": "string"
-        },
-        {
-            "label": "Margin",
-            "name": "margin",
-            "placeholder": "0",
-            "type": "string"
-        },
-        {
-            "label": "Widths",
-            "name": "width_ratios",
-            "placeholder": "1 2 1",
-            "type": "string"
-        },
-        {
-            "label": "Heights",
-            "name": "height_ratios",
-            "placeholder": "1 2 1",
-            "type": "string"
+          "field": ".meta.showOutput"
         }
-    ]
+      ]
+    },
+    {
+      "label": "Rows",
+      "name": "rows",
+      "value": "1",
+      "type": "integer",
+      "required": true
+    },
+    {
+      "label": "Columns",
+      "name": "columns",
+      "value": "1",
+      "type": "integer",
+      "required": true
+    },
+    {
+      "label": "Render cell: {row} x {column}",
+      "name": "render_functions",
+      "type": "node",
+      "seq": [
+        ["row", 1, "rows"],
+        ["column", 1, "columns"]
+      ]
+    },
+    {
+      "label": "Render all other cells",
+      "name": "render_function",
+      "type": "node"
+    },
+    {
+      "label": "Gap",
+      "name": "gap",
+      "placeholder": "0",
+      "type": "string"
+    },
+    {
+      "label": "Margin",
+      "name": "margin",
+      "placeholder": "0",
+      "type": "string"
+    },
+    {
+      "label": "Widths",
+      "name": "width_ratios",
+      "placeholder": "1 2 1",
+      "type": "string"
+    },
+    {
+      "label": "Heights",
+      "name": "height_ratios",
+      "placeholder": "1 2 1",
+      "type": "string"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ]
 }

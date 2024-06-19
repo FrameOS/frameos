@@ -76,7 +76,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   elif appConfig.counterStateKey != "":
     result.counter = scene.state{appConfig.counterStateKey}.getInt() mod result.images.len
 
-proc run*(self: App, context: ExecutionContext): Image =
+proc get*(self: App, context: ExecutionContext): Image =
   if self.images.len == 0:
     return self.error "No images found in: " & self.appConfig.path
 

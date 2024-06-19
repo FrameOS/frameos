@@ -156,8 +156,8 @@ class SceneWriter:
                 '))',
             ]
             self.after_node_lines += [
-                "scene.controlCodeRender.appConfig.image = self.controlCodeData.run(context)",
-                "discard self.controlCodeRender.run(context)"
+                "scene.controlCodeRender.appConfig.image = self.controlCodeData.get(context)",
+                "self.controlCodeRender.run(context)"
             ]
 
     def read_edges(self):
@@ -409,16 +409,14 @@ class SceneWriter:
             ]
         next_node_id = self.next_nodes.get(node_id, None)
 
-        app_output = self.app_node_outputs.get(node_id, []) or []
-
-        discard_or_not = "discard " if len(app_output) > 0 and case_or_block == "case" else ""
-        output_field_access = f".{app_output[0].get('name', '')}" if len(app_output) > 1 else ""
-        run_lines += [f"  {discard_or_not}self.{app_id}.run(context){output_field_access}"]
-
         if case_or_block == "case":
+            run_lines += [f"  self.{app_id}.run(context)"]
             run_lines += [
                 f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
             ]
+        else:
+            run_lines += [f"  self.{app_id}.get(context)"]
+
 
         return run_lines
 

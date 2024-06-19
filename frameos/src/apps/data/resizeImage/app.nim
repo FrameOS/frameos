@@ -23,7 +23,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
     appConfig: appConfig,
   )
 
-proc run*(self: App, context: ExecutionContext): Image =
+proc get*(self: App, context: ExecutionContext): Image =
   let image = newImage(self.appConfig.width, self.appConfig.height)
   image.scaleAndDrawImage(self.appConfig.image, self.appConfig.scalingMode)
   return image

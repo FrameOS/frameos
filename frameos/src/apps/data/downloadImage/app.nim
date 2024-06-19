@@ -29,7 +29,7 @@ proc log*(self: App, message: string) =
 proc error*(self: App, message: string) =
   self.scene.logger.log(%*{"event": "apps/data/downloadImage:error", "error": message})
 
-proc run*(self: App, context: ExecutionContext): Image =
+proc get*(self: App, context: ExecutionContext): Image =
   try:
     let url = self.appConfig.url
     return downloadImage(url)

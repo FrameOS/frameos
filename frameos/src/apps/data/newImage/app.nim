@@ -22,7 +22,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
     frameConfig: scene.frameConfig,
   )
 
-proc run*(self: App, context: ExecutionContext): Image =
+proc get*(self: App, context: ExecutionContext): Image =
   let width = if self.appConfig.width != 0:
                 self.appConfig.width
               elif context.hasImage:

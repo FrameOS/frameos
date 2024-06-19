@@ -1,11 +1,13 @@
 import strutils
 import pixie
+import options
 import frameos/config
 import frameos/types
 import frameos/utils/image
 
 type
   AppConfig* = object
+    inputImage*: Option[Image]
     rows*: int
     columns*: int
     renderFunctions*: seq[seq[NodeId]]
@@ -108,7 +110,7 @@ proc splitDimensions(width: int, height: int, appConfig: AppConfig): seq[(int, i
     for col in 0..<columns:
       result[row * columns + col] = (cellWidths[col], cellHeights[row])
 
-proc run*(self: App, context: var ExecutionContext) =
+proc render*(self: App, context: var ExecutionContext, image: Image) =
   let
     rows = self.appConfig.rows
     columns = self.appConfig.columns
@@ -116,15 +118,15 @@ proc run*(self: App, context: var ExecutionContext) =
     renderFunctions = self.appConfig.renderFunctions
 
   if rows <= 0:
-    writeError(context.image, self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), "Grid: Invalid rows value")
+    writeError(image, self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), "Grid: Invalid rows value")
     return
   if columns <= 0:
-    writeError(context.image, self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), "Grid: Invalid columns value")
+    writeError(image, self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), "Grid: Invalid columns value")
     return
 
   # Calculate cell dimensions
   let
-    cellDims = splitDimensions(context.image.width, context.image.height,self.appConfig)
+    cellDims = splitDimensions(image.width, image.height, self.appConfig)
     (marginTop, marginRight {.used.}, marginBottom {.used.}, marginLeft) = extractMargins(self.appConfig.margin)
     (gapHorizontal, gapVertical) = extractGaps(self.appConfig.gap)
 
@@ -134,13 +136,14 @@ proc run*(self: App, context: var ExecutionContext) =
     var cellX = marginLeft
     for column in 0..<columns:
       let (cellWidth, cellHeight) = cellDims[row * columns + column]
-      let image = context.image.subImage(cellX.toInt, cellY.toInt, cellWidth, cellHeight)
+      let image = image.subImage(cellX.toInt, cellY.toInt, cellWidth, cellHeight)
       let renderer: NodeId = if row >= 0 and row < renderFunctions.len and column >= 0 and column < renderFunctions[
           row].len and renderFunctions[row][column] == 0: renderFunction else: renderFunctions[row][column]
       if renderer != 0:
         var cellContext = ExecutionContext(
             scene: context.scene,
             image: image,
+            hasImage: true,
             event: context.event,
             payload: context.payload,
             parent: context,
@@ -148,10 +151,23 @@ proc run*(self: App, context: var ExecutionContext) =
             loopKey: context.loopKey & "/" & $(row * columns + column)
         )
         self.scene.execNode(renderer, cellContext)
-      context.image.draw(
+      image.draw(
         image,
         translate(vec2(cellX, cellY))
       )
       cellX += cellWidth.toFloat + gapHorizontal
       if column == columns - 1:
         cellY += cellHeight.toFloat + gapVertical
+
+proc run*(self: App, context: ExecutionContext) =
+  render(self, context.image, context)
+
+proc get*(self: App, context: ExecutionContext): Image =
+  result = if self.appConfig.inputImage.isSome:
+    self.appConfig.inputImage.get()
+  elif context.hasImage:
+    newImage(context.image.width, context.image.height)
+  else:
+    newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
+  render(self, result, context)
+

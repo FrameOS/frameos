@@ -5,31 +5,63 @@
   "version": "1.0.0",
   "fields": [
     {
+      "name": "inputImage",
+      "type": "image",
+      "value": "",
+      "required": false,
+      "label": "Image to print text on (optional)",
+      "showIf": [
+        {
+          "field": ".meta.showOutput"
+        }
+      ]
+    },
+    {
       "name": "text",
       "type": "text",
       "value": "",
       "required": false,
       "label": "Text",
-      "placeholder": "Write your prose here"
+      "placeholder": "Once upon a time..."
     },
     {
       "name": "position",
       "type": "select",
       "options": [
-        "top-left",
-        "top-center",
-        "top-right",
-        "center-left",
-        "center-center",
-        "center-right",
-        "bottom-left",
-        "bottom-center",
-        "bottom-right"
+        "left",
+        "center",
+        "right"
       ],
-      "value": "center-center",
+      "value": "center",
       "required": true,
-      "label": "Position",
-      "placeholder": "center-center"
+      "label": "Align",
+      "placeholder": "center"
+    },
+    {
+      "name": "vAlign",
+      "type": "select",
+      "options": [
+        "top",
+        "middle",
+        "bottom"
+      ],
+      "value": "middle",
+      "required": true,
+      "label": "Align V",
+      "placeholder": "middle",
+      "showIf": [
+        {
+          "field": ".meta.showNextPrev"
+        },
+        {"and": [
+          {
+            "field": ".meta.showOutput"
+          },
+          {
+            "field": "inputImage"
+          }  
+        ]}
+      ]
     },
     {
       "name": "offsetX",
@@ -37,7 +69,15 @@
       "value": "0",
       "required": true,
       "label": "Offset X",
-      "placeholder": "0"
+      "placeholder": "0",
+      "showIf": [
+        {
+          "field": ".meta.showNextPrev"
+        },
+        {
+          "field": "inputImage"
+        }
+      ]
     },
     {
       "name": "offsetY",
@@ -45,7 +85,15 @@
       "value": "0",
       "required": true,
       "label": "Offset Y",
-      "placeholder": "0"
+      "placeholder": "0",
+      "showIf": [
+        {
+          "field": ".meta.showNextPrev"
+        },
+        {
+          "field": "inputImage"
+        }
+      ]
     },
     {
       "name": "padding",
@@ -90,12 +138,15 @@
     {
       "name": "overflow",
       "type": "select",
-      "options": [
-        "fit-bounds",
-        "visible"
-      ],
+      "options": ["fit-bounds", "visible"],
       "value": "fit-bounds",
       "label": "Overflow"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
     }
   ]
 }

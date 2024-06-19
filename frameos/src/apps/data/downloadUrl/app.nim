@@ -28,7 +28,7 @@ proc log*(self: App, message: string) =
 proc error*(self: App, message: string) =
   self.scene.logger.log(%*{"event": "apps/data/downloadUrl:error", "error": message})
 
-proc run*(self: App, context: ExecutionContext): string =
+proc get*(self: App, context: ExecutionContext): string =
   let url = self.appConfig.url
   let client = newHttpClient(timeout = 30000)
   try:

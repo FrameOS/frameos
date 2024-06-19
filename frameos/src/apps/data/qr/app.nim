@@ -38,7 +38,7 @@ proc log*(self: App, message: string) =
 proc error*(self: App, message: string) =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
 
-proc run*(self: App, context: ExecutionContext): Image =
+proc get*(self: App, context: ExecutionContext): Image =
   let code = if self.appConfig.codeType == "Frame Control URL":
       (if self.frameConfig.framePort mod 1000 == 443: "https" else: "http") & "://" & self.frameConfig.frameHost &
         ":" & $self.frameConfig.framePort & "/c" & (if self.frameConfig.frameAccess != "public": "?k=" &

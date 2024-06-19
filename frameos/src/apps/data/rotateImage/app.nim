@@ -26,7 +26,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
 proc log*(self: App, message: string) =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
 
-proc run*(self: App, context: ExecutionContext): Image =
+proc get*(self: App, context: ExecutionContext): Image =
   let originalImage = self.appConfig.image
   let rotationAngle = degToRad(self.appConfig.rotationDegree).float32
 

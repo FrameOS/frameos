@@ -36,7 +36,7 @@ proc error*(self: App, context: ExecutionContext, message: string): Image =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
   result = renderError(self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), message)
 
-proc run*(self: App, context: ExecutionContext): Image =
+proc get*(self: App, context: ExecutionContext): Image =
   let prompt = self.appConfig.prompt
   if prompt == "":
     return self.error(context, "No prompt provided in app config.")

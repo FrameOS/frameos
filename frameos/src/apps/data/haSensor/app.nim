@@ -31,7 +31,7 @@ proc error*(self: App, message: string): JsonNode =
   self.scene.logger.log(%*{"event": "legacy/haSensor:error", "error": message})
   return %*{"error": message}
 
-proc run*(self: App, context: ExecutionContext): JsonNode =
+proc get*(self: App, context: ExecutionContext): JsonNode =
   let haUrl = self.frameConfig.settings{"homeAssistant"}{"url"}.getStr
   if haUrl == "":
     return self.error("Please provide a Home Assistant URL in the settings.")

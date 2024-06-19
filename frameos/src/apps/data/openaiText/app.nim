@@ -33,7 +33,7 @@ proc error*(self: App, message: string) =
   self.scene.logger.log(%*{"event": &"openai:{self.nodeId}:error", "error": message})
   self.scene.state[self.appConfig.stateKey] = %*(&"Error: {message}")
 
-proc run*(self: App, context: ExecutionContext): string =
+proc get*(self: App, context: ExecutionContext): string =
   if self.appConfig.user == "" and self.appConfig.system == "":
     self.error("No system or user prompt provided in app config.")
     return

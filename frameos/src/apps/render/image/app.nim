@@ -3,10 +3,12 @@ import strformat
 import pixie
 import options
 import frameos/utils/image
+import frameos/config
 import frameos/types
 
 type
   AppConfig* = object
+    inputImage*: Option[Image]
     image*: Image
     placement*: string
     offsetX*: int
@@ -32,11 +34,24 @@ proc log*(self: App, message: string) =
 proc error*(self: App, message: string) =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
 
-proc run*(self: App, context: ExecutionContext) =
+proc render*(self: App, context: ExecutionContext, image: Image) =
   try:
-    scaleAndDrawImage(context.image, self.appConfig.image, self.appConfig.placement, self.appConfig.offsetX,
+    scaleAndDrawImage(image, self.appConfig.image, self.appConfig.placement, self.appConfig.offsetX,
         self.appConfig.offsetY)
   except:
     self.error "An error occurred while rendering image."
-    let errorImage = renderError(context.image.width, context.image.height, "An error occurred while rendering image.")
-    scaleAndDrawImage(context.image, errorImage, self.appConfig.placement)
+    let errorImage = renderError(image.width, image.height, "An error occurred while rendering image.")
+    scaleAndDrawImage(image, errorImage, self.appConfig.placement)
+
+proc run*(self: App, context: ExecutionContext) =
+  render(self, context, context.image)
+
+proc get*(self: App, context: ExecutionContext): Image =
+  result = if self.appConfig.inputImage.isSome:
+    self.appConfig.inputImage.get()
+  elif context.hasImage:
+    newImage(context.image.width, context.image.height)
+  else:
+    newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
+  render(self, context, result)
+
