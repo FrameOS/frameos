@@ -34,5 +34,5 @@ proc get*(self: App, context: ExecutionContext): Image =
     let url = self.appConfig.url
     return downloadImage(url)
   except:
-    self.error "An error occurred while downloading image."
-    return renderError(self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), "An error occurred while downloading image.")
+    self.error "An error occurred while downloading the image."
+    return renderError(self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), "An error occurred while downloading the image.")

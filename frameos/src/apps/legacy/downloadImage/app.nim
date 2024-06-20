@@ -57,4 +57,4 @@ proc run*(self: App, context: ExecutionContext) =
     if context.image.width > 0 and context.image.height > 0:
       scaleAndDrawImage(context.image, downloadedImage.get(), self.appConfig.scalingMode)
   except:
-    self.error "An error occurred while downloading image."
+    self.error "An error occurred while downloading the image."

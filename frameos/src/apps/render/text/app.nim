@@ -161,15 +161,16 @@ proc renderText*(self: App, context: ExecutionContext, image: Image, offsetX, of
   return image
 
 proc layoutBoundsTopLeft*(arrangement: Arrangement): Vec2 {.raises: [].} =
+  result.x = 999999999
+  result.y = 999999999
   ## Computes the width and height of the arrangement in pixels.
   if arrangement.runes.len > 0:
     for i in 0 ..< arrangement.runes.len:
       if arrangement.runes[i] != Rune(10):
         # Don't add width of a new line rune.
         let rect = arrangement.selectionRects[i]
-        result.x = rect.x
-        result.y = rect.y
-        return
+        result.x = min(result.x, rect.x)
+        result.y = min(result.y, rect.y)
 
 proc run*(self: App, context: ExecutionContext) =
   self.setRenderResult(context, context.image.width, context.image.height)
