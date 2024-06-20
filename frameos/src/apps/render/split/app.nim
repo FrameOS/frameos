@@ -110,7 +110,7 @@ proc splitDimensions(width: int, height: int, appConfig: AppConfig): seq[(int, i
     for col in 0..<columns:
       result[row * columns + col] = (cellWidths[col], cellHeights[row])
 
-proc render*(self: App, context: var ExecutionContext, image: Image) =
+proc render*(self: App, context: ExecutionContext, image: var Image) =
   let
     rows = self.appConfig.rows
     columns = self.appConfig.columns
@@ -118,10 +118,10 @@ proc render*(self: App, context: var ExecutionContext, image: Image) =
     renderFunctions = self.appConfig.renderFunctions
 
   if rows <= 0:
-    writeError(image, self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), "Grid: Invalid rows value")
+    writeError(image, image.width, image.height, "Grid: Invalid rows value")
     return
   if columns <= 0:
-    writeError(image, self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), "Grid: Invalid columns value")
+    writeError(image, image.width, image.height, "Grid: Invalid columns value")
     return
 
   # Calculate cell dimensions
@@ -136,13 +136,13 @@ proc render*(self: App, context: var ExecutionContext, image: Image) =
     var cellX = marginLeft
     for column in 0..<columns:
       let (cellWidth, cellHeight) = cellDims[row * columns + column]
-      let image = image.subImage(cellX.toInt, cellY.toInt, cellWidth, cellHeight)
       let renderer: NodeId = if row >= 0 and row < renderFunctions.len and column >= 0 and column < renderFunctions[
           row].len and renderFunctions[row][column] == 0: renderFunction else: renderFunctions[row][column]
       if renderer != 0:
+        let img = image.subImage(cellX.toInt, cellY.toInt, cellWidth, cellHeight)
         var cellContext = ExecutionContext(
             scene: context.scene,
-            image: image,
+            image: img,
             hasImage: true,
             event: context.event,
             payload: context.payload,
@@ -151,16 +151,13 @@ proc render*(self: App, context: var ExecutionContext, image: Image) =
             loopKey: context.loopKey & "/" & $(row * columns + column)
         )
         self.scene.execNode(renderer, cellContext)
-      image.draw(
-        image,
-        translate(vec2(cellX, cellY))
-      )
+        image.draw(cellContext.image, translate(vec2(cellX, cellY)))
       cellX += cellWidth.toFloat + gapHorizontal
       if column == columns - 1:
         cellY += cellHeight.toFloat + gapVertical
 
 proc run*(self: App, context: ExecutionContext) =
-  render(self, context.image, context)
+  render(self, context, context.image)
 
 proc get*(self: App, context: ExecutionContext): Image =
   result = if self.appConfig.inputImage.isSome:
@@ -169,5 +166,5 @@ proc get*(self: App, context: ExecutionContext): Image =
     newImage(context.image.width, context.image.height)
   else:
     newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
-  render(self, result, context)
+  render(self, context, result)
 

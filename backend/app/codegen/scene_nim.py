@@ -101,6 +101,7 @@ class SceneWriter:
         self.run_node_lines = []
         self.after_node_lines = []
         self.run_event_lines = []
+        self.after_render_lines = []
         self.event_nodes = {}
         self.next_nodes = {}
         self.prev_nodes = {}
@@ -108,6 +109,7 @@ class SceneWriter:
         self.code_field_source_nodes = {}
         self.source_field_inputs = {}
         self.node_fields = {}
+        self.node_fields_targets = {}
         self.app_node_outputs = {}
         self.cache_counter = 0
         self.cache_indexes = {}
@@ -155,8 +157,8 @@ class SceneWriter:
                 '  moSep: 0.0',
                 '))',
             ]
-            self.after_node_lines += [
-                "scene.controlCodeRender.appConfig.image = self.controlCodeData.get(context)",
+            self.after_render_lines += [
+                "self.controlCodeRender.appConfig.image = self.controlCodeData.get(context)",
                 "self.controlCodeRender.run(context)"
             ]
 
@@ -199,6 +201,7 @@ class SceneWriter:
                     if not self.node_fields.get(source):
                         self.node_fields[source] = {}
                     self.node_fields[source][field] = target
+                    self.prev_nodes[target] = source
 
                 # Ad-hoc code nodes connecting to app field's inputs, e.g. state from a render event to an app
                 # TODO: should stop using them?
@@ -216,7 +219,7 @@ class SceneWriter:
                         self.source_field_inputs[target] = {}
                     self.source_field_inputs[target][target_field] = (source, source_field)
 
-    def process_app_init(self, node):
+    def process_app_import(self, node):
         node_id = node["id"]
         sources = node.get("data", {}).get("sources", {})
         name = node.get("data", {}).get("keyword", f"app_{node_id}")
@@ -484,7 +487,7 @@ class SceneWriter:
                         ]
 
             elif node.get("type") == "app":
-                self.process_app_init(node)
+                self.process_app_import(node)
                 self.process_app_run(node)
                 if self.next_nodes.get(node_id, None) or self.prev_nodes.get(node_id, None):
                     self.run_node_lines += self.process_app_run_lines(node, "case")
@@ -652,6 +655,7 @@ proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
   context.image.fill(self.backgroundColor)
   runEvent(context)
+  {(newline + "  ").join(self.after_render_lines)}
   return context.image
 
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
