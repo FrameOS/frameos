@@ -77,7 +77,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
-  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 300.0, backgroundColor: parseHtmlColor("#000000"))
+  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 3600.0, backgroundColor: parseHtmlColor("#000000"))
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
@@ -94,20 +94,20 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
       @[
         2.NodeId,
         0.NodeId,
-        0.NodeId,
+        3.NodeId,
       ],
       @[
         0.NodeId,
-        0.NodeId,
+        3.NodeId,
         0.NodeId,
       ],
       @[
-        0.NodeId,
-        0.NodeId,
-        0.NodeId,
+        3.NodeId,
+        2.NodeId,
+        3.NodeId,
       ],
     ],
-    render_function: 3.NodeId,
+    render_function: 0.NodeId,
   ))
   scene.node2 = render_colorApp.init(2.NodeId, scene.FrameScene, render_colorApp.AppConfig(
     color: parseHtmlColor("#ff0000"),

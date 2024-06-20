@@ -124,7 +124,6 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         scenes=[],
         scaling_mode="contain",
         rotate=0,
-        background_color="#ffffff",
         device=device or "web_only",
         log_to_file=None, # spare the SD card from load
         control_code={"enabled": "true"},

@@ -2,38 +2,29 @@
 
 import frameos/types
 import tables, options
-import scenes/scene_color as scene_color
-import scenes/scene_github as scene_github
-import scenes/scene_gradient as scene_gradient
-import scenes/scene_ifElse as scene_ifElse
-import scenes/scene_image as scene_image
-import scenes/scene_imageError as scene_imageError
-import scenes/scene_qr as scene_qr
-import scenes/scene_split as scene_split
-import scenes/scene_text as scene_text
+import scenes/scene_renderColorFlow as scene_renderColorFlow
+import scenes/scene_renderColorImage as scene_renderColorImage
+import scenes/scene_renderColorSplit as scene_renderColorSplit
+import scenes/scene_renderGradientSplit as scene_renderGradientSplit
+import scenes/scene_renderSplitData as scene_renderSplitData
+import scenes/scene_renderSplitFlow as scene_renderSplitFlow
 
-let defaultSceneId* = some("color".SceneId)
+let defaultSceneId* = some("renderColorFlow".SceneId)
 
 const sceneOptions* = [
-  ("color".SceneId, "Test Color"),
-  ("github".SceneId, "Github Stars"),
-  ("gradient".SceneId, "Test Gradient"),
-  ("ifElse".SceneId, "Test If Else"),
-  ("image".SceneId, "TEST"),
-  ("imageError".SceneId, "TEST"),
-  ("qr".SceneId, "Test QR"),
-  ("split".SceneId, "Test Bananas"),
-  ("text".SceneId, "Text test"),
+  ("renderColorFlow".SceneId, "Color"),
+  ("renderColorImage".SceneId, "Color"),
+  ("renderColorSplit".SceneId, "Color"),
+  ("renderGradientSplit".SceneId, "Gradient"),
+  ("renderSplitData".SceneId, "Split"),
+  ("renderSplitFlow".SceneId, "Split"),
 ]
 
 proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result = initTable[SceneId, ExportedScene]()
-  result["color".SceneId] = scene_color.exportedScene
-  result["github".SceneId] = scene_github.exportedScene
-  result["gradient".SceneId] = scene_gradient.exportedScene
-  result["ifElse".SceneId] = scene_ifElse.exportedScene
-  result["image".SceneId] = scene_image.exportedScene
-  result["imageError".SceneId] = scene_imageError.exportedScene
-  result["qr".SceneId] = scene_qr.exportedScene
-  result["split".SceneId] = scene_split.exportedScene
-  result["text".SceneId] = scene_text.exportedScene
+  result["renderColorFlow".SceneId] = scene_renderColorFlow.exportedScene
+  result["renderColorImage".SceneId] = scene_renderColorImage.exportedScene
+  result["renderColorSplit".SceneId] = scene_renderColorSplit.exportedScene
+  result["renderGradientSplit".SceneId] = scene_renderGradientSplit.exportedScene
+  result["renderSplitData".SceneId] = scene_renderSplitData.exportedScene
+  result["renderSplitFlow".SceneId] = scene_renderSplitFlow.exportedScene

@@ -106,6 +106,8 @@ class SceneWriter:
         self.next_nodes = {}
         self.prev_nodes = {}
         self.field_inputs = {}
+        self.required_fields = {}
+        self.field_types = {}
         self.code_field_source_nodes = {}
         self.source_field_inputs = {}
         self.node_fields = {}
@@ -271,6 +273,8 @@ class SceneWriter:
                 config = {}
         self.app_configs[node_id] = config
         self.app_node_outputs[node_id] = config.get("output", None)
+        self.required_fields[node_id] = {}
+        self.field_types[node_id] = {}
 
         # { field: [['key1', 'from', 'to'], ['key2', 1, 5]] }
         seq_fields_for_node: dict[str, list[list[str | int]]] = {}
@@ -278,20 +282,20 @@ class SceneWriter:
         code_fields_for_node = self.code_field_source_nodes.get(node_id, {})
         source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
         node_fields_for_node = self.node_fields.get(node_id, {})
+        required_fields_for_node = self.required_fields.get(node_id, {})
+        field_types_for_node = self.field_types.get(node_id, {})
 
-        config_types: dict[str, str] = {}
-        required_fields: dict[str, bool] = {}
         for field in config.get("fields"):
             if field.get('markdown'):
                 continue
             key = field.get("name", None)
             value = field.get("value", None)
             field_type = field.get("type", "string")
-            config_types[key] = field_type
+            field_types_for_node[key] = field_type
             seq = field.get("seq", None)
             required = field.get("required", False)
             if required:
-                required_fields[key] = True
+                required_fields_for_node[key] = True
             # set defaults for missing values
             if (
                 (key not in app_config or app_config.get(key) is None)
@@ -317,7 +321,7 @@ class SceneWriter:
 
         app_config_pairs: list[list[str]] = []
         for key, value in app_config.items():
-            if key not in config_types:
+            if key not in field_types_for_node:
                 message = f'- ERROR: When generating scene {self.scene_id}. Config key "{key}" not found for app "{name}", node "{node_id}"'
                 try:
                     from app.models.log import new_log as log
@@ -329,7 +333,7 @@ class SceneWriter:
                     continue
                 except Exception:
                     raise ValueError(message)
-            type = config_types[key]
+            type = field_types_for_node[key]
 
             app_config_pairs.append(
                 [f"  {x}" for x in self.sanitize_nim_field(
@@ -342,7 +346,7 @@ class SceneWriter:
                     source_field_inputs_for_node,
                     seq_fields_for_node,
                     code_fields_for_node,
-                    required_fields,
+                    required_fields_for_node,
                     False,
                 )]
             )
@@ -394,12 +398,17 @@ class SceneWriter:
                 "block:",
             ]
         field_inputs_for_node = self.field_inputs.get(node_id, {})
+        field_types_for_node = self.field_types.get(node_id, {})
         code_fields_for_node = self.code_field_source_nodes.get(node_id, {})
         source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
 
         for key, code in field_inputs_for_node.items():
             if key in code_fields_for_node:
                 code_lines = self.get_code_field_value(code_fields_for_node[key])
+                # Wrap optional images with some()
+                if not self.required_fields[node_id].get(key, False) and field_types_for_node.get(key, "string") == "image":
+                    code_lines[0] = "some(" + code_lines[0]
+                    code_lines[-1] = code_lines[-1] + ")"
                 run_lines += [f"  self.{app_id}.appConfig.{key} = {code_lines[0]}"]
                 for line in code_lines[1:]:
                     run_lines += [f"  {line}"]
@@ -597,12 +606,6 @@ class SceneWriter:
         scene_refresh_interval = str(refresh_interval)
 
         background_color = self.scene.get("settings", {}).get("backgroundColor", None)
-        if (
-            background_color is None
-            and self.frame.background_color is not None
-            and self.frame.background_color.startswith("#")
-        ):
-            background_color = self.frame.background_color
         if background_color is None:
             background_color = "#000000"
         scene_background_color = wrap_color(sanitize_nim_string(str(background_color)))
@@ -716,7 +719,12 @@ var exportedScene* = ExportedScene(
 
         if key in field_inputs_for_node:
             if key in code_fields_for_node:
-                return self.get_code_field_value(code_fields_for_node[key])
+                code_lines = self.get_code_field_value(code_fields_for_node[key])
+                # Wrap optional images with some()
+                if not self.required_fields[node_id].get(key, False) and self.field_types[node_id].get(key, "string") == "image":
+                    code_lines[0] = "some(" + code_lines[0]
+                    code_lines[-1] = code_lines[-1] + ")"
+                return code_lines
 
             return [f"{field_inputs_for_node[key]}"]
         elif key in source_field_inputs_for_node:

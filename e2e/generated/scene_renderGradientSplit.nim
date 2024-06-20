@@ -8,8 +8,9 @@ import frameos/channels
 import frameos/utils/image
 import frameos/utils/url
 import apps/render/split/app as render_splitApp
-import apps/render/color/app as render_colorApp
-import apps/render/text/app as render_textApp
+import apps/render/gradient/app as render_gradientApp
+import apps/render/image/app as render_imageApp
+import apps/data/newImage/app as data_newImageApp
 
 const DEBUG = false
 let PUBLIC_STATE_FIELDS*: seq[StateField] = @[]
@@ -17,13 +18,15 @@ let PERSISTED_STATE_KEYS*: seq[string] = @[]
 
 type Scene* = ref object of FrameScene
   node1: render_splitApp.App
-  node2: render_colorApp.App
-  node3: render_colorApp.App
-  node4: render_textApp.App
-  node5: render_colorApp.App
+  node2: render_gradientApp.App
+  node3: render_imageApp.App
+  node4: render_imageApp.App
+  node5: render_gradientApp.App
+  node6: render_gradientApp.App
+  node7: data_newImageApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
-
+var cache0: Option[Image] = none(Image)
 
 proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
   let scene = self
@@ -39,16 +42,22 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
     of 1.NodeId: # render/split
       self.node1.run(context)
       nextNode = -1.NodeId
-    of 2.NodeId: # render/color
+    of 2.NodeId: # render/gradient
       self.node2.run(context)
       nextNode = -1.NodeId
-    of 3.NodeId: # render/color
+    of 3.NodeId: # render/image
+      self.node3.appConfig.image = block:
+        self.node5.get(context)
       self.node3.run(context)
       nextNode = -1.NodeId
-    of 5.NodeId: # render/color
-      self.node5.run(context)
-      nextNode = -1.NodeId
-    of 4.NodeId: # render/text
+    of 4.NodeId: # render/image
+      self.node4.appConfig.image = block:
+        self.node6.appConfig.inputImage = some(block:
+          if cache0.isNone():
+            cache0 = some(block:
+              self.node7.get(context))
+          cache0.get())
+        self.node6.get(context)
       self.node4.run(context)
       nextNode = -1.NodeId
     else:
@@ -78,6 +87,7 @@ proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
   context.image.fill(self.backgroundColor)
   runEvent(context)
+  
   return context.image
 
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
@@ -85,55 +95,63 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
-  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 10.016, backgroundColor: parseHtmlColor("#ffffff"))
+  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 300.0, backgroundColor: parseHtmlColor("#000000"))
   let self = scene
   result = scene
-  var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+  var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
   scene.node1 = render_splitApp.init(1.NodeId, scene.FrameScene, render_splitApp.AppConfig(
     columns: 3,
-    height_ratios: "2 1 2",
-    rows: 3,
-    width_ratios: "1 2 1",
+    gap: "10",
+    inputImage: none(Image),
+    rows: 1,
     render_functions: @[
       @[
         2.NodeId,
         3.NodeId,
-        2.NodeId,
-      ],
-      @[
-        3.NodeId,
-        0.NodeId,
         4.NodeId,
       ],
-      @[
-        2.NodeId,
-        3.NodeId,
-        2.NodeId,
-      ],
     ],
-    render_function: 5.NodeId,
+    render_function: 0.NodeId,
   ))
-  scene.node2 = render_colorApp.init(2.NodeId, scene.FrameScene, render_colorApp.AppConfig(
-    color: parseHtmlColor("#aba12b"),
+  scene.node2 = render_gradientApp.init(2.NodeId, scene.FrameScene, render_gradientApp.AppConfig(
+    startColor: parseHtmlColor("#05a2d6"),
+    endColor: parseHtmlColor("#eff312"),
+    angle: 90.0,
+    inputImage: none(Image),
   ))
-  scene.node3 = render_colorApp.init(3.NodeId, scene.FrameScene, render_colorApp.AppConfig(
-    color: parseHtmlColor("#814141"),
+  scene.node3 = render_imageApp.init(3.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+    placement: "center",
+    inputImage: none(Image),
+    offsetX: 0,
+    offsetY: 0,
   ))
-  scene.node5 = render_colorApp.init(5.NodeId, scene.FrameScene, render_colorApp.AppConfig(
+  scene.node5 = render_gradientApp.init(5.NodeId, scene.FrameScene, render_gradientApp.AppConfig(
+    inputImage: none(Image),
+    startColor: parseHtmlColor("#800080"),
+    endColor: parseHtmlColor("#ffc0cb"),
+    angle: 45.0,
+  ))
+  scene.node4 = render_imageApp.init(4.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+    placement: "center",
+    inputImage: none(Image),
+    offsetX: 0,
+    offsetY: 0,
+  ))
+  scene.node7 = data_newImageApp.init(7.NodeId, scene.FrameScene, data_newImageApp.AppConfig(
+    width: 40,
+    height: 40,
     color: parseHtmlColor("#ffffff"),
   ))
-  scene.node4 = render_textApp.init(4.NodeId, scene.FrameScene, render_textApp.AppConfig(
-    text: "2 x 3",
-    fontColor: parseHtmlColor("#000000"),
-    position: "center-center",
-    offsetX: 0.0,
-    offsetY: 0.0,
-    padding: 10.0,
-    fontSize: 32.0,
-    borderColor: parseHtmlColor("#000000"),
-    borderWidth: 2,
-    overflow: "fit-bounds",
+  scene.node6 = render_gradientApp.init(6.NodeId, scene.FrameScene, render_gradientApp.AppConfig(
+    startColor: parseHtmlColor("#2f8d1c"),
+    endColor: parseHtmlColor("#04390a"),
+    inputImage: some(block:
+      if cache0.isNone():
+        cache0 = some(block:
+          self.node7.get(context))
+      cache0.get()),
+    angle: 45.0,
   ))
   runEvent(context)
   
