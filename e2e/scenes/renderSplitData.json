@@ -1,0 +1,246 @@
+{
+  "id": "d2e1048c-4615-44e9-86ae-cdeb7ca22a33",
+  "name": "Split",
+  "settings": {
+    "backgroundColor": "#000000"
+  },
+  "fields": [],
+  "nodes": [
+    {
+      "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "type": "event",
+      "position": {
+        "x": -301.1938855689634,
+        "y": 493.70480029594165
+      },
+      "data": {
+        "keyword": "render"
+      },
+      "width": 212,
+      "height": 161,
+      "selected": false,
+      "positionAbsolute": {
+        "x": -301.1938855689634,
+        "y": 493.70480029594165
+      },
+      "dragging": false
+    },
+    {
+      "id": "d77949d3-3ed7-4627-ab32-dce732a9967c",
+      "position": {
+        "x": 482.170809586191,
+        "y": 128.99131045059084
+      },
+      "data": {
+        "keyword": "render/split",
+        "config": {
+          "rows": "3",
+          "columns": "3",
+          "gap": "10",
+          "margin": "10",
+          "height_ratios": "1 3 1",
+          "width_ratios": "3 1 3"
+        }
+      },
+      "type": "app",
+      "width": 306,
+      "height": 560,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 482.170809586191,
+        "y": 128.99131045059084
+      },
+      "dragging": false
+    },
+    {
+      "id": "6a1a2ff3-46a1-420d-b6a3-98f32c1a06d7",
+      "position": {
+        "x": 867.9165536715809,
+        "y": 206.46846186775963
+      },
+      "data": {
+        "keyword": "render/color",
+        "config": {
+          "color": "#ff0000"
+        }
+      },
+      "type": "app",
+      "width": 196,
+      "height": 81,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 867.9165536715809,
+        "y": 206.46846186775963
+      },
+      "dragging": false
+    },
+    {
+      "id": "4a803f5e-d398-48ee-88b3-cbe14a5f9045",
+      "position": {
+        "x": 866.0264189352712,
+        "y": 457.76505543687847
+      },
+      "data": {
+        "keyword": "render/color",
+        "config": {
+          "color": "#3c3091"
+        }
+      },
+      "type": "app",
+      "width": 196,
+      "height": 81,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 866.0264189352712,
+        "y": 457.76505543687847
+      },
+      "dragging": false
+    },
+    {
+      "id": "e011de66-2706-4e20-ade9-fb273c823ee6",
+      "position": {
+        "x": 910.2962613144628,
+        "y": 311.1212025558072
+      },
+      "data": {
+        "keyword": "render/gradient",
+        "config": {}
+      },
+      "type": "app",
+      "width": 345,
+      "height": 140,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 910.2962613144628,
+        "y": 311.1212025558072
+      },
+      "dragging": false
+    },
+    {
+      "id": "1637079e-f1ae-4e46-bdba-51d854a923af",
+      "type": "app",
+      "position": {
+        "x": 460.206080790083,
+        "y": 745.0450243835298
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {},
+        "cache": {}
+      },
+      "width": 311,
+      "height": 106,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 460.206080790083,
+        "y": 745.0450243835298
+      },
+      "dragging": false
+    },
+    {
+      "id": "c4ab5c26-954c-4ef0-95ac-1af038f9a13b",
+      "position": {
+        "x": 863.7849110487078,
+        "y": 562.6382486219601
+      },
+      "data": {
+        "keyword": "render/text",
+        "config": {
+          "text": "Banana",
+          "fontColor": "#d2cb0f"
+        }
+      },
+      "type": "app",
+      "width": 380,
+      "height": 412,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 863.7849110487078,
+        "y": 562.6382486219601
+      },
+      "dragging": false
+    },
+    {
+      "id": "7161ad09-2e24-4baf-8d78-ad762ea906fb",
+      "position": {
+        "x": 4.922395372336894,
+        "y": 636.7135697556103
+      },
+      "data": {
+        "keyword": "render/gradient",
+        "config": {
+          "startColor": "#050723",
+          "endColor": "#0d0d0d",
+          "angle": "90"
+        }
+      },
+      "type": "app",
+      "width": 354,
+      "height": 140,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 4.922395372336894,
+        "y": 636.7135697556103
+      },
+      "dragging": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "fec1eb66-119e-4d3a-a485-c6ef0b46b788",
+      "source": "d77949d3-3ed7-4627-ab32-dce732a9967c",
+      "sourceHandle": "field/render_functions[1][1]",
+      "target": "6a1a2ff3-46a1-420d-b6a3-98f32c1a06d7",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "589634b6-2d29-434c-9a22-acc48e7b272a",
+      "source": "d77949d3-3ed7-4627-ab32-dce732a9967c",
+      "sourceHandle": "field/render_functions[3][2]",
+      "target": "4a803f5e-d398-48ee-88b3-cbe14a5f9045",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "a7ef2c0b-58b9-48af-a7e7-1f5d5961468d",
+      "source": "d77949d3-3ed7-4627-ab32-dce732a9967c",
+      "sourceHandle": "field/render_functions[2][2]",
+      "target": "e011de66-2706-4e20-ade9-fb273c823ee6",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "be6fb02e-6bd4-4beb-985e-ac92543334a5",
+      "source": "d77949d3-3ed7-4627-ab32-dce732a9967c",
+      "sourceHandle": "fieldOutput",
+      "target": "1637079e-f1ae-4e46-bdba-51d854a923af",
+      "targetHandle": "fieldInput/image",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "534fd10a-99e1-45b8-92cd-2d8e7832703f",
+      "source": "d77949d3-3ed7-4627-ab32-dce732a9967c",
+      "sourceHandle": "field/render_function",
+      "target": "c4ab5c26-954c-4ef0-95ac-1af038f9a13b",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "59a8c333-507d-4f69-b725-715e7e3efb6e",
+      "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "sourceHandle": "next",
+      "target": "7161ad09-2e24-4baf-8d78-ad762ea906fb",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "713e8f71-642e-42cf-b8a2-10391ac7dbd1",
+      "source": "7161ad09-2e24-4baf-8d78-ad762ea906fb",
+      "sourceHandle": "next",
+      "target": "1637079e-f1ae-4e46-bdba-51d854a923af",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    }
+  ]
+}
