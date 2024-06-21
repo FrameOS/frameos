@@ -326,6 +326,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
             if (value !== undefined ? value === actualValue : !!actualValue || fieldInputFields.includes(field))
               return true
           }
+          return false
         }
 
         const values = { ...allDefaultValues, ...nodeConfig }
