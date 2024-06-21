@@ -109,6 +109,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     rows: 10,
     inputImage: none(Image),
     columns: 1,
+    hideEmpty: false,
     render_functions: @[
       @[
         0.NodeId,
@@ -164,6 +165,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     columns: 2,
     inputImage: none(Image),
     rows: 1,
+    hideEmpty: false,
     render_functions: @[
       @[
         1.NodeId,
@@ -176,6 +178,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     rows: 6,
     inputImage: none(Image),
     columns: 1,
+    hideEmpty: false,
     render_functions: @[
       @[
         0.NodeId,

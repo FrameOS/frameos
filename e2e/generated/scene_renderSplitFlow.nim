@@ -90,6 +90,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     height_ratios: "1 3 1",
     width_ratios: "3 1 3",
     inputImage: none(Image),
+    hideEmpty: false,
     render_functions: @[
       @[
         2.NodeId,

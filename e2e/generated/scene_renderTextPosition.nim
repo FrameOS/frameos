@@ -125,6 +125,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     gap: "5",
     margin: "5",
     inputImage: none(Image),
+    hideEmpty: false,
     render_functions: @[
       @[
         0.NodeId,
@@ -156,6 +157,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     gap: "5",
     margin: "5",
     inputImage: none(Image),
+    hideEmpty: false,
     render_functions: @[
       @[
         4.NodeId,

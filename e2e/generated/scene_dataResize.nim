@@ -134,6 +134,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     columns: 2,
     rows: 2,
     inputImage: none(Image),
+    hideEmpty: false,
     render_functions: @[
       @[
         2.NodeId,
