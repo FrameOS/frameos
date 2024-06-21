@@ -34,7 +34,8 @@ proc log*(self: App, message: string) =
 
 proc error*(self: App, context: ExecutionContext, message: string): Image =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
-  result = renderError(self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), message)
+  result = renderError(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
+        if context.hasImage: context.image.height else: self.frameConfig.renderHeight(), message)
 
 proc get*(self: App, context: ExecutionContext): Image =
   let prompt = self.appConfig.prompt
@@ -49,10 +50,12 @@ proc get*(self: App, context: ExecutionContext): Image =
       ("Authorization", "Bearer " & apiKey),
       ("Content-Type", "application/json"),
   ])
+  let imageWidth = if context.hasImage: context.image.width else: self.frameConfig.renderWidth()
+  let imageHeight = if context.hasImage: context.image.height else: self.frameConfig.renderHeight()
   let size = if self.appConfig.size == "best for orientation":
                 if self.appConfig.model == "dall-e-3":
-                  if self.frameConfig.renderWidth() > self.frameConfig.renderHeight(): "1792x1024"
-                  elif self.frameConfig.renderWidth() < self.frameConfig.renderHeight(): "1024x1792"
+                  if imageWidth > imageHeight: "1792x1024"
+                  elif imageWidth < imageHeight: "1024x1792"
                   else: "1024x1024"
                 else: "1024x1024"
               elif self.appConfig.size != "": self.appConfig.size

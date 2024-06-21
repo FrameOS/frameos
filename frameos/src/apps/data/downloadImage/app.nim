@@ -35,4 +35,5 @@ proc get*(self: App, context: ExecutionContext): Image =
     return downloadImage(url)
   except:
     self.error "An error occurred while downloading the image."
-    return renderError(self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), "An error occurred while downloading the image.")
+    return renderError(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
+        if context.hasImage: context.image.height else: self.frameConfig.renderHeight(), "An error occurred while downloading the image.")
