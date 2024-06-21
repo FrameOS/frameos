@@ -6,6 +6,8 @@ import scenes/scene_dataDownloadImage as scene_dataDownloadImage
 import scenes/scene_dataDownloadUrl as scene_dataDownloadUrl
 import scenes/scene_dataLocalImage as scene_dataLocalImage
 import scenes/scene_dataNewImage as scene_dataNewImage
+import scenes/scene_dataQR as scene_dataQR
+import scenes/scene_dataResize as scene_dataResize
 import scenes/scene_renderColorFlow as scene_renderColorFlow
 import scenes/scene_renderColorImage as scene_renderColorImage
 import scenes/scene_renderColorSplit as scene_renderColorSplit
@@ -25,6 +27,8 @@ const sceneOptions* = [
   ("dataDownloadUrl".SceneId, "Download URL"),
   ("dataLocalImage".SceneId, "Local Image"),
   ("dataNewImage".SceneId, "New Image"),
+  ("dataQR".SceneId, "QR"),
+  ("dataResize".SceneId, "Resize image"),
   ("renderColorFlow".SceneId, "Color"),
   ("renderColorImage".SceneId, "Color"),
   ("renderColorSplit".SceneId, "Color"),
@@ -44,6 +48,8 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result["dataDownloadUrl".SceneId] = scene_dataDownloadUrl.exportedScene
   result["dataLocalImage".SceneId] = scene_dataLocalImage.exportedScene
   result["dataNewImage".SceneId] = scene_dataNewImage.exportedScene
+  result["dataQR".SceneId] = scene_dataQR.exportedScene
+  result["dataResize".SceneId] = scene_dataResize.exportedScene
   result["renderColorFlow".SceneId] = scene_renderColorFlow.exportedScene
   result["renderColorImage".SceneId] = scene_renderColorImage.exportedScene
   result["renderColorSplit".SceneId] = scene_renderColorSplit.exportedScene

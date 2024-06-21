@@ -462,6 +462,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           newNode.position.x -= 20
           newNode.position.y -= 100
           const app = values.apps[keyword]
+          // Note: we place apps at a rough estimate above the node they're connected to. should be improved
           for (const field of app.fields ?? []) {
             newNode.position.y -= 30 + ('type' in field && field.type === 'text' ? (field.rows ?? 3) * 20 : 0)
           }
