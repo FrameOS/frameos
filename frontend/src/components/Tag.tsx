@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import { ButtonProps, buttonColor } from './Button'
 
-interface TagProps extends React.HTMLAttributes<HTMLDivElement> {
+export interface TagProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode
   color?: ButtonProps['color']
   className?: string

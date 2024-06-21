@@ -111,6 +111,17 @@ proc loadLastScene*(): Option[SceneId] =
   except IOError:
     return none(SceneId)
 
+proc getFirstSceneId*(): SceneId =
+  if defaultSceneId.isSome():
+    return defaultSceneId.get()
+  let lastSceneId = loadLastScene()
+  if lastSceneId.isSome() and exportedScenes.hasKey(lastSceneId.get()):
+    return lastSceneId.get()
+  if len(exportedScenes) > 0:
+    for key in keys(exportedScenes):
+      return key
+  return "".SceneId
+
 proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene): Image =
   let sceneTimer = epochTime()
   let requiredWidth = self.frameConfig.renderWidth()
@@ -125,6 +136,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
       image: case self.frameConfig.rotate:
       of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
       else: newImage(self.frameConfig.width, self.frameConfig.height),
+      hasImage: true,
       loopIndex: 0,
       loopKey: "."
     )
@@ -159,9 +171,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   while true:
     timer = epochTime()
     self.isRendering = true
-    let sceneId = self.currentSceneId
-    if not exportedScenes.hasKey(sceneId):
-      raise newException(Exception, &"Scene {sceneId} not found")
+    let sceneId = if exportedScenes.hasKey(self.currentSceneId): self.currentSceneId else: getFirstSceneId()
     let exportedScene = exportedScenes[sceneId]
     if lastSceneId != sceneId:
       self.logger.log(%*{"event": "sceneChange", "sceneId": sceneId.string})
@@ -266,7 +276,7 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
     scene: scene,
     event: event,
     payload: payload,
-    image: newImage(1, 1),
+    hasImage: false,
     loopIndex: 0,
     loopKey: "."
   )
@@ -328,17 +338,6 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
         await sleepAsync(waitTime)
         if waitTime < 200:
           waitTime += 5
-
-proc getFirstSceneId*(): SceneId =
-  if defaultSceneId.isSome():
-    return defaultSceneId.get()
-  let lastSceneId = loadLastScene()
-  if lastSceneId.isSome():
-    return lastSceneId.get()
-  if len(exportedScenes) > 0:
-    for key in keys(exportedScenes):
-      return key
-  return "".SceneId
 
 proc createRunnerThread*(args: (FrameConfig, Logger)) =
   {.cast(gcsafe).}:

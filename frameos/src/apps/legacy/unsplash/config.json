@@ -1,0 +1,24 @@
+{
+  "name": "Unsplash (legacy)",
+  "description": "Random unsplash image",
+  "category": "legacy",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "keyword",
+      "type": "string",
+      "value": "nature",
+      "required": false,
+      "label": "Random keyword (one word)",
+      "placeholder": "e.g. pineapple, nature, birds, power"
+    },
+    {
+      "name": "cacheSeconds",
+      "type": "float",
+      "value": "3600",
+      "required": false,
+      "label": "Seconds to cache the result",
+      "placeholder": "Default: 3600 (1h). Use 0 to refetch on every render."
+    }
+  ]
+}

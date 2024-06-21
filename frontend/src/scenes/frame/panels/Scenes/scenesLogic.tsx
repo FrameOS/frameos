@@ -1,7 +1,7 @@
 import { actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import type { scenesLogicType } from './scenesLogicType'
 import { FrameScene, Panel } from '../../../../types'
-import { frameLogic } from '../../frameLogic'
+import { frameLogic, sanitizeScene } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { forms } from 'kea-forms'
 import { v4 as uuidv4 } from 'uuid'
@@ -32,6 +32,7 @@ export const scenesLogic = kea<scenesLogicType>([
     duplicateScene: (sceneId: string) => ({ sceneId }),
     toggleNewScene: true,
     closeNewScene: true,
+    createNewScene: true,
   }),
   forms(({ actions, values, props }) => ({
     newScene: {
@@ -47,27 +48,30 @@ export const scenesLogic = kea<scenesLogicType>([
         frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
           scenes: [
             ...scenes,
-            {
-              id,
-              name,
-              nodes: [
-                {
-                  id: '463556ab-e4fe-40c7-93f3-40bc723f454e',
-                  type: 'event',
-                  position: {
-                    x: 121,
-                    y: 113,
+            sanitizeScene(
+              {
+                id,
+                name,
+                nodes: [
+                  {
+                    id: '463556ab-e4fe-40c7-93f3-40bc723f454e',
+                    type: 'event',
+                    position: {
+                      x: 121,
+                      y: 113,
+                    },
+                    data: {
+                      keyword: 'render',
+                    },
+                    width: 99,
+                    height: 40,
                   },
-                  data: {
-                    keyword: 'render',
-                  },
-                  width: 99,
-                  height: 40,
-                },
-              ],
-              edges: [],
-              fields: [],
-            },
+                ],
+                edges: [],
+                fields: [],
+              },
+              values.frameForm
+            ),
           ],
         })
         actions.editScene(id)
@@ -128,6 +132,38 @@ export const scenesLogic = kea<scenesLogicType>([
     },
     closeNewScene: () => {
       actions.resetNewScene({ name: '' })
+    },
+    createNewScene: () => {
+      const scenes: FrameScene[] = values.frameForm.scenes || []
+      const id = uuidv4()
+      frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
+        scenes: [
+          ...scenes,
+          {
+            id,
+            name: 'My Scene',
+            nodes: [
+              {
+                id: '463556ab-e4fe-40c7-93f3-40bc723f454e',
+                type: 'event',
+                position: {
+                  x: 121,
+                  y: 113,
+                },
+                data: {
+                  keyword: 'render',
+                },
+                width: 99,
+                height: 40,
+              },
+            ],
+            edges: [],
+            fields: [],
+          },
+        ],
+      })
+      actions.editScene(id)
+      actions.resetNewScene()
     },
   })),
   reducers({

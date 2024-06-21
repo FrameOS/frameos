@@ -1,0 +1,193 @@
+{
+  "id": "a57557f1-0859-49cb-8979-73a4d830959b",
+  "name": "Download URL",
+  "settings": {
+    "backgroundColor": "#000000",
+    "refreshInterval": 3600
+  },
+  "fields": [
+    {
+      "access": "private",
+      "label": "text",
+      "name": "text",
+      "persist": "memory",
+      "type": "string"
+    }
+  ],
+  "nodes": [
+    {
+      "data": {
+        "keyword": "render"
+      },
+      "height": 161,
+      "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "position": {
+        "x": -189.9548684450139,
+        "y": 125.77022047002106
+      },
+      "type": "event",
+      "width": 212,
+      "selected": false,
+      "positionAbsolute": {
+        "x": -189.9548684450139,
+        "y": 125.77022047002106
+      },
+      "dragging": false
+    },
+    {
+      "data": {
+        "cache": {
+          "duration": "900",
+          "durationEnabled": true,
+          "enabled": true,
+          "inputEnabled": true
+        },
+        "config": {
+          "url": "https://frameos.net/.ci_text_file"
+        },
+        "keyword": "data/downloadUrl"
+      },
+      "height": 160,
+      "id": "78aac07a-756b-43bf-b905-3724cab37138",
+      "position": {
+        "x": 485.81960725552847,
+        "y": -104.92115191291023
+      },
+      "selected": false,
+      "type": "app",
+      "width": 310
+    },
+    {
+      "data": {
+        "config": {},
+        "keyword": "render/text"
+      },
+      "dragging": false,
+      "height": 364,
+      "id": "c096b188-4ad6-4cba-88de-d5c174e80deb",
+      "position": {
+        "x": 602.5436760913116,
+        "y": 86.4893605436134
+      },
+      "positionAbsolute": {
+        "x": 602.5436760913116,
+        "y": 86.4893605436134
+      },
+      "selected": false,
+      "type": "app",
+      "width": 334
+    },
+    {
+      "id": "ac9c35bc-68dd-4c59-8ff2-780573ca7734",
+      "position": {
+        "x": 121.83547964467857,
+        "y": 154.1923002554963
+      },
+      "data": {
+        "keyword": "render/split",
+        "config": {
+          "rows": "2"
+        }
+      },
+      "type": "app",
+      "width": 305,
+      "height": 302,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 121.83547964467857,
+        "y": 154.1923002554963
+      },
+      "dragging": false
+    },
+    {
+      "id": "a0089e46-00cf-4645-a88b-12b80df91cb2",
+      "position": {
+        "x": 1058.0462513076077,
+        "y": 123.66932781978721
+      },
+      "data": {
+        "keyword": "render/text",
+        "config": {}
+      },
+      "type": "app",
+      "width": 334,
+      "height": 364,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 1058.0462513076077,
+        "y": 123.66932781978721
+      },
+      "dragging": false
+    },
+    {
+      "id": "5a0cb3f7-793a-4f9b-84c1-7f5c5cbed19e",
+      "position": {
+        "x": 1036.814622533525,
+        "y": -110.02555850246154
+      },
+      "data": {
+        "keyword": "data/downloadUrl",
+        "config": {
+          "url": "https://frameos.net/.this-is-not-a-file-that-exists"
+        },
+        "cache": {
+          "duration": "900",
+          "durationEnabled": true,
+          "enabled": true,
+          "inputEnabled": true
+        }
+      },
+      "type": "app",
+      "width": 310,
+      "height": 160,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 1036.814622533525,
+        "y": -110.02555850246154
+      },
+      "dragging": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "b99a557b-89b6-4f2c-bf43-321324772224",
+      "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "sourceHandle": "next",
+      "target": "ac9c35bc-68dd-4c59-8ff2-780573ca7734",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "77225e62-22eb-42d2-bcd9-d22995f38029",
+      "source": "78aac07a-756b-43bf-b905-3724cab37138",
+      "sourceHandle": "fieldOutput",
+      "target": "c096b188-4ad6-4cba-88de-d5c174e80deb",
+      "targetHandle": "fieldInput/text",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "18c16337-801e-4c23-abfa-e99a71430789",
+      "source": "ac9c35bc-68dd-4c59-8ff2-780573ca7734",
+      "sourceHandle": "field/render_functions[1][1]",
+      "target": "c096b188-4ad6-4cba-88de-d5c174e80deb",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "135bec70-073e-4d7d-b394-518b11129877",
+      "source": "ac9c35bc-68dd-4c59-8ff2-780573ca7734",
+      "sourceHandle": "field/render_functions[2][1]",
+      "target": "a0089e46-00cf-4645-a88b-12b80df91cb2",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "0f611251-5748-454d-8085-fa431bb7ad10",
+      "target": "a0089e46-00cf-4645-a88b-12b80df91cb2",
+      "targetHandle": "fieldInput/text",
+      "source": "5a0cb3f7-793a-4f9b-84c1-7f5c5cbed19e",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    }
+  ]
+}

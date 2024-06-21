@@ -9,11 +9,11 @@ class TestApps(BaseTestCase):
         assert response.status_code == 200
         assert 'apps' in data
         assert len(data['apps']) > 0
-        assert 'breakIfRendering' in data['apps']
-        assert 'clock' in data['apps']
+        assert 'logic/ifElse' in data['apps']
+        assert 'data/clock' in data['apps']
 
     def test_api_apps_source(self):
-        response = self.client.get('/api/apps/source/code')
+        response = self.client.get('/api/apps/source?keyword=logic/ifElse')
         data = json.loads(response.data)
         assert response.status_code == 200
         assert 'app.nim' in data

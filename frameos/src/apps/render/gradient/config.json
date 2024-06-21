@@ -1,0 +1,47 @@
+{
+  "name": "Gradient",
+  "description": "Set a gradient background",
+  "category": "render",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "inputImage",
+      "type": "image",
+      "value": "",
+      "required": false,
+      "label": "Image to render on (optional)",
+      "showIf": [
+        {
+          "field": ".meta.showOutput"
+        }
+      ]
+    },
+    {
+      "name": "startColor",
+      "type": "color",
+      "value": "#800080",
+      "required": true,
+      "label": "Start color (hex)"
+    },
+    {
+      "name": "endColor",
+      "type": "color",
+      "value": "#ffc0cb",
+      "required": true,
+      "label": "End color (hex)"
+    },
+    {
+      "name": "angle",
+      "type": "float",
+      "value": "45",
+      "required": true,
+      "label": "Angle (degrees)"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ]
+}

@@ -2,7 +2,7 @@ import { actions, afterMount, connect, kea, key, listeners, path, props, reducer
 import { framesModel } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
-import { FrameScene, FrameType, TemplateType } from '../../types'
+import { AppNodeData, DiagramNode, FrameScene, FrameType, TemplateType } from '../../types'
 import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
 import { v4 as uuidv4 } from 'uuid'
@@ -54,13 +54,58 @@ function cleanBackgroundColor(color: string): string {
   return '#000000'
 }
 
+const legacyAppMapping: Record<string, string> = {
+  // image data apps. todo: make migration to get rid of them
+  downloadImage: 'legacy/downloadImage',
+  unsplash: 'legacy/unsplash',
+  frameOSGallery: 'legacy/frameOSGallery',
+  openai: 'legacy/openai',
+  resize: 'legacy/resize',
+  rotate: 'legacy/rotate',
+  localImage: 'legacy/localImage',
+  qr: 'legacy/qr',
+  haSensor: 'legacy/haSensor',
+  openaiText: 'legacy/openaiText',
+  clock: 'legacy/clock',
+
+  // render app
+  color: 'render/color',
+  gradient: 'render/gradient',
+  text: 'render/text',
+  renderImage: 'render/image',
+  split: 'render/split',
+
+  // logic app
+  setAsState: 'logic/setAsState',
+  breakIfRendering: 'logic/breakIfRendering',
+  ifElse: 'logic/ifElse',
+}
+
+export function sanitizeNodes(nodes: DiagramNode[]): DiagramNode[] {
+  let changed = false
+  const newNodes = nodes.map((node) => {
+    if (node.type === 'app' && legacyAppMapping[(node.data as AppNodeData).keyword]) {
+      changed = true
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          keyword: legacyAppMapping[(node.data as AppNodeData).keyword],
+        },
+      } as DiagramNode
+    }
+    return node
+  })
+  return changed ? newNodes : nodes
+}
+
 export function sanitizeScene(scene: Partial<FrameScene>, frame: FrameType): FrameScene {
   const settings = scene.settings ?? {}
   return {
     ...scene,
     id: scene.id ?? uuidv4(),
     name: scene.name || 'Untitled scene',
-    nodes: scene.nodes ?? [],
+    nodes: sanitizeNodes(scene.nodes ?? []),
     edges: scene.edges ?? [],
     fields: scene.fields ?? [],
     settings: {
@@ -151,6 +196,14 @@ export const frameLogic = kea<frameLogicType>([
         return (allScenes.find((scene) => scene.id === 'default' || scene.default) || allScenes[0])?.id ?? null
       },
     ],
+    width: [
+      (s) => [s.frameForm],
+      (frameForm) => (frameForm.rotate === 90 || frameForm.rotate === 270 ? frameForm.height : frameForm.width),
+    ],
+    height: [
+      (s) => [s.frameForm],
+      (frameForm) => (frameForm.rotate === 90 || frameForm.rotate === 270 ? frameForm.width : frameForm.height),
+    ],
   })),
   subscriptions(({ actions }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
@@ -198,7 +251,9 @@ export const frameLogic = kea<frameLogicType>([
     applyTemplate: ({ template, replaceScenes }) => {
       if ('scenes' in template) {
         const oldScenes = values.frameForm?.scenes || []
-        const newScenes = duplicateScenes(template.scenes ?? [])
+        const newScenes = duplicateScenes(
+          (template.scenes ?? []).map((scene) => sanitizeScene(scene, values.frameForm))
+        )
         if (newScenes.length === 1) {
           newScenes[0].name = template?.name || newScenes[0].name || 'Untitled scene'
         }

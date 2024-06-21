@@ -1,11 +1,12 @@
 import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
 
 import { loaders } from 'kea-loaders'
-import { FrameType } from '../types'
+import { FrameScene, FrameType } from '../types'
 import { socketLogic } from '../scenes/socketLogic'
 
 import type { framesModelType } from './framesModelType'
 import { router } from 'kea-router'
+import { sanitizeScene } from '../scenes/frame/frameLogic'
 
 export const framesModel = kea<framesModelType>([
   connect({ logic: [socketLogic] }),
@@ -30,7 +31,11 @@ export const framesModel = kea<framesModelType>([
               throw new Error('Failed to fetch logs')
             }
             const data = await response.json()
-            return { ...values.frames, frame: data.frame as FrameType }
+            const frame = data.frame as FrameType
+            return {
+              ...values.frames,
+              frame: { ...frame, scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)) },
+            }
           } catch (error) {
             console.error(error)
             return values.frames

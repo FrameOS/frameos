@@ -7,7 +7,7 @@ export interface NumberTextInputProps extends Omit<TextInputProps, 'onChange' | 
   onChange?: (value: number | undefined) => void
 }
 
-export function NumberTextInput({ value, onChange, ...props }: NumberTextInputProps) {
+export function NumberTextInput({ value, onChange, onBlur, ...props }: NumberTextInputProps) {
   const [internalValue, setInternalValue] = React.useState(value?.toString() ?? '')
   useEffect(() => {
     if (value !== undefined) {
@@ -19,18 +19,17 @@ export function NumberTextInput({ value, onChange, ...props }: NumberTextInputPr
   return (
     <TextInput
       value={internalValue}
-      onChange={
-        onChange
-          ? (newValue) => {
-              setInternalValue(newValue)
-              if (newValue && Number.isFinite(parseFloat(String(newValue)))) {
-                onChange(parseFloat(newValue))
-              } else if (newValue === '') {
-                onChange(undefined)
-              }
-            }
-          : undefined
-      }
+      onBlur={(e) => {
+        if (internalValue && Number.isFinite(parseFloat(String(internalValue)))) {
+          onChange?.(parseFloat(internalValue))
+        } else {
+          onChange?.(undefined)
+        }
+        onBlur?.(e)
+      }}
+      onChange={(e) => {
+        setInternalValue(e)
+      }}
       {...props}
     />
   )

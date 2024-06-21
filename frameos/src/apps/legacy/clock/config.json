@@ -1,0 +1,103 @@
+{
+  "name": "Clock",
+  "description": "Overlay current time on the image",
+  "category": "legacy",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "markdown": "[Date format syntax](https://nim-lang.org/2.0.2/times.html)"
+    },
+    {
+      "name": "format",
+      "type": "select",
+      "options": ["yyyy-MM-dd", "yyyy-MM-dd HH:mm:ss", "HH:mm:ss:fff", "HH:mm:ss", "HH:mm", "custom"],
+      "value": "HH:mm:ss",
+      "required": true,
+      "label": "Format",
+      "placeholder": "HH:mm:ss"
+    },
+    {
+      "name": "formatCustom",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Custom format",
+      "placeholder": ""
+    },
+    {
+      "name": "position",
+      "type": "select",
+      "options": [
+        "top-left",
+        "top-center",
+        "top-right",
+        "center-left",
+        "center-center",
+        "center-right",
+        "bottom-left",
+        "bottom-center",
+        "bottom-right"
+      ],
+      "value": "center-center",
+      "required": true,
+      "label": "Position",
+      "placeholder": "center-center"
+    },
+    {
+      "name": "offsetX",
+      "type": "float",
+      "value": "0",
+      "required": true,
+      "label": "Offset X",
+      "placeholder": "0"
+    },
+    {
+      "name": "offsetY",
+      "type": "float",
+      "value": "0",
+      "required": true,
+      "label": "Offset Y",
+      "placeholder": "0"
+    },
+    {
+      "name": "padding",
+      "type": "float",
+      "value": "10",
+      "required": true,
+      "label": "Padding",
+      "placeholder": "10"
+    },
+    {
+      "name": "fontColor",
+      "type": "color",
+      "value": "#ffffff",
+      "required": true,
+      "label": "Font Color",
+      "placeholder": "#ffffff"
+    },
+    {
+      "name": "fontSize",
+      "type": "float",
+      "value": "32",
+      "required": true,
+      "label": "Font Size",
+      "placeholder": "32"
+    },
+    {
+      "name": "borderColor",
+      "type": "color",
+      "value": "#000000",
+      "required": true,
+      "label": "Border Color",
+      "placeholder": "#000000"
+    },
+    {
+      "name": "borderWidth",
+      "type": "integer",
+      "value": "2",
+      "required": true,
+      "label": "Border width",
+      "placeholder": "2"
+    }
+  ]
+}

@@ -11,7 +11,6 @@ export function Debug() {
   const setValue = (value: any) => {
     setFrameFormValue('scenes', value)
   }
-  console.log({ ReactJson })
   return (
     <div className="space-y-2">
       <H6>Scenes</H6>

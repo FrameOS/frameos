@@ -34,7 +34,7 @@ proc logToFile(filename: string, logJson: JsonNode) =
 
 proc processQueue(self: LoggerThread): int =
   let logCount = (self.logs.len + self.erroredLogs.len)
-  if logCount > 10 or (logCount > 0 and self.lastSendAt + LOG_FLUSH_SECONDS < epochTime()):
+  if logCount > 1000 or (logCount > 0 and self.lastSendAt + LOG_FLUSH_SECONDS < epochTime()):
     # make a copy, just in case some thread from somewhere adds new entries
     var newLogs = self.erroredLogs.concat(self.logs)
     self.logs = @[]
@@ -43,8 +43,8 @@ proc processQueue(self: LoggerThread): int =
     if newLogs.len == 0:
       return 0
 
-    if newLogs.len > 100:
-      newLogs = newLogs[(newLogs.len - 100) .. (newLogs.len - 1)]
+    if newLogs.len > 1000:
+      newLogs = newLogs[(newLogs.len - 1000) .. (newLogs.len - 1)]
 
     var client = newHttpClient(timeout = 1000)
     try:

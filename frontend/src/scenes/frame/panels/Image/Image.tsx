@@ -18,6 +18,7 @@ export function Image({ className, ...props }: ImageProps) {
     setIsLoading(true)
   }, [getFrameImage(frameId)])
 
+  // TODO: use the current scene's refresh interval
   const visiblyLoading = (isLoading || frames[frameId]?.status !== 'ready') && frames[frameId]?.interval > 5
 
   return (

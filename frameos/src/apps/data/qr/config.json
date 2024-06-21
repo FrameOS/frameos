@@ -1,0 +1,96 @@
+{
+  "name": "QR Code",
+  "description": "QR codes. Default to a link to the frame control URL.",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "codeType",
+      "label": "Code Type",
+      "type": "select",
+      "options": ["Frame Control URL", "Frame Image URL", "Custom"],
+      "value": "Frame Control URL",
+      "required": false
+    },
+    {
+      "name": "code",
+      "label": "Custom code",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "showIf": [
+        {
+          "field": "codeType",
+          "op": "eq",
+          "value": "Custom"
+        }
+      ]
+    },
+    {
+      "name": "size",
+      "type": "float",
+      "value": "2",
+      "label": "Size"
+    },
+    {
+      "name": "sizeUnit",
+      "type": "select",
+      "options": ["pixels per dot", "pixels total", "percent"],
+      "value": "pixels per dot",
+      "required": true,
+      "label": "Size unit"
+    },
+    {
+      "name": "alRad",
+      "type": "float",
+      "value": "30",
+      "label": "Alignment pattern radius %"
+    },
+    {
+      "name": "moRad",
+      "type": "float",
+      "value": "0",
+      "label": "Module radius %"
+    },
+    {
+      "name": "moSep",
+      "type": "float",
+      "value": "0",
+      "label": "Module separation %"
+    },
+    {
+      "name": "padding",
+      "type": "integer",
+      "value": "1",
+      "required": true,
+      "label": "Padding in dots",
+      "placeholder": "1"
+    },
+    {
+      "name": "qrCodeColor",
+      "type": "color",
+      "value": "#000000",
+      "required": true,
+      "label": "QR Code Color",
+      "placeholder": "#000000"
+    },
+    {
+      "name": "backgroundColor",
+      "type": "color",
+      "value": "#ffffff",
+      "required": true,
+      "label": "Background Color",
+      "placeholder": "#ffffff"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ],
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true
+  }
+}

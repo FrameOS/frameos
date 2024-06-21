@@ -83,25 +83,41 @@ export interface MetricsType {
   metrics: Record<string, any>
 }
 
-export const configFieldTypes = [
-  'string',
-  'text',
-  'float',
-  'integer',
-  'boolean',
-  'color',
-  'select',
-  'json',
-  'node',
-] as const
+export type FieldType = 'string' | 'float' | 'integer' | 'boolean' | 'color' | 'json' | 'node' | 'scene' | 'image'
+export const fieldTypes = ['string', 'float', 'integer', 'boolean', 'color', 'json', 'node', 'scene', 'image'] as const
+export type AppConfigFieldType = FieldType | 'text' | 'select'
+export const toFieldType: (value: string | AppConfigFieldType) => FieldType = (value) =>
+  fieldTypes.includes(value as any) ? (value as FieldType) : 'string'
 
-export interface ConfigField {
+export type ConfigFieldConditionOperator =
+  | 'eq'
+  | 'ne'
+  | 'gt'
+  | 'lt'
+  | 'gte'
+  | 'lte'
+  | 'empty'
+  | 'notEmpty'
+  | 'in'
+  | 'notIn'
+
+export interface ConfigFieldCondition {
+  field: string | '.meta.showOutput' | '.meta.showNextPrev'
+  operator?: ConfigFieldConditionOperator
+  value?: any
+}
+
+export interface ConfigFieldConditionAnd {
+  and: ConfigFieldCondition[]
+}
+
+export interface AppConfigField {
   /** Unique config field keyword */
   name: string
   /** Human readable label */
   label: string
-  /** Type of the field, only 'string' is supported for now */
-  type: 'string' | 'text' | 'float' | 'integer' | 'boolean' | 'color' | 'select' | 'json' | 'node' | 'scene'
+  /** Type of the field */
+  type: AppConfigFieldType
   /** List of options for the field, only used if type is 'select' */
   options?: string[]
   /** Whether the field is required */
@@ -116,20 +132,19 @@ export interface ConfigField {
   rows?: number
   /** Turn the field into a multidimensional array of fields. seq=[1, "rows"] --> for 1 to rows */
   seq?: [string, number | string, number | string][]
+  /** Conditions on which to show the field */
+  showIf?: (ConfigFieldCondition | ConfigFieldConditionAnd)[]
 }
 
-export interface StateField extends ConfigField {
-  persist?: 'memory' | 'disk'
-  access?: 'private' | 'public'
-}
-
-export interface MarkdownField {
-  /** Block of markdown text to display between fields */
-  markdown: string
+export interface OutputField {
+  /** Name of the output field */
+  name: string
+  /** Type of the field */
+  type: FieldType
 }
 
 /** config.json schema */
-export interface App {
+export interface AppConfig {
   /** Name for this app */
   name: string
   /** Category for this app */
@@ -141,7 +156,36 @@ export interface App {
   /** List of top level settings exported for this app */
   settings?: string[]
   /** Fields for app in diagram editor */
-  fields?: (ConfigField | MarkdownField)[]
+  fields?: (AppConfigField | MarkdownField)[]
+  /** Returned fields */
+  output?: OutputField[]
+  /** Default cache settings */
+  cache?: CacheConfig
+}
+
+export interface StateField extends AppConfigField {
+  persist?: 'memory' | 'disk'
+  access?: 'private' | 'public'
+}
+
+export interface MarkdownField {
+  /** Block of markdown text to display between fields */
+  markdown: string
+  /** Conditions on which to show the field */
+  showIf?: ConfigFieldCondition[]
+}
+
+export interface CacheConfig {
+  enabled?: boolean
+
+  inputEnabled?: boolean
+
+  durationEnabled?: boolean
+  duration?: string
+
+  expressionEnabled?: boolean
+  expression?: string
+  expressionType?: FieldType
 }
 
 export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event'
@@ -152,16 +196,19 @@ export interface AppNodeData {
   name?: string
   config: Record<string, any>
   sources?: Record<string, string>
+  cache?: CacheConfig
+}
+
+export interface CodeArg {
+  name: string
+  type: FieldType
 }
 
 export interface CodeNodeData {
   code: string
-  codeFields?: string[]
-  cacheType?: 'none' | 'forever' | 'duration' | 'key' | 'keyDuration'
-  cacheDataType?: 'string' | 'integer' | 'float' | 'json'
-  cacheDuration?: string
-  cacheKey?: string
-  cacheKeyDataType?: 'string' | 'integer' | 'float' | 'json'
+  codeArgs?: CodeArg[]
+  codeOutputs?: CodeArg[]
+  cache?: CacheConfig
 }
 
 export interface EventNodeData {
@@ -176,6 +223,82 @@ export interface DispatchNodeData {
 export type NodeData = AppNodeData | CodeNodeData | EventNodeData | DispatchNodeData
 
 export type DiagramNode = Node<NodeData, NodeType>
+export type DiagramEdge = Edge<any>
+
+export interface HandleType {
+  handleId: string
+  handleType: 'source' | 'target'
+}
+
+export interface PrevNodeHandle extends HandleType {
+  handleId: 'prev'
+  handleType: 'target'
+}
+
+export interface NextNodeHandle extends HandleType {
+  handleId: 'next'
+  handleType: 'source'
+}
+
+export interface AppInputHandle extends HandleType {
+  handleId: `fieldInput/${string}`
+  handleType: 'target'
+}
+
+export interface AppNodeOutputHandle extends HandleType {
+  handleId: `field/${string}`
+  handleType: 'source'
+}
+
+export interface NewCodeInputHandle extends HandleType {
+  handleId: `codeField/+`
+  handleType: 'target'
+}
+
+export interface CodeInputHandle extends HandleType {
+  handleId: `codeField/${string}`
+  handleType: 'target'
+}
+
+export interface CodeOutputHandle extends HandleType {
+  handleId: `fieldOutput`
+  handleType: 'source'
+}
+
+export interface EdgeConnectionType {
+  sourceHandle: HandleType & { handleType: 'source' }
+  targetHandle: HandleType & { handleType: 'target' }
+  sourceNodeType: NodeType
+  targetNodeType: NodeType
+}
+
+export interface ConnectionAppNextPrev extends EdgeConnectionType {
+  sourceHandle: NextNodeHandle
+  targetHandle: PrevNodeHandle
+  sourceNodeType: 'app' | 'source' | 'event'
+  targetNodeType: 'app' | 'source'
+}
+
+export interface ConnectionAppNodeOutputPrev extends EdgeConnectionType {
+  sourceHandle: AppNodeOutputHandle
+  targetHandle: PrevNodeHandle
+  sourceNodeType: 'app' | 'source'
+  targetNodeType: 'app' | 'source'
+}
+
+export interface ConnectionCodeInputOutput extends EdgeConnectionType {
+  sourceHandle: CodeOutputHandle
+  targetHandle: CodeInputHandle
+  sourceNodeType: 'app' | 'source' | 'event'
+  targetNodeType: 'app' | 'source'
+}
+
+export interface ConnectionCodeOutputAppInput extends EdgeConnectionType {
+  sourceHandle: CodeOutputHandle
+  targetHandle: AppInputHandle
+  sourceNodeType: 'app' | 'source' | 'event'
+  targetNodeType: 'app' | 'source'
+}
 
 export interface FrameSceneSettings {
   refreshInterval?: number
@@ -186,7 +309,7 @@ export interface FrameScene {
   id: string
   name: string
   nodes: DiagramNode[]
-  edges: Edge[]
+  edges: DiagramEdge[]
   fields?: StateField[]
   default?: boolean
   settings?: FrameSceneSettings
@@ -196,7 +319,7 @@ export interface FrameSceneIndexed {
   id: string
   name: string
   nodes: Record<string, DiagramNode>
-  edges: Record<string, Edge[]>
+  edges: Record<string, DiagramEdge[]>
 }
 
 /** config.json schema */
@@ -206,7 +329,7 @@ export interface FrameEvent {
   /** Description for this event */
   description?: string
   /** Fields for app in diagram editor */
-  fields?: ConfigField[]
+  fields?: AppConfigField[]
   /** Can this event be dispatched */
   canDispatch?: boolean
   /** Can this event be listened to */

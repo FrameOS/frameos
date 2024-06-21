@@ -37,6 +37,9 @@ body {
 .react-flow .react-flow__node {
   cursor: default;
 }
+.react-flow .react-flow__node-code {
+  overflow: hidden;
+}
 
 .react-flow .react-flow__node .frameos-node-title {
   cursor: grab;
@@ -49,12 +52,25 @@ body {
   border: 3px solid white;
   background-color: #264e17;
 }
-.react-flow__handle-bottom, .react-flow__handle-top {
+.react-flow__handle-bottom, .react-flow__handle-top,
+.react-flow__handle-left, .react-flow__handle-right {
   left: auto;
   bottom: auto;
   top: auto;
+  right: auto;
 }
-
+.react-flow__resize-control.line {
+  border-color: rgba(0,0,0,0.1);
+  &:hover {
+    border-color: rgba(255,255,255,0.3);
+  }
+}
+.react-flow__resize-control.handle {
+  width: 12px;
+  height: 12px;
+  border-color: rgba(0,0,0,0);
+  background: rgba(0,0,0,0.0);
+}
 select.with-triangle {
   background-image: url("data:image/svg+xml;utf8,<svg fill='white' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>");
   background-repeat: no-repeat;

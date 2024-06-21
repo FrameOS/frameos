@@ -1,0 +1,146 @@
+{
+  "name": "Text",
+  "description": "Overlay a block of text",
+  "category": "render",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "inputImage",
+      "type": "image",
+      "value": "",
+      "required": false,
+      "label": "Image to print text on (optional)",
+      "showIf": [
+        {
+          "field": ".meta.showOutput"
+        }
+      ]
+    },
+    {
+      "name": "text",
+      "type": "text",
+      "value": "",
+      "required": false,
+      "label": "Text",
+      "placeholder": "Once upon a time..."
+    },
+    {
+      "name": "position",
+      "type": "select",
+      "options": ["left", "center", "right"],
+      "value": "center",
+      "required": true,
+      "label": "Align",
+      "placeholder": "center"
+    },
+    {
+      "name": "vAlign",
+      "type": "select",
+      "options": ["top", "middle", "bottom"],
+      "value": "middle",
+      "required": true,
+      "label": "Align V",
+      "placeholder": "middle",
+      "showIf": [
+        {
+          "field": ".meta.showNextPrev"
+        },
+        {
+          "and": [
+            {
+              "field": ".meta.showOutput"
+            },
+            {
+              "field": "inputImage"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "offsetX",
+      "type": "float",
+      "value": "0",
+      "required": true,
+      "label": "Offset X",
+      "placeholder": "0",
+      "showIf": [
+        {
+          "field": ".meta.showNextPrev"
+        },
+        {
+          "field": "inputImage"
+        }
+      ]
+    },
+    {
+      "name": "offsetY",
+      "type": "float",
+      "value": "0",
+      "required": true,
+      "label": "Offset Y",
+      "placeholder": "0",
+      "showIf": [
+        {
+          "field": ".meta.showNextPrev"
+        },
+        {
+          "field": "inputImage"
+        }
+      ]
+    },
+    {
+      "name": "padding",
+      "type": "float",
+      "value": "10",
+      "required": true,
+      "label": "Padding",
+      "placeholder": "10"
+    },
+    {
+      "name": "fontColor",
+      "type": "color",
+      "value": "#ffffff",
+      "required": true,
+      "label": "Font Color",
+      "placeholder": "#ffffff"
+    },
+    {
+      "name": "fontSize",
+      "type": "float",
+      "value": "32",
+      "required": true,
+      "label": "Font Size",
+      "placeholder": "32"
+    },
+    {
+      "name": "borderColor",
+      "type": "color",
+      "value": "#000000",
+      "required": true,
+      "label": "Border Color",
+      "placeholder": "#000000"
+    },
+    {
+      "name": "borderWidth",
+      "type": "integer",
+      "value": "2",
+      "required": true,
+      "label": "Border width",
+      "placeholder": "2"
+    },
+    {
+      "name": "overflow",
+      "type": "select",
+      "options": ["fit-bounds", "visible"],
+      "value": "fit-bounds",
+      "label": "Overflow"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ]
+}
