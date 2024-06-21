@@ -27,11 +27,7 @@
     {
       "name": "position",
       "type": "select",
-      "options": [
-        "left",
-        "center",
-        "right"
-      ],
+      "options": ["left", "center", "right"],
       "value": "center",
       "required": true,
       "label": "Align",
@@ -40,11 +36,7 @@
     {
       "name": "vAlign",
       "type": "select",
-      "options": [
-        "top",
-        "middle",
-        "bottom"
-      ],
+      "options": ["top", "middle", "bottom"],
       "value": "middle",
       "required": true,
       "label": "Align V",
@@ -53,14 +45,16 @@
         {
           "field": ".meta.showNextPrev"
         },
-        {"and": [
-          {
-            "field": ".meta.showOutput"
-          },
-          {
-            "field": "inputImage"
-          }  
-        ]}
+        {
+          "and": [
+            {
+              "field": ".meta.showOutput"
+            },
+            {
+              "field": "inputImage"
+            }
+          ]
+        }
       ]
     },
     {

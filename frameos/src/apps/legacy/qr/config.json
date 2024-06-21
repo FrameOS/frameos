@@ -28,11 +28,7 @@
     {
       "name": "sizeUnit",
       "type": "select",
-      "options": [
-        "percent",
-        "pixels per dot",
-        "pixels total"
-      ],
+      "options": ["percent", "pixels per dot", "pixels total"],
       "value": "pixels per dot",
       "required": true,
       "label": "Size unit"

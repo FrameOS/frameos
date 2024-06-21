@@ -1,43 +1,43 @@
 {
-    "name": "Local Image",
-    "description": "Show an image from the SD card",
-    "category": "data",
-    "version": "1.0.0",
-    "fields": [
-        {
-            "name": "path",
-            "type": "text",
-            "value": "/srv/images",
-            "required": true,
-            "label": "Image filename or folder",
-            "placeholder": "/srv/images"
-        },
-        {
-            "name": "order",
-            "type": "select",
-            "options": ["random", "alphabetical"],
-            "value": "random",
-            "required": true,
-            "label": "Order of images"
-        },
-        {
-            "name": "counterStateKey",
-            "type": "string",
-            "value": "",
-            "required": false,
-            "label": "Optional state key for persistence"
-        }
-    ],
-    "output": [
-        {
-            "name": "image",
-            "type": "image"
-        }
-    ],
-    "cache": {
-        "enabled": true,
-        "inputEnabled": true,
-        "durationEnabled": true,
-        "duration": "900"
+  "name": "Local Image",
+  "description": "Show an image from the SD card",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "path",
+      "type": "text",
+      "value": "/srv/images",
+      "required": true,
+      "label": "Image filename or folder",
+      "placeholder": "/srv/images"
+    },
+    {
+      "name": "order",
+      "type": "select",
+      "options": ["random", "alphabetical"],
+      "value": "random",
+      "required": true,
+      "label": "Order of images"
+    },
+    {
+      "name": "counterStateKey",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Optional state key for persistence"
     }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ],
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true,
+    "durationEnabled": true,
+    "duration": "900"
+  }
 }

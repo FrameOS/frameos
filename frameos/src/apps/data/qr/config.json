@@ -14,10 +14,17 @@
     },
     {
       "name": "code",
-      "label": "Code (if Custom above)",
+      "label": "Custom code",
       "type": "string",
       "value": "",
-      "required": false
+      "required": false,
+      "showIf": [
+        {
+          "field": "codeType",
+          "op": "eq",
+          "value": "Custom"
+        }
+      ]
     },
     {
       "name": "size",
@@ -28,11 +35,7 @@
     {
       "name": "sizeUnit",
       "type": "select",
-      "options": [
-        "pixels per dot",
-        "pixels total",
-        "percent"
-      ],
+      "options": ["pixels per dot", "pixels total", "percent"],
       "value": "pixels per dot",
       "required": true,
       "label": "Size unit"
@@ -87,7 +90,7 @@
     }
   ],
   "cache": {
-      "enabled": true,
-      "inputEnabled": true
+    "enabled": true,
+    "inputEnabled": true
   }
 }

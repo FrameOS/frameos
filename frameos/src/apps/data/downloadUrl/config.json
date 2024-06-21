@@ -1,28 +1,28 @@
 {
-    "name": "Download URL",
-    "description": "Download a URL into a string",
-    "category": "data",
-    "version": "1.0.0",
-    "fields": [
-        {
-            "name": "url",
-            "type": "text",
-            "value": "",
-            "required": true,
-            "label": "URL",
-            "placeholder": "https://domain/content"
-        }
-    ],
-    "output": [
-        {
-            "name": "result",
-            "type": "string"
-        }
-    ],
-    "cache": {
-        "enabled": true,
-        "inputEnabled": true,
-        "durationEnabled": true,
-        "duration": "900"
+  "name": "Download URL",
+  "description": "Download a URL into a string",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "url",
+      "type": "text",
+      "value": "",
+      "required": true,
+      "label": "URL",
+      "placeholder": "https://domain/content"
     }
+  ],
+  "output": [
+    {
+      "name": "result",
+      "type": "string"
+    }
+  ],
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true,
+    "durationEnabled": true,
+    "duration": "900"
+  }
 }

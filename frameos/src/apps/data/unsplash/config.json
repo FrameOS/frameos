@@ -1,28 +1,28 @@
 {
-    "name": "Unsplash",
-    "description": "Random unsplash image",
-    "category": "data",
-    "version": "1.0.0",
-    "fields": [
-        {
-            "name": "keyword",
-            "type": "string",
-            "value": "nature",
-            "required": false,
-            "label": "Random keyword (one word)",
-            "placeholder": "e.g. pineapple, nature, birds, power"
-        }
-    ],
-    "output": [
-        {
-            "name": "image",
-            "type": "image"
-        }
-    ],
-    "cache": {
-        "enabled": true,
-        "inputEnabled": true,
-        "durationEnabled": true,
-        "duration": "900"
+  "name": "Unsplash",
+  "description": "Random unsplash image",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "keyword",
+      "type": "string",
+      "value": "nature",
+      "required": false,
+      "label": "Random keyword (one word)",
+      "placeholder": "e.g. pineapple, nature, birds, power"
     }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ],
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true,
+    "durationEnabled": true,
+    "duration": "900"
+  }
 }

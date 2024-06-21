@@ -1,28 +1,28 @@
 {
-    "name": "Download Image",
-    "description": "Download image from an URL",
-    "category": "data",
-    "version": "1.0.0",
-    "fields": [
-        {
-            "name": "url",
-            "type": "text",
-            "value": "",
-            "required": true,
-            "label": "Image URL",
-            "placeholder": "https://domain/image"
-        }
-    ],
-    "output": [
-        {
-            "name": "image",
-            "type": "image"
-        }
-    ],
-    "cache": {
-        "enabled": true,
-        "inputEnabled": true,
-        "durationEnabled": true,
-        "duration": "900"
+  "name": "Download Image",
+  "description": "Download image from an URL",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "url",
+      "type": "text",
+      "value": "",
+      "required": true,
+      "label": "Image URL",
+      "placeholder": "https://domain/image"
     }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ],
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true,
+    "durationEnabled": true,
+    "duration": "900"
+  }
 }

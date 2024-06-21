@@ -1,38 +1,38 @@
 {
-    "name": "HA Sensor",
-    "description": "Get the state of a Home Assistant entity",
-    "category": "data",
-    "version": "1.0.0",
-    "settings": ["homeAssistant"],
-    "fields": [
-        {
-          "markdown": "Find the [entity id here](http://homeassistant.local:8123/config/entities)"
-        },
-        {
-          "name": "entityId",
-          "type": "text",
-          "required": true,
-          "label": "Entity ID",
-          "placeholder": "Home Assistant entity name. Example: sensor.home_solar_percentage or water_heater.hot_water"
-        },
-        {
-            "name": "debug",
-            "type": "boolean",
-            "value": "false",
-            "required": false,
-            "label": "Debug logging"
-        }
-    ],
-    "output": [
-        {
-            "name": "state",
-            "type": "json"
-        }
-    ],
-    "cache": {
-        "enabled": true,
-        "inputEnabled": true,
-        "durationEnabled": true,
-        "duration": "60"
+  "name": "HA Sensor",
+  "description": "Get the state of a Home Assistant entity",
+  "category": "data",
+  "version": "1.0.0",
+  "settings": ["homeAssistant"],
+  "fields": [
+    {
+      "markdown": "Find the [entity id here](http://homeassistant.local:8123/config/entities)"
+    },
+    {
+      "name": "entityId",
+      "type": "text",
+      "required": true,
+      "label": "Entity ID",
+      "placeholder": "Home Assistant entity name. Example: sensor.home_solar_percentage or water_heater.hot_water"
+    },
+    {
+      "name": "debug",
+      "type": "boolean",
+      "value": "false",
+      "required": false,
+      "label": "Debug logging"
     }
+  ],
+  "output": [
+    {
+      "name": "state",
+      "type": "json"
+    }
+  ],
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true,
+    "durationEnabled": true,
+    "duration": "60"
+  }
 }

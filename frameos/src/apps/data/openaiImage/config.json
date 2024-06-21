@@ -63,7 +63,6 @@
           "value": "dall-e-3"
         }
       ]
-
     }
   ],
   "output": [
@@ -73,9 +72,9 @@
     }
   ],
   "cache": {
-      "enabled": true,
-      "inputEnabled": true,
-      "durationEnabled": true,
-      "duration": "3600"
+    "enabled": true,
+    "inputEnabled": true,
+    "durationEnabled": true,
+    "duration": "3600"
   }
 }
