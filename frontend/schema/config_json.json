@@ -207,7 +207,7 @@
       "type": "object"
     },
     "ConfigFieldConditionOperator": {
-      "enum": ["eq", "ne", "gt", "lt", "gte", "lte", "empty", "not_empty", "in", "not_in"],
+      "enum": ["eq", "ne", "gt", "lt", "gte", "lte", "empty", "notEmpty", "in", "notIn"],
       "type": "string"
     },
     "FieldType": {

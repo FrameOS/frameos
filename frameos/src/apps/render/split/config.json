@@ -6,6 +6,9 @@
   "settings": [],
   "fields": [
     {
+      "markdown": "Loop index in: `context.loopIndex`"
+    },
+    {
       "name": "inputImage",
       "type": "image",
       "value": "",
@@ -32,12 +35,28 @@
       "required": true
     },
     {
+      "label": "Hide empty cells",
+      "name": "hideEmpty",
+      "type": "boolean",
+      "value": "false"
+    },
+    {
       "label": "Render cell: {row} x {column}",
       "name": "render_functions",
       "type": "node",
       "seq": [
         ["row", 1, "rows"],
         ["column", 1, "columns"]
+      ],
+      "showIf": [
+        {
+          "op": "notEmpty"
+        },
+        {
+          "field": "hideEmpty",
+          "op": "eq",
+          "value": "false"
+        }
       ]
     },
     {

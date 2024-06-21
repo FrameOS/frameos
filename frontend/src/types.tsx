@@ -97,9 +97,9 @@ export type ConfigFieldConditionOperator =
   | 'gte'
   | 'lte'
   | 'empty'
-  | 'not_empty'
+  | 'notEmpty'
   | 'in'
-  | 'not_in'
+  | 'notIn'
 
 export interface ConfigFieldCondition {
   field: string | '.meta.showOutput' | '.meta.showNextPrev'

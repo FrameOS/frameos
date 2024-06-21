@@ -36,7 +36,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
     isSelected,
     codeArgs,
     fieldInputFields,
-    fieldOutputFields,
+    nodeOutputFields,
     showOutput,
     showNextPrev,
   } = useValues(appNodeLogic(appNodeLogicProps))
@@ -189,7 +189,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                     'name' in field &&
                     (codeArgs.includes(field.name) ||
                       fieldInputFields.includes(field.name) ||
-                      fieldOutputFields.includes(field.name) ||
+                      nodeOutputFields.includes(field.name) ||
                       (field.name in data.config && data.config[field.name] !== field.value))
 
                   const isFieldWithInput =
@@ -249,7 +249,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
                               field.type === 'node' ||
                                 codeArgs.includes(field.name) ||
                                 fieldInputFields.includes(field.name) ||
-                                fieldOutputFields.includes(field.name)
+                                nodeOutputFields.includes(field.name)
                                 ? 'w-full'
                                 : ''
                             )}

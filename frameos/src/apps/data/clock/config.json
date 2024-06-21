@@ -29,8 +29,15 @@
         "value": "",
         "required": false,
         "label": "Custom format",
-        "placeholder": ""
-    }
+        "placeholder": "",
+        "showIf": [
+          {
+            "field": "format",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      }
   ],
   "output": [
     {

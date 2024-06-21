@@ -80,8 +80,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
           )
           .map((edge) => edge.targetHandle?.replace('fieldInput/', '') ?? ''),
     ],
-    fieldOutputFields: [
-      // DEPRECATED, don't use
+    nodeOutputFields: [
       (s) => [s.nodeEdges, s.nodeId],
       (nodeEdges, nodeId) =>
         nodeEdges
@@ -284,24 +283,43 @@ export const appNodeLogic = kea<appNodeLogicType>([
       (node, output, showOutput) => node?.type === 'app' && !!output && output.length > 0 && showOutput,
     ],
     fields: [
-      (s) => [s.allFields, s.showOutput, s.showNextPrev, s.nodeConfig, s.allDefaultValues, s.fieldInputFields],
+      (s) => [
+        s.allFields,
+        s.showOutput,
+        s.showNextPrev,
+        s.nodeConfig,
+        s.allDefaultValues,
+        s.fieldInputFields,
+        s.nodeOutputFields,
+      ],
       (
         allFields,
         showOutput,
         showNextPrev,
         nodeConfig,
         allDefaultValues,
-        fieldInputFields
+        fieldInputFields,
+        nodeOutputFields
       ): (AppConfigField | MarkdownField)[] | null => {
-        function matchValue(condition: ConfigFieldCondition | ConfigFieldConditionAnd): boolean {
+        const values = { ...allDefaultValues, ...nodeConfig }
+
+        function matchValue(
+          currentField: AppConfigField | MarkdownField,
+          condition: ConfigFieldCondition | ConfigFieldConditionAnd
+        ): boolean {
           if ('and' in condition) {
-            return condition.and.every(matchValue)
+            return condition.and.every((condition) => matchValue(currentField, condition))
           }
 
-          const { value, operator, field } = condition
+          const { value, operator, field: fieldName } = condition
+          const field = fieldName || ('name' in currentField ? currentField.name : null) || ''
 
           const actualValue =
-            field === '.meta.showOutput' ? showOutput : field === '.meta.showNextPrev' ? showNextPrev : values[field]
+            fieldName === '.meta.showOutput'
+              ? showOutput
+              : fieldName === '.meta.showNextPrev'
+              ? showNextPrev
+              : values[field]
           if (operator === 'eq') {
             if (actualValue === value) return true
           } else if (operator === 'ne') {
@@ -316,28 +334,31 @@ export const appNodeLogic = kea<appNodeLogicType>([
             if (actualValue <= value) return true
           } else if (operator === 'in') {
             if (value.includes(actualValue)) return true
-          } else if (operator === 'not_in') {
+          } else if (operator === 'notIn') {
             if (!value.includes(actualValue)) return true
           } else if (operator === 'empty') {
-            if (!actualValue && !fieldInputFields.includes(field)) return true
-          } else if (operator === 'not_empty') {
-            if (!!actualValue || fieldInputFields.includes(field)) return true
+            if (!actualValue && !fieldInputFields.includes(field) && !nodeOutputFields.includes(field)) return true
+          } else if (operator === 'notEmpty') {
+            if (!!actualValue || fieldInputFields.includes(field) || nodeOutputFields.includes(field)) return true
           } else {
-            if (value !== undefined ? value === actualValue : !!actualValue || fieldInputFields.includes(field))
+            if (
+              value !== undefined
+                ? value === actualValue
+                : !!actualValue || fieldInputFields.includes(field) || nodeOutputFields.includes(field)
+            )
               return true
           }
           return false
         }
 
-        const values = { ...allDefaultValues, ...nodeConfig }
         return (
-          allFields?.filter((field) => {
-            const conditions = field.showIf ?? []
+          allFields?.filter((configField) => {
+            const conditions = configField.showIf ?? []
             if (conditions.length === 0) {
               return true
             }
             for (const condition of conditions) {
-              if (matchValue(condition)) {
+              if (matchValue(configField, condition)) {
                 return true
               }
             }

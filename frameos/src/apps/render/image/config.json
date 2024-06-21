@@ -50,7 +50,7 @@
       "value": "0",
       "required": false,
       "label": "Offset X",
-      "showIf": [{ "field": "placement", "operator": "not_in", "value": ["cover", "contain", "stretch"] }]
+      "showIf": [{ "field": "placement", "operator": "notIn", "value": ["cover", "contain", "stretch"] }]
     },
     {
       "name": "offsetY",
@@ -58,7 +58,7 @@
       "value": "0",
       "required": false,
       "label": "Offset Y",
-      "showIf": [{ "field": "placement", "operator": "not_in", "value": ["cover", "contain", "stretch"] }]
+      "showIf": [{ "field": "placement", "operator": "notIn", "value": ["cover", "contain", "stretch"] }]
     }
   ],
   "output": [

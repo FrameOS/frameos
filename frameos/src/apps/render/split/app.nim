@@ -8,6 +8,7 @@ import frameos/utils/image
 type
   AppConfig* = object
     inputImage*: Option[Image]
+    hideEmpty*: bool
     rows*: int
     columns*: int
     renderFunctions*: seq[seq[NodeId]]
