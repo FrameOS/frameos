@@ -1,0 +1,322 @@
+{
+    "id": "44ab298f-68c3-4327-b089-8b0d1121920c",
+    "name": "If Else",
+    "settings": {
+      "refreshInterval": 3600,
+      "backgroundColor": "#000000"
+    },
+    "fields": [],
+    "nodes": [
+      {
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "type": "event",
+        "position": {
+          "x": -425.77820392917283,
+          "y": 131.12524432914392
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 212,
+        "height": 161,
+        "selected": false,
+        "positionAbsolute": {
+          "x": -425.77820392917283,
+          "y": 131.12524432914392
+        },
+        "dragging": false
+      },
+      {
+        "id": "fd823976-57ae-4938-995a-e9c8c379947b",
+        "position": {
+          "x": 455.6584594172423,
+          "y": 85.81342657663498
+        },
+        "data": {
+          "keyword": "render/split",
+          "config": {
+            "rows": "10"
+          }
+        },
+        "type": "app",
+        "width": 305,
+        "height": 526,
+        "selected": false
+      },
+      {
+        "id": "091831b5-3f63-488a-af17-0d72daa23696",
+        "position": {
+          "x": 953.3438686785387,
+          "y": 144.39392871370012
+        },
+        "data": {
+          "keyword": "logic/ifElse",
+          "config": {}
+        },
+        "type": "app",
+        "width": 166,
+        "height": 134,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 953.3438686785387,
+          "y": 144.39392871370012
+        },
+        "dragging": false
+      },
+      {
+        "id": "14806217-3ad0-4d98-800d-9f785e61b51e",
+        "position": {
+          "x": 933.3438686785387,
+          "y": -15.60607128629988
+        },
+        "data": {
+          "code": "context.loopIndex mod 2 == 0",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "condition",
+              "type": "boolean"
+            }
+          ]
+        },
+        "type": "code",
+        "style": {
+          "width": 300,
+          "height": 119
+        },
+        "width": 300,
+        "height": 119,
+        "selected": false
+      },
+      {
+        "id": "ae12ee2d-efb5-4880-829d-03893089abde",
+        "position": {
+          "x": 1200.0388604265638,
+          "y": 161.11050591800563
+        },
+        "data": {
+          "keyword": "render/gradient",
+          "config": {
+            "startColor": "#800000",
+            "endColor": "#e534df"
+          }
+        },
+        "type": "app",
+        "width": 354,
+        "height": 140,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1200.0388604265638,
+          "y": 161.11050591800563
+        },
+        "dragging": false
+      },
+      {
+        "id": "44f39616-f68c-43e7-b9b7-016f7b7c9020",
+        "position": {
+          "x": 1147.1330261307203,
+          "y": 367.0653608553966
+        },
+        "data": {
+          "keyword": "render/gradient",
+          "config": {
+            "startColor": "#1ba179",
+            "endColor": "#186d1e"
+          }
+        },
+        "type": "app",
+        "width": 354,
+        "height": 140,
+        "selected": false
+      },
+      {
+        "id": "2d6daa8c-c063-4b18-9ad7-85ef1b986af5",
+        "position": {
+          "x": -86.35722716978216,
+          "y": 89.29626783972674
+        },
+        "data": {
+          "keyword": "render/split",
+          "config": {
+            "columns": "2"
+          }
+        },
+        "type": "app",
+        "width": 306,
+        "height": 302,
+        "selected": false,
+        "positionAbsolute": {
+          "x": -86.35722716978216,
+          "y": 89.29626783972674
+        },
+        "dragging": false
+      },
+      {
+        "id": "426633ff-7845-4a6e-a53d-d980657db0ec",
+        "position": {
+          "x": 421.1496140462457,
+          "y": 793.1599226214797
+        },
+        "data": {
+          "keyword": "render/split",
+          "config": {
+            "rows": "6"
+          }
+        },
+        "type": "app",
+        "width": 305,
+        "height": 414,
+        "selected": false
+      },
+      {
+        "id": "dd248b20-6064-4a7b-adf9-3d806c6980e7",
+        "position": {
+          "x": 815.1827878278341,
+          "y": 1054.8676790785655
+        },
+        "data": {
+          "keyword": "logic/ifElse",
+          "config": {}
+        },
+        "type": "app",
+        "width": 166,
+        "height": 134,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 815.1827878278341,
+          "y": 1054.8676790785655
+        },
+        "dragging": false
+      },
+      {
+        "id": "07b01bdd-180d-4154-b5eb-dc2ac2f7d53b",
+        "position": {
+          "x": 812.5329058693409,
+          "y": 889.945571095482
+        },
+        "data": {
+          "code": "context.loopIndex mod 3 == 0",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "condition",
+              "type": "boolean"
+            }
+          ]
+        },
+        "type": "code",
+        "style": {
+          "width": 300,
+          "height": 119
+        },
+        "width": 300,
+        "height": 119,
+        "selected": false
+      },
+      {
+        "id": "872c81ed-5460-4630-8257-d6cc46594eaa",
+        "position": {
+          "x": 1028.498285486537,
+          "y": 1082.6914396427442
+        },
+        "data": {
+          "keyword": "render/gradient",
+          "config": {
+            "startColor": "#ddeb24",
+            "endColor": "#dbff29"
+          }
+        },
+        "type": "app",
+        "width": 354,
+        "height": 140,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1028.498285486537,
+          "y": 1082.6914396427442
+        },
+        "dragging": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "3ab5bea7-8b9a-4629-96a9-d5cdc613e801",
+        "source": "fd823976-57ae-4938-995a-e9c8c379947b",
+        "sourceHandle": "field/render_function",
+        "target": "091831b5-3f63-488a-af17-0d72daa23696",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "1a6e13c4-166a-4e49-9293-2a08573456ad",
+        "target": "091831b5-3f63-488a-af17-0d72daa23696",
+        "targetHandle": "fieldInput/condition",
+        "source": "14806217-3ad0-4d98-800d-9f785e61b51e",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "a9e53641-9558-4e3d-ad8e-1e09f551f37d",
+        "source": "091831b5-3f63-488a-af17-0d72daa23696",
+        "sourceHandle": "field/thenNode",
+        "target": "ae12ee2d-efb5-4880-829d-03893089abde",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "29fed7f1-9e64-4b07-b1db-27281d4ccb1b",
+        "source": "091831b5-3f63-488a-af17-0d72daa23696",
+        "sourceHandle": "field/elseNode",
+        "target": "44f39616-f68c-43e7-b9b7-016f7b7c9020",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "6e3dfd36-a75e-4753-a15c-b036ee7814fe",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "target": "2d6daa8c-c063-4b18-9ad7-85ef1b986af5",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "bc15067c-0006-47b7-be22-d949d125e5bb",
+        "source": "2d6daa8c-c063-4b18-9ad7-85ef1b986af5",
+        "sourceHandle": "field/render_functions[1][1]",
+        "target": "fd823976-57ae-4938-995a-e9c8c379947b",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "2bd77501-342b-4d3c-b0c1-faada20caf5d",
+        "source": "2d6daa8c-c063-4b18-9ad7-85ef1b986af5",
+        "sourceHandle": "field/render_functions[1][2]",
+        "target": "426633ff-7845-4a6e-a53d-d980657db0ec",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "f0cd37ff-2529-4519-ae11-a6d9b1e4ae3e",
+        "source": "426633ff-7845-4a6e-a53d-d980657db0ec",
+        "sourceHandle": "field/render_function",
+        "target": "dd248b20-6064-4a7b-adf9-3d806c6980e7",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "dfe7d849-fd59-46ae-b1ae-75f8f2b3253e",
+        "target": "dd248b20-6064-4a7b-adf9-3d806c6980e7",
+        "targetHandle": "fieldInput/condition",
+        "source": "07b01bdd-180d-4154-b5eb-dc2ac2f7d53b",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "430d797f-80c5-447d-92e9-b8c1a3f44c0c",
+        "source": "dd248b20-6064-4a7b-adf9-3d806c6980e7",
+        "sourceHandle": "field/thenNode",
+        "target": "872c81ed-5460-4630-8257-d6cc46594eaa",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      }
+    ]
+  }
