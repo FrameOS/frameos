@@ -1,6 +1,6 @@
 {
   "name": "Resize",
-  "description": "Scale or stretch the image",
+  "description": "Scale or stretch an image",
   "category": "data",
   "version": "1.0.0",
   "fields": [

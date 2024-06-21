@@ -55,7 +55,7 @@ function cleanBackgroundColor(color: string): string {
 }
 
 const legacyAppMapping: Record<string, string> = {
-  // image data apps. todo: convert, migrate to two nodes
+  // image data apps. todo: make migration to get rid of them
   downloadImage: 'legacy/downloadImage',
   unsplash: 'legacy/unsplash',
   frameOSGallery: 'legacy/frameOSGallery',
@@ -63,17 +63,14 @@ const legacyAppMapping: Record<string, string> = {
   resize: 'legacy/resize',
   rotate: 'legacy/rotate',
   localImage: 'legacy/localImage',
-
-  qr: 'render/qr',
-  color: 'render/color',
-  gradient: 'render/gradient',
-
-  // text data apps
+  qr: 'legacy/qr',
   haSensor: 'legacy/haSensor',
   openaiText: 'legacy/openaiText',
   clock: 'legacy/clock',
 
   // render app
+  color: 'render/color',
+  gradient: 'render/gradient',
   text: 'render/text',
   renderImage: 'render/image',
   split: 'render/split',

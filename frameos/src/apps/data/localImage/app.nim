@@ -53,9 +53,13 @@ proc getImagesInFolder(folder: string): seq[string] =
 proc log*(self: App, message: string) =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
 
-proc error*(self: App, message: string): Image =
+proc error*(self: App, context: ExecutionContext, message: string): Image =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
-  return renderError(self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), message)
+  return renderError(
+    if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
+    if context.hasImage: context.image.height else: self.frameConfig.renderHeight(),
+    message
+  )
 
 proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
@@ -78,7 +82,7 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
 
 proc get*(self: App, context: ExecutionContext): Image =
   if self.images.len == 0:
-    return self.error "No images found in: " & self.appConfig.path
+    return self.error(context, "No images found in: " & self.appConfig.path)
 
   var nextImage: Option[Image] = none(Image)
   if self.appConfig.seconds > 0 and self.lastImage.isSome and self.lastExpiry > epochTime():
@@ -96,6 +100,6 @@ proc get*(self: App, context: ExecutionContext): Image =
         self.lastImage = nextImage
         self.lastExpiry = epochTime() + self.appConfig.seconds
     except CatchableError as e:
-      return self.error "An error occurred while loading the image: " & path & "\n" & e.msg
+      return self.error(context, "An error occurred while loading the image: " & path & "\n" & e.msg)
 
   return nextImage.get()

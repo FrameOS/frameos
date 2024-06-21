@@ -1,6 +1,6 @@
 {
   "name": "Clock",
-  "description": "Overlay current time on the image",
+  "description": "Return the current time",
   "category": "data",
   "version": "1.0.0",
   "fields": [

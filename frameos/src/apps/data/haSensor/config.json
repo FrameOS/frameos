@@ -1,6 +1,6 @@
 {
     "name": "HA Sensor",
-    "description": "Store the state of a Home Assistant entity in the scene's state",
+    "description": "Get the state of a Home Assistant entity",
     "category": "data",
     "version": "1.0.0",
     "settings": ["homeAssistant"],

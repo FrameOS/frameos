@@ -36,11 +36,14 @@ proc error*(self: App, message: string) =
 
 proc render*(self: App, context: ExecutionContext, image: Image) =
   try:
+    if self.appConfig.image == nil:
+      raise newException(Exception, "No image provided.")
     scaleAndDrawImage(image, self.appConfig.image, self.appConfig.placement, self.appConfig.offsetX,
         self.appConfig.offsetY)
-  except:
-    self.error "An error occurred while rendering image."
-    let errorImage = renderError(image.width, image.height, "An error occurred while rendering image.")
+  except Exception as e:
+    let message = &"Error rendering image: {e.msg}"
+    self.error(message)
+    let errorImage = renderError(image.width, image.height, message)
     scaleAndDrawImage(image, errorImage, self.appConfig.placement)
 
 proc run*(self: App, context: ExecutionContext) =

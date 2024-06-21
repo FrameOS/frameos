@@ -1,6 +1,6 @@
 {
   "name": "QR Code",
-  "description": "Display QR codes. Default to link to self.",
+  "description": "QR codes. Default to a link to the frame control URL.",
   "category": "data",
   "version": "1.0.0",
   "fields": [

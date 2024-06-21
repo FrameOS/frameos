@@ -7,27 +7,25 @@ import frameos/types
 import frameos/channels
 import frameos/utils/image
 import frameos/utils/url
-import apps/render/image/app as render_imageApp
-import apps/data/downloadImage/app as data_downloadImageApp
+import apps/data/downloadUrl/app as data_downloadUrlApp
+import apps/render/text/app as render_textApp
 import apps/render/split/app as render_splitApp
-import apps/render/color/app as render_colorApp
 
 const DEBUG = false
 let PUBLIC_STATE_FIELDS*: seq[StateField] = @[]
 let PERSISTED_STATE_KEYS*: seq[string] = @[]
 
 type Scene* = ref object of FrameScene
-  node1: render_imageApp.App
-  node2: data_downloadImageApp.App
+  node1: data_downloadUrlApp.App
+  node2: render_textApp.App
   node3: render_splitApp.App
-  node4: render_colorApp.App
-  node5: render_imageApp.App
-  node6: data_downloadImageApp.App
+  node4: render_textApp.App
+  node5: data_downloadUrlApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
-var cache0: Option[Image] = none(Image)
+var cache0: Option[string] = none(string)
 var cache0Time: float = 0
-var cache1: Option[Image] = none(Image)
+var cache1: Option[string] = none(string)
 var cache1Time: float = 0
 
 proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
@@ -41,30 +39,27 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
     currentNode = nextNode
     timer = epochTime()
     case nextNode:
-    of 1.NodeId: # render/image
-      self.node1.appConfig.image = block:
+    of 2.NodeId: # render/text
+      self.node2.appConfig.text = block:
         if cache0.isNone() or epochTime() > cache0Time + 900.0:
           cache0 = some(block:
-            self.node2.get(context))
+            self.node1.get(context))
           cache0Time = epochTime()
         cache0.get()
-      self.node1.run(context)
+      self.node2.run(context)
       nextNode = -1.NodeId
     of 3.NodeId: # render/split
       self.node3.run(context)
       nextNode = -1.NodeId
-    of 5.NodeId: # render/image
-      self.node5.appConfig.image = block:
+    of 4.NodeId: # render/text
+      self.node4.appConfig.text = block:
         if cache1.isNone() or epochTime() > cache1Time + 900.0:
           cache1 = some(block:
-            self.node6.get(context))
+            self.node5.get(context))
           cache1Time = epochTime()
         cache1.get()
-      self.node5.run(context)
-      nextNode = -1.NodeId
-    of 4.NodeId: # render/color
       self.node4.run(context)
-      nextNode = 1.NodeId
+      nextNode = -1.NodeId
     else:
       nextNode = -1.NodeId
     
@@ -96,23 +91,36 @@ proc render*(self: FrameScene, context: var ExecutionContext): Image =
   return context.image
 
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
-  var state = %*{}
+  var state = %*{"text": %*("")}
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
-  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 300.0, backgroundColor: parseHtmlColor("#ffffff"))
+  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 3600.0, backgroundColor: parseHtmlColor("#000000"))
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_imageApp.init(1.NodeId, scene.FrameScene, render_imageApp.AppConfig(
-    placement: "center",
-    inputImage: none(Image),
-    offsetX: 0,
-    offsetY: 0,
+  scene.node1 = data_downloadUrlApp.init(1.NodeId, scene.FrameScene, data_downloadUrlApp.AppConfig(
+    url: "https://frameos.net/.ci_text_file",
   ))
-  scene.node2 = data_downloadImageApp.init(2.NodeId, scene.FrameScene, data_downloadImageApp.AppConfig(
-    url: "https://frameos.net/img/logo_in_ci_tests.png",
+  scene.node2 = render_textApp.init(2.NodeId, scene.FrameScene, render_textApp.AppConfig(
+    inputImage: none(Image),
+    text: block:
+      if cache0.isNone() or epochTime() > cache0Time + 900.0:
+        cache0 = some(block:
+          self.node1.get(context))
+        cache0Time = epochTime()
+      cache0.get(),
+    position: "center",
+    vAlign: "middle",
+    offsetX: 0.0,
+    offsetY: 0.0,
+    padding: 10.0,
+    fontColor: parseHtmlColor("#ffffff"),
+    fontSize: 32.0,
+    borderColor: parseHtmlColor("#000000"),
+    borderWidth: 2,
+    overflow: "fit-bounds",
   ))
   scene.node3 = render_splitApp.init(3.NodeId, scene.FrameScene, render_splitApp.AppConfig(
     rows: 2,
@@ -120,26 +128,35 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     columns: 1,
     render_functions: @[
       @[
-        4.NodeId,
+        2.NodeId,
       ],
       @[
-        5.NodeId,
+        4.NodeId,
       ],
     ],
     render_function: 0.NodeId,
   ))
-  scene.node5 = render_imageApp.init(5.NodeId, scene.FrameScene, render_imageApp.AppConfig(
-    inputImage: none(Image),
-    placement: "cover",
-    offsetX: 0,
-    offsetY: 0,
+  scene.node5 = data_downloadUrlApp.init(5.NodeId, scene.FrameScene, data_downloadUrlApp.AppConfig(
+    url: "https://frameos.net/.this-is-not-a-file-that-exists",
   ))
-  scene.node6 = data_downloadImageApp.init(6.NodeId, scene.FrameScene, data_downloadImageApp.AppConfig(
-    url: "this is not an url",
-  ))
-  scene.node4 = render_colorApp.init(4.NodeId, scene.FrameScene, render_colorApp.AppConfig(
+  scene.node4 = render_textApp.init(4.NodeId, scene.FrameScene, render_textApp.AppConfig(
     inputImage: none(Image),
-    color: parseHtmlColor("#ffffff"),
+    text: block:
+      if cache1.isNone() or epochTime() > cache1Time + 900.0:
+        cache1 = some(block:
+          self.node5.get(context))
+        cache1Time = epochTime()
+      cache1.get(),
+    position: "center",
+    vAlign: "middle",
+    offsetX: 0.0,
+    offsetY: 0.0,
+    padding: 10.0,
+    fontColor: parseHtmlColor("#ffffff"),
+    fontSize: 32.0,
+    borderColor: parseHtmlColor("#000000"),
+    borderWidth: 2,
+    overflow: "fit-bounds",
   ))
   runEvent(context)
   
