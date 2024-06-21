@@ -1,7 +1,6 @@
 import json
 import strformat
 import pixie
-import times
 import options
 import frameos/utils/image
 import frameos/config
@@ -23,9 +22,6 @@ type
     scene*: FrameScene
     appConfig*: AppConfig
     frameConfig*: FrameConfig
-    lastExpiry: float
-    lastImage: Option[Image]
-    cachedUrl: string
     images: seq[string]
     counter: int
 
@@ -67,8 +63,6 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
     scene: scene,
     frameConfig: scene.frameConfig,
     appConfig: appConfig,
-    lastImage: none(Image),
-    lastExpiry: 0.0,
     images: getImagesInFolder(appConfig.path),
     counter: 0
   )
@@ -85,21 +79,15 @@ proc get*(self: App, context: ExecutionContext): Image =
     return self.error(context, "No images found in: " & self.appConfig.path)
 
   var nextImage: Option[Image] = none(Image)
-  if self.appConfig.seconds > 0 and self.lastImage.isSome and self.lastExpiry > epochTime():
-    nextImage = self.lastImage
-  else:
-    let path = joinPath(self.appConfig.path, self.images[self.counter])
-    self.log("Loading image: " & path)
-    self.counter = (self.counter + 1) mod len(self.images)
-    if self.appConfig.counterStateKey != "":
-      self.scene.state[self.appConfig.counterStateKey] = %*(self.counter)
+  let path = joinPath(self.appConfig.path, self.images[self.counter])
+  self.log("Loading image: " & path)
+  self.counter = (self.counter + 1) mod len(self.images)
+  if self.appConfig.counterStateKey != "":
+    self.scene.state[self.appConfig.counterStateKey] = %*(self.counter)
 
-    try:
-      nextImage = some(readImage(path))
-      if self.appConfig.seconds > 0:
-        self.lastImage = nextImage
-        self.lastExpiry = epochTime() + self.appConfig.seconds
-    except CatchableError as e:
-      return self.error(context, "An error occurred while loading the image: " & path & "\n" & e.msg)
+  try:
+    nextImage = some(readImage(path))
+  except CatchableError as e:
+    return self.error(context, "An error occurred while loading the image: " & path & "\n" & e.msg)
 
   return nextImage.get()

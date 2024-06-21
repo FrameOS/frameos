@@ -21,14 +21,6 @@
             "label": "Order of images"
         },
         {
-            "name": "seconds",
-            "type": "float",
-            "value": "900",
-            "required": false,
-            "label": "Seconds to show one image",
-            "placeholder": "Default: 900 (15min)"
-        },
-        {
             "name": "counterStateKey",
             "type": "string",
             "value": "",

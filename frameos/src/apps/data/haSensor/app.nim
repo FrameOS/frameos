@@ -12,7 +12,6 @@ type
     scene*: FrameScene
     appConfig*: AppConfig
     frameConfig*: FrameConfig
-    json: Option[JsonNode]
 
 
 proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
@@ -21,7 +20,6 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
     scene: scene,
     appConfig: appConfig,
     frameConfig: scene.frameConfig,
-    json: none(JsonNode),
   )
 
 proc log*(self: App, message: string) =

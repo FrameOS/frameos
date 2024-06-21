@@ -96,7 +96,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.node2 = data_localImageApp.init(2.NodeId, scene.FrameScene, data_localImageApp.AppConfig(
     path: "./assets/image.png",
     order: "random",
-    seconds: 900.0,
     counterStateKey: "",
   ))
   scene.node3 = render_textApp.init(3.NodeId, scene.FrameScene, render_textApp.AppConfig(

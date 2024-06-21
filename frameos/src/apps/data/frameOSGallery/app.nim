@@ -15,10 +15,6 @@ type
     appConfig*: AppConfig
     frameConfig*: FrameConfig
 
-    cacheExpiry: float
-    cachedImage: Option[Image]
-    cachedUrl: string
-
 proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(
     nodeId: nodeId,
