@@ -1,5 +1,5 @@
 {
-  "name": "QR Code",
+  "name": "QR Code (legacy)",
   "description": "Display QR codes. Default to link to self.",
   "category": "legacy",
   "version": "1.0.0",

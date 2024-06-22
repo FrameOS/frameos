@@ -1,5 +1,5 @@
 {
-  "name": "Clock",
+  "name": "Clock (legacy)",
   "description": "Overlay current time on the image",
   "category": "legacy",
   "version": "1.0.0",
