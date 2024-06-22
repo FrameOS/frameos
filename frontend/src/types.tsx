@@ -373,3 +373,31 @@ export type PanelWithMetadata = {
   metadata?: Record<string, any>
   closable?: boolean
 }
+
+export interface FrameOSSettings {
+  homeAssistant?: {
+    url?: string
+    accessToken?: string
+  }
+  frameOS?: {
+    apiKey?: string
+  }
+  github?: {
+    api_key?: string
+  }
+  sentry?: {
+    controller_dsn?: string
+    frame_dsn?: string
+  }
+  openAI?: {
+    apiKey?: string
+  }
+  repositories?: RepositoryType[]
+  ssh_keys?: {
+    default?: string
+    default_public?: string
+  }
+  unsplash?: {
+    accessKey?: string
+  }
+}

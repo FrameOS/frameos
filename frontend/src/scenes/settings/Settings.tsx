@@ -101,6 +101,14 @@ export function Settings() {
                     </Field>
                   </Box>
                 </Group>
+                <Group name="unsplash">
+                  <Box className="p-2 mb-4 space-y-2">
+                    <H6>Unsplash API</H6>
+                    <Field name="accessKey" label="Access key" secret={!!savedSettings?.unsplash?.accessKey}>
+                      <TextInput autoFocus={!!savedSettings?.unsplash?.accessKey} />
+                    </Field>
+                  </Box>
+                </Group>
                 <Group name="ssh_keys">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>SSH Keys</H6>
