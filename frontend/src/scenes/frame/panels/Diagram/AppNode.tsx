@@ -18,7 +18,7 @@ import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 
-export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
+export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
   const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
   const { updateNodeConfig, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const { editApp } = useActions(panelsLogic)
@@ -40,6 +40,7 @@ export function AppNode({ data, id, isConnectable }: NodeProps<AppNodeData | Dis
     showOutput,
     showNextPrev,
   } = useValues(appNodeLogic(appNodeLogicProps))
+  const data: AppNodeData = (node?.data as AppNodeData) ?? ({ keyword: '', config: {} } satisfies AppNodeData)
   const { select } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})

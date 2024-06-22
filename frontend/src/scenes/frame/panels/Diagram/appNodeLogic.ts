@@ -18,6 +18,7 @@ import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 import type { Node } from '@reactflow/core/dist/esm/types/nodes'
 
 import _events from '../../../../../schema/events.json'
+import equal from 'fast-deep-equal'
 const events: FrameEvent[] = _events as any
 
 export interface AppNodeLogicProps extends DiagramLogicProps {
@@ -55,6 +56,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
     nodeConfig: [
       (s) => [s.node],
       (node): Record<string, any> => (node && 'config' in node?.data ? node?.data.config ?? {} : {}),
+      { resultEqualityCheck: equal },
     ],
     codeArgs: [
       (s) => [s.nodeEdges, s.nodeId],
@@ -67,6 +69,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
               edge.targetHandle?.startsWith('fieldInput/')
           )
           .map((edge) => edge.targetHandle?.replace('fieldInput/', '') ?? ''),
+      { resultEqualityCheck: equal },
     ],
     fieldInputFields: [
       (s) => [s.nodeEdges, s.nodeId],
@@ -79,6 +82,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
               edge.targetHandle?.startsWith('fieldInput/')
           )
           .map((edge) => edge.targetHandle?.replace('fieldInput/', '') ?? ''),
+      { resultEqualityCheck: equal },
     ],
     nodeOutputFields: [
       (s) => [s.nodeEdges, s.nodeId],
@@ -88,6 +92,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
             (edge) => edge.sourceHandle?.startsWith('field/') && nodeId == edge.source && edge.targetHandle === 'prev'
           )
           .map((edge) => edge.sourceHandle?.replace('field/', '') ?? ''),
+      { resultEqualityCheck: equal },
     ],
     isSelected: [(s) => [s.selectedNodeId, s.nodeId], (selectedNodeId, nodeId) => selectedNodeId === nodeId],
     sources: [
@@ -139,6 +144,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
         }
         return null
       },
+      { resultEqualityCheck: equal },
     ],
     event: [
       (s) => [s.node],
@@ -218,6 +224,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
         }
         return realFields
       },
+      { resultEqualityCheck: equal },
     ],
     allDefaultValues: [
       (s) => [s.allFields],
@@ -366,6 +373,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
           }) ?? null
         )
       },
+      { resultEqualityCheck: equal },
     ],
   }),
   listeners(({ actions, values, props }) => ({

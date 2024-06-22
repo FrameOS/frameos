@@ -11,11 +11,12 @@ import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
 
-export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
+export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
   const { updateNodeData, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const { isSelected, node, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
+  const data: CodeNodeData = (node?.data as CodeNodeData) ?? ({ code: '' } satisfies CodeNodeData)
   const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
 

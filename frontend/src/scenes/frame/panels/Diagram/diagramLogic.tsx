@@ -1,4 +1,16 @@
-import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import {
+  actions,
+  afterMount,
+  connect,
+  kea,
+  key,
+  listeners,
+  path,
+  props,
+  reducers,
+  selectors,
+  sharedListeners,
+} from 'kea'
 import { framesModel } from '../../../../models/framesModel'
 import { applyEdgeChanges, applyNodeChanges, addEdge } from 'reactflow'
 import { v4 as uuidv4 } from 'uuid'
@@ -206,8 +218,11 @@ export const diagramLogic = kea<diagramLogicType>([
       { resultEqualityCheck: equal },
     ],
   }),
-  subscriptions(({ actions, values, props }) => ({
-    nodes: (nodes: DiagramNode[], oldNodes: DiagramNode[]) => {
+  sharedListeners(({ selectors, actions, values, props }) => ({
+    nodesChanged: (_, __, ___, previousState) => {
+      const nodes = values.nodes
+      const oldNodes = selectors.nodes(previousState)
+
       // Upon first render of a new scene, the nodes will have x = -9999, y = -9999, width = undefined, height = undefined
       // Upon second render, the width and height will have been set, but x and y will still be -9999 for all nodes
       // If we detect that case, automatically rearrange the scene.
@@ -233,6 +248,39 @@ export const diagramLogic = kea<diagramLogicType>([
         })
       }
     },
+  })),
+  listeners(({ sharedListeners, props, values, actions }) => ({
+    setNodes: sharedListeners.nodesChanged,
+    onNodesChange: sharedListeners.nodesChanged,
+    selectNode: sharedListeners.nodesChanged,
+    deselectNode: sharedListeners.nodesChanged,
+    updateNodeData: sharedListeners.nodesChanged,
+    deleteApp: sharedListeners.nodesChanged,
+    updateNodeConfig: ({ id, field, value }) => {
+      actions.setFrameFormValues({
+        scenes: values.editingFrame.scenes?.map((scene) =>
+          scene.id === props.sceneId && !equal(scene.nodes, nodes)
+            ? // set the nodes on the scene's form, and remove the selected flag from all
+              ({
+                ...scene,
+                nodes: values.nodes.map((node) =>
+                  node.id === id
+                    ? {
+                        ...node,
+                        data: {
+                          ...(node.data ?? {}),
+                          config: { ...('config' in node.data ? node.data?.config ?? {} : {}), [field]: value },
+                        },
+                      }
+                    : node
+                ),
+              } satisfies FrameScene)
+            : scene
+        ),
+      })
+    },
+  })),
+  subscriptions(({ actions, values, props }) => ({
     edges: (edges: Edge[], oldEdges: Edge[]) => {
       // Do not update on first render
       if (typeof oldEdges !== 'undefined' && edges && !equal(edges, oldEdges)) {
@@ -250,12 +298,18 @@ export const diagramLogic = kea<diagramLogicType>([
       if (scene && !equal(scene.nodes, oldScene?.nodes)) {
         // nodes changed on the form, update our local state, but retain the selected flag
         const selectedNodeId = values.selectedNodeId
-        actions.setNodes(scene.nodes.map((n) => (n.id === selectedNodeId ? { ...n, selected: true } : n)))
+        const newNodes = scene.nodes.map((n) => (n.id === selectedNodeId ? { ...n, selected: true } : n))
+        if (!equal(newNodes, values.nodes)) {
+          actions.setNodes(newNodes)
+        }
       }
       if (scene && !equal(scene.edges, oldScene?.edges)) {
         // edges changed on the form, update our local state, but retain the selected flag
         const selectedEdgeId = values.selectedEdgeId
-        actions.setEdges(scene.edges.map((e) => (e.id === selectedEdgeId ? { ...e, selected: true } : e)))
+        const newEdges = scene.edges.map((e) => (e.id === selectedEdgeId ? { ...e, selected: true } : e))
+        if (!equal(newEdges, values.edges)) {
+          actions.setEdges(newEdges)
+        }
       }
     },
   })),

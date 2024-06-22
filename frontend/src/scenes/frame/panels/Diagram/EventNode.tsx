@@ -3,7 +3,7 @@ import { NodeProps, Handle, Position } from 'reactflow'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import copy from 'copy-to-clipboard'
-import { FrameEvent, StateField } from '../../../../types'
+import { EventNodeData, FrameEvent, StateField } from '../../../../types'
 import { stateFieldAccess } from '../../../../utils/fieldTypes'
 
 import _events from '../../../../../schema/events.json'
@@ -21,14 +21,15 @@ const events: FrameEvent[] = _events as any
 
 export function EventNode(props: NodeProps): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
-  const { data, id } = props
+  const { id } = props
   const { width, height } = useValues(frameLogic)
   const { selectedNodeId, scene } = useValues(diagramLogic)
   const { selectNode } = useActions(diagramLogic)
 
-  const { keyword } = data
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const { node, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
+  const data: EventNodeData = (node?.data as EventNodeData) ?? ({ keyword: '' } satisfies EventNodeData)
+  const keyword = data.keyword
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
 
   const isEventWithStateFields = keyword === 'init' || keyword === 'setSceneState' || keyword === 'render'
