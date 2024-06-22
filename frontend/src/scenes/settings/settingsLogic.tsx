@@ -5,8 +5,9 @@ import { socketLogic } from '../socketLogic'
 
 import type { settingsLogicType } from './settingsLogicType'
 import { forms } from 'kea-forms'
+import { FrameOSSettings } from '../../types'
 
-function setDefaultSettings(settings: Record<string, any>): Record<string, any> {
+function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, any>): FrameOSSettings {
   return {
     ...settings,
     homeAssistant: settings.homeAssistant ?? {},
@@ -16,6 +17,7 @@ function setDefaultSettings(settings: Record<string, any>): Record<string, any> 
     openAI: settings.openAI ?? {},
     repositories: settings.repositories ?? [],
     ssh_keys: settings.ssh_keys ?? {},
+    unsplash: settings.unsplash ?? {},
   }
 }
 
