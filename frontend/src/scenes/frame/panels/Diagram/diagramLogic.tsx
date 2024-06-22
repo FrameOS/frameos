@@ -257,6 +257,7 @@ export const diagramLogic = kea<diagramLogicType>([
     updateNodeData: sharedListeners.nodesChanged,
     deleteApp: sharedListeners.nodesChanged,
     updateNodeConfig: ({ id, field, value }) => {
+      const { nodes } = values
       actions.setFrameFormValues({
         scenes: values.editingFrame.scenes?.map((scene) =>
           scene.id === props.sceneId && !equal(scene.nodes, nodes)
