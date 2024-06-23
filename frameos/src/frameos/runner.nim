@@ -247,8 +247,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
       self.triggerRenderNext = false
       continue
 
-    # No sleep duration provided by the scene, calculate based on the interval
-
+    # If no sleep duration provided by the scene, calculate based on the interval
     sleepDuration = if nextSleep >= 0: nextSleep * 1000
                     else: max((interval - (epochTime() - timer)) * 1000, 0.1)
     self.logger.log(%*{"event": "sleep", "ms": round(sleepDuration, 3)})
