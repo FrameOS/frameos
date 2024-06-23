@@ -9,10 +9,7 @@ type
     rotationDegree*: float
     scalingMode*: string
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
-    frameConfig*: FrameConfig
+  App* = ref object of AppRoot
     appConfig*: AppConfig
 
 proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =

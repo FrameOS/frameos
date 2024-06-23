@@ -14,11 +14,8 @@ type
     offsetX*: int
     offsetY*: int
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
 
 proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   result = App(

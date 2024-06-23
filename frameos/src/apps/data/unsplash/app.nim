@@ -14,11 +14,8 @@ type
     search*: string
     orientation*: string
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
 
 proc log*(self: App, message: string) =
   self.scene.logger.log(%*{"event": "unsplash:log", "message": message})

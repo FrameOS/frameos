@@ -50,6 +50,11 @@ type
     lastPublicStateUpdate*: float
     lastPersistedStateUpdate*: float
 
+  AppRoot* = ref object of RootObj
+    nodeId*: NodeId
+    scene*: FrameScene
+    frameConfig*: FrameConfig
+
   ExportedScene* = ref object of RootObj
     publicStateFields*: seq[StateField]
     persistedStateKeys*: seq[string]

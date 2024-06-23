@@ -36,11 +36,8 @@ type
     textTypeset*: Arrangement
     borderTypeset*: Option[Arrangement]
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
     typeface*: Typeface
     renderResult*: Option[RenderResult]
 
