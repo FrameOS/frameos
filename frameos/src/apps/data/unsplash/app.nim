@@ -78,11 +78,11 @@ proc get*(self: App, context: ExecutionContext): Image =
     if imageUrl == "":
       return self.error(context, "No image URL returned from Unsplash.")
     var client2 = newHttpClient(timeout = 60000)
+    defer: client2.close()
     let realImageUrl = &"{imageUrl}&w={width}&h={height}&fit=crop&crop=faces,edges"
     if self.frameConfig.debug:
       self.log(&"Downloading image: {realImageUrl}")
     let imageData = client2.request(realImageUrl, httpMethod = HttpGet)
-    defer: client2.close()
     if imageData.code != Http200:
       return self.error(context, &"Error {imageData.status} fetching image")
     result = decodeImage(imageData.body)

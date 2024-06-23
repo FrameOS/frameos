@@ -84,8 +84,8 @@ proc get*(self: App, context: ExecutionContext): Image =
     if imageUrl == "":
       return self.error(context, "No image URL returned from OpenAI.")
     var client2 = newHttpClient(timeout = 60000)
-    let imageData = client2.request(imageUrl, httpMethod = HttpGet)
     defer: client2.close()
+    let imageData = client2.request(imageUrl, httpMethod = HttpGet)
     if imageData.code != Http200:
       return self.error(context, "Error fetching image " & $imageData.status)
     result = decodeImage(imageData.body)

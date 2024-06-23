@@ -14,7 +14,6 @@ type
   AppConfig* = object
     path*: string
     order*: string
-    seconds*: float
     counterStateKey*: string
 
   App* = ref object
@@ -47,10 +46,10 @@ proc getImagesInFolder(folder: string): seq[string] =
   return images
 
 proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
+  self.scene.logger.log(%*{"event": &"localImage:log", "message": message})
 
 proc error*(self: App, context: ExecutionContext, message: string): Image =
-  self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
+  self.scene.logger.log(%*{"event": &"localImage:error", "error": message})
   return renderError(
     if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
     if context.hasImage: context.image.height else: self.frameConfig.renderHeight(),

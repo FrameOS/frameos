@@ -149,10 +149,14 @@ proc render*(self: App, context: ExecutionContext, image: var Image) =
             payload: context.payload,
             parent: context,
             loopIndex: row * columns + column,
-            loopKey: context.loopKey & "/" & $(row * columns + column)
+            loopKey: context.loopKey & "/" & $(row * columns + column),
+            nextSleep: context.nextSleep
         )
         self.scene.execNode(renderer, cellContext)
+        if cellContext.nextSleep != context.nextSleep:
+          context.nextSleep = cellContext.nextSleep
         image.draw(cellContext.image, translate(vec2(cellX, cellY)))
+
       cellX += cellWidth.toFloat + gapHorizontal
       if column == columns - 1:
         cellY += cellHeight.toFloat + gapVertical

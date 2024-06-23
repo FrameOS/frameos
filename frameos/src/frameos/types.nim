@@ -66,6 +66,7 @@ type
     parent*: ExecutionContext
     loopIndex*: int
     loopKey*: string
+    nextSleep*: float
 
   StateField* = ref object
     name*: string
