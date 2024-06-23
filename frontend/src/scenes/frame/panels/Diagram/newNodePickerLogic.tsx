@@ -227,7 +227,6 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         // Pulling out a field to the left of an app to specify a custom input
         if (handleType === 'target' && (handleId.startsWith('fieldInput/') || handleId.startsWith('codeField/'))) {
           const key = handleId.split('/', 2)[1]
-
           options.push({ label: 'Code', value: 'code', type: newNodeHandleDataType ?? 'string', keyword: key })
           if (newNodeHandleDataType) {
             const appsForType = getAppsForType(apps, newNodeHandleDataType)
@@ -254,7 +253,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
                 label: `State: ${field.label}`,
                 value: `code/${stateFieldAccess(field)}`,
                 type: newNodeHandleDataType,
-                keyword: key,
+                keyword: field.name,
               })
             }
           } else if (handleId === 'codeField/+') {
@@ -273,7 +272,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
                 label: `State: ${field.label}`,
                 value: `code/${stateFieldAccess(field)}`,
                 type: toFieldType(field.type),
-                keyword: key,
+                keyword: field.name,
               })
             }
           } else {
@@ -449,9 +448,9 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           ]
         }
       } else if (value.startsWith('app/')) {
-        const keyword = value.substring(4)
+        const appKeyword = value.substring(4)
         newNode.type = 'app'
-        newNode.data = { keyword, config: {} }
+        newNode.data = { keyword: appKeyword, config: {} }
         if (newNodeOutputHandle === 'prev') {
           newNode.position.x -= 20
           newNode.position.y -= 20
@@ -461,7 +460,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         } else {
           newNode.position.x -= 20
           newNode.position.y -= 100
-          const app = values.apps[keyword]
+          const app = values.apps[appKeyword]
           // Note: we place apps at a rough estimate above the node they're connected to. should be improved
           for (const field of app.fields ?? []) {
             newNode.position.y -= 30 + ('type' in field && field.type === 'text' ? (field.rows ?? 3) * 20 : 0)
@@ -476,7 +475,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
 
       if (handleId === 'codeField/+') {
         const codeArgs = (values.nodes.find((node) => node.id === nodeId)?.data as CodeNodeData)?.codeArgs ?? []
-        let newArg = { name: getNewFieldName(codeArgs), type: type ?? 'string' } satisfies CodeArg
+        let newArg = { name: keyword || getNewFieldName(codeArgs), type: type ?? 'string' } satisfies CodeArg
         actions.setNodes([
           ...values.nodes.map((node) =>
             node.id === nodeId ? { ...node, data: { ...node.data, codeArgs: [...codeArgs, newArg] } } : node
