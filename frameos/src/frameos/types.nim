@@ -1,4 +1,4 @@
-import json, jester, pixie, hashes, strformat
+import json, jester, pixie, hashes
 import std/locks
 
 type

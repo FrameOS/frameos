@@ -1,3 +1,5 @@
+import json
+import frameos/types
 
 proc renderWidth*(config: FrameConfig): int {.inline.} =
   if config.rotate in [90, 270]: config.height else: config.width

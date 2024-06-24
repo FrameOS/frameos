@@ -1,4 +1,4 @@
-import zippy, json, sequtils, os, times, math, strutils, net, strformat
+import zippy, json, sequtils, os, times, math, strutils, net
 import lib/httpclient
 
 import frameos/channels
