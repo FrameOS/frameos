@@ -108,6 +108,8 @@ class SceneWriter:
         self.field_inputs = {}
         self.required_fields = {}
         self.field_types = {}
+        self.app_sources = {}
+        self.app_capabilities = {}
         self.code_field_source_nodes = {}
         self.source_field_inputs = {}
         self.node_fields = {}
@@ -276,6 +278,32 @@ class SceneWriter:
         self.required_fields[node_id] = {}
         self.field_types[node_id] = {}
 
+        if len(sources) > 0 and sources.get("app.nim", None):
+            source_lines = sources.get("app.nim").split("\n")
+        else:
+            source_path = os.path.join(local_apps_path, name, "app.nim")
+            if os.path.exists(source_path):
+                with open(source_path, "r") as file:
+                    source_lines = file.read().split("\n")
+            else:
+                source_lines = []
+        self.app_sources[node_id] = source_lines
+        capabilities = set()
+        for line in source_lines:
+            if line.startswith("proc get*(self: App"):
+                capabilities.add("get")
+                break
+            if line.startswith("proc run*(self: App"):
+                capabilities.add("run")
+                break
+            if line.startswith("proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig)"):
+                capabilities.add("initOld")
+                break
+            if line.startswith("proc init*(self: App)") or line.startswith("proc init*(app: App)"):
+                capabilities.add("init")
+                break
+        self.app_capabilities[node_id] = capabilities
+
         # { field: [['key1', 'from', 'to'], ['key2', 1, 5]] }
         seq_fields_for_node: dict[str, list[list[str | int]]] = {}
         field_inputs_for_node = self.field_inputs.get(node_id, {})
@@ -356,15 +384,25 @@ class SceneWriter:
         else:
             name_identifier = name.replace("/", "_")
             appName = f"{name_identifier}App"
-        self.init_apps += [
-            f"scene.{app_id} = {appName}.init({node_integer}.NodeId, scene.FrameScene, {appName}.AppConfig(",
-        ]
+
+        if "initOld" in capabilities:
+            self.init_apps += [
+                f"scene.{app_id} = {appName}.init({node_integer}.NodeId, scene.FrameScene, {appName}.AppConfig(",
+            ]
+        else:
+            self.init_apps += [
+                f"scene.{app_id} = {appName}.App(nodeId: {node_integer}.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: {appName}.AppConfig(",
+            ]
+
         for x in app_config_pairs:
             if len(x) > 0:
                 for line in x:
                     self.init_apps += [line]
                 self.init_apps[-1] = self.init_apps[-1] + ","
         self.init_apps += ['))']
+
+        if "init" in capabilities:
+            self.init_apps += [f"scene.{app_id}.init()"]
 
     def get_app_node_cacheable_fields_with_types(self, node_id) -> dict[str, str]:
         field_inputs_for_node = self.field_inputs.get(node_id, {})

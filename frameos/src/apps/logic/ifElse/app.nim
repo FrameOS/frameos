@@ -9,14 +9,6 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    appConfig: appConfig,
-    frameConfig: scene.frameConfig,
-  )
-
 proc run*(self: App, context: var ExecutionContext) =
   if self.appConfig.condition:
     if self.appConfig.thenNode != 0:

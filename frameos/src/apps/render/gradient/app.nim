@@ -13,14 +13,6 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    appConfig: appConfig,
-    frameConfig: scene.frameConfig,
-  )
-
 proc angleToPoints(angle: float, width: float, height: float): seq[Vec2] =
   let rad = angle * PI / 180.0
   let dx = cos(rad)

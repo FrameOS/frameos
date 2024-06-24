@@ -105,16 +105,16 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_imageApp.init(1.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node1 = render_imageApp.App(nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node2 = data_downloadImageApp.init(2.NodeId, scene.FrameScene, data_downloadImageApp.AppConfig(
+  scene.node2 = data_downloadImageApp.App(nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_downloadImageApp.AppConfig(
     url: "https://frameos.net/img/logo_in_ci_tests.png",
   ))
-  scene.node3 = render_splitApp.init(3.NodeId, scene.FrameScene, render_splitApp.AppConfig(
+  scene.node3 = render_splitApp.App(nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 2,
     inputImage: none(Image),
     columns: 1,
@@ -129,16 +129,16 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node5 = render_imageApp.init(5.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node5 = render_imageApp.App(nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     inputImage: none(Image),
     placement: "cover",
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node6 = data_downloadImageApp.init(6.NodeId, scene.FrameScene, data_downloadImageApp.AppConfig(
+  scene.node6 = data_downloadImageApp.App(nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_downloadImageApp.AppConfig(
     url: "this is not an url",
   ))
-  scene.node4 = render_colorApp.init(4.NodeId, scene.FrameScene, render_colorApp.AppConfig(
+  scene.node4 = render_colorApp.App(nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_colorApp.AppConfig(
     inputImage: none(Image),
     color: parseHtmlColor("#ffffff"),
   ))

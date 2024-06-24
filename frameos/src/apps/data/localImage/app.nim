@@ -53,22 +53,16 @@ proc error*(self: App, context: ExecutionContext, message: string): Image =
     message
   )
 
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    frameConfig: scene.frameConfig,
-    appConfig: appConfig,
-    images: getImagesInFolder(appConfig.path),
-    counter: 0
-  )
-  result.log("Found " & $result.images.len & " images in the folder: " & appConfig.path)
-  result.log(result.images.join(", "))
-  if appConfig.order == "random":
+proc init*(self: App) =
+  self.images = getImagesInFolder(self.appConfig.path)
+  self.counter = 0
+  self.log("Found " & $self.images.len & " images in the folder: " & self.appConfig.path)
+  self.log(self.images.join(", "))
+  if self.appConfig.order == "random":
     randomize()
-    result.images.shuffle()
-  elif appConfig.counterStateKey != "":
-    result.counter = scene.state{appConfig.counterStateKey}.getInt() mod result.images.len
+    self.images.shuffle()
+  elif self.appConfig.counterStateKey != "":
+    self.counter = self.scene.state{self.appConfig.counterStateKey}.getInt() mod self.images.len
 
 proc get*(self: App, context: ExecutionContext): Image =
   if self.images.len == 0:

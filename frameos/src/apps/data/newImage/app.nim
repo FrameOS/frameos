@@ -11,14 +11,6 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    appConfig: appConfig,
-    frameConfig: scene.frameConfig,
-  )
-
 proc get*(self: App, context: ExecutionContext): Image =
   let width = if self.appConfig.width != 0:
                 self.appConfig.width

@@ -1,5 +1,6 @@
-import json, strformat, options
+import json
 import frameos/types
+import frameos/logger
 
 type
   AppConfig* = object
@@ -10,23 +11,9 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    appConfig: appConfig,
-    frameConfig: scene.frameConfig,
-  )
-
-proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
-
-proc error*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
-
 proc run*(self: App, context: ExecutionContext) =
   if self.appConfig.valueString != "" and self.appConfig.valueJson != nil:
-    self.error("Both valueString and valueJson are set. Only one can be set.")
+    self.logError("Both valueString and valueJson are set. Only one can be set.")
     return
   if self.appConfig.valueJson != nil and self.appConfig.valueJson.kind != JNull and self.appConfig.valueJson.kind != JNull:
     self.scene.state[self.appConfig.stateKey] = self.appConfig.valueJson

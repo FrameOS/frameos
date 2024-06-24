@@ -111,7 +111,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_splitApp.init(1.NodeId, scene.FrameScene, render_splitApp.AppConfig(
+  scene.node1 = render_splitApp.App(nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 2,
     columns: 2,
     inputImage: none(Image),
@@ -128,38 +128,38 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node2 = render_imageApp.init(2.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node2 = render_imageApp.App(nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node6 = data_newImageApp.init(6.NodeId, scene.FrameScene, data_newImageApp.AppConfig(
+  scene.node6 = data_newImageApp.App(nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
     color: parseHtmlColor("#278f91"),
   ))
-  scene.node3 = render_imageApp.init(3.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node3 = render_imageApp.App(nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     inputImage: none(Image),
     placement: "cover",
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node7 = data_newImageApp.init(7.NodeId, scene.FrameScene, data_newImageApp.AppConfig(
+  scene.node7 = data_newImageApp.App(nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
     width: 30,
     height: 30,
     color: parseHtmlColor("#1b4750"),
   ))
-  scene.node4 = render_imageApp.init(4.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node4 = render_imageApp.App(nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "bottom-right",
     offsetX: -10,
     offsetY: -10,
     inputImage: none(Image),
   ))
-  scene.node8 = data_newImageApp.init(8.NodeId, scene.FrameScene, data_newImageApp.AppConfig(
+  scene.node8 = data_newImageApp.App(nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
     width: 100,
     height: 100,
     color: parseHtmlColor("#1b5079"),
   ))
-  scene.node5 = render_imageApp.init(5.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node5 = render_imageApp.App(nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "stretch",
     inputImage: none(Image),
     offsetX: 0,

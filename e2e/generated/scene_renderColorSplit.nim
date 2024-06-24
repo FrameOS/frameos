@@ -90,7 +90,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_splitApp.init(1.NodeId, scene.FrameScene, render_splitApp.AppConfig(
+  scene.node1 = render_splitApp.App(nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     columns: 2,
     inputImage: none(Image),
     rows: 1,
@@ -103,22 +103,22 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node2 = render_imageApp.init(2.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node2 = render_imageApp.App(nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node4 = data_resizeImageApp.init(4.NodeId, scene.FrameScene, data_resizeImageApp.AppConfig(
+  scene.node4 = data_resizeImageApp.App(nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_resizeImageApp.AppConfig(
     width: 200,
     height: 200,
     scalingMode: "center",
   ))
-  scene.node5 = render_colorApp.init(5.NodeId, scene.FrameScene, render_colorApp.AppConfig(
+  scene.node5 = render_colorApp.App(nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_colorApp.AppConfig(
     color: parseHtmlColor("#d62424"),
     inputImage: none(Image),
   ))
-  scene.node3 = render_colorApp.init(3.NodeId, scene.FrameScene, render_colorApp.AppConfig(
+  scene.node3 = render_colorApp.App(nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_colorApp.AppConfig(
     color: parseHtmlColor("#e6d40f"),
     inputImage: none(Image),
   ))

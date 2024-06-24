@@ -18,14 +18,6 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    frameConfig: scene.frameConfig,
-    appConfig: appConfig,
-  )
-
 proc log*(self: App, message: string) =
   self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
 

@@ -17,6 +17,9 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
+proc init*(self: App) =
+  self.appConfig.search = self.appConfig.search.strip()
+
 proc log*(self: App, message: string) =
   self.scene.logger.log(%*{"event": "unsplash:log", "message": message})
 
@@ -24,15 +27,6 @@ proc error*(self: App, context: ExecutionContext, message: string): Image =
   self.scene.logger.log(%*{"event": &"unsplash:error", "error": message})
   result = renderError(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
         if context.hasImage: context.image.height else: self.frameConfig.renderHeight(), message)
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    frameConfig: scene.frameConfig,
-    appConfig: appConfig,
-  )
-  result.appConfig.search = result.appConfig.search.strip()
 
 proc get*(self: App, context: ExecutionContext): Image =
   let apiKey = self.frameConfig.settings{"unsplash"}{"accessKey"}.getStr

@@ -1,4 +1,4 @@
-import zippy, json, sequtils, os, times, math, strutils, net
+import zippy, json, sequtils, os, times, math, strutils, net, strformat
 import lib/httpclient
 
 import frameos/channels
@@ -137,3 +137,9 @@ proc newLogger*(frameConfig: FrameConfig): Logger =
     logger.enabled = false
 
   result = logger
+
+proc log*(self: AppRoot, message: string) =
+  self.scene.logger.log(%*{"event": "log", "node": self.nodeId, "message": message})
+
+proc logError*(self: AppRoot, message: string) =
+  self.scene.logger.log(%*{"event": "error", "node": self.nodeId, "error": message})

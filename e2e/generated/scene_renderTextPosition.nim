@@ -119,7 +119,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_splitApp.init(1.NodeId, scene.FrameScene, render_splitApp.AppConfig(
+  scene.node1 = render_splitApp.App(nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 3,
     columns: 3,
     gap: "5",
@@ -145,13 +145,13 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 2.NodeId,
   ))
-  scene.node2 = render_gradientApp.init(2.NodeId, scene.FrameScene, render_gradientApp.AppConfig(
+  scene.node2 = render_gradientApp.App(nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
     startColor: parseHtmlColor("#3f99ab"),
     endColor: parseHtmlColor("#218514"),
     inputImage: none(Image),
     angle: 45.0,
   ))
-  scene.node3 = render_splitApp.init(3.NodeId, scene.FrameScene, render_splitApp.AppConfig(
+  scene.node3 = render_splitApp.App(nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 3,
     columns: 3,
     gap: "5",
@@ -177,7 +177,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node4 = render_textApp.init(4.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node4 = render_textApp.App(nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "ananas",
     fontSize: 24.0,
     position: "left",
@@ -191,7 +191,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node5 = render_textApp.init(5.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node4.init()
+  scene.node5 = render_textApp.App(nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     vAlign: "top",
     text: "bananas",
     fontSize: 24.0,
@@ -205,7 +206,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node6 = render_textApp.init(6.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node5.init()
+  scene.node6 = render_textApp.App(nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "right",
     vAlign: "top",
     text: "ananas",
@@ -219,7 +221,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node7 = render_textApp.init(7.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node6.init()
+  scene.node7 = render_textApp.App(nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "left",
     text: "bananas",
     fontSize: 24.0,
@@ -233,7 +236,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderWidth: 2,
     overflow: "fit-bounds",
   ))
-  scene.node8 = render_textApp.init(8.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node7.init()
+  scene.node8 = render_textApp.App(nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "ananas",
     fontSize: 24.0,
     borderWidth: 0,
@@ -247,7 +251,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node9 = render_textApp.init(9.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node8.init()
+  scene.node9 = render_textApp.App(nodeId: 9.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "right",
     text: "bananas",
     fontSize: 24.0,
@@ -261,7 +266,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderWidth: 2,
     overflow: "fit-bounds",
   ))
-  scene.node10 = render_textApp.init(10.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node9.init()
+  scene.node10 = render_textApp.App(nodeId: 10.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "left",
     vAlign: "bottom",
     text: "ananas",
@@ -275,7 +281,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node11 = render_textApp.init(11.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node10.init()
+  scene.node11 = render_textApp.App(nodeId: 11.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     vAlign: "bottom",
     text: "bananas",
     fontSize: 24.0,
@@ -289,7 +296,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node12 = render_textApp.init(12.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node11.init()
+  scene.node12 = render_textApp.App(nodeId: 12.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "right",
     vAlign: "bottom",
     text: "ananas",
@@ -303,6 +311,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
+  scene.node12.init()
   runEvent(context)
   
 {.pop.}

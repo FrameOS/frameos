@@ -130,7 +130,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_splitApp.init(1.NodeId, scene.FrameScene, render_splitApp.AppConfig(
+  scene.node1 = render_splitApp.App(nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     columns: 2,
     rows: 2,
     inputImage: none(Image),
@@ -147,51 +147,52 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node2 = render_imageApp.init(2.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node2 = render_imageApp.App(nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node6 = data_resizeImageApp.init(6.NodeId, scene.FrameScene, data_resizeImageApp.AppConfig(
+  scene.node6 = data_resizeImageApp.App(nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_resizeImageApp.AppConfig(
     height: 100,
     width: 100,
     scalingMode: "contain",
   ))
-  scene.node7 = data_localImageApp.init(7.NodeId, scene.FrameScene, data_localImageApp.AppConfig(
+  scene.node7 = data_localImageApp.App(nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_localImageApp.AppConfig(
     path: "./assets/image.png",
     order: "random",
     counterStateKey: "",
   ))
-  scene.node3 = render_imageApp.init(3.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node7.init()
+  scene.node3 = render_imageApp.App(nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node8 = data_resizeImageApp.init(8.NodeId, scene.FrameScene, data_resizeImageApp.AppConfig(
+  scene.node8 = data_resizeImageApp.App(nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_resizeImageApp.AppConfig(
     height: 100,
     scalingMode: "cover",
     width: 100,
   ))
-  scene.node4 = render_imageApp.init(4.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node4 = render_imageApp.App(nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node9 = data_resizeImageApp.init(9.NodeId, scene.FrameScene, data_resizeImageApp.AppConfig(
+  scene.node9 = data_resizeImageApp.App(nodeId: 9.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_resizeImageApp.AppConfig(
     height: 100,
     scalingMode: "stretch",
     width: 100,
   ))
-  scene.node5 = render_imageApp.init(5.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node5 = render_imageApp.App(nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node10 = data_resizeImageApp.init(10.NodeId, scene.FrameScene, data_resizeImageApp.AppConfig(
+  scene.node10 = data_resizeImageApp.App(nodeId: 10.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_resizeImageApp.AppConfig(
     height: 100,
     scalingMode: "center",
     width: 100,
