@@ -1,5 +1,6 @@
 import json, strformat, options, strutils
 import lib/httpclient
+import frameos/apps
 import frameos/types
 
 type
@@ -7,26 +8,11 @@ type
     entityId*: string
     debug*: bool
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
-
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    appConfig: appConfig,
-    frameConfig: scene.frameConfig,
-  )
-
-proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": "legacy/haSensor:log", "message": message})
 
 proc error*(self: App, message: string): JsonNode =
-  self.scene.logger.log(%*{"event": "legacy/haSensor:error", "error": message})
+  self.logError(message)
   return %*{"error": message}
 
 proc get*(self: App, context: ExecutionContext): JsonNode =

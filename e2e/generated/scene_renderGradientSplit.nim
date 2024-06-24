@@ -64,7 +64,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
       nextNode = -1.NodeId
     
     if DEBUG:
-      self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
 proc runEvent*(context: var ExecutionContext) =
   let self = Scene(context.scene)
@@ -100,7 +100,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_splitApp.init(1.NodeId, scene.FrameScene, render_splitApp.AppConfig(
+  scene.node1 = render_splitApp.App(nodeName: "render/split", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     columns: 3,
     gap: "10",
     inputImage: none(Image),
@@ -115,36 +115,36 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node2 = render_gradientApp.init(2.NodeId, scene.FrameScene, render_gradientApp.AppConfig(
+  scene.node2 = render_gradientApp.App(nodeName: "render/gradient", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
     startColor: parseHtmlColor("#05a2d6"),
     endColor: parseHtmlColor("#eff312"),
     angle: 90.0,
     inputImage: none(Image),
   ))
-  scene.node3 = render_imageApp.init(3.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node3 = render_imageApp.App(nodeName: "render/image", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node5 = render_gradientApp.init(5.NodeId, scene.FrameScene, render_gradientApp.AppConfig(
+  scene.node5 = render_gradientApp.App(nodeName: "render/gradient", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
     inputImage: none(Image),
     startColor: parseHtmlColor("#800080"),
     endColor: parseHtmlColor("#ffc0cb"),
     angle: 45.0,
   ))
-  scene.node4 = render_imageApp.init(4.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node4 = render_imageApp.App(nodeName: "render/image", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node7 = data_newImageApp.init(7.NodeId, scene.FrameScene, data_newImageApp.AppConfig(
+  scene.node7 = data_newImageApp.App(nodeName: "data/newImage", nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
     width: 40,
     height: 40,
     color: parseHtmlColor("#ffffff"),
   ))
-  scene.node6 = render_gradientApp.init(6.NodeId, scene.FrameScene, render_gradientApp.AppConfig(
+  scene.node6 = render_gradientApp.App(nodeName: "render/gradient", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
     startColor: parseHtmlColor("#2f8d1c"),
     endColor: parseHtmlColor("#04390a"),
     inputImage: some(block:

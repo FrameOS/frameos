@@ -9,19 +9,8 @@ type
     height*: int
     scalingMode*: string
 
-  App* = ref object
-    nodeId*: NodeId
-    frameConfig*: FrameConfig
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    frameConfig: scene.frameConfig,
-    appConfig: appConfig,
-  )
 
 proc get*(self: App, context: ExecutionContext): Image =
   let image = newImage(self.appConfig.width, self.appConfig.height)

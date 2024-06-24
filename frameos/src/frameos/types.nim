@@ -1,5 +1,4 @@
-import json, jester, pixie, hashes
-import std/locks
+import json, jester, pixie, hashes, locks
 
 type
   FrameConfig* = ref object
@@ -49,6 +48,12 @@ type
     execNode*: proc(nodeId: NodeId, context: var ExecutionContext)
     lastPublicStateUpdate*: float
     lastPersistedStateUpdate*: float
+
+  AppRoot* = ref object of RootObj
+    nodeId*: NodeId
+    nodeName*: string # used mainly for logging
+    scene*: FrameScene
+    frameConfig*: FrameConfig
 
   ExportedScene* = ref object of RootObj
     publicStateFields*: seq[StateField]

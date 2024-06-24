@@ -1,12 +1,12 @@
 import json
-import strformat
 import pixie
 import options
+import os
+import strutils
+import random
 import frameos/utils/image
-import frameos/config
+import frameos/apps
 import frameos/types
-import os, strutils
-import std/random
 
 let imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", "*.qoi", ".ppm", ".svg"]
 
@@ -16,11 +16,8 @@ type
     order*: string
     counterStateKey*: string
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
     images: seq[string]
     counter: int
 
@@ -45,33 +42,24 @@ proc getImagesInFolder(folder: string): seq[string] =
       images.add(file)
   return images
 
-proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"localImage:log", "message": message})
-
 proc error*(self: App, context: ExecutionContext, message: string): Image =
-  self.scene.logger.log(%*{"event": &"localImage:error", "error": message})
+  self.logError(message)
   return renderError(
     if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
     if context.hasImage: context.image.height else: self.frameConfig.renderHeight(),
     message
   )
 
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    frameConfig: scene.frameConfig,
-    appConfig: appConfig,
-    images: getImagesInFolder(appConfig.path),
-    counter: 0
-  )
-  result.log("Found " & $result.images.len & " images in the folder: " & appConfig.path)
-  result.log(result.images.join(", "))
-  if appConfig.order == "random":
+proc init*(self: App) =
+  self.images = getImagesInFolder(self.appConfig.path)
+  self.counter = 0
+  self.log("Found " & $self.images.len & " images in the folder: " & self.appConfig.path)
+  self.log(%*{"images": self.images})
+  if self.appConfig.order == "random":
     randomize()
-    result.images.shuffle()
-  elif appConfig.counterStateKey != "":
-    result.counter = scene.state{appConfig.counterStateKey}.getInt() mod result.images.len
+    self.images.shuffle()
+  elif self.appConfig.counterStateKey != "":
+    self.counter = self.scene.state{self.appConfig.counterStateKey}.getInt() mod self.images.len
 
 proc get*(self: App, context: ExecutionContext): Image =
   if self.images.len == 0:

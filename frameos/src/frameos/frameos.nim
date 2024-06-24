@@ -1,12 +1,11 @@
-import json, asyncdispatch, pixie, chroma, strutils
-
-import frameos/types
-from frameos/config import loadConfig
-from frameos/logger import newLogger
-from frameos/metrics import newMetricsLogger
-from frameos/server import newServer, startServer
-from frameos/runner import newRunner
+import json, asyncdispatch, pixie, strutils
 import drivers/drivers as drivers
+import frameos/config
+import frameos/logger
+import frameos/metrics
+import frameos/runner
+import frameos/server
+import frameos/types
 
 proc newFrameOS*(): FrameOS =
   var frameConfig = loadConfig()

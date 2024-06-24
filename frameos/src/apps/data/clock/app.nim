@@ -6,19 +6,8 @@ type
     format*: string
     formatCustom*: string
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    appConfig: appConfig,
-    frameConfig: scene.frameConfig,
-  )
 
 proc get*(self: App, context: ExecutionContext): string =
   result = now().format(case self.appConfig.format:

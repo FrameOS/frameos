@@ -1,6 +1,6 @@
 import pixie
+import frameos/apps
 import frameos/types
-import frameos/config
 
 type
   AppConfig* = object
@@ -8,19 +8,8 @@ type
     width*: int
     height*: int
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    appConfig: appConfig,
-    frameConfig: scene.frameConfig,
-  )
 
 proc get*(self: App, context: ExecutionContext): Image =
   let width = if self.appConfig.width != 0:

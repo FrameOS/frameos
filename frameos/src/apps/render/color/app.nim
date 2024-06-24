@@ -1,6 +1,6 @@
 import pixie
 import options
-import frameos/config
+import frameos/apps
 import frameos/types
 
 type
@@ -8,19 +8,8 @@ type
     inputImage*: Option[Image]
     color*: Color
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    appConfig: appConfig,
-    frameConfig: scene.frameConfig,
-  )
 
 proc render*(self: App, context: ExecutionContext, image: Image) =
   image.fill(self.appConfig.color)

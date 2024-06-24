@@ -1,26 +1,12 @@
-import json, options
+import frameos/apps
 import frameos/types
 
 type
   AppConfig* = object
     duration*: float
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    appConfig: appConfig,
-    frameConfig: scene.frameConfig,
-  )
-
-proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": "setNextSleep:log", "message": message})
 
 proc run*(self: App, context: ExecutionContext) =
   context.nextSleep = self.appConfig.duration

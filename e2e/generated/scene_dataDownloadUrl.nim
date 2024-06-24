@@ -64,7 +64,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
       nextNode = -1.NodeId
     
     if DEBUG:
-      self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
 proc runEvent*(context: var ExecutionContext) =
   let self = Scene(context.scene)
@@ -100,10 +100,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = data_downloadUrlApp.init(1.NodeId, scene.FrameScene, data_downloadUrlApp.AppConfig(
+  scene.node1 = data_downloadUrlApp.App(nodeName: "data/downloadUrl", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_downloadUrlApp.AppConfig(
     url: "https://frameos.net/.ci_text_file",
   ))
-  scene.node2 = render_textApp.init(2.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node2 = render_textApp.App(nodeName: "render/text", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     inputImage: none(Image),
     text: block:
       if cache0.isNone() or epochTime() > cache0Time + 900.0:
@@ -122,7 +122,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderWidth: 2,
     overflow: "fit-bounds",
   ))
-  scene.node3 = render_splitApp.init(3.NodeId, scene.FrameScene, render_splitApp.AppConfig(
+  scene.node2.init()
+  scene.node3 = render_splitApp.App(nodeName: "render/split", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 2,
     inputImage: none(Image),
     columns: 1,
@@ -137,10 +138,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node5 = data_downloadUrlApp.init(5.NodeId, scene.FrameScene, data_downloadUrlApp.AppConfig(
+  scene.node5 = data_downloadUrlApp.App(nodeName: "data/downloadUrl", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_downloadUrlApp.AppConfig(
     url: "https://frameos.net/.this-is-not-a-file-that-exists",
   ))
-  scene.node4 = render_textApp.init(4.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node4 = render_textApp.App(nodeName: "render/text", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     inputImage: none(Image),
     text: block:
       if cache1.isNone() or epochTime() > cache1Time + 900.0:
@@ -159,6 +160,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderWidth: 2,
     overflow: "fit-bounds",
   ))
+  scene.node4.init()
   runEvent(context)
   
 {.pop.}

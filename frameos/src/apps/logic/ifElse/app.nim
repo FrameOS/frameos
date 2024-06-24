@@ -6,19 +6,8 @@ type
     thenNode*: NodeId
     elseNode*: NodeId
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    appConfig: appConfig,
-    frameConfig: scene.frameConfig,
-  )
 
 proc run*(self: App, context: var ExecutionContext) =
   if self.appConfig.condition:

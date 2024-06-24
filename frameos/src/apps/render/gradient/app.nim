@@ -1,7 +1,7 @@
 import pixie
 import options
+import frameos/apps
 import frameos/types
-import frameos/config
 
 type
   AppConfig* = object
@@ -10,19 +10,8 @@ type
     endColor*: Color
     angle*: float
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    appConfig: appConfig,
-    frameConfig: scene.frameConfig,
-  )
 
 proc angleToPoints(angle: float, width: float, height: float): seq[Vec2] =
   let rad = angle * PI / 180.0

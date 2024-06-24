@@ -1,10 +1,9 @@
-import json
 import strformat
 import pixie
 import options
-import frameos/utils/image
-import frameos/config
+import frameos/apps
 import frameos/types
+import frameos/utils/image
 
 type
   AppConfig* = object
@@ -14,25 +13,8 @@ type
     offsetX*: int
     offsetY*: int
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    frameConfig: scene.frameConfig,
-    appConfig: appConfig,
-  )
-
-proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
-
-proc error*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
 
 proc render*(self: App, context: ExecutionContext, image: Image) =
   try:
@@ -42,7 +24,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
         self.appConfig.offsetY)
   except Exception as e:
     let message = &"Error rendering image: {e.msg}"
-    self.error(message)
+    self.logError(message)
     let errorImage = renderError(image.width, image.height, message)
     scaleAndDrawImage(image, errorImage, self.appConfig.placement)
 

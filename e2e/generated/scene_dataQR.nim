@@ -82,7 +82,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
       nextNode = -1.NodeId
     
     if DEBUG:
-      self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
 proc runEvent*(context: var ExecutionContext) =
   let self = Scene(context.scene)
@@ -118,7 +118,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_splitApp.init(1.NodeId, scene.FrameScene, render_splitApp.AppConfig(
+  scene.node1 = render_splitApp.App(nodeName: "render/split", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 2,
     columns: 2,
     inputImage: none(Image),
@@ -135,13 +135,13 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node2 = render_imageApp.init(2.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node2 = render_imageApp.App(nodeName: "render/image", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node6 = data_qrApp.init(6.NodeId, scene.FrameScene, data_qrApp.AppConfig(
+  scene.node6 = data_qrApp.App(nodeName: "data/qr", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_qrApp.AppConfig(
     codeType: "Custom",
     code: "pineapple belongs on pizza",
     size: 3.0,
@@ -153,13 +153,13 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     qrCodeColor: parseHtmlColor("#000000"),
     backgroundColor: parseHtmlColor("#ffffff"),
   ))
-  scene.node3 = render_imageApp.init(3.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node3 = render_imageApp.App(nodeName: "render/image", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "top-right",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node7 = data_qrApp.init(7.NodeId, scene.FrameScene, data_qrApp.AppConfig(
+  scene.node7 = data_qrApp.App(nodeName: "data/qr", nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_qrApp.AppConfig(
     codeType: "Custom",
     sizeUnit: "percent",
     size: 100.0,
@@ -171,13 +171,13 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     alRad: 30.0,
     padding: 1,
   ))
-  scene.node4 = render_imageApp.init(4.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node4 = render_imageApp.App(nodeName: "render/image", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "bottom-left",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node8 = data_qrApp.init(8.NodeId, scene.FrameScene, data_qrApp.AppConfig(
+  scene.node8 = data_qrApp.App(nodeName: "data/qr", nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_qrApp.AppConfig(
     codeType: "Frame Control URL",
     sizeUnit: "pixels total",
     size: 180.0,
@@ -189,13 +189,13 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     backgroundColor: parseHtmlColor("#0b7c93"),
     code: "",
   ))
-  scene.node5 = render_imageApp.init(5.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node5 = render_imageApp.App(nodeName: "render/image", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "stretch",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node9 = data_qrApp.init(9.NodeId, scene.FrameScene, data_qrApp.AppConfig(
+  scene.node9 = data_qrApp.App(nodeName: "data/qr", nodeId: 9.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_qrApp.AppConfig(
     codeType: "Frame Image URL",
     code: "",
     size: 2.0,

@@ -1,11 +1,10 @@
 import pixie
 import json
 import uri
-import std/strformat
-import std/strutils
+import strformat
+import strutils
 import lib/httpclient
-import options
-import frameos/config
+import frameos/apps
 import frameos/types
 import frameos/utils/image
 
@@ -14,28 +13,16 @@ type
     search*: string
     orientation*: string
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
 
-proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": "unsplash:log", "message": message})
+proc init*(self: App) =
+  self.appConfig.search = self.appConfig.search.strip()
 
 proc error*(self: App, context: ExecutionContext, message: string): Image =
-  self.scene.logger.log(%*{"event": &"unsplash:error", "error": message})
+  self.logError(message)
   result = renderError(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
         if context.hasImage: context.image.height else: self.frameConfig.renderHeight(), message)
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    frameConfig: scene.frameConfig,
-    appConfig: appConfig,
-  )
-  result.appConfig.search = result.appConfig.search.strip()
 
 proc get*(self: App, context: ExecutionContext): Image =
   let apiKey = self.frameConfig.settings{"unsplash"}{"accessKey"}.getStr

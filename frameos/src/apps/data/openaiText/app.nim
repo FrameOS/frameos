@@ -3,6 +3,7 @@ import options
 import json
 import strformat
 import lib/httpclient
+import frameos/apps
 import frameos/types
 
 type
@@ -12,25 +13,11 @@ type
     user*: string
     stateKey*: string
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    frameConfig: scene.frameConfig,
-    appConfig: appConfig,
-  )
-
-proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"openai:{self.nodeId}:log", "message": message})
 
 proc error*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"openai:{self.nodeId}:error", "error": message})
+  self.logError(message)
   self.scene.state[self.appConfig.stateKey] = %*(&"Error: {message}")
 
 proc get*(self: App, context: ExecutionContext): string =
@@ -61,8 +48,7 @@ proc get*(self: App, context: ExecutionContext): string =
       ]
     }
   try:
-    self.scene.logger.log(%*{"event": &"openai:{self.nodeId}:request", "user": self.appConfig.user,
-        "system": self.appConfig.system})
+    self.log(%*{"user": self.appConfig.user, "system": self.appConfig.system})
     let response = client.request("https://api.openai.com/v1/chat/completions",
         httpMethod = HttpPost, body = $body)
     if response.code != Http200:
@@ -75,7 +61,7 @@ proc get*(self: App, context: ExecutionContext): string =
       return
     let json = parseJson(response.body)
     let reply = json{"choices"}{0}{"message"}{"content"}.getStr
-    self.scene.logger.log(%*{"event": &"openai:{self.nodeId}:reply", "reply": reply})
+    self.log(%*{"reply": reply})
     result = reply
   except CatchableError as e:
     self.error "OpenAI API error: " & $e.msg

@@ -1,9 +1,8 @@
-import json, strformat
 import pixie
-import frameos/config
-import frameos/types
 import QRgen
 import QRgen/renderer
+import frameos/apps
+import frameos/types
 
 type
   AppConfig* = object
@@ -18,25 +17,8 @@ type
     qrCodeColor*: Color
     backgroundColor*: Color
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
-    frameConfig*: FrameConfig
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    frameConfig: scene.frameConfig,
-    appConfig: appConfig,
-  )
-
-proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
-
-proc error*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
 
 proc get*(self: App, context: ExecutionContext): Image =
   let code = if self.appConfig.codeType == "Frame Control URL":
@@ -58,7 +40,7 @@ proc get*(self: App, context: ExecutionContext): Image =
     of "pixels per dot": self.appConfig.size * (myQR.drawing.size.int + self.appConfig.padding * 2).float
     else: self.appConfig.size
 
-  let qrImage = myQR.renderImg(
+  result = myQR.renderImg(
     light = self.appConfig.backgroundColor.toHtmlHex,
     dark = self.appConfig.qrCodeColor.toHtmlHex,
     alRad = self.appConfig.alRad,
@@ -67,4 +49,3 @@ proc get*(self: App, context: ExecutionContext): Image =
     pixels = width.uint32,
     padding = self.appConfig.padding.uint8
   )
-  return qrImage

@@ -71,7 +71,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
       nextNode = -1.NodeId
     
     if DEBUG:
-      self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
 proc runEvent*(context: var ExecutionContext) =
   let self = Scene(context.scene)
@@ -107,7 +107,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_splitApp.init(1.NodeId, scene.FrameScene, render_splitApp.AppConfig(
+  scene.node1 = render_splitApp.App(nodeName: "render/split", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 2,
     columns: 2,
     inputImage: none(Image),
@@ -124,7 +124,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node2 = render_textApp.init(2.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node2 = render_textApp.App(nodeName: "render/text", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "Rendering a lot of text as just a text node. Rendering a lot of text as just a text node. Rendering a lot of text as just a text node. ",
     fontSize: 66.0,
     inputImage: none(Image),
@@ -138,13 +138,14 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderWidth: 2,
     overflow: "fit-bounds",
   ))
-  scene.node3 = render_imageApp.init(3.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node2.init()
+  scene.node3 = render_imageApp.App(nodeName: "render/image", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node6 = render_textApp.init(6.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node6 = render_textApp.App(nodeName: "render/text", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "Rendering a lot of text as an image node with no image. Rendering a lot of text as an image node with no imageRendering a lot of text as an image node with no imageRendering a lot of text as an image node with no image",
     fontColor: parseHtmlColor("#000000"),
     fontSize: 24.0,
@@ -158,13 +159,14 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node4 = render_imageApp.init(4.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node6.init()
+  scene.node4 = render_imageApp.App(nodeName: "render/image", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "bottom-right",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node7 = render_textApp.init(7.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node7 = render_textApp.App(nodeName: "render/text", nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "little  \ntext line",
     inputImage: none(Image),
     position: "center",
@@ -178,18 +180,19 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderWidth: 2,
     overflow: "fit-bounds",
   ))
-  scene.node5 = render_imageApp.init(5.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node7.init()
+  scene.node5 = render_imageApp.App(nodeName: "render/image", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node9 = data_newImageApp.init(9.NodeId, scene.FrameScene, data_newImageApp.AppConfig(
+  scene.node9 = data_newImageApp.App(nodeName: "data/newImage", nodeId: 9.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
     width: 100,
     height: 100,
     color: parseHtmlColor("#b30000"),
   ))
-  scene.node8 = render_textApp.init(8.NodeId, scene.FrameScene, render_textApp.AppConfig(
+  scene.node8 = render_textApp.App(nodeName: "render/text", nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "text on image, i repeat this is text on an image",
     inputImage: some(block:
       if cache0.isNone():
@@ -207,6 +210,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderWidth: 2,
     overflow: "fit-bounds",
   ))
+  scene.node8.init()
   runEvent(context)
   
 {.pop.}

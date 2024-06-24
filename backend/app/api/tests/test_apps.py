@@ -18,7 +18,7 @@ class TestApps(BaseTestCase):
         assert response.status_code == 200
         assert 'app.nim' in data
         assert 'config.json' in data
-        assert 'FrameConfig' in data['app.nim']
+        assert 'AppRoot' in data['app.nim']
 
     def test_validate_python_frame_source_python(self):
         data = {'file': 'test.py', 'source': 'print("Hello World")'}

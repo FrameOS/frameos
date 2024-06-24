@@ -94,7 +94,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
       nextNode = -1.NodeId
     
     if DEBUG:
-      self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
 proc runEvent*(context: var ExecutionContext) =
   let self = Scene(context.scene)
@@ -130,7 +130,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_splitApp.init(1.NodeId, scene.FrameScene, render_splitApp.AppConfig(
+  scene.node1 = render_splitApp.App(nodeName: "render/split", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 3,
     inputImage: none(Image),
     columns: 1,
@@ -148,29 +148,30 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node2 = render_imageApp.init(2.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node2 = render_imageApp.App(nodeName: "render/image", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "stretch",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node5 = data_localImageApp.init(5.NodeId, scene.FrameScene, data_localImageApp.AppConfig(
+  scene.node5 = data_localImageApp.App(nodeName: "data/localImage", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_localImageApp.AppConfig(
     path: "./assets/image.png",
     order: "random",
     counterStateKey: "",
   ))
-  scene.node3 = render_imageApp.init(3.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node5.init()
+  scene.node3 = render_imageApp.App(nodeName: "render/image", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node7 = data_newImageApp.init(7.NodeId, scene.FrameScene, data_newImageApp.AppConfig(
+  scene.node7 = data_newImageApp.App(nodeName: "data/newImage", nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
     width: 100,
     height: 100,
     color: parseHtmlColor("#1b9d6b"),
   ))
-  scene.node6 = render_imageApp.init(6.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node6 = render_imageApp.App(nodeName: "render/image", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center-left",
     inputImage: some(block:
       if cache1.isNone():
@@ -180,12 +181,12 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node9 = data_newImageApp.init(9.NodeId, scene.FrameScene, data_newImageApp.AppConfig(
+  scene.node9 = data_newImageApp.App(nodeName: "data/newImage", nodeId: 9.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
     width: 30,
     height: 30,
     color: parseHtmlColor("#ffffff"),
   ))
-  scene.node8 = render_gradientApp.init(8.NodeId, scene.FrameScene, render_gradientApp.AppConfig(
+  scene.node8 = render_gradientApp.App(nodeName: "render/gradient", nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
     inputImage: some(block:
       if cache2.isNone():
         cache2 = some(block:
@@ -195,24 +196,24 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     endColor: parseHtmlColor("#ffc0cb"),
     angle: 45.0,
   ))
-  scene.node4 = render_imageApp.init(4.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node4 = render_imageApp.App(nodeName: "render/image", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     inputImage: none(Image),
     placement: "cover",
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node10 = render_imageApp.init(10.NodeId, scene.FrameScene, render_imageApp.AppConfig(
+  scene.node10 = render_imageApp.App(nodeName: "render/image", nodeId: 10.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center-right",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node12 = data_newImageApp.init(12.NodeId, scene.FrameScene, data_newImageApp.AppConfig(
+  scene.node12 = data_newImageApp.App(nodeName: "data/newImage", nodeId: 12.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
     width: 30,
     height: 30,
     color: parseHtmlColor("#ffffff"),
   ))
-  scene.node11 = render_gradientApp.init(11.NodeId, scene.FrameScene, render_gradientApp.AppConfig(
+  scene.node11 = render_gradientApp.App(nodeName: "render/gradient", nodeId: 11.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
     inputImage: some(block:
       if cache3.isNone():
         cache3 = some(block:

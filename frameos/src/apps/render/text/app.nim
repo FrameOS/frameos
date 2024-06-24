@@ -1,7 +1,6 @@
 import pixie, options, unicode
-
+import frameos/apps
 import frameos/types
-import frameos/config
 import frameos/utils/font
 
 type
@@ -36,24 +35,13 @@ type
     textTypeset*: Arrangement
     borderTypeset*: Option[Arrangement]
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
     typeface*: Typeface
     renderResult*: Option[RenderResult]
 
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  let typeface = getDefaultTypeface()
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    frameConfig: scene.frameConfig,
-    appConfig: appConfig,
-    typeface: typeface,
-    renderResult: none(RenderResult),
-  )
+proc init*(self: App) =
+  self.typeface = getDefaultTypeface()
 
 proc `==`(obj1, obj2: RenderData): bool =
   obj1.text == obj2.text and obj1.vAlign == obj2.vAlign and obj1.position == obj2.position and

@@ -1,7 +1,7 @@
 import strutils
 import pixie
 import options
-import frameos/config
+import frameos/apps
 import frameos/types
 import frameos/utils/image
 
@@ -18,19 +18,8 @@ type
     widthRatios*: string
     heightRatios*: string
 
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
+  App* = ref object of AppRoot
     appConfig*: AppConfig
-    frameConfig*: FrameConfig
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    appConfig: appConfig,
-    frameConfig: scene.frameConfig,
-  )
 
 proc extractMargins(marginString: string): (float, float, float, float) =
   let
