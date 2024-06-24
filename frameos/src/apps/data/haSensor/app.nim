@@ -1,5 +1,6 @@
 import json, strformat, options, strutils
 import lib/httpclient
+import frameos/apps
 import frameos/types
 
 type

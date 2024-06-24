@@ -3,6 +3,7 @@ import options
 import json
 import strformat
 import lib/httpclient
+import frameos/apps
 import frameos/types
 
 type

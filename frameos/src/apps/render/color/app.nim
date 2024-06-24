@@ -1,5 +1,6 @@
 import pixie
 import options
+import frameos/apps
 import frameos/types
 
 type

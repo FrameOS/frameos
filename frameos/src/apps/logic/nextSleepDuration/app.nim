@@ -1,3 +1,4 @@
+import frameos/apps
 import frameos/types
 
 type

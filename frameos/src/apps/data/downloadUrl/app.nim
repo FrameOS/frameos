@@ -1,6 +1,7 @@
 import options
-import frameos/types
 import lib/httpclient
+import frameos/apps
+import frameos/types
 
 type
   AppConfig* = object

@@ -1,7 +1,8 @@
 import pixie
-import frameos/types
 import QRgen
 import QRgen/renderer
+import frameos/apps
+import frameos/types
 
 type
   AppConfig* = object

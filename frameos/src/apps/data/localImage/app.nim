@@ -1,10 +1,12 @@
 import json
 import pixie
 import options
+import os
+import strutils
+import random
 import frameos/utils/image
+import frameos/apps
 import frameos/types
-import os, strutils
-import std/random
 
 let imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", "*.qoi", ".ppm", ".svg"]
 

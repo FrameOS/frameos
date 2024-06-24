@@ -1,4 +1,5 @@
 import json
+import frameos/apps
 import frameos/types
 
 type

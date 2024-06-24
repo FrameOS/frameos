@@ -1,9 +1,10 @@
 import pixie
 import json
 import uri
-import std/strformat
-import std/strutils
+import strformat
+import strutils
 import lib/httpclient
+import frameos/apps
 import frameos/types
 import frameos/utils/image
 

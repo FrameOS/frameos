@@ -1,8 +1,9 @@
 import strformat
 import pixie
 import options
-import frameos/utils/image
+import frameos/apps
 import frameos/types
+import frameos/utils/image
 
 type
   AppConfig* = object
