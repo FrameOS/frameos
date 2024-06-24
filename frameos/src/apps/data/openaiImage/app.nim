@@ -6,6 +6,7 @@ import lib/httpclient
 import frameos/utils/image
 import frameos/config
 import frameos/types
+import frameos/logger
 
 type
   AppConfig* = object
@@ -18,11 +19,8 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
-
 proc error*(self: App, context: ExecutionContext, message: string): Image =
-  self.scene.logger.log(%*{"event": &"{self.nodeId}:error", "error": message})
+  self.logError(message)
   result = renderError(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
         if context.hasImage: context.image.height else: self.frameConfig.renderHeight(), message)
 

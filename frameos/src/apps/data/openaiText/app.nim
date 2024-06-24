@@ -4,6 +4,7 @@ import json
 import strformat
 import lib/httpclient
 import frameos/types
+import frameos/logger
 
 type
   AppConfig* = object
@@ -15,11 +16,8 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"openai:{self.nodeId}:log", "message": message})
-
 proc error*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"openai:{self.nodeId}:error", "error": message})
+  self.logError(message)
   self.scene.state[self.appConfig.stateKey] = %*(&"Error: {message}")
 
 proc get*(self: App, context: ExecutionContext): string =

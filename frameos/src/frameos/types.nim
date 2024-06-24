@@ -52,6 +52,7 @@ type
 
   AppRoot* = ref object of RootObj
     nodeId*: NodeId
+    nodeName*: string # used mainly for logging
     scene*: FrameScene
     frameConfig*: FrameConfig
 

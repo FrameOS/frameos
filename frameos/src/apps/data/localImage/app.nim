@@ -1,10 +1,10 @@
 import json
-import strformat
 import pixie
 import options
 import frameos/utils/image
 import frameos/config
 import frameos/types
+import frameos/logger
 import os, strutils
 import std/random
 
@@ -42,11 +42,8 @@ proc getImagesInFolder(folder: string): seq[string] =
       images.add(file)
   return images
 
-proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"localImage:log", "message": message})
-
 proc error*(self: App, context: ExecutionContext, message: string): Image =
-  self.scene.logger.log(%*{"event": &"localImage:error", "error": message})
+  self.logError(message)
   return renderError(
     if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
     if context.hasImage: context.image.height else: self.frameConfig.renderHeight(),

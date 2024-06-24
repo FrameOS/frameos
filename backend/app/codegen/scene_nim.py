@@ -391,7 +391,7 @@ class SceneWriter:
             ]
         else:
             self.init_apps += [
-                f"scene.{app_id} = {appName}.App(nodeId: {node_integer}.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: {appName}.AppConfig(",
+                f"scene.{app_id} = {appName}.App(nodeName: \"{sanitize_nim_string(name)}\", nodeId: {node_integer}.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: {appName}.AppConfig(",
             ]
 
         for x in app_config_pairs:

@@ -1,6 +1,7 @@
 import json, strformat, options, strutils
 import lib/httpclient
 import frameos/types
+import frameos/logger
 
 type
   AppConfig* = object
@@ -10,11 +11,8 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": "legacy/haSensor:log", "message": message})
-
 proc error*(self: App, message: string): JsonNode =
-  self.scene.logger.log(%*{"event": "legacy/haSensor:error", "error": message})
+  self.logError(message)
   return %*{"error": message}
 
 proc get*(self: App, context: ExecutionContext): JsonNode =

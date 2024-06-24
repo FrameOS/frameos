@@ -4,7 +4,7 @@ import uri
 import std/strformat
 import std/strutils
 import lib/httpclient
-import options
+import frameos/logger
 import frameos/config
 import frameos/types
 import frameos/utils/image
@@ -20,11 +20,8 @@ type
 proc init*(self: App) =
   self.appConfig.search = self.appConfig.search.strip()
 
-proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": "unsplash:log", "message": message})
-
 proc error*(self: App, context: ExecutionContext, message: string): Image =
-  self.scene.logger.log(%*{"event": &"unsplash:error", "error": message})
+  self.logError(message)
   result = renderError(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
         if context.hasImage: context.image.height else: self.frameConfig.renderHeight(), message)
 

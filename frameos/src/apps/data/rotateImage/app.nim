@@ -1,6 +1,4 @@
 import pixie
-import json
-import strformat
 import frameos/types
 
 type
@@ -11,9 +9,6 @@ type
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
-
-proc log*(self: AppRoot, message: string) =
-  self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
 
 proc get*(self: App, context: ExecutionContext): Image =
   let originalImage = self.appConfig.image
