@@ -143,12 +143,12 @@ class SceneWriter:
             if app_import not in self.imports:
                 self.imports += [app_import]
             self.init_apps += [
-                'scene.controlCodeRender = render_imageApp.init(-1.NodeId, scene.FrameScene, render_imageApp.AppConfig(',
+                'scene.controlCodeRender = render_imageApp.App(nodeName: "render/image", nodeId: -1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(',
                 f'  offsetX: {int(control_code.get("offsetX", "0"))},',
                 f'  offsetY: {int(control_code.get("offsetY", "0"))},',
                 f'  placement: "{sanitize_nim_string(control_code.get("placement", "top-left"))}",',
                 '))',
-                'scene.controlCodeData = data_qrApp.init(-1.NodeId, scene.FrameScene, data_qrApp.AppConfig(',
+                'scene.controlCodeData = data_qrApp.App(nodeName: "data/qr", nodeId: -1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_qrApp.AppConfig(',
                 f'  backgroundColor: parseHtmlColor("{sanitize_nim_string(control_code.get("backgroundColor", "#000000"))}"),',
                 f'  qrCodeColor: parseHtmlColor("{sanitize_nim_string(control_code.get("qrCodeColor", "#ffffff"))}"),',
                 f'  padding: {int(control_code.get("padding", "1"))},',
