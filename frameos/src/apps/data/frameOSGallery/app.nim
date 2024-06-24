@@ -1,4 +1,4 @@
-import pixie, strformat
+import pixie, strformat, json
 import frameos/utils/image
 import frameos/types
 import frameos/logger
@@ -15,6 +15,6 @@ type
 
 proc get*(self: App, context: ExecutionContext): Image =
   let category = if self.appConfig.category == "other": self.appConfig.categoryOther else: self.appConfig.category
-  self.log(&"Category: {category}")
+  self.log(%*{"category": category})
   let url = &"{BASE_URL}?category={category}"
   result = downloadImage(url)

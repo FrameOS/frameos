@@ -48,8 +48,7 @@ proc get*(self: App, context: ExecutionContext): string =
       ]
     }
   try:
-    self.scene.logger.log(%*{"event": &"openai:{self.nodeId}:request", "user": self.appConfig.user,
-        "system": self.appConfig.system})
+    self.log(%*{"user": self.appConfig.user, "system": self.appConfig.system})
     let response = client.request("https://api.openai.com/v1/chat/completions",
         httpMethod = HttpPost, body = $body)
     if response.code != Http200:
@@ -62,7 +61,7 @@ proc get*(self: App, context: ExecutionContext): string =
       return
     let json = parseJson(response.body)
     let reply = json{"choices"}{0}{"message"}{"content"}.getStr
-    self.scene.logger.log(%*{"event": &"openai:{self.nodeId}:reply", "reply": reply})
+    self.log(%*{"reply": reply})
     result = reply
   except CatchableError as e:
     self.error "OpenAI API error: " & $e.msg

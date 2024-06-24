@@ -54,7 +54,7 @@ proc init*(self: App) =
   self.images = getImagesInFolder(self.appConfig.path)
   self.counter = 0
   self.log("Found " & $self.images.len & " images in the folder: " & self.appConfig.path)
-  self.log(self.images.join(", "))
+  self.log(%*{"images": self.images})
   if self.appConfig.order == "random":
     randomize()
     self.images.shuffle()
