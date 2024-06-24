@@ -69,7 +69,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
       nextNode = -1.NodeId
     
     if DEBUG:
-      self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
 proc runEvent*(context: var ExecutionContext) =
   let self = Scene(context.scene)
@@ -105,7 +105,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_splitApp.App(nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
+  scene.node1 = render_splitApp.App(nodeName: "render/split", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 10,
     inputImage: none(Image),
     columns: 1,
@@ -144,24 +144,24 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 2.NodeId,
   ))
-  scene.node2 = logic_ifElseApp.App(nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: logic_ifElseApp.AppConfig(
+  scene.node2 = logic_ifElseApp.App(nodeName: "logic/ifElse", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: logic_ifElseApp.AppConfig(
     condition: context.loopIndex mod 2 == 0,
     thenNode: 3.NodeId,
     elseNode: 4.NodeId,
   ))
-  scene.node3 = render_gradientApp.App(nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
+  scene.node3 = render_gradientApp.App(nodeName: "render/gradient", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
     startColor: parseHtmlColor("#800000"),
     endColor: parseHtmlColor("#e534df"),
     inputImage: none(Image),
     angle: 45.0,
   ))
-  scene.node4 = render_gradientApp.App(nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
+  scene.node4 = render_gradientApp.App(nodeName: "render/gradient", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
     startColor: parseHtmlColor("#1ba179"),
     endColor: parseHtmlColor("#186d1e"),
     inputImage: none(Image),
     angle: 45.0,
   ))
-  scene.node5 = render_splitApp.App(nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
+  scene.node5 = render_splitApp.App(nodeName: "render/split", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     columns: 2,
     inputImage: none(Image),
     rows: 1,
@@ -174,7 +174,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node6 = render_splitApp.App(nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
+  scene.node6 = render_splitApp.App(nodeName: "render/split", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 6,
     inputImage: none(Image),
     columns: 1,
@@ -201,12 +201,12 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 7.NodeId,
   ))
-  scene.node7 = logic_ifElseApp.App(nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: logic_ifElseApp.AppConfig(
+  scene.node7 = logic_ifElseApp.App(nodeName: "logic/ifElse", nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: logic_ifElseApp.AppConfig(
     condition: context.loopIndex mod 3 == 0,
     thenNode: 8.NodeId,
     elseNode: 0.NodeId,
   ))
-  scene.node8 = render_gradientApp.App(nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
+  scene.node8 = render_gradientApp.App(nodeName: "render/gradient", nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
     startColor: parseHtmlColor("#ddeb24"),
     endColor: parseHtmlColor("#dbff29"),
     inputImage: none(Image),

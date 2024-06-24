@@ -72,7 +72,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
       nextNode = -1.NodeId
     
     if DEBUG:
-      self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
 proc runEvent*(context: var ExecutionContext) =
   let self = Scene(context.scene)
@@ -108,7 +108,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_textApp.App(nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
+  scene.node1 = render_textApp.App(nodeName: "render/text", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     vAlign: "top",
     position: "left",
     inputImage: none(Image),
@@ -123,7 +123,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     overflow: "fit-bounds",
   ))
   scene.node1.init()
-  scene.node2 = render_textApp.App(nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
+  scene.node2 = render_textApp.App(nodeName: "render/text", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "right",
     vAlign: "top",
     inputImage: none(Image),
@@ -138,11 +138,11 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     overflow: "fit-bounds",
   ))
   scene.node2.init()
-  scene.node3 = logic_setAsStateApp.App(nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: logic_setAsStateApp.AppConfig(
+  scene.node3 = logic_setAsStateApp.App(nodeName: "logic/setAsState", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: logic_setAsStateApp.AppConfig(
     stateKey: "setField",
     valueString: "chicken",
   ))
-  scene.node5 = render_textApp.App(nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
+  scene.node5 = render_textApp.App(nodeName: "render/text", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "left",
     inputImage: none(Image),
     text: state{"setField"}.getStr(),
@@ -157,7 +157,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     overflow: "fit-bounds",
   ))
   scene.node5.init()
-  scene.node6 = render_textApp.App(nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
+  scene.node6 = render_textApp.App(nodeName: "render/text", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "right",
     inputImage: none(Image),
     text: state{"unknown"}.getStr(),
@@ -172,14 +172,14 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     overflow: "fit-bounds",
   ))
   scene.node6.init()
-  scene.node4 = logic_setAsStateApp.App(nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: logic_setAsStateApp.AppConfig(
+  scene.node4 = logic_setAsStateApp.App(nodeName: "logic/setAsState", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: logic_setAsStateApp.AppConfig(
     valueString: "potato",
     stateKey: "unknown",
   ))
-  scene.node7 = logic_setAsStateApp.App(nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: logic_setAsStateApp.AppConfig(
+  scene.node7 = logic_setAsStateApp.App(nodeName: "logic/setAsState", nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: logic_setAsStateApp.AppConfig(
     stateKey: "misc",
   ))
-  scene.node8 = render_textApp.App(nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
+  scene.node8 = render_textApp.App(nodeName: "render/text", nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "left",
     vAlign: "bottom",
     inputImage: none(Image),

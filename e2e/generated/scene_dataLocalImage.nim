@@ -51,7 +51,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
       nextNode = -1.NodeId
     
     if DEBUG:
-      self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
 proc runEvent*(context: var ExecutionContext) =
   let self = Scene(context.scene)
@@ -87,19 +87,19 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_imageApp.App(nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
+  scene.node1 = render_imageApp.App(nodeName: "render/image", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     inputImage: none(Image),
     placement: "cover",
     offsetX: 0,
     offsetY: 0,
   ))
-  scene.node2 = data_localImageApp.App(nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_localImageApp.AppConfig(
+  scene.node2 = data_localImageApp.App(nodeName: "data/localImage", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_localImageApp.AppConfig(
     path: "./assets/image.png",
     order: "random",
     counterStateKey: "",
   ))
   scene.node2.init()
-  scene.node3 = render_textApp.App(nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
+  scene.node3 = render_textApp.App(nodeName: "render/text", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "Activate proton beam",
     inputImage: none(Image),
     position: "center",

@@ -63,7 +63,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
       nextNode = -1.NodeId
     
     if DEBUG:
-      self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
 proc runEvent*(context: var ExecutionContext) =
   let self = Scene(context.scene)
@@ -99,13 +99,13 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_gradientApp.App(nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
+  scene.node1 = render_gradientApp.App(nodeName: "render/gradient", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
     startColor: parseHtmlColor("#57802d"),
     endColor: parseHtmlColor("#114b38"),
     inputImage: none(Image),
     angle: 45.0,
   ))
-  scene.node2 = render_textApp.App(nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
+  scene.node2 = render_textApp.App(nodeName: "render/text", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     inputImage: none(Image),
     text: state{"text"}.getStr(),
     position: "center",
@@ -120,7 +120,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     overflow: "fit-bounds",
   ))
   scene.node2.init()
-  scene.node3 = render_splitApp.App(nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
+  scene.node3 = render_splitApp.App(nodeName: "render/split", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 2,
     inputImage: none(Image),
     columns: 1,
@@ -135,13 +135,13 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node4 = render_gradientApp.App(nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
+  scene.node4 = render_gradientApp.App(nodeName: "render/gradient", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
     endColor: parseHtmlColor("#81081c"),
     inputImage: none(Image),
     startColor: parseHtmlColor("#800080"),
     angle: 45.0,
   ))
-  scene.node5 = render_textApp.App(nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
+  scene.node5 = render_textApp.App(nodeName: "render/text", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     overflow: "visible",
     inputImage: none(Image),
     text: state{"text"}.getStr(),
@@ -156,7 +156,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderWidth: 2,
   ))
   scene.node5.init()
-  scene.node6 = logic_setAsStateApp.App(nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: logic_setAsStateApp.AppConfig(
+  scene.node6 = logic_setAsStateApp.App(nodeName: "logic/setAsState", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: logic_setAsStateApp.AppConfig(
     stateKey: "text",
   ))
   runEvent(context)

@@ -46,7 +46,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
       nextNode = -1.NodeId
     
     if DEBUG:
-      self.logger.log(%*{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
 proc runEvent*(context: var ExecutionContext) =
   let self = Scene(context.scene)
@@ -82,7 +82,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_splitApp.App(nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
+  scene.node1 = render_splitApp.App(nodeName: "render/split", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 3,
     columns: 3,
     gap: "10",
@@ -110,11 +110,11 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node2 = render_colorApp.App(nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_colorApp.AppConfig(
+  scene.node2 = render_colorApp.App(nodeName: "render/color", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_colorApp.AppConfig(
     color: parseHtmlColor("#ff0000"),
     inputImage: none(Image),
   ))
-  scene.node3 = render_colorApp.App(nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_colorApp.AppConfig(
+  scene.node3 = render_colorApp.App(nodeName: "render/color", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_colorApp.AppConfig(
     color: parseHtmlColor("#22b44e"),
     inputImage: none(Image),
   ))
