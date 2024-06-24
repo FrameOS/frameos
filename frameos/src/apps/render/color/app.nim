@@ -1,6 +1,5 @@
 import pixie
 import options
-import frameos/config
 import frameos/types
 
 type

@@ -1,6 +1,5 @@
 import json
 import frameos/types
-import frameos/logger
 
 type
   AppConfig* = object

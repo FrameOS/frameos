@@ -1,12 +1,9 @@
 import pixie
 import options
 import json
-import strformat
 import lib/httpclient
 import frameos/utils/image
-import frameos/config
 import frameos/types
-import frameos/logger
 
 type
   AppConfig* = object

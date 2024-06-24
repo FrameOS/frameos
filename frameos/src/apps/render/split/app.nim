@@ -1,7 +1,6 @@
 import strutils
 import pixie
 import options
-import frameos/config
 import frameos/types
 import frameos/utils/image
 

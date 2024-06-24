@@ -1,5 +1,4 @@
 import pixie
-import frameos/config
 import frameos/types
 import QRgen
 import QRgen/renderer

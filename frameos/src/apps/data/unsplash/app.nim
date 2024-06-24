@@ -4,8 +4,6 @@ import uri
 import std/strformat
 import std/strutils
 import lib/httpclient
-import frameos/logger
-import frameos/config
 import frameos/types
 import frameos/utils/image
 

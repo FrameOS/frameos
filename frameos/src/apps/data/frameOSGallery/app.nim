@@ -1,7 +1,6 @@
 import pixie, strformat, json
 import frameos/utils/image
 import frameos/types
-import frameos/logger
 
 const BASE_URL = "https://gallery.frameos.net/image"
 

@@ -1,7 +1,5 @@
 import pixie
 import frameos/utils/image
-import frameos/logger
-import frameos/config
 import frameos/types
 
 type

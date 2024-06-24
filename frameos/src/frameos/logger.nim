@@ -137,26 +137,3 @@ proc newLogger*(frameConfig: FrameConfig): Logger =
     logger.enabled = false
 
   result = logger
-
-proc logAppName*(self: AppRoot): string =
-  if self.nodeName == "": $self.nodeId else: $self.nodeId & ":" & self.nodeName
-
-proc log*(self: AppRoot, message: string) =
-  self.scene.logger.log(%*{
-    "event": &"log:{self.logAppName()}",
-    "message": message
-  })
-
-# Note: message will be modified
-proc log*(self: AppRoot, message: JsonNode) =
-  if message.kind == JObject:
-    message["event"] = %*("log:" & self.logAppName() & (if message.hasKey("event"): ":" & message["event"].getStr() else: ""))
-    self.scene.logger.log(message)
-  else:
-    self.log($message)
-
-proc logError*(self: AppRoot, message: string) =
-  self.scene.logger.log(%*{
-    "event": &"error:{self.logAppName()}",
-    "error": message
-  })

@@ -1,6 +1,5 @@
 import options
 import frameos/types
-import frameos/logger
 import lib/httpclient
 
 type

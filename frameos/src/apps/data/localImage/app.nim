@@ -2,9 +2,7 @@ import json
 import pixie
 import options
 import frameos/utils/image
-import frameos/config
 import frameos/types
-import frameos/logger
 import os, strutils
 import std/random
 

@@ -2,9 +2,7 @@ import strformat
 import pixie
 import options
 import frameos/utils/image
-import frameos/config
 import frameos/types
-import frameos/logger
 
 type
   AppConfig* = object

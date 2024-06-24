@@ -1,7 +1,6 @@
 import json, strformat, options, strutils
 import lib/httpclient
 import frameos/types
-import frameos/logger
 
 type
   AppConfig* = object

@@ -1,6 +1,5 @@
 import pixie, options, unicode
 import frameos/types
-import frameos/config
 import frameos/utils/font
 
 type

@@ -1,7 +1,6 @@
 import pixie
 import options
 import frameos/types
-import frameos/config
 
 type
   AppConfig* = object
