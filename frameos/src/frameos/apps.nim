@@ -1,4 +1,5 @@
 import json
+import strformat
 import frameos/types
 
 proc renderWidth*(config: FrameConfig): int {.inline.} =

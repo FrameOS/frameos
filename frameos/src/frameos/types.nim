@@ -1,5 +1,4 @@
-import json, jester, pixie, hashes
-import std/locks
+import json, jester, pixie, hashes, locks
 
 type
   FrameConfig* = ref object

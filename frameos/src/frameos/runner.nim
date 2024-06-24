@@ -1,11 +1,11 @@
 import json, pixie, times, options, asyncdispatch, strformat, strutils, locks, tables
 import pixie/fileformats/png
-from scenes/scenes import getExportedScenes, defaultSceneId
+import scenes/scenes
 
+import frameos/apps
 import frameos/channels
-import frameos/types
-import frameos/config
 import frameos/logger
+import frameos/types
 import frameos/utils/image
 
 import drivers/drivers as drivers
