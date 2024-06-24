@@ -146,4 +146,8 @@ proc log*(self: AppRoot, message: string) =
   })
 
 proc logError*(self: AppRoot, message: string) =
-  self.scene.logger.log(%*{"event": "error", "node": self.nodeId, "error": message})
+  let appName = if self.nodeName == "": $self.nodeId else: self.nodeName & ":" & $self.nodeId
+  self.scene.logger.log(%*{
+    "event": &"error:{appName}",
+    "error": message
+  })
