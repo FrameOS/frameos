@@ -17,8 +17,8 @@ export function Frames() {
 
   return (
     <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">
-      <PanelGroup direction="vertical" units="pixels">
-        <Panel minSize={60} maxSize={60}>
+      <div className="flex flex-col h-full max-h-full">
+        <div className="h-[60px]">
           <Header
             title="FrameOS"
             right={
@@ -30,31 +30,26 @@ export function Frames() {
               </div>
             }
           />
-        </Panel>
-        <Panel>
-          <div className="overflow-auto h-full">
-            <Masonry
-              id="frames"
-              className="p-4 columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4"
-            >
-              {framesList.map((frame) => (
-                <div key={frame.id} className="mb-4">
-                  <Frame frame={frame} />
-                </div>
-              ))}
-            </Masonry>
-            <div className="p-4">
-              {formVisible ? (
-                <NewFrame />
-              ) : (
-                <Button color="secondary" onClick={showForm}>
-                  Add a smart frame
-                </Button>
-              )}
-            </div>
+        </div>
+        <div className="overflow-auto h-full">
+          <Masonry id="frames" className="p-4">
+            {framesList.map((frame) => (
+              <div key={frame.id} className="mb-4">
+                <Frame frame={frame} />
+              </div>
+            ))}
+          </Masonry>
+          <div className="p-4">
+            {formVisible ? (
+              <NewFrame />
+            ) : (
+              <Button color="secondary" onClick={showForm}>
+                Add a smart frame
+              </Button>
+            )}
           </div>
-        </Panel>
-      </PanelGroup>
+        </div>
+      </div>
     </div>
   )
 }

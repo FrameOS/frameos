@@ -13,7 +13,7 @@ export function Panels() {
 
   return frame ? (
     <BindLogic logic={panelsLogic} props={{ frameId }}>
-      <PanelGroup direction="horizontal" units="percentages" className="flex-1 p-4">
+      <PanelGroup direction="horizontal" className="flex-1 p-4">
         {panels.TopLeft.length > 0 || panels.BottomLeft.length > 0 ? (
           <Panel>
             <PanelGroup direction="vertical">
