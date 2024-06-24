@@ -124,7 +124,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   let sceneTimer = epochTime()
   let requiredWidth = self.frameConfig.renderWidth()
   let requiredHeight = self.frameConfig.renderHeight()
-  self.logger.log(%*{"event": "render", "width": requiredWidth, "height": requiredHeight})
+  self.logger.log(%*{"event": "render:scene", "width": requiredWidth, "height": requiredHeight})
 
   var context = ExecutionContext(
     scene: scene,
@@ -157,7 +157,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   self.logger.log(%*{"event": "render:done", "ms": round((epochTime() - sceneTimer) * 1000, 3)})
 
 proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
-  self.logger.log(%*{"event": "startRenderLoop"})
+  self.logger.log(%*{"event": "render:startLoop"})
   var timer = 0.0
   var driverTimer = 0.0
   var sleepDuration = 0.0
@@ -173,7 +173,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     let sceneId = if exportedScenes.hasKey(self.currentSceneId): self.currentSceneId else: getFirstSceneId()
     let exportedScene = exportedScenes[sceneId]
     if lastSceneId != sceneId:
-      self.logger.log(%*{"event": "sceneChange", "sceneId": sceneId.string})
+      self.logger.log(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
       if self.scenes.hasKey(sceneId):
         currentScene = self.scenes[sceneId]
       else:
@@ -219,7 +219,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
         # Two fast scenes in a row
         if fastSceneCount == 2:
           # TODO: capture logs per _scene_ and log if slow
-          self.logger.log(%*{"event": "pause", "message": "Rendering fast. Pausing all scene render logs for 10 seconds."})
+          self.logger.log(%*{"event": "render:pause", "message": "Rendering fast. Pausing all scene render logs for 10 seconds."})
           self.logger.disable()
           fastSceneResumeAt = now + 10
         elif fastSceneResumeAt != 0.0 and now > fastSceneResumeAt:
@@ -250,7 +250,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     # If no sleep duration provided by the scene, calculate based on the interval
     sleepDuration = if nextSleep >= 0: nextSleep * 1000
                     else: max((interval - (epochTime() - timer)) * 1000, 0.1)
-    self.logger.log(%*{"event": "sleep", "ms": round(sleepDuration, 3)})
+    self.logger.log(%*{"event": "render:sleep", "ms": round(sleepDuration, 3)})
 
     let future = sleepAsync(sleepDuration)
     self.sleepFuture = some(future)

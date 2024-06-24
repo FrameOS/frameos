@@ -139,14 +139,14 @@ proc newLogger*(frameConfig: FrameConfig): Logger =
   result = logger
 
 proc log*(self: AppRoot, message: string) =
-  let appName = if self.nodeName == "": $self.nodeId else: self.nodeName & ":" & $self.nodeId
+  let appName = if self.nodeName == "": $self.nodeId else: $self.nodeId & ":" & self.nodeName
   self.scene.logger.log(%*{
     "event": &"log:{appName}",
     "message": message
   })
 
 proc logError*(self: AppRoot, message: string) =
-  let appName = if self.nodeName == "": $self.nodeId else: self.nodeName & ":" & $self.nodeId
+  let appName = if self.nodeName == "": $self.nodeId else: $self.nodeId & ":" & self.nodeName
   self.scene.logger.log(%*{
     "event": &"error:{appName}",
     "error": message

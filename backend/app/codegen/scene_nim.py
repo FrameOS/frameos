@@ -684,7 +684,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
       nextNode = -1.NodeId
     {(newline + "    ").join(self.after_node_lines)}
     if DEBUG:
-      self.logger.log(%*{{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
+      self.logger.log(%*{{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
 
 proc runEvent*(context: var ExecutionContext) =
   let self = Scene(context.scene)
