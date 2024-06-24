@@ -209,6 +209,6 @@ proc newServer*(frameOS: FrameOS): Server =
   )
 
 proc startServer*(self: Server) {.async.} =
-  log(%*{"event": "server:start", "message": "Starting web server"})
+  log(%*{"event": "http:start", "message": "Starting web server"})
   asyncCheck listenForRender()
   self.jester.serve() # blocks forever
