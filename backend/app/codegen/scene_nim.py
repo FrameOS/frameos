@@ -419,6 +419,7 @@ class SceneWriter:
 
         return cache_fields
 
+    # case_or_block = 'case' or 'block' or 'vars' or 'blockWithVars'
     def process_app_run_lines(self, node, case_or_block = "case"):
         node_id = node["id"]
         name = node.get("data", {}).get("keyword", f"app_{node_id}")
@@ -431,7 +432,7 @@ class SceneWriter:
             run_lines += [
                 f"of {node_integer}.NodeId: # {name}",
             ]
-        else:
+        elif case_or_block == "block" or case_or_block == "blockWithVars" or case_or_block == "vars":
             run_lines += [
                 "block:",
             ]
@@ -441,21 +442,34 @@ class SceneWriter:
         source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
 
         for key, code in field_inputs_for_node.items():
+            if case_or_block == "vars":
+                fieldAssignment = f"let {key}"
+            else:
+                fieldAssignment = f"self.{app_id}.appConfig.{key}"
+
+            if case_or_block == "blockWithVars":
+                run_lines += [f"  {fieldAssignment} = {key}"]
+                continue
+
             if key in code_fields_for_node:
                 code_lines = self.get_code_field_value(code_fields_for_node[key])
                 # Wrap optional images with some()
                 if not self.required_fields[node_id].get(key, False) and field_types_for_node.get(key, "string") == "image":
                     code_lines[0] = "some(" + code_lines[0]
                     code_lines[-1] = code_lines[-1] + ")"
-                run_lines += [f"  self.{app_id}.appConfig.{key} = {code_lines[0]}"]
+                run_lines += [f"  {fieldAssignment} = {code_lines[0]}"]
                 for line in code_lines[1:]:
                     run_lines += [f"  {line}"]
             else:
-                run_lines += [f"  self.{app_id}.appConfig.{key} = {code}"]
+                run_lines += [f"  {fieldAssignment} = {code}"]
 
         for key, (source_id, source_key) in source_field_inputs_for_node.items():
+            if case_or_block == "vars":
+                fieldAssignment = "let {key}"
+            else:
+                fieldAssignment = f"self.{app_id}.appConfig.{key}"
             run_lines += [
-                f"  self.{app_id}.appConfig.{key} = self.node{self.node_id_to_integer(source_id)}.appConfig.{source_key}"
+                f"  {fieldAssignment} = self.node{self.node_id_to_integer(source_id)}.appConfig.{source_key}"
             ]
         next_node_id = self.next_nodes.get(node_id, None)
 
@@ -464,9 +478,8 @@ class SceneWriter:
             run_lines += [
                 f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
             ]
-        else:
+        elif case_or_block == "block" or case_or_block == "blockWithVars":
             run_lines += [f"  self.{app_id}.get(context)"]
-
 
         return run_lines
 
@@ -909,9 +922,17 @@ var exportedScene* = ExportedScene(
             cache_enabled = node.get("data", {}).get('cache', {}).get('enabled', False)
             if node.get("type") == "app":
                 self.process_app_run(node)
-                result = self.process_app_run_lines(node, "block")
-                if cache_enabled:
-                    result = self.wrap_with_cache(node_id, result, node.get("data", {}))
+                input_enabled = node.get("data", {}).get('cache', {}).get('inputEnabled', False)
+                if input_enabled:
+                    vars = self.process_app_run_lines(node, "vars")
+                    result = self.process_app_run_lines(node, "blockWithVars")
+                    if cache_enabled:
+                        result = self.wrap_with_cache(node_id, result, node.get("data", {}))
+                    result = vars + [f"  {r}" for r in result]
+                else:
+                    result = self.process_app_run_lines(node, "block")
+                    if cache_enabled:
+                        result = self.wrap_with_cache(node_id, result, node.get("data", {}))
             elif node.get("type") == "code":
                 code = [node.get("data", {}).get("code", "")]
                 code_args = node.get("data", {}).get("codeArgs", [])
@@ -1010,11 +1031,7 @@ var exportedScene* = ExportedScene(
                 }
 
             if len(cache_fields) > 0:
-                app_id = f"node{self.node_id_to_integer(node_id)}"
-                if node.get("type") == "app":
-                    cache_key = ", ".join(map(lambda x: f"self.{app_id}.appConfig.{x}", cache_fields.keys()))
-                else:
-                    cache_key = ", ".join(cache_fields.keys())
+                cache_key = ", ".join(cache_fields.keys())
                 cache_key_data_type = ", ".join(cache_fields.values())
                 if len(cache_fields) > 1:
                     cache_key = f"({cache_key})"
