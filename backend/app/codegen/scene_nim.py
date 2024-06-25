@@ -928,7 +928,8 @@ var exportedScene* = ExportedScene(
                     result = self.process_app_run_lines(node, "blockWithVars")
                     if cache_enabled:
                         result = self.wrap_with_cache(node_id, result, node.get("data", {}))
-                    result = vars + [f"  {r}" for r in result]
+                    if len(vars) > 1: # just "block:" doesn't as a line
+                        result = vars + [f"  {r}" for r in result]
                 else:
                     result = self.process_app_run_lines(node, "block")
                     if cache_enabled:
