@@ -33,7 +33,7 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
   var client = newHttpClient(timeout = 60000)
   var parsedEvents: seq[VEvent]
   try:
-    parsedEvents = parseICalendar(self.appConfig.ical)
+    parsedEvents = parseICalendar(self.appConfig.ical).events
   except CatchableError as e:
     self.logError "Error parsing iCal: " & $e.msg
     return
