@@ -1,6 +1,7 @@
 import pixie
 import times
 import strutils
+import sequtils
 import chrono
 import options
 import std/algorithm
@@ -30,9 +31,20 @@ type
     description*: string
     startTime*: Timestamp
     endTime*: Timestamp
+    fullDay*: bool
     location*: string
     rrules*: seq[RRule]
     recurrenceId*: string
+
+  Calendar* = ref object
+    events*: seq[VEvent]
+    timeZone*: string
+
+  CalendarParser* = ref object
+    calendar*: Calendar
+    currentVEvent*: VEvent
+    inVEvent*: bool
+    inVCalendar*: bool
 
 proc extractTimeZone*(dateTimeStr: string): string =
   if dateTimeStr.startsWith("TZID="):
@@ -41,24 +53,22 @@ proc extractTimeZone*(dateTimeStr: string): string =
   else:
     "UTC"
 
-proc parseDateTime*(dateTimeStr: string, tzInfo: string): Timestamp =
+proc parseDateTime*(dateTimeStr: string, tzName: string): Timestamp =
   let cleanDateTimeStr = if dateTimeStr.contains(";"):
     dateTimeStr.split(";")[1]
   elif dateTimeStr.contains(":"):
     dateTimeStr.split(":")[1]
   else:
     dateTimeStr
-  let hasZ = cleanDateTimeStr.endsWith("Z")
-  let finalDateTimeStr = if hasZ: cleanDateTimeStr[0 ..< ^1] else: cleanDateTimeStr
-  let format = if 'T' in finalDateTimeStr:
-                  "{year/4}{month/2}{day/2}T{hour/2}{minute/2}{second/2}"
-                else:
-                  "{year/4}{month/2}{day/2}"
+  let zOrEmpty = if cleanDateTimeStr.endsWith("Z"): "Z" else: ""
+  let format = if 'T' in cleanDateTimeStr:
+                 "{year/4}{month/2}{day/2}T{hour/2}{minute/2}{second/2}" & zOrEmpty
+               else:
+                 "{year/4}{month/2}{day/2}"
   try:
-    return parseTs(format, finalDateTimeStr, tzInfo)
+    return parseTs(format, cleanDateTimeStr, tzName)
   except ValueError as e:
-    raise newException(TimeParseError, "Failed to parse datetime string: " & dateTimeStr &
-      ". Error: " & e.msg)
+    raise newException(TimeParseError, "Failed to parse datetime string: " & dateTimeStr & ". Error: " & e.msg)
 
 proc unescape*(line: string): string =
   result = ""
@@ -81,15 +91,19 @@ proc unescape*(line: string): string =
     inc i
   return result
 
-proc processLine*(line: string, currentVEvent: var VEvent, inVEvent: var bool, events: var seq[VEvent]) =
+proc processLine*(self: CalendarParser, line: string) =
   try:
     if line.startsWith("BEGIN:VEVENT"):
-      inVEvent = true
-      currentVEvent = VEvent()
+      self.inVEvent = true
+      self.currentVEvent = VEvent()
     elif line.startsWith("END:VEVENT"):
-      inVEvent = false
-      events.add(currentVEvent)
-    elif inVEvent:
+      self.inVEvent = false
+      self.calendar.events.add(self.currentVEvent)
+    elif line.startsWith("BEGIN:VCALENDAR"):
+      self.inVCalendar = true
+    elif line.startsWith("END:VCALENDAR"):
+      self.inVCalendar = false
+    elif self.inVEvent or self.inVCalendar:
       let splitPos = line.find(':')
       if splitPos == -1:
         return
@@ -97,110 +111,130 @@ proc processLine*(line: string, currentVEvent: var VEvent, inVEvent: var bool, e
       if arr.len > 1:
         let key = arr[0]
         let value = arr[1]
-        case key
-        of "DTSTART", "DTEND":
-          let tzInfo = extractTimeZone(value)
-          let timestamp = parseDateTime(value, tzInfo)
-          if key == "DTSTART":
-            currentVEvent.startTime = timestamp
-          else:
-            currentVEvent.endTime = timestamp
-        of "LOCATION":
-          currentVEvent.location = unescape(value)
-        of "SUMMARY":
-          currentVEvent.summary = unescape(value)
-        of "RECURRENCE-ID":
-          currentVEvent.recurrenceId = unescape(value)
-        of "RRULE":
-          var rrule = RRule(weekStart: RRuleDay.none, byDay: @[], byMonth: @[], byMonthDay: @[])
-          for split in arr[1].split(';'):
-            let keyValue = split.split('=', 2)
-            if keyValue.len != 2:
-              continue
-            case keyValue[0]:
-            of "FREQ":
-              case keyValue[1]
-              of "DAILY":
-                rrule.freq = RRuleFreq.daily
-              of "WEEKLY":
-                rrule.freq = RRuleFreq.weekly
-              of "MONTHLY":
-                rrule.freq = RRuleFreq.monthly
-              of "YEARLY":
-                rrule.freq = RRuleFreq.yearly
-            of "INTERVAL":
-              rrule.interval = keyValue[1].parseInt()
-            of "COUNT":
-              rrule.count = keyValue[1].parseInt()
-            of "UNTIL":
-              rrule.until = parseDateTime(keyValue[1], extractTimeZone(keyValue[1]))
-            of "BYDAY":
-              # "1SU"
-              for day in keyValue[1].split(','):
-                let dayNum = if day.len > 2: day[0..^2].parseInt() else: 0
-                let day = day[^2..^1]
-                case day.toUpper():
-                of "SU": rrule.byDay.add((RRuleDay.su, dayNum))
-                of "MO": rrule.byDay.add((RRuleDay.mo, dayNum))
-                of "TU": rrule.byDay.add((RRuleDay.tu, dayNum))
-                of "WE": rrule.byDay.add((RRuleDay.we, dayNum))
-                of "TH": rrule.byDay.add((RRuleDay.th, dayNum))
-                of "FR": rrule.byDay.add((RRuleDay.fr, dayNum))
-                of "SA": rrule.byDay.add((RRuleDay.sa, dayNum))
-            of "BYMONTH":
-              for month in keyValue[1].split(','):
-                rrule.byMonth.add(month.parseInt())
-            of "BYMONTHDAY":
-              for monthDay in keyValue[1].split(','):
-                rrule.byMonthDay.add(monthDay.parseInt())
-            of "WKST":
-              case keyValue[1].toUpper()
-              of "SU": rrule.weekStart = RRuleDay.su
-              of "MO": rrule.weekStart = RRuleDay.mo
-              of "TU": rrule.weekStart = RRuleDay.tu
-              of "WE": rrule.weekStart = RRuleDay.we
-              of "TH": rrule.weekStart = RRuleDay.th
-              of "FR": rrule.weekStart = RRuleDay.fr
-              of "SA": rrule.weekStart = RRuleDay.sa
+        if self.inVEvent:
+          case key
+          of "DTSTART", "DTEND":
+            if value.contains("VALUE=DATE"):
+              let parts = value.split(":")
+              let date = parts[len(parts) - 1]
+              self.currentVEvent.fullDay = true
+              var cal = parseCalendar("{year/4}{month/2}{day/2}", date)
+              cal.applyTimezone(self.calendar.timeZone)
+              let timestamp = (cal.ts.float + cal.tzOffset * 60).Timestamp
+              if key == "DTSTART":
+                self.currentVEvent.startTime = timestamp
+              else:
+                self.currentVEvent.endTime = timestamp
             else:
-              echo "!! Unknown RRULE rule: " & split
-          if rrule.interval == 0:
-            rrule.interval = 1
-          if rrule.freq == RRuleFreq.daily:
-            rrule.timeInterval = TimeInterval(days: rrule.interval or 1)
-          elif rrule.freq == RRuleFreq.weekly:
-            rrule.timeInterval = TimeInterval(weeks: rrule.interval or 1)
-          elif rrule.freq == RRuleFreq.monthly:
-            rrule.timeInterval = TimeInterval(months: rrule.interval or 1)
-          elif rrule.freq == RRuleFreq.yearly:
-            rrule.timeInterval = TimeInterval(years: rrule.interval or 1)
-          currentVEvent.rrules.add(rrule)
-        of "DESCRIPTION":
-          currentVEvent.description = unescape(value)
-        else:
-          return
+              let tzInfo = extractTimeZone(value)
+              let timestamp = parseDateTime(value, tzInfo)
+              self.currentVEvent.fullDay = false
+              if key == "DTSTART":
+                self.currentVEvent.startTime = timestamp
+              else:
+                self.currentVEvent.endTime = timestamp
+          of "LOCATION":
+            self.currentVEvent.location = unescape(value)
+          of "SUMMARY":
+            self.currentVEvent.summary = unescape(value)
+          of "RECURRENCE-ID":
+            self.currentVEvent.recurrenceId = unescape(value)
+          of "RRULE":
+            var rrule = RRule(weekStart: RRuleDay.none, byDay: @[], byMonth: @[], byMonthDay: @[])
+            for split in arr[1].split(';'):
+              let keyValue = split.split('=', 2)
+              if keyValue.len != 2:
+                continue
+              case keyValue[0]:
+              of "FREQ":
+                case keyValue[1]
+                of "DAILY":
+                  rrule.freq = RRuleFreq.daily
+                of "WEEKLY":
+                  rrule.freq = RRuleFreq.weekly
+                of "MONTHLY":
+                  rrule.freq = RRuleFreq.monthly
+                of "YEARLY":
+                  rrule.freq = RRuleFreq.yearly
+              of "INTERVAL":
+                rrule.interval = keyValue[1].parseInt()
+              of "COUNT":
+                rrule.count = keyValue[1].parseInt()
+              of "UNTIL":
+                rrule.until = parseDateTime(keyValue[1], extractTimeZone(keyValue[1]))
+              of "BYDAY":
+                # "1SU"
+                for day in keyValue[1].split(','):
+                  let dayNum = if day.len > 2: day[0..^2].parseInt() else: 0
+                  let day = day[^2..^1]
+                  case day.toUpper():
+                  of "SU": rrule.byDay.add((RRuleDay.su, dayNum))
+                  of "MO": rrule.byDay.add((RRuleDay.mo, dayNum))
+                  of "TU": rrule.byDay.add((RRuleDay.tu, dayNum))
+                  of "WE": rrule.byDay.add((RRuleDay.we, dayNum))
+                  of "TH": rrule.byDay.add((RRuleDay.th, dayNum))
+                  of "FR": rrule.byDay.add((RRuleDay.fr, dayNum))
+                  of "SA": rrule.byDay.add((RRuleDay.sa, dayNum))
+              of "BYMONTH":
+                for month in keyValue[1].split(','):
+                  rrule.byMonth.add(month.parseInt())
+              of "BYMONTHDAY":
+                for monthDay in keyValue[1].split(','):
+                  rrule.byMonthDay.add(monthDay.parseInt())
+              of "WKST":
+                case keyValue[1].toUpper()
+                of "SU": rrule.weekStart = RRuleDay.su
+                of "MO": rrule.weekStart = RRuleDay.mo
+                of "TU": rrule.weekStart = RRuleDay.tu
+                of "WE": rrule.weekStart = RRuleDay.we
+                of "TH": rrule.weekStart = RRuleDay.th
+                of "FR": rrule.weekStart = RRuleDay.fr
+                of "SA": rrule.weekStart = RRuleDay.sa
+              else:
+                echo "!! Unknown RRULE rule: " & split
+            if rrule.interval == 0:
+              rrule.interval = 1
+            if rrule.freq == RRuleFreq.daily:
+              rrule.timeInterval = TimeInterval(days: rrule.interval or 1)
+            elif rrule.freq == RRuleFreq.weekly:
+              rrule.timeInterval = TimeInterval(weeks: rrule.interval or 1)
+            elif rrule.freq == RRuleFreq.monthly:
+              rrule.timeInterval = TimeInterval(months: rrule.interval or 1)
+            elif rrule.freq == RRuleFreq.yearly:
+              rrule.timeInterval = TimeInterval(years: rrule.interval or 1)
+            self.currentVEvent.rrules.add(rrule)
+          of "DESCRIPTION":
+            self.currentVEvent.description = unescape(value)
+          else:
+            return
+        elif self.inVCalendar:
+          case key
+          of "X-WR-TIMEZONE":
+            self.calendar.timeZone = value
+          else:
+            return
+
   except CatchableError as e:
     echo "Failed to parse calendar line \"" & line & "\". Error: " & e.msg
 
-proc parseICalendar*(content: string): seq[VEvent] =
-  result = @[]
+proc parseICalendar*(content: string): Calendar =
   let lines = content.splitLines()
-  var currentVEvent: VEvent
-  var inVEvent = false
   var accumulator = ""
+  var parser = CalendarParser(calendar: Calendar(events: @[], timeZone: "UTC"), currentVEvent: nil, inVEvent: false,
+                              inVCalendar: false)
 
   for i, line in lines:
     if line.len > 0 and (line[0] == ' ' or line[0] == '\t'):
       accumulator.add(line[1..^1])
       continue
     if accumulator != "":
-      processLine(accumulator.strip(), currentVEvent, inVEvent, result)
+      parser.processLine(accumulator.strip())
       accumulator = ""
     accumulator = line
   if accumulator != "":
-    processLine(accumulator.strip(), currentVEvent, inVEvent, result)
-
-  result.sort(proc (a: VEvent, b: VEvent): int = cmp(a.startTime.float, b.startTime.float))
+    parser.processLine(accumulator.strip())
+  parser.calendar.events.sort(proc (a: VEvent, b: VEvent): int = cmp(a.startTime.float, b.startTime.float))
+  return parser.calendar
 
 proc getEvents*(events: seq[VEvent], startTime: Timestamp, endTime: Timestamp, maxCount: int = 1000): seq[(
     Timestamp, VEvent)] =

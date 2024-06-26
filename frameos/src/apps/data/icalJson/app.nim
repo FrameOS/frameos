@@ -48,11 +48,15 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
   let matchedEvents = getEvents(parsedEvents, exportFrom, exportUntil, self.appConfig.exportCount)
   var eventsReply: JsonNode = %[]
   for (time, event) in matchedEvents:
+    let startTime = if event.fullDay: fromUnixFloat(time.float).format("yyyy-MM-dd")
+                    else: fromUnixFloat(time.float).format("yyyy-MM-dd'T'HH:mm:ss")
+    let endTimeFloat = time.float + (event.endTime.float - event.startTime.float)
+    let endTime = if event.fullDay: fromUnixFloat(endTimeFloat).format("yyyy-MM-dd")
+                  else: fromUnixFloat(endTimeFloat).format("yyyy-MM-dd'T'HH:mm:ss")
     let jsonEvent = %*{
       "summary": event.summary,
-      "startTime": fromUnixFloat(time.float).format("yyyy-MM-dd'T'HH:mm:ss"),
-      "endTime": fromUnixFloat(time.float + (event.endTime.float - event.startTime.float)).format(
-          "yyyy-MM-dd'T'HH:mm:ss"),
+      "startTime": startTime,
+      "endTime": endTime,
       "location": event.location,
       "description": event.description,
     }

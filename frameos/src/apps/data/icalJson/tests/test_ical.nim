@@ -2,8 +2,9 @@ import ../ical
 import chrono, times
 
 block test_lincoln:
-    let iCalFile = readFile("./src/apps/ical/tests/data/lincoln.ics")
-    let events = parseICalendar(iCalFile)
+    echo "Test: lincoln"
+    let iCalFile = readFile("./src/apps/data/icalJson/tests/data/lincoln.ics")
+    let events = parseICalendar(iCalFile).events
     doAssert len(events) == 1
     doAssert events[0].startTime == Timestamp(1202774400.0)
     doAssert events[0].endTime == Timestamp(1202860800.0)
@@ -12,8 +13,9 @@ block test_lincoln:
     doAssert events[0].summary == "Abraham Lincoln"
 
 block test_meetings:
-    let iCalFile = readFile("./src/apps/ical/tests/data/meetings.ics")
-    let events = parseICalendar(iCalFile)
+    echo "Test: meetings"
+    let iCalFile = readFile("./src/apps/data/icalJson/tests/data/meetings.ics")
+    let events = parseICalendar(iCalFile).events
     doAssert len(events) == 5
     doAssert events[0].startTime == Timestamp(1618419600.0)
     doAssert events[0].endTime == Timestamp(1618421400.0)
@@ -44,13 +46,24 @@ block test_meetings:
     doAssert events[4].summary == "One / Two - Meeting"
 
 block test_holidays:
-    let iCalFile = readFile("./src/apps/ical/tests/data/holidays.ics")
-    let events = parseICalendar(iCalFile)
+    echo "Test: holidays"
+    let iCalFile = readFile("./src/apps/data/icalJson/tests/data/holidays.ics")
+    let calendar = parseICalendar(iCalFile)
+    doAssert calendar.timezone == "Europe/Tallinn"
+
+    let events = calendar.events
     doAssert len(events) == 49
+    doAssert events[0].startTime == Timestamp(1147564800.0)
+    doAssert events[0].summary == "Emadepäev"
+
 
 block test_get_events:
-    let iCalFile = readFile("./src/apps/ical/tests/data/meetings.ics")
-    let events = parseICalendar(iCalFile)
+    echo "Test: get_events"
+    let iCalFile = readFile("./src/apps/data/icalJson/tests/data/meetings.ics")
+    let calendar = parseICalendar(iCalFile)
+    let events = calendar.events
+    doAssert calendar.timezone == "Europe/Brussels"
+
     let allEvents = getEvents(events, parseDateTime("20240101", "UTC"), parseDateTime("20250101", "UTC"), 100)
     doAssert len(allEvents) == 52
     doAssert allEvents[0][0] == Timestamp(1704301200.0)
