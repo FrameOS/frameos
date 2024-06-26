@@ -1,4 +1,4 @@
-import { useActions, useValues } from 'kea'
+import { BindLogic, useActions, useValues } from 'kea'
 import { NodeProps, Handle, Position, NodeResizer } from 'reactflow'
 import { CodeNodeData } from '../../../../types'
 import clsx from 'clsx'
@@ -7,45 +7,145 @@ import { TextArea } from '../../../../components/TextArea'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
+import { NodeCache } from './NodeCache'
+import { CodeArg } from './CodeArg'
+import { newNodePickerLogic } from './newNodePickerLogic'
 
-export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
+export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
   const { updateNodeData, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { isSelected, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
+  const { isSelected, node, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
+  const data: CodeNodeData = (node?.data as CodeNodeData) ?? ({ code: '' } satisfies CodeNodeData)
   const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
-
-  const targetNode = nodeEdges.find(
-    (edge) =>
-      edge.sourceHandle === 'fieldOutput' &&
-      (edge.targetHandle?.startsWith('fieldInput/') || edge.targetHandle?.startsWith('codeField/'))
-  )
-  const targetFunction = targetNode?.targetHandle?.replace(/^[^\/]+\//, '')
+  const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
 
   return (
-    <div
-      onClick={select}
-      className={clsx(
-        'shadow-lg border-2 h-full flex flex-col',
-        isSelected
-          ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
-          : 'bg-black bg-opacity-70 border-sky-900 shadow-sky-700/50 '
-      )}
-    >
-      <NodeResizer minWidth={200} minHeight={130} />
+    <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>
       <div
+        onClick={select}
         className={clsx(
-          'frameos-node-title text-xl p-1 gap-2',
-          isSelected ? 'bg-indigo-900' : 'bg-sky-900',
-          'flex w-full items-center'
+          'shadow-lg border-2 h-full flex flex-col',
+          isSelected
+            ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
+            : 'bg-black bg-opacity-70 border-green-900 shadow-green-700/50 '
         )}
       >
-        {[...(data.codeFields ?? []), '+'].map((codeField) => (
+        <NodeResizer minWidth={200} minHeight={119} />
+        <div
+          className={clsx('flex w-full items-center justify-between', isSelected ? 'bg-indigo-900' : 'bg-green-900')}
+        >
+          <div className={clsx('frameos-node-title text-xl px-1 gap-2', 'flex w-full items-center')}>
+            {[...(data.codeArgs ?? []), '+'].map((codeField, i) => (
+              <div key={i} className="flex gap-1 items-center">
+                <Handle
+                  // CodeInputHandle
+                  type="target"
+                  position={Position.Top}
+                  id={`codeField/${typeof codeField === 'object' ? codeField.name : codeField}`}
+                  style={{
+                    position: 'relative',
+                    transform: 'none',
+                    right: 0,
+                    top: 0,
+                    background: 'black',
+                    borderColor: 'white',
+                  }}
+                  isConnectable={isConnectable}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const existingNodeCount = nodeEdges.filter(
+                      (edge) => edge.targetHandle?.startsWith('codeField/') && edge.target === id
+                    ).length
+                    openNewNodePicker(
+                      e.clientX, // screenX
+                      e.clientY, // screenY
+                      (node?.position.x || 0) - existingNodeCount * 20, // diagramX
+                      (node?.position.y || 0) - 40 - existingNodeCount * 150, // diagramY
+                      id, // nodeId
+                      `codeField/${typeof codeField === 'object' ? codeField.name : codeField}`, // handleId
+                      'target' // handleType
+                    )
+                  }}
+                />
+                {codeField === '+' ? (
+                  <em
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      const existingNodeCount = nodeEdges.filter(
+                        (edge) => edge.targetHandle?.startsWith('codeField/') && edge.target === id
+                      ).length
+                      openNewNodePicker(
+                        e.clientX, // screenX
+                        e.clientY, // screenY
+                        (node?.position.x || 0) - existingNodeCount * 20, // diagramX
+                        (node?.position.y || 0) - 40 - existingNodeCount * 150, // diagramY
+                        id, // nodeId
+                        `codeField/+`, // handleId
+                        'target' // handleType
+                      )
+                    }}
+                  >
+                    +
+                  </em>
+                ) : typeof codeField !== 'string' ? (
+                  <div className="cursor-pointer hover:underline">
+                    <CodeArg
+                      key={`${codeField.type}/${codeField.name}`}
+                      codeArg={codeField}
+                      onChange={(value) =>
+                        updateNodeData(id, {
+                          codeArgs: data.codeArgs?.map((c, j) => (i === j ? { ...c, ...value } : c)),
+                        })
+                      }
+                      onDelete={() => editCodeField(codeField.name, '')}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          <DropdownMenu
+            className="w-fit"
+            buttonColor="none"
+            horizontal
+            items={[
+              {
+                label: 'Copy as JSON',
+                onClick: () => copyAppJSON(id),
+                icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Delete Node',
+                onClick: () => deleteApp(id),
+                icon: <TrashIcon className="w-5 h-5" />,
+              },
+            ]}
+          />
+        </div>
+        <div className="p-1 h-full">
+          <TextArea
+            theme="node"
+            className="w-full h-full font-mono resize-none"
+            placeholder={`e.g: state{"magic3"}.getStr()`}
+            value={data.code ?? ''}
+            rows={2}
+            onChange={(value) => updateNodeData(id, { code: value.replaceAll('\n', '') })}
+          />
+        </div>
+        <div
+          className={clsx(
+            'frameos-node-title text-xl px-1 gap-1',
+            isSelected ? 'bg-indigo-900' : 'bg-green-900',
+            'flex w-full justify-between items-center'
+          )}
+        >
           <div className="flex gap-1 items-center">
             <Handle
-              type="target"
-              position={Position.Top}
-              id={`codeField/${codeField}`}
+              // CodeOutputHandle
+              type="source"
+              position={Position.Bottom}
+              id={`fieldOutput`}
               style={{
                 position: 'relative',
                 transform: 'none',
@@ -55,69 +155,38 @@ export function CodeNode({ data, id, isConnectable }: NodeProps<CodeNodeData>): 
                 borderColor: 'white',
               }}
               isConnectable={isConnectable}
+              onClick={(e) => {
+                e.stopPropagation()
+                openNewNodePicker(
+                  e.clientX, // screenX
+                  e.clientY, // screenY
+                  (node?.position.x || 0) + Math.random() * 60 - 10, // diagramX
+                  (node?.position.y || 0) + (node?.height || 300) + Math.random() * 30 + 20, // diagramY
+                  id, // nodeId
+                  `fieldOutput`, // handleId
+                  'source' // handleType
+                )
+              }}
             />
-            {codeField === '+' ? (
-              <em>+</em>
-            ) : (
-              <div className="cursor-pointer" onClick={() => editCodeField(codeField)}>
-                {codeField}
-              </div>
-            )}
+            {data.codeOutputs
+              ? data.codeOutputs.map((c, i) => (
+                  <CodeArg
+                    key={`${i}/${c.type}/${c.name}`}
+                    codeArg={c}
+                    onChange={(value) => {
+                      updateNodeData(id, {
+                        codeOutputs: data.codeOutputs?.map((c, j) => (i === j ? { ...c, ...value } : c)),
+                      })
+                    }}
+                  />
+                ))
+              : null}
           </div>
-        ))}
-      </div>
-      <div className="p-1 h-full">
-        <TextArea
-          theme="node"
-          className="w-full h-full font-mono resize-none"
-          placeholder={`e.g: state{"magic3"}.getStr()`}
-          value={data.code ?? ''}
-          rows={2}
-          onChange={(value) => updateNodeData(id, { code: value.replaceAll('\n', '') })}
-        />
-      </div>
-      <div
-        className={clsx(
-          'frameos-node-title text-xl p-1 gap-1',
-          isSelected ? 'bg-indigo-900' : 'bg-sky-900',
-          'flex w-full justify-between items-center'
-        )}
-      >
-        <div className="flex gap-1 items-center">
-          <Handle
-            type="source"
-            position={Position.Bottom}
-            id={`fieldOutput`}
-            style={{
-              position: 'relative',
-              transform: 'none',
-              right: 0,
-              top: 0,
-              background: 'black',
-              borderColor: 'white',
-            }}
-            isConnectable={isConnectable}
-          />
-          <div>{targetFunction ?? <em>disconnected</em>}</div>
+          <div className="flex gap-1 items-center">
+            <NodeCache nodeType="code" />
+          </div>
         </div>
-        <DropdownMenu
-          className="w-fit"
-          buttonColor="none"
-          horizontal
-          items={[
-            {
-              label: 'Copy as JSON',
-              onClick: () => copyAppJSON(id),
-              icon: <ClipboardDocumentIcon className="w-5 h-5" />,
-            },
-            {
-              label: 'Delete Node',
-              onClick: () => deleteApp(id),
-              icon: <TrashIcon className="w-5 h-5" />,
-            },
-          ]}
-        />
       </div>
-    </div>
+    </BindLogic>
   )
 }

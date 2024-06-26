@@ -1,0 +1,38 @@
+{
+  "name": "Unsplash",
+  "description": "Random unsplash image",
+  "category": "data",
+  "version": "1.0.0",
+  "settings": ["unsplash"],
+  "fields": [
+    {
+      "name": "search",
+      "type": "string",
+      "value": "nature",
+      "required": false,
+      "label": "Search",
+      "placeholder": "e.g. pineapple, nature, birds, power"
+    },
+    {
+      "name": "orientation",
+      "type": "select",
+      "value": "auto",
+      "options": ["auto", "any", "landscape", "portrait", "squarish"],
+      "required": false,
+      "label": "Orientation",
+      "placeholder": "landscape, portrait, square"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ],
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true,
+    "durationEnabled": true,
+    "duration": "900"
+  }
+}

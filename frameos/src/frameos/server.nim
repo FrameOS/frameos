@@ -11,9 +11,9 @@ import strformat
 import options
 import strutils
 import drivers/drivers as drivers
+import frameos/apps
 import frameos/types
 import frameos/channels
-import frameos/config
 import frameos/utils/image
 from net import Port
 from frameos/runner import getLastImagePng, getLastPublicState

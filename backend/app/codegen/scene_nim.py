@@ -27,12 +27,44 @@ def wrap_color(value: str) -> str:
 def write_scene_nim(frame: Frame, scene: dict) -> str:
     return SceneWriter(frame, scene).write_scene_nim()
 
+
+def field_type_to_nim_type(field_type: str, required: bool = True) -> str:
+    match field_type:
+        case 'select':
+            return 'string'
+        case 'text':
+            return 'string'
+        case 'string':
+            return 'string'
+        case 'float':
+            return 'float'
+        case 'integer':
+            return 'int'
+        case 'boolean':
+            return 'bool'
+        case 'color':
+            return 'Color'
+        case 'json':
+            return 'JsonNode'
+        case 'node':
+            return 'NodeId'
+        case 'scene':
+            return 'SceneId'
+        case 'image':
+            if not required:
+                return 'Option[Image]'
+            return 'Image'
+        case _:
+            raise ValueError(f"Invalid field type {field_type}")
+
+
 class SceneWriter:
     events_schema = get_events_schema()
-    available_apps = get_local_frame_apps()
+    available_apps: list[str]
     scene_id: str
     nodes: list
     nodes_by_id: dict
+    app_configs: dict[str, dict]
     node_integer_map: dict[str, int]
     imports: list
     scene_object_fields: list
@@ -49,13 +81,18 @@ class SceneWriter:
     source_field_inputs: dict[str, dict[str, tuple[str, str]]]
     node_fields: dict[str, dict[str, str]]
     newline = "\n"
+    cache_counter: int = 0
+    cache_indexes: dict[str, int]
+    cache_fields: list[str]
 
     def __init__(self, frame: Frame, scene: dict):
+        self.available_apps = get_local_frame_apps()
         self.frame = frame
         self.scene = scene
         self.scene_id = scene.get("id", "default")
         self.nodes = scene.get("nodes", [])
         self.nodes_by_id = {n["id"]: n for n in self.nodes}
+        self.app_configs = {}
         self.edges = scene.get("edges", [])
         self.node_integer_map = {}
         self.imports = []
@@ -64,13 +101,23 @@ class SceneWriter:
         self.run_node_lines = []
         self.after_node_lines = []
         self.run_event_lines = []
+        self.after_render_lines = []
         self.event_nodes = {}
         self.next_nodes = {}
         self.prev_nodes = {}
         self.field_inputs = {}
+        self.required_fields = {}
+        self.field_types = {}
+        self.app_sources = {}
+        self.app_capabilities = {}
         self.code_field_source_nodes = {}
         self.source_field_inputs = {}
         self.node_fields = {}
+        self.node_fields_targets = {}
+        self.app_node_outputs = {}
+        self.cache_counter = 0
+        self.cache_indexes = {}
+        self.cache_fields = []
 
 
     def node_id_to_integer(self, node_id: str) -> int:
@@ -87,28 +134,37 @@ class SceneWriter:
     def apply_control_code(self):
         control_code = self.frame.control_code
         if control_code and control_code.get("enabled") == "true":
-            self.scene_object_fields += ["controlCode: qrApp.App"]
-            app_import = "import apps/qr/app as qrApp"
+            self.scene_object_fields += ["controlCodeRender: render_imageApp.App"]
+            self.scene_object_fields += ["controlCodeData: data_qrApp.App"]
+            app_import = "import apps/render/image/app as render_imageApp"
+            if app_import not in self.imports:
+                self.imports += [app_import]
+            app_import = "import apps/data/qr/app as data_qrApp"
             if app_import not in self.imports:
                 self.imports += [app_import]
             self.init_apps += [
-                'scene.controlCode = qrApp.init(-1.NodeId, scene.FrameScene, qrApp.AppConfig(',
+                'scene.controlCodeRender = render_imageApp.App(nodeName: "render/image", nodeId: -1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(',
+                f'  offsetX: {int(control_code.get("offsetX", "0"))},',
+                f'  offsetY: {int(control_code.get("offsetY", "0"))},',
+                f'  placement: "{sanitize_nim_string(control_code.get("placement", "top-left"))}",',
+                '))',
+                'scene.controlCodeData = data_qrApp.App(nodeName: "data/qr", nodeId: -1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_qrApp.AppConfig(',
                 f'  backgroundColor: parseHtmlColor("{sanitize_nim_string(control_code.get("backgroundColor", "#000000"))}"),',
                 f'  qrCodeColor: parseHtmlColor("{sanitize_nim_string(control_code.get("qrCodeColor", "#ffffff"))}"),',
-                f'  offsetX: {float(control_code.get("offsetX", "0"))},',
-                f'  offsetY: {float(control_code.get("offsetY", "0"))},',
                 f'  padding: {int(control_code.get("padding", "1"))},',
-                f'  position: "{sanitize_nim_string(control_code.get("position", "top-left"))}"',
-                f'  size: {float(control_code.get("size", "2"))}',
+                f'  size: {float(control_code.get("size", "2"))},',
                 '  codeType: "Frame Control URL",',
                 '  code: "",',
                 '  sizeUnit: "pixels per dot",',
                 '  alRad: 30.0,',
-                '  moRad: 0.0,'
+                '  moRad: 0.0,',
                 '  moSep: 0.0',
-                '))'
+                '))',
             ]
-            self.after_node_lines += ["self.controlCode.run(context)"]
+            self.after_render_lines += [
+                "self.controlCodeRender.appConfig.image = self.controlCodeData.get(context)",
+                "self.controlCodeRender.run(context)"
+            ]
 
     def read_edges(self):
         for edge in self.edges:
@@ -149,6 +205,7 @@ class SceneWriter:
                     if not self.node_fields.get(source):
                         self.node_fields[source] = {}
                     self.node_fields[source][field] = target
+                    self.prev_nodes[target] = source
 
                 # Ad-hoc code nodes connecting to app field's inputs, e.g. state from a render event to an app
                 # TODO: should stop using them?
@@ -165,6 +222,266 @@ class SceneWriter:
                     if not self.source_field_inputs.get(target):
                         self.source_field_inputs[target] = {}
                     self.source_field_inputs[target][target_field] = (source, source_field)
+
+    def process_app_import(self, node):
+        node_id = node["id"]
+        sources = node.get("data", {}).get("sources", {})
+        name = node.get("data", {}).get("keyword", f"app_{node_id}")
+        name_identifier = name.replace("/", "_")
+        app_id = f"node{self.node_id_to_integer(node_id)}"
+
+        if name not in self.available_apps and len(sources) == 0:
+            message = f'- ERROR: When generating scene {self.scene_id}. App "{name}" for node "{node_id}" not found'
+            try:
+                from app.models.log import new_log as log
+                log(self.frame.id, "stderr", message)
+                return
+            except Exception:
+                raise ValueError(message)
+
+        if len(sources) > 0:
+            node_app_id = "nodeapp_" + node_id.replace("-", "_")
+            app_import = f"import apps/{node_app_id}/app as nodeApp{self.node_id_to_integer(node_id)}"
+            self.scene_object_fields += [
+                f"{app_id}: nodeApp{self.node_id_to_integer(node_id)}.App"
+            ]
+        else:
+            app_import = f"import apps/{name}/app as {name_identifier}App"
+            self.scene_object_fields += [f"{app_id}: {name_identifier}App.App"]
+
+        if app_import not in self.imports:
+            self.imports += [app_import]
+
+
+    def process_app_run(self, node):
+        node_id = node["id"]
+        if node_id in self.app_configs:
+            return
+
+        sources = node.get("data", {}).get("sources", {})
+        name = node.get("data", {}).get("keyword", f"app_{node_id}")
+        node_integer = self.node_id_to_integer(node_id)
+        app_id = f"node{node_integer}"
+
+        app_config = node.get("data", {}).get("config", {}).copy()
+        if len(sources) > 0 and sources.get("config.json", None):
+            config = json.loads(sources.get("config.json"))
+        else:
+            config_path = os.path.join(local_apps_path, name, "config.json")
+            if os.path.exists(config_path):
+                with open(config_path, "r") as file:
+                    config = json.load(file)
+            else:
+                config = {}
+        self.app_configs[node_id] = config
+        self.app_node_outputs[node_id] = config.get("output", None)
+        self.required_fields[node_id] = {}
+        self.field_types[node_id] = {}
+
+        if len(sources) > 0 and sources.get("app.nim", None):
+            source_lines = sources.get("app.nim").split("\n")
+        else:
+            source_path = os.path.join(local_apps_path, name, "app.nim")
+            if os.path.exists(source_path):
+                with open(source_path, "r") as file:
+                    source_lines = file.read().split("\n")
+            else:
+                source_lines = []
+        self.app_sources[node_id] = source_lines
+        capabilities = set()
+        for line in source_lines:
+            if line.startswith("proc get*(self: App"):
+                capabilities.add("get")
+                break
+            if line.startswith("proc run*(self: App"):
+                capabilities.add("run")
+                break
+            if line.startswith("proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig)"):
+                capabilities.add("initOld")
+                break
+            if line.startswith("proc init*(self: App)") or line.startswith("proc init*(app: App)"):
+                capabilities.add("init")
+                break
+        self.app_capabilities[node_id] = capabilities
+
+        # { field: [['key1', 'from', 'to'], ['key2', 1, 5]] }
+        seq_fields_for_node: dict[str, list[list[str | int]]] = {}
+        field_inputs_for_node = self.field_inputs.get(node_id, {})
+        code_fields_for_node = self.code_field_source_nodes.get(node_id, {})
+        source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
+        node_fields_for_node = self.node_fields.get(node_id, {})
+        required_fields_for_node = self.required_fields.get(node_id, {})
+        field_types_for_node = self.field_types.get(node_id, {})
+
+        for field in config.get("fields"):
+            if field.get('markdown'):
+                continue
+            key = field.get("name", None)
+            value = field.get("value", None)
+            field_type = field.get("type", "string")
+            field_types_for_node[key] = field_type
+            seq = field.get("seq", None)
+            required = field.get("required", False)
+            if required:
+                required_fields_for_node[key] = True
+            # set defaults for missing values
+            if (
+                (key not in app_config or app_config.get(key) is None)
+                and (value is not None or field_type == "node")
+                and seq is None
+            ):
+                app_config[key] = value
+            # mark fields that are sequences of fields
+            if seq is not None:
+                seq_fields_for_node[key] = seq
+                if key not in app_config:
+                    app_config[key] = None
+
+        # convert sequence field metadata from ["key", "from_key", "to_key"] to ["key", 1, 3]
+        for key, seqs in seq_fields_for_node.items():
+            for i, [seq_key, seq_from, seq_to] in enumerate(seqs):
+                if isinstance(seq_from, str):
+                    seq_from = app_config.get(seq_from, None)
+                    seqs[i][1] = int(seq_from)
+                if isinstance(seq_to, str):
+                    seq_to = app_config.get(seq_to, None)
+                    seqs[i][2] = int(seq_to)
+
+        app_config_pairs: list[list[str]] = []
+        for key, value in app_config.items():
+            if key not in field_types_for_node:
+                message = f'- ERROR: When generating scene {self.scene_id}. Config key "{key}" not found for app "{name}", node "{node_id}"'
+                try:
+                    from app.models.log import new_log as log
+                    log(
+                        self.frame.id,
+                        "stderr",
+                        message,
+                    )
+                    continue
+                except Exception:
+                    raise ValueError(message)
+            type = field_types_for_node[key]
+
+            app_config_pairs.append(
+                [f"  {x}" for x in self.sanitize_nim_field(
+                    node_id,
+                    key,
+                    type,
+                    value,
+                    field_inputs_for_node,
+                    node_fields_for_node,
+                    source_field_inputs_for_node,
+                    seq_fields_for_node,
+                    code_fields_for_node,
+                    required_fields_for_node,
+                    False,
+                )]
+            )
+
+        if len(sources) > 0:
+            appName = f"nodeApp{self.node_id_to_integer(node_id)}"
+        else:
+            name_identifier = name.replace("/", "_")
+            appName = f"{name_identifier}App"
+
+        if "initOld" in capabilities:
+            self.init_apps += [
+                f"scene.{app_id} = {appName}.init({node_integer}.NodeId, scene.FrameScene, {appName}.AppConfig(",
+            ]
+        else:
+            self.init_apps += [
+                f"scene.{app_id} = {appName}.App(nodeName: \"{sanitize_nim_string(name)}\", nodeId: {node_integer}.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: {appName}.AppConfig(",
+            ]
+
+        for x in app_config_pairs:
+            if len(x) > 0:
+                for line in x:
+                    self.init_apps += [line]
+                self.init_apps[-1] = self.init_apps[-1] + ","
+        self.init_apps += ['))']
+
+        if "init" in capabilities:
+            self.init_apps += [f"scene.{app_id}.init()"]
+
+    def get_app_node_cacheable_fields_with_types(self, node_id) -> dict[str, str]:
+        field_inputs_for_node = self.field_inputs.get(node_id, {})
+        code_fields_for_node = self.code_field_source_nodes.get(node_id, {})
+        app_config = self.app_configs[node_id]
+
+        cache_fields: dict[str, str] = {}
+        for key, code in field_inputs_for_node.items():
+            if key in code_fields_for_node:
+                fields = app_config.get('fields', [])
+                for field in fields:
+                    if field.get('name') == key:
+                        cache_fields[key] = field_type_to_nim_type(field.get('type', 'string'), field.get('required', False))
+
+        return cache_fields
+
+    # case_or_block = 'case' or 'block' or 'vars' or 'blockWithVars'
+    def process_app_run_lines(self, node, case_or_block = "case"):
+        node_id = node["id"]
+        name = node.get("data", {}).get("keyword", f"app_{node_id}")
+        node_integer = self.node_id_to_integer(node_id)
+        app_id = f"node{node_integer}"
+
+        run_lines = []
+
+        if case_or_block == "case":
+            run_lines += [
+                f"of {node_integer}.NodeId: # {name}",
+            ]
+        elif case_or_block == "block" or case_or_block == "blockWithVars" or case_or_block == "vars":
+            run_lines += [
+                "block:",
+            ]
+        field_inputs_for_node = self.field_inputs.get(node_id, {})
+        field_types_for_node = self.field_types.get(node_id, {})
+        code_fields_for_node = self.code_field_source_nodes.get(node_id, {})
+        source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
+
+        for key, code in field_inputs_for_node.items():
+            if case_or_block == "vars":
+                fieldAssignment = f"let {key}"
+            else:
+                fieldAssignment = f"self.{app_id}.appConfig.{key}"
+
+            if case_or_block == "blockWithVars":
+                run_lines += [f"  {fieldAssignment} = {key}"]
+                continue
+
+            if key in code_fields_for_node:
+                code_lines = self.get_code_field_value(code_fields_for_node[key])
+                # Wrap optional images with some()
+                if not self.required_fields[node_id].get(key, False) and field_types_for_node.get(key, "string") == "image":
+                    code_lines[0] = "some(" + code_lines[0]
+                    code_lines[-1] = code_lines[-1] + ")"
+                run_lines += [f"  {fieldAssignment} = {code_lines[0]}"]
+                for line in code_lines[1:]:
+                    run_lines += [f"  {line}"]
+            else:
+                run_lines += [f"  {fieldAssignment} = {code}"]
+
+        for key, (source_id, source_key) in source_field_inputs_for_node.items():
+            if case_or_block == "vars":
+                fieldAssignment = "let {key}"
+            else:
+                fieldAssignment = f"self.{app_id}.appConfig.{key}"
+            run_lines += [
+                f"  {fieldAssignment} = self.node{self.node_id_to_integer(source_id)}.appConfig.{source_key}"
+            ]
+        next_node_id = self.next_nodes.get(node_id, None)
+
+        if case_or_block == "case":
+            run_lines += [f"  self.{app_id}.run(context)"]
+            run_lines += [
+                f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
+            ]
+        elif case_or_block == "block" or case_or_block == "blockWithVars":
+            run_lines += [f"  self.{app_id}.get(context)"]
+
+        return run_lines
 
     def read_nodes(self):
         newline = "\n"
@@ -186,6 +503,7 @@ class SceneWriter:
                         field_inputs_for_node = self.field_inputs.get(node_id, {})
                         source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
                         node_fields_for_node = self.node_fields.get(node_id, {})
+                        required_fields = {}
 
                         event_schema = None
                         for schema in self.events_schema:
@@ -201,6 +519,8 @@ class SceneWriter:
                                     config[key] = field.get("value", None)
                                 type = field.get("type", "string")
                                 value = config.get(key, None)
+                                if field.get("required", False):
+                                    required_fields[key] = True
 
                                 event_payload_pairs.append(
                                     [f"  {x}" for x in self.sanitize_nim_field(
@@ -213,6 +533,7 @@ class SceneWriter:
                                         source_field_inputs_for_node,
                                         {},
                                         True,
+                                        required_fields,
                                     )]
                                 )
 
@@ -226,144 +547,10 @@ class SceneWriter:
                         ]
 
             elif node.get("type") == "app":
-                sources = node.get("data", {}).get("sources", {})
-                name = node.get("data", {}).get("keyword", f"app_{node_id}")
-                node_integer = self.node_id_to_integer(node_id)
-                app_id = f"node{node_integer}"
-
-                if name not in self.available_apps and len(sources) == 0:
-                    from app.models.log import new_log as log
-                    log(
-                        self.frame.id,
-                        "stderr",
-                        f'- ERROR: When generating scene {self.scene_id}. App "{name}" for node "{node_id}" not found',
-                    )
-                    continue
-
-                if len(sources) > 0:
-                    node_app_id = "nodeapp_" + node_id.replace("-", "_")
-                    app_import = f"import apps/{node_app_id}/app as nodeApp{self.node_id_to_integer(node_id)}"
-                    self.scene_object_fields += [
-                        f"{app_id}: nodeApp{self.node_id_to_integer(node_id)}.App"
-                    ]
-                else:
-                    app_import = f"import apps/{name}/app as {name}App"
-                    self.scene_object_fields += [f"{app_id}: {name}App.App"]
-
-                if app_import not in self.imports:
-                    self.imports += [app_import]
-
-                app_config = node.get("data", {}).get("config", {}).copy()
-                if len(sources) > 0 and sources.get("config.json", None):
-                    config = json.loads(sources.get("config.json"))
-                else:
-                    config_path = os.path.join(local_apps_path, name, "config.json")
-                    if os.path.exists(config_path):
-                        with open(config_path, "r") as file:
-                            config = json.load(file)
-                    else:
-                        config = {}
-
-                # { field: [['key1', 'from', 'to'], ['key2', 1, 5]] }
-                seq_fields_for_node: dict[str, list[list[str | int]]] = {}
-                field_inputs_for_node = self.field_inputs.get(node_id, {})
-                code_fields_for_node = self.code_field_source_nodes.get(node_id, {})
-                source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
-                node_fields_for_node = self.node_fields.get(node_id, {})
-
-                config_types: dict[str, str] = {}
-                for field in config.get("fields"):
-                    key = field.get("name", None)
-                    value = field.get("value", None)
-                    field_type = field.get("type", "string")
-                    config_types[key] = field_type
-                    seq = field.get("seq", None)
-                    # set defaults for missing values
-                    if (
-                        (key not in app_config or app_config.get(key) is None)
-                        and (value is not None or field_type == "node")
-                        and seq is None
-                    ):
-                        app_config[key] = value
-                    # mark fields that are sequences of fields
-                    if seq is not None:
-                        seq_fields_for_node[key] = seq
-                        if key not in app_config:
-                            app_config[key] = None
-
-                # convert sequence field metadata from ["key", "from_key", "to_key"] to ["key", 1, 3]
-                for key, seqs in seq_fields_for_node.items():
-                    for i, [seq_key, seq_from, seq_to] in enumerate(seqs):
-                        if isinstance(seq_from, str):
-                            seq_from = app_config.get(seq_from, None)
-                            seqs[i][1] = int(seq_from)
-                        if isinstance(seq_to, str):
-                            seq_to = app_config.get(seq_to, None)
-                            seqs[i][2] = int(seq_to)
-
-                app_config_pairs: list[list[str]] = []
-                for key, value in app_config.items():
-                    if key not in config_types:
-                        from app.models.log import new_log as log
-                        log(
-                            self.frame.id,
-                            "stderr",
-                            f'- ERROR: When generating scene {self.scene_id}. Config key "{key}" not found for app "{name}", node "{node_id}"',
-                        )
-                        continue
-                    type = config_types[key]
-
-                    app_config_pairs.append(
-                        [f"  {x}" for x in self.sanitize_nim_field(
-                            node_id,
-                            key,
-                            type,
-                            value,
-                            field_inputs_for_node,
-                            node_fields_for_node,
-                            source_field_inputs_for_node,
-                            seq_fields_for_node,
-                            code_fields_for_node,
-                            False,
-                        )]
-                    )
-
-                if len(sources) > 0:
-                    appName = f"nodeApp{self.node_id_to_integer(node_id)}"
-                else:
-                    appName = f"{name}App"
-                self.init_apps += [
-                    f"scene.{app_id} = {appName}.init({node_integer}.NodeId, scene.FrameScene, {appName}.AppConfig(",
-                ]
-                for x in app_config_pairs:
-                    if len(x) > 0:
-                        for line in x:
-                            self.init_apps += [line]
-                        self.init_apps[-1] = self.init_apps[-1] + ","
-                self.init_apps += ['))']
-
-                self.run_node_lines += [
-                    f"of {node_integer}.NodeId: # {name}",
-                ]
-
-                for key, code in field_inputs_for_node.items():
-                    if key in code_fields_for_node:
-                        code_lines = self.get_code_field_value(code_fields_for_node[key])
-                        self.run_node_lines += [f"  self.{app_id}.appConfig.{key} = {code_lines[0]}"]
-                        for line in code_lines[1:]:
-                            self.run_node_lines += [f"  {line}"]
-                    else:
-                        self.run_node_lines += [f"  self.{app_id}.appConfig.{key} = {code}"]
-
-                for key, (source_id, source_key) in source_field_inputs_for_node.items():
-                    self.run_node_lines += [
-                        f"  self.{app_id}.appConfig.{key} = self.node{self.node_id_to_integer(source_id)}.appConfig.{source_key}"
-                    ]
-                next_node_id = self.next_nodes.get(node_id, None)
-                self.run_node_lines += [
-                    f"  self.{app_id}.run(context)",
-                    f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
-                ]
+                self.process_app_import(node)
+                self.process_app_run(node)
+                if self.next_nodes.get(node_id, None) or self.prev_nodes.get(node_id, None):
+                    self.run_node_lines += self.process_app_run_lines(node, "case")
 
         self.scene_object_fields.sort(key=natural_keys)
 
@@ -470,21 +657,18 @@ class SceneWriter:
         scene_refresh_interval = str(refresh_interval)
 
         background_color = self.scene.get("settings", {}).get("backgroundColor", None)
-        if (
-            background_color is None
-            and self.frame.background_color is not None
-            and self.frame.background_color.startswith("#")
-        ):
-            background_color = self.frame.background_color
         if background_color is None:
             background_color = "#000000"
         scene_background_color = wrap_color(sanitize_nim_string(str(background_color)))
 
         scene_source = f"""
-import pixie, json, times, strformat, strutils, sequtils
+{{.warning[UnusedImport]: off.}}
+import pixie, json, times, strformat, strutils, sequtils, options
 
 import frameos/types
 import frameos/channels
+import frameos/utils/image
+import frameos/utils/url
 {newline.join(self.imports)}
 
 const DEBUG = {'true' if self.frame.debug else 'false'}
@@ -495,9 +679,9 @@ type Scene* = ref object of FrameScene
   {(newline + "  ").join(self.scene_object_fields)}
 
 {{.push hint[XDeclaredButNotUsed]: off.}}
+{newline.join(self.cache_fields)}
 
-proc runNode*(self: Scene, nodeId: NodeId,
-    context: var ExecutionContext) =
+proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
   let scene = self
   let frameConfig = scene.frameConfig
   let state = scene.state
@@ -513,7 +697,7 @@ proc runNode*(self: Scene, nodeId: NodeId,
       nextNode = -1.NodeId
     {(newline + "    ").join(self.after_node_lines)}
     if DEBUG:
-      self.logger.log(%*{{"event": "scene:debug:app", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
+      self.logger.log(%*{{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
 
 proc runEvent*(context: var ExecutionContext) =
   let self = Scene(context.scene)
@@ -525,6 +709,7 @@ proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
   context.image.fill(self.backgroundColor)
   runEvent(context)
+  {(newline + "  ").join(self.after_render_lines)}
   return context.image
 
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
@@ -533,8 +718,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     for key in persistedState.keys:
       state[key] = persistedState[key]
   let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: {scene_refresh_interval}, backgroundColor: {scene_background_color})
+  let self = scene
   result = scene
-  var context = ExecutionContext(scene: scene, event: "init", payload: state, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
+  var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
   {(newline + "  ").join(self.init_apps)}
   runEvent(context)
@@ -563,6 +749,7 @@ var exportedScene* = ExportedScene(
         source_field_inputs_for_node,
         seq_fields_for_node,
         code_fields_for_node,
+        required_fields,
     ) -> list[str]:
         if key in seq_fields_for_node:
             sequences = seq_fields_for_node[key]
@@ -578,11 +765,17 @@ var exportedScene* = ExportedScene(
                 source_field_inputs_for_node,
                 seq_fields_for_node,
                 code_fields_for_node,
+                required_fields,
             )
 
         if key in field_inputs_for_node:
             if key in code_fields_for_node:
-                return self.get_code_field_value(code_fields_for_node[key])
+                code_lines = self.get_code_field_value(code_fields_for_node[key])
+                # Wrap optional images with some()
+                if not self.required_fields[node_id].get(key, False) and self.field_types[node_id].get(key, "string") == "image":
+                    code_lines[0] = "some(" + code_lines[0]
+                    code_lines[-1] = code_lines[-1] + ")"
+                return code_lines
 
             return [f"{field_inputs_for_node[key]}"]
         elif key in source_field_inputs_for_node:
@@ -608,6 +801,10 @@ var exportedScene* = ExportedScene(
                 raise ValueError(f"Invalid color value {value} for key {key}")
         elif type == "scene":
             return [f"\"{'' if value is None else sanitize_nim_string(str(value))}\".SceneId"]
+        elif type == "image":
+            if not required_fields.get(key, False):
+                return ["none(Image)"]
+            return ["newImage(1, 1)"]
         else:
             return [f"\"{'' if value is None else sanitize_nim_string(str(value))}\""]
 
@@ -624,6 +821,7 @@ var exportedScene* = ExportedScene(
         source_field_inputs_for_node,
         seq_fields_for_node,
         code_fields_for_node,
+        required_fields,
     ) -> list[str]:
         seq_start = sequences[index][1]
         seq_end = sequences[index][2]
@@ -641,6 +839,7 @@ var exportedScene* = ExportedScene(
                         source_field_inputs_for_node,
                         seq_fields_for_node,
                         code_fields_for_node,
+                        required_fields,
                     )
                 )
             else:
@@ -657,6 +856,7 @@ var exportedScene* = ExportedScene(
                         source_field_inputs_for_node,
                         seq_fields_for_node,
                         code_fields_for_node,
+                        required_fields
                     )
                 )
 
@@ -682,6 +882,7 @@ var exportedScene* = ExportedScene(
         source_field_inputs_for_node,
         seq_fields_for_node,
         code_fields_for_node,
+        required_fields,
         key_with_quotes: bool,
     ) -> list[str]:
         key_str = (
@@ -699,6 +900,7 @@ var exportedScene* = ExportedScene(
             source_field_inputs_for_node,
             seq_fields_for_node,
             code_fields_for_node,
+            required_fields,
         )
 
         if len(value_list) == 0:
@@ -715,25 +917,144 @@ var exportedScene* = ExportedScene(
     def get_code_field_value(self, node_id, depth = 0) -> list[str]:
         if depth > 100:
             raise ValueError("Code field recursion limit reached")
-        code_field_node = self.nodes_by_id.get(node_id)
-        if code_field_node:
-            code = code_field_node.get("data", {}).get("code", "")
-            code_fields = code_field_node.get("data", {}).get("codeFields", [])
-            if code_fields and len(code_fields) > 0:
-                source_lines = ["block:"]
-                code_field_sources = self.code_field_source_nodes.get(node_id, {}) or {}
-                for field in code_fields:
-                    if field in code_field_sources:
-                        code_field_source = self.get_code_field_value(code_field_sources[field], depth + 1)
-                        if len(code_field_source) == 1:
-                            source_lines += [f"  let {field} = {code_field_source[0]}"]
-                        elif len(code_field_source) > 1:
-                            source_lines += [f"  let {field} = {code_field_source[0]}"]
-                            source_lines += [f"  {x}" for x in code_field_source[1:]]
-                source_lines += ["  " + code]
-                return source_lines
+        node = self.nodes_by_id.get(node_id)
+        if node:
+            cache_enabled = node.get("data", {}).get('cache', {}).get('enabled', False)
+            if node.get("type") == "app":
+                self.process_app_run(node)
+                input_enabled = node.get("data", {}).get('cache', {}).get('inputEnabled', False)
+                if input_enabled:
+                    vars = self.process_app_run_lines(node, "vars")
+                    result = self.process_app_run_lines(node, "blockWithVars")
+                    if cache_enabled:
+                        result = self.wrap_with_cache(node_id, result, node.get("data", {}))
+                    if len(vars) > 1: # just "block:" doesn't as a line
+                        result = vars + [f"  {r}" for r in result]
+                else:
+                    result = self.process_app_run_lines(node, "block")
+                    if cache_enabled:
+                        result = self.wrap_with_cache(node_id, result, node.get("data", {}))
+            elif node.get("type") == "code":
+                code = [node.get("data", {}).get("code", "")]
+                code_args = node.get("data", {}).get("codeArgs", [])
+                if code_args and len(code_args) > 0:
+                    source_lines = ["block:"]
+                    code_field_sources = self.code_field_source_nodes.get(node_id, {}) or {}
+                    for code_field in code_args:
+                        field = code_field.get('name')
+                        if field in code_field_sources:
+                            code_field_source = self.get_code_field_value(code_field_sources[field], depth + 1)
+
+                            if len(code_field_source) == 1:
+                                source_lines += [f"  let {field} = {code_field_source[0]}"]
+                            elif len(code_field_source) > 1:
+                                source_lines += [f"  let {field} = {code_field_source[0]}"]
+                                source_lines += [f"  {x}" for x in code_field_source[1:]]
+                            else:
+                                raise ValueError("Invalid code field source")
+
+                    if cache_enabled:
+                        code = self.wrap_with_cache(node_id, code, node.get("data", {}))
+
+                    for line in code:
+                        source_lines += ["  " + line]
+                    result = source_lines
+                else:
+                    if cache_enabled:
+                        code = self.wrap_with_cache(node_id, code, node.get("data", {}))
+                    result = code
             else:
-                return [code]
+                raise NotImplementedError(f"Unknown node type, can't fetch fields for node {node_id}")
+
+            return result
+
+    def wrap_with_cache(self, node_id: str, value_list: list[str], data: dict):
+        duration_enabled = data.get('cache', {}).get('durationEnabled', False)
+        input_enabled = data.get('cache', {}).get('inputEnabled', False)
+        expression_enabled = data.get('cache', {}).get('expressionEnabled', False)
+
+        # unique key
+        if node_id in self.cache_indexes:
+            cache_index = self.cache_indexes[node_id]
+        else:
+            cache_index = self.cache_counter
+            self.cache_indexes[node_id] = cache_index
+            self.cache_counter += 1
+        cache_field = f"cache{cache_index}"
+
+        # data type
+        cache_data_type = 'string'
+        if self.app_configs.get(node_id) is not None:
+            app_config = self.app_configs[node_id]
+            if app_config.get('output') is not None and len(app_config.get('output')) > 0:
+                output = app_config['output'][0]
+                cache_data_type = field_type_to_nim_type(output.get('type', 'string'))
+
+        # where to store the cached data
+        cache_var = f"var {cache_field}: Option[{cache_data_type}] = none({cache_data_type})"
+        if cache_var not in self.cache_fields:
+            self.cache_fields += [cache_var]
+
+        cache_conditions = f"{cache_field}.isNone()"
+        extra_pre_lines = []
+        extra_post_lines = []
+
+        # duration
+        if duration_enabled:
+            cache_duration = float(data.get('cache', {}).get('duration', 60))
+            time_var = f"var {cache_field}Time: float = 0"
+            if time_var not in self.cache_fields:
+                self.cache_fields += [time_var]
+            cache_conditions += f" or epochTime() > {cache_field}Time + {cache_duration}"
+            extra_post_lines += [f"    {cache_field}Time = epochTime()"]
+
+        # expression
+        if expression_enabled:
+            cache_key = data.get('cache', {}).get('expression', '"string"')
+            cache_key_data_type = field_type_to_nim_type(data.get('cache', {}).get('expressionType', 'string'))
+
+            key_var = f"var {cache_field}Expr: {cache_key_data_type}"
+            if key_var not in self.cache_fields:
+                self.cache_fields += [key_var]
+            extra_pre_lines += [f"  let {cache_field}ExprNew: {cache_key_data_type} = {cache_key}"]
+            cache_conditions += f" or {cache_field}Expr != {cache_field}ExprNew"
+            extra_post_lines += [f"    {cache_field}Expr = {cache_field}ExprNew"]
+
+        # input fields
+        if input_enabled:
+            node = self.nodes_by_id.get(node_id)
+            if node.get("type") == "app":
+                cache_fields = self.get_app_node_cacheable_fields_with_types(node_id)
+            else:
+                cache_fields = {
+                    codeArg.get('name', ''): field_type_to_nim_type(codeArg.get('type', 'string'))
+                    for codeArg in node.get("data", {}).get("codeArgs", [])
+                }
+
+            if len(cache_fields) > 0:
+                cache_key = ", ".join(cache_fields.keys())
+                cache_key_data_type = ", ".join(cache_fields.values())
+                if len(cache_fields) > 1:
+                    cache_key = f"({cache_key})"
+                    cache_key_data_type = f"({cache_key_data_type})"
+                key_var = f"var {cache_field}Fields: {cache_key_data_type} # {', '.join(cache_fields.keys())}"
+                if key_var not in self.cache_fields:
+                    self.cache_fields += [key_var]
+                cache_conditions += f" or {cache_field}Fields != {cache_key}"
+                extra_post_lines += [f"    {cache_field}Fields = {cache_key}"]
+
+        value_list[-1] = value_list[-1] + ')'
+        value_list = [
+            "block:",
+            *extra_pre_lines,
+            f"  if {cache_conditions}:",
+            f"    {cache_field} = some({value_list[0]}",
+            *[f"    {x}" for x in value_list[1:]],
+            *extra_post_lines,
+            f"  {cache_field}.get()",
+        ]
+
+        return value_list
 
 
 def write_scenes_nim(frame: Frame) -> str:

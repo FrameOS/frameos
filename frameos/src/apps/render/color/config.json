@@ -1,0 +1,33 @@
+{
+  "name": "Color",
+  "description": "Set a single color background",
+  "category": "render",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "inputImage",
+      "type": "image",
+      "value": "",
+      "required": false,
+      "label": "Image to render on (optional)",
+      "showIf": [
+        {
+          "field": ".meta.showOutput"
+        }
+      ]
+    },
+    {
+      "name": "color",
+      "type": "color",
+      "value": "#ffffff",
+      "required": true,
+      "label": "Color"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ]
+}

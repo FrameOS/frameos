@@ -3,7 +3,7 @@ import { actions, connect, kea, path, reducers, selectors } from 'kea'
 import type { appsLogicType } from './appsLogicType'
 import { appsModel, categoryLabels } from '../../../../models/appsModel'
 import { searchInText } from '../../../../utils/searchInText'
-import { App } from '../../../../types'
+import { AppConfig } from '../../../../types'
 
 export const appsLogic = kea<appsLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Apps', 'appsLogic']),
@@ -19,18 +19,19 @@ export const appsLogic = kea<appsLogicType>([
   selectors({
     apps: [
       (s) => [s.search, s.allApps],
-      (search, allApps): Record<string, App> => {
+      (search, allApps): Record<string, AppConfig> => {
         return Object.fromEntries(
           Object.entries(allApps).filter(
-            ([_, app]) => searchInText(search, app.name) || searchInText(search, app.description)
+            ([_, app]) =>
+              app.category !== 'legacy' && (searchInText(search, app.name) || searchInText(search, app.description))
           )
         )
       },
     ],
     appsByCategory: [
       (s) => [s.apps],
-      (apps: Record<string, App>): Record<string, Record<string, App>> => {
-        const defaultEntries: Record<string, Record<string, App>> = Object.fromEntries(
+      (apps: Record<string, AppConfig>): Record<string, Record<string, AppConfig>> => {
+        const defaultEntries: Record<string, Record<string, AppConfig>> = Object.fromEntries(
           Object.keys(categoryLabels).map((c) => [c, {}])
         )
         return Object.fromEntries(

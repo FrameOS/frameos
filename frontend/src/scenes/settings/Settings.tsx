@@ -1,6 +1,5 @@
 import { useActions, useValues } from 'kea'
 import { Form, Group } from 'kea-forms'
-import { Panel, PanelGroup } from 'react-resizable-panels'
 import { Header } from '../../components/Header'
 import { Box } from '../../components/Box'
 import { settingsLogic } from './settingsLogic'
@@ -11,6 +10,7 @@ import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
 import { sceneLogic } from '../sceneLogic'
+import { Masonry } from '../../components/Masonry'
 
 export function Settings() {
   const { savedSettings, savedSettingsLoading, settingsChanged } = useValues(settingsLogic)
@@ -19,8 +19,8 @@ export function Settings() {
 
   return (
     <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">
-      <PanelGroup direction="vertical" units="pixels">
-        <Panel minSize={60} maxSize={60}>
+      <div className="flex flex-col h-full max-h-full">
+        <div className="h-[60px]">
           <Header
             title="Settings"
             right={
@@ -32,16 +32,16 @@ export function Settings() {
               </div>
             }
           />
-        </Panel>
-        {savedSettingsLoading ? (
-          <Spinner />
-        ) : (
-          <Panel>
-            <div
-              id="frames"
-              className="max-h-full overflow-auto p-4 columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4"
-            >
-              <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings}>
+        </div>
+        <div
+          // id="frames"
+          className="h-full"
+        >
+          {savedSettingsLoading ? (
+            <Spinner />
+          ) : (
+            <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings}>
+              <Masonry id="frames" className="p-4">
                 <Group name="frameOS">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>FrameOS Gallery</H6>
@@ -101,6 +101,14 @@ export function Settings() {
                     </Field>
                   </Box>
                 </Group>
+                <Group name="unsplash">
+                  <Box className="p-2 mb-4 space-y-2">
+                    <H6>Unsplash API</H6>
+                    <Field name="accessKey" label="Access key" secret={!!savedSettings?.unsplash?.accessKey}>
+                      <TextInput autoFocus={!!savedSettings?.unsplash?.accessKey} />
+                    </Field>
+                  </Box>
+                </Group>
                 <Group name="ssh_keys">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>SSH Keys</H6>
@@ -122,11 +130,11 @@ export function Settings() {
                     </Field>
                   </Box>
                 </Group>
-              </Form>
-            </div>
-          </Panel>
-        )}
-      </PanelGroup>
+              </Masonry>
+            </Form>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

@@ -131,7 +131,7 @@ export const controlLogic = kea<controlLogicType>([
     [socketLogic.actionTypes.newLog]: ({ log }) => {
       try {
         const { event, sceneId } = JSON.parse(log.line)
-        if (event === 'sceneChange') {
+        if (event === 'render:sceneChange') {
           if (sceneId !== values.sceneId) {
             actions.currentSceneChanged(sceneId)
             actions.sync()

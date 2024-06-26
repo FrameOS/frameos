@@ -2,38 +2,68 @@
 
 import frameos/types
 import tables, options
-import scenes/scene_color as scene_color
-import scenes/scene_github as scene_github
-import scenes/scene_gradient as scene_gradient
-import scenes/scene_ifElse as scene_ifElse
-import scenes/scene_image as scene_image
-import scenes/scene_imageError as scene_imageError
-import scenes/scene_qr as scene_qr
-import scenes/scene_split as scene_split
-import scenes/scene_text as scene_text
+import scenes/scene_dataDownloadImage as scene_dataDownloadImage
+import scenes/scene_dataDownloadUrl as scene_dataDownloadUrl
+import scenes/scene_dataLocalImage as scene_dataLocalImage
+import scenes/scene_dataNewImage as scene_dataNewImage
+import scenes/scene_dataQR as scene_dataQR
+import scenes/scene_dataResize as scene_dataResize
+import scenes/scene_logicIfElse as scene_logicIfElse
+import scenes/scene_logicSetAsState as scene_logicSetAsState
+import scenes/scene_renderColorFlow as scene_renderColorFlow
+import scenes/scene_renderColorImage as scene_renderColorImage
+import scenes/scene_renderColorSplit as scene_renderColorSplit
+import scenes/scene_renderGradientSplit as scene_renderGradientSplit
+import scenes/scene_renderImage as scene_renderImage
+import scenes/scene_renderSplitData as scene_renderSplitData
+import scenes/scene_renderSplitFlow as scene_renderSplitFlow
+import scenes/scene_renderSplitLoop as scene_renderSplitLoop
+import scenes/scene_renderTextOverflow as scene_renderTextOverflow
+import scenes/scene_renderTextPosition as scene_renderTextPosition
+import scenes/scene_renderTextSplit as scene_renderTextSplit
 
-let defaultSceneId* = some("color".SceneId)
+let defaultSceneId* = some("dataDownloadImage".SceneId)
 
 const sceneOptions* = [
-  ("color".SceneId, "Test Color"),
-  ("github".SceneId, "Github Stars"),
-  ("gradient".SceneId, "Test Gradient"),
-  ("ifElse".SceneId, "Test If Else"),
-  ("image".SceneId, "TEST"),
-  ("imageError".SceneId, "TEST"),
-  ("qr".SceneId, "Test QR"),
-  ("split".SceneId, "Test Bananas"),
-  ("text".SceneId, "Text test"),
+  ("dataDownloadImage".SceneId, "Download Image"),
+  ("dataDownloadUrl".SceneId, "Download URL"),
+  ("dataLocalImage".SceneId, "Local Image"),
+  ("dataNewImage".SceneId, "New Image"),
+  ("dataQR".SceneId, "QR"),
+  ("dataResize".SceneId, "Resize image"),
+  ("logicIfElse".SceneId, "If Else"),
+  ("logicSetAsState".SceneId, "Set as State"),
+  ("renderColorFlow".SceneId, "Color"),
+  ("renderColorImage".SceneId, "Color"),
+  ("renderColorSplit".SceneId, "Color"),
+  ("renderGradientSplit".SceneId, "Gradient"),
+  ("renderImage".SceneId, "Render image"),
+  ("renderSplitData".SceneId, "Split"),
+  ("renderSplitFlow".SceneId, "Split"),
+  ("renderSplitLoop".SceneId, "Split Loop"),
+  ("renderTextOverflow".SceneId, "Text Overflow"),
+  ("renderTextPosition".SceneId, "Text"),
+  ("renderTextSplit".SceneId, "Text Split"),
 ]
 
 proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result = initTable[SceneId, ExportedScene]()
-  result["color".SceneId] = scene_color.exportedScene
-  result["github".SceneId] = scene_github.exportedScene
-  result["gradient".SceneId] = scene_gradient.exportedScene
-  result["ifElse".SceneId] = scene_ifElse.exportedScene
-  result["image".SceneId] = scene_image.exportedScene
-  result["imageError".SceneId] = scene_imageError.exportedScene
-  result["qr".SceneId] = scene_qr.exportedScene
-  result["split".SceneId] = scene_split.exportedScene
-  result["text".SceneId] = scene_text.exportedScene
+  result["dataDownloadImage".SceneId] = scene_dataDownloadImage.exportedScene
+  result["dataDownloadUrl".SceneId] = scene_dataDownloadUrl.exportedScene
+  result["dataLocalImage".SceneId] = scene_dataLocalImage.exportedScene
+  result["dataNewImage".SceneId] = scene_dataNewImage.exportedScene
+  result["dataQR".SceneId] = scene_dataQR.exportedScene
+  result["dataResize".SceneId] = scene_dataResize.exportedScene
+  result["logicIfElse".SceneId] = scene_logicIfElse.exportedScene
+  result["logicSetAsState".SceneId] = scene_logicSetAsState.exportedScene
+  result["renderColorFlow".SceneId] = scene_renderColorFlow.exportedScene
+  result["renderColorImage".SceneId] = scene_renderColorImage.exportedScene
+  result["renderColorSplit".SceneId] = scene_renderColorSplit.exportedScene
+  result["renderGradientSplit".SceneId] = scene_renderGradientSplit.exportedScene
+  result["renderImage".SceneId] = scene_renderImage.exportedScene
+  result["renderSplitData".SceneId] = scene_renderSplitData.exportedScene
+  result["renderSplitFlow".SceneId] = scene_renderSplitFlow.exportedScene
+  result["renderSplitLoop".SceneId] = scene_renderSplitLoop.exportedScene
+  result["renderTextOverflow".SceneId] = scene_renderTextOverflow.exportedScene
+  result["renderTextPosition".SceneId] = scene_renderTextPosition.exportedScene
+  result["renderTextSplit".SceneId] = scene_renderTextSplit.exportedScene

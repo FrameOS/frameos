@@ -1,0 +1,70 @@
+{
+  "name": "Render Image",
+  "description": "Render an image onto a canvas",
+  "category": "render",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "inputImage",
+      "type": "image",
+      "value": "",
+      "required": false,
+      "label": "Image to render on (optional)",
+      "showIf": [
+        {
+          "field": ".meta.showOutput"
+        }
+      ]
+    },
+
+    {
+      "name": "image",
+      "type": "image",
+      "required": true,
+      "label": "Image"
+    },
+    {
+      "name": "placement",
+      "type": "select",
+      "options": [
+        "cover",
+        "contain",
+        "stretch",
+        "center",
+        "top-left",
+        "top-center",
+        "top-right",
+        "center-left",
+        "center-right",
+        "bottom-left",
+        "bottom-center",
+        "bottom-right"
+      ],
+      "value": "cover",
+      "required": true,
+      "label": "Placement"
+    },
+    {
+      "name": "offsetX",
+      "type": "integer",
+      "value": "0",
+      "required": false,
+      "label": "Offset X",
+      "showIf": [{ "field": "placement", "operator": "notIn", "value": ["cover", "contain", "stretch"] }]
+    },
+    {
+      "name": "offsetY",
+      "type": "integer",
+      "value": "0",
+      "required": false,
+      "label": "Offset Y",
+      "showIf": [{ "field": "placement", "operator": "notIn", "value": ["cover", "contain", "stretch"] }]
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ]
+}

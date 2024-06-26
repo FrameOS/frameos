@@ -1,0 +1,26 @@
+{
+  "name": "If-Else",
+  "description": "If Condition Then Node Else Node",
+  "category": "logic",
+  "version": "1.0.0",
+  "settings": [],
+  "fields": [
+    {
+      "label": "Condition",
+      "name": "condition",
+      "value": "true",
+      "type": "boolean",
+      "required": true
+    },
+    {
+      "label": "Truthy",
+      "name": "thenNode",
+      "type": "node"
+    },
+    {
+      "label": "Falsy",
+      "name": "elseNode",
+      "type": "node"
+    }
+  ]
+}

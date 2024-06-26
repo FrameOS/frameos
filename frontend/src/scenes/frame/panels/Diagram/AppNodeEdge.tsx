@@ -22,7 +22,7 @@ export function AppNodeEdge({
     targetY,
     targetPosition,
   })
-  const isNodeConnection = sourceHandleId === 'next' && targetHandleId === 'prev'
+  const isNodeConnection = sourceHandleId === 'next' || targetHandleId === 'prev'
   return (
     <>
       <BaseEdge

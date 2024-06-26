@@ -1,0 +1,209 @@
+{
+  "id": "f1c1faad-a19c-4574-9314-80481ea1542e",
+  "name": "Download Image",
+  "settings": {
+    "backgroundColor": "#ffffff"
+  },
+  "fields": [],
+  "nodes": [
+    {
+      "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "type": "event",
+      "position": {
+        "x": -371.17173266793543,
+        "y": 33.27499994695012
+      },
+      "data": {
+        "keyword": "render"
+      },
+      "width": 212,
+      "height": 161,
+      "selected": false,
+      "positionAbsolute": {
+        "x": -371.17173266793543,
+        "y": 33.27499994695012
+      },
+      "dragging": false
+    },
+    {
+      "id": "24e728f9-8445-4ed7-a420-65c40c7a0693",
+      "position": {
+        "x": 502.99251068344233,
+        "y": 84.20871021545312
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "center"
+        }
+      },
+      "type": "app",
+      "width": 314,
+      "height": 162,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 502.99251068344233,
+        "y": 84.20871021545312
+      },
+      "dragging": false
+    },
+    {
+      "id": "402ab393-df89-4acc-b727-87602f9cba57",
+      "position": {
+        "x": 454.6001358935033,
+        "y": -141.91960231319152
+      },
+      "data": {
+        "keyword": "data/downloadImage",
+        "config": {
+          "url": "https://frameos.net/img/logo_in_ci_tests.png"
+        },
+        "cache": {
+          "duration": "900",
+          "durationEnabled": true,
+          "enabled": true,
+          "inputEnabled": true
+        }
+      },
+      "type": "app",
+      "width": 361,
+      "height": 160,
+      "selected": false
+    },
+    {
+      "id": "100f8a8c-2e9d-4987-b4b3-fc5d997a3025",
+      "position": {
+        "x": -149.11746667748338,
+        "y": 34.20763384798545
+      },
+      "data": {
+        "keyword": "render/split",
+        "config": {
+          "rows": "2"
+        }
+      },
+      "type": "app",
+      "width": 305,
+      "height": 302,
+      "selected": false
+    },
+    {
+      "id": "1ba24aaf-1987-40fe-8a38-4f42dcdb19db",
+      "position": {
+        "x": 270.3246968674291,
+        "y": 500.5803891182029
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {}
+      },
+      "type": "app",
+      "width": 311,
+      "height": 106,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 270.3246968674291,
+        "y": 500.5803891182029
+      },
+      "dragging": false
+    },
+    {
+      "id": "cbccee5f-9592-491b-acdd-86a9ba5091fc",
+      "position": {
+        "x": 270.1857494978453,
+        "y": 297.6903441439289
+      },
+      "data": {
+        "keyword": "data/downloadImage",
+        "config": {
+          "url": "this is not an url"
+        },
+        "cache": {
+          "duration": "900",
+          "durationEnabled": true,
+          "enabled": true,
+          "inputEnabled": true
+        }
+      },
+      "type": "app",
+      "width": 361,
+      "height": 160,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 270.1857494978453,
+        "y": 297.6903441439289
+      },
+      "dragging": false
+    },
+    {
+      "id": "446bfbf9-0af3-45d3-8891-196e2a9161c8",
+      "position": {
+        "x": 221.92752415070845,
+        "y": 104.60352143594287
+      },
+      "data": {
+        "keyword": "render/color",
+        "config": {}
+      },
+      "type": "app",
+      "width": 195,
+      "height": 81,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 221.92752415070845,
+        "y": 104.60352143594287
+      },
+      "dragging": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "bf95fd8a-5d26-4441-8bdb-aa20b4fcc2a0",
+      "target": "24e728f9-8445-4ed7-a420-65c40c7a0693",
+      "targetHandle": "fieldInput/image",
+      "source": "402ab393-df89-4acc-b727-87602f9cba57",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "9a54d5cc-c042-4e0d-b2e8-7dbc1dcbfac6",
+      "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "sourceHandle": "next",
+      "target": "100f8a8c-2e9d-4987-b4b3-fc5d997a3025",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "1fb8ed34-bf69-4878-af2f-9fda2f6ab7fb",
+      "source": "100f8a8c-2e9d-4987-b4b3-fc5d997a3025",
+      "sourceHandle": "field/render_functions[2][1]",
+      "target": "1ba24aaf-1987-40fe-8a38-4f42dcdb19db",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "2d973dde-ba00-4134-8e0d-1407c9447ebc",
+      "target": "1ba24aaf-1987-40fe-8a38-4f42dcdb19db",
+      "targetHandle": "fieldInput/image",
+      "source": "cbccee5f-9592-491b-acdd-86a9ba5091fc",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "0b42c616-c1b5-4241-a49d-3d873045ad40",
+      "source": "100f8a8c-2e9d-4987-b4b3-fc5d997a3025",
+      "sourceHandle": "field/render_functions[1][1]",
+      "target": "446bfbf9-0af3-45d3-8891-196e2a9161c8",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "72bcb058-21fb-404b-ba8c-8a2f8eb84a5e",
+      "source": "446bfbf9-0af3-45d3-8891-196e2a9161c8",
+      "sourceHandle": "next",
+      "target": "24e728f9-8445-4ed7-a420-65c40c7a0693",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    }
+  ]
+}

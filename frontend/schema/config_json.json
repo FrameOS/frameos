@@ -1,11 +1,15 @@
 {
-  "$ref": "#/definitions/App",
+  "$ref": "#/definitions/AppConfig",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "App": {
+    "AppConfig": {
       "additionalProperties": false,
       "description": "config.json schema",
       "properties": {
+        "cache": {
+          "$ref": "#/definitions/CacheConfig",
+          "description": "Default cache settings"
+        },
         "category": {
           "description": "Category for this app",
           "type": "string"
@@ -19,7 +23,7 @@
           "items": {
             "anyOf": [
               {
-                "$ref": "#/definitions/ConfigField"
+                "$ref": "#/definitions/AppConfigField"
               },
               {
                 "$ref": "#/definitions/MarkdownField"
@@ -31,6 +35,13 @@
         "name": {
           "description": "Name for this app",
           "type": "string"
+        },
+        "output": {
+          "description": "Returned fields",
+          "items": {
+            "$ref": "#/definitions/OutputField"
+          },
+          "type": "array"
         },
         "settings": {
           "description": "List of top level settings exported for this app",
@@ -47,7 +58,7 @@
       "required": ["name"],
       "type": "object"
     },
-    "ConfigField": {
+    "AppConfigField": {
       "additionalProperties": false,
       "properties": {
         "label": {
@@ -101,10 +112,23 @@
           },
           "type": "array"
         },
+        "showIf": {
+          "description": "Conditions on which to show the field",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ConfigFieldCondition"
+              },
+              {
+                "$ref": "#/definitions/ConfigFieldConditionAnd"
+              }
+            ]
+          },
+          "type": "array"
+        },
         "type": {
-          "description": "Type of the field, only 'string' is supported for now",
-          "enum": ["string", "text", "float", "integer", "boolean", "color", "select", "json", "node", "scene"],
-          "type": "string"
+          "$ref": "#/definitions/AppConfigFieldType",
+          "description": "Type of the field"
         },
         "value": {
           "description": "Default value for the field"
@@ -113,15 +137,114 @@
       "required": ["name", "label", "type"],
       "type": "object"
     },
+    "AppConfigFieldType": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FieldType"
+        },
+        {
+          "const": "text",
+          "type": "string"
+        },
+        {
+          "const": "select",
+          "type": "string"
+        }
+      ]
+    },
+    "CacheConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "duration": {
+          "type": "string"
+        },
+        "durationEnabled": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "expression": {
+          "type": "string"
+        },
+        "expressionEnabled": {
+          "type": "boolean"
+        },
+        "expressionType": {
+          "$ref": "#/definitions/FieldType"
+        },
+        "inputEnabled": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ConfigFieldCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "operator": {
+          "$ref": "#/definitions/ConfigFieldConditionOperator"
+        },
+        "value": {}
+      },
+      "required": ["field"],
+      "type": "object"
+    },
+    "ConfigFieldConditionAnd": {
+      "additionalProperties": false,
+      "properties": {
+        "and": {
+          "items": {
+            "$ref": "#/definitions/ConfigFieldCondition"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["and"],
+      "type": "object"
+    },
+    "ConfigFieldConditionOperator": {
+      "enum": ["eq", "ne", "gt", "lt", "gte", "lte", "empty", "notEmpty", "in", "notIn"],
+      "type": "string"
+    },
+    "FieldType": {
+      "enum": ["string", "float", "integer", "boolean", "color", "json", "node", "scene", "image"],
+      "type": "string"
+    },
     "MarkdownField": {
       "additionalProperties": false,
       "properties": {
         "markdown": {
           "description": "Block of markdown text to display between fields",
           "type": "string"
+        },
+        "showIf": {
+          "description": "Conditions on which to show the field",
+          "items": {
+            "$ref": "#/definitions/ConfigFieldCondition"
+          },
+          "type": "array"
         }
       },
       "required": ["markdown"],
+      "type": "object"
+    },
+    "OutputField": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Name of the output field",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/FieldType",
+          "description": "Type of the field"
+        }
+      },
+      "required": ["name", "type"],
       "type": "object"
     }
   }

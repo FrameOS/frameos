@@ -20,9 +20,10 @@ from app.models.settings import get_settings_dict
 def api_apps():
     return jsonify(apps=get_app_configs())
 
-@api.route("/apps/source/<string:keyword>", methods=["GET"])
+@api.route("/apps/source", methods=["GET"])
 @login_required
-def api_apps_source(keyword: str):
+def api_apps_source():
+    keyword = request.args.get("keyword")
     return jsonify(get_one_app_sources(keyword))
 
 

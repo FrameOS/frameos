@@ -1,11 +1,11 @@
 import json, pixie, times, options, asyncdispatch, strformat, strutils, locks, tables
 import pixie/fileformats/png
-from scenes/scenes import getExportedScenes, defaultSceneId
+import scenes/scenes
 
+import frameos/apps
 import frameos/channels
-import frameos/types
-import frameos/config
 import frameos/logger
+import frameos/types
 import frameos/utils/image
 
 import drivers/drivers as drivers
@@ -35,9 +35,7 @@ var
 
 proc setLastImage(image: Image) =
   withLock lastImageLock:
-    if lastImage.width != image.width or lastImage.height != image.height:
-      lastImage = newImage(image.width, image.height)
-    lastImage.draw(image)
+    lastImage = copy(image)
     lastImagePresent = true
 
 proc getLastImagePng*(): string =
@@ -111,42 +109,55 @@ proc loadLastScene*(): Option[SceneId] =
   except IOError:
     return none(SceneId)
 
-proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene): Image =
+proc getFirstSceneId*(): SceneId =
+  if defaultSceneId.isSome():
+    return defaultSceneId.get()
+  let lastSceneId = loadLastScene()
+  if lastSceneId.isSome() and exportedScenes.hasKey(lastSceneId.get()):
+    return lastSceneId.get()
+  if len(exportedScenes) > 0:
+    for key in keys(exportedScenes):
+      return key
+  return "".SceneId
+
+proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene): (Image, float) =
   let sceneTimer = epochTime()
   let requiredWidth = self.frameConfig.renderWidth()
   let requiredHeight = self.frameConfig.renderHeight()
-  self.logger.log(%*{"event": "render", "width": requiredWidth, "height": requiredHeight})
+  self.logger.log(%*{"event": "render:scene", "width": requiredWidth, "height": requiredHeight})
+
+  var context = ExecutionContext(
+    scene: scene,
+    event: "render",
+    payload: %*{},
+    image: case self.frameConfig.rotate:
+    of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
+    else: newImage(self.frameConfig.width, self.frameConfig.height),
+    hasImage: true,
+    loopIndex: 0,
+    loopKey: ".",
+    nextSleep: -1
+  )
 
   try:
-    var context = ExecutionContext(
-      scene: scene,
-      event: "render",
-      payload: %*{},
-      image: case self.frameConfig.rotate:
-      of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-      else: newImage(self.frameConfig.width, self.frameConfig.height),
-      loopIndex: 0,
-      loopKey: "."
-    )
-
     let image = exportedScene.render(scene, context)
     if image.width != requiredWidth or image.height != requiredHeight:
       let resizedImage = newImage(requiredWidth, requiredHeight)
       resizedImage.fill(scene.backgroundColor)
       scaleAndDrawImage(resizedImage, image, self.frameConfig.scalingMode)
       setLastImage(resizedImage)
-      result = resizedImage.rotateDegrees(self.frameConfig.rotate)
+      result = (resizedImage.rotateDegrees(self.frameConfig.rotate), context.nextSleep)
     else:
       setLastImage(image)
-      result = image.rotateDegrees(self.frameConfig.rotate)
+      result = (image.rotateDegrees(self.frameConfig.rotate), context.nextSleep)
   except Exception as e:
-    result = renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}")
+    result = (renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}"), context.nextSleep)
     self.logger.log(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
   self.lastRenderAt = epochTime()
   self.logger.log(%*{"event": "render:done", "ms": round((epochTime() - sceneTimer) * 1000, 3)})
 
 proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
-  self.logger.log(%*{"event": "startRenderLoop"})
+  self.logger.log(%*{"event": "render:startLoop"})
   var timer = 0.0
   var driverTimer = 0.0
   var sleepDuration = 0.0
@@ -159,12 +170,10 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   while true:
     timer = epochTime()
     self.isRendering = true
-    let sceneId = self.currentSceneId
-    if not exportedScenes.hasKey(sceneId):
-      raise newException(Exception, &"Scene {sceneId} not found")
+    let sceneId = if exportedScenes.hasKey(self.currentSceneId): self.currentSceneId else: getFirstSceneId()
     let exportedScene = exportedScenes[sceneId]
     if lastSceneId != sceneId:
-      self.logger.log(%*{"event": "sceneChange", "sceneId": sceneId.string})
+      self.logger.log(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
       if self.scenes.hasKey(sceneId):
         currentScene = self.scenes[sceneId]
       else:
@@ -183,7 +192,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     self.triggerRenderNext = false # used to debounce render events received while rendering
 
     let interval = currentScene.refreshInterval
-    let lastRotatedImage = self.renderSceneImage(exportedScene, currentScene)
+    let (lastRotatedImage, nextSleep) = self.renderSceneImage(exportedScene, currentScene)
     if interval < 1:
       let now = epochTime()
       if now >= nextServerRenderAt:
@@ -203,14 +212,14 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     except Exception as e:
       self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
-    if interval < 1:
+    if interval < 1 or (nextSleep > 0 and nextSleep < interval):
       let now = epochTime()
       if now - timer < FAST_SCENE_CUTOFF_SECONDS:
         fastSceneCount += 1
         # Two fast scenes in a row
         if fastSceneCount == 2:
           # TODO: capture logs per _scene_ and log if slow
-          self.logger.log(%*{"event": "pause", "message": "Rendering fast. Pausing all scene render logs for 10 seconds."})
+          self.logger.log(%*{"event": "render:pause", "message": "Rendering fast. Pausing all scene render logs for 10 seconds."})
           self.logger.disable()
           fastSceneResumeAt = now + 10
         elif fastSceneResumeAt != 0.0 and now > fastSceneResumeAt:
@@ -238,11 +247,11 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
       self.triggerRenderNext = false
       continue
 
-    # Sleep until the next frame
-    sleepDuration = max((interval - (epochTime() - timer)) * 1000, 0.1)
-    self.logger.log(%*{"event": "sleep", "ms": round(sleepDuration, 3)})
-    # Calculate once more to subtract the time it took to log the message
-    sleepDuration = max((interval - (epochTime() - timer)) * 1000, 0.1)
+    # If no sleep duration provided by the scene, calculate based on the interval
+    sleepDuration = if nextSleep >= 0: nextSleep * 1000
+                    else: max((interval - (epochTime() - timer)) * 1000, 0.1)
+    self.logger.log(%*{"event": "render:sleep", "ms": round(sleepDuration, 3)})
+
     let future = sleepAsync(sleepDuration)
     self.sleepFuture = some(future)
     await future
@@ -266,9 +275,10 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
     scene: scene,
     event: event,
     payload: payload,
-    image: newImage(1, 1),
+    hasImage: false,
     loopIndex: 0,
-    loopKey: "."
+    loopKey: ".",
+    nextSleep: -1
   )
   exportedScene.runEvent(context)
   if event == "setSceneState":
@@ -328,17 +338,6 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
         await sleepAsync(waitTime)
         if waitTime < 200:
           waitTime += 5
-
-proc getFirstSceneId*(): SceneId =
-  if defaultSceneId.isSome():
-    return defaultSceneId.get()
-  let lastSceneId = loadLastScene()
-  if lastSceneId.isSome():
-    return lastSceneId.get()
-  if len(exportedScenes) > 0:
-    for key in keys(exportedScenes):
-      return key
-  return "".SceneId
 
 proc createRunnerThread*(args: (FrameConfig, Logger)) =
   {.cast(gcsafe).}:

@@ -1,0 +1,303 @@
+{
+    "id": "b83c51f9-5fec-4342-ad7a-a027519b70a2",
+    "name": "Text Split",
+    "settings": {
+      "backgroundColor": "#76500f"
+    },
+    "fields": [],
+    "nodes": [
+      {
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "type": "event",
+        "position": {
+          "x": 121,
+          "y": 113
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 212,
+        "height": 161,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "f156951b-b1e7-48b6-88ad-82839be35470",
+        "position": {
+          "x": 453.260049236348,
+          "y": 106.9558403352458
+        },
+        "data": {
+          "keyword": "render/split",
+          "config": {
+            "rows": "2",
+            "columns": "2"
+          }
+        },
+        "type": "app",
+        "width": 306,
+        "height": 358,
+        "selected": false
+      },
+      {
+        "id": "1cff5590-c1bd-4cbd-b6b3-df026b79deb0",
+        "position": {
+          "x": 898.7447119539311,
+          "y": -245.51360547802952
+        },
+        "data": {
+          "keyword": "render/text",
+          "config": {
+            "text": "Rendering a lot of text as just a text node. Rendering a lot of text as just a text node. Rendering a lot of text as just a text node. ",
+            "fontSize": "66"
+          }
+        },
+        "type": "app",
+        "width": 380,
+        "height": 412,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 898.7447119539311,
+          "y": -245.51360547802952
+        },
+        "dragging": false
+      },
+      {
+        "id": "bc6299ce-d4f1-4330-a6fc-c06e61cb0e8e",
+        "position": {
+          "x": 1489.1366825465439,
+          "y": 58.755534873786246
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "center"
+          }
+        },
+        "type": "app",
+        "width": 314,
+        "height": 162,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1489.1366825465439,
+          "y": 58.755534873786246
+        },
+        "dragging": false
+      },
+      {
+        "id": "dfbf29f5-837a-4841-8e60-1937a6c146ac",
+        "position": {
+          "x": 1390.2874260217473,
+          "y": -389.2367643519394
+        },
+        "data": {
+          "keyword": "render/text",
+          "config": {
+            "text": "Rendering a lot of text as an image node with no image. Rendering a lot of text as an image node with no imageRendering a lot of text as an image node with no imageRendering a lot of text as an image node with no image",
+            "fontColor": "#000000",
+            "fontSize": "24",
+            "borderWidth": "0"
+          }
+        },
+        "type": "app",
+        "width": 386,
+        "height": 390,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1390.2874260217473,
+          "y": -389.2367643519394
+        },
+        "dragging": false
+      },
+      {
+        "id": "62ac0ca7-2751-4a45-83f7-86e0f7fb7ae8",
+        "position": {
+          "x": 946.620366638994,
+          "y": 718.0755710545242
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "bottom-right"
+          }
+        },
+        "type": "app",
+        "width": 314,
+        "height": 162,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 946.620366638994,
+          "y": 718.0755710545242
+        },
+        "dragging": false
+      },
+      {
+        "id": "29bee9d9-e891-4085-982a-5557ca8b997c",
+        "position": {
+          "x": 885.590084041848,
+          "y": 282.4047878461107
+        },
+        "data": {
+          "keyword": "render/text",
+          "config": {
+            "text": "little  \ntext line"
+          }
+        },
+        "type": "app",
+        "width": 380,
+        "height": 390,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 885.590084041848,
+          "y": 282.4047878461107
+        },
+        "dragging": false
+      },
+      {
+        "id": "35be624e-3f2c-449a-82ac-823230035d22",
+        "position": {
+          "x": 1505.9925634395427,
+          "y": 986.8506126569123
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "center"
+          }
+        },
+        "type": "app",
+        "width": 314,
+        "height": 162,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1505.9925634395427,
+          "y": 986.8506126569123
+        },
+        "dragging": false
+      },
+      {
+        "id": "afcc7290-4bdd-4e4f-b7ad-3bbfcbd0fb75",
+        "position": {
+          "x": 1459.6046338744654,
+          "y": 475.39243822086996
+        },
+        "data": {
+          "keyword": "render/text",
+          "config": {
+            "text": "text on image, i repeat this is text on an image"
+          }
+        },
+        "type": "app",
+        "width": 380,
+        "height": 474,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1459.6046338744654,
+          "y": 475.39243822086996
+        },
+        "dragging": false
+      },
+      {
+        "id": "ec0d6c5a-68fd-4f10-a667-a7ae42be05fe",
+        "position": {
+          "x": 1405.1722196661997,
+          "y": 262.7177632354358
+        },
+        "data": {
+          "keyword": "data/newImage",
+          "config": {
+            "width": "100",
+            "height": "100",
+            "color": "#b30000"
+          },
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true
+          }
+        },
+        "type": "app",
+        "width": 293,
+        "height": 171,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1405.1722196661997,
+          "y": 262.7177632354358
+        },
+        "dragging": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "50f47780-c12e-45fe-abdb-6ef6be1d92c8",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "target": "f156951b-b1e7-48b6-88ad-82839be35470",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "e5134704-65a2-479e-94e3-adea53dca293",
+        "source": "f156951b-b1e7-48b6-88ad-82839be35470",
+        "sourceHandle": "field/render_functions[1][1]",
+        "target": "1cff5590-c1bd-4cbd-b6b3-df026b79deb0",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "ad5a18de-2304-442d-83c5-c14a35d7d672",
+        "source": "f156951b-b1e7-48b6-88ad-82839be35470",
+        "sourceHandle": "field/render_functions[1][2]",
+        "target": "bc6299ce-d4f1-4330-a6fc-c06e61cb0e8e",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "d80f6f85-0c72-4d38-8b5e-063a75e214b3",
+        "target": "bc6299ce-d4f1-4330-a6fc-c06e61cb0e8e",
+        "targetHandle": "fieldInput/image",
+        "source": "dfbf29f5-837a-4841-8e60-1937a6c146ac",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "9050d86e-b82d-42af-a958-c00d63ca4182",
+        "source": "f156951b-b1e7-48b6-88ad-82839be35470",
+        "sourceHandle": "field/render_functions[2][1]",
+        "target": "62ac0ca7-2751-4a45-83f7-86e0f7fb7ae8",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "b0e09932-e9c0-4ec5-b8aa-23ff3291d2dc",
+        "target": "62ac0ca7-2751-4a45-83f7-86e0f7fb7ae8",
+        "targetHandle": "fieldInput/image",
+        "source": "29bee9d9-e891-4085-982a-5557ca8b997c",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "54a74c93-a475-4b60-80ea-5740db2d9017",
+        "source": "f156951b-b1e7-48b6-88ad-82839be35470",
+        "sourceHandle": "field/render_functions[2][2]",
+        "target": "35be624e-3f2c-449a-82ac-823230035d22",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "e5ce4da7-e386-451d-9750-32743ce92613",
+        "target": "35be624e-3f2c-449a-82ac-823230035d22",
+        "targetHandle": "fieldInput/image",
+        "source": "afcc7290-4bdd-4e4f-b7ad-3bbfcbd0fb75",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "3030d7a2-b7fe-41d2-b495-1d16f046dfb2",
+        "target": "afcc7290-4bdd-4e4f-b7ad-3bbfcbd0fb75",
+        "targetHandle": "fieldInput/inputImage",
+        "source": "ec0d6c5a-68fd-4f10-a667-a7ae42be05fe",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      }
+    ]
+  }

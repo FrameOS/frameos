@@ -2,20 +2,19 @@ import { afterMount, kea, path, selectors } from 'kea'
 
 import type { appsModelType } from './appsModelType'
 import { loaders } from 'kea-loaders'
-import { App } from '../types'
+import { AppConfig } from '../types'
 
 export const categoryLabels: Record<string, any> = {
-  boilerplate: 'Boilerplate',
-  image: 'Image generation',
-  overlay: 'Overlays',
-  util: 'Utilities',
+  render: 'Render',
+  logic: 'Logic',
+  data: 'Data',
 }
 
 export const appsModel = kea<appsModelType>([
   path(['src', 'models', 'appsModel']),
   loaders(({ values }) => ({
     apps: [
-      {} as Record<string, App>,
+      {} as Record<string, AppConfig>,
       {
         loadApps: async () => {
           try {
@@ -24,7 +23,7 @@ export const appsModel = kea<appsModelType>([
               throw new Error('Failed to fetch apps')
             }
             const data = await response.json()
-            return data.apps as Record<string, App>
+            return data.apps as Record<string, AppConfig>
           } catch (error) {
             console.error(error)
             return values.apps

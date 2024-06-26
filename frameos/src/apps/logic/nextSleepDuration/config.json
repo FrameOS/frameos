@@ -1,0 +1,14 @@
+{
+  "name": "Next sleep duration",
+  "description": "Override the delay between renders",
+  "category": "logic",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "duration",
+      "type": "float",
+      "required": true,
+      "label": "Duration in seconds"
+    }
+  ]
+}

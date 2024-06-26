@@ -1,4 +1,16 @@
-import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import {
+  actions,
+  afterMount,
+  connect,
+  kea,
+  key,
+  listeners,
+  path,
+  props,
+  reducers,
+  selectors,
+  sharedListeners,
+} from 'kea'
 import { framesModel } from '../../../../models/framesModel'
 import { applyEdgeChanges, applyNodeChanges, addEdge } from 'reactflow'
 import { v4 as uuidv4 } from 'uuid'
@@ -21,6 +33,17 @@ import { Option } from '../../../../components/Select'
 export interface DiagramLogicProps {
   frameId: number
   sceneId: string
+  updateNodeInternals?: (nodeId: string) => void
+}
+
+export interface NewNodePicker {
+  screenX: number
+  screenY: number
+  diagramX: number
+  diagramY: number
+  handleId: string
+  handleType: string
+  nodeId: string
 }
 
 export const diagramLogic = kea<diagramLogicType>([
@@ -130,15 +153,17 @@ export const diagramLogic = kea<diagramLogicType>([
     edges: [
       (s) => [s.rawEdges],
       (rawEdges): Edge[] =>
-        rawEdges.map((edge) =>
-          edge.sourceHandle === 'fieldOutput' || edge.targetHandle?.startsWith('fieldInput/')
-            ? edge.type !== 'codeNodeEdge'
+        rawEdges.map((edge) => {
+          const newEdge =
+            edge.targetHandle === 'prev' || edge.sourceHandle === 'next'
+              ? edge.type !== 'appNodeEdge'
+                ? { ...edge, type: 'appNodeEdge' }
+                : edge
+              : edge.type !== 'codeNodeEdge'
               ? { ...edge, type: 'codeNodeEdge' }
               : edge
-            : edge.type !== 'appNodeEdge'
-            ? { ...edge, type: 'appNodeEdge' }
-            : edge
-        ),
+          return newEdge
+        }),
     ],
     selectedEdge: [(s) => [s.edges], (edges): Edge | null => edges.find((edge) => edge.selected) ?? null],
     selectedEdgeId: [(s) => [s.selectedEdge], (edge) => edge?.id ?? null],
@@ -154,11 +179,14 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
     nodesById: [
       (s) => [s.nodes],
-      (nodes: DiagramNode[]): Record<string, DiagramNode[]> => {
+      (nodes: DiagramNode[]): Record<string, DiagramNode> => {
         return nodes.reduce((acc, node) => {
-          acc[node.id] = [...(acc[node.id] ?? []), node]
+          if (acc[node.id]) {
+            console.error('Duplicate node id found', node.id)
+          }
+          acc[node.id] = node
           return acc
-        }, {} as Record<string, DiagramNode[]>)
+        }, {} as Record<string, DiagramNode>)
       },
     ],
     hasChanges: [
@@ -190,8 +218,11 @@ export const diagramLogic = kea<diagramLogicType>([
       { resultEqualityCheck: equal },
     ],
   }),
-  subscriptions(({ actions, values, props }) => ({
-    nodes: (nodes: DiagramNode[], oldNodes: DiagramNode[]) => {
+  sharedListeners(({ selectors, actions, values, props }) => ({
+    nodesChanged: (_, __, ___, previousState) => {
+      const nodes = values.nodes
+      const oldNodes = selectors.nodes(previousState)
+
       // Upon first render of a new scene, the nodes will have x = -9999, y = -9999, width = undefined, height = undefined
       // Upon second render, the width and height will have been set, but x and y will still be -9999 for all nodes
       // If we detect that case, automatically rearrange the scene.
@@ -217,6 +248,40 @@ export const diagramLogic = kea<diagramLogicType>([
         })
       }
     },
+  })),
+  listeners(({ sharedListeners, props, values, actions }) => ({
+    setNodes: sharedListeners.nodesChanged,
+    onNodesChange: sharedListeners.nodesChanged,
+    selectNode: sharedListeners.nodesChanged,
+    deselectNode: sharedListeners.nodesChanged,
+    updateNodeData: sharedListeners.nodesChanged,
+    deleteApp: sharedListeners.nodesChanged,
+    updateNodeConfig: ({ id, field, value }) => {
+      const { nodes } = values
+      actions.setFrameFormValues({
+        scenes: values.editingFrame.scenes?.map((scene) =>
+          scene.id === props.sceneId && !equal(scene.nodes, nodes)
+            ? // set the nodes on the scene's form, and remove the selected flag from all
+              ({
+                ...scene,
+                nodes: values.nodes.map((node) =>
+                  node.id === id
+                    ? {
+                        ...node,
+                        data: {
+                          ...(node.data ?? {}),
+                          config: { ...('config' in node.data ? node.data?.config ?? {} : {}), [field]: value },
+                        },
+                      }
+                    : node
+                ),
+              } satisfies FrameScene)
+            : scene
+        ),
+      })
+    },
+  })),
+  subscriptions(({ actions, values, props }) => ({
     edges: (edges: Edge[], oldEdges: Edge[]) => {
       // Do not update on first render
       if (typeof oldEdges !== 'undefined' && edges && !equal(edges, oldEdges)) {
@@ -234,27 +299,39 @@ export const diagramLogic = kea<diagramLogicType>([
       if (scene && !equal(scene.nodes, oldScene?.nodes)) {
         // nodes changed on the form, update our local state, but retain the selected flag
         const selectedNodeId = values.selectedNodeId
-        actions.setNodes(scene.nodes.map((n) => (n.id === selectedNodeId ? { ...n, selected: true } : n)))
+        const newNodes = scene.nodes.map((n) => (n.id === selectedNodeId ? { ...n, selected: true } : n))
+        if (!equal(newNodes, values.nodes)) {
+          actions.setNodes(newNodes)
+        }
       }
       if (scene && !equal(scene.edges, oldScene?.edges)) {
         // edges changed on the form, update our local state, but retain the selected flag
         const selectedEdgeId = values.selectedEdgeId
-        actions.setEdges(scene.edges.map((e) => (e.id === selectedEdgeId ? { ...e, selected: true } : e)))
+        const newEdges = scene.edges.map((e) => (e.id === selectedEdgeId ? { ...e, selected: true } : e))
+        if (!equal(newEdges, values.edges)) {
+          actions.setEdges(newEdges)
+        }
       }
     },
   })),
-  listeners(({ actions, values }) => ({
+  listeners(({ actions, values, props }) => ({
     rearrangeCurrentScene: () => {
       actions.setNodes(arrangeNodes(values.nodes, values.edges))
       actions.fitDiagramView()
     },
     keywordDropped: ({ keyword, type, position }) => {
+      // Whenever something is dropped on the diagram from the menu
       if (type === 'app') {
+        const app = values.apps[keyword]
+        if (!app) {
+          console.error('App not found:', keyword)
+          return
+        }
         const newNode: DiagramNode = {
           id: uuidv4(),
           type: 'app',
           position,
-          data: { keyword: keyword, config: {} } satisfies AppNodeData,
+          data: { keyword: keyword, config: {}, cache: { ...app.cache } } satisfies AppNodeData,
         }
         actions.setNodes([...values.nodes, newNode])
       } else if (type === 'event') {
