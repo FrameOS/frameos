@@ -1,0 +1,27 @@
+{
+  "name": "Pretty",
+  "description": "Pretty print JSON into a string",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "json",
+      "type": "json",
+      "required": true,
+      "label": "JSON"
+    },
+    {
+      "name": "ident",
+      "type": "integer",
+      "value": "2",
+      "required": false,
+      "label": "Indent"
+    }
+  ],
+  "output": [
+    {
+      "name": "result",
+      "type": "string"
+    }
+  ]
+}

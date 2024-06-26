@@ -204,7 +204,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                     <React.Fragment key={i}>
                       {'markdown' in field ? (
                         <tr>
-                          <td className={clsx('font-sm text-indigo-200')} colSpan={4}>
+                          <td className='font-sm text-indigo-200 w-min' colSpan={4}>
                             <Markdown value={field.markdown} />
                           </td>
                         </tr>

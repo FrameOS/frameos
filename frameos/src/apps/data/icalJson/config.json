@@ -1,9 +1,12 @@
 {
   "name": "iCal to JSON",
   "description": "Convert an iCal file into a JSON event list",
-  "category": "utils",
+  "category": "data",
   "version": "1.0.0",
   "fields": [
+    {
+      "markdown": "This app is still experimental. Press \"Edit App\" and help make it better."
+    },
     {
       "name": "ical",
       "type": "string",
@@ -22,7 +25,7 @@
       "name": "exportUntil",
       "type": "string",
       "value": "",
-      "placeholder": "1 year from now",
+      "placeholder": "1 year later",
       "required": false,
       "label": "Export events until (YYYY-MM-DD)"
     },
