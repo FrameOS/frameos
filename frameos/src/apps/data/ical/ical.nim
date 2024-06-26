@@ -202,12 +202,12 @@ proc parseICalendar*(content: string): seq[VEvent] =
 
   result.sort(proc (a: VEvent, b: VEvent): int = cmp(a.startTime.float, b.startTime.float))
 
-proc getEvents*(events: seq[VEvent], startTime: Timestamp, endTime: var Timestamp, maxCount: int = 1000): seq[(
+proc getEvents*(events: seq[VEvent], startTime: Timestamp, endTime: Timestamp, maxCount: int = 1000): seq[(
     Timestamp, VEvent)] =
   result = @[]
   var toCheck = initDoublyLinkedList[(VEvent, Option[RRule], int)]()
-  if endTime == 0.Timestamp:
-    endTime = (startTime.float + 366 * 86400).Timestamp
+  let endTime = if endTime == 0.Timestamp: (startTime.float + 366 * 86400).Timestamp
+                else: endTime
 
   for event in events:
     for rrule in event.rrules:
