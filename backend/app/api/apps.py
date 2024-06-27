@@ -116,6 +116,10 @@ def validate_nim(source):
             os.makedirs(target_path, exist_ok=True)
             shutil.copytree("../frameos/src/frameos", target_path, dirs_exist_ok=True)
 
+            lib_target_path = os.path.join(temp_dir, "lib")
+            os.makedirs(lib_target_path, exist_ok=True)
+            shutil.copytree("../frameos/src/lib", lib_target_path, dirs_exist_ok=True)
+
             temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.nim', dir=temp_dir, delete=False)
             temp_file_name = temp_file.name
             temp_file_abs_name = os.path.realpath(temp_file_name)
