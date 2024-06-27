@@ -1,0 +1,24 @@
+{
+  "name": "Image Opacity",
+  "description": "Change how transparent an image is",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    { 
+      "name": "image", "type": "image", "required": true, "label": "Image (will be modified!)" 
+    },
+    {
+      "name": "opacity",
+      "type": "float",
+      "value": "1",
+      "required": true,
+      "label": "Opacity (0-1)"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ]
+}
