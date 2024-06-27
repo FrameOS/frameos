@@ -1,4 +1,3 @@
-
 import pixie
 import httpclient
 
@@ -63,13 +62,13 @@ proc renderError*(width, height: int, message: string): Image =
   writeError(result, width, height, message)
 
 proc scaleAndDrawImage*(targetImage: Image, srcImage: Image, scalingMode: string, offsetX: int = 0,
-    offsetY: int = 0) {.raises: [PixieError].} =
+    offsetY: int = 0, blendMode: BlendMode = OverwriteBlend) {.raises: [PixieError].} =
   if srcImage.width == targetImage.width and srcImage.height ==
       targetImage.height:
     if offsetX != 0 or offsetY != 0:
-      targetImage.draw(srcImage, translate(vec2(offsetX.float32, offsetY.float32)))
+      targetImage.draw(srcImage, translate(vec2(offsetX.float32, offsetY.float32)), blendMode)
     else:
-      targetImage.draw(srcImage)
+      targetImage.draw(srcImage, blendMode = blendMode)
   else:
     case scalingMode:
     of "cover":
@@ -85,7 +84,7 @@ proc scaleAndDrawImage*(targetImage: Image, srcImage: Image, scalingMode: string
         srcImage,
         translate(vec2(-xOffset + offsetX.float32, -yOffset + offsetY.float32)) * scale(vec2(scaleRatio,
             scaleRatio)),
-        OverwriteBlend
+        blendMode
       )
 
     of "contain":
@@ -100,7 +99,7 @@ proc scaleAndDrawImage*(targetImage: Image, srcImage: Image, scalingMode: string
       targetImage.draw(
         srcImage,
         scale(vec2(scaleRatio, scaleRatio)) * translate(vec2(xOffset + offsetX.float32, yOffset + offsetY.float32)),
-        OverwriteBlend
+        blendMode
       )
 
     of "stretch":
@@ -110,7 +109,7 @@ proc scaleAndDrawImage*(targetImage: Image, srcImage: Image, scalingMode: string
           targetImage.width.float32 / srcImage.width.float32,
           targetImage.height.float32 / srcImage.height.float32
         )) * translate(vec2(offsetX.float32, offsetY.float32)),
-        OverwriteBlend
+        blendMode
       )
 
     of "top-left":

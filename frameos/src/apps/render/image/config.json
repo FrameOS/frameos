@@ -59,6 +59,32 @@
       "required": false,
       "label": "Offset Y",
       "showIf": [{ "field": "placement", "operator": "notIn", "value": ["cover", "contain", "stretch"] }]
+    },
+    {
+      "name": "blendMode",
+      "type": "select",
+      "options": [
+        "overwrite",
+        "normal",
+        "darken",
+        "multiply",
+        "color-burn",
+        "lighten",
+        "screen",
+        "color-dodge",
+        "overlay",
+        "soft-light",
+        "hard-light",
+        "difference",
+        "exclusion",
+        "hue",
+        "saturation",
+        "color",
+        "luminosity"
+      ],
+      "value": "overwrite",
+      "required": false,
+      "label": "Blend Mode"
     }
   ],
   "output": [

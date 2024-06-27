@@ -12,6 +12,7 @@ type
     placement*: string
     offsetX*: int
     offsetY*: int
+    blendMode*: string
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -20,8 +21,27 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
   try:
     if self.appConfig.image == nil:
       raise newException(Exception, "No image provided.")
+    let blendMode = case self.appConfig.blendMode:
+      of "overwrite": OverwriteBlend
+      of "normal": NormalBlend
+      of "darken": DarkenBlend
+      of "multiply": MultiplyBlend
+      of "color-burn": ColorBurnBlend
+      of "lighten": LightenBlend
+      of "screen": ScreenBlend
+      of "color-dodge": ColorDodgeBlend
+      of "overlay": OverlayBlend
+      of "soft-light": SoftLightBlend
+      of "hard-light": HardLightBlend
+      of "difference": DifferenceBlend
+      of "exclusion": ExclusionBlend
+      of "hue": HueBlend
+      of "saturation": SaturationBlend
+      of "color": ColorBlend
+      of "luminosity": LuminosityBlend
+      else: OverwriteBlend
     scaleAndDrawImage(image, self.appConfig.image, self.appConfig.placement, self.appConfig.offsetX,
-        self.appConfig.offsetY)
+        self.appConfig.offsetY, blendMode)
   except Exception as e:
     let message = &"Error rendering image: {e.msg}"
     self.logError(message)
