@@ -47,8 +47,11 @@ def get_one_app_sources(keyword: str) -> Optional[dict[str, str]]:
         local_app_path = os.path.join(local_apps_path, keyword)
         files = os.listdir(local_app_path)
         for file in files:
-            with open(os.path.join(local_app_path, file), 'r') as f:
-                sources[file] = f.read()
+            full_path = os.path.join(local_app_path, file)
+            if os.path.isfile(full_path):
+                # TODO: also support folders and binary files
+                with open(full_path, 'r') as f:
+                    sources[file] = f.read()
     return sources
 
 

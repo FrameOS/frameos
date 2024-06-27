@@ -32,4 +32,4 @@ before build:
 
 task test, "Run tests":
   exec "testament pattern './src/**/tests/*.nim' --lineTrace:on"
-  exec "testament pattern './src/apps/**/tests/*.nim' --lineTrace:on"
+  exec "testament pattern './src/apps/**/**/tests/*.nim' --lineTrace:on"
