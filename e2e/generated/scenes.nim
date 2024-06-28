@@ -6,6 +6,7 @@ import scenes/scene_dataDownloadImage as scene_dataDownloadImage
 import scenes/scene_dataDownloadUrl as scene_dataDownloadUrl
 import scenes/scene_dataLocalImage as scene_dataLocalImage
 import scenes/scene_dataNewImage as scene_dataNewImage
+import scenes/scene_dataNewImageNext as scene_dataNewImageNext
 import scenes/scene_dataQR as scene_dataQR
 import scenes/scene_dataResize as scene_dataResize
 import scenes/scene_logicIfElse as scene_logicIfElse
@@ -32,6 +33,7 @@ const sceneOptions* = [
   ("dataDownloadUrl".SceneId, "Download URL"),
   ("dataLocalImage".SceneId, "Local Image"),
   ("dataNewImage".SceneId, "New Image"),
+  ("dataNewImageNext".SceneId, "Data Image Next"),
   ("dataQR".SceneId, "QR"),
   ("dataResize".SceneId, "Resize image"),
   ("logicIfElse".SceneId, "If Else"),
@@ -58,6 +60,7 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result["dataDownloadUrl".SceneId] = scene_dataDownloadUrl.exportedScene
   result["dataLocalImage".SceneId] = scene_dataLocalImage.exportedScene
   result["dataNewImage".SceneId] = scene_dataNewImage.exportedScene
+  result["dataNewImageNext".SceneId] = scene_dataNewImageNext.exportedScene
   result["dataQR".SceneId] = scene_dataQR.exportedScene
   result["dataResize".SceneId] = scene_dataResize.exportedScene
   result["logicIfElse".SceneId] = scene_logicIfElse.exportedScene
