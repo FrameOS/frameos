@@ -110,6 +110,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
+    blendMode: "normal",
   ))
   scene.node2 = data_downloadImageApp.App(nodeName: "data/downloadImage", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_downloadImageApp.AppConfig(
     url: "https://frameos.net/img/logo_in_ci_tests.png",
@@ -134,6 +135,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     placement: "cover",
     offsetX: 0,
     offsetY: 0,
+    blendMode: "normal",
   ))
   scene.node6 = data_downloadImageApp.App(nodeName: "data/downloadImage", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_downloadImageApp.AppConfig(
     url: "this is not an url",

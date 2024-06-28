@@ -144,6 +144,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
+    blendMode: "normal",
   ))
   scene.node6 = render_textApp.App(nodeName: "render/text", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "Rendering a lot of text as an image node with no image. Rendering a lot of text as an image node with no imageRendering a lot of text as an image node with no imageRendering a lot of text as an image node with no image",
@@ -165,6 +166,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
+    blendMode: "normal",
   ))
   scene.node7 = render_textApp.App(nodeName: "render/text", nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "little  \ntext line",
@@ -186,11 +188,14 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
+    blendMode: "normal",
   ))
   scene.node9 = data_newImageApp.App(nodeName: "data/newImage", nodeId: 9.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
     width: 100,
     height: 100,
     color: parseHtmlColor("#b30000"),
+    opacity: 1.0,
+    renderNext: 0.NodeId,
   ))
   scene.node8 = render_textApp.App(nodeName: "render/text", nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "text on image, i repeat this is text on an image",

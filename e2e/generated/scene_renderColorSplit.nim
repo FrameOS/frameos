@@ -108,6 +108,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
+    blendMode: "normal",
   ))
   scene.node4 = data_resizeImageApp.App(nodeName: "data/resizeImage", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_resizeImageApp.AppConfig(
     width: 200,

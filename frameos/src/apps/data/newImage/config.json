@@ -24,6 +24,19 @@
       "value": "#ffffff",
       "required": true,
       "label": "Color"
+    },
+    {
+      "name": "opacity",
+      "type": "float",
+      "required": false,
+      "label": "Opacity (0-1)",
+      "value": "1"
+    },
+    {
+      "name": "renderNext",
+      "type": "node",
+      "required": false,
+      "label": "Render next"
     }
   ],
   "output": [

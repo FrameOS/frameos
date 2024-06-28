@@ -133,37 +133,47 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
+    blendMode: "normal",
   ))
   scene.node6 = data_newImageApp.App(nodeName: "data/newImage", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
     color: parseHtmlColor("#278f91"),
+    opacity: 1.0,
+    renderNext: 0.NodeId,
   ))
   scene.node3 = render_imageApp.App(nodeName: "render/image", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     inputImage: none(Image),
     placement: "cover",
     offsetX: 0,
     offsetY: 0,
+    blendMode: "normal",
   ))
   scene.node7 = data_newImageApp.App(nodeName: "data/newImage", nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
     width: 30,
     height: 30,
     color: parseHtmlColor("#1b4750"),
+    opacity: 1.0,
+    renderNext: 0.NodeId,
   ))
   scene.node4 = render_imageApp.App(nodeName: "render/image", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "bottom-right",
     offsetX: -10,
     offsetY: -10,
     inputImage: none(Image),
+    blendMode: "normal",
   ))
   scene.node8 = data_newImageApp.App(nodeName: "data/newImage", nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
     width: 100,
     height: 100,
     color: parseHtmlColor("#1b5079"),
+    opacity: 1.0,
+    renderNext: 0.NodeId,
   ))
   scene.node5 = render_imageApp.App(nodeName: "render/image", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "stretch",
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
+    blendMode: "normal",
   ))
   runEvent(context)
   

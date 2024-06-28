@@ -280,9 +280,9 @@ export const appNodeLogic = kea<appNodeLogicType>([
       },
     ],
     showNextPrev: [
-      (s) => [s.hasNextPrevNodeConnected, s.hasOutputConnected],
-      (hasNextPrevNodeConnected, hasOutputConnected) => {
-        return hasNextPrevNodeConnected || !hasOutputConnected
+      (s) => [s.hasNextPrevNodeConnected, s.hasOutputConnected, s.configJson],
+      (hasNextPrevNodeConnected, hasOutputConnected, configJson) => {
+        return (hasNextPrevNodeConnected || !hasOutputConnected) && configJson?.category !== 'data'
       },
     ],
     isDataApp: [

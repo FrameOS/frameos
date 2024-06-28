@@ -125,7 +125,9 @@
       },
       "data": {
         "keyword": "render/image",
-        "config": {},
+        "config": {
+          "blendMode": "normal"
+        },
         "cache": {}
       },
       "width": 311,
