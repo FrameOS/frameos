@@ -8,8 +8,9 @@ import frameos/channels
 import frameos/utils/image
 import frameos/utils/url
 import apps/render/image/app as render_imageApp
-import apps/data/localImage/app as data_localImageApp
-import apps/render/text/app as render_textApp
+import apps/data/newImage/app as data_newImageApp
+import apps/render/split/app as render_splitApp
+import apps/render/color/app as render_colorApp
 
 const DEBUG = false
 let PUBLIC_STATE_FIELDS*: seq[StateField] = @[]
@@ -17,12 +18,13 @@ let PERSISTED_STATE_KEYS*: seq[string] = @[]
 
 type Scene* = ref object of FrameScene
   node1: render_imageApp.App
-  node2: data_localImageApp.App
-  node3: render_textApp.App
+  node2: data_newImageApp.App
+  node3: render_splitApp.App
+  node4: render_colorApp.App
+  node5: render_colorApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
 var cache0: Option[Image] = none(Image)
-var cache0Time: float = 0
 
 proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
   let scene = self
@@ -37,15 +39,20 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
     case nextNode:
     of 1.NodeId: # render/image
       self.node1.appConfig.image = block:
-        if cache0.isNone() or epochTime() > cache0Time + 900.0:
+        if cache0.isNone():
           cache0 = some(block:
             self.node2.get(context))
-          cache0Time = epochTime()
         cache0.get()
       self.node1.run(context)
-      nextNode = 3.NodeId
-    of 3.NodeId: # render/text
+      nextNode = -1.NodeId
+    of 3.NodeId: # render/split
       self.node3.run(context)
+      nextNode = -1.NodeId
+    of 4.NodeId: # render/color
+      self.node4.run(context)
+      nextNode = -1.NodeId
+    of 5.NodeId: # render/color
+      self.node5.run(context)
       nextNode = -1.NodeId
     else:
       nextNode = -1.NodeId
@@ -82,7 +89,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
-  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 300.0, backgroundColor: parseHtmlColor("#000000"))
+  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 3600.0, backgroundColor: parseHtmlColor("#000000"))
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
@@ -94,27 +101,34 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     offsetY: 0,
     blendMode: "normal",
   ))
-  scene.node2 = data_localImageApp.App(nodeName: "data/localImage", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_localImageApp.AppConfig(
-    path: "./assets/image.png",
-    order: "random",
-    counterStateKey: "",
+  scene.node2 = data_newImageApp.App(nodeName: "data/newImage", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
+    color: parseHtmlColor("#ffffff"),
+    opacity: 1.0,
+    renderNext: 3.NodeId,
   ))
-  scene.node2.init()
-  scene.node3 = render_textApp.App(nodeName: "render/text", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
-    text: "Activate proton beam",
+  scene.node3 = render_splitApp.App(nodeName: "render/split", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
+    rows: 2,
     inputImage: none(Image),
-    position: "center",
-    vAlign: "middle",
-    offsetX: 0.0,
-    offsetY: 0.0,
-    padding: 10.0,
-    fontColor: parseHtmlColor("#ffffff"),
-    fontSize: 32.0,
-    borderColor: parseHtmlColor("#000000"),
-    borderWidth: 2,
-    overflow: "fit-bounds",
+    columns: 1,
+    hideEmpty: false,
+    render_functions: @[
+      @[
+        4.NodeId,
+      ],
+      @[
+        5.NodeId,
+      ],
+    ],
+    render_function: 0.NodeId,
   ))
-  scene.node3.init()
+  scene.node4 = render_colorApp.App(nodeName: "render/color", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_colorApp.AppConfig(
+    color: parseHtmlColor("#4f0896"),
+    inputImage: none(Image),
+  ))
+  scene.node5 = render_colorApp.App(nodeName: "render/color", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_colorApp.AppConfig(
+    color: parseHtmlColor("#137981"),
+    inputImage: none(Image),
+  ))
   runEvent(context)
   
 {.pop.}

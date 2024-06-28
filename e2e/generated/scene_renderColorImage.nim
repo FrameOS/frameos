@@ -82,6 +82,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     placement: "cover",
     offsetX: 0,
     offsetY: 0,
+    blendMode: "normal",
   ))
   scene.node2 = render_colorApp.App(nodeName: "render/color", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_colorApp.AppConfig(
     color: parseHtmlColor("#1eff00"),

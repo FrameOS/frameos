@@ -152,6 +152,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
+    blendMode: "normal",
   ))
   scene.node6 = data_resizeImageApp.App(nodeName: "data/resizeImage", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_resizeImageApp.AppConfig(
     height: 100,
@@ -169,6 +170,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
+    blendMode: "normal",
   ))
   scene.node8 = data_resizeImageApp.App(nodeName: "data/resizeImage", nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_resizeImageApp.AppConfig(
     height: 100,
@@ -180,6 +182,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
+    blendMode: "normal",
   ))
   scene.node9 = data_resizeImageApp.App(nodeName: "data/resizeImage", nodeId: 9.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_resizeImageApp.AppConfig(
     height: 100,
@@ -191,6 +194,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     inputImage: none(Image),
     offsetX: 0,
     offsetY: 0,
+    blendMode: "normal",
   ))
   scene.node10 = data_resizeImageApp.App(nodeName: "data/resizeImage", nodeId: 10.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_resizeImageApp.AppConfig(
     height: 100,

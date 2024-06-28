@@ -143,6 +143,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     angle: 45.0,
   ))
   scene.node6 = render_imageApp.App(nodeName: "render/image", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
+    blendMode: "normal",
     inputImage: none(Image),
     placement: "cover",
     offsetX: 0,

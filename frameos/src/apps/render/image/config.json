@@ -16,7 +16,6 @@
         }
       ]
     },
-
     {
       "name": "image",
       "type": "image",
@@ -31,6 +30,7 @@
         "contain",
         "stretch",
         "center",
+        "tiled",
         "top-left",
         "top-center",
         "top-right",
@@ -59,6 +59,35 @@
       "required": false,
       "label": "Offset Y",
       "showIf": [{ "field": "placement", "operator": "notIn", "value": ["cover", "contain", "stretch"] }]
+    },
+    {
+      "name": "blendMode",
+      "type": "select",
+      "options": [
+        "normal",
+        "overwrite",
+        "darken",
+        "multiply",
+        "color-burn",
+        "lighten",
+        "screen",
+        "color-dodge",
+        "overlay",
+        "soft-light",
+        "hard-light",
+        "difference",
+        "exclusion",
+        "hue",
+        "saturation",
+        "color",
+        "luminosity",
+        "mask",
+        "inverse-mask",
+        "exclude-mask"
+      ],
+      "value": "normal",
+      "required": false,
+      "label": "Blend Mode"
     }
   ],
   "output": [
