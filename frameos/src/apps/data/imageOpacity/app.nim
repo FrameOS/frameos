@@ -10,5 +10,6 @@ type
     appConfig*: AppConfig
 
 proc get*(self: App, context: ExecutionContext): Image =
-  applyOpacity(self.appConfig.image, self.appConfig.opacity)
-  return self.appConfig.image
+  let image = self.appConfig.image.copy()
+  applyOpacity(image, self.appConfig.opacity)
+  return image

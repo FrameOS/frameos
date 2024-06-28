@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "fields": [
     { 
-      "name": "image", "type": "image", "required": true, "label": "Image (will be modified!)" 
+      "name": "image", "type": "image", "required": true, "label": "Image" 
     },
     {
       "name": "opacity",

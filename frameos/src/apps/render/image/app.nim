@@ -22,8 +22,8 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
     if self.appConfig.image == nil:
       raise newException(Exception, "No image provided.")
     let blendMode = case self.appConfig.blendMode:
-      of "overwrite": OverwriteBlend
       of "normal": NormalBlend
+      of "overwrite": OverwriteBlend
       of "darken": DarkenBlend
       of "multiply": MultiplyBlend
       of "color-burn": ColorBurnBlend

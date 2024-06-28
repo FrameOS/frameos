@@ -241,11 +241,14 @@ def make_local_modifications(frame: Frame, source_dir: str):
 
     # only one scene called "default" for now
     for scene in frame.scenes:
-        scene_source = write_scene_nim(frame, scene)
-        id = re.sub(r'\W+', '', scene.get('id', 'default'))
-
-        with open(os.path.join(source_dir, "src", "scenes", f"scene_{id}.nim"), "w") as file:
-            file.write(scene_source)
+        try:
+            scene_source = write_scene_nim(frame, scene)
+            id = re.sub(r'\W+', '', scene.get('id', 'default'))
+            with open(os.path.join(source_dir, "src", "scenes", f"scene_{id}.nim"), "w") as file:
+                file.write(scene_source)
+        except Exception as e:
+            log(frame.id, "stderr", f"Error writing scene \"{scene.get('name', '')}\" ({scene.get('id', 'default')}): {e}")
+            raise
     with open(os.path.join(source_dir, "src", "scenes", "scenes.nim"), "w") as file:
         file.write(write_scenes_nim(frame))
 

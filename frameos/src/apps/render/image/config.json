@@ -64,8 +64,8 @@
       "name": "blendMode",
       "type": "select",
       "options": [
-        "overwrite",
         "normal",
+        "overwrite",
         "darken",
         "multiply",
         "color-burn",
@@ -82,7 +82,7 @@
         "color",
         "luminosity"
       ],
-      "value": "overwrite",
+      "value": "normal",
       "required": false,
       "label": "Blend Mode"
     }
