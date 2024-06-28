@@ -137,6 +137,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   ))
   scene.node6 = data_newImageApp.App(nodeName: "data/newImage", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
     color: parseHtmlColor("#278f91"),
+    opacity: 1.0,
+    renderNext: 0.NodeId,
   ))
   scene.node3 = render_imageApp.App(nodeName: "render/image", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     inputImage: none(Image),
@@ -149,6 +151,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     width: 30,
     height: 30,
     color: parseHtmlColor("#1b4750"),
+    opacity: 1.0,
+    renderNext: 0.NodeId,
   ))
   scene.node4 = render_imageApp.App(nodeName: "render/image", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "bottom-right",
@@ -161,6 +165,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     width: 100,
     height: 100,
     color: parseHtmlColor("#1b5079"),
+    opacity: 1.0,
+    renderNext: 0.NodeId,
   ))
   scene.node5 = render_imageApp.App(nodeName: "render/image", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "stretch",

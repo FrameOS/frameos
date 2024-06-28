@@ -145,6 +145,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     width: 40,
     height: 40,
     color: parseHtmlColor("#ffffff"),
+    opacity: 1.0,
+    renderNext: 0.NodeId,
   ))
   scene.node6 = render_gradientApp.App(nodeName: "render/gradient", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
     startColor: parseHtmlColor("#2f8d1c"),

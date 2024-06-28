@@ -16,6 +16,8 @@ import scenes/scene_renderColorSplit as scene_renderColorSplit
 import scenes/scene_renderGradientSplit as scene_renderGradientSplit
 import scenes/scene_renderImage as scene_renderImage
 import scenes/scene_renderImageBlend as scene_renderImageBlend
+import scenes/scene_renderImageMask as scene_renderImageMask
+import scenes/scene_renderOpacity as scene_renderOpacity
 import scenes/scene_renderSplitData as scene_renderSplitData
 import scenes/scene_renderSplitFlow as scene_renderSplitFlow
 import scenes/scene_renderSplitLoop as scene_renderSplitLoop
@@ -40,6 +42,8 @@ const sceneOptions* = [
   ("renderGradientSplit".SceneId, "Gradient"),
   ("renderImage".SceneId, "Render image"),
   ("renderImageBlend".SceneId, "Blend Modes"),
+  ("renderImageMask".SceneId, "Image Mask"),
+  ("renderOpacity".SceneId, "Opacity"),
   ("renderSplitData".SceneId, "Split"),
   ("renderSplitFlow".SceneId, "Split"),
   ("renderSplitLoop".SceneId, "Split Loop"),
@@ -64,6 +68,8 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result["renderGradientSplit".SceneId] = scene_renderGradientSplit.exportedScene
   result["renderImage".SceneId] = scene_renderImage.exportedScene
   result["renderImageBlend".SceneId] = scene_renderImageBlend.exportedScene
+  result["renderImageMask".SceneId] = scene_renderImageMask.exportedScene
+  result["renderOpacity".SceneId] = scene_renderOpacity.exportedScene
   result["renderSplitData".SceneId] = scene_renderSplitData.exportedScene
   result["renderSplitFlow".SceneId] = scene_renderSplitFlow.exportedScene
   result["renderSplitLoop".SceneId] = scene_renderSplitLoop.exportedScene

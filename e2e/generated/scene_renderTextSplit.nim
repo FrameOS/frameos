@@ -194,6 +194,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     width: 100,
     height: 100,
     color: parseHtmlColor("#b30000"),
+    opacity: 1.0,
+    renderNext: 0.NodeId,
   ))
   scene.node8 = render_textApp.App(nodeName: "render/text", nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "text on image, i repeat this is text on an image",

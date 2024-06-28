@@ -39,7 +39,10 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       of "saturation": SaturationBlend
       of "color": ColorBlend
       of "luminosity": LuminosityBlend
-      else: OverwriteBlend
+      of "mask": MaskBlend
+      of "inverse-mask": SubtractMaskBlend
+      of "exclude-mask": ExcludeMaskBlend
+      else: NormalBlend
     scaleAndDrawImage(image, self.appConfig.image, self.appConfig.placement, self.appConfig.offsetX,
         self.appConfig.offsetY, blendMode)
   except Exception as e:

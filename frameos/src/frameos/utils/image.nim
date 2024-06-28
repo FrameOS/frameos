@@ -112,6 +112,9 @@ proc scaleAndDrawImage*(targetImage: Image, srcImage: Image, scalingMode: string
         blendMode
       )
 
+    of "tiled":
+      targetImage.drawTiled(srcImage, translate(vec2(offsetX.float32, offsetY.float32)))
+
     of "top-left":
       targetImage.draw(srcImage, translate(vec2(offsetX.float32, offsetY.float32)))
 

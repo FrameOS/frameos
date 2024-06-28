@@ -1,11 +1,19 @@
 {
-  "name": "Image Opacity",
+  "name": "Opacity",
   "description": "Change how transparent an image is",
-  "category": "data",
+  "category": "render",
   "version": "1.0.0",
   "fields": [
     { 
-      "name": "image", "type": "image", "required": true, "label": "Image" 
+      "name": "image", 
+      "type": "image", 
+      "required": false, 
+      "label": "Image (optional)",
+      "showIf": [
+        {
+          "field": ".meta.showOutput"
+        }
+      ]
     },
     {
       "name": "opacity",

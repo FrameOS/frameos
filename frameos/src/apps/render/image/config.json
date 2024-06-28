@@ -16,7 +16,6 @@
         }
       ]
     },
-
     {
       "name": "image",
       "type": "image",
@@ -31,6 +30,7 @@
         "contain",
         "stretch",
         "center",
+        "tiled",
         "top-left",
         "top-center",
         "top-right",
@@ -80,7 +80,10 @@
         "hue",
         "saturation",
         "color",
-        "luminosity"
+        "luminosity",
+        "mask",
+        "inverse-mask",
+        "exclude-mask"
       ],
       "value": "normal",
       "required": false,
