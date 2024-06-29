@@ -6,7 +6,7 @@ import frameos/metrics
 import frameos/runner
 import frameos/server
 import frameos/types
-import frameos/tz
+import lib/tz
 
 proc newFrameOS*(): FrameOS =
   initTimeZone()
