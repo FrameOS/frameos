@@ -6,8 +6,10 @@ import frameos/metrics
 import frameos/runner
 import frameos/server
 import frameos/types
+import frameos/tz
 
 proc newFrameOS*(): FrameOS =
+  initTimeZone()
   var frameConfig = loadConfig()
   var logger = newLogger(frameConfig)
   logger.log(%*{"event": "startup"})

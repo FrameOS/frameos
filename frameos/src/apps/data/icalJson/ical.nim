@@ -53,7 +53,7 @@ proc extractTimeZone*(dateTimeStr: string): string =
   else:
     "UTC"
 
-proc parseDateTime*(dateTimeStr: string, tzName: string): Timestamp =
+proc parseDateTime*(dateTimeStr: string, isFullDay: bool, timezone: string): Timestamp =
   let cleanDateTimeStr = if dateTimeStr.contains(";"):
     dateTimeStr.split(";")[1]
   elif dateTimeStr.contains(":"):
@@ -66,7 +66,12 @@ proc parseDateTime*(dateTimeStr: string, tzName: string): Timestamp =
                else:
                  "{year/4}{month/2}{day/2}"
   try:
-    return parseTs(format, cleanDateTimeStr, tzName)
+    var cal = parseTs(format, cleanDateTimeStr).calendar()
+    if isFullDay:
+      cal.shiftTimezone(timeZone)
+    else:
+      cal.applyTimezone(timeZone)
+    return cal.ts
   except ValueError as e:
     raise newException(TimeParseError, "Failed to parse datetime string: " & dateTimeStr & ". Error: " & e.msg)
 
@@ -118,16 +123,14 @@ proc processLine*(self: CalendarParser, line: string) =
               let parts = value.split(":")
               let date = parts[len(parts) - 1]
               self.currentVEvent.fullDay = true
-              var cal = parseCalendar("{year/4}{month/2}{day/2}", date)
-              cal.applyTimezone(self.calendar.timeZone)
-              let timestamp = (cal.ts.float + cal.tzOffset * 60).Timestamp
+              let timestamp = parseDateTime(date, true, self.calendar.timeZone)
               if key == "DTSTART":
                 self.currentVEvent.startTime = timestamp
               else:
                 self.currentVEvent.endTime = timestamp
             else:
               let tzInfo = extractTimeZone(value)
-              let timestamp = parseDateTime(value, tzInfo)
+              let timestamp = parseDateTime(value, false, tzInfo)
               self.currentVEvent.fullDay = false
               if key == "DTSTART":
                 self.currentVEvent.startTime = timestamp
@@ -161,7 +164,7 @@ proc processLine*(self: CalendarParser, line: string) =
               of "COUNT":
                 rrule.count = keyValue[1].parseInt()
               of "UNTIL":
-                rrule.until = parseDateTime(keyValue[1], extractTimeZone(keyValue[1]))
+                rrule.until = parseDateTime(keyValue[1], true, extractTimeZone(keyValue[1]))
               of "BYDAY":
                 # "1SU"
                 for day in keyValue[1].split(','):
