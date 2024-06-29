@@ -76,7 +76,7 @@ block test_get_events:
     let events = calendar.events
     doAssert calendar.timezone == "Europe/Brussels"
 
-    let allEvents = getEvents(events, parseICalDateTime("20240101", "UTC"), parseICalDateTime("20250101", "UTC"), 100)
+    let allEvents = getEvents(events, parseICalDateTime("20240101", "UTC"), parseICalDateTime("20250101", "UTC"), "", 100)
     doAssert len(allEvents) == 52
     echo allEvents[0][0]
     echo allEvents[51][0]
@@ -84,7 +84,7 @@ block test_get_events:
     doAssert allEvents[51][0] == Timestamp(1735138800.0)
     doAssert allEvents[0][1].summary == "Team Standup"
 
-    let allEventsOld = getEvents(events, parseICalDateTime("20210101", "UTC"), parseICalDateTime("20220101", "UTC"), 100)
+    let allEventsOld = getEvents(events, parseICalDateTime("20210101", "UTC"), parseICalDateTime("20220101", "UTC"), "", 100)
     echo allEventsOld[0][0]
     echo allEventsOld[41][0]
     doAssert len(allEventsOld) == 42
@@ -92,3 +92,7 @@ block test_get_events:
     doAssert allEventsOld[41][0] == Timestamp(1640790000.0)
     doAssert allEventsOld[0][1].summary == "Team Standup"
     doAssert allEventsOld[11][1].summary == "Hacklunch for Project"
+
+    let standupEvents = getEvents(events, parseICalDateTime("20210101", "UTC"), parseICalDateTime("20220101", "UTC"),
+            "Team Standup", 1000)
+    doAssert len(standupEvents) == 38

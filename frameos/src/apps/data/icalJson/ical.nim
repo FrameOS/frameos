@@ -234,14 +234,16 @@ proc parseICalendar*(content: string): Calendar =
   parser.calendar.events.sort(proc (a: VEvent, b: VEvent): int = cmp(a.startTime.float, b.startTime.float))
   return parser.calendar
 
-proc getEvents*(events: seq[VEvent], startTime: Timestamp, endTime: Timestamp, maxCount: int = 1000): seq[(
-    Timestamp, VEvent)] =
+proc getEvents*(events: seq[VEvent], startTime: Timestamp, endTime: Timestamp, search: string = "",
+    maxCount: int = 1000): seq[(Timestamp, VEvent)] =
   result = @[]
   var toCheck = initDoublyLinkedList[(VEvent, Option[RRule], int)]()
   let endTime = if endTime == 0.Timestamp: (startTime.float + 366 * 86400).Timestamp
                 else: endTime
 
   for event in events:
+    if search != "" and not event.summary.contains(search):
+      continue
     for rrule in event.rrules:
       toCheck.add((event, some(rrule), 0))
     if event.rrules.len == 0:

@@ -17,6 +17,7 @@ type
     exportFrom*: string
     exportUntil*: string
     exportCount*: int
+    search*: string
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -33,7 +34,7 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
   var client = newHttpClient(timeout = 60000)
   var parsedEvents: seq[VEvent]
   try:
-    parsedEvents = parseICalendar(self.appConfig.ical).events
+    parsedEvents = parseICalendar(self.appConfig.iCal).events
   except CatchableError as e:
     self.logError "Error parsing iCal: " & $e.msg
     return
@@ -45,7 +46,8 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
       timezone) else: now()).toTime().toUnixFloat().Timestamp
   var exportUntil = if self.appConfig.exportUntil != "": parse(self.appConfig.exportUntil, "yyyy-MM-dd",
       timezone).toTime().toUnixFloat().Timestamp else: 0.Timestamp
-  let matchedEvents = getEvents(parsedEvents, exportFrom, exportUntil, self.appConfig.exportCount)
+  let matchedEvents = getEvents(parsedEvents, exportFrom, exportUntil, self.appConfig.search,
+      self.appConfig.exportCount)
   var eventsReply: JsonNode = %[]
   for (time, event) in matchedEvents:
     let startTime = if event.fullDay: fromUnixFloat(time.float).format("yyyy-MM-dd")

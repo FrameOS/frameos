@@ -5,9 +5,6 @@
   "version": "1.0.0",
   "fields": [
     {
-      "markdown": "This app is still experimental. Press \"Edit App\" and help make it better."
-    },
-    {
       "name": "ical",
       "type": "string",
       "required": true,
@@ -36,6 +33,17 @@
       "placeholder": "1000",
       "required": false,
       "label": "Maximum number of events to export"
+    },
+    {
+      "name": "search",
+      "type": "string",
+      "value": "",
+      "placeholder": "",
+      "required": false,
+      "label": "Search"
+    },
+    {
+      "markdown": "`[{ summary, startTime, endTime, location, description }]`"
     }
   ],
   "output": [
