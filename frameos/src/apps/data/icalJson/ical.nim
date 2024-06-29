@@ -1,7 +1,6 @@
 import pixie
 import times
 import strutils
-import sequtils
 import chrono
 import options
 import std/algorithm
@@ -53,24 +52,20 @@ proc extractTimeZone*(dateTimeStr: string): string =
   else:
     "UTC"
 
-proc parseDateTime*(dateTimeStr: string, isFullDay: bool, timezone: string): Timestamp =
-  let cleanDateTimeStr = if dateTimeStr.contains(";"):
-    dateTimeStr.split(";")[1]
-  elif dateTimeStr.contains(":"):
-    dateTimeStr.split(":")[1]
-  else:
-    dateTimeStr
-  let zOrEmpty = if cleanDateTimeStr.endsWith("Z"): "Z" else: ""
-  let format = if 'T' in cleanDateTimeStr:
-                 "{year/4}{month/2}{day/2}T{hour/2}{minute/2}{second/2}" & zOrEmpty
+proc parseICalDateTime*(dateTimeStr: string, timezone: string): Timestamp =
+  let dateTime = if dateTimeStr.contains(";"): dateTimeStr.split(";")[1]
+                 elif dateTimeStr.contains(":"): dateTimeStr.split(":")[1]
+                 else: dateTimeStr
+  let format = if 'T' in dateTime:
+                 "{year/4}{month/2}{day/2}T{hour/2}{minute/2}{second/2}" & (if dateTimeStr.endsWith("Z"): "Z" else: "")
                else:
                  "{year/4}{month/2}{day/2}"
   try:
-    var cal = parseTs(format, cleanDateTimeStr).calendar()
-    if isFullDay:
-      cal.shiftTimezone(timeZone)
+    var cal = parseTs(format, dateTime).calendar()
+    if 'T' in dateTime and dateTimeStr.endsWith("Z"):
+      cal.applyTimezone(timeZone) # Treat UTC timestamps as the real deal
     else:
-      cal.applyTimezone(timeZone)
+      cal.shiftTimezone(timeZone) # Otherwise the date/time was in the local zone
     return cal.ts
   except ValueError as e:
     raise newException(TimeParseError, "Failed to parse datetime string: " & dateTimeStr & ". Error: " & e.msg)
@@ -123,14 +118,14 @@ proc processLine*(self: CalendarParser, line: string) =
               let parts = value.split(":")
               let date = parts[len(parts) - 1]
               self.currentVEvent.fullDay = true
-              let timestamp = parseDateTime(date, true, self.calendar.timeZone)
+              let timestamp = parseICalDateTime(date, self.calendar.timeZone)
               if key == "DTSTART":
                 self.currentVEvent.startTime = timestamp
               else:
                 self.currentVEvent.endTime = timestamp
             else:
               let tzInfo = extractTimeZone(value)
-              let timestamp = parseDateTime(value, false, tzInfo)
+              let timestamp = parseICalDateTime(value, tzInfo)
               self.currentVEvent.fullDay = false
               if key == "DTSTART":
                 self.currentVEvent.startTime = timestamp
@@ -164,7 +159,7 @@ proc processLine*(self: CalendarParser, line: string) =
               of "COUNT":
                 rrule.count = keyValue[1].parseInt()
               of "UNTIL":
-                rrule.until = parseDateTime(keyValue[1], true, extractTimeZone(keyValue[1]))
+                rrule.until = parseICalDateTime(keyValue[1], extractTimeZone(keyValue[1]))
               of "BYDAY":
                 # "1SU"
                 for day in keyValue[1].split(','):

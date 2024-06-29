@@ -1,4 +1,5 @@
 import ../ical
+import lib/tz
 import chrono, times
 
 block test_lincoln:
@@ -57,6 +58,17 @@ block test_holidays:
     doAssert events[0].summary == "Emadepäev"
 
 
+block test_parse_ical_datetime:
+    echo "Test: parse_ical_datetime"
+    doAssert parseICalDateTime("20240101", "UTC") == parseICalDateTime("20240101", "Europe/Brussels")
+    doAssert parseICalDateTime("20240101T000000", "UTC") == parseICalDateTime("20240101T000000", "Europe/Brussels")
+    doAssert parseICalDateTime("20240101T000000Z", "UTC") == parseICalDateTime("20240101T000000Z", "Europe/Brussels")
+    initTimeZone()
+    doAssert parseICalDateTime("20240101", "UTC") != parseICalDateTime("20240101", "Europe/Brussels")
+    doAssert parseICalDateTime("20240101T000000", "UTC") != parseICalDateTime("20240101T000000", "Europe/Brussels")
+    doAssert parseICalDateTime("20240101T000000Z", "UTC") == parseICalDateTime("20240101T000000Z", "Europe/Brussels")
+
+
 block test_get_events:
     echo "Test: get_events"
     let iCalFile = readFile("./src/apps/data/icalJson/tests/data/meetings.ics")
@@ -64,15 +76,19 @@ block test_get_events:
     let events = calendar.events
     doAssert calendar.timezone == "Europe/Brussels"
 
-    let allEvents = getEvents(events, parseDateTime("20240101", "UTC"), parseDateTime("20250101", "UTC"), 100)
+    let allEvents = getEvents(events, parseICalDateTime("20240101", "UTC"), parseICalDateTime("20250101", "UTC"), 100)
     doAssert len(allEvents) == 52
-    doAssert allEvents[0][0] == Timestamp(1704301200.0)
-    doAssert allEvents[51][0] == Timestamp(1735146000.0)
+    echo allEvents[0][0]
+    echo allEvents[51][0]
+    doAssert allEvents[0][0] == Timestamp(1704294000.0)
+    doAssert allEvents[51][0] == Timestamp(1735138800.0)
     doAssert allEvents[0][1].summary == "Team Standup"
 
-    let allEventsOld = getEvents(events, parseDateTime("20210101", "UTC"), parseDateTime("20220101", "UTC"), 100)
+    let allEventsOld = getEvents(events, parseICalDateTime("20210101", "UTC"), parseICalDateTime("20220101", "UTC"), 100)
+    echo allEventsOld[0][0]
+    echo allEventsOld[41][0]
     doAssert len(allEventsOld) == 42
-    doAssert allEventsOld[0][0] == Timestamp(1618419600.0)
-    doAssert allEventsOld[41][0] == Timestamp(1640797200.0)
+    doAssert allEventsOld[0][0] == Timestamp(1618412400.0)
+    doAssert allEventsOld[41][0] == Timestamp(1640790000.0)
     doAssert allEventsOld[0][1].summary == "Team Standup"
     doAssert allEventsOld[11][1].summary == "Hacklunch for Project"
