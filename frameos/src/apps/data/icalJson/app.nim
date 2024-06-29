@@ -2,7 +2,6 @@ import pixie
 import times
 import options
 import json
-import strformat
 import strutils
 import httpclient
 import frameos/apps
@@ -63,5 +62,5 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
       "description": event.description,
     }
     eventsReply.add(jsonEvent)
-  self.log(%*{"event": &"reply", "events": len(eventsReply), "inRange": len(eventsReply)})
+  self.log(%*{"event": "reply", "eventsInRange": len(eventsReply)})
   return eventsReply
