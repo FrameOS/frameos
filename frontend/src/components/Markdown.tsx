@@ -18,7 +18,7 @@ export function Markdown({ value }: MarkdownProps) {
           return <a target="_blank" {...props} className="text-blue-400 hover:underline" />
         },
         p({ node, ...props }) {
-          return <p {...props} className="mb-4" />
+          return <p {...props} />
         },
         code(props) {
           const { children, className, node, ref, ...rest } = props
