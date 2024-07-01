@@ -10,8 +10,9 @@ block test_lincoln:
     doAssert events[0].startTs == Timestamp(1202774400.0)
     doAssert events[0].endTs == Timestamp(1202860800.0)
     doAssert events[0].location == "Hodgenville, Kentucky"
-    doAssert events[0].description == "Born February 12, 1809\nSixteenth President (1861-1865)\n\n\n\nhttp://AmericanHistoryCalendar.com"
-    doAssert events[0].summary == "Abraham Lincoln"
+    doAssert events[0].description == "Born February 12, 1809\nSixteenth President (1861-1865)\n\n\n\nhttp://AmericanHistoryCalendar.com",
+            events[0].description
+    doAssert events[0].summary == "Abraham Lincoln", events[0].summary
 
 block test_meetings:
     echo "Test: meetings"
@@ -77,11 +78,7 @@ block test_get_events:
     var calendar = parseICalendar(iCalFile)
     doAssert calendar.timezone == "Europe/Brussels"
     let allEvents = getEvents(calendar, parseICalDateTime("20240101", "UTC"), parseICalDateTime("20250101", "UTC"), "", 100)
-    echo len(allEvents)
     doAssert len(allEvents) == 52
-    echo "5"
-    echo allEvents[0][0]
-    echo allEvents[51][0]
     doAssert allEvents[0][0] == Timestamp(1704294000.0)
     doAssert allEvents[51][0] == Timestamp(1735138800.0)
     doAssert allEvents[0][1].summary == "Team Standup"
@@ -89,8 +86,6 @@ block test_get_events:
     calendar = parseICalendar(iCalFile)
     let allEventsOld = getEvents(calendar, parseICalDateTime("20210101", "UTC"), parseICalDateTime("20220101", "UTC"),
             "", 100)
-    echo allEventsOld[0][0]
-    echo allEventsOld[41][0]
     doAssert len(allEventsOld) == 42
     doAssert allEventsOld[0][0] == Timestamp(1618412400.0)
     doAssert allEventsOld[41][0] == Timestamp(1640790000.0)
@@ -101,4 +96,53 @@ block test_get_events:
     let standupEvents = getEvents(calendar, parseICalDateTime("20210101", "UTC"), parseICalDateTime("20220101", "UTC"),
             "Team Standup", 1000)
     doAssert len(standupEvents) == 38
+
+
+# block test_get_events_large:
+#     echo "Test: get_events_large"
+#     let iCalFile = readFile("./src/apps/data/icalJson/tests/data/large.ics")
+#     let calendar = parseICalendar(iCalFile)
+#     doAssert calendar.timezone == "Europe/Brussels"
+
+#     let allEvents = getEvents(calendar, parseICalDateTime("20240630", "UTC"), parseICalDateTime("20250101", "UTC"), "", 100)
+#     doAssert len(allEvents) == 100
+
+proc toFullCal(event: string, timeZone = "UTC"): seq[(Timestamp, VEvent)] =
+    let calendar = parseICalendar("""
+BEGIN:VCALENDAR
+BEGIN:VEVENT
+""" & event & """
+END:VEVENT
+END:VCALENDAR
+""", timeZone)
+    return getEvents(calendar, parseICalDateTime("19900101", "UTC"), parseICalDateTime("20301231", "UTC"), "", 1000)
+
+
+block test_rrules_1:
+    echo "Daily for 10 occurrences"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:19970902T090000
+DTEND;TZID=America/New_York:19970902T093000
+RRULE:FREQ=DAILY;COUNT=10
+""")
+    #  ==> (1997 9:00 AM EDT) September 2-11
+    doAssert len(events) == 10
+    doAssert events[0][0] == parseICalDateTime("19970902T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("19970903T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("19970904T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("19970905T090000", "America/New_York")
+    doAssert events[9][0] == parseICalDateTime("19970911T090000", "America/New_York")
+
+block test_rrules_2:
+    echo "Daily until December 24, 1997"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:19970902T090000
+DTEND;TZID=America/New_York:19970902T093000
+RRULE:FREQ=DAILY;UNTIL=19971224T000000Z
+""")
+    #  ==> (1997 9:00 AM EDT) September 2-30;October 1-25
+    #      (1997 9:00 AM EST) October 26-31;November 1-30;December 1-23
+    doAssert len(events) == 113
+    doAssert events[0][0] == parseICalDateTime("19970902T090000", "America/New_York")
+    doAssert events[112][0] == parseICalDateTime("19971223T090000", "America/New_York")
 
