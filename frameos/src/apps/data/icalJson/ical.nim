@@ -28,19 +28,16 @@ type
   VEvent* = ref object
     summary*: string
     description*: string
-    startTime*: Timestamp
-    endTime*: Timestamp
+    startTs*: Timestamp
+    endTs*: Timestamp
     fullDay*: bool
     location*: string
     rrules*: seq[RRule]
     recurrenceId*: string
 
-  Calendar* = ref object
+  ParsedCalendar* = ref object
     events*: seq[VEvent]
     timeZone*: string
-
-  CalendarParser* = ref object
-    calendar*: Calendar
     currentVEvent*: VEvent
     inVEvent*: bool
     inVCalendar*: bool
@@ -91,14 +88,16 @@ proc unescape*(line: string): string =
     inc i
   return result
 
-proc processLine*(self: CalendarParser, line: string) =
+proc processLine*(self: ParsedCalendar, line: string) =
   try:
     if line.startsWith("BEGIN:VEVENT"):
       self.inVEvent = true
       self.currentVEvent = VEvent()
+      if self.timeZone == "":
+        self.timeZone = now().timezone().name
     elif line.startsWith("END:VEVENT"):
       self.inVEvent = false
-      self.calendar.events.add(self.currentVEvent)
+      self.events.add(self.currentVEvent)
     elif line.startsWith("BEGIN:VCALENDAR"):
       self.inVCalendar = true
     elif line.startsWith("END:VCALENDAR"):
@@ -118,19 +117,19 @@ proc processLine*(self: CalendarParser, line: string) =
               let parts = value.split(":")
               let date = parts[len(parts) - 1]
               self.currentVEvent.fullDay = true
-              let timestamp = parseICalDateTime(date, self.calendar.timeZone)
+              let timestamp = parseICalDateTime(date, self.timeZone)
               if key == "DTSTART":
-                self.currentVEvent.startTime = timestamp
+                self.currentVEvent.startTs = timestamp
               else:
-                self.currentVEvent.endTime = timestamp
+                self.currentVEvent.endTs = timestamp
             else:
               let tzInfo = extractTimeZone(value)
               let timestamp = parseICalDateTime(value, tzInfo)
               self.currentVEvent.fullDay = false
               if key == "DTSTART":
-                self.currentVEvent.startTime = timestamp
+                self.currentVEvent.startTs = timestamp
               else:
-                self.currentVEvent.endTime = timestamp
+                self.currentVEvent.endTs = timestamp
           of "LOCATION":
             self.currentVEvent.location = unescape(value)
           of "SUMMARY":
@@ -159,13 +158,13 @@ proc processLine*(self: CalendarParser, line: string) =
               of "COUNT":
                 rrule.count = keyValue[1].parseInt()
               of "UNTIL":
-                rrule.until = parseICalDateTime(keyValue[1], extractTimeZone(keyValue[1]))
+                rrule.until = parseICalDateTime(keyValue[1], self.timeZone)
               of "BYDAY":
                 # "1SU"
                 for day in keyValue[1].split(','):
-                  let dayNum = if day.len > 2: day[0..^2].parseInt() else: 0
-                  let day = day[^2..^1]
-                  case day.toUpper():
+                  let weekDay = day[^2..^1]
+                  let dayNum = if day.len > 2: day[0..(day.len - weekDay.len - 1)].parseInt() else: 0
+                  case weekDay.toUpper():
                   of "SU": rrule.byDay.add((RRuleDay.su, dayNum))
                   of "MO": rrule.byDay.add((RRuleDay.mo, dayNum))
                   of "TU": rrule.byDay.add((RRuleDay.tu, dayNum))
@@ -208,17 +207,20 @@ proc processLine*(self: CalendarParser, line: string) =
         elif self.inVCalendar:
           case key
           of "X-WR-TIMEZONE":
-            self.calendar.timeZone = value
+            self.timeZone = value
           else:
             return
 
   except CatchableError as e:
     echo "Failed to parse calendar line \"" & line & "\". Error: " & e.msg
 
-proc parseICalendar*(content: string): Calendar =
+proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
   let lines = content.splitLines()
   var accumulator = ""
-  var parser = CalendarParser(calendar: Calendar(events: @[], timeZone: "UTC"), currentVEvent: nil, inVEvent: false,
+  var parser = ParsedCalendar(events: @[],
+                              timeZone: timeZone,
+                              currentVEvent: nil,
+                              inVEvent: false,
                               inVCalendar: false)
 
   for i, line in lines:
@@ -231,60 +233,57 @@ proc parseICalendar*(content: string): Calendar =
     accumulator = line
   if accumulator != "":
     parser.processLine(accumulator.strip())
-  parser.calendar.events.sort(proc (a: VEvent, b: VEvent): int = cmp(a.startTime.float, b.startTime.float))
-  return parser.calendar
+  parser.events.sort(proc (a: VEvent, b: VEvent): int = cmp(a.startTs, b.startTs))
+  return parser
 
-proc getEvents*(events: seq[VEvent], startTime: Timestamp, endTime: Timestamp, search: string = "",
+
+proc applyRRule(parsedCalendar: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent, rrule: RRule): seq[
+    (Timestamp, VEvent)] =
+  var
+    currentTs = event.startTs
+    newEndTs = event.endTs
+    currentCal = currentTs.calendar(parsedCalendar.timeZone)
+    count = 0
+
+  while (rrule.until == 0.Timestamp or currentTs <= rrule.until) and (rrule.count == 0 or count < rrule.count) and
+      currentTs <= endTs:
+
+    if currentTs <= endTs and newEndTs >= startTs:
+      result.add((currentTs, event))
+
+    case rrule.freq
+    of RRuleFreq.daily:
+      currentCal.add(TimeScale.Day, rrule.interval)
+    of RRuleFreq.weekly:
+      currentCal.add(TimeScale.Day, 7 * rrule.interval)
+    of RRuleFreq.monthly:
+      currentCal.add(TimeScale.Month, rrule.interval)
+    of RRuleFreq.yearly:
+      currentCal.add(TimeScale.Year, rrule.interval)
+
+    # Apply BYDAY, BYMONTH, BYMONTHDAY adjustments
+    # (Simplified for clarity. Implement specific logic based on iCalendar specifications)
+
+    currentTs = currentCal.ts
+    newEndTs = (currentTs.float + (event.endTs.float - event.startTs.float)).Timestamp
+    inc(count)
+    if count > 100000:
+      break
+
+proc getEvents*(parsedCalendar: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, search: string = "",
     maxCount: int = 1000): seq[(Timestamp, VEvent)] =
-  result = @[]
-  var toCheck = initDoublyLinkedList[(VEvent, Option[RRule], int)]()
-  let endTime = if endTime == 0.Timestamp: (startTime.float + 366 * 86400).Timestamp
-                else: endTime
-
-  for event in events:
+  for event in parsedCalendar.events:
     if search != "" and not event.summary.contains(search):
       continue
+
     for rrule in event.rrules:
-      toCheck.add((event, some(rrule), 0))
-    if event.rrules.len == 0:
-      toCheck.add((event, none(RRule), 0))
+      let newRules = applyRRule(parsedCalendar, startTs, endTs, event, rrule)
+      for rule in newRules:
+        result.add(rule)
 
-  while toCheck.head != nil:
-    let head = toCheck.head
-    let (event, rruleOption, intervalIndex) = head.value
-    toCheck.remove(head)
+    if event.rrules.len == 0 and event.startTs <= endTs and event.endTs >= startTs:
+      result.add((event.startTs, event))
 
-    var eventStart = event.startTime
-    var eventEnd = event.endTime
-
-    if rruleOption.isNone() or event.recurrenceId != "":
-      if eventEnd > startTime and eventStart < endTime:
-        result.add((eventStart, event))
-      continue
-
-    let rrule = rruleOption.get()
-    let duration = eventEnd.float - eventStart.float
-    var cal = eventStart.calendar()
-    if intervalIndex > 0:
-      if rrule.freq == RRuleFreq.daily:
-        cal.add(TimeScale.Day, intervalIndex * rrule.interval)
-      elif rrule.freq == RRuleFreq.weekly:
-        cal.add(TimeScale.Week, intervalIndex * rrule.interval)
-      elif rrule.freq == RRuleFreq.monthly:
-        cal.add(TimeScale.Month, intervalIndex * rrule.interval)
-      elif rrule.freq == RRuleFreq.yearly:
-        cal.add(TimeScale.Year, intervalIndex * rrule.interval)
-
-    eventStart = cal.ts()
-    eventEnd = (eventStart.float + duration).Timestamp
-
-    if eventStart < startTime and eventEnd < startTime and rruleOption.isSome():
-      toCheck.add((event, rruleOption, intervalIndex + 1))
-    elif (eventEnd > startTime and eventStart < endTime):
-      result.add((eventStart, event))
-      if rruleOption.isSome():
-        toCheck.add((event, rruleOption, intervalIndex + 1))
-
-  result.sort(proc (a: (Timestamp, VEvent), b: (Timestamp, VEvent)): int = cmp(a[0].float, b[0].float))
+  result.sort(cmp) # Sort events based on start time
   if maxCount > 0 and result.len > maxCount:
     result = result[0..<maxCount]
