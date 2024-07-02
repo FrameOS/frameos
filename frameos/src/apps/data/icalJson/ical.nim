@@ -51,24 +51,6 @@ type
 proc `<`(a, b: VEvent): bool =
   a.startTs < b.startTs
 
-proc parseICalDateTime*(dateTimeStr: string, timezone: string): Timestamp =
-  let dateTime = if dateTimeStr.contains(";"): dateTimeStr.split(";")[1]
-                 elif dateTimeStr.contains(":"): dateTimeStr.split(":")[1]
-                 else: dateTimeStr
-  let format = if 'T' in dateTime:
-                 "{year/4}{month/2}{day/2}T{hour/2}{minute/2}{second/2}" & (if dateTimeStr.endsWith("Z"): "Z" else: "")
-               else:
-                 "{year/4}{month/2}{day/2}"
-  try:
-    var cal = parseTs(format, dateTime).calendar()
-    if 'T' in dateTime and dateTimeStr.endsWith("Z"):
-      cal.applyTimezone(timeZone) # Treat UTC timestamps as the real deal
-    else:
-      cal.shiftTimezone(timeZone) # Otherwise the date/time was in the local zone
-    return cal.ts
-  except ValueError as e:
-    raise newException(TimeParseError, "Failed to parse datetime string: " & dateTimeStr & ". Error: " & e.msg)
-
 proc unescape*(line: string): string =
   result = ""
   var i = 0
@@ -93,14 +75,38 @@ proc unescape*(line: string): string =
     inc i
   return result
 
-proc extractTimeZone*(self: ParsedCalendar, dateTimeStr: string): string =
-  if dateTimeStr.startsWith("TZID="):
-    let parts = dateTimeStr.split(":")
-    parts[0].split("=")[1]
-  elif dateTimeStr.endsWith("Z") or self.timeZone == "":
-    "UTC"
+proc parseICalDateTime*(dateTimeStr: string, timeZone: string): Timestamp =
+  let dateTime = if dateTimeStr.contains(";"): dateTimeStr.split(";")[1]
+                 elif dateTimeStr.contains(":"): dateTimeStr.split(":")[1]
+                 else: dateTimeStr
+  let format = if 'T' in dateTime:
+                 "{year/4}{month/2}{day/2}T{hour/2}{minute/2}{second/2}" & (if dateTime.endsWith("Z"): "Z" else: "")
+               else:
+                 "{year/4}{month/2}{day/2}"
+  try:
+    let ts = parseTs(format, dateTime)
+
+    # Treat UTC timestamps as the real deal
+    if 'T' in dateTime and dateTime.endsWith("Z"):
+      return ts
+
+    # Otherwise the date/time was in the local zone
+    var cal = ts.calendar()
+    cal.shiftTimezone(timeZone)
+    return cal.ts
+  except ValueError as e:
+    raise newException(TimeParseError, "Failed to parse datetime string: " & dateTimeStr & ". Error: " & e.msg)
+
+proc parseDateString(self: var ParsedCalendar, event: var VEvent, value: string): Timestamp =
+  let timeZone = if event.timeZone == "": self.timeZone else: event.timeZone
+  if value.contains("VALUE=DATE"):
+    let parts = value.split(":")
+    let date = parts[len(parts) - 1]
+    return parseICalDateTime(date, timeZone)
+  elif len(value) == 8: # 20181231
+    return parseICalDateTime(value, timeZone)
   else:
-    ""
+    return parseICalDateTime(value, timeZone)
 
 proc processCurrentFields*(self: var ParsedCalendar) =
   let fields = self.currentFields
@@ -119,39 +125,17 @@ proc processCurrentFields*(self: var ParsedCalendar) =
 
   if fields.hasKey("DTSTART"):
     let value = getFirstValue("DTSTART")
-    if value.contains("VALUE=DATE"):
-      let parts = value.split(":")
-      let date = parts[len(parts) - 1]
-      event.fullDay = true
-      event.startTs = parseICalDateTime(date, self.timeZone)
-    elif len(value) == 8:
-      event.fullDay = true
-      event.startTs = parseICalDateTime(value, self.timeZone)
-    else:
-      let tzInfo = self.extractTimeZone(value)
-      if tzInfo != "":
-        event.timeZone = tzInfo
-      let timestamp = parseICalDateTime(value, self.timeZone)
-      event.fullDay = false
-      event.startTs = timestamp
+    if value.startsWith("TZID="):
+      event.timeZone = value.split(":")[0].split("=")[1]
+    event.startTs = self.parseDateString(event, value)
+    event.fullDay = value.contains("VALUE=DATE") or len(value) == 8
 
   if fields.hasKey("DTEND"):
     let value = getFirstValue("DTEND")
-    if value.contains("VALUE=DATE"):
-      let parts = value.split(":")
-      let date = parts[len(parts) - 1]
-      event.fullDay = true
-      event.endTs = parseICalDateTime(date, self.timeZone)
-    elif len(value) == 8:
-      event.fullDay = true
-      event.endTs = parseICalDateTime(value, self.timeZone)
-    else:
-      let tzInfo = self.extractTimeZone(value)
-      if tzInfo != "":
-        event.timeZone = tzInfo
-      let timestamp = parseICalDateTime(value, self.timeZone)
-      event.fullDay = false
-      event.endTs = timestamp
+    if value.startsWith("TZID="):
+      event.timeZone = value.split(":")[0].split("=")[1]
+    event.endTs = self.parseDateString(event, value)
+    event.fullDay = value.contains("VALUE=DATE") or len(value) == 8
 
   if fields.hasKey("DURATION"):
     assert(false, "DURATION is not supported")
@@ -285,7 +269,6 @@ proc processCurrentFields*(self: var ParsedCalendar) =
   #   assert(false, "PRIORITY is not supported")
   self.events.add(event)
 
-
 proc processLine*(self: var ParsedCalendar, line: string) =
   if line.startsWith("BEGIN:VEVENT"):
     self.inVEvent = true
@@ -303,7 +286,6 @@ proc processLine*(self: var ParsedCalendar, line: string) =
   elif line.startsWith("END:VCALENDAR"):
     self.inVCalendar = false
   elif self.inVEvent or self.inVCalendar:
-    echo "Processline: " & line
     let splitPos = line.find(':')
     if splitPos == -1:
       return
@@ -318,8 +300,9 @@ proc processLine*(self: var ParsedCalendar, line: string) =
       else:
         if key == "X-WR-TIMEZONE":
           self.timeZone = unescape(value)
+          echo self.timeZone
 
-proc parseICalendar*(content: string, timeZone = "UTC"): ParsedCalendar =
+proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
   result = ParsedCalendar(timeZone: timeZone)
   result.timeZone = timeZone # Default. Will be overridden by X-WR-TIMEZONE if given
   var accumulator = ""
@@ -338,12 +321,14 @@ proc parseICalendar*(content: string, timeZone = "UTC"): ParsedCalendar =
 
 ####################################################################################################
 
-proc applyRRule(parsedCalendar: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent, rrule: RRule): seq[
+proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent, rrule: RRule): seq[
     (Timestamp, VEvent)] =
+  let timeZone = if event.timeZone == "": self.timeZone else: event.timeZone
+  let duration = event.endTs.float - event.startTs.float
   var
     currentTs = event.startTs
     newEndTs = event.endTs
-    currentCal = currentTs.calendar(parsedCalendar.timeZone)
+    currentCal = currentTs.calendar(timeZone)
     count = 0
 
   while (rrule.until == 0.Timestamp or currentTs <= rrule.until) and (rrule.count == 0 or count < rrule.count) and
@@ -362,24 +347,28 @@ proc applyRRule(parsedCalendar: ParsedCalendar, startTs: Timestamp, endTs: Times
     of RRuleFreq.yearly:
       currentCal.add(TimeScale.Year, rrule.interval)
 
-    # Apply BYDAY, BYMONTH, BYMONTHDAY adjustments
-    # (Simplified for clarity. Implement specific logic based on iCalendar specifications)
+    # Must do this to preserve the right hour past DST changes
+    currentCal.tzOffset = 0
+    currentCal.tzName = ""
+    currentCal.dstName = ""
+    currentCal.shiftTimezone(timeZone)
+
+    # TODO: BYDAY, BYMONTH, BYMONTHDAY, etc.
 
     currentTs = currentCal.ts
-    newEndTs = (currentTs.float + (event.endTs.float - event.startTs.float)).Timestamp
+    newEndTs = (currentTs.float + duration).Timestamp
     inc(count)
     if count > 100000:
       break
 
-proc getEvents*(parsedCalendar: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, search: string = "",
+proc getEvents*(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, search: string = "",
     maxCount: int = 1000): seq[(Timestamp, VEvent)] =
-  for event in parsedCalendar.events:
+  for event in self.events:
     if search != "" and not event.summary.contains(search):
       continue
 
     for rrule in event.rrules:
-      let newRules = applyRRule(parsedCalendar, startTs, endTs, event, rrule)
-      for rule in newRules:
+      for rule in applyRRule(self, startTs, endTs, event, rrule):
         result.add(rule)
 
     if event.rrules.len == 0 and event.startTs <= endTs and event.endTs >= startTs:

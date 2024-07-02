@@ -2,6 +2,16 @@ import ../ical
 import lib/tz
 import chrono, times
 
+block test_parse_ical_datetime:
+    echo "Test: parse_ical_datetime"
+    doAssert parseICalDateTime("20240101", "UTC") == parseICalDateTime("20240101", "Europe/Brussels")
+    doAssert parseICalDateTime("20240101T000000", "UTC") == parseICalDateTime("20240101T000000", "Europe/Brussels")
+    doAssert parseICalDateTime("20240101T000000Z", "UTC") == parseICalDateTime("20240101T000000Z", "Europe/Brussels")
+    initTimeZone()
+    doAssert parseICalDateTime("20240101", "UTC") != parseICalDateTime("20240101", "Europe/Brussels")
+    doAssert parseICalDateTime("20240101T000000", "UTC") != parseICalDateTime("20240101T000000", "Europe/Brussels")
+    doAssert parseICalDateTime("20240101T000000Z", "UTC") == parseICalDateTime("20240101T000000Z", "Europe/Brussels")
+
 block test_lincoln:
     echo "Test: lincoln"
     let iCalFile = readFile("./src/apps/data/icalJson/tests/data/lincoln.ics")
@@ -19,8 +29,8 @@ block test_meetings:
     let iCalFile = readFile("./src/apps/data/icalJson/tests/data/meetings.ics")
     let events = parseICalendar(iCalFile).events
     doAssert len(events) == 5
-    doAssert events[0].startTs == Timestamp(1618419600.0)
-    doAssert events[0].endTs == Timestamp(1618421400.0)
+    doAssert events[0].startTs == Timestamp(1618412400.0)
+    doAssert events[0].endTs == Timestamp(1618414200.0)
     doAssert events[0].location == "https://example.com/location-url/"
     doAssert events[0].description == ""
     doAssert events[0].summary == "Team Standup"
@@ -48,39 +58,16 @@ block test_meetings:
     doAssert events[4].description == "Hey Team! The sugarly overlord commands me to set up a meeting. This is the meeting"
     doAssert events[4].summary == "One / Two - Meeting"
 
-block test_holidays:
-    echo "Test: holidays"
-    let iCalFile = readFile("./src/apps/data/icalJson/tests/data/holidays.ics")
-    let calendar = parseICalendar(iCalFile)
-    doAssert calendar.timezone == "Europe/Tallinn"
-
-    let events = calendar.events
-    doAssert len(events) == 49
-    doAssert events[0].startTs == Timestamp(1147564800.0)
-    doAssert events[0].summary == "Emadepäev"
-
-
-block test_parse_ical_datetime:
-    echo "Test: parse_ical_datetime"
-    doAssert parseICalDateTime("20240101", "UTC") == parseICalDateTime("20240101", "Europe/Brussels")
-    doAssert parseICalDateTime("20240101T000000", "UTC") == parseICalDateTime("20240101T000000", "Europe/Brussels")
-    doAssert parseICalDateTime("20240101T000000Z", "UTC") == parseICalDateTime("20240101T000000Z", "Europe/Brussels")
-    initTimeZone()
-    doAssert parseICalDateTime("20240101", "UTC") != parseICalDateTime("20240101", "Europe/Brussels")
-    doAssert parseICalDateTime("20240101T000000", "UTC") != parseICalDateTime("20240101T000000", "Europe/Brussels")
-    doAssert parseICalDateTime("20240101T000000Z", "UTC") == parseICalDateTime("20240101T000000Z", "Europe/Brussels")
-
-
-block test_get_events:
-    echo "Test: get_events"
+block test_meetings_events:
+    echo "Test: meetings_events"
     let iCalFile = readFile("./src/apps/data/icalJson/tests/data/meetings.ics")
 
     var calendar = parseICalendar(iCalFile)
     doAssert calendar.timezone == "Europe/Brussels"
     let allEvents = getEvents(calendar, parseICalDateTime("20240101", "UTC"), parseICalDateTime("20250101", "UTC"), "", 100)
     doAssert len(allEvents) == 52
-    doAssert allEvents[0][0] == Timestamp(1704294000.0)
-    doAssert allEvents[51][0] == Timestamp(1735138800.0)
+    doAssert allEvents[0][0] == Timestamp(1704297600.0)
+    doAssert allEvents[51][0] == Timestamp(1735142400.0)
     doAssert allEvents[0][1].summary == "Team Standup"
 
     calendar = parseICalendar(iCalFile)
@@ -88,7 +75,7 @@ block test_get_events:
             "", 100)
     doAssert len(allEventsOld) == 42
     doAssert allEventsOld[0][0] == Timestamp(1618412400.0)
-    doAssert allEventsOld[41][0] == Timestamp(1640790000.0)
+    doAssert allEventsOld[41][0] == Timestamp(1640793600.0)
     doAssert allEventsOld[0][1].summary == "Team Standup"
     doAssert allEventsOld[11][1].summary == "Hacklunch for Project"
 
@@ -97,6 +84,17 @@ block test_get_events:
             "Team Standup", 1000)
     doAssert len(standupEvents) == 38
 
+
+block test_holidays:
+    echo "Test: holidays"
+    let iCalFile = readFile("./src/apps/data/icalJson/tests/data/holidays.ics")
+    let calendar = parseICalendar(iCalFile)
+    doAssert calendar.timezone == "Europe/Tallinn"
+
+    let events = calendar.events
+    doAssert len(events) == 49
+    doAssert events[0].startTs == Timestamp(1147554000.0)
+    doAssert events[0].summary == "Emadepäev"
 
 # block test_get_events_large:
 #     echo "Test: get_events_large"
@@ -145,4 +143,18 @@ RRULE:FREQ=DAILY;UNTIL=19971224T000000Z
     doAssert len(events) == 113
     doAssert events[0][0] == parseICalDateTime("19970902T090000", "America/New_York")
     doAssert events[112][0] == parseICalDateTime("19971223T090000", "America/New_York")
+
+block test_rrules_3:
+    echo "Every other day - forever"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:19970902T090000
+DTEND;TZID=America/New_York:19970902T093000
+RRULE:FREQ=DAILY;INTERVAL=2
+""")
+    #  ==> (1997 9:00 AM EDT) September 2-30;October 1-25
+    #      (1997 9:00 AM EST) October 26-31;November 1-30;December 1-23
+    doAssert len(events) == 1000 # the limit
+    doAssert events[0][0] == parseICalDateTime("19970902T090000", "America/New_York")
+    doAssert events[56][0] == parseICalDateTime("19971223T090000", "America/New_York")
+    doAssert events[999][0] == parseICalDateTime("20030221T090000", "America/New_York")
 
