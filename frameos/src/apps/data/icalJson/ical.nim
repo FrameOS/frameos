@@ -384,7 +384,10 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
     # Need to loop over every day to handle BYDAY, BYMONTH, BYMONTHDAY, etc.
     else:
       let intervalEnd = currentCal.getThisIntervalEnd(rrule, timeZone)
-      while currentTs < intervalEnd and currentTs < endTs and (rrule.until == 0.Timestamp or currentTs <= rrule.until):
+      while (rrule.until == 0.Timestamp or currentTs <= rrule.until) and
+            (rrule.count == 0 or result.len() < rrule.count) and
+            currentTs < intervalEnd and
+            currentTs < endTs:
         var matches = true
         if rrule.byDay.len > 0:
           var found = false
@@ -393,8 +396,20 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
               if day.int == currentCal.weekDay:
                 found = true
                 break
-            elif num > 0: # Every nth wednesday of the month
-              assert(false, "Positive BYDAY not yet supported")
+            elif num > 0: # Every num-th Wednesday of the month
+              # what is the num-th day of the month?
+              var count = 0
+              var cal = currentCal.copy()
+              cal.day = 1
+              while cal.month == currentCal.month:
+                if cal.weekDay == day.int:
+                  count += 1
+                  if count == num:
+                    break
+                cal.add(TimeScale.Day, 1)
+              if cal.day == currentCal.day:
+                found = true
+                break
             else:
               assert(false, "Negative BYDAY not supported")
           if not found:
