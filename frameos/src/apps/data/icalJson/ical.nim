@@ -304,7 +304,6 @@ proc processLine*(self: var ParsedCalendar, line: string) =
       else:
         if key == "X-WR-TIMEZONE":
           self.timeZone = unescape(value)
-          echo self.timeZone
 
 proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
   result = ParsedCalendar(timeZone: timeZone)
@@ -346,13 +345,28 @@ proc getNextIntervalStart(calendar: var Calendar, rrule: RRule, timeZone: string
   # Must do this to preserve the right hour past DST changes
   result.fixDST(timeZone)
 
+proc getThisIntervalEnd(calendar: var Calendar, rrule: RRule, timeZone: string): Timestamp =
+  var cal = calendar.copy()
+  case rrule.freq
+  of RRuleFreq.daily:
+    cal.add(TimeScale.Day, 1)
+  of RRuleFreq.weekly:
+    cal.add(TimeScale.Day, 7)
+  of RRuleFreq.monthly:
+    cal.add(TimeScale.Month, 1)
+  of RRuleFreq.yearly:
+    cal.add(TimeScale.Year, 1)
+  # Must do this to preserve the right hour past DST changes
+  cal.fixDST(timeZone)
+  cal.ts
+
 proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent, rrule: RRule): EventsSeq =
   let timeZone = if event.timeZone == "": self.timeZone else: event.timeZone
   let duration = event.endTs.float - event.startTs.float
   var
     currentTs = event.startTs
-    newEndTs = event.endTs
     currentCal = currentTs.calendar(timeZone)
+    newEndTs = event.endTs
 
   let simpleRepeat = rrule.byDay.len == 0 and rrule.byMonth.len == 0 and rrule.byMonthDay.len == 0
 
@@ -366,15 +380,11 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
     if simpleRepeat:
       if currentTs <= endTs and newEndTs >= startTs:
         result.add((currentTs, event))
-      currentCal = nextIntervalStart
-      currentTs = currentCal.ts
-      newEndTs = (currentTs.float + duration).Timestamp
 
     # Need to loop over every day to handle BYDAY, BYMONTH, BYMONTHDAY, etc.
     else:
-      while currentTs < nextIntervalStart.ts:
-        if currentTs > endTs:
-          break
+      let intervalEnd = currentCal.getThisIntervalEnd(rrule, timeZone)
+      while currentTs < intervalEnd and currentTs < endTs and (rrule.until == 0.Timestamp or currentTs <= rrule.until):
         var matches = true
         if rrule.byDay.len > 0:
           var found = false
@@ -404,6 +414,10 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
 
     if result.len() > 100000:
       break
+
+    currentCal = nextIntervalStart
+    currentTs = currentCal.ts
+    newEndTs = (currentTs.float + duration).Timestamp
 
 proc getEvents*(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, search: string = "",
     maxCount: int = 1000): EventsSeq =
