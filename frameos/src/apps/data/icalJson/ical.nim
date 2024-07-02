@@ -14,7 +14,7 @@ type
 
   RRuleDay* = enum
     none = -1
-    su = 0, mo, tu, we, th, fr, sa
+    mo = 0, tu, we, th, fr, sa, su # match order in chrono
 
   RRule* = object
     freq*: RRuleFreq
@@ -28,6 +28,7 @@ type
     weekStart*: RRuleDay
 
   FieldsTable* = Table[string, DoublyLinkedList[string]]
+  EventsSeq* = seq[(Timestamp, VEvent)]
 
   VEvent* = object
     timeZone*: string
@@ -47,6 +48,9 @@ type
     currentFields*: FieldsTable
     inVEvent*: bool
     inVCalendar*: bool
+
+####################################################################################################
+# Parsing
 
 proc `<`(a, b: VEvent): bool =
   a.startTs < b.startTs
@@ -320,49 +324,89 @@ proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
   result.events.sort(proc (a: VEvent, b: VEvent): int = cmp(a.startTs, b.startTs))
 
 ####################################################################################################
+# Querying
 
-proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent, rrule: RRule): seq[
-    (Timestamp, VEvent)] =
+proc fixDST(self: var Calendar, timeZone: string) =
+  self.tzOffset = 0
+  self.tzName = ""
+  self.dstName = ""
+  self.shiftTimezone(timeZone)
+
+proc getNextIntervalStart(calendar: var Calendar, rrule: RRule, timeZone: string): Calendar =
+  result = calendar.copy()
+  case rrule.freq
+  of RRuleFreq.daily:
+    result.add(TimeScale.Day, rrule.interval)
+  of RRuleFreq.weekly:
+    result.add(TimeScale.Day, 7 * rrule.interval)
+  of RRuleFreq.monthly:
+    result.add(TimeScale.Month, rrule.interval)
+  of RRuleFreq.yearly:
+    result.add(TimeScale.Year, rrule.interval)
+  # Must do this to preserve the right hour past DST changes
+  result.fixDST(timeZone)
+
+proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent, rrule: RRule): EventsSeq =
   let timeZone = if event.timeZone == "": self.timeZone else: event.timeZone
   let duration = event.endTs.float - event.startTs.float
   var
     currentTs = event.startTs
     newEndTs = event.endTs
     currentCal = currentTs.calendar(timeZone)
-    count = 0
 
-  while (rrule.until == 0.Timestamp or currentTs <= rrule.until) and (rrule.count == 0 or count < rrule.count) and
-      currentTs <= endTs:
+  let simpleRepeat = rrule.byDay.len == 0 and rrule.byMonth.len == 0 and rrule.byMonthDay.len == 0
 
-    if currentTs <= endTs and newEndTs >= startTs:
-      result.add((currentTs, event))
+  # Loop between intervals
+  while (rrule.until == 0.Timestamp or currentTs <= rrule.until) and
+        (rrule.count == 0 or result.len() < rrule.count) and
+        currentTs <= endTs:
 
-    case rrule.freq
-    of RRuleFreq.daily:
-      currentCal.add(TimeScale.Day, rrule.interval)
-    of RRuleFreq.weekly:
-      currentCal.add(TimeScale.Day, 7 * rrule.interval)
-    of RRuleFreq.monthly:
-      currentCal.add(TimeScale.Month, rrule.interval)
-    of RRuleFreq.yearly:
-      currentCal.add(TimeScale.Year, rrule.interval)
+    let nextIntervalStart = currentCal.getNextIntervalStart(rrule, timeZone)
 
-    # Must do this to preserve the right hour past DST changes
-    currentCal.tzOffset = 0
-    currentCal.tzName = ""
-    currentCal.dstName = ""
-    currentCal.shiftTimezone(timeZone)
+    if simpleRepeat:
+      if currentTs <= endTs and newEndTs >= startTs:
+        result.add((currentTs, event))
+      currentCal = nextIntervalStart
+      currentTs = currentCal.ts
+      newEndTs = (currentTs.float + duration).Timestamp
 
-    # TODO: BYDAY, BYMONTH, BYMONTHDAY, etc.
+    # Need to loop over every day to handle BYDAY, BYMONTH, BYMONTHDAY, etc.
+    else:
+      while currentTs < nextIntervalStart.ts:
+        if currentTs > endTs:
+          break
+        var matches = true
+        if rrule.byDay.len > 0:
+          var found = false
+          for (day, num) in rrule.byDay:
+            if num == 0:
+              if day.int == currentCal.weekDay:
+                found = true
+                break
+            elif num > 0: # Every nth wednesday of the month
+              assert(false, "Positive BYDAY not yet supported")
+            else:
+              assert(false, "Negative BYDAY not supported")
+          if not found:
+            matches = false
+        if matches and rrule.byMonth.len > 0 and not rrule.byMonth.contains(currentCal.month):
+          matches = false
+        if matches and rrule.byMonthDay.len > 0 and not rrule.byMonthDay.contains(currentCal.day):
+          matches = false
 
-    currentTs = currentCal.ts
-    newEndTs = (currentTs.float + duration).Timestamp
-    inc(count)
-    if count > 100000:
+        if matches and currentTs <= endTs and newEndTs >= startTs:
+          result.add((currentTs, event))
+
+        currentCal.add(TimeScale.Day, 1)
+        currentCal.fixDST(timeZone)
+        currentTs = currentCal.ts
+        newEndTs = (currentTs.float + duration).Timestamp
+
+    if result.len() > 100000:
       break
 
 proc getEvents*(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, search: string = "",
-    maxCount: int = 1000): seq[(Timestamp, VEvent)] =
+    maxCount: int = 1000): EventsSeq =
   for event in self.events:
     if search != "" and not event.summary.contains(search):
       continue
