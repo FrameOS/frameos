@@ -672,15 +672,6 @@ RRULE:FREQ=YEARLY;INTERVAL=3;COUNT=10;BYYEARDAY=1,100,200
     doAssert events[8][0] == parseICalDateTime("20030719T090000", "America/New_York")
     doAssert events[9][0] == parseICalDateTime("20060101T090000", "America/New_York")
 
-
-# Every 20th Monday of the year, forever:
-#  DTSTART;TZID=America/New_York:19970519T090000
-#  RRULE:FREQ=YEARLY;BYDAY=20MO
-#  ==> (1997 9:00 AM EDT) May 19
-#      (1998 9:00 AM EDT) May 18
-#      (1999 9:00 AM EDT) May 17
-#      ...
-
 # block test_rrules_25:
 #     echo ">> Testing: Every 20th Monday of the year, forever"
 #     let events = toFullCal("""
@@ -712,114 +703,304 @@ RRULE:FREQ=YEARLY;INTERVAL=3;COUNT=10;BYYEARDAY=1,100,200
 #     doAssert events[14][0] == parseICalDateTime("20110516T090000", "America/New_York")
 
 
-# Monday of week number 20 (where the default start of the week is
-# Monday), forever:
-#  DTSTART;TZID=America/New_York:19970512T090000
-#  RRULE:FREQ=YEARLY;BYWEEKNO=20;BYDAY=MO
-#  ==> (1997 9:00 AM EDT) May 12
-#      (1998 9:00 AM EDT) May 11
-#      (1999 9:00 AM EDT) May 17
-#      ...
+# block test_rrules_26:
+#     echo ">> Testing: Monday of week number 20 (where the default start of the week is Monday), forever"
+#     let events = toFullCal("""
+# DTSTART;TZID=America/New_York:19970512T090000
+# DTEND;TZID=America/New_York:19970512T093000
+# RRULE:FREQ=YEARLY;BYWEEKNO=20;BYDAY=MO
+# """)
+#     #  ==> (1997 9:00 AM EDT) May 12
+#     #      (1998 9:00 AM EDT) May 11
+#     #      (1999 9:00 AM EDT) May 17
+#     #      ...
+#     # doAssert len(events) == 400
+#     doAssert events[0][0] == parseICalDateTime("19970512T090000", "America/New_York")
+#     doAssert events[1][0] == parseICalDateTime("19980511T090000", "America/New_York")
+#     doAssert events[2][0] == parseICalDateTime("19990517T090000", "America/New_York")
+#     doAssert events[3][0] == parseICalDateTime("20000515T090000", "America/New_York")
+#     doAssert events[4][0] == parseICalDateTime("20010514T090000", "America/New_York")
+#     doAssert events[5][0] == parseICalDateTime("20020513T090000", "America/New_York")
+#     doAssert events[6][0] == parseICalDateTime("20030512T090000", "America/New_York")
+#     doAssert events[7][0] == parseICalDateTime("20040510T090000", "America/New_York")
+#     doAssert events[8][0] == parseICalDateTime("20050516T090000", "America/New_York")
+#     doAssert events[9][0] == parseICalDateTime("20060515T090000", "America/New_York")
+#     doAssert events[10][0] == parseICalDateTime("20070514T090000", "America/New_York")
+#     doAssert events[11][0] == parseICalDateTime("20080512T090000", "America/New_York")
+#     doAssert events[12][0] == parseICalDateTime("20090511T090000", "America/New_York")
+#     doAssert events[13][0] == parseICalDateTime("20100517T090000", "America/New_York")
 
-# Every Thursday in March, forever:
-#  DTSTART;TZID=America/New_York:19970313T090000
-#  RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=TH
-#  ==> (1997 9:00 AM EST) March 13,20,27
-#      (1998 9:00 AM EST) March 5,12,19,26
-#      (1999 9:00 AM EST) March 4,11,18,25
-#      ...
+block test_rrules_27:
+    echo ">> Testing: Every Thursday in March, forever"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:19970313T090000
+DTEND;TZID=America/New_York:19970313T093000
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=TH
+""")
+    #  ==> (1997 9:00 AM EST) March 13,20,27
+    #      (1998 9:00 AM EST) March 5,12,19,26
+    #      (1999 9:00 AM EST) March 4,11,18,25
+    #      ...
+    doAssert len(events) == 149
+    doAssert events[0][0] == parseICalDateTime("19970313T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("19970320T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("19970327T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("19980305T090000", "America/New_York")
+    doAssert events[4][0] == parseICalDateTime("19980312T090000", "America/New_York")
+    doAssert events[5][0] == parseICalDateTime("19980319T090000", "America/New_York")
+    doAssert events[6][0] == parseICalDateTime("19980326T090000", "America/New_York")
+    doAssert events[7][0] == parseICalDateTime("19990304T090000", "America/New_York")
+    doAssert events[8][0] == parseICalDateTime("19990311T090000", "America/New_York")
+    doAssert events[9][0] == parseICalDateTime("19990318T090000", "America/New_York")
+    doAssert events[10][0] == parseICalDateTime("19990325T090000", "America/New_York")
+    doAssert events[11][0] == parseICalDateTime("20000302T090000", "America/New_York")
+    doAssert events[12][0] == parseICalDateTime("20000309T090000", "America/New_York")
+    doAssert events[13][0] == parseICalDateTime("20000316T090000", "America/New_York")
 
-# Every Thursday, but only during June, July, and August, forever:
-#  DTSTART;TZID=America/New_York:19970605T090000
-#  RRULE:FREQ=YEARLY;BYDAY=TH;BYMONTH=6,7,8
-#  ==> (1997 9:00 AM EDT) June 5,12,19,26;July 3,10,17,24,31;
-#                         August 7,14,21,28
-#      (1998 9:00 AM EDT) June 4,11,18,25;July 2,9,16,23,30;
-#                         August 6,13,20,27
-#      (1999 9:00 AM EDT) June 3,10,17,24;July 1,8,15,22,29;
-#                         August 5,12,19,26
-#      ...
+block test_rrules_28:
+    echo ">> Testing: Every Thursday, but only during June, July, and August, forever"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:19970605T090000
+DTEND;TZID=America/New_York:19970605T093000
+RRULE:FREQ=YEARLY;BYDAY=TH;BYMONTH=6,7,8
+""")
+    #  ==> (1997 9:00 AM EDT) June 5,12,19,26;July 3,10,17,24,31;
+    #                         August 7,14,21,28
+    #      (1998 9:00 AM EDT) June 4,11,18,25;July 2,9,16,23,30;
+    #                         August 6,13,20,27
+    #      (1999 9:00 AM EDT) June 3,10,17,24;July 1,8,15,22,29;
+    #                         August 5,12,19,26
+    #      ...
+    doAssert len(events) == 447
+    doAssert events[0][0] == parseICalDateTime("19970605T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("19970612T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("19970619T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("19970626T090000", "America/New_York")
+    doAssert events[4][0] == parseICalDateTime("19970703T090000", "America/New_York")
+    doAssert events[5][0] == parseICalDateTime("19970710T090000", "America/New_York")
+    doAssert events[6][0] == parseICalDateTime("19970717T090000", "America/New_York")
+    doAssert events[7][0] == parseICalDateTime("19970724T090000", "America/New_York")
+    doAssert events[8][0] == parseICalDateTime("19970731T090000", "America/New_York")
+    doAssert events[9][0] == parseICalDateTime("19970807T090000", "America/New_York")
+    doAssert events[10][0] == parseICalDateTime("19970814T090000", "America/New_York")
 
-# Every Friday the 13th, forever:
-#  DTSTART;TZID=America/New_York:19970902T090000
-#  EXDATE;TZID=America/New_York:19970902T090000
-#  RRULE:FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13
-#  ==> (1998 9:00 AM EST) February 13;March 13;November 13
-#      (1999 9:00 AM EDT) August 13
-#      (2000 9:00 AM EDT) October 13
-#      ...
+# block test_rrules_29:
+#     echo ">> Testing: Every Friday the 13th, forever"
+#     let events = toFullCal("""
+# DTSTART;TZID=America/New_York:19970902T090000
+# EXDATE;TZID=America/New_York:19970902T090000
+# RRULE:FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13
+# """)
+#     #  ==> (1998 9:00 AM EST) February 13;March 13;November 13
+#     #      (1999 9:00 AM EDT) August 13
+#     #      (2000 9:00 AM EDT) October 13
+#     #      ...
+#     doAssert len(events) == 23
+#     echo events
+#     doAssert events[0][0] == parseICalDateTime("19980213T090000", "America/New_York")
+#     doAssert events[1][0] == parseICalDateTime("19980313T090000", "America/New_York")
+#     doAssert events[2][0] == parseICalDateTime("19981113T090000", "America/New_York")
+#     doAssert events[3][0] == parseICalDateTime("19990813T090000", "America/New_York")
+#     doAssert events[4][0] == parseICalDateTime("20001013T090000", "America/New_York")
 
-# The first Saturday that follows the first Sunday of the month, forever:
-#  DTSTART;TZID=America/New_York:19970913T090000
-#  RRULE:FREQ=MONTHLY;BYDAY=SA;BYMONTHDAY=7,8,9,10,11,12,13
-#  ==> (1997 9:00 AM EDT) September 13;October 11
-#      (1997 9:00 AM EST) November 8;December 13
-#      (1998 9:00 AM EST) January 10;February 7;March 7
-#      (1998 9:00 AM EDT) April 11;May 9;June 13...
-#      ...
+block test_rrules_30:
+    echo ">> Testing: The first Saturday that follows the first Sunday of the month, forever"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:19970913T090000
+DTEND;TZID=America/New_York:19970913T093000
+RRULE:FREQ=MONTHLY;BYDAY=SA;BYMONTHDAY=7,8,9,10,11,12,13
+""")
+    #  ==> (1997 9:00 AM EDT) September 13;October 11
+    #      (1997 9:00 AM EST) November 8;December 13
+    #      (1998 9:00 AM EST) January 10;February 7;March 7
+    #      (1998 9:00 AM EDT) April 11;May 9;June 13...
+    #      ...
+    doAssert len(events) == 400
+    doAssert events[0][0] == parseICalDateTime("19970913T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("19971011T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("19971108T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("19971213T090000", "America/New_York")
+    doAssert events[4][0] == parseICalDateTime("19980110T090000", "America/New_York")
+    doAssert events[5][0] == parseICalDateTime("19980207T090000", "America/New_York")
+    doAssert events[6][0] == parseICalDateTime("19980307T090000", "America/New_York")
+    doAssert events[7][0] == parseICalDateTime("19980411T090000", "America/New_York")
+    doAssert events[8][0] == parseICalDateTime("19980509T090000", "America/New_York")
+    doAssert events[9][0] == parseICalDateTime("19980613T090000", "America/New_York")
 
-# Every 4 years, the first Tuesday after a Monday in November, forever (U.S. Presidential Election day):
-#  DTSTART;TZID=America/New_York:19961105T090000
-#  RRULE:FREQ=YEARLY;INTERVAL=4;BYMONTH=11;BYDAY=TU;
-#   BYMONTHDAY=2,3,4,5,6,7,8
-#   ==> (1996 9:00 AM EST) November 5
-#       (2000 9:00 AM EST) November 7
-#       (2004 9:00 AM EST) November 2
-#       ...
+block test_rrules_31:
+    echo ">> Testing: Every 4 years, the first Tuesday after a Monday in November, forever (U.S. Presidential Election day)"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:19961105T090000
+DTEND;TZID=America/New_York:19961105T093000
+RRULE:FREQ=YEARLY;INTERVAL=4;BYMONTH=11;BYDAY=TU;BYMONTHDAY=2,3,4,5,6,7,8
+""")
+    #  ==> (1996 9:00 AM EST) November 5
+    #      (2000 9:00 AM EST) November 7
+    #      (2004 9:00 AM EST) November 2
+    #      ...
+    doAssert len(events) == 9
+    doAssert events[0][0] == parseICalDateTime("19961105T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("20001107T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("20041102T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("20081104T090000", "America/New_York")
+    doAssert events[4][0] == parseICalDateTime("20121106T090000", "America/New_York")
+    doAssert events[5][0] == parseICalDateTime("20161108T090000", "America/New_York")
+    doAssert events[6][0] == parseICalDateTime("20201103T090000", "America/New_York")
 
-# The third instance into the month of one of Tuesday, Wednesday, or Thursday, for the next 3 months:
-#  DTSTART;TZID=America/New_York:19970904T090000
-#  RRULE:FREQ=MONTHLY;COUNT=3;BYDAY=TU,WE,TH;BYSETPOS=3
-#  ==> (1997 9:00 AM EDT) September 4;October 7
-#      (1997 9:00 AM EST) November 6
+# block test_rrules_32:
+#     echo ">> Testing: The third instance into the month of one of Tuesday, Wednesday, or Thursday, for the next 3 months"
+#     let events = toFullCal("""
+# DTSTART;TZID=America/New_York:19970904T090000
+# DTEND;TZID=America/New_York:19970904T093000
+# RRULE:FREQ=MONTHLY;COUNT=3;BYDAY=TU,WE,TH;BYSETPOS=3
+# """)
+#     #  ==> (1997 9:00 AM EDT) September 4;October 7
+#     #      (1997 9:00 AM EST) November 6
+#     echo len(events)
+#     doAssert len(events) == 3
+#     doAssert events[0][0] == parseICalDateTime("19970904T090000", "America/New_York")
+#     doAssert events[1][0] == parseICalDateTime("19971007T090000", "America/New_York")
+#     doAssert events[2][0] == parseICalDateTime("19971106T090000", "America/New_York")
 
-# The second-to-last weekday of the month:
-#  DTSTART;TZID=America/New_York:19970929T090000
-#  RRULE:FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-2
-#  ==> (1997 9:00 AM EDT) September 29
-#      (1997 9:00 AM EST) October 30;November 27;December 30
-#      (1998 9:00 AM EST) January 29;February 26;March 30
-#      ...
+# block test_rrules_33:
+#     echo ">> Testing: The second-to-last weekday of the month"
+#     let events = toFullCal("""
+# DTSTART;TZID=America/New_York:19970929T090000
+# DTEND;TZID=America/New_York:19970929T093000
+# RRULE:FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-2
+# """)
+#     #  ==> (1997 9:00 AM EDT) September 29
+#     #      (1997 9:00 AM EST) October 30;November 27;December 30
+#     #      (1998 9:00 AM EST) January 29;February 26;March 30
+#     #      ...
+#     doAssert len(events) == 10
+#     doAssert events[0][0] == parseICalDateTime("19970929T090000", "America/New_York")
+#     doAssert events[1][0] == parseICalDateTime("19971030T090000", "America/New_York")
+#     doAssert events[2][0] == parseICalDateTime("19971127T090000", "America/New_York")
+#     doAssert events[3][0] == parseICalDateTime("19971230T090000", "America/New_York")
+#     doAssert events[4][0] == parseICalDateTime("19980129T090000", "America/New_York")
+#     doAssert events[5][0] == parseICalDateTime("19980226T090000", "America/New_York")
+#     doAssert events[6][0] == parseICalDateTime("19980330T090000", "America/New_York")
+#     doAssert events[7][0] == parseICalDateTime("19980429T090000", "America/New_York")
+#     doAssert events[8][0] == parseICalDateTime("19980528T090000", "America/New_York")
+#     doAssert events[9][0] == parseICalDateTime("19980629T090000", "America/New_York")
 
-# Every 3 hours from 9:00 AM to 5:00 PM on a specific day:
-#  DTSTART;TZID=America/New_York:19970902T090000
-#  RRULE:FREQ=HOURLY;INTERVAL=3;UNTIL=19970902T170000Z
-#  ==> (September 2, 1997 EDT) 09:00,12:00,15:00
+# block test_rrules_34:
+#     echo ">> Testing: Every 3 hours from 9:00 AM to 5:00 PM on a specific day"
+#     let events = toFullCal("""
+# DTSTART;TZID=America/New_York:19970902T090000
+# DTEND;TZID=America/New_York:19970902T170000
+# RRULE:FREQ=HOURLY;INTERVAL=3;UNTIL=19970902T170000Z
+# """)
+#     #  ==> (September 2, 1997 EDT) 09:00,12:00,15:00
+#     # doAssert len(events) == 3
+#     doAssert events[0][0] == parseICalDateTime("19970902T090000", "America/New_York")
+#     doAssert events[1][0] == parseICalDateTime("19970902T120000", "America/New_York")
+#     doAssert events[2][0] == parseICalDateTime("19970902T150000", "America/New_York")
 
-# Every 15 minutes for 6 occurrences:
-#  DTSTART;TZID=America/New_York:19970902T090000
-#  RRULE:FREQ=MINUTELY;INTERVAL=15;COUNT=6
-#  ==> (September 2, 1997 EDT) 09:00,09:15,09:30,09:45,10:00,10:15
+# block test_rrules_35:
+#     echo ">> Testing: Every 15 minutes for 6 occurrences"
+#     let events = toFullCal("""
+# DTSTART;TZID=America/New_York:19970902T090000
+# DTEND;TZID=America/New_York:19970902T093000
+# RRULE:FREQ=MINUTELY;INTERVAL=15;COUNT=6
+# """)
+#     #  ==> (September 2, 1997 EDT) 09:00,09:15,09:30,09:45,10:00,10:15
+#     doAssert len(events) == 6
+#     doAssert events[0][0] == parseICalDateTime("19970902T090000", "America/New_York")
+#     doAssert events[1][0] == parseICalDateTime("19970902T091500", "America/New_York")
+#     doAssert events[2][0] == parseICalDateTime("19970902T093000", "America/New_York")
+#     doAssert events[3][0] == parseICalDateTime("19970902T094500", "America/New_York")
+#     doAssert events[4][0] == parseICalDateTime("19970902T100000", "America/New_York")
+#     doAssert events[5][0] == parseICalDateTime("19970902T101500", "America/New_York")
 
-# Every hour and a half for 4 occurrences:
-#  DTSTART;TZID=America/New_York:19970902T090000
-#  RRULE:FREQ=MINUTELY;INTERVAL=90;COUNT=4
-#  ==> (September 2, 1997 EDT) 09:00,10:30;12:00;13:30
+# block test_rrules_36:
+#     echo ">> Testing: Every hour and a half for 4 occurrences"
+#     let events = toFullCal("""
+# DTSTART;TZID=America/New_York:19970902T090000
+# DTEND;TZID=America/New_York:19970902T093000
+# RRULE:FREQ=MINUTELY;INTERVAL=90;COUNT=4
+# """)
+#     #  ==> (September 2, 1997 EDT) 09:00,10:30;12:00;13:30
+#     doAssert len(events) == 4
+#     doAssert events[0][0] == parseICalDateTime("19970902T090000", "America/New_York")
+#     doAssert events[1][0] == parseICalDateTime("19970902T103000", "America/New_York")
+#     doAssert events[2][0] == parseICalDateTime("19970902T120000", "America/New_York")
+#     doAssert events[3][0] == parseICalDateTime("19970902T133000", "America/New_York")
 
-# Every 20 minutes from 9:00 AM to 4:40 PM every day:
-#  DTSTART;TZID=America/New_York:19970902T090000
-#  RRULE:FREQ=DAILY;BYHOUR=9,10,11,12,13,14,15,16;BYMINUTE=0,20,40
-#  or
-#  RRULE:FREQ=MINUTELY;INTERVAL=20;BYHOUR=9,10,11,12,13,14,15,16
-#  ==> (September 2, 1997 EDT) 9:00,9:20,9:40,10:00,10:20,
-#                              ... 16:00,16:20,16:40
-#      (September 3, 1997 EDT) 9:00,9:20,9:40,10:00,10:20,
-#                              ...16:00,16:20,16:40
-#      ...
+# block test_rrules_37:
+#     echo ">> Testing: Every 20 minutes from 9:00 AM to 4:40 PM every day"
+#     let events = toFullCal("""
+# DTSTART;TZID=America/New_York:19970902T090000
+# DTEND;TZID=America/New_York:19970902T094000
+# RRULE:FREQ=DAILY;BYHOUR=9,10,11,12,13,14,15,16;BYMINUTE=0,20,40
+# """)
+#     let events2 = toFullCal("""
+# DTSTART;TZID=America/New_York:19970902T090000
+# DTEND;TZID=America/New_York:19970902T094000
+# RRULE:FREQ=MINUTELY;INTERVAL=20;BYHOUR=9,10,11,12,13,14,15,16
+# """)
+#     #  ==> (September 2, 1997 EDT) 9:00,9:20,9:40,10:00,10:20,
+#     #                              ... 16:00,16:20,16:40
+#     #      (September 3, 1997 EDT) 9:00,9:20,9:40,10:00,10:20,
+#     #                              ...16:00,16:20,16:40
+#     #      ...
+#     doAssert events == events2
+#     doAssert len(events) == 169
+#     doAssert events[0][0] == parseICalDateTime("19970902T090000", "America/New_York")
+#     doAssert events[1][0] == parseICalDateTime("19970902T092000", "America/New_York")
+#     doAssert events[2][0] == parseICalDateTime("19970902T094000", "America/New_York")
+#     doAssert events[3][0] == parseICalDateTime("19970902T100000", "America/New_York")
+#     doAssert events[4][0] == parseICalDateTime("19970902T102000", "America/New_York")
+#     doAssert events[5][0] == parseICalDateTime("19970902T104000", "America/New_York")
+#     doAssert events[6][0] == parseICalDateTime("19970902T110000", "America/New_York")
+#     doAssert events[7][0] == parseICalDateTime("19970902T112000", "America/New_York")
+#     doAssert events[8][0] == parseICalDateTime("19970902T114000", "America/New_York")
+#     doAssert events[9][0] == parseICalDateTime("19970902T120000", "America/New_York")
+#     doAssert events[10][0] == parseICalDateTime("19970902T122000", "America/New_York")
+#     doAssert events[11][0] == parseICalDateTime("19970902T124000", "America/New_York")
 
-# An example where the days generated makes a difference because of WKST:
-#  DTSTART;TZID=America/New_York:19970805T090000
-#  RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=4;BYDAY=TU,SU;WKST=MO
-#  ==> (1997 EDT) August 5,10,19,24
+block test_rrules_38:
+    echo ">> Testing: An example where the days generated makes a difference because of WKST"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:19970805T090000
+DTEND;TZID=America/New_York:19970805T093000
+RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=4;BYDAY=TU,SU;WKST=MO
+""")
+    #  ==> (1997 EDT) August 5,10,19,24
+    doAssert len(events) == 4
+    doAssert events[0][0] == parseICalDateTime("19970805T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("19970810T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("19970819T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("19970824T090000", "America/New_York")
 
-# changing only WKST from MO to SU, yields different results...
-#  DTSTART;TZID=America/New_York:19970805T090000
-#  RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=4;BYDAY=TU,SU;WKST=SU
-#  ==> (1997 EDT) August 5,17,19,31
+block test_rrules_39:
+    echo ">> Testing: changing only WKST from MO to SU, yields different results"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:19970805T090000
+DTEND;TZID=America/New_York:19970805T093000
+RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=4;BYDAY=TU,SU;WKST=SU
+""")
+    #  ==> (1997 EDT) August 5,17,19,31
+    doAssert len(events) == 4
+    doAssert events[0][0] == parseICalDateTime("19970805T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("19970817T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("19970819T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("19970831T090000", "America/New_York")
 
-# An example where an invalid date (i.e., February 30) is ignored.
-#  DTSTART;TZID=America/New_York:20070115T090000
-#  RRULE:FREQ=MONTHLY;BYMONTHDAY=15,30;COUNT=5
-#  ==> (2007 EST) January 15,30
-#      (2007 EST) February 15
-#      (2007 EDT) March 15,30
+block test_rrules_40:
+    echo ">> Testing: An example where an invalid date (i.e., February 30) is ignored"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:20070115T090000
+DTEND;TZID=America/New_York:20070115T093000
+RRULE:FREQ=MONTHLY;BYMONTHDAY=15,30;COUNT=5
+""")
+    #  ==> (2007 EST) January 15,30
+    #      (2007 EST) February 15
+    #      (2007 EDT) March 15,30
+    doAssert len(events) == 5
+    doAssert events[0][0] == parseICalDateTime("20070115T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("20070130T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("20070215T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("20070315T090000", "America/New_York")
+    doAssert events[4][0] == parseICalDateTime("20070330T090000", "America/New_York")

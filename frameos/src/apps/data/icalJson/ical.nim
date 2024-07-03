@@ -169,6 +169,8 @@ proc processCurrentFields*(self: var ParsedCalendar) =
           rrule.freq = RRuleFreq.monthly
         of "YEARLY":
           rrule.freq = RRuleFreq.yearly
+        else:
+          assert(false, "Unknown RRULE freq: " & keyValue[1])
       of "INTERVAL":
         rrule.interval = keyValue[1].parseInt()
       of "COUNT":
@@ -484,7 +486,6 @@ proc matchesRRule*(currentCal: Calendar, rrule: RRule): bool =
   if rrule.byYearDay.len > 0 and not rrule.byYearDay.contains(currentCal.dayOfYear()):
     return false
   return true
-
 
 proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent, rrule: RRule): EventsSeq =
   let timeZone = if event.timeZone == "": self.timeZone else: event.timeZone
