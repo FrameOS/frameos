@@ -393,6 +393,57 @@ proc getNextIntervalStart*(calendar: Calendar, rrule: RRule, timeZone: string): 
   result.normalize()
   result.fixDST(timeZone)
 
+proc matchesRRule*(currentCal: Calendar, rrule: RRule): bool =
+  result = true # currentCal.matchesRRule(rrule)
+  if rrule.byDay.len > 0:
+    var found = false
+    for (day, num) in rrule.byDay:
+      if num == 0:
+        if day.int == currentCal.weekDay:
+          found = true
+          break
+      elif num > 0: # Every num-th Wednesday of the month
+        var count = 0
+        var cal = currentCal.copy()
+        cal.day = 1
+        while cal.month == currentCal.month:
+          if cal.weekDay == day.int:
+            count += 1
+            if count == num:
+              break
+          cal.add(TimeScale.Day, 1)
+        if cal.day == currentCal.day:
+          found = true
+          break
+      else: # Every last -num-th Wednesday of the month
+        var count = 0
+        var cal = currentCal.copy()
+        cal.day = cal.daysInMonth
+        while cal.month == currentCal.month:
+          if cal.weekDay == day.int:
+            count += 1
+            if count == -num:
+              break
+          cal.add(TimeScale.Day, -1)
+        if cal.day == currentCal.day:
+          found = true
+          break
+    if not found:
+      result = false
+  if result and rrule.byMonth.len > 0 and not rrule.byMonth.contains(currentCal.month):
+    result = false
+  if result and rrule.byMonthDay.len > 0:
+    var matchesRule = false
+    for day in rrule.byMonthDay:
+      if day > 0 and day == currentCal.day:
+        matchesRule = true
+        break
+      elif day < 0 and currentCal.day == (currentCal.daysInMonth + day + 1):
+        matchesRule = true
+        break
+    if not matchesRule:
+      result = false
+
 proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent, rrule: RRule): EventsSeq =
   let timeZone = if event.timeZone == "": self.timeZone else: event.timeZone
   let duration = event.endTs.float - event.startTs.float
@@ -420,57 +471,17 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
     else:
       nextIntervalStart = getNextIntervalStart(currentCal, rrule, timeZone)
       let intervalEnd = getEndOfThisInterval(currentCal, rrule, timeZone)
-      echo "Weekstart: " & $rrule.weekStart
-      echo "Current ts: " & $currentTs & " " & currentTs.formatIso()
-      echo "Interval end: " & $intervalEnd & " " & intervalEnd.formatIso()
-      echo "Next interval: " & $nextIntervalStart.ts & " " & nextIntervalStart.ts.formatIso()
-      echo "==="
+      # echo "Weekstart: " & $rrule.weekStart
+      # echo "Current ts: " & $currentTs & " " & currentTs.formatIso()
+      # echo "Interval end: " & $intervalEnd & " " & intervalEnd.formatIso()
+      # echo "Next interval: " & $nextIntervalStart.ts & " " & nextIntervalStart.ts.formatIso()
+      # echo "==="
       while (rrule.until == 0.Timestamp or currentTs <= rrule.until) and
             (rrule.count == 0 or result.len() < rrule.count) and
             currentTs < intervalEnd and
             currentTs < endTs:
-        var matches = true
-        if rrule.byDay.len > 0:
-          var found = false
-          for (day, num) in rrule.byDay:
-            if num == 0:
-              if day.int == currentCal.weekDay:
-                found = true
-                break
-            elif num > 0: # Every num-th Wednesday of the month
-              var count = 0
-              var cal = currentCal.copy()
-              cal.day = 1
-              while cal.month == currentCal.month:
-                if cal.weekDay == day.int:
-                  count += 1
-                  if count == num:
-                    break
-                cal.add(TimeScale.Day, 1)
-              if cal.day == currentCal.day:
-                found = true
-                break
-            else: # Every last -num-th Wednesday of the month
-              var count = 0
-              var cal = currentCal.copy()
-              cal.day = cal.daysInMonth
-              while cal.month == currentCal.month:
-                if cal.weekDay == day.int:
-                  count += 1
-                  if count == -num:
-                    break
-                cal.add(TimeScale.Day, -1)
-              if cal.day == currentCal.day:
-                found = true
-                break
-          if not found:
-            matches = false
-        if matches and rrule.byMonth.len > 0 and not rrule.byMonth.contains(currentCal.month):
-          matches = false
-        if matches and rrule.byMonthDay.len > 0 and not rrule.byMonthDay.contains(currentCal.day):
-          matches = false
 
-        if matches and currentTs <= endTs and newEndTs >= startTs:
+        if currentCal.matchesRRule(rrule) and currentTs <= endTs and newEndTs >= startTs:
           result.add((currentTs, event))
           if result.len() > 100000:
             break
