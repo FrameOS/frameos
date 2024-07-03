@@ -117,7 +117,6 @@ block test_meetings_events:
             "Team Standup", 1000)
     doAssert len(standupEvents) == 38
 
-
 block test_holidays:
     echo ">> Testing: holidays"
     let iCalFile = readFile("./src/apps/data/icalJson/tests/data/holidays.ics")
@@ -128,16 +127,6 @@ block test_holidays:
     doAssert len(events) == 49
     doAssert events[0].startTs == Timestamp(1147554000.0)
     doAssert events[0].summary == "Emadepäev"
-
-# block test_get_events_large:
-#     echo ">> Testing: get_events_large"
-#     let iCalFile = readFile("./src/apps/data/icalJson/tests/data/large.ics")
-#     let calendar = parseICalendar(iCalFile)
-#     doAssert calendar.timezone == "Europe/Brussels"
-
-#     let allEvents = getEvents(calendar, parseICalDateTime("20240630", "UTC"), parseICalDateTime("20250101", "UTC"), "", 100)
-#     doAssert len(allEvents) == 100
-
 
 block test_rrules_1:
     echo ">> Testing: Daily for 10 occurrences"
@@ -671,35 +660,28 @@ RRULE:FREQ=YEARLY;INTERVAL=3;COUNT=10;BYYEARDAY=1,100,200
     doAssert events[8][0] == parseICalDateTime("20030719T090000", "America/New_York")
     doAssert events[9][0] == parseICalDateTime("20060101T090000", "America/New_York")
 
-# block test_rrules_25:
-#     echo ">> Testing: Every 20th Monday of the year, forever"
-#     let events = toFullCal("""
-# DTSTART;TZID=America/New_York:19970519T090000
-# DTEND;TZID=America/New_York:19970519T093000
-# RRULE:FREQ=YEARLY;BYDAY=20MO
-# """)
-#     #  ==> (1997 9:00 AM EDT) May 19
-#     #      (1998 9:00 AM EDT) May 18
-#     #      (1999 9:00 AM EDT) May 17
-#     #      ...
-#     # doAssert len(events) == 403
-#     echo events[0]
-#     echo len(events)
-#     doAssert events[0][0] == parseICalDateTime("19970519T090000", "America/New_York")
-#     doAssert events[1][0] == parseICalDateTime("19980518T090000", "America/New_York")
-#     doAssert events[2][0] == parseICalDateTime("19990517T090000", "America/New_York")
-#     doAssert events[3][0] == parseICalDateTime("20000522T090000", "America/New_York")
-#     doAssert events[4][0] == parseICalDateTime("20010521T090000", "America/New_York")
-#     doAssert events[5][0] == parseICalDateTime("20020520T090000", "America/New_York")
-#     doAssert events[6][0] == parseICalDateTime("20030519T090000", "America/New_York")
-#     doAssert events[7][0] == parseICalDateTime("20040517T090000", "America/New_York")
-#     doAssert events[8][0] == parseICalDateTime("20050516T090000", "America/New_York")
-#     doAssert events[9][0] == parseICalDateTime("20060522T090000", "America/New_York")
-#     doAssert events[10][0] == parseICalDateTime("20070521T090000", "America/New_York")
-#     doAssert events[11][0] == parseICalDateTime("20080519T090000", "America/New_York")
-#     doAssert events[12][0] == parseICalDateTime("20090518T090000", "America/New_York")
-#     doAssert events[13][0] == parseICalDateTime("20100517T090000", "America/New_York")
-#     doAssert events[14][0] == parseICalDateTime("20110516T090000", "America/New_York")
+block test_rrules_25:
+    echo ">> Testing: Every 20th Monday of the year, forever"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:19970519T090000
+DTEND;TZID=America/New_York:19970519T093000
+RRULE:FREQ=YEARLY;BYDAY=20MO
+""")
+    #  ==> (1997 9:00 AM EDT) May 19
+    #      (1998 9:00 AM EDT) May 18
+    #      (1999 9:00 AM EDT) May 17
+    #      ...
+    doAssert len(events) == 34
+    doAssert events[0][0] == parseICalDateTime("19970519T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("19980518T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("19990517T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("20000515T090000", "America/New_York")
+    doAssert events[4][0] == parseICalDateTime("20010514T090000", "America/New_York")
+    doAssert events[5][0] == parseICalDateTime("20020520T090000", "America/New_York")
+    doAssert events[6][0] == parseICalDateTime("20030519T090000", "America/New_York")
+    doAssert events[7][0] == parseICalDateTime("20040517T090000", "America/New_York")
+    doAssert events[8][0] == parseICalDateTime("20050516T090000", "America/New_York")
+    doAssert events[9][0] == parseICalDateTime("20060515T090000", "America/New_York")
 
 
 # block test_rrules_26:
