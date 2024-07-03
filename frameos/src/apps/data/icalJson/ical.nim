@@ -360,7 +360,7 @@ proc trimDay(self: var Calendar) =
   self.hour = 0
 
 proc dayOfYear*(cal: Calendar): int =
-  # TODO: upsteream all of this
+  # TODO: upstream all of this
   proc leapYear(year: int): bool =
     if year mod 4 == 0:
       if year mod 100 == 0:
@@ -470,7 +470,6 @@ proc matchesRRule*(currentCal: Calendar, rrule: RRule): bool =
             if count == num:
               break
           cal.add(TimeScale.Day, 1)
-        # if count == num:
         if cal.month == currentCal.month and cal.day == currentCal.day:
           found = true
           break
@@ -553,7 +552,6 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
 
         if currentCal.matchesRRule(rrule) and currentTs <= endTs and newEndTs >= startTs and
             not event.exDates.contains(currentTs):
-          echo currentTs
           result.add((currentTs, event))
           if result.len() > 100000:
             break
