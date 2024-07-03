@@ -611,7 +611,6 @@ RRULE:FREQ=YEARLY;COUNT=10;BYMONTH=6,7
     #      (2000 9:00 AM EDT) June 10;July 10
     #      (2001 9:00 AM EDT) June 10;July 10
     doAssert len(events) == 10
-    echo events
     doAssert events[0][0] == parseICalDateTime("19970610T090000", "America/New_York")
     doAssert events[1][0] == parseICalDateTime("19970710T090000", "America/New_York")
     doAssert events[2][0] == parseICalDateTime("19980610T090000", "America/New_York")
@@ -647,16 +646,32 @@ RRULE:FREQ=YEARLY;INTERVAL=2;COUNT=10;BYMONTH=1,2,3
     doAssert events[9][0] == parseICalDateTime("20030310T090000", "America/New_York")
 
 
-# Every third year on the 1st, 100th, and 200th day for 10 occurrences:
-#  DTSTART;TZID=America/New_York:19970101T090000
-#  RRULE:FREQ=YEARLY;INTERVAL=3;COUNT=10;BYYEARDAY=1,100,200
-#  ==> (1997 9:00 AM EST) January 1
-#      (1997 9:00 AM EDT) April 10;July 19
-#      (2000 9:00 AM EST) January 1
-#      (2000 9:00 AM EDT) April 9;July 18
-#      (2003 9:00 AM EST) January 1
-#      (2003 9:00 AM EDT) April 10;July 19
-#      (2006 9:00 AM EST) January 1
+block test_rrules_24:
+    echo ">> Testing: Every third year on the 1st, 100th, and 200th day for 10 occurrences"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:19970101T090000
+DTEND;TZID=America/New_York:19970101T093000
+RRULE:FREQ=YEARLY;INTERVAL=3;COUNT=10;BYYEARDAY=1,100,200
+""")
+    #  ==> (1997 9:00 AM EST) January 1
+    #      (1997 9:00 AM EDT) April 10;July 19
+    #      (2000 9:00 AM EST) January 1
+    #      (2000 9:00 AM EDT) April 9;July 18
+    #      (2003 9:00 AM EST) January 1
+    #      (2003 9:00 AM EDT) April 10;July 19
+    #      (2006 9:00 AM EST) January 1
+    doAssert len(events) == 10
+    doAssert events[0][0] == parseICalDateTime("19970101T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("19970410T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("19970719T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("20000101T090000", "America/New_York")
+    doAssert events[4][0] == parseICalDateTime("20000409T090000", "America/New_York")
+    doAssert events[5][0] == parseICalDateTime("20000718T090000", "America/New_York")
+    doAssert events[6][0] == parseICalDateTime("20030101T090000", "America/New_York")
+    doAssert events[7][0] == parseICalDateTime("20030410T090000", "America/New_York")
+    doAssert events[8][0] == parseICalDateTime("20030719T090000", "America/New_York")
+    doAssert events[9][0] == parseICalDateTime("20060101T090000", "America/New_York")
+
 
 # Every 20th Monday of the year, forever:
 #  DTSTART;TZID=America/New_York:19970519T090000
@@ -665,6 +680,37 @@ RRULE:FREQ=YEARLY;INTERVAL=2;COUNT=10;BYMONTH=1,2,3
 #      (1998 9:00 AM EDT) May 18
 #      (1999 9:00 AM EDT) May 17
 #      ...
+
+# block test_rrules_25:
+#     echo ">> Testing: Every 20th Monday of the year, forever"
+#     let events = toFullCal("""
+# DTSTART;TZID=America/New_York:19970519T090000
+# DTEND;TZID=America/New_York:19970519T093000
+# RRULE:FREQ=YEARLY;BYDAY=20MO
+# """)
+#     #  ==> (1997 9:00 AM EDT) May 19
+#     #      (1998 9:00 AM EDT) May 18
+#     #      (1999 9:00 AM EDT) May 17
+#     #      ...
+#     # doAssert len(events) == 403
+#     echo events[0]
+#     echo len(events)
+#     doAssert events[0][0] == parseICalDateTime("19970519T090000", "America/New_York")
+#     doAssert events[1][0] == parseICalDateTime("19980518T090000", "America/New_York")
+#     doAssert events[2][0] == parseICalDateTime("19990517T090000", "America/New_York")
+#     doAssert events[3][0] == parseICalDateTime("20000522T090000", "America/New_York")
+#     doAssert events[4][0] == parseICalDateTime("20010521T090000", "America/New_York")
+#     doAssert events[5][0] == parseICalDateTime("20020520T090000", "America/New_York")
+#     doAssert events[6][0] == parseICalDateTime("20030519T090000", "America/New_York")
+#     doAssert events[7][0] == parseICalDateTime("20040517T090000", "America/New_York")
+#     doAssert events[8][0] == parseICalDateTime("20050516T090000", "America/New_York")
+#     doAssert events[9][0] == parseICalDateTime("20060522T090000", "America/New_York")
+#     doAssert events[10][0] == parseICalDateTime("20070521T090000", "America/New_York")
+#     doAssert events[11][0] == parseICalDateTime("20080519T090000", "America/New_York")
+#     doAssert events[12][0] == parseICalDateTime("20090518T090000", "America/New_York")
+#     doAssert events[13][0] == parseICalDateTime("20100517T090000", "America/New_York")
+#     doAssert events[14][0] == parseICalDateTime("20110516T090000", "America/New_York")
+
 
 # Monday of week number 20 (where the default start of the week is
 # Monday), forever:

@@ -343,6 +343,34 @@ proc trimDay(self: var Calendar) =
   self.minute = 0
   self.hour = 0
 
+proc dayOfYear*(cal: Calendar): int =
+  # TODO: upsteream all of this
+  proc leapYear(year: int): bool =
+    if year mod 4 == 0:
+      if year mod 100 == 0:
+        if year mod 400 == 0:
+          return true
+        else:
+          return false
+      else:
+        return true
+    else:
+      return false
+  proc daysInMonth(m: int, year: int): int =
+    if m == 1 or m == 3 or m == 5 or m == 7 or m == 8 or m == 10 or m == 12:
+      return 31
+    elif m == 4 or m == 6 or m == 9 or m == 11:
+      return 30
+    elif m == 2:
+      if leapYear(year):
+        return 29
+      else:
+        return 28
+  var r = cal.day
+  for i in 1 ..< cal.month:
+    r += daysInMonth(i, cal.year)
+  return r
+
 # Just add the interval to the event date
 proc getSimpleNextInterval*(calendar: Calendar, rrule: RRule, timeZone: string): Calendar =
   result = calendar.copy()
@@ -405,7 +433,6 @@ proc getNextIntervalStart*(calendar: Calendar, rrule: RRule, timeZone: string): 
   result.fixDST(timeZone)
 
 proc matchesRRule*(currentCal: Calendar, rrule: RRule): bool =
-  result = true # currentCal.matchesRRule(rrule)
   if rrule.byDay.len > 0:
     var found = false
     for (day, num) in rrule.byDay:
@@ -440,10 +467,10 @@ proc matchesRRule*(currentCal: Calendar, rrule: RRule): bool =
           found = true
           break
     if not found:
-      result = false
-  if result and rrule.byMonth.len > 0 and not rrule.byMonth.contains(currentCal.month):
-    result = false
-  if result and rrule.byMonthDay.len > 0:
+      return false
+  if rrule.byMonth.len > 0 and not rrule.byMonth.contains(currentCal.month):
+    return false
+  if rrule.byMonthDay.len > 0:
     var matchesRule = false
     for day in rrule.byMonthDay:
       if day > 0 and day == currentCal.day:
@@ -453,7 +480,11 @@ proc matchesRRule*(currentCal: Calendar, rrule: RRule): bool =
         matchesRule = true
         break
     if not matchesRule:
-      result = false
+      return false
+  if rrule.byYearDay.len > 0 and not rrule.byYearDay.contains(currentCal.dayOfYear()):
+    return false
+  return true
+
 
 proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent, rrule: RRule): EventsSeq =
   let timeZone = if event.timeZone == "": self.timeZone else: event.timeZone
@@ -463,7 +494,8 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
     currentCal = currentTs.calendar(timeZone)
     newEndTs = event.endTs
 
-  let simpleRepeat = rrule.byDay.len == 0 and rrule.byMonth.len == 0 and rrule.byMonthDay.len == 0
+  let simpleRepeat = rrule.byDay.len == 0 and rrule.byMonth.len == 0 and rrule.byMonthDay.len == 0 and
+      rrule.byYearDay.len == 0 and rrule.byWeekNo.len == 0
   var nextIntervalStart: Calendar
 
   # Loop between intervals
