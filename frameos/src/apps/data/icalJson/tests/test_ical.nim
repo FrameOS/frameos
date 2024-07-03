@@ -436,7 +436,6 @@ RRULE:FREQ=MONTHLY;INTERVAL=2;COUNT=10;BYDAY=1SU,-1SU
     #      (1998 9:00 AM EST) January 4,25;March 1,29
     #      (1998 9:00 AM EDT) May 3,31
     doAssert len(events) == 10
-    echo events
     doAssert events[0][0] == parseICalDateTime("19970907T090000", "America/New_York")
     doAssert events[1][0] == parseICalDateTime("19970928T090000", "America/New_York")
     doAssert events[2][0] == parseICalDateTime("19971102T090000", "America/New_York")
@@ -784,24 +783,23 @@ RRULE:FREQ=YEARLY;BYDAY=TH;BYMONTH=6,7,8
     doAssert events[9][0] == parseICalDateTime("19970807T090000", "America/New_York")
     doAssert events[10][0] == parseICalDateTime("19970814T090000", "America/New_York")
 
-# block test_rrules_29:
-#     echo ">> Testing: Every Friday the 13th, forever"
-#     let events = toFullCal("""
-# DTSTART;TZID=America/New_York:19970902T090000
-# EXDATE;TZID=America/New_York:19970902T090000
-# RRULE:FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13
-# """)
-#     #  ==> (1998 9:00 AM EST) February 13;March 13;November 13
-#     #      (1999 9:00 AM EDT) August 13
-#     #      (2000 9:00 AM EDT) October 13
-#     #      ...
-#     doAssert len(events) == 23
-#     echo events
-#     doAssert events[0][0] == parseICalDateTime("19980213T090000", "America/New_York")
-#     doAssert events[1][0] == parseICalDateTime("19980313T090000", "America/New_York")
-#     doAssert events[2][0] == parseICalDateTime("19981113T090000", "America/New_York")
-#     doAssert events[3][0] == parseICalDateTime("19990813T090000", "America/New_York")
-#     doAssert events[4][0] == parseICalDateTime("20001013T090000", "America/New_York")
+block test_rrules_29:
+    echo ">> Testing: Every Friday the 13th, forever"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:19970902T090000
+DTEND;TZID=America/New_York:19970902T093000
+RRULE:FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13
+""")
+    #  ==> (1998 9:00 AM EST) February 13;March 13;November 13
+    #      (1999 9:00 AM EDT) August 13
+    #      (2000 9:00 AM EDT) October 13
+    #      ...
+    doAssert len(events) == 57
+    doAssert events[0][0] == parseICalDateTime("19980213T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("19980313T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("19981113T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("19990813T090000", "America/New_York")
+    doAssert events[4][0] == parseICalDateTime("20001013T090000", "America/New_York")
 
 block test_rrules_30:
     echo ">> Testing: The first Saturday that follows the first Sunday of the month, forever"
