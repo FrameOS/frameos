@@ -1,6 +1,16 @@
 import ../ical
 import lib/tz
-import chrono, times
+import chrono
+
+proc toFullCal(event: string, timeZone = "UTC"): seq[(Timestamp, VEvent)] =
+    let calendar = parseICalendar("""
+BEGIN:VCALENDAR
+BEGIN:VEVENT
+""" & event & """
+END:VEVENT
+END:VCALENDAR
+""", timeZone)
+    return getEvents(calendar, parseICalDateTime("19900101", "UTC"), parseICalDateTime("20301231", "UTC"), "", 1000)
 
 block test_parse_ical_datetime:
     echo ">> Testing: parse_ical_datetime"
@@ -11,6 +21,27 @@ block test_parse_ical_datetime:
     doAssert parseICalDateTime("20240101", "UTC") != parseICalDateTime("20240101", "Europe/Brussels")
     doAssert parseICalDateTime("20240101T000000", "UTC") != parseICalDateTime("20240101T000000", "Europe/Brussels")
     doAssert parseICalDateTime("20240101T000000Z", "UTC") == parseICalDateTime("20240101T000000Z", "Europe/Brussels")
+
+block test_get_simple_next_interval:
+    echo ">> Testing: get_simple_next_interval"
+    let daily = RRule(freq: daily, interval: 1, byDay: @[], byMonth: @[], byMonthDay: @[], until: Timestamp(0.0),
+            count: 0, weekStart: none)
+    let weeklyMo = RRule(freq: weekly, interval: 1, byDay: @[(mo, 0)], byMonth: @[], byMonthDay: @[], until: Timestamp(
+            0.0), count: 0, weekStart: none)
+    let monthly = RRule(freq: monthly, interval: 1, byDay: @[], byMonth: @[], byMonthDay: @[], until: Timestamp(0.0),
+            count: 0, weekStart: none)
+    proc assertInterval(date: string, rrule: RRule, expected: string, timezone: string = "UTC", comment = "") =
+        block:
+            var cal = parseIsoCalendar(date)
+            cal.applyTimezone(timezone)
+            let next = getSimpleNextInterval(cal, rrule, timezone)
+            doAssert next == parseIsoCalendar(expected), "Expected: " & expected & ", got: " & next.formatIso() & ", " &
+                    comment
+
+    assertInterval("2024-07-01T18:30:00Z", weeklyMo, "2024-07-08T20:30:00+02:00", "Europe/Brussels", "mo -> mo")
+    # assertInterval("2024-07-03T18:30:00Z", weeklyMo, "2024-07-08T20:30:00+02:00", "Europe/Brussels", "we -> mo")
+    assertInterval("2024-07-03T18:30:00Z", monthly, "2024-08-03T20:30:00+02:00", "Europe/Brussels", "next month same day")
+    assertInterval("2024-07-03T18:30:00Z", daily, "2024-07-04T20:30:00+02:00", "Europe/Brussels", "next day")
 
 block test_lincoln:
     echo ">> Testing: lincoln"
@@ -34,7 +65,7 @@ block test_meetings:
     doAssert events[0].location == "https://example.com/location-url/"
     doAssert events[0].description == ""
     doAssert events[0].summary == "Team Standup"
-    doAssert events[0].rrules[0] == RRule(freq: weekly, interval: 1, timeInterval: TimeInterval(weeks: 1), byDay: @[(
+    doAssert events[0].rrules[0] == RRule(freq: weekly, interval: 1, byDay: @[(
             we, 0)], byMonth: @[], byMonthDay: @[], until: Timestamp(1777388399.0), count: 0,
                     weekStart: none)
     doAssert events[1].startTs == Timestamp(1624528800.0)
@@ -106,16 +137,6 @@ block test_holidays:
 
 #     let allEvents = getEvents(calendar, parseICalDateTime("20240630", "UTC"), parseICalDateTime("20250101", "UTC"), "", 100)
 #     doAssert len(allEvents) == 100
-
-proc toFullCal(event: string, timeZone = "UTC"): seq[(Timestamp, VEvent)] =
-    let calendar = parseICalendar("""
-BEGIN:VCALENDAR
-BEGIN:VEVENT
-""" & event & """
-END:VEVENT
-END:VCALENDAR
-""", timeZone)
-    return getEvents(calendar, parseICalDateTime("19900101", "UTC"), parseICalDateTime("20301231", "UTC"), "", 1000)
 
 
 block test_rrules_1:
@@ -388,19 +409,45 @@ RRULE:FREQ=MONTHLY;COUNT=10;BYDAY=1FR
     doAssert events[8][0] == parseICalDateTime("19980501T090000", "America/New_York")
     doAssert events[9][0] == parseICalDateTime("19980605T090000", "America/New_York")
 
-# Monthly on the first Friday for 10 occurrences:
-#  DTSTART;TZID=America/New_York:19970905T090000
-#  RRULE:FREQ=MONTHLY;COUNT=10;BYDAY=1FR
-#  ==> (1997 9:00 AM EDT) September 5;October 3
-#      (1997 9:00 AM EST) November 7;December 5
-#      (1998 9:00 AM EST) January 2;February 6;March 6;April 3
-#      (1998 9:00 AM EDT) May 1;June 5
+block test_rrules_13:
+    echo ">> Testing: Monthly on the first Friday until December 24, 1997"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:19970905T090000
+DTEND;TZID=America/New_York:19970905T093000
+RRULE:FREQ=MONTHLY;UNTIL=19971224T000000Z;BYDAY=1FR
+""")
+    #  ==> (1997 9:00 AM EDT) September 5; October 3
+    #      (1997 9:00 AM EST) November 7; December 5
+    doAssert len(events) == 4
+    doAssert events[0][0] == parseICalDateTime("19970905T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("19971003T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("19971107T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("19971205T090000", "America/New_York")
 
-# Monthly on the first Friday until December 24, 1997:
-#  DTSTART;TZID=America/New_York:19970905T090000
-#  RRULE:FREQ=MONTHLY;UNTIL=19971224T000000Z;BYDAY=1FR
-#  ==> (1997 9:00 AM EDT) September 5; October 3
-#      (1997 9:00 AM EST) November 7; December 5
+block test_rrules_14:
+    echo ">> Testing: Every other month on the first and last Sunday of the month for 10 occurrences"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:19970907T090000
+DTEND;TZID=America/New_York:19970907T093000
+RRULE:FREQ=MONTHLY;INTERVAL=2;COUNT=10;BYDAY=1SU,-1SU
+""")
+    #  ==> (1997 9:00 AM EDT) September 7,28
+    #      (1997 9:00 AM EST) November 2,30
+    #      (1998 9:00 AM EST) January 4,25;March 1,29
+    #      (1998 9:00 AM EDT) May 3,31
+    doAssert len(events) == 10
+    echo events
+    doAssert events[0][0] == parseICalDateTime("19970907T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("19970928T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("19971102T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("19971130T090000", "America/New_York")
+    doAssert events[4][0] == parseICalDateTime("19980104T090000", "America/New_York")
+    doAssert events[5][0] == parseICalDateTime("19980125T090000", "America/New_York")
+    doAssert events[6][0] == parseICalDateTime("19980301T090000", "America/New_York")
+    doAssert events[7][0] == parseICalDateTime("19980329T090000", "America/New_York")
+    doAssert events[8][0] == parseICalDateTime("19980503T090000", "America/New_York")
+    doAssert events[9][0] == parseICalDateTime("19980531T090000", "America/New_York")
+
 
 # Every other month on the first and last Sunday of the month for 10 occurrences:
 #  DTSTART;TZID=America/New_York:19970907T090000

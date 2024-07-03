@@ -326,7 +326,14 @@ proc fixDST(self: var Calendar, timeZone: string) =
   self.dstName = ""
   self.shiftTimezone(timeZone)
 
-proc getNextIntervalStart(calendar: var Calendar, rrule: RRule, timeZone: string): Calendar =
+proc trimDay(self: var Calendar) =
+  self.secondFraction = 0.0
+  self.second = 0
+  self.minute = 0
+  self.hour = 0
+
+# Just add the interval to the event date
+proc getSimpleNextInterval*(calendar: Calendar, rrule: RRule, timeZone: string): Calendar =
   result = calendar.copy()
   case rrule.freq
   of RRuleFreq.daily:
@@ -340,20 +347,51 @@ proc getNextIntervalStart(calendar: var Calendar, rrule: RRule, timeZone: string
   # Must do this to preserve the right hour past DST changes
   result.fixDST(timeZone)
 
-proc getThisIntervalEnd(calendar: var Calendar, rrule: RRule, timeZone: string): Timestamp =
+# Get the end of this week, month, etc
+proc getEndOfThisInterval*(calendar: Calendar, rrule: RRule, timeZone: string): Timestamp =
   var cal = calendar.copy()
   case rrule.freq
   of RRuleFreq.daily:
-    cal.add(TimeScale.Day, 1)
+    cal.day += 1
   of RRuleFreq.weekly:
-    cal.add(TimeScale.Day, 7)
+    let weekStart = (if rrule.weekStart == RRuleDay.none: RRuleDay.mo else: rrule.weekStart).int
+    let diff = if weekStart > cal.weekDay: weekStart - cal.weekDay
+               else: 7 - cal.weekDay + weekStart
+    cal.day += diff
   of RRuleFreq.monthly:
-    cal.add(TimeScale.Month, 1)
+    cal.day = 1
+    cal.month += 1
   of RRuleFreq.yearly:
-    cal.add(TimeScale.Year, 1)
+    cal.day = 1
+    cal.month = 1
+    cal.year += 1
+  cal.trimDay()
+  cal.normalize()
   # Must do this to preserve the right hour past DST changes
   cal.fixDST(timeZone)
   cal.ts
+
+proc getNextIntervalStart*(calendar: Calendar, rrule: RRule, timeZone: string): Calendar =
+  result = calendar.copy()
+  # result.trimDay()
+  case rrule.freq
+  of RRuleFreq.daily:
+    result.day += rrule.interval
+  of RRuleFreq.weekly:
+    let weekStart = (if rrule.weekStart == RRuleDay.none: RRuleDay.mo else: rrule.weekStart).int
+    let diff = if weekStart > result.weekDay: weekStart - result.weekDay
+               else: 7 - result.weekDay + weekStart
+    result.day += 7 * (rrule.interval - 1) + diff
+  of RRuleFreq.monthly:
+    result.day = 1
+    result.month += rrule.interval
+  of RRuleFreq.yearly:
+    result.day = 1
+    result.month = 1
+    result.year += rrule.interval
+  # Must do this to preserve the right hour past DST changes
+  result.normalize()
+  result.fixDST(timeZone)
 
 proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent, rrule: RRule): EventsSeq =
   let timeZone = if event.timeZone == "": self.timeZone else: event.timeZone
@@ -364,21 +402,29 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
     newEndTs = event.endTs
 
   let simpleRepeat = rrule.byDay.len == 0 and rrule.byMonth.len == 0 and rrule.byMonthDay.len == 0
+  var nextIntervalStart: Calendar
 
   # Loop between intervals
   while (rrule.until == 0.Timestamp or currentTs <= rrule.until) and
         (rrule.count == 0 or result.len() < rrule.count) and
         currentTs <= endTs:
 
-    let nextIntervalStart = currentCal.getNextIntervalStart(rrule, timeZone)
-
     if simpleRepeat:
+      nextIntervalStart = getSimpleNextInterval(currentCal, rrule, timeZone)
       if currentTs <= endTs and newEndTs >= startTs:
         result.add((currentTs, event))
+        if result.len() > 100000:
+          break
 
     # Need to loop over every day to handle BYDAY, BYMONTH, BYMONTHDAY, etc.
     else:
-      let intervalEnd = currentCal.getThisIntervalEnd(rrule, timeZone)
+      nextIntervalStart = getNextIntervalStart(currentCal, rrule, timeZone)
+      let intervalEnd = getEndOfThisInterval(currentCal, rrule, timeZone)
+      echo "Weekstart: " & $rrule.weekStart
+      echo "Current ts: " & $currentTs & " " & currentTs.formatIso()
+      echo "Interval end: " & $intervalEnd & " " & intervalEnd.formatIso()
+      echo "Next interval: " & $nextIntervalStart.ts & " " & nextIntervalStart.ts.formatIso()
+      echo "==="
       while (rrule.until == 0.Timestamp or currentTs <= rrule.until) and
             (rrule.count == 0 or result.len() < rrule.count) and
             currentTs < intervalEnd and
@@ -407,6 +453,18 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
                 break
             else:
               assert(false, "Negative BYDAY not supported")
+              # var count = 0
+              # var cal = currentCal.copy()
+              # cal.day = cal.daysInMonth
+              # while cal.month == currentCal.month:
+              #   if cal.weekDay == day.int:
+              #     count += 1
+              #     if count == -num:
+              #       break
+              #   cal.add(TimeScale.Day, -1)
+              # if cal.day == currentCal.day:
+              #   found = true
+              #   break
           if not found:
             matches = false
         if matches and rrule.byMonth.len > 0 and not rrule.byMonth.contains(currentCal.month):
@@ -416,14 +474,14 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
 
         if matches and currentTs <= endTs and newEndTs >= startTs:
           result.add((currentTs, event))
+          if result.len() > 100000:
+            break
 
         currentCal.add(TimeScale.Day, 1)
         currentCal.fixDST(timeZone)
         currentTs = currentCal.ts
         newEndTs = (currentTs.float + duration).Timestamp
 
-    if result.len() > 100000:
-      break
 
     currentCal = nextIntervalStart
     currentTs = currentCal.ts
