@@ -984,3 +984,23 @@ RRULE:FREQ=MONTHLY;BYMONTHDAY=15,30;COUNT=5
     doAssert events[2][0] == parseICalDateTime("20070215T090000", "America/New_York")
     doAssert events[3][0] == parseICalDateTime("20070315T090000", "America/New_York")
     doAssert events[4][0] == parseICalDateTime("20070330T090000", "America/New_York")
+
+block test_rrules_41:
+    echo ">> Testing: EXDATE"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:20070115T090000
+DTEND;TZID=America/New_York:20070115T093000
+RRULE:FREQ=MONTHLY;BYMONTHDAY=15,30;COUNT=5
+EXDATE;TZID=America/New_York:20070315T090000
+EXDATE;TZID=America/New_York:20070415T090000
+""")
+    #  ==> (2007 EST) January 15,30
+    #      (2007 EST) February 15
+    #      (2007 EDT) March ~15~,30
+    #      (2007 EDT) April ~15~,30
+    doAssert len(events) == 5
+    doAssert events[0][0] == parseICalDateTime("20070115T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("20070130T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("20070215T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("20070330T090000", "America/New_York")
+    doAssert events[4][0] == parseICalDateTime("20070430T090000", "America/New_York")

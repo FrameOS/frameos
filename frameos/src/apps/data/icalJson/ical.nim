@@ -8,6 +8,17 @@ import std/lists
 import system
 import tables
 
+# Key missing event features (none used by Google/Apple calendar):
+# - HOURLY, MINUTELY, SECONDLY frequencies
+# - BYHOUR, BYMINUTE, BYSECOND
+# - BYSETPOS
+# - DURATION
+# - RDATE
+
+# Missing metadata fields:
+# - ORGANIZER, ATTENDEE, CONTACT, RELATED-TO, RESOURCES, VALARM, CLASS, CREATED, LAST-MODIFIED,
+# - SEQUENCE, TRANSP, PRIORITY, STATUS, GEO, CATEGORIES
+
 type
   RRuleFreq* = enum
     daily, weekly, monthly, yearly
@@ -37,6 +48,7 @@ type
     endTs*: Timestamp
     fullDay*: bool
     rrules*: seq[RRule]
+    exDates*: seq[Timestamp]
     recurrenceId*: string
     summary*: string
     description*: string
@@ -221,6 +233,7 @@ proc processCurrentFields*(self: var ParsedCalendar) =
         of "SA": rrule.weekStart = RRuleDay.sa
       else:
         echo "!! Unknown RRULE rule: " & split
+
     if rrule.interval == 0:
       rrule.interval = 1
 
@@ -233,8 +246,9 @@ proc processCurrentFields*(self: var ParsedCalendar) =
     event.rrules.add(rrule)
   # if fields.hasKey("RDATE"):
   #   assert(false, "RDATE is not supported")
-  # if fields.hasKey("EXDATE"):
-  #   assert(false, "EXDATE is not supported")
+  if fields.hasKey("EXDATE"):
+    for value in fields["EXDATE"].items():
+      event.exDates.add(parseICalDateTime(value, event.timeZone))
 
   # Text fields
   if fields.hasKey("SUMMARY"):
@@ -495,6 +509,7 @@ proc matchesRRule*(currentCal: Calendar, rrule: RRule): bool =
       return false
   if rrule.byYearDay.len > 0 and not rrule.byYearDay.contains(currentCal.dayOfYear()):
     return false
+
   return true
 
 proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent, rrule: RRule): EventsSeq =
@@ -536,7 +551,9 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
             currentTs < intervalEnd and
             currentTs < endTs:
 
-        if currentCal.matchesRRule(rrule) and currentTs <= endTs and newEndTs >= startTs:
+        if currentCal.matchesRRule(rrule) and currentTs <= endTs and newEndTs >= startTs and
+            not event.exDates.contains(currentTs):
+          echo currentTs
           result.add((currentTs, event))
           if result.len() > 100000:
             break
