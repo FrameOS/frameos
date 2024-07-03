@@ -22,6 +22,8 @@ type
     byDay*: seq[(RRuleDay, int)]
     byMonth*: seq[int]
     byMonthDay*: seq[int]
+    byYearDay*: seq[int]
+    byWeekNo*: seq[int]
     until*: Timestamp
     count*: int
     weekStart*: RRuleDay
@@ -196,9 +198,11 @@ proc processCurrentFields*(self: var ParsedCalendar) =
         for monthDay in keyValue[1].split(','):
           rrule.byMonthDay.add(monthDay.parseInt())
       of "BYYEARDAY":
-        assert(false, "BYYEARDAY is not supported")
+        for yearDay in keyValue[1].split(','):
+          rrule.byYearDay.add(yearDay.parseInt())
       of "BYWEEKNO":
-        assert(false, "BYWEEKNO is not supported")
+        for weekNo in keyValue[1].split(','):
+          rrule.byWeekNo.add(weekNo.parseInt())
       of "BYMONTH":
         for month in keyValue[1].split(','):
           rrule.byMonth.add(month.parseInt())
@@ -217,6 +221,13 @@ proc processCurrentFields*(self: var ParsedCalendar) =
         echo "!! Unknown RRULE rule: " & split
     if rrule.interval == 0:
       rrule.interval = 1
+
+    # Since none of the BYDAY, BYMONTHDAY, or BYYEARDAY components are specified, the day is gotten from "DTSTART".
+    # RRULE:FREQ=YEARLY;INTERVAL=2;COUNT=10;BYMONTH=1,2,3
+    if (rrule.freq == monthly or rrule.freq == yearly) and rrule.byMonth.len > 0 and rrule.byDay.len == 0 and
+        rrule.byMonthDay.len == 0 and rrule.byYearDay.len == 0:
+      rrule.byMonthDay.add(event.startTs.calendar(event.timeZone).day)
+
     event.rrules.add(rrule)
   # if fields.hasKey("RDATE"):
   #   assert(false, "RDATE is not supported")
