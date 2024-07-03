@@ -438,7 +438,6 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
                 found = true
                 break
             elif num > 0: # Every num-th Wednesday of the month
-              # what is the num-th day of the month?
               var count = 0
               var cal = currentCal.copy()
               cal.day = 1
@@ -451,20 +450,19 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
               if cal.day == currentCal.day:
                 found = true
                 break
-            else:
-              assert(false, "Negative BYDAY not supported")
-              # var count = 0
-              # var cal = currentCal.copy()
-              # cal.day = cal.daysInMonth
-              # while cal.month == currentCal.month:
-              #   if cal.weekDay == day.int:
-              #     count += 1
-              #     if count == -num:
-              #       break
-              #   cal.add(TimeScale.Day, -1)
-              # if cal.day == currentCal.day:
-              #   found = true
-              #   break
+            else: # Every last -num-th Wednesday of the month
+              var count = 0
+              var cal = currentCal.copy()
+              cal.day = cal.daysInMonth
+              while cal.month == currentCal.month:
+                if cal.weekDay == day.int:
+                  count += 1
+                  if count == -num:
+                    break
+                cal.add(TimeScale.Day, -1)
+              if cal.day == currentCal.day:
+                found = true
+                break
           if not found:
             matches = false
         if matches and rrule.byMonth.len > 0 and not rrule.byMonth.contains(currentCal.month):
