@@ -128,6 +128,8 @@ block test_holidays:
     doAssert events[0].startTs == Timestamp(1147554000.0)
     doAssert events[0].summary == "Emadepäev"
 
+# Examples copied from: https://icalendar.org/iCalendar-RFC-5545/3-8-5-3-recurrence-rule.html
+
 block test_rrules_1:
     echo ">> Testing: Daily for 10 occurrences"
     let events = toFullCal("""

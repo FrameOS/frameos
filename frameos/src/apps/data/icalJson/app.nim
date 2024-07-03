@@ -57,9 +57,13 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
       "summary": event.summary,
       "startTime": startTime,
       "endTime": endTime,
-      "location": event.location,
-      "description": event.description,
     }
+    if event.location != "":
+      jsonEvent["location"] = %*event.location
+    if event.description != "":
+      jsonEvent["description"] = %*event.description
+    if event.url != "":
+      jsonEvent["url"] = %*event.url
     eventsReply.add(jsonEvent)
   self.log(%*{"event": "reply", "eventsInRange": len(eventsReply)})
   return eventsReply
