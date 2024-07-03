@@ -19,7 +19,6 @@ type
   RRule* = object
     freq*: RRuleFreq
     interval*: int
-    timeInterval*: TimeInterval
     byDay*: seq[(RRuleDay, int)]
     byMonth*: seq[int]
     byMonthDay*: seq[int]
@@ -162,16 +161,12 @@ proc processCurrentFields*(self: var ParsedCalendar) =
         case keyValue[1]
         of "DAILY":
           rrule.freq = RRuleFreq.daily
-          rrule.timeInterval = TimeInterval(days: rrule.interval or 1)
         of "WEEKLY":
           rrule.freq = RRuleFreq.weekly
-          rrule.timeInterval = TimeInterval(weeks: rrule.interval or 1)
         of "MONTHLY":
           rrule.freq = RRuleFreq.monthly
-          rrule.timeInterval = TimeInterval(months: rrule.interval or 1)
         of "YEARLY":
           rrule.freq = RRuleFreq.yearly
-          rrule.timeInterval = TimeInterval(years: rrule.interval or 1)
       of "INTERVAL":
         rrule.interval = keyValue[1].parseInt()
       of "COUNT":
