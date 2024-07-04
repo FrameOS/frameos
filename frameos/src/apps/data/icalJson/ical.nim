@@ -43,6 +43,7 @@ type
   EventsSeq* = seq[(Timestamp, VEvent)]
 
   VEvent* = object
+    uid*: string
     timeZone*: string
     startTs*: Timestamp
     endTs*: Timestamp
@@ -132,8 +133,8 @@ proc processCurrentFields*(self: var ParsedCalendar) =
   template getFirstValue(key: string): string =
     fields[key].head.value
 
-  # of "UID":
-  #   assert(false, "UID is not supported")
+  if fields.hasKey("UID"):
+    event.uid = getFirstValue("UID")
 
   if fields.hasKey("TZID"):
     event.timeZone = fields["TZID"].head.value
@@ -531,6 +532,7 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
     if simpleRepeat:
       nextIntervalStart = getSimpleNextInterval(currentCal, rrule, timeZone)
       if currentTs <= endTs and newEndTs >= startTs:
+        echo (1, currentTs, event)
         result.add((currentTs, event))
         if result.len() > 100000:
           break
@@ -552,15 +554,15 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
 
         if currentCal.matchesRRule(rrule) and currentTs <= endTs and newEndTs >= startTs and
             not event.exDates.contains(currentTs):
+          echo (2, currentTs, event)
           result.add((currentTs, event))
           if result.len() > 100000:
-            break
+            return
 
         currentCal.add(TimeScale.Day, 1)
         currentCal.fixDST(timeZone)
         currentTs = currentCal.ts
         newEndTs = (currentTs.float + duration).Timestamp
-
 
     currentCal = nextIntervalStart
     currentTs = currentCal.ts
@@ -568,15 +570,21 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
 
 proc getEvents*(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, search: string = "",
     maxCount: int = 1000): EventsSeq =
+  let eventsHash = initTable[string, EventsSeq]()
   for event in self.events:
     if search != "" and not event.summary.contains(search):
       continue
 
     for rrule in event.rrules:
       for rule in applyRRule(self, startTs, endTs, event, rrule):
+        if eventsHash.hasKey(event.uid):
+          eventsHash[event.uid & " " & rule.ts].add(rule)
+        else:
+          eventsHash[event.uid] = @[rule]
         result.add(rule)
 
     if event.rrules.len == 0 and event.startTs <= endTs and event.endTs >= startTs:
+      echo (3, event.startTs, event)
       result.add((event.startTs, event))
 
   result.sort(cmp) # Sort events based on start time
