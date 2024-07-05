@@ -565,12 +565,6 @@ proc applyRRule(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
     else:
       nextIntervalStart = getNextIntervalStart(currentCal, rrule, timeZone)
       let intervalEnd = getEndOfThisInterval(currentCal, rrule, timeZone)
-      # echo "==="
-      # echo "Weekstart: " & $rrule.weekStart
-      # echo "Current ts: " & $currentTs & " " & currentTs.formatIso()
-      # echo "New end tS: " & $newEndTs & " " & newEndTs.formatIso()
-      # echo "Interval end: " & $intervalEnd & " " & intervalEnd.formatIso()
-      # echo "Next interval: " & $nextIntervalStart.ts & " " & nextIntervalStart.ts.formatIso()
       while (rrule.until == 0.Timestamp or currentTs <= rrule.until) and
             (rrule.count == 0 or counter < rrule.count) and
             currentTs < intervalEnd and
