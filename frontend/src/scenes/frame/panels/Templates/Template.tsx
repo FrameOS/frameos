@@ -3,7 +3,7 @@ import { H6 } from '../../../../components/H6'
 
 import { ArrowDownTrayIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { CloudArrowDownIcon, DocumentPlusIcon, DocumentIcon } from '@heroicons/react/24/outline'
+import { FolderPlusIcon, CloudArrowDownIcon, DocumentPlusIcon, DocumentIcon } from '@heroicons/react/24/outline'
 import { Button } from '../../../../components/Button'
 
 interface TemplateProps {
@@ -47,7 +47,7 @@ export function Template({
         <div className="flex gap-2 items-right">
           {applyTemplate ? (
             <Button size="small" color="secondary" onClick={() => applyTemplate(template)} title="Install scene">
-              <CloudArrowDownIcon className="w-5 h-5" />
+              <FolderPlusIcon className="w-5 h-5" />
             </Button>
           ) : null}
           <DropdownMenu

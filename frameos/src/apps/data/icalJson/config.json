@@ -1,0 +1,59 @@
+{
+  "name": "iCal to JSON",
+  "description": "Convert an iCal file into a JSON event list",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "ical",
+      "type": "string",
+      "required": true,
+      "label": "iCal file contents"
+    },
+    {
+      "name": "exportFrom",
+      "type": "string",
+      "value": "",
+      "placeholder": "now",
+      "required": false,
+      "label": "Export events from (YYYY-MM-DD)"
+    },
+    {
+      "name": "exportUntil",
+      "type": "string",
+      "value": "",
+      "placeholder": "1 year later",
+      "required": false,
+      "label": "Export events until (YYYY-MM-DD)"
+    },
+    {
+      "name": "exportCount",
+      "type": "integer",
+      "value": "1000",
+      "placeholder": "1000",
+      "required": false,
+      "label": "Maximum number of events to export"
+    },
+    {
+      "name": "search",
+      "type": "string",
+      "value": "",
+      "placeholder": "",
+      "required": false,
+      "label": "Filter events by keyword"
+    },
+    {
+      "markdown": "`[{ summary, startTime, endTime, location, description }]`"
+    }
+  ],
+  "output": [
+    {
+      "name": "events",
+      "type": "json"
+    }
+  ],
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true
+  }
+}
