@@ -40,7 +40,7 @@
       "value": "",
       "placeholder": "",
       "required": false,
-      "label": "Search"
+      "label": "Filter events by keyword"
     },
     {
       "markdown": "`[{ summary, startTime, endTime, location, description }]`"
