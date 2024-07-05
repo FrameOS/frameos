@@ -29,8 +29,8 @@
     {
       "name": "exportCount",
       "type": "integer",
-      "value": "1000",
-      "placeholder": "1000",
+      "value": "50",
+      "placeholder": "50",
       "required": false,
       "label": "Maximum number of events to export"
     },
