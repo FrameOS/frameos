@@ -3,9 +3,10 @@ import lib/tz
 import chrono
 
 proc toFullCal(event: string, timeZone = "UTC"): seq[(Timestamp, VEvent)] =
-    let calendar = parseICalendar("""
+    var calendar = parseICalendar("""
 BEGIN:VCALENDAR
 BEGIN:VEVENT
+UID:1234567890
 """ & event & """
 END:VEVENT
 END:VCALENDAR
@@ -1006,3 +1007,43 @@ EXDATE;TZID=America/New_York:20070415T090000
     doAssert events[2][0] == parseICalDateTime("20070215T090000", "America/New_York")
     doAssert events[3][0] == parseICalDateTime("20070330T090000", "America/New_York")
     doAssert events[4][0] == parseICalDateTime("20070430T090000", "America/New_York")
+
+block test_rrules_42:
+    echo ">> Testing: RECURRENCE-ID override"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:20070115T090000
+DTEND;TZID=America/New_York:20070115T093000
+RRULE:FREQ=MONTHLY;BYMONTHDAY=15,30;COUNT=5
+SUMMARY:Test Event
+END:VEVENT
+BEGIN:VEVENT
+UID:1234567890
+DTSTART;TZID=America/New_York:20070215T090000
+DTEND;TZID=America/New_York:20070215T093000
+RECURRENCE-ID;TZID=America/New_York:20070215T090000
+SUMMARY:Overridden
+""")
+    #  ==> (2007 EST) January 15,30
+    #      (2007 EST) February 15
+    #      (2007 EDT) March 15,30
+    doAssert len(events) == 5
+    doAssert events[0][0] == parseICalDateTime("20070115T090000", "America/New_York")
+    doAssert events[1][0] == parseICalDateTime("20070130T090000", "America/New_York")
+    doAssert events[2][0] == parseICalDateTime("20070215T090000", "America/New_York")
+    doAssert events[3][0] == parseICalDateTime("20070315T090000", "America/New_York")
+    doAssert events[4][0] == parseICalDateTime("20070330T090000", "America/New_York")
+    doAssert events[0][1].summary == "Test Event"
+    doAssert events[2][1].summary == "Overridden"
+
+
+block test_rrules_43:
+    echo ">> Testing: RECURRENCE-ID standalone"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:20070215T090000
+DTEND;TZID=America/New_York:20070215T093000
+RECURRENCE-ID;TZID=America/New_York:20070215T090000
+SUMMARY:Overridden
+""")
+    doAssert len(events) == 1
+    doAssert events[0][0] == parseICalDateTime("20070215T090000", "America/New_York")
+

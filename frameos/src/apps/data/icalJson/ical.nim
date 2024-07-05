@@ -60,8 +60,14 @@ type
     events*: seq[VEvent]
     timeZone*: string
     currentFields*: FieldsTable
+    inVAlarm*: bool
     inVEvent*: bool
     inVCalendar*: bool
+    rRuleProvided*: Table[string, (Timestamp, VEvent)]
+    rRuleGenerated*: Table[string, (Timestamp, VEvent)]
+    result*: EventsSeq
+
+const MAX_RESULT_COUNT = 100000
 
 ####################################################################################################
 # Parsing
@@ -312,7 +318,11 @@ proc processLine*(self: var ParsedCalendar, line: string) =
     self.inVCalendar = true
   elif line.startsWith("END:VCALENDAR"):
     self.inVCalendar = false
-  elif self.inVEvent or self.inVCalendar:
+  elif line.startsWith("BEGIN:VALARM"):
+    self.inVAlarm = true
+  elif line.startsWith("END:VALARM"):
+    self.inVAlarm = false
+  elif not self.inVAlarm and (self.inVEvent or self.inVCalendar):
     let splitPos = line.find(':')
     if splitPos == -1:
       return
@@ -512,7 +522,22 @@ proc matchesRRule*(currentCal: Calendar, rrule: RRule): bool =
 
   return true
 
-proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent, rrule: RRule): EventsSeq =
+proc addMatchedEvent(self: var ParsedCalendar, ts: Timestamp, event: VEvent) =
+  if self.result.len() > MAX_RESULT_COUNT:
+    raise newException(ValueError, "Too many events in calendar. Increase MAX_RESULT_COUNT.")
+
+  let key = event.uid & "/" & $ts
+  if event.recurrenceId != "":
+    self.rRuleProvided[key] = (ts, event)
+
+  elif event.rrules.len() > 0:
+    self.rRuleGenerated[key] = (ts, event)
+
+  else:
+    self.result.add((ts, event))
+
+proc applyRRule(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent,
+    rrule: RRule) =
   let timeZone = if event.timeZone == "": self.timeZone else: event.timeZone
   let duration = event.endTs.float - event.startTs.float
   var
@@ -523,18 +548,18 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
   let simpleRepeat = rrule.byDay.len == 0 and rrule.byMonth.len == 0 and rrule.byMonthDay.len == 0 and
       rrule.byYearDay.len == 0 and rrule.byWeekNo.len == 0
   var nextIntervalStart: Calendar
+  var counter = 0
 
   # Loop between intervals
   while (rrule.until == 0.Timestamp or currentTs <= rrule.until) and
-        (rrule.count == 0 or result.len() < rrule.count) and
+        (rrule.count == 0 or counter < rrule.count) and
         currentTs <= endTs:
 
     if simpleRepeat:
       nextIntervalStart = getSimpleNextInterval(currentCal, rrule, timeZone)
       if currentTs <= endTs and newEndTs >= startTs:
-        result.add((currentTs, event))
-        if result.len() > 100000:
-          break
+        self.addMatchedEvent(currentTs, event)
+        counter += 1
 
     # Need to loop over every day to handle BYDAY, BYMONTH, BYMONTHDAY, etc.
     else:
@@ -547,15 +572,14 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
       # echo "Interval end: " & $intervalEnd & " " & intervalEnd.formatIso()
       # echo "Next interval: " & $nextIntervalStart.ts & " " & nextIntervalStart.ts.formatIso()
       while (rrule.until == 0.Timestamp or currentTs <= rrule.until) and
-            (rrule.count == 0 or result.len() < rrule.count) and
+            (rrule.count == 0 or counter < rrule.count) and
             currentTs < intervalEnd and
             currentTs < endTs:
 
         if currentCal.matchesRRule(rrule) and currentTs <= endTs and newEndTs >= startTs and
             not event.exDates.contains(currentTs):
-          result.add((currentTs, event))
-          if result.len() > 100000:
-            return
+          self.addMatchedEvent(currentTs, event)
+          counter += 1
 
         currentCal.add(TimeScale.Day, 1)
         currentCal.fixDST(timeZone)
@@ -566,19 +590,28 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
     currentTs = currentCal.ts
     newEndTs = (currentTs.float + duration).Timestamp
 
-proc getEvents*(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, search: string = "",
+proc getEvents*(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, search: string = "",
     maxCount: int = 1000): EventsSeq =
   for event in self.events:
     if search != "" and not event.summary.contains(search):
       continue
 
     for rrule in event.rrules:
-      for eventsSeqEvent in applyRRule(self, startTs, endTs, event, rrule):
-        result.add(eventsSeqEvent)
+      self.applyRRule(startTs, endTs, event, rrule)
 
     if event.rrules.len == 0 and event.startTs <= endTs and event.endTs >= startTs:
-      result.add((event.startTs, event))
+      self.addMatchedEvent(event.startTs, event)
 
-  result.sort(cmp) # Sort events based on start time
-  if maxCount > 0 and result.len > maxCount:
-    result = result[0..<maxCount]
+  # dedupe rrule results and standalone results
+  for key, (ts, event) in self.rRuleProvided.pairs():
+    if self.rRuleGenerated.hasKey(key):
+      self.rRuleGenerated.del(key)
+    self.result.add((ts, event))
+  for key, (ts, event) in self.rRuleGenerated.pairs():
+    self.result.add((ts, event))
+
+  self.result.sort(cmp)
+
+  if maxCount > 0 and self.result.len > maxCount:
+    self.result = self.result[0..<maxCount]
+  return self.result
