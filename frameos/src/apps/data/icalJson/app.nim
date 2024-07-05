@@ -3,7 +3,6 @@ import times
 import options
 import json
 import strutils
-import httpclient
 import frameos/apps
 import frameos/types
 import chrono
@@ -30,10 +29,10 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
     self.logError "No iCal data provided."
     return
 
-  let timezone = now().timezone().name
+  let timezone = "UTC"
   let startTs = if self.appConfig.exportFrom == "": epochTime().Timestamp
                 else: parseTs("{year/4}-{month/2}-{day/2}", self.appConfig.exportFrom, timezone)
-  var endTs = if self.appConfig.exportUntil == "": (epochTime() + 366 * 24 * 60 * 60).Timestamp
+  let endTs = if self.appConfig.exportUntil == "": (epochTime() + 366 * 24 * 60 * 60).Timestamp
               else: parseTs("{year/4}-{month/2}-{day/2}", self.appConfig.exportUntil, timezone)
 
   var parsedCalendar: ParsedCalendar

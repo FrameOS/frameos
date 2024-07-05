@@ -532,7 +532,6 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
     if simpleRepeat:
       nextIntervalStart = getSimpleNextInterval(currentCal, rrule, timeZone)
       if currentTs <= endTs and newEndTs >= startTs:
-        echo (1, currentTs, event)
         result.add((currentTs, event))
         if result.len() > 100000:
           break
@@ -570,21 +569,15 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
 
 proc getEvents*(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, search: string = "",
     maxCount: int = 1000): EventsSeq =
-  let eventsHash = initTable[string, EventsSeq]()
   for event in self.events:
     if search != "" and not event.summary.contains(search):
       continue
 
     for rrule in event.rrules:
-      for rule in applyRRule(self, startTs, endTs, event, rrule):
-        if eventsHash.hasKey(event.uid):
-          eventsHash[event.uid & " " & rule.ts].add(rule)
-        else:
-          eventsHash[event.uid] = @[rule]
-        result.add(rule)
+      for eventsSeqEvent in applyRRule(self, startTs, endTs, event, rrule):
+        result.add(eventsSeqEvent)
 
     if event.rrules.len == 0 and event.startTs <= endTs and event.endTs >= startTs:
-      echo (3, event.startTs, event)
       result.add((event.startTs, event))
 
   result.sort(cmp) # Sort events based on start time
