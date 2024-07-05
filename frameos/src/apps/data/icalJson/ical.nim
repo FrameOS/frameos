@@ -553,7 +553,6 @@ proc applyRRule(self: ParsedCalendar, startTs: Timestamp, endTs: Timestamp, even
 
         if currentCal.matchesRRule(rrule) and currentTs <= endTs and newEndTs >= startTs and
             not event.exDates.contains(currentTs):
-          echo (2, currentTs, event)
           result.add((currentTs, event))
           if result.len() > 100000:
             return
