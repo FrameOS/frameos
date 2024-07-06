@@ -6,16 +6,65 @@ on:
       - '**'
 
 jobs:
-  test:
+  frameos:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Set up Node
-        uses: actions/setup-node@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
         with:
-          node-version: '16.x'
+          python-version: '3.11'
+
+      - name: Cache pip packages
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install python dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade uv
+          uv venv
+          uv pip install -r requirements.txt
+
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: FrameOS nim tests
+        run: |
+          cd frameos
+          nimble install -d
+          nimble setup
+          nimble test
+  
+      - name: Visual regression tests
+        run: |
+          cd e2e
+          source ../backend/.venv/bin/activate
+          make
+
+      - name: Commit updated snapshots
+        uses: EndBug/add-and-commit@v9
+        id: commit
+        with:
+            add: 'e2e/*'
+            author_name: FrameOS Bot
+            author_email: git@frameos.net
+            message: 'Update snapshots'
+            pull: --rebase --autostash
+            default_author: github_actions
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
 
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -46,53 +95,20 @@ jobs:
           source .venv/bin/activate
           TEST=1 pytest
 
-      - uses: jiro4989/setup-nim-action@v1
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Node
+        uses: actions/setup-node@v2
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: FrameOS nim tests
-        run: |
-          cd frameos
-          nimble install -d
-          nimble setup
-          nimble test
-  
-      - name: Visual regression tests
-        run: |
-          cd e2e
-          source ../backend/.venv/bin/activate
-          make
-
-      - name: Check for snapshot modifications
-        run: |
-          rm init.sh
-          if [[ `git status --porcelain` ]]; then
-            echo "Changes detected in the repository after running visual regression tests."
-            echo "Run the following locally to fix:"
-            echo "- cd e2e"
-            echo "- source ../backend/.venv/bin/activate"
-            echo "- make"
-            git status
-            git diff
-            echo "changes_detected=true" >> $GITHUB_ENV
-          else
-            echo "No changes detected in the repository."
-            echo "changes_detected=false" >> $GITHUB_ENV
-          fi
-
-      - name: Commit updated snapshots
-        uses: EndBug/add-and-commit@v9
-        id: commit
-        with:
-            add: 'e2e/*'
-            author_name: FrameOS Bot
-            author_email: git@frameos.net
-            message: 'Update snapshots'
-            pull: --rebase --autostash
-            default_author: github_actions
+          node-version: '16.x'
 
       - name: Build frontend
         run: |
           cd frontend
           npm install
           npm run build
+        
