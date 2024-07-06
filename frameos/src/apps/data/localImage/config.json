@@ -7,10 +7,10 @@
     {
       "name": "path",
       "type": "text",
-      "value": "/srv/images",
+      "value": "/srv/assets",
       "required": true,
       "label": "Image filename or folder",
-      "placeholder": "/srv/images"
+      "placeholder": "/srv/assets"
     },
     {
       "name": "order",

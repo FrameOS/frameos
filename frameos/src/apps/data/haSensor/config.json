@@ -1,5 +1,5 @@
 {
-  "name": "HA Sensor",
+  "name": "Home Assistant Sensor",
   "description": "Get the state of a Home Assistant entity",
   "category": "data",
   "version": "1.0.0",

@@ -28,6 +28,7 @@ export interface FrameType {
   debug?: boolean
   last_log_at?: string
   log_to_file?: string
+  assets_path?: string
   reboot?: {
     enabled?: 'true' | 'false'
     crontab?: string

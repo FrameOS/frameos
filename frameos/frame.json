@@ -13,7 +13,8 @@
     "metricsInterval": 60.0,
     "scalingMode": "cover",
     "frameAccess": "public",
-    "logToFile": "/tmp/frameos.log",
+    "logToFile": "./tmp/frameos.log",
+    "assetsPath": "./tmp",
     "rotate": 0,
     "debug": true,
     "settings": {

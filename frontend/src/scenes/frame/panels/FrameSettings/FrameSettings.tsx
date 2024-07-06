@@ -258,6 +258,31 @@ export function FrameSettings({ className }: FrameSettingsProps) {
               />
             </Field>
             <Field
+              name="assets_path"
+              label={<div>Assets path</div>}
+              labelRight={
+                <Button
+                  color="secondary"
+                  size="small"
+                  onClick={() => {
+                    setFrameFormValues({ assets_path: '/srv/assets' })
+                    touchFrameFormField('assets_path')
+                  }}
+                >
+                  Set default
+                </Button>
+              }
+              tooltip="Path on frame where to store assets like images, videos, and custom fonts."
+            >
+              <TextInput
+                name="assets_path"
+                onClick={() => touchFrameFormField('assets_path')}
+                type="text"
+                placeholder="/srv/assets"
+                required
+              />
+            </Field>
+            <Field
               name="log_to_file"
               label={<div>Save logs to file</div>}
               labelRight={

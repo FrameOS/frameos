@@ -17,6 +17,7 @@ type
     rotate*: int
     scalingMode*: string
     settings*: JsonNode
+    assetsPath*: string
     logToFile*: string
     debug*: bool
 
