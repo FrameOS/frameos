@@ -1,5 +1,8 @@
 import json
 import strformat
+import strutils
+import os
+import checksums/md5
 import frameos/types
 
 proc renderWidth*(config: FrameConfig): int {.inline.} =
@@ -30,3 +33,40 @@ proc logError*(self: AppRoot, message: string) =
     "event": &"error:{appName(self)}",
     "error": message
   })
+
+proc cleanPosix*(self: string): string =
+  var finalResult = ""
+  var lastCharWasSpace = false
+
+  for ch in self:
+    if ch.isAlphaNumeric or ch == '-' or ch == '_':
+      finalResult.add(ch)
+      lastCharWasSpace = false
+    elif ch == ' ':
+      if not lastCharWasSpace:
+        finalResult.add(' ')
+        lastCharWasSpace = true
+
+  return finalResult
+
+proc saveAsset*(self: AppRoot, filename: string, contents: string): string =
+  let assetsPath = if self.frameConfig.assetsPath == "": "/srv/assets" else: self.frameConfig.assetsPath
+  let appName = if self.nodeName == "": "saved" else: self.nodeName.replace("data/", "").cleanPosix
+  let basename = filename.splitFile.name.cleanPosix
+  let md5hash = getMD5(contents)
+  let extension = filename.splitFile.ext
+  let cleanPath = &"{assetsPath}/{appName}"
+  let cleanFilename = &"{cleanPath}/{basename}.{md5hash}{extension}"
+
+  try:
+    if not dirExists(cleanPath):
+      createDir(cleanPath)
+    if not fileExists(cleanFilename):
+      writeFile(cleanFilename, contents)
+      self.log(&"Saved as asset: {cleanFilename}")
+    else:
+      self.log(&"Asset already exists: {cleanFilename}")
+  except Exception as e:
+    self.logError(&"Error saving asset: {e.msg}")
+
+  return cleanFilename
