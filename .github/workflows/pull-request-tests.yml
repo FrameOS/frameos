@@ -6,7 +6,7 @@ on:
       - '**'
 
 jobs:
-  frameos:
+  nim:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -60,7 +60,7 @@ jobs:
             pull: --rebase --autostash
             default_author: github_actions
 
-  backend:
+  python:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -95,7 +95,7 @@ jobs:
           source .venv/bin/activate
           TEST=1 pytest
 
-  frontend:
+  typescript:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
