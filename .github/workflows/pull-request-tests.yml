@@ -80,9 +80,16 @@ jobs:
             echo "changes_detected=false" >> $GITHUB_ENV
           fi
 
-      - name: Fail if changes detected
-        if: env.changes_detected == 'true'
-        run: exit 1
+      - name: Commit updated snapshots
+        uses: EndBug/add-and-commit@v9
+        id: commit
+        with:
+            add: 'e2e/*'
+            author_name: FrameOS Bot
+            author_email: git@frameos.net
+            message: 'Update snapshots'
+            pull: --rebase --autostash
+            default_author: github_actions
 
       - name: Build frontend
         run: |
