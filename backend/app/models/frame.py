@@ -39,6 +39,7 @@ class Frame(db.Model):
     rotate = db.Column(db.Integer, nullable=True)
     log_to_file = db.Column(db.String(256), nullable=True)
     assets_path = db.Column(db.String(256), nullable=True)
+    save_assets = db.Column(JSON, nullable=True)
     debug = db.Column(db.Boolean, nullable=True)
     last_log_at = db.Column(db.DateTime, nullable=True)
     reboot = db.Column(JSON, nullable=True)
@@ -81,6 +82,7 @@ class Frame(db.Model):
             'last_log_at': self.last_log_at.replace(tzinfo=timezone.utc).isoformat() if self.last_log_at else None,
             'log_to_file': self.log_to_file,
             'assets_path': self.assets_path,
+            'save_assets': self.save_assets,
             'reboot': self.reboot,
             'control_code': self.control_code,
         }
@@ -129,6 +131,7 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         device=device or "web_only",
         log_to_file=None, # spare the SD card from load
         assets_path='/srv/assets',
+        save_assets=False,
         control_code={"enabled": "true"},
         reboot={"enabled": "true", "crontab": "4 0 * * *"},
     )
@@ -190,6 +193,7 @@ def get_frame_json(frame: Frame) -> dict:
         "rotate": frame.rotate or 0,
         "logToFile": frame.log_to_file,
         "assetsPath": frame.assets_path,
+        "saveAssets": frame.save_assets,
     }
 
     setting_keys = set()

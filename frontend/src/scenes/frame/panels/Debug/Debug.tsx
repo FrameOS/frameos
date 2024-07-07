@@ -15,10 +15,10 @@ export function Debug() {
     <div className="space-y-2">
       <H6>Scenes</H6>
       <ReactJSON
-        src={frameForm?.scenes ?? frame.scenes ?? []}
+        src={frameForm}
         collapsed={2}
         theme="ocean"
-        name="scenes"
+        name="frame"
         style={{ background: 'none' }}
         onEdit={({ updated_src }) => setValue(updated_src)}
         onAdd={({ updated_src }) => setValue(updated_src)}

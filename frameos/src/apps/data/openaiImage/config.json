@@ -65,12 +65,12 @@
       ]
     },
     {
-      "name": "saveAsset",
+      "name": "saveAssets",
       "type": "select",
       "value": "auto",
       "options": ["auto", "always", "never"],
       "label": "Save asset",
-      "hint": "Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to play back saved images.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+      "hint": "Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to view saved assets.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
     }
   ],
   "output": [

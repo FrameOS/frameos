@@ -48,5 +48,15 @@ export const appsLogic = kea<appsLogicType>([
         )
       },
     ],
+    appsWithSaveAssets: [
+      (s) => [s.apps],
+      (apps: Record<string, AppConfig>): Record<string, string> => {
+        return Object.fromEntries(
+          Object.entries(apps)
+            .filter(([_, app]) => app.fields?.some((f) => !('markdown' in f) && f.name === 'saveAssets'))
+            .map(([k, v]) => [k, v.name])
+        )
+      },
+    ],
   }),
 ])

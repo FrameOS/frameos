@@ -29,6 +29,7 @@ export interface FrameType {
   last_log_at?: string
   log_to_file?: string
   assets_path?: string
+  save_assets?: boolean | Record<string, boolean>
   reboot?: {
     enabled?: 'true' | 'false'
     crontab?: string

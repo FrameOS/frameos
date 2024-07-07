@@ -10,6 +10,7 @@ import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
 import { devices } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
+import { appsLogic } from '../Apps/appsLogic'
 
 export interface FrameSettingsProps {
   className?: string
@@ -19,6 +20,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
   const { frameId, frame, frameForm, frameFormTouches } = useValues(frameLogic)
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
+  const { appsWithSaveAssets } = useValues(appsLogic)
 
   return (
     <div className={clsx('space-y-4', className)}>
@@ -281,6 +283,53 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                 placeholder="/srv/assets"
                 required
               />
+            </Field>
+            <Field
+              name="save_assets"
+              label={<div>Save downloaded images as assets</div>}
+              tooltip="This controls the 'auto' setting for 'Save assets' in the following apps. Please note that individual apps/scenes may have overridden the default set here."
+            >
+              <>
+                <div className="space-y-2">
+                  {Object.entries({
+                    _all: 'All',
+                    ...appsWithSaveAssets,
+                  }).map(([keyword, name]) => (
+                    <label key={keyword} className="flex gap-1">
+                      <input
+                        type="checkbox"
+                        checked={
+                          typeof frameForm.save_assets === 'boolean'
+                            ? frameForm.save_assets
+                            : !!frameForm.save_assets?.[keyword]
+                        }
+                        value={'true'}
+                        onChange={(e) => {
+                          const checked = !!e.target.checked
+                          if (keyword === '_all') {
+                            setFrameFormValues({ save_assets: checked })
+                          } else {
+                            const prevValues =
+                              typeof frameForm.save_assets === 'object'
+                                ? frameForm.save_assets
+                                : frameForm.save_assets === true
+                                ? Object.fromEntries(Object.entries(appsWithSaveAssets).map(([k]) => [k, true]))
+                                : {}
+                            setFrameFormValues({
+                              save_assets: {
+                                ...prevValues,
+                                [keyword]: checked,
+                              },
+                            })
+                          }
+                          touchFrameFormField('save_assets')
+                        }}
+                      />
+                      {name}
+                    </label>
+                  ))}
+                </div>
+              </>
             </Field>
             <Field
               name="log_to_file"

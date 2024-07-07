@@ -12,6 +12,7 @@ type
   AppConfig* = object
     search*: string
     orientation*: string
+    saveAssets*: string
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -72,6 +73,10 @@ proc get*(self: App, context: ExecutionContext): Image =
     let imageData = client2.request(realImageUrl, httpMethod = HttpGet)
     if imageData.code != Http200:
       return self.error(context, &"Error {imageData.status} fetching image")
+
+    if self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always":
+      discard self.saveAsset(&"{search} {width}x{height}.jpg", imageData.body, self.appConfig.saveAssets == "auto")
+
     result = decodeImage(imageData.body)
   except CatchableError as e:
     return self.error(context, "Error fetching image from Unsplash: " & $e.msg)

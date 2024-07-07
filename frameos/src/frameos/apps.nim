@@ -49,7 +49,17 @@ proc cleanPosix*(self: string): string =
 
   return finalResult
 
-proc saveAsset*(self: AppRoot, filename: string, contents: string): string =
+proc saveAsset*(self: AppRoot, filename: string, contents: string, isAuto: bool): string =
+  if isAuto:
+    if self.frameConfig.saveAssets.kind == JBool:
+      if not self.frameConfig.saveAssets.getBool():
+        return ""
+    elif self.frameConfig.saveAssets.kind == JObject:
+      if not self.frameConfig.saveAssets{self.nodeName}.getBool():
+        return ""
+    else:
+      return ""
+
   let assetsPath = if self.frameConfig.assetsPath == "": "/srv/assets" else: self.frameConfig.assetsPath
   let appName = if self.nodeName == "": "saved" else: self.nodeName.replace("data/", "").cleanPosix
   let basename = filename.splitFile.name.cleanPosix

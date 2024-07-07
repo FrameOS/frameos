@@ -18,6 +18,7 @@ type
     scalingMode*: string
     settings*: JsonNode
     assetsPath*: string
+    saveAssets*: JsonNode
     logToFile*: string
     debug*: bool
 

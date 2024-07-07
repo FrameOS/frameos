@@ -36,6 +36,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'debug',
   'log_to_file',
   'assets_path',
+  'save_assets',
   'reboot',
   'control_code',
 ]
