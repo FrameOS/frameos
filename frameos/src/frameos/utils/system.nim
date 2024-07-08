@@ -1,6 +1,6 @@
 import posix
 
-proc getAvailableDiskSpace*(path: string): int =
+proc getAvailableDiskSpace*(path: string): int64 =
   let fd = open(path.cstring, O_RDONLY)
   if fd >= 0:
     try:

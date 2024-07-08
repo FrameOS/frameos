@@ -36,7 +36,7 @@ proc logError*(self: AppRoot, message: string) =
     "error": message
   })
 
-proc cleanPosix*(self: string): string =
+proc cleanFilename*(self: string): string =
   var finalResult = ""
   var lastCharWasSpace = false
 
@@ -63,8 +63,8 @@ proc saveAsset*(self: AppRoot, filename: string, contents: string, isAuto: bool)
       return ""
 
   let assetsPath = if self.frameConfig.assetsPath == "": "/srv/assets" else: self.frameConfig.assetsPath
-  let appName = if self.nodeName == "": "saved" else: self.nodeName.replace("data/", "").cleanPosix
-  let basename = filename.splitFile.name.cleanPosix
+  let appName = if self.nodeName == "": "saved" else: self.nodeName.replace("data/", "").cleanFilename()
+  let basename = filename.splitFile.name.cleanFilename()
   let md5hash = getMD5(contents)
   let extension = filename.splitFile.ext
   let cleanPath = &"{assetsPath}/{appName}"
