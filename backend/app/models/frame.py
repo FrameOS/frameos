@@ -131,7 +131,7 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         device=device or "web_only",
         log_to_file=None, # spare the SD card from load
         assets_path='/srv/assets',
-        save_assets=False,
+        save_assets=True,
         control_code={"enabled": "true"},
         reboot={"enabled": "true", "crontab": "4 0 * * *"},
     )
