@@ -13,6 +13,7 @@ type
     style*: string
     quality*: string
     size*: string
+    saveAssets*: string
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -73,6 +74,9 @@ proc get*(self: App, context: ExecutionContext): Image =
     let imageData = client2.request(imageUrl, httpMethod = HttpGet)
     if imageData.code != Http200:
       return self.error(context, "Error fetching image " & $imageData.status)
+    if self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always":
+      discard self.saveAsset(prompt & ".jpg", imageData.body, self.appConfig.saveAssets == "auto")
+
     result = decodeImage(imageData.body)
   except CatchableError as e:
     return self.error(context, "Error fetching image from OpenAI: " & $e.msg)

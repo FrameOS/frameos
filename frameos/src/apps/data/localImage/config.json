@@ -7,10 +7,10 @@
     {
       "name": "path",
       "type": "text",
-      "value": "/srv/images",
+      "value": "",
       "required": true,
       "label": "Image filename or folder",
-      "placeholder": "/srv/images"
+      "placeholder": "Defaults to the assets folder (e.g. /srv/assets)"
     },
     {
       "name": "order",
@@ -26,6 +26,13 @@
       "value": "",
       "required": false,
       "label": "Optional state key for persistence"
+    },
+    {
+      "name": "search",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Filter filenames by keyword"
     }
   ],
   "output": [

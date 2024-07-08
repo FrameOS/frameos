@@ -155,6 +155,10 @@ def deploy_frame(id: int):
                 # swap out the release
                 exec_command(frame, ssh, f"rm -rf /srv/frameos/current && ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current")
 
+                # Make sure /srv/assets is writable, if not create it and assign to our user
+                assets_path = frame.assets_path or "/srv/assets"
+                exec_command(frame, ssh, f"if [ ! -d {assets_path} ]; then sudo mkdir -p {assets_path} && sudo chown $(whoami):$(whoami) {assets_path}; elif [ ! -w {assets_path} ]; then echo 'User does not have write access to {assets_path}. Changing ownership...'; sudo chown $(whoami):$(whoami) {assets_path}; fi")
+
                 # clean old build and release and cache folders
                 exec_command(frame, ssh, "cd /srv/frameos/build && ls -dt1 build_* | tail -n +11 | xargs rm -rf")
                 exec_command(frame, ssh, "cd /srv/frameos/build/cache && find . -type f \( -atime +0 -a -mtime +0 \) | xargs rm -rf")

@@ -11,12 +11,13 @@ import { TextArea } from '../../../../components/TextArea'
 import { panelsLogic } from '../panelsLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Markdown } from '../../../../components/Markdown'
-import { ClipboardDocumentIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { ClipboardDocumentIcon, InformationCircleIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
 import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
+import { Tooltip } from '../../../../components/Tooltip'
 
 export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
   const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
@@ -280,6 +281,14 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                             >
                               <div title={field.type} className={hasChangedValue ? 'underline font-bold' : ''}>
                                 {field.label ?? field.name}
+                                {field.hint ? (
+                                  <Tooltip
+                                    title={<Markdown value={field.hint} />}
+                                    containerClassName="ml-1 inline-block align-sub"
+                                  >
+                                    <InformationCircleIcon className="w-4 h-4 text-indigo-200" aria-label="Info" />
+                                  </Tooltip>
+                                ) : null}
                               </div>
                               {field.type === 'node' ? (
                                 <div className="flex items-center gap-2">

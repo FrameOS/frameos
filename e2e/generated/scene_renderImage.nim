@@ -180,6 +180,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     path: "./assets/image.png",
     order: "random",
     counterStateKey: "",
+    search: "",
   ))
   scene.node6.init()
   scene.node3 = render_imageApp.App(nodeName: "render/image", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(

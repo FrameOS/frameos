@@ -98,6 +98,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     path: "./assets/image.png",
     order: "random",
     counterStateKey: "",
+    search: "",
   ))
   scene.node2.init()
   scene.node3 = render_textApp.App(nodeName: "render/text", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(

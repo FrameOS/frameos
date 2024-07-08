@@ -151,6 +151,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     path: "./assets/bird.png",
     order: "random",
     counterStateKey: "",
+    search: "",
   ))
   scene.node2.init()
   scene.node3 = render_splitApp.App(nodeName: "render/split", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(

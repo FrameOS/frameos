@@ -28,6 +28,8 @@ export interface FrameType {
   debug?: boolean
   last_log_at?: string
   log_to_file?: string
+  assets_path?: string
+  save_assets?: boolean | Record<string, boolean>
   reboot?: {
     enabled?: 'true' | 'false'
     crontab?: string
@@ -128,6 +130,8 @@ export interface AppConfigField {
   value?: any
   /** Placeholder text for the field */
   placeholder?: string
+  /** Info tooltip contents (markdown) */
+  hint?: string
   /** Number of rows for the field, only used if type is 'text' */
   rows?: number
   /** Turn the field into a multidimensional array of fields. seq=[1, "rows"] --> for 1 to rows */

@@ -143,6 +143,22 @@ export function FrameDetails({ className }: DetailsProps) {
                 <td className="break-words">{frame.rotate}</td>
               </tr>
               <tr>
+                <td className="text-blue-200 text-right">Assets path:</td>
+                <td className="break-words">{frame.assets_path || '/srv/assets'}</td>
+              </tr>
+              <tr>
+                <td className="text-blue-200 text-right">Save assets:</td>
+                <td className="break-words">
+                  {frame.save_assets === true
+                    ? 'Save all downloaded assets to disk'
+                    : frame.save_assets === false
+                    ? 'Do not save assets to disk'
+                    : typeof frame.save_assets === 'object' && frame.save_assets !== null
+                    ? 'Save apps: ' + Object.keys(frame.save_assets).join(', ')
+                    : 'Unset'}
+                </td>
+              </tr>
+              <tr>
                 <td className="text-blue-200 text-right">Log to file:</td>
                 <td className="break-words">{frame.log_to_file || <em>disabled</em>}</td>
               </tr>

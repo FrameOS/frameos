@@ -17,6 +17,8 @@ type
     rotate*: int
     scalingMode*: string
     settings*: JsonNode
+    assetsPath*: string
+    saveAssets*: JsonNode
     logToFile*: string
     debug*: bool
 
@@ -51,7 +53,7 @@ type
 
   AppRoot* = ref object of RootObj
     nodeId*: NodeId
-    nodeName*: string # used mainly for logging
+    nodeName*: string # used mainly for logging and saving assets
     scene*: FrameScene
     frameConfig*: FrameConfig
 

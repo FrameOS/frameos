@@ -188,6 +188,16 @@
       "checksums": {
         "sha1": "deac69a313df5422db074f0bf95448607cc52c18"
       }
+    },
+    "checksums": {
+      "version": "0.1.0",
+      "vcsRevision": "7ff0b762332d2591bbeb65df9bb86d52ea44ec01",
+      "url": "https://github.com/nim-lang/checksums",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "3b0211c13e33fa7c8bbf1504604206d983fd3491"
+      }
     }
   },
   "tasks": {

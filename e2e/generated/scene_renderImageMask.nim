@@ -252,6 +252,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     path: "./assets/bird.png",
     order: "random",
     counterStateKey: "",
+    search: "",
   ))
   scene.node9.init()
   scene.node8 = render_imageApp.App(nodeName: "render/image", nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
@@ -270,6 +271,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     path: "./assets/mask.png",
     order: "random",
     counterStateKey: "",
+    search: "",
   ))
   scene.node10.init()
   scene.node2 = render_imageApp.App(nodeName: "render/image", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
