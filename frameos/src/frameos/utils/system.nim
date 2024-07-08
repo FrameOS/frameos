@@ -6,7 +6,7 @@ proc getAvailableDiskSpace*(path: string): int64 =
     try:
       var statvfs: StatVfs
       if fstatvfs(fd, statvfs) == 0:
-        return statvfs.f_bavail * statvfs.f_frsize
+        return (statvfs.f_bavail * statvfs.f_frsize).int64
     finally:
       discard close(fd)
   return -1
