@@ -1,9 +1,11 @@
 import json
 import strformat
 import strutils
+import math
 import os
 import checksums/md5
 import frameos/types
+import frameos/utils/system
 
 proc renderWidth*(config: FrameConfig): int {.inline.} =
   if config.rotate in [90, 270]: config.height else: config.width
@@ -71,6 +73,15 @@ proc saveAsset*(self: AppRoot, filename: string, contents: string, isAuto: bool)
   try:
     if not dirExists(cleanPath):
       createDir(cleanPath)
+
+    let freeDiskSpace = getAvailableDiskSpace(cleanPath)
+    if freeDiskSpace != -1:
+      if freeDiskSpace < 100 * 1024 * 1024:
+        self.logError(&"Low disk space: {(freeDiskSpace.float / 1024 / 1024).round(2)} MB. Asset not saved!")
+        return ""
+      else:
+        self.log(&"Disk space available: {(freeDiskSpace.float / 1024 / 1024).round(2)} MB")
+
     if not fileExists(cleanFilename):
       writeFile(cleanFilename, contents)
       self.log(&"Saved as asset: {cleanFilename}")
