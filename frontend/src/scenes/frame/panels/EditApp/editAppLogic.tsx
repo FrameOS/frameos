@@ -38,6 +38,8 @@ export const editAppLogic = kea<editAppLogicType>([
     enhance: true,
     setPrompt: (prompt: string) => ({ prompt }),
     resetEnhanceSuggestion: true,
+    addFile: true,
+    deleteFile: (file: string) => ({ file }),
   }),
   loaders(({ props, values }) => ({
     sources: [
@@ -78,6 +80,7 @@ export const editAppLogic = kea<editAppLogicType>([
       {
         setActiveFile: (state, { file }) => file,
         resetEnhanceSuggestion: (state) => (state === 'app.nim/suggestion' ? 'app.nim' : state),
+        deleteFile: (state, { file }) => (state === file ? 'app.nim' : state),
       },
     ],
     prompt: [
@@ -88,6 +91,11 @@ export const editAppLogic = kea<editAppLogicType>([
     ],
     sources: {
       updateFile: (state, { file, source }) => ({ ...state, [file]: source }),
+      deleteFile: (state, { file }) => {
+        const newState = { ...state }
+        delete newState[file]
+        return newState
+      },
     },
     enhanceSuggestion: [
       null as string | null,
@@ -154,6 +162,15 @@ export const editAppLogic = kea<editAppLogicType>([
           ])
         ),
     ],
+    filenames: [
+      (s) => [s.sources],
+      (sources): string[] => {
+        const filenames = Object.keys(sources)
+        const first = filenames.filter((f) => f === 'config.json' || f === 'app.nim').sort()
+        const rest = filenames.filter((f) => f !== 'config.json' && f !== 'app.nim').sort()
+        return [...first, ...rest]
+      },
+    ],
   }),
   listeners(({ actions, props, values }) => ({
     saveChanges: () => {
@@ -185,6 +202,13 @@ export const editAppLogic = kea<editAppLogicType>([
     },
     enhanceSuccess: () => {
       actions.setActiveFile('app.nim/suggestion')
+    },
+    addFile: () => {
+      const fileName = window.prompt('Enter file name')
+      if (fileName) {
+        actions.updateFile(fileName, '')
+        actions.setActiveFile(fileName)
+      }
     },
   })),
   afterMount(({ actions, props }) => {

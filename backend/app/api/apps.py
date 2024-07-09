@@ -56,7 +56,7 @@ def enhance_python_frame_source():
     data = request.json
     source = data.get('source')
     prompt = data.get('prompt')
-    api_key = get_settings_dict().get('openai', {}).get('api_key', None)
+    api_key = get_settings_dict().get('openAI', {}).get('apiKey', None)
 
     if api_key is None:
         return jsonify({"error": "OpenAI API key not set"}), 400

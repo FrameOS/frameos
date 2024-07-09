@@ -10,10 +10,11 @@ import schema from '../../../../../schema/config_json.json'
 import type { editor as importedEditor } from 'monaco-editor'
 import type { Monaco } from '@monaco-editor/react'
 import clsx from 'clsx'
-import { BeakerIcon } from '@heroicons/react/24/solid'
+import { BeakerIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { Spinner } from '../../../../components/Spinner'
 import { TextArea } from '../../../../components/TextArea'
 import { Markdown } from '../../../../components/Markdown'
+import { DropdownMenu } from '../../../../components/DropdownMenu'
 
 interface EditAppProps {
   panel: PanelWithMetadata
@@ -35,6 +36,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
   const logic = editAppLogic(logicProps)
   const {
     sources,
+    filenames,
     sourcesLoading,
     activeFile,
     hasChanges,
@@ -45,7 +47,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
     enhanceSuggestionLoading,
     prompt,
   } = useValues(logic)
-  const { saveChanges, setActiveFile, updateFile, enhance, resetEnhanceSuggestion, setPrompt } = useActions(logic)
+  const { saveChanges, setActiveFile, updateFile, enhance, addFile, deleteFile, setPrompt } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
@@ -87,13 +89,12 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
   }
 
   const name = configJson?.name || nodeData.keyword
-  const filenames = Object.keys(sources)
 
   return (
     <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
       <div className="w-auto max-w-60 max-h-full h-full overflow-x-auto space-y-1">
         {filenames.map((file) => (
-          <div key={file} className="w-min flex gap-2">
+          <div key={file} className="w-full flex justify-between gap-2">
             <Button
               size="small"
               color={activeFile === file ? (modelMarkers[file]?.length ? 'red' : 'primary') : 'none'}
@@ -111,7 +112,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
               {changedFiles[file] ? '* ' : ''}
               {file}
             </Button>
-            {file === 'app.nim' && (
+            {file === 'app.nim' ? (
               <Button
                 color={activeFile === 'app.nim/suggestion' ? 'primary' : 'gray'}
                 size="small"
@@ -120,9 +121,26 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
               >
                 {enhanceSuggestionLoading ? <Spinner color="white" /> : <BeakerIcon className="w-5 h-5" />}
               </Button>
+            ) : file === 'config.json' ? null : (
+              <DropdownMenu
+                buttonColor="none"
+                items={[
+                  {
+                    label: 'Delete file',
+                    confirm: `Are you sure you want to delete ${file}?`,
+                    onClick: () => deleteFile(file),
+                    icon: <TrashIcon className="w-5 h-5" />,
+                  },
+                ]}
+              />
             )}
           </div>
         ))}
+        <div>
+          <Button color="none" size="small" onClick={() => addFile()} title="Add file">
+            + Add file
+          </Button>
+        </div>
       </div>
 
       <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
