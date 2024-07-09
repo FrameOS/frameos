@@ -20,18 +20,15 @@ interface EditAppProps {
   panel: PanelWithMetadata
   sceneId: string
   nodeId: string
-  nodeData: AppNodeData
 }
 
-export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
+export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
   const { frameId } = useValues(frameLogic)
   const { persistUntilClosed } = useActions(panelsLogic)
   const logicProps: EditAppLogicProps = {
     frameId,
     sceneId,
     nodeId,
-    keyword: nodeData.keyword,
-    sources: nodeData.sources,
   }
   const logic = editAppLogic(logicProps)
   const {
@@ -46,6 +43,9 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
     enhanceSuggestion,
     enhanceSuggestionLoading,
     prompt,
+    savedKeyword,
+    savedSources,
+    title,
   } = useValues(logic)
   const { saveChanges, setActiveFile, updateFile, enhance, addFile, deleteFile, setPrompt } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
@@ -88,7 +88,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
     return <div>Loading...</div>
   }
 
-  const name = configJson?.name || nodeData.keyword
+  const name = configJson?.name || savedKeyword || nodeId
 
   return (
     <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
@@ -144,7 +144,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
       </div>
 
       <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
-        {!nodeData.sources && !hasChanges ? (
+        {!savedSources && !hasChanges ? (
           <div className="bg-gray-950 p-2">
             You're editing a read-only system app <strong>{name}</strong>. Changes will be saved on a copy on the scene.
           </div>
@@ -152,7 +152,7 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
           <div className="bg-gray-900 p-2">
             You have changes.{' '}
             <Button size="small" onClick={saveChanges}>
-              Click here to save them
+              Click here to {!savedSources ? 'fork the app' : 'save them'}
             </Button>
           </div>
         ) : null}
@@ -194,21 +194,19 @@ export function EditApp({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
     </div>
   )
 }
-EditApp.PanelTitle = function EditAppPanelTitle({ panel, sceneId, nodeId, nodeData }: EditAppProps) {
+EditApp.PanelTitle = function EditAppPanelTitle({ panel, sceneId, nodeId }: EditAppProps) {
   const { frameId } = useValues(frameLogic)
   const logicProps: EditAppLogicProps = {
     frameId,
     sceneId,
     nodeId,
-    keyword: nodeData.keyword,
-    sources: nodeData.sources,
   }
-  const { hasChanges, configJson } = useValues(editAppLogic(logicProps))
+  const { hasChanges, configJson, savedKeyword, title } = useValues(editAppLogic(logicProps))
 
   return (
     <div title={nodeId}>
       {hasChanges ? '* ' : ''}
-      {configJson?.name ?? nodeData.keyword ?? nodeId}
+      {title}
     </div>
   )
 }

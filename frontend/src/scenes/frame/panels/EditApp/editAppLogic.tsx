@@ -2,8 +2,11 @@ import { actions, afterMount, connect, kea, key, listeners, path, props, propsCh
 
 import type { editAppLogicType } from './editAppLogicType'
 import { loaders } from 'kea-loaders'
+import { Node } from 'reactflow'
 import { frameLogic } from '../../frameLogic'
 import { editor, MarkerSeverity } from 'monaco-editor'
+import { AppNodeData } from '../../../../types'
+import { appsLogic } from '../Apps/appsLogic'
 
 export interface ModelMarker extends editor.IMarkerData {}
 
@@ -11,8 +14,6 @@ export interface EditAppLogicProps {
   frameId: number
   sceneId: string
   nodeId: string
-  keyword: string
-  sources?: Record<string, string>
 }
 
 export interface SourceError {
@@ -24,9 +25,10 @@ export interface SourceError {
 export const editAppLogic = kea<editAppLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'EditApp', 'editAppLogic']),
   props({} as EditAppLogicProps),
-  key((props) => `${props.frameId}:${props.sceneId}.${props.nodeId}.${props.keyword}`),
+  key((props) => `${props.frameId}:${props.sceneId}.${props.nodeId}`),
   connect(({ frameId }: EditAppLogicProps) => ({
     actions: [frameLogic({ frameId }), ['updateNodeData']],
+    values: [frameLogic({ frameId }), ['frameForm'], appsLogic, ['apps']],
   })),
   actions({
     setActiveFile: (file: string) => ({ file }),
@@ -41,16 +43,32 @@ export const editAppLogic = kea<editAppLogicType>([
     addFile: true,
     deleteFile: (file: string) => ({ file }),
   }),
+  selectors({
+    app: [
+      (s, p) => [s.frameForm, p.sceneId, p.nodeId],
+      (frameForm, sceneId, nodeId): Node<AppNodeData, 'app'> | null => {
+        const scene = frameForm?.scenes?.find((scene) => scene.id === sceneId)
+        const node = scene?.nodes?.find((node) => node.id === nodeId) as Node<AppNodeData, 'app'> | undefined
+        return node ?? null
+      },
+    ],
+    appData: [(s) => [s.app], (app): AppNodeData | null => app?.data || null],
+    savedSources: [(s) => [s.appData], (appData): Record<string, string> | null => appData?.sources || null],
+    savedKeyword: [(s) => [s.appData], (appData): string | null => appData?.keyword || null],
+  }),
   loaders(({ props, values }) => ({
     sources: [
-      props.sources || ({} as Record<string, string>),
+      {} as Record<string, string>,
       {
         loadSources: async () => {
-          if (!props.keyword) {
-            return values.sources
+          if (values.savedSources) {
+            return values.savedSources
           }
-          const response = await fetch(`/api/apps/source?keyword=${encodeURIComponent(props.keyword as string)}`)
-          return await response.json()
+          if (values.savedKeyword) {
+            const response = await fetch(`/api/apps/source?keyword=${encodeURIComponent(values.savedKeyword)}`)
+            return await response.json()
+          }
+          return {}
         },
       },
     ],
@@ -104,7 +122,7 @@ export const editAppLogic = kea<editAppLogicType>([
       },
     ],
     initialSources: [
-      props.sources ? structuredClone(props.sources) : ({} as Record<string, string>),
+      {} as Record<string, string>,
       {
         loadSourcesSuccess: (_, { sources }) => sources,
         setInitialSources: (_, { sources }) => sources,
@@ -144,6 +162,11 @@ export const editAppLogic = kea<editAppLogicType>([
           return null
         }
       },
+    ],
+    title: [
+      (s, p) => [s.savedKeyword, p.nodeId, s.apps, s.configJson],
+      (keyword, nodeId, apps, configJson): string =>
+        configJson?.name || (keyword ? apps[keyword]?.name || keyword : nodeId),
     ],
     modelMarkers: [
       (s) => [s.sourceErrors],
@@ -211,9 +234,7 @@ export const editAppLogic = kea<editAppLogicType>([
       }
     },
   })),
-  afterMount(({ actions, props }) => {
-    if (!props.sources) {
-      actions.loadSources()
-    }
+  afterMount(({ actions, values }) => {
+    actions.loadSources()
   }),
 ])
