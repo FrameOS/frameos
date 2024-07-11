@@ -132,7 +132,7 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         log_to_file=None, # spare the SD card from load
         assets_path='/srv/assets',
         save_assets=True,
-        control_code={"enabled": "true"},
+        control_code={"enabled": "true", "position": "top-right"},
         reboot={"enabled": "true", "crontab": "4 0 * * *"},
     )
     db.session.add(frame)
