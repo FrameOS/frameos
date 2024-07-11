@@ -13,9 +13,11 @@ import {
   OutputField,
   ConfigFieldCondition,
   ConfigFieldConditionAnd,
+  StateNodeData,
+  FieldType,
+  toFieldType,
 } from '../../../../types'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
-import type { Node } from '@reactflow/core/dist/esm/types/nodes'
 
 import _events from '../../../../../schema/events.json'
 import equal from 'fast-deep-equal'
@@ -285,6 +287,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
         return (hasNextPrevNodeConnected || !hasOutputConnected) && configJson?.category !== 'data'
       },
     ],
+    isStateNode: [(s) => [s.node], (node) => node?.type === 'state'],
     isDataApp: [
       (s) => [s.node, s.output, s.showOutput],
       (node, output, showOutput) => node?.type === 'app' && !!output && output.length > 0 && showOutput,
@@ -374,6 +377,13 @@ export const appNodeLogic = kea<appNodeLogicType>([
         )
       },
       { resultEqualityCheck: equal },
+    ],
+    stateFieldType: [
+      (s) => [s.isStateNode, s.scene, s.node],
+      (isStateNode, scene, node): FieldType =>
+        isStateNode && node && 'keyword' in node.data
+          ? toFieldType(scene?.fields?.find((f) => f.name === (node.data as StateNodeData).keyword)?.type ?? 'string')
+          : 'string',
     ],
   }),
   listeners(({ actions, values, props }) => ({

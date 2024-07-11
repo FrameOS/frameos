@@ -2,7 +2,6 @@ import { actions, connect, kea, key, listeners, path, props, reducers, selectors
 
 import { frameLogic } from '../../frameLogic'
 
-import { forms } from 'kea-forms'
 import { FrameScene, StateField } from '../../../../types'
 
 import type { sceneStateLogicType } from './sceneStateLogicType'

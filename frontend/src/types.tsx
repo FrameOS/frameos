@@ -192,7 +192,7 @@ export interface CacheConfig {
   expressionType?: FieldType
 }
 
-export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event'
+export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event' | 'state'
 export type EdgeType = 'appNodeEdge' | 'codeNodeEdge'
 
 export interface AppNodeData {
@@ -215,6 +215,10 @@ export interface CodeNodeData {
   cache?: CacheConfig
 }
 
+export interface StateNodeData {
+  keyword: string
+}
+
 export interface EventNodeData {
   keyword: string
 }
@@ -224,7 +228,7 @@ export interface DispatchNodeData {
   config: Record<string, any>
 }
 
-export type NodeData = AppNodeData | CodeNodeData | EventNodeData | DispatchNodeData
+export type NodeData = AppNodeData | CodeNodeData | EventNodeData | DispatchNodeData | StateNodeData
 
 export type DiagramNode = Node<NodeData, NodeType>
 export type DiagramEdge = Edge<any>
@@ -266,6 +270,11 @@ export interface CodeInputHandle extends HandleType {
 
 export interface CodeOutputHandle extends HandleType {
   handleId: `fieldOutput`
+  handleType: 'source'
+}
+
+export interface StateOutputHandle extends HandleType {
+  handleId: `stateOutput`
   handleType: 'source'
 }
 

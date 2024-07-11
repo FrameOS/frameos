@@ -251,7 +251,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             )) {
               options.push({
                 label: `State: ${field.label}`,
-                value: `code/${stateFieldAccess(field)}`,
+                value: `state/${field.name}`,
                 type: newNodeHandleDataType,
                 keyword: field.name,
               })
@@ -270,7 +270,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             for (const field of scene?.fields ?? []) {
               options.push({
                 label: `State: ${field.label}`,
-                value: `code/${stateFieldAccess(field)}`,
+                value: `state/${field.name}`,
                 type: toFieldType(field.type),
                 keyword: field.name,
               })
@@ -446,6 +446,13 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               type: type ?? values.newNodeHandleDataType ?? 'string',
             },
           ]
+        }
+      } else if (value.startsWith('state/')) {
+        newNode.position.x -= 20
+        newNode.position.y -= 20
+        newNode.type = 'state'
+        newNode.data = {
+          keyword: value.startsWith('state/') ? value.substring(6) : '',
         }
       } else if (value.startsWith('app/')) {
         const appKeyword = value.substring(4)
