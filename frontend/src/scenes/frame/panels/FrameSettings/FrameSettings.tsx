@@ -424,16 +424,20 @@ export function FrameSettings({ className }: FrameSettingsProps) {
               {String(frameForm.control_code?.enabled) === 'true' && (
                 <div className="pl-4 space-y-4">
                   <Field name="position" label="Position">
-                    <Select
-                      name="position"
-                      options={[
-                        { value: 'top-left', label: 'Top Left' },
-                        { value: 'top-right', label: 'Top Right' },
-                        { value: 'bottom-left', label: 'Bottom Left' },
-                        { value: 'bottom-right', label: 'Bottom Right' },
-                        { value: 'center', label: 'Center' },
-                      ]}
-                    />
+                    {({ value, onChange }) => (
+                      <Select
+                        name="position"
+                        value={value ?? 'top-right'}
+                        onChange={onChange}
+                        options={[
+                          { value: 'top-left', label: 'Top Left' },
+                          { value: 'top-right', label: 'Top Right' },
+                          { value: 'bottom-left', label: 'Bottom Left' },
+                          { value: 'bottom-right', label: 'Bottom Right' },
+                          { value: 'center', label: 'Center' },
+                        ]}
+                      />
+                    )}
                   </Field>
                   <Field name="size" label="Size of each square in pixels">
                     <TextInput name="size" placeholder="2" />
