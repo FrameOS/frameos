@@ -385,6 +385,16 @@ export const appNodeLogic = kea<appNodeLogicType>([
           ? toFieldType(scene?.fields?.find((f) => f.name === (node.data as StateNodeData).keyword)?.type ?? 'string')
           : 'string',
     ],
+    stateFieldTitle: [
+      (s) => [s.isStateNode, s.scene, s.node],
+      (isStateNode, scene, node): string | null => {
+        if (isStateNode && node && 'keyword' in node.data) {
+          const label = scene?.fields?.find((f) => f.name === (node.data as StateNodeData).keyword)?.label
+          return label ?? node.data.keyword
+        }
+        return null
+      },
+    ],
   }),
   listeners(({ actions, values, props }) => ({
     select: () => {

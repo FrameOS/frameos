@@ -11,7 +11,7 @@ import { newNodePickerLogic } from './newNodePickerLogic'
 export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { isSelected, node, stateFieldType } = useValues(appNodeLogic(appNodeLogicProps))
+  const { isSelected, node, stateFieldType, stateFieldTitle } = useValues(appNodeLogic(appNodeLogicProps))
   const data: StateNodeData = (node?.data as StateNodeData) ?? ({ keyword: '' } satisfies StateNodeData)
   const { select } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
@@ -61,7 +61,7 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
               )
             }}
           />
-          <CodeArg codeArg={{ name: data.keyword, type: stateFieldType }} />
+          <CodeArg codeArg={{ name: stateFieldTitle ?? data.keyword, type: stateFieldType }} />
         </div>
       </div>
     </BindLogic>
