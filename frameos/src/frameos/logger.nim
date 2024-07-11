@@ -9,8 +9,8 @@ type
     frameConfig: FrameConfig
     client: HttpClient
     url: string
-    logs: seq[JsonNode]
-    erroredLogs: seq[JsonNode]
+    logs: seq[(float, JsonNode)]
+    erroredLogs: seq[(float, JsonNode)]
     lastSendAt: float
 
 const LOG_FLUSH_SECONDS = 1.0
@@ -31,6 +31,10 @@ proc logToFile(filename: string, logJson: JsonNode) =
       logFile.close()
     except Exception as e:
       echo "Error writing to log file: " & $e.msg
+
+proc `%`*(payload: (float, JsonNode)): JsonNode =
+  let (timestamp, log) = payload
+  result = %*[timestamp, log]
 
 proc processQueue(self: LoggerThread): int =
   let logCount = (self.logs.len + self.erroredLogs.len)
@@ -97,7 +101,7 @@ proc run(self: LoggerThread) =
       if self.frameConfig.debug:
         echo payload
       self.logs.add(payload)
-      logToFile(self.frameConfig.logToFile, payload)
+      logToFile(self.frameConfig.logToFile, payload[1])
     else:
       sleep(100)
 
@@ -130,7 +134,7 @@ proc newLogger*(frameConfig: FrameConfig): Logger =
   )
   logger.log = proc(payload: JsonNode) =
     if logger.enabled:
-      logChannel.send(payload)
+      logChannel.send((epochTime(), payload))
   logger.enable = proc() =
     logger.enabled = true
   logger.disable = proc() =
