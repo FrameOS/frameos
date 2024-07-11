@@ -1,6 +1,8 @@
 import json
 from datetime import timezone, datetime
 from copy import deepcopy
+from typing import Optional
+
 from app import db, socketio
 from .frame import Frame, update_frame
 from .metrics import new_metrics
@@ -24,8 +26,8 @@ class Log(db.Model):
         }
 
 
-def new_log(frame_id: int, type: str, line: str, timestamp: datetime) -> Log:
-    log = Log(frame_id=frame_id, type=type, line=line, timestamp=timestamp)
+def new_log(frame_id: int, type: str, line: str, timestamp: Optional[datetime] = None) -> Log:
+    log = Log(frame_id=frame_id, type=type, line=line, timestamp=timestamp or datetime.utcnow())
     db.session.add(log)
     db.session.commit()
     frame_logs_count = Log.query.filter_by(frame_id=frame_id).count()

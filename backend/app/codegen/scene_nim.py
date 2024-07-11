@@ -952,7 +952,7 @@ var exportedScene* = ExportedScene(
                 type = 'string'
                 for field in self.scene.get('fields', []):
                     if field.get('name') == keyword:
-                        type = field.get('type', 'string'),
+                        type = field.get('type', 'string')
                 result = [f"state{{\"{sanitize_nim_string(keyword)}\"}}{field_type_to_getter(type)}"]
             elif node.get("type") == "code":
                 code = [node.get("data", {}).get("code", "")]

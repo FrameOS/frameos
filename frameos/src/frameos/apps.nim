@@ -51,7 +51,7 @@ proc cleanFilename*(self: string): string =
 
   return finalResult
 
-proc saveAsset*(self: AppRoot, filename: string, contents: string, isAuto: bool): string =
+proc saveAsset*(self: AppRoot, filename: string, extension: string, contents: string, isAuto: bool): string =
   if isAuto:
     if self.frameConfig.saveAssets.kind == JBool:
       if not self.frameConfig.saveAssets.getBool():
@@ -64,9 +64,8 @@ proc saveAsset*(self: AppRoot, filename: string, contents: string, isAuto: bool)
 
   let assetsPath = if self.frameConfig.assetsPath == "": "/srv/assets" else: self.frameConfig.assetsPath
   let appName = if self.nodeName == "": "saved" else: self.nodeName.replace("data/", "").cleanFilename()
-  let basename = filename.splitFile.name.cleanFilename()
+  let basename = (if filename.len > 100: filename[0..100] else: filename).cleanFilename()
   let md5hash = getMD5(contents)
-  let extension = filename.splitFile.ext
   let cleanPath = &"{assetsPath}/{appName}"
   let cleanFilename = &"{cleanPath}/{basename}.{md5hash}{extension}"
 
