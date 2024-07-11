@@ -23,7 +23,15 @@ import type { EdgeChange, NodeChange } from '@reactflow/core/dist/esm/types/chan
 import equal from 'fast-deep-equal'
 import type { diagramLogicType } from './diagramLogicType'
 import { subscriptions } from 'kea-subscriptions'
-import { AppNodeData, CodeNodeData, DiagramNode, DispatchNodeData, EventNodeData, FrameScene } from '../../../../types'
+import {
+  AppNodeData,
+  CodeNodeData,
+  DiagramNode,
+  DispatchNodeData,
+  EventNodeData,
+  FrameScene,
+  StateNodeData,
+} from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { arrangeNodes } from '../../../../utils/arrangeNodes'
@@ -348,6 +356,14 @@ export const diagramLogic = kea<diagramLogicType>([
           type: type,
           position,
           data: { keyword, config: {} } satisfies DispatchNodeData,
+        }
+        actions.setNodes([...values.nodes, newNode])
+      } else if (type === 'state') {
+        const newNode: DiagramNode = {
+          id: uuidv4(),
+          type: type,
+          position,
+          data: { keyword } satisfies StateNodeData,
         }
         actions.setNodes([...values.nodes, newNode])
       } else if (type === 'code') {

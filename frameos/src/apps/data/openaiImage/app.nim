@@ -75,7 +75,7 @@ proc get*(self: App, context: ExecutionContext): Image =
     if imageData.code != Http200:
       return self.error(context, "Error fetching image " & $imageData.status)
     if self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always":
-      discard self.saveAsset(prompt & ".jpg", imageData.body, self.appConfig.saveAssets == "auto")
+      discard self.saveAsset(prompt, ".jpg", imageData.body, self.appConfig.saveAssets == "auto")
 
     result = decodeImage(imageData.body)
   except CatchableError as e:

@@ -58,6 +58,19 @@ def field_type_to_nim_type(field_type: str, required: bool = True) -> str:
             raise ValueError(f"Invalid field type {field_type}")
 
 
+def field_type_to_getter(type):
+    options: dict = {
+        'integer': '.getInt()',
+        'string': '.getStr()',
+        'text': '.getStr()',
+        'boolean': '.getBool()',
+        'float': '.getFloat()',
+        'select': '.getStr()',
+        'json': '',
+    }
+    return options.get(type, '.getStr()')
+
+
 class SceneWriter:
     events_schema = get_events_schema()
     available_apps: list[str]
@@ -146,7 +159,7 @@ class SceneWriter:
                 'scene.controlCodeRender = render_imageApp.App(nodeName: "render/image", nodeId: -1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(',
                 f'  offsetX: {int(control_code.get("offsetX", "0"))},',
                 f'  offsetY: {int(control_code.get("offsetY", "0"))},',
-                f'  placement: "{sanitize_nim_string(control_code.get("position", "top-left"))}",',
+                f'  placement: "{sanitize_nim_string(control_code.get("position", "top-right"))}",',
                 '))',
                 'scene.controlCodeData = data_qrApp.App(nodeName: "data/qr", nodeId: -1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_qrApp.AppConfig(',
                 f'  backgroundColor: parseHtmlColor("{sanitize_nim_string(control_code.get("backgroundColor", "#000000"))}"),',
@@ -934,6 +947,13 @@ var exportedScene* = ExportedScene(
                     result = self.process_app_run_lines(node, "block")
                     if cache_enabled:
                         result = self.wrap_with_cache(node_id, result, node.get("data", {}))
+            elif node.get("type") == "state":
+                keyword = node.get("data", {}).get("keyword", "")
+                type = 'string'
+                for field in self.scene.get('fields', []):
+                    if field.get('name') == keyword:
+                        type = field.get('type', 'string')
+                result = [f"state{{\"{sanitize_nim_string(keyword)}\"}}{field_type_to_getter(type)}"]
             elif node.get("type") == "code":
                 code = [node.get("data", {}).get("code", "")]
                 code_args = node.get("data", {}).get("codeArgs", [])

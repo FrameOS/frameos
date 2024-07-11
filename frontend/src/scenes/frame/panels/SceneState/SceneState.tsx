@@ -37,7 +37,7 @@ export function SceneState(): JSX.Element {
     return <div>Add a scene first</div>
   }
 
-  const onDragStart = (event: any, type: 'code', keyword: string) => {
+  const onDragStart = (event: any, type: 'state', keyword: string) => {
     event.dataTransfer.setData('application/reactflow', JSON.stringify({ type, keyword }))
     event.dataTransfer.effectAllowed = 'move'
   }
@@ -181,7 +181,7 @@ export function SceneState(): JSX.Element {
                 <div
                   className="bg-gray-900 p-2 dndnode cursor-move"
                   draggable
-                  onDragStart={(event) => onDragStart(event, 'code', stateFieldAccess(field, 'state'))}
+                  onDragStart={(event) => onDragStart(event, 'state', field.name)}
                 >
                   <div className="flex items-center gap-1 justify-between max-w-full w-full">
                     <div className="flex items-center gap-1 max-w-full w-full overflow-hidden">

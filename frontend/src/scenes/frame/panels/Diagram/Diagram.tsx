@@ -23,6 +23,7 @@ import {
 import { AppNode } from './AppNode'
 import { CodeNode } from './CodeNode'
 import { EventNode } from './EventNode'
+import { StateNode } from './StateNode'
 import { Button, buttonColor, buttonSize } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { NodeType, EdgeType, CodeNodeData } from '../../../../types'
@@ -43,6 +44,7 @@ const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   dispatch: AppNode,
   code: CodeNode,
   event: EventNode,
+  state: StateNode,
 }
 
 const edgeTypes: Record<EdgeType, (props: EdgeProps) => JSX.Element> = {

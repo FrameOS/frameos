@@ -1,5 +1,6 @@
 import json
 import options
+import times
 import frameos/types
 
 # Event
@@ -17,14 +18,14 @@ proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) =
 
 # Log
 
-var logChannel*: Channel[JsonNode]
+var logChannel*: Channel[(float, JsonNode)]
 logChannel.open()
 
 proc log*(event: JsonNode) =
-  logChannel.send(event)
+  logChannel.send((epochTime(), event))
 
 proc debug*(message: string) =
-  logChannel.send(%*{"event": "debug", "message": message})
+  logChannel.send((epochTime(), %*{"event": "debug", "message": message}))
 
 # Server
 

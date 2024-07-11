@@ -75,7 +75,7 @@ proc get*(self: App, context: ExecutionContext): Image =
       return self.error(context, &"Error {imageData.status} fetching image")
 
     if self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always":
-      discard self.saveAsset(&"{search} {width}x{height}.jpg", imageData.body, self.appConfig.saveAssets == "auto")
+      discard self.saveAsset(&"{search} {width}x{height}", ".jpg", imageData.body, self.appConfig.saveAssets == "auto")
 
     result = decodeImage(imageData.body)
   except CatchableError as e:
