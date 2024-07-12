@@ -16,6 +16,9 @@ type
     exportUntil*: string
     exportCount*: int
     search*: string
+    addLocation*: bool
+    addUrl*: bool
+    addDescription*: bool
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -57,12 +60,12 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
       "startTime": startTime,
       "endTime": endTime,
     }
-    if event.location != "":
+    if event.location != "" and self.appConfig.addLocation:
       jsonEvent["location"] = %*event.location
-    if event.description != "":
-      jsonEvent["description"] = %*event.description
-    if event.url != "":
+    if event.url != "" and self.appConfig.addUrl:
       jsonEvent["url"] = %*event.url
+    if event.description != "" and self.appConfig.addDescription:
+      jsonEvent["description"] = %*event.description
     eventsReply.add(jsonEvent)
   self.log(%*{"event": "reply", "eventsInRange": len(eventsReply)})
   return eventsReply

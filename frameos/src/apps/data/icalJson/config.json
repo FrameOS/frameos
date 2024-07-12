@@ -43,7 +43,28 @@
       "label": "Filter events by keyword"
     },
     {
-      "markdown": "`[{ summary, startTime, endTime, location, description }]`"
+      "name": "addLocation",
+      "type": "boolean",
+      "value": "true",
+      "required": false,
+      "label": "Add 'location' to the result JSON"
+    },
+    {
+      "name": "addUrl",
+      "type": "boolean",
+      "value": "true",
+      "required": false,
+      "label": "Add 'url' to the result JSON"
+    },
+    {
+      "name": "addDescription",
+      "type": "boolean",
+      "value": "false",
+      "required": false,
+      "label": "Add 'description' to the result JSON"
+    },
+    {
+      "markdown": "`[{ summary, startTime, endTime, location, url, description }]`"
     }
   ],
   "output": [

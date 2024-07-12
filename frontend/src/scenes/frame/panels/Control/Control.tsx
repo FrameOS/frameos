@@ -93,6 +93,17 @@ export function Control(): JSX.Element {
                       />
                     )}
                   </Field>
+                ) : field.type === 'boolean' ? (
+                  <Field name={field.name}>
+                    {({ value, onChange }) => (
+                      <Select
+                        placeholder={field.placeholder}
+                        value={stateChanges[field.name] ?? state[field.name] ?? value ?? field.value}
+                        onChange={onChange}
+                        options={['true', 'false'].map((option) => ({ label: option, value: option }))}
+                      />
+                    )}
+                  </Field>
                 ) : field.type === 'text' ? (
                   <Field name={field.name}>
                     {({ value, onChange }) => (
