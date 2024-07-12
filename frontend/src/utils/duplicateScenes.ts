@@ -22,7 +22,7 @@ export function duplicateScenes(newScenes: FrameScene[]): FrameScene[] {
       ...scene,
       id,
       nodes: scene.nodes.map((node) => {
-        if (node.type === 'code' || node.type === 'event') {
+        if (node.type === 'code' || node.type === 'state' || node.type === 'event' || node.type === 'app') {
           return node
         } else if (node.type === 'dispatch') {
           const data = node.data as DispatchNodeData
@@ -38,9 +38,6 @@ export function duplicateScenes(newScenes: FrameScene[]): FrameScene[] {
             }
           }
           return { ...node, data: { ...data, config: newConfig } }
-        } else if (node.type === 'app') {
-          // TODO for later. No built in app currently uses scene fields
-          return node
         } else if (node.type === 'source') {
           try {
             const data = node.data as AppNodeData
