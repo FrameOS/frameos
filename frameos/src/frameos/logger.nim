@@ -1,4 +1,4 @@
-import zippy, json, sequtils, os, times, math, strutils, net
+import zippy, json, os, times, strutils, net
 import lib/httpclient
 
 import frameos/channels
@@ -10,7 +10,6 @@ type
     client: HttpClient
     url: string
     logs: seq[(float, JsonNode)]
-    erroredLogs: seq[(float, JsonNode)]
     lastSendAt: float
 
 const LOG_FLUSH_SECONDS = 1.0
@@ -20,8 +19,8 @@ var thread: Thread[FrameConfig]
 var logFile: File
 
 proc logToFile(filename: string, logJson: JsonNode) =
-  if filename.len > 0:
-    try:
+  try:
+    if filename.len > 0:
       let file = if "{date}" in filename:
         filename.replace("{date}", now().format("yyyyMMdd"))
       else:
@@ -29,20 +28,19 @@ proc logToFile(filename: string, logJson: JsonNode) =
       logFile = open(file, fmAppend)
       logFile.write(now().format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & $logJson & "\n")
       logFile.close()
-    except Exception as e:
-      echo "Error writing to log file: " & $e.msg
+  except Exception as e:
+    echo "Error writing to log file: " & $e.msg
 
 proc `%`*(payload: (float, JsonNode)): JsonNode =
   let (timestamp, log) = payload
   result = %*[timestamp, log]
 
 proc processQueue(self: LoggerThread): int =
-  let logCount = (self.logs.len + self.erroredLogs.len)
+  let logCount = self.logs.len
   if logCount > 1000 or (logCount > 0 and self.lastSendAt + LOG_FLUSH_SECONDS < epochTime()):
     # make a copy, just in case some thread from somewhere adds new entries
-    var newLogs = self.erroredLogs.concat(self.logs)
+    var newLogs = self.logs
     self.logs = @[]
-    self.erroredLogs = @[]
 
     if newLogs.len == 0:
       return 0
@@ -60,42 +58,23 @@ proc processQueue(self: LoggerThread): int =
       let body = %*{"logs": newLogs}
       let response = client.request(self.url, httpMethod = HttpPost, body = compress($body))
       self.lastSendAt = epochTime()
-      if response.code == Http200:
-        if self.erroredLogs.len > 0:
-          self.erroredLogs = @[]
-      else:
+      if response.code != Http200:
         echo "Error sending logs: HTTP " & $response.status
         logToFile(self.frameConfig.logToFile, %*{"error": "Error sending logs", "status": response.status})
-        self.erroredLogs = newLogs
     except CatchableError as e:
       echo "Error sending logs: " & $e.msg
       logToFile(self.frameConfig.logToFile, %*{"error": "Error sending logs", "message": e.msg})
-      self.erroredLogs = newLogs
     finally:
       client.close()
 
-    if self.erroredLogs.len > 0:
-      return -self.erroredLogs.len
-    else:
-      return newLogs.len
+    return newLogs.len
 
 
 proc run(self: LoggerThread) =
-  var attempt = 0
   while true:
     let processedLogs = self.processQueue()
     if processedLogs == 0:
-      sleep(100)
-    elif processedLogs < 0:
-      attempt += 1
-      let sleepDuration = min(100 * (2 ^ attempt), 7500)
-      echo "Sleeping for " & $sleepDuration & "ms, attempt " & $attempt & ". Logs queued: " & $self.erroredLogs.len
-      logToFile(self.frameConfig.logToFile, %*{"sleep": "Error sending logs", "duration": sleepDuration,
-          "attempt": attempt, "queued": self.erroredLogs.len})
-      sleep(sleepDuration)
-    else:
-      attempt = 0
-
+      sleep(250)
     let (success, payload) = logChannel.tryRecv()
     if success:
       if self.frameConfig.debug:
@@ -112,7 +91,6 @@ proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
     frameConfig: frameConfig,
     url: url,
     logs: @[],
-    erroredLogs: @[],
     lastSendAt: 0.0,
   )
   while true:
