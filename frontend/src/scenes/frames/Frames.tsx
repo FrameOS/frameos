@@ -21,13 +21,11 @@ export function Frames() {
         <div className="h-[60px]">
           <Header
             title="FrameOS"
+            version={version}
             right={
-              <div className="flex gap-2 items-center">
-                {version}
-                <Button color="secondary" onClick={() => router.actions.push('/settings')}>
-                  Settings
-                </Button>
-              </div>
+              <Button color="secondary" onClick={() => router.actions.push('/settings')}>
+                Settings
+              </Button>
             }
           />
         </div>
