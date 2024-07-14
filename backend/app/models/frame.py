@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import timezone
-from app import db, socketio
+from app import db, socketio, redis
 from typing import Optional
 from sqlalchemy.dialects.sqlite import JSON
 
@@ -158,6 +158,9 @@ def delete_frame(frame_id: int):
         Log.query.filter_by(frame_id=frame_id).delete()
         from .metrics import Metrics
         Metrics.query.filter_by(frame_id=frame_id).delete()
+
+        cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+        redis.delete(cache_key)
 
         db.session.delete(frame)
         db.session.commit()
