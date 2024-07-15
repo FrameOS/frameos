@@ -128,6 +128,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     text: "Rendering a lot of text as just a text node. Rendering a lot of text as just a text node. Rendering a lot of text as just a text node. ",
     fontSize: 66.0,
     inputImage: none(Image),
+    richText: "disabled",
     position: "center",
     vAlign: "middle",
     offsetX: 0.0,
@@ -152,6 +153,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     fontSize: 24.0,
     borderWidth: 0,
     inputImage: none(Image),
+    richText: "disabled",
     position: "center",
     vAlign: "middle",
     offsetX: 0.0,
@@ -171,6 +173,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.node7 = render_textApp.App(nodeName: "render/text", nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "little  \ntext line",
     inputImage: none(Image),
+    richText: "disabled",
     position: "center",
     vAlign: "middle",
     offsetX: 0.0,
@@ -204,6 +207,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
         cache0 = some(block:
           self.node9.get(context))
       cache0.get()),
+    richText: "disabled",
     position: "center",
     vAlign: "middle",
     offsetX: 0.0,

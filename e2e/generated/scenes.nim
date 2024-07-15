@@ -24,6 +24,8 @@ import scenes/scene_renderSplitFlow as scene_renderSplitFlow
 import scenes/scene_renderSplitLoop as scene_renderSplitLoop
 import scenes/scene_renderTextOverflow as scene_renderTextOverflow
 import scenes/scene_renderTextPosition as scene_renderTextPosition
+import scenes/scene_renderTextRich as scene_renderTextRich
+import scenes/scene_renderTextRichOver as scene_renderTextRichOver
 import scenes/scene_renderTextSplit as scene_renderTextSplit
 
 let defaultSceneId* = some("dataDownloadImage".SceneId)
@@ -51,6 +53,8 @@ const sceneOptions* = [
   ("renderSplitLoop".SceneId, "Split Loop"),
   ("renderTextOverflow".SceneId, "Text Overflow"),
   ("renderTextPosition".SceneId, "Text"),
+  ("renderTextRich".SceneId, "Rich text"),
+  ("renderTextRichOver".SceneId, "Rich text overflow"),
   ("renderTextSplit".SceneId, "Text Split"),
 ]
 
@@ -78,4 +82,6 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result["renderSplitLoop".SceneId] = scene_renderSplitLoop.exportedScene
   result["renderTextOverflow".SceneId] = scene_renderTextOverflow.exportedScene
   result["renderTextPosition".SceneId] = scene_renderTextPosition.exportedScene
+  result["renderTextRich".SceneId] = scene_renderTextRich.exportedScene
+  result["renderTextRichOver".SceneId] = scene_renderTextRichOver.exportedScene
   result["renderTextSplit".SceneId] = scene_renderTextSplit.exportedScene

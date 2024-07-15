@@ -108,6 +108,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.node2 = render_textApp.App(nodeName: "render/text", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     inputImage: none(Image),
     text: state{"text"}.getStr(),
+    richText: "disabled",
     position: "center",
     vAlign: "middle",
     offsetX: 0.0,
@@ -145,6 +146,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     overflow: "visible",
     inputImage: none(Image),
     text: state{"text"}.getStr(),
+    richText: "disabled",
     position: "center",
     vAlign: "middle",
     offsetX: 0.0,

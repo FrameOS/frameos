@@ -1,4 +1,4 @@
-import pixie, options, unicode
+import pixie, options, strutils, unicode
 import frameos/apps
 import frameos/types
 import frameos/utils/font
@@ -7,6 +7,7 @@ type
   AppConfig* = object
     inputImage*: Option[Image]
     text*: string
+    richText*: string
     position*: string
     vAlign*: string
     offsetX*: float
@@ -50,6 +51,79 @@ proc `==`(obj1, obj2: RenderData): bool =
       obj1.fontSize == obj2.fontSize and obj1.borderColor ==
           obj2.borderColor and obj1.borderWidth == obj2.borderWidth
 
+proc isNumber(x: string): bool =
+  try:
+    discard parseFloat(x)
+    result = true
+  except ValueError:
+    result = false
+
+proc toTypeset*(self: App, text: string, fontSize: float, baseFontSize: float, color: Color, typeface: Typeface,
+                bounds: Vec2, hAlign: HorizontalAlignment, vAlign: VerticalAlignment, border: bool): Arrangement =
+  let factor = fontSize / baseFontSize
+  var spans: seq[Span] = @[]
+  var currentColor = color
+  var currentSize = fontSize
+  var currentUnderline = false
+  var currentStrikethrough = false
+
+  if self.appConfig.richText == "basic-caret":
+    var i = 0
+    while i < text.len:
+      if text[i] == '^':
+        # Increment to skip '^'
+        i += 1
+        if i < text.len and text[i] == '(':
+          # Find the closing parenthesis for the tag
+          let tagStart = i + 1
+          i = text.find(')', tagStart)
+          if i != -1:
+            let tag = text[tagStart ..< i]
+            let parts = tag.split(',')
+            for p in parts:
+              let part = strutils.strip(p)
+              if part.startsWith('#') and not border:
+                currentColor = parseHtmlColor(part)
+              elif part.isNumber():
+                currentSize = part.parseFloat() * factor
+              elif part == "underline":
+                currentUnderline = true
+              elif part == "strikethrough":
+                currentStrikethrough = true
+              elif part == "no-underline":
+                currentUnderline = false
+              elif part == "no-strikethrough":
+                currentStrikethrough = false
+              elif part == "reset":
+                currentColor = color
+                currentSize = fontSize
+                currentUnderline = false
+                currentStrikethrough = false
+              else:
+                self.logError("Invalid tag component: " & part)
+            # Move past the closing ')'
+            i += 1
+          else:
+            self.logError("Unmatched parenthesis in tag.")
+        else:
+          self.logError("Invalid tag format.")
+      # Process the text following the tag until next tag or end of text
+      let start = i
+      while i < text.len and text[i] != '^':
+        i += 1
+      if i > start:
+        let font = newFont(typeface, currentSize, currentColor)
+        if currentUnderline:
+          font.underline = true
+        if currentStrikethrough:
+          font.strikethrough = true
+        spans.add(newSpan(text[start ..< i], font))
+  else:
+    spans.add(newSpan(text, newFont(typeface, currentSize, currentColor)))
+
+  return typeset(spans, bounds, hAlign, vAlign)
+
+
 proc generateTypeset(self: App, typeface: Typeface, renderData: RenderData, border: bool): Arrangement =
   let
     hAlign = case renderData.position:
@@ -64,31 +138,32 @@ proc generateTypeset(self: App, typeface: Typeface, renderData: RenderData, bord
     width = renderData.width.toFloat() - 2 * renderData.padding
     height = renderData.height.toFloat() - 2 * renderData.padding
     bounds = vec2(width, height)
-    font = newFont(typeface, renderData.fontSize, color)
+    baseFontSize = renderData.fontSize
 
   if self.appConfig.overflow == "visible":
-    return typeset([newSpan(renderData.text, font)], bounds, hAlign, vAlign)
+    return self.toTypeset(renderData.text, renderData.fontSize, baseFontSize, color, typeface, bounds, hAlign, vAlign, border)
 
   else: # "fit-bounds"
     var tooBigFontSize = 0.0
     var tooSmallFontSize = 0.0
     var loopIndex = 0
+    var fontSize = baseFontSize
     while loopIndex < 100:
       loopIndex += 1
-      result = typeset([newSpan(renderData.text, font)], bounds, hAlign, vAlign)
+      result = self.toTypeset(renderData.text, fontSize, baseFontSize, color, typeface, bounds, hAlign, vAlign, border)
       let bounds = layoutBounds(result)
 
       # if the text is too big, shrink the font size
       if bounds.y > height:
-        if font.size < 2:
+        if fontSize < 2:
           break
 
         # try to get closer based on the ratio
-        tooBigFontSize = font.size
+        tooBigFontSize = fontSize
         if tooSmallFontSize > 0.0:
-          font.size = (tooBigFontSize + tooSmallFontSize) / 2
+          fontSize = (tooBigFontSize + tooSmallFontSize) / 2
         else:
-          font.size = tooBigFontSize / 2
+          fontSize = tooBigFontSize / 2
         continue
 
       # we're in bounds, and on the first run (text was never too big), so return
@@ -99,10 +174,10 @@ proc generateTypeset(self: App, typeface: Typeface, renderData: RenderData, bord
       else:
         if height - bounds.y < 1:
           break
-        tooSmallFontSize = font.size
+        tooSmallFontSize = fontSize
         if tooBigFontSize - tooSmallFontSize < 0.5:
           break
-        font.size = (tooBigFontSize + tooSmallFontSize) / 2
+        fontSize = (tooBigFontSize + tooSmallFontSize) / 2
         continue
 
 proc setRenderResult*(self: App, context: ExecutionContext, maxWidth, maxHeight: int) =

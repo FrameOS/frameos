@@ -153,6 +153,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     text: "Banana",
     fontColor: parseHtmlColor("#d2cb0f"),
     inputImage: none(Image),
+    richText: "disabled",
     position: "center",
     vAlign: "middle",
     offsetX: 0.0,

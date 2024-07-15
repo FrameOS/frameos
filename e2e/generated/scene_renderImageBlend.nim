@@ -146,6 +146,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     fontSize: 16.0,
     inputImage: none(Image),
     text: state{"mode"}{context.loopIndex mod 17}.getStr(),
+    richText: "disabled",
     position: "center",
     vAlign: "middle",
     offsetX: 0.0,
