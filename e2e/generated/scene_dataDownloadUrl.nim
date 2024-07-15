@@ -111,6 +111,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
           self.node1.get(context))
         cache0Time = epochTime()
       cache0.get(),
+    richText: "disabled",
     position: "center",
     vAlign: "middle",
     offsetX: 0.0,
@@ -149,6 +150,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
           self.node5.get(context))
         cache1Time = epochTime()
       cache1.get(),
+    richText: "disabled",
     position: "center",
     vAlign: "middle",
     offsetX: 0.0,

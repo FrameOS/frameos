@@ -7,8 +7,6 @@ import frameos/types
 import frameos/channels
 import frameos/utils/image
 import frameos/utils/url
-import apps/render/image/app as render_imageApp
-import apps/data/localImage/app as data_localImageApp
 import apps/render/text/app as render_textApp
 
 const DEBUG = false
@@ -16,13 +14,10 @@ let PUBLIC_STATE_FIELDS*: seq[StateField] = @[]
 let PERSISTED_STATE_KEYS*: seq[string] = @[]
 
 type Scene* = ref object of FrameScene
-  node1: render_imageApp.App
-  node2: data_localImageApp.App
-  node3: render_textApp.App
+  node1: render_textApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
-var cache0: Option[Image] = none(Image)
-var cache0Time: float = 0
+
 
 proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
   let scene = self
@@ -35,17 +30,8 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
     currentNode = nextNode
     timer = epochTime()
     case nextNode:
-    of 1.NodeId: # render/image
-      self.node1.appConfig.image = block:
-        if cache0.isNone() or epochTime() > cache0Time + 900.0:
-          cache0 = some(block:
-            self.node2.get(context))
-          cache0Time = epochTime()
-        cache0.get()
+    of 1.NodeId: # render/text
       self.node1.run(context)
-      nextNode = 3.NodeId
-    of 3.NodeId: # render/text
-      self.node3.run(context)
       nextNode = -1.NodeId
     else:
       nextNode = -1.NodeId
@@ -82,27 +68,16 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
-  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 300.0, backgroundColor: parseHtmlColor("#000000"))
+  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 3600.0, backgroundColor: parseHtmlColor("#000000"))
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.node1 = render_imageApp.App(nodeName: "render/image", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
-    inputImage: none(Image),
-    placement: "cover",
-    offsetX: 0,
-    offsetY: 0,
-    blendMode: "normal",
-  ))
-  scene.node2 = data_localImageApp.App(nodeName: "data/localImage", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_localImageApp.AppConfig(
-    path: "./assets/image.png",
-    order: "random",
-    counterStateKey: "",
-    search: "",
-  ))
-  scene.node2.init()
-  scene.node3 = render_textApp.App(nodeName: "render/text", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
-    text: "Activate proton beam",
+  scene.node1 = render_textApp.App(nodeName: "render/text", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
+    text: "^(64,#FFFF00)This is a great day\n^(32,#00FF00)\nBecause ^(underline)reasons^(no-underline)!",
+    borderColor: parseHtmlColor("#ffffff"),
+    fontColor: parseHtmlColor("#8a0a0a"),
+    borderWidth: 0,
     inputImage: none(Image),
     richText: "disabled",
     position: "center",
@@ -110,13 +85,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     offsetX: 0.0,
     offsetY: 0.0,
     padding: 10.0,
-    fontColor: parseHtmlColor("#ffffff"),
     fontSize: 32.0,
-    borderColor: parseHtmlColor("#000000"),
-    borderWidth: 2,
     overflow: "fit-bounds",
   ))
-  scene.node3.init()
+  scene.node1.init()
   runEvent(context)
   
 {.pop.}

@@ -322,6 +322,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.node11 = render_textApp.App(nodeName: "render/text", nodeId: 11.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "mask",
     inputImage: none(Image),
+    richText: "disabled",
     position: "center",
     vAlign: "middle",
     offsetX: 0.0,
@@ -337,6 +338,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.node15 = render_textApp.App(nodeName: "render/text", nodeId: 15.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "inverse-mask",
     inputImage: none(Image),
+    richText: "disabled",
     position: "center",
     vAlign: "middle",
     offsetX: 0.0,
@@ -352,6 +354,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.node13 = render_textApp.App(nodeName: "render/text", nodeId: 13.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "exclude-mask",
     inputImage: none(Image),
+    richText: "disabled",
     position: "center",
     vAlign: "middle",
     offsetX: 0.0,
