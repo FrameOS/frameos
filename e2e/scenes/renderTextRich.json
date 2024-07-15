@@ -30,6 +30,7 @@
           "keyword": "render/text",
           "config": {
             "text": "^(64,#FFFF00)This is a great day\n^(32,#00FF00)\nBecause ^(underline)reasons^(no-underline)!",
+            "richText": "basic-caret",
             "borderColor": "#ffffff",
             "fontColor": "#8a0a0a",
             "borderWidth": "0"
