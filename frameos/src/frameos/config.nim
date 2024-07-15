@@ -33,7 +33,7 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     scalingMode: data{"scalingMode"}.getStr(),
     settings: data{"settings"},
     assetsPath: data{"assetsPath"}.getStr("/srv/assets"),
-    saveAssets: data{"saveAssets"},
+    saveAssets: if data{"saveAssets"} == nil: %*(false) else: data{"saveAssets"},
     logToFile: data{"logToFile"}.getStr(),
     debug: data{"debug"}.getBool() or commandLineParams().contains("--debug")
   )
