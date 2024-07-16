@@ -82,8 +82,9 @@ proc toTypeset*(self: App, text: string, fontSize: float, baseFontSize: float, c
             let parts = tag.split(',')
             for p in parts:
               let part = strutils.strip(p)
-              if part.startsWith('#') and not border:
-                currentColor = parseHtmlColor(part)
+              if part.startsWith('#'):
+                if not border:
+                  currentColor = parseHtmlColor(part)
               elif part.isNumber():
                 currentSize = part.parseFloat() * factor
               elif part == "underline":

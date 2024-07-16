@@ -1,0 +1,55 @@
+{
+  "name": "Events to Agenda",
+  "description": "Convert events to an basic-caret formatted agenda string",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "events",
+      "type": "json",
+      "required": true,
+      "label": "Events"
+    },
+    {
+      "name": "baseFontSize",
+      "type": "integer",
+      "value": "24",
+      "required": true,
+      "label": "Base font size"
+    },
+    {
+      "name": "titleFontSize",
+      "type": "integer",
+      "value": "48",
+      "required": true,
+      "label": "Title font size"
+    },
+    {
+      "name": "titleColor",
+      "type": "color",
+      "value": "#FFFFFF",
+      "required": true,
+      "label": "Day title color"
+    },
+    {
+      "name": "textColor",
+      "type": "color",
+      "value": "#FFFFFF",
+      "required": true,
+      "label": "Base text color"
+    },
+    {
+      "name": "timeColor",
+      "type": "color",
+      "value": "#FF0000",
+      "required": true,
+      "label": "Time color"
+    }
+  ],
+  "output": [
+    {
+      "name": "result",
+      "type": "string"
+    }
+  ]
+}
