@@ -17,7 +17,7 @@ export interface CodeArgProps {
   onDelete?: () => void
 }
 
-export function CodeArg({ codeArg, onChange }: CodeArgProps): JSX.Element {
+export function CodeArg({ codeArg, onChange, onDelete }: CodeArgProps): JSX.Element {
   const [name, setName] = useState(codeArg.name ?? '')
   const [type, setType] = useState(codeArg.type ?? 'string')
 
@@ -66,9 +66,11 @@ export function CodeArg({ codeArg, onChange }: CodeArgProps): JSX.Element {
             >
               Update
             </Button>
-            <Button color="tertiary" size="small" onClick={() => onChange?.({ name, type })}>
-              Delete
-            </Button>
+            {onDelete ? (
+              <Button color="tertiary" size="small" onClick={() => onDelete?.()}>
+                Delete
+              </Button>
+            ) : null}
           </div>
         </div>
       }
