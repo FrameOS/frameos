@@ -64,7 +64,14 @@
       "label": "Add 'description' to the result JSON"
     },
     {
-      "markdown": "`[{ summary, startTime, endTime, location, url, description }]`"
+      "name": "addTimezone",
+      "type": "boolean",
+      "value": "false",
+      "required": false,
+      "label": "Add 'timezone' to the result JSON"
+    },
+    {
+      "markdown": "[{ summary, startTime, endTime, location, url, description, timezone }]"
     }
   ],
   "output": [

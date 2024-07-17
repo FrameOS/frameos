@@ -12,14 +12,14 @@
     },
     {
       "name": "baseFontSize",
-      "type": "integer",
+      "type": "float",
       "value": "24",
       "required": true,
       "label": "Base font size"
     },
     {
       "name": "titleFontSize",
-      "type": "integer",
+      "type": "float",
       "value": "48",
       "required": true,
       "label": "Title font size"

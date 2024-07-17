@@ -16,8 +16,8 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
   [Area.TopRight]: [
     { panel: Panel.Apps, active: true, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
-    { panel: Panel.Templates, active: false, hidden: false },
     { panel: Panel.SceneState, active: false, hidden: false },
+    { panel: Panel.Templates, active: false, hidden: false },
     { panel: Panel.FrameSettings, active: false, hidden: false },
     { panel: Panel.Control, active: false, hidden: false },
   ],
@@ -189,9 +189,7 @@ export const panelsLogic = kea<panelsLogicType>([
           return {
             ...panels,
             [Area.TopRight]: panels[Area.TopRight].filter((p) =>
-              diagramOpen
-                ? p.panel !== Panel.Templates
-                : p.panel !== Panel.Apps && p.panel !== Panel.Events && p.panel !== Panel.SceneState
+              diagramOpen ? true : p.panel !== Panel.Apps && p.panel !== Panel.Events && p.panel !== Panel.SceneState
             ),
             [Area.BottomLeft]: panels[Area.BottomLeft].filter((p) =>
               diagramOpen ? true : p.panel !== Panel.SceneSource

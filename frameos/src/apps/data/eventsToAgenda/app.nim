@@ -3,6 +3,7 @@ import frameos/types
 import json
 import strformat
 import strutils
+import sequtils
 import chrono
 import times
 import pixie
@@ -10,8 +11,8 @@ import pixie
 type
   AppConfig* = object
     events*: JsonNode
-    baseFontSize*: int
-    titleFontSize*: int
+    baseFontSize*: float
+    titleFontSize*: float
     textColor*: Color
     timeColor*: Color
     titleColor*: Color
@@ -21,23 +22,31 @@ type
 
 const titleFormat = "{weekday}, {month/n} {day}"
 
+proc getTimezone*(self: JsonNode): string =
+  result = "UTC" # TODO: get from frameConfig or system
+  if self.kind == JArray:
+    for result in self.items():
+      if result{"timezone"}.getStr() != "":
+        return result{"timezone"}.getStr()
+
 proc get*(self: App, context: ExecutionContext): string =
   let title = &"^({self.appConfig.titleFontSize},{self.appConfig.titleColor.toHtmlHex()})"
   let normal = &"^({self.appConfig.baseFontSize},{self.appConfig.textColor.toHtmlHex()})"
   let time = &"^({self.appConfig.baseFontSize},{self.appConfig.timeColor.toHtmlHex()})"
   let events = self.appConfig.events
+  let timezone = getTimezone(events)
   let todayTs = epochTime().Timestamp
-  let today = format(todayTs, titleFormat)
+  let today = format(todayTs, titleFormat, tzName = timezone)
 
   proc h1(text: string): string = &"{title}{text}\n{normal}\n"
   proc formatDay(day: string): string = format(parseTs("{year/4}-{month/2}-{day/2}", day), titleFormat)
 
-  var currentDay = format(todayTs, "{year/4}-{month/2}-{day/2}")
+  var currentDay = format(todayTs, "{year/4}-{month/2}-{day/2}", tzName = timezone)
 
   result = h1(today)
 
   if events == nil or events.kind != JArray or events.len == 0:
-    result &= &"No events found"
+    result &= &"No events found\n"
     return
 
   var hasAny = false

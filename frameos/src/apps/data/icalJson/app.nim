@@ -19,6 +19,7 @@ type
     addLocation*: bool
     addUrl*: bool
     addDescription*: bool
+    addTimezone*: bool
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -51,7 +52,8 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
     let startTime = if event.fullDay: time.format("{year/4}-{month/2}-{day/2}", parsedCalendar.timeZone)
                     else: time.format("{year/4}-{month/2}-{day/2}T{hour/2}:{minute/2}:{second/2}",
                         parsedCalendar.timeZone)
-    let endTimeFloat = time.float + (event.endTs.float - event.startTs.float) - (if event.fullDay: 0.001 else: 0.0)
+    let endTimeFloat = time.float + (event.endTs.float - event.startTs.float) - (if event.fullDay: 0.001 else: 0.0) + (
+        if event.fullDay and event.startTs == event.endTs: 86400.0 else: 0.0)
     let endTime = if event.fullDay: endTimeFloat.Timestamp.format("{year/4}-{month/2}-{day/2}", parsedCalendar.timeZone)
                   else: endTimeFloat.Timestamp.format("{year/4}-{month/2}-{day/2}T{hour/2}:{minute/2}:{second/2}",
                         parsedCalendar.timeZone)
@@ -66,6 +68,8 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
       jsonEvent["url"] = %*event.url
     if event.description != "" and self.appConfig.addDescription:
       jsonEvent["description"] = %*event.description
+    if self.appConfig.addTimezone:
+      jsonEvent["timezone"] = %*(if event.timeZone == "": parsedCalendar.timeZone else: event.timeZone)
     eventsReply.add(jsonEvent)
   self.log(%*{"event": "reply", "eventsInRange": len(eventsReply)})
   return eventsReply
