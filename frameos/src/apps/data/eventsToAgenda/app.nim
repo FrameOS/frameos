@@ -22,19 +22,21 @@ type
 
 const titleFormat = "{weekday}, {month/n} {day}"
 
-proc getTimezone*(self: JsonNode): string =
-  result = "UTC" # TODO: get from frameConfig or system
-  if self.kind == JArray:
-    for result in self.items():
+proc getTimezone*(self: App, json: JsonNode): string =
+  result = "UTC"
+  if json.kind == JArray:
+    for result in json.items():
       if result{"timezone"}.getStr() != "":
         return result{"timezone"}.getStr()
+  if self.frameConfig.timeZone != "":
+    return self.frameConfig.timeZone
 
 proc get*(self: App, context: ExecutionContext): string =
   let title = &"^({self.appConfig.titleFontSize},{self.appConfig.titleColor.toHtmlHex()})"
   let normal = &"^({self.appConfig.baseFontSize},{self.appConfig.textColor.toHtmlHex()})"
   let time = &"^({self.appConfig.baseFontSize},{self.appConfig.timeColor.toHtmlHex()})"
   let events = self.appConfig.events
-  let timezone = getTimezone(events)
+  let timezone = self.getTimezone(events)
   let todayTs = epochTime().Timestamp
   let today = format(todayTs, titleFormat, tzName = timezone)
 

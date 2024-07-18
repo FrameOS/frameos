@@ -38,6 +38,7 @@ proc start*(self: FrameOS) {.async.} =
     "saveAssets": self.frameConfig.saveAssets,
     "logToFile": self.frameConfig.logToFile,
     "debug": self.frameConfig.debug,
+    "timeZone": self.frameConfig.timeZone,
   }}
   self.logger.log(message)
   self.runner.start()

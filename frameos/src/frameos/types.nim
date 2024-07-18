@@ -21,6 +21,7 @@ type
     saveAssets*: JsonNode
     logToFile*: string
     debug*: bool
+    timeZone*: string
 
   Logger* = ref object
     frameConfig*: FrameConfig

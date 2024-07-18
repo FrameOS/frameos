@@ -1,5 +1,6 @@
 import json, pixie, os
 import frameos/types
+import lib/tz
 
 proc setConfigDefaults*(config: var FrameConfig) =
   if config.serverPort == 0: config.serverPort = 8989
@@ -13,6 +14,7 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.frameHost == "": config.frameHost = "localhost"
   if config.frameAccess == "": config.frameAccess = "private"
   if config.name == "": config.name = config.frameHost
+  if config.timeZone == "": config.timeZone = findSystemTimeZone()
 
 proc loadConfig*(filename: string = "frame.json"): FrameConfig =
   let data = parseFile(filename)
@@ -35,6 +37,7 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     assetsPath: data{"assetsPath"}.getStr("/srv/assets"),
     saveAssets: if data{"saveAssets"} == nil: %*(false) else: data{"saveAssets"},
     logToFile: data{"logToFile"}.getStr(),
-    debug: data{"debug"}.getBool() or commandLineParams().contains("--debug")
+    debug: data{"debug"}.getBool() or commandLineParams().contains("--debug"),
+    timeZone: data{"timeZone"}.getStr(),
   )
   setConfigDefaults(result)
