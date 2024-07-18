@@ -1,9 +1,8 @@
-import frameos/apps
 import frameos/types
 import json
 import strformat
 import strutils
-import sequtils
+import algorithm
 import chrono
 import times
 import pixie
@@ -51,8 +50,11 @@ proc get*(self: App, context: ExecutionContext): string =
     result &= &"No events found\n"
     return
 
+  let sortedEvents = events.elems.sorted(
+    proc (a, b: JsonNode): int = cmp(a["startTime"].getStr(), b["startTime"].getStr())
+  )
   var hasAny = false
-  for obj in events.items():
+  for obj in sortedEvents:
     let summary = obj{"summary"}.getStr()
     let startDay = obj{"startTime"}.getStr()
     let endDay = obj{"endTime"}.getStr()

@@ -676,7 +676,7 @@ class SceneWriter:
 
         scene_source = f"""
 {{.warning[UnusedImport]: off.}}
-import pixie, json, times, strformat, strutils, sequtils, options
+import pixie, json, times, strformat, strutils, sequtils, options, algorithm
 
 import frameos/types
 import frameos/channels
