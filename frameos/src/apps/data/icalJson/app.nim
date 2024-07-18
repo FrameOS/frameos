@@ -33,7 +33,7 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
     self.logError "No iCal data provided."
     return
 
-  let timezone = "UTC"
+  let timezone = if self.frameConfig.timeZone != "": self.frameConfig.timeZone else: "UTC"
   let startTs = if self.appConfig.exportFrom == "": epochTime().Timestamp
                 else: parseTs("{year/4}-{month/2}-{day/2}", self.appConfig.exportFrom, timezone)
   let endTs = if self.appConfig.exportUntil == "": (epochTime() + 366 * 24 * 60 * 60).Timestamp
