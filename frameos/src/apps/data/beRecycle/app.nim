@@ -22,6 +22,7 @@ type
     streetName*: string
     number*: int
     postalCode*: int
+    xSecret*: string
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -37,7 +38,7 @@ proc authenticate(self: App) =
   self.headers = newHttpHeaders([
     ("User-Agent", USER_AGENT),
     ("x-consumer", X_CONSUMER),
-    ("x-secret", X_SECRET)
+    ("x-secret", if self.appConfig.xSecret != "": self.appConfig.xSecret else: X_SECRET)
   ])
   var client = newHttpClient(headers = self.headers)
   try:
