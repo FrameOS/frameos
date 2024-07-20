@@ -12,7 +12,7 @@ To get started:
 
 2. Read the [device hardware guide](https://frameos.net/devices/) for your screen type. Typically you'll just need to connect the display to a Raspberry Pi, install the OS, and make sure it's reachable over the network. 
 
-3. Once connected, deploy our prebuilt [apps](https://frameos.net/apps/), or code your own directly inside the controller.
+3. Once connected, deploy our prebuilt scenes, or code your own directly inside the controller.
 
 4. Finally, for a professional look, 3d print a case around your frame.
 
