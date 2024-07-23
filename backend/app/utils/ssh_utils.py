@@ -72,17 +72,19 @@ def get_ssh_connection(frame: Frame) -> SSHClient:
     return ssh
 
 
-def exec_command(frame: Frame, ssh: SSHClient, command: str, output: Optional[list[str]] = None, raise_on_error = True) -> int:
+def exec_command(frame: Frame, ssh: SSHClient, command: str, output: Optional[list[str]] = None, raise_on_error = True, log_output = True) -> int:
     log(frame.id, "stdout", f"> {command}")
     _stdin, stdout, stderr = ssh.exec_command(command)
     exit_status = None
     while exit_status is None:
         while line := stdout.readline():
-            log(frame.id, "stdout", line)
+            if log_output:
+                log(frame.id, "stdout", line)
             if output is not None:
                 output.append(line)
         while line := stderr.readline():
-            log(frame.id, "stderr", line)
+            if log_output:
+                log(frame.id, "stderr", line)
             if output is not None:
                 output.append(line)
 

@@ -1,14 +1,22 @@
+import io
 import json
+import shlex
+
 import requests
+import os
 
 from http import HTTPStatus
-from flask import jsonify, request, Response
+from flask import jsonify, request, Response, send_file
 from flask_login import login_required
 from . import api
 from app import redis
 from app.models.frame import Frame, new_frame, delete_frame, update_frame
+from app.models.log import new_log as log
 from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
+from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection
+from scp import SCPClient
+from tempfile import NamedTemporaryFile
 
 
 @api.route("/frames", methods=["GET"])
@@ -126,6 +134,90 @@ def api_frame_scene_source(id: int, scene: str):
          if scene_json.get('id') == scene:
             return jsonify({'source': write_scene_nim(frame, scene_json)})
     return jsonify({'error': f'Scene {scene} not found'}), HTTPStatus.NOT_FOUND
+
+@api.route('/frames/<int:id>/assets', methods=['GET'])
+@login_required
+def api_frame_get_assets(id: int):
+    frame = Frame.query.get_or_404(id)
+    assets_path = frame.assets_path or "/srv/assets"
+    ssh = get_ssh_connection(frame)
+    command = f"find {assets_path} -type f -exec stat --format='%s %Y %n' {{}} +"
+    output = []
+    exec_command(frame, ssh, command, output, log_output=False)
+    remove_ssh_connection(ssh)
+
+    assets = []
+    for line in output:
+        parts = line.split(' ', 2)
+        size, mtime, path = parts
+        assets.append({
+            'path': path.strip(),
+            'size': int(size.strip()),
+            'mtime': int(mtime.strip()),
+        })
+
+    assets.sort(key=lambda x: x['path'])
+    return jsonify(assets=assets)
+
+@api.route('/frames/<int:id>/asset', methods=['GET'])
+@login_required
+def api_frame_get_asset(id: int):
+    frame = Frame.query.get_or_404(id)
+    assets_path = frame.assets_path or "/srv/assets"
+    path = request.args.get('path')
+    mode = request.args.get('mode', 'download')  # Default mode is 'download'
+    filename = request.args.get('filename', os.path.basename(path))
+
+    if not path:
+        return jsonify({'error': 'Path parameter is required'}), HTTPStatus.BAD_REQUEST
+
+    # Normalize and validate the path
+    normalized_path = os.path.normpath(os.path.join(assets_path, path))
+    if not normalized_path.startswith(os.path.normpath(assets_path)):
+        return jsonify({'error': 'Invalid asset path'}), HTTPStatus.BAD_REQUEST
+
+    try:
+        ssh = get_ssh_connection(frame)
+        try:
+            escaped_path = shlex.quote(normalized_path)
+            # Check if the asset exists and get its MD5 hash
+            command = f"md5sum {escaped_path}"
+            log(frame.id, "stdinfo", f"> {command}")
+            stdin, stdout, stderr = ssh.exec_command(command)
+            md5sum_output = stdout.read().decode().strip()
+            if not md5sum_output:
+                return jsonify({'error': 'Asset not found'}), HTTPStatus.NOT_FOUND
+
+            md5sum = md5sum_output.split()[0]
+            cache_key = f'asset:{md5sum}'
+
+            cached_asset = redis.get(cache_key)
+            if cached_asset:
+                return send_file(
+                    io.BytesIO(cached_asset),
+                    download_name=filename,
+                    as_attachment=(mode == 'download'),
+                    mimetype='image/png' if mode == 'image' else 'application/octet-stream'
+                )
+
+            # Download the file to a temporary file
+            with NamedTemporaryFile(delete=True) as temp_file:
+                with SCPClient(ssh.get_transport()) as scp:
+                    scp.get(normalized_path, temp_file.name)
+                temp_file.seek(0)
+                asset_content = temp_file.read()
+                redis.set(cache_key, asset_content, ex=86400 * 30)  # Cache for 30 days
+                return send_file(
+                    io.BytesIO(asset_content),
+                    download_name=filename,
+                    as_attachment=(mode == 'download'),
+                    mimetype='image/png' if mode == 'image' else 'application/octet-stream'
+                )
+        finally:
+            remove_ssh_connection(ssh)
+    except Exception as e:
+        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+
 
 @api.route('/frames/<int:id>/reset', methods=['POST'])
 @login_required

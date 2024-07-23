@@ -78,6 +78,12 @@ export interface LogType {
   frame_id: number
 }
 
+export interface AssetType {
+  path: string
+  size: number
+  mtime: number
+}
+
 export interface MetricsType {
   id: string
   timestamp: string
@@ -358,23 +364,25 @@ export enum Area {
 
 export enum Panel {
   Action = 'Action',
+  Apps = 'Apps',
+  Asset = 'Asset',
+  Assets = 'Assets',
+  Control = 'Control',
   Debug = 'Debug',
   Diagram = 'Diagram',
+  EditApp = 'EditApp',
+  Events = 'Events',
   FrameDetails = 'FrameDetails',
   FrameSettings = 'FrameSettings',
   Image = 'Image',
   Logs = 'Logs',
-  SceneState = 'SceneState',
-  Control = 'Control',
-  Apps = 'Apps',
-  Events = 'Events',
   Metrics = 'Metrics',
-  EditApp = 'EditApp',
-  Terminal = 'Terminal',
-  SceneSource = 'SceneSource',
   SceneJSON = 'SceneJSON',
   Scenes = 'Scenes',
+  SceneSource = 'SceneSource',
+  SceneState = 'SceneState',
   Templates = 'Templates',
+  Terminal = 'Terminal',
 }
 
 export type PanelWithMetadata = {
