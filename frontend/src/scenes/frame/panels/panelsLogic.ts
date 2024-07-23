@@ -28,6 +28,7 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
     { panel: Panel.Terminal, active: false, hidden: false },
     { panel: Panel.Debug, active: false, hidden: false },
     { panel: Panel.SceneSource, active: false, hidden: false },
+    { panel: Panel.Assets, active: false, hidden: false },
   ],
   [Area.BottomRight]: [{ panel: Panel.Image, active: true, hidden: false }],
 }
@@ -55,6 +56,7 @@ export const panelsLogic = kea<panelsLogicType>([
     editScene: (sceneId: string) => ({ sceneId }),
     editSceneJSON: (sceneId: string) => ({ sceneId }),
     editStateScene: (sceneId: string) => ({ sceneId }),
+    openAsset: (path: string) => ({ path }),
     persistUntilClosed: (panel: PanelWithMetadata, logic: AnyBuiltLogic) => ({ panel, logic }),
   }),
   reducers({
@@ -140,6 +142,24 @@ export const panelsLogic = kea<panelsLogicType>([
             a.panel === Panel.Templates ? { ...a, active: true } : a.active ? { ...a, active: false } : a
           ),
         }),
+        openAsset: (state, { path }) => ({
+          ...state,
+          [Area.TopLeft]: state[Area.TopLeft].find((a) => a.panel === Panel.Asset && a.key === path)
+            ? state[Area.TopLeft].map((a) =>
+                a.key === path ? { ...a, active: true } : a.active ? { ...a, active: false } : a
+              )
+            : [
+                ...state[Area.TopLeft].map((a) => ({ ...a, active: false })),
+                {
+                  panel: Panel.Asset,
+                  key: path,
+                  active: true,
+                  hidden: false,
+                  closable: true,
+                  metadata: { path },
+                },
+              ],
+        }),
       },
     ],
     fullScreenPanel: [
@@ -148,6 +168,7 @@ export const panelsLogic = kea<panelsLogicType>([
         toggleFullScreenPanel: (state, { panel }) => (state && panelsEqual(state, panel) ? null : panel),
         disableFullscreenPanel: () => null,
         openTemplates: () => null,
+        openAsset: () => null,
       },
     ],
     lastSelectedScene: [
