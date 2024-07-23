@@ -2,6 +2,8 @@ import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { assetsLogic } from './assetsLogic'
 import { panelsLogic } from '../panelsLogic'
+import { Code } from '../../../../components/Code'
+import { CloudArrowDownIcon } from '@heroicons/react/24/outline'
 
 function humaniseSize(size: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -32,7 +34,7 @@ export function Assets(): JSX.Element {
                 <td className="text-nowrap">{humaniseSize(asset.size)}</td>
                 <td>
                   <a href={`/api/frames/${frame.id}/asset?path=${encodeURIComponent(asset.path)}`} download>
-                    Download
+                    <CloudArrowDownIcon className="w-5 h-5" />
                   </a>
                 </td>
               </tr>
