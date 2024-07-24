@@ -328,7 +328,7 @@ export const diagramLogic = kea<diagramLogicType>([
       actions.fitDiagramView()
     },
     keywordDropped: ({ keyword, type, position }) => {
-      // Whenever something is dropped on the diagram from the menu
+      // Whenever something is dropped on the diagram from the side panel
       if (type === 'app') {
         const app = values.apps[keyword]
         if (!app) {
