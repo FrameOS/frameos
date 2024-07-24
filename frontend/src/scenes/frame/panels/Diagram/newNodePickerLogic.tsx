@@ -571,7 +571,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
 
           if (oldEdge) {
             actions.setEdges(
-              [...edges.filter((edge) => edge.id !== oldEdge.id), newEdge, extraEdge].filter((a) => !!a) as Edge[]
+              [...edges.filter((edge) => edge.id !== oldEdge?.id), newEdge, extraEdge].filter((a) => !!a) as Edge[]
             )
           } else {
             actions.setEdges([...values.edges, newEdge])
