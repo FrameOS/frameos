@@ -98,7 +98,7 @@ proc scaleAndDrawImage*(targetImage: Image, srcImage: Image, scalingMode: string
       let yOffset = (targetImage.height.float32 - scaledHeight) / 2
       targetImage.draw(
         srcImage,
-        scale(vec2(scaleRatio, scaleRatio)) * translate(vec2(xOffset + offsetX.float32, yOffset + offsetY.float32)),
+        translate(vec2(xOffset, yOffset)) * scale(vec2(scaleRatio, scaleRatio)),
         blendMode
       )
 
