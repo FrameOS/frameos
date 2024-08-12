@@ -35,9 +35,9 @@ export interface NewNodePicker {
   screenY: number
   diagramX: number
   diagramY: number
-  handleId: string
-  handleType: string
-  nodeId: string
+  handleId: string | null
+  handleType: string | null
+  nodeId: string | null
 }
 
 export interface OptionWithType extends Option {
@@ -104,9 +104,9 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       screenY: number,
       diagramX: number,
       diagramY: number,
-      nodeId: string,
-      handleId: string,
-      handleType: string
+      nodeId: string | null,
+      handleId: string | null,
+      handleType: string | null
     ) => ({
       screenX,
       screenY,
@@ -162,14 +162,13 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           return null
         }
         const { nodeId } = newNodePicker
-        const node = nodesById[nodeId] ?? null
-        return node
+        return nodeId ? nodesById[nodeId] ?? null : null
       },
     ],
     newNodeHandleDataType: [
       (s) => [s.newNodePicker, s.apps, s.node],
       (newNodePicker, apps, node): FieldType | null => {
-        if (!newNodePicker || !node) {
+        if (!newNodePicker || !node || !newNodePicker.handleId) {
           return null
         }
         const { handleId, handleType } = newNodePicker
@@ -218,23 +217,27 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
     allNewNodeOptions: [
       (s) => [s.newNodePicker, s.apps, s.scene, s.newNodeHandleDataType, s.node],
       (newNodePicker, apps, scene, newNodeHandleDataType, node): OptionWithType[] => {
-        if (!newNodePicker || !node) {
+        if (!newNodePicker) {
           return []
         }
         const { handleId, handleType } = newNodePicker
         const options: OptionWithType[] = []
 
         // Pulling out a field to the left of an app to specify a custom input
-        if (handleType === 'target' && (handleId.startsWith('fieldInput/') || handleId.startsWith('codeField/'))) {
-          const key = handleId.split('/', 2)[1]
+        if (
+          (!handleType || handleType === 'target') &&
+          (!handleId || handleId.startsWith('fieldInput/') || handleId.startsWith('codeField/'))
+        ) {
+          const key = handleId ? handleId.split('/', 2)[1] : ''
           options.push({ label: 'Code', value: 'code', type: newNodeHandleDataType ?? 'string', keyword: key })
-          if (newNodeHandleDataType) {
-            const appsForType = getAppsForType(apps, newNodeHandleDataType)
+
+          if (newNodeHandleDataType || !node) {
+            const appsForType = newNodeHandleDataType ? getAppsForType(apps, newNodeHandleDataType) : apps
             for (const [keyword, app] of Object.entries(appsForType)) {
               options.push({
                 label: `App: ${app.name}`,
                 value: `app/${keyword}`,
-                type: newNodeHandleDataType,
+                type: newNodeHandleDataType ?? app.output?.[0].type ?? 'string',
                 keyword: key,
               })
             }
@@ -246,15 +249,17 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
                 keyword: key,
               })
             }
-            for (const field of (scene?.fields ?? []).filter(
-              (f) => 'type' in f && typesMatch(f.type, newNodeHandleDataType)
-            )) {
-              options.push({
-                label: `State: ${field.label}`,
-                value: `state/${field.name}`,
-                type: newNodeHandleDataType,
-                keyword: field.name,
-              })
+            if (newNodeHandleDataType) {
+              for (const field of (scene?.fields ?? []).filter(
+                (f) => 'type' in f && typesMatch(f.type, newNodeHandleDataType)
+              )) {
+                options.push({
+                  label: `State: ${field.label}`,
+                  value: `state/${field.name}`,
+                  type: newNodeHandleDataType,
+                  keyword: field.name,
+                })
+              }
             }
           } else if (handleId === 'codeField/+') {
             for (const [keyword, app] of Object.entries(apps)) {
@@ -279,7 +284,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             options.push({ label: 'Error: unable to determine data type', value: 'app', type: 'string', keyword: key })
           }
         } else if (
-          (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) ||
+          (handleType === 'source' && (handleId === 'next' || handleId?.startsWith('field/'))) ||
           (handleType === 'target' && handleId === 'prev')
         ) {
           for (const [keyword, app] of Object.entries(apps)) {
@@ -294,9 +299,9 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           }
         } else if (handleType === 'source' && handleId === 'fieldOutput') {
           let keyword = 'output'
-          if (node.type === 'code') {
+          if (node?.type === 'code') {
             keyword = (node.data as CodeNodeData)?.codeOutputs?.[0].name || keyword
-          } else if (node.type === 'app') {
+          } else if (node?.type === 'app') {
             const appKeyword = (node.data as AppNodeData)?.keyword || keyword
             const app = apps[appKeyword]
             keyword = app.output?.[0].name || keyword
@@ -358,7 +363,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           return null
         }
         const { handleId, handleType } = newNodePicker
-        if (handleType === 'target' && handleId.startsWith('fieldInput/')) {
+        if (handleType === 'target' && handleId?.startsWith('fieldInput/')) {
           return handleId.split('/')[1]
         }
         return null
@@ -371,7 +376,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           return 'New node'
         }
         const { handleId, handleType } = newNodePicker
-        if (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) {
+        if (handleType === 'source' && (handleId === 'next' || handleId?.startsWith('field/'))) {
           return 'Select next node'
         }
         if (handleType === 'target' && handleId === 'prev') {
@@ -406,7 +411,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       }
       let newNodeOutputHandle = 'fieldOutput'
 
-      if (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) {
+      if (handleType === 'source' && (handleId === 'next' || handleId?.startsWith('field/'))) {
         newNodeOutputHandle = 'prev'
       }
       if (handleType === 'target' && handleId === 'prev') {
@@ -424,7 +429,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           width: 300,
           height: 119,
         }
-        const codeArgs = (values.nodesById[nodeId]?.data as CodeNodeData)?.codeArgs ?? []
+        const codeArgs = nodeId ? (values.nodesById[nodeId]?.data as CodeNodeData)?.codeArgs ?? [] : []
 
         newNode.data = {
           code: value.startsWith('code/') ? value.substring(5) : '',
@@ -514,73 +519,77 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           ),
           newNode,
         ])
-        window.setTimeout(() => {
-          actions.addEdge({
-            id: uuidv4(),
-            target: nodeId,
-            targetHandle: `codeField/${newArg.name}`,
-            source: newNode.id,
-            sourceHandle: newNodeOutputHandle,
-          })
+        if (nodeId) {
           window.setTimeout(() => {
-            props.updateNodeInternals?.(nodeId)
-            props.updateNodeInternals?.(newNode.id)
-          }, 200)
-        }, 200)
-      } else {
-        actions.setNodes([...values.nodes, newNode])
-        window.setTimeout(() => {
-          const edges = values.edges
-          let oldEdge: Edge | undefined
-          let newEdge: Edge
-          let extraEdge: Edge | undefined
-          if (handleType === 'source') {
-            oldEdge = edges.find((edge) => edge.source === nodeId && edge.sourceHandle === handleId)
-            newEdge = {
+            actions.addEdge({
               id: uuidv4(),
-              target: newNode.id,
-              targetHandle: newNodeOutputHandle,
-              source: nodeId,
-              sourceHandle: handleId,
-            }
-            extraEdge = oldEdge ? { ...oldEdge, source: newNode.id } : undefined
-          } else {
-            oldEdge = edges.find((edge) => edge.target === nodeId && edge.targetHandle === handleId)
-            newEdge = {
-              id: uuidv4(),
+              target: nodeId,
+              targetHandle: `codeField/${newArg.name}`,
               source: newNode.id,
               sourceHandle: newNodeOutputHandle,
-              target: nodeId,
-              targetHandle: handleId,
-            }
-            extraEdge =
-              oldEdge &&
-              (oldEdge.sourceHandle === 'prev' ||
-                oldEdge.targetHandle === 'prev' ||
-                oldEdge.sourceHandle === 'next' ||
-                oldEdge.targetHandle === 'next')
-                ? { ...oldEdge, target: newNode.id }
-                : oldEdge?.sourceHandle === 'fieldOutput' && newNode.type === 'code'
-                ? {
-                    ...oldEdge,
-                    targetHandle: `codeField/${(newNode.data as CodeNodeData).codeArgs?.[0]?.name}`,
-                    target: newNode.id,
-                  }
-                : undefined
-          }
-
-          if (oldEdge) {
-            actions.setEdges(
-              [...edges.filter((edge) => edge.id !== oldEdge?.id), newEdge, extraEdge].filter((a) => !!a) as Edge[]
-            )
-          } else {
-            actions.setEdges([...values.edges, newEdge])
-          }
-          window.setTimeout(() => {
-            props.updateNodeInternals?.(nodeId)
-            props.updateNodeInternals?.(newNode.id)
+            })
+            window.setTimeout(() => {
+              props.updateNodeInternals?.(nodeId)
+              props.updateNodeInternals?.(newNode.id)
+            }, 200)
           }, 200)
-        }, 200)
+        }
+      } else {
+        actions.setNodes([...values.nodes, newNode])
+        if (nodeId) {
+          window.setTimeout(() => {
+            const edges = values.edges
+            let oldEdge: Edge | undefined
+            let newEdge: Edge
+            let extraEdge: Edge | undefined
+            if (handleType === 'source') {
+              oldEdge = edges.find((edge) => edge.source === nodeId && edge.sourceHandle === handleId)
+              newEdge = {
+                id: uuidv4(),
+                target: newNode.id,
+                targetHandle: newNodeOutputHandle,
+                source: nodeId,
+                sourceHandle: handleId,
+              }
+              extraEdge = oldEdge ? { ...oldEdge, source: newNode.id } : undefined
+            } else {
+              oldEdge = edges.find((edge) => edge.target === nodeId && edge.targetHandle === handleId)
+              newEdge = {
+                id: uuidv4(),
+                source: newNode.id,
+                sourceHandle: newNodeOutputHandle,
+                target: nodeId,
+                targetHandle: handleId,
+              }
+              extraEdge =
+                oldEdge &&
+                (oldEdge.sourceHandle === 'prev' ||
+                  oldEdge.targetHandle === 'prev' ||
+                  oldEdge.sourceHandle === 'next' ||
+                  oldEdge.targetHandle === 'next')
+                  ? { ...oldEdge, target: newNode.id }
+                  : oldEdge?.sourceHandle === 'fieldOutput' && newNode.type === 'code'
+                  ? {
+                      ...oldEdge,
+                      targetHandle: `codeField/${(newNode.data as CodeNodeData).codeArgs?.[0]?.name}`,
+                      target: newNode.id,
+                    }
+                  : undefined
+            }
+
+            if (oldEdge) {
+              actions.setEdges(
+                [...edges.filter((edge) => edge.id !== oldEdge?.id), newEdge, extraEdge].filter((a) => !!a) as Edge[]
+              )
+            } else {
+              actions.setEdges([...values.edges, newEdge])
+            }
+            window.setTimeout(() => {
+              props.updateNodeInternals?.(nodeId)
+              props.updateNodeInternals?.(newNode.id)
+            }, 200)
+          }, 200)
+        }
       }
       actions.setSearchValue('')
     },
