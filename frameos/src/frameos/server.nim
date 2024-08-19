@@ -200,7 +200,7 @@ proc newServer*(frameOS: FrameOS): Server =
   globalFrameConfig = frameOS.frameConfig
   globalRunner = frameOS.runner
 
-  let port = (frameOS.frameConfig.framePort or 8787).Port
+  let port = (if frameOS.frameConfig.framePort == 0: 8787 else: frameOS.frameConfig.framePort).Port
   let settings = newSettings(port = port)
   var jester = initJester(myrouter, settings)
 
