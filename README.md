@@ -37,7 +37,15 @@ The FrameOS backend is where you set up your frames. You can run it continuously
 
 Read more in [the documentation](https://frameos.net/guide/backend).
 
-### Docker quickstart
+### Quick install
+
+The easiest way to install the FrameOS backend on a Mac or Debian/Ubuntu Linux is to run the following installation script:
+
+```bash
+curl -fsSL https://frameos.net/install.sh | bash
+```
+
+### Running via Docker manually
 
 ```bash
 # running the latest release
