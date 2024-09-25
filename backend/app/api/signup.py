@@ -1,5 +1,6 @@
 # backend/app/api/signup.py
 
+import requests
 from flask import request, jsonify
 from flask_login import login_user
 from app import db
@@ -19,6 +20,7 @@ def signup():
     email = data.get('email')
     password = data.get('password')
     password2 = data.get('password2')
+    newsletter = data.get('newsletter', False)
 
     errors = {}
 
@@ -34,9 +36,17 @@ def signup():
     if errors:
         return jsonify({'errors': errors}), 400
 
+    if newsletter:
+        url = "https://buttondown.email/api/emails/embed-subscribe/frameos"
+        data = { "email": email }
+        response = requests.post(url, data=data)
+        if response.status_code != 200:
+            return jsonify({'error': 'Error signing up to newsletter'}), 400
+
     user = User(email=email)
     user.set_password(password)
     db.session.add(user)
     db.session.commit()
+
     login_user(user, remember=True)
     return jsonify({'success': True}), 201

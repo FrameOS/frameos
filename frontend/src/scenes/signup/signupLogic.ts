@@ -30,11 +30,11 @@ export const signupLogic = kea<signupLogicType>([
       }),
       submit: async (formData) => {
         try {
-          const { email, password, password2 } = formData
+          const { email, password, password2, newsletter } = formData
           const response = await fetch(`/api/signup`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password, password2 }),
+            body: JSON.stringify({ email, password, password2, newsletter }),
           })
           if (response.ok) {
             const response = await fetch(`/api/login`, {
