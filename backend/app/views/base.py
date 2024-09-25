@@ -2,9 +2,13 @@ import gzip
 import io
 import json
 
-from flask import Flask, current_app, flash, redirect, url_for, request, jsonify
+from flask import Flask, current_app, flash, redirect, request, jsonify
 from flask_login import current_user
 from app import login_manager
+
+def has_first_user():
+    from app.models import User
+    return User.query.first() is not None
 
 def setup_base_routes(app: Flask):
     @login_manager.user_loader
@@ -17,26 +21,31 @@ def setup_base_routes(app: Flask):
         if request.is_json or request.path.startswith('/api/'):
             return jsonify({'error': 'Unauthorized'}), 401
 
-        from app.models import User  # Import here to avoid circular dependencies
-        if User.query.first() is None:
-            flash('Please register the first user!')
-            return redirect(url_for('views.register'))
-        else:
+        if has_first_user():
             flash('Please login!')
             return redirect('/login')
+        else:
+            flash('Please register the first user!')
+            return redirect('/signup')
 
     @app.errorhandler(404)
     def not_found(e):
         if request.is_json or request.path.startswith('/api/'):
             return jsonify({'error': 'Not found'}), 404
-        if not current_user.is_authenticated and not request.path.startswith('/login'):
-            from app.models import User  # Import here to avoid circular dependencies
-            if User.query.first() is None:
-                flash('Please register the first user!')
-                return redirect(url_for('views.register'))
+        if not current_user.is_authenticated:
+            if request.path.startswith('/signup'):
+                if has_first_user():
+                    return redirect('/login')
+            elif request.path.startswith('/login'):
+                if not has_first_user():
+                    return redirect('/signup')
             else:
-                flash('Please login!')
-                return redirect('/login')
+                if has_first_user():
+                    flash('Please login!')
+                    return redirect('/login')
+                else:
+                    flash('Please register the first user!')
+                    return redirect('/signup')
         return current_app.send_static_file('index.html')
 
     @app.before_request

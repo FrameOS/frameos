@@ -6,6 +6,7 @@ export const scenes = {
   frame: lazy(() => import('./frame/Frame')),
   settings: lazy(() => import('./settings/Settings')),
   login: lazy(() => import('./login/Login')),
+  signup: lazy(() => import('./signup/Signup')),
 }
 
 export const routes = {
@@ -13,4 +14,5 @@ export const routes = {
   '/frames/:id': 'frame',
   '/settings': 'settings',
   '/login': 'login',
+  '/signup': 'signup',
 }

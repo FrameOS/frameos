@@ -9,16 +9,16 @@ def login():
     if User.query.first() is None:
         return jsonify({'error': 'Please register a user first!'}), 404
 
-    username = request.json.get('username', None)
+    email = request.json.get('email', None)
     password = request.json.get('password', None)
 
-    if username is not None and password is not None:
-        user = User.query.filter_by(username=username).first()
+    if email is not None and password is not None:
+        user = User.query.filter_by(email=email).first()
         if user is None or not user.check_password(password):
-            return jsonify({'error': 'Invalid username or password'}), 401
+            return jsonify({'error': 'Invalid email or password'}), 401
         login_user(user, remember=True)
         return jsonify({'success': True})
-    return jsonify({'error': 'Please specify an username and a password'}), 401
+    return jsonify({'error': 'Please specify an email and a password'}), 401
 
 @api.route('/logout', methods=['POST'])
 @login_required

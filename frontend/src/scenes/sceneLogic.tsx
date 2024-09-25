@@ -4,6 +4,7 @@ import type { sceneLogicType } from './sceneLogicType'
 import { urlToAction } from 'kea-router'
 import { routes } from './scenes'
 
+// Note: this should not connect to any other logic that pulls in data, as it's used even when the user is not logged in
 export const sceneLogic = kea<sceneLogicType>([
   path(['src', 'sceneLogic']),
   actions({

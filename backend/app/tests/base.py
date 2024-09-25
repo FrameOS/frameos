@@ -24,8 +24,8 @@ class BaseTestCase(unittest.TestCase):
         self.init_tests()
 
     def init_user(self):
-        self.create_user("tester", "test@example.com", "testpassword")
-        login_response = self.login("tester", "testpassword")
+        self.create_user( "test@example.com", "testpassword")
+        login_response = self.login("test@example.com", "testpassword")
         assert login_response.status_code == 200, (login_response.status_code, login_response.data)
 
     def init_tests(self):
@@ -34,9 +34,9 @@ class BaseTestCase(unittest.TestCase):
     def tearDown(self):
         self.app_context.pop()
 
-    def create_user(self, username, email, password):
+    def create_user(self, email, password):
         try:
-            user = User(username=username, email=email)
+            user = User(email=email)
             user.set_password(password)
             db.session.add(user)
             db.session.commit()
@@ -44,9 +44,9 @@ class BaseTestCase(unittest.TestCase):
             db.session.rollback()
             raise
 
-    def login(self, username, password):
+    def login(self, email, password):
         return self.client.post('/api/login', json=dict(
-            username=username,
+            email=email,
             password=password
         ), follow_redirects=True)
 

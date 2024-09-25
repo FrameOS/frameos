@@ -5,23 +5,23 @@ from app.models import User
 
 class TestLogin(BaseTestCase):
     def init_user(self):
-        self.user = User(username='test', email='me@test.com')
+        self.user = User(email='me@test.com')
         self.user.set_password('banana')
         db.session.add(self.user)
         db.session.commit()
 
     def test_login_valid(self):
-        data = {'username': 'test', 'password': 'banana'}
+        data = {'email': 'me@test.com', 'password': 'banana'}
         response = self.client.post('/api/login', json=data)
         assert response.status_code == 200
 
     def test_login_invalid_user(self):
-        data = {'username': 'notfound', 'password': 'banana'}
+        data = {'email': 'notfound', 'password': 'banana'}
         response = self.client.post('/api/login', json=data)
         assert response.status_code == 401
 
     def test_login_invalid_pass(self):
-        data = {'username': 'test', 'password': 'notvalid'}
+        data = {'email': 'me@test.com', 'password': 'notvalid'}
         response = self.client.post('/api/login', json=data)
         assert response.status_code == 401
 
@@ -32,7 +32,7 @@ class TestLogin(BaseTestCase):
         assert response.json == {"error": "Unauthorized"}
 
         # login
-        data = {'username': 'test', 'password': 'banana'}
+        data = {'email': 'me@test.com', 'password': 'banana'}
         response = self.client.post('/api/login', json=data)
         assert response.status_code == 200
 

@@ -19,7 +19,7 @@ export function DelayedLoading() {
   return <div className="w-full h-screen flex items-center justify-center">Loading...</div>
 }
 
-export function App() {
+export function LoggedInApp() {
   useMountedLogic(socketLogic)
   useMountedLogic(appsModel)
   useMountedLogic(framesModel)
@@ -34,4 +34,24 @@ export function App() {
       <SceneComponent {...params} />
     </Suspense>
   )
+}
+
+export function LoggedOutApp() {
+  const { scene, params } = useValues(sceneLogic)
+  const SceneComponent: (() => JSX.Element) | LazyExoticComponent<any> =
+    scenes[scene as keyof typeof scenes] || scenes.error404
+
+  return (
+    <Suspense fallback={<DelayedLoading />}>
+      <SceneComponent {...params} />
+    </Suspense>
+  )
+}
+
+export function App() {
+  const { scene, params } = useValues(sceneLogic)
+  if (scene === 'login' || scene === 'signup') {
+    return <LoggedOutApp />
+  }
+  return <LoggedInApp />
 }

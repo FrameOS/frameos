@@ -5,7 +5,7 @@ import { forms } from 'kea-forms'
 import type { loginFormType } from './loginFormType'
 
 export interface LoginFormForm {
-  username: string
+  email: string
   password: string
 }
 
@@ -14,7 +14,7 @@ export const loginForm = kea<loginFormType>([
   forms(({ actions }) => ({
     loginForm: {
       defaults: {
-        username: '',
+        email: '',
         password: '',
       } as LoginFormForm,
       options: {
@@ -22,16 +22,16 @@ export const loginForm = kea<loginFormType>([
         canSubmitWithErrors: true,
       },
       errors: (frame: Partial<LoginFormForm>) => ({
-        username: !frame.username ? 'Please enter a username' : null,
+        email: !frame.email ? 'Please enter an e-mail address' : null,
         password: !frame.password ? 'Please enter a password' : null,
       }),
       submit: async (frame) => {
         try {
-          const { username, password } = frame
+          const { email, password } = frame
           const response = await fetch(`/api/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password }),
+            body: JSON.stringify({ email, password }),
           })
           if (response.ok) {
             window.location.href = '/'
