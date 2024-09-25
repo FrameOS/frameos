@@ -22,8 +22,8 @@ export function Login() {
       </div>
       <Box id="add-frame" className="p-4 mb-12 w-80 max-w-full">
         <Form logic={loginForm} formKey="loginForm" className="space-y-4" enableFormOnSubmit>
-          <Field name="username" label="Usermame">
-            <TextInput name="username" placeholder="username" required />
+          <Field name="email" label="E-mail">
+            <TextInput name="email" placeholder="email" required />
           </Field>
           <Field name="password" label="Password">
             <TextInput name="password" placeholder="" type="password" required />

@@ -7,6 +7,7 @@ from .frames import *
 from .log import *
 from .login import *
 from .repositories import *
+from .signup import *
 from .settings import *
 from .templates import *
 from .misc import *

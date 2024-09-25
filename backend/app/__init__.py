@@ -69,7 +69,4 @@ def create_app(config: Optional[Config] = None):
     from app.api import api as api_blueprint
     app.register_blueprint(api_blueprint, url_prefix='/api')
 
-    from app.views import views as views_blueprint
-    app.register_blueprint(views_blueprint, url_prefix='/')
-
     return app

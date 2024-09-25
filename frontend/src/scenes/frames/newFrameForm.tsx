@@ -67,4 +67,9 @@ export const newFrameForm = kea<newFrameFormType>([
       }
     },
   })),
+  afterMount(({ actions }) => {
+    if (!framesModel.values.framesLoading && Object.keys(framesModel.values.frames).length === 0) {
+      framesModel.actions.loadFrames()
+    }
+  }),
 ])
