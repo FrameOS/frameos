@@ -1,7 +1,7 @@
 import pixie
 import options
 import json
-import lib/httpclient
+import httpclient
 import frameos/apps
 import frameos/types
 import frameos/utils/image
