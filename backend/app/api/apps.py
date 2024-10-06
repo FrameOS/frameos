@@ -1,6 +1,5 @@
 import ast
 import re
-import shutil
 
 import requests
 import json
@@ -109,43 +108,37 @@ def validate_python(source):
 
 
 def validate_nim(source):
+    temp_file_name = ''
     try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # copy src/frameos/types.nim to temp_dir
-            target_path = os.path.join(temp_dir, "frameos")
-            os.makedirs(target_path, exist_ok=True)
-            shutil.copytree("../frameos/src/frameos", target_path, dirs_exist_ok=True)
+        os.makedirs("../frameos/src/codegen", exist_ok=True)
+        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.nim', dir="../frameos/src/codegen", delete=False)
+        temp_file_name = temp_file.name
+        temp_file_abs_name = os.path.realpath(temp_file_name)
+        temp_file.write(source)
+        temp_file.close()
 
-            lib_target_path = os.path.join(temp_dir, "lib")
-            os.makedirs(lib_target_path, exist_ok=True)
-            shutil.copytree("../frameos/src/lib", lib_target_path, dirs_exist_ok=True)
+        result = subprocess.run(['nim', 'check', temp_file_name], capture_output=True, text=True)
+        errors = []
+        for line in result.stderr.split('\n'):
+            if line.startswith(temp_file_name) or line.startswith(temp_file_abs_name):
+                # "tmps4sk1v2t.nim(22, 12) Error: expression 'scene' has no type (or is ambiguous)"
+                if line.startswith(temp_file_name):
+                    line = line[len(temp_file_name):]
+                elif line.startswith(temp_file_abs_name):
+                    line = line[len(temp_file_abs_name):]
 
-            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.nim', dir=temp_dir, delete=False)
-            temp_file_name = temp_file.name
-            temp_file_abs_name = os.path.realpath(temp_file_name)
-            temp_file.write(source)
-            temp_file.close()
-
-            result = subprocess.run(['nim', 'check', temp_file_name], capture_output=True, text=True)
-
-            errors = []
-            for line in result.stderr.split('\n'):
-                if line.startswith(temp_file_name) or line.startswith(temp_file_abs_name):
-                    # "tmps4sk1v2t.nim(22, 12) Error: expression 'scene' has no type (or is ambiguous)"
-                    if line.startswith(temp_file_name):
-                        line = line[len(temp_file_name):]
-                    elif line.startswith(temp_file_abs_name):
-                        line = line[len(temp_file_abs_name):]
-
-                    if "Error:" in line:
-                        match = re.search(r'\((\d+), (\d+)\) (Error: .+)', line)
-                        if match:
-                            line_no, column, error = int(match.group(1)), int(match.group(2)), match.group(3)
-                            errors.append({"line": line_no, "column": column, "error": error})
-            return errors
+                if "Error:" in line:
+                    match = re.search(r'\((\d+), (\d+)\) (Error: .+)', line)
+                    if match:
+                        line_no, column, error = int(match.group(1)), int(match.group(2)), match.group(3)
+                        errors.append({"line": line_no, "column": column, "error": error})
+        return errors
 
     except Exception as e:
         return [{"error": str(e)}]
+    finally:
+        if temp_file_name:
+            os.remove(temp_file_name)
 
 def validate_json(source):
     try:
