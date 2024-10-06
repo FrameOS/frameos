@@ -1,14 +1,76 @@
 {
   "version": 2,
   "packages": {
-    "flatty": {
-      "version": "0.3.4",
-      "vcsRevision": "07f6ba8ab96238e5bd1264cf0cea1d1746abb00c",
-      "url": "https://github.com/treeform/flatty",
+    "QRgen": {
+      "version": "3.1.0",
+      "vcsRevision": "4445bb93a126ec33004901e9486963a40cbb97fc",
+      "url": "https://github.com/aruZeta/QRgen",
       "downloadMethod": "git",
       "dependencies": [],
       "checksums": {
-        "sha1": "5775e6ea6ca339efc5bd37b082b8294342d49dc5"
+        "sha1": "41a7a63b515a4cad66091a70509925e2dcc5a0e4"
+      }
+    },
+    "asynctools": {
+      "version": "0.1.1",
+      "vcsRevision": "0e6bdc3ed5bae8c7cc9e03cfbf66b7c882a908a7",
+      "url": "https://github.com/cheatfate/asynctools",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "54314dceabb06b20908ecb0f2c007e9ff3aaa054"
+      }
+    },
+    "vmath": {
+      "version": "2.0.0",
+      "vcsRevision": "7282ae1247f2f384ebeaec3826d7fa38fd0e1df1",
+      "url": "https://github.com/treeform/vmath",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "c90a664f3425d26219e1262ed9a888b859b3127c"
+      }
+    },
+    "bumpy": {
+      "version": "1.1.2",
+      "vcsRevision": "d7eaf00c24820ad0317c9926737402e62431e931",
+      "url": "https://github.com/treeform/bumpy",
+      "downloadMethod": "git",
+      "dependencies": [
+        "vmath"
+      ],
+      "checksums": {
+        "sha1": "acc789c4e31b3ee969a13dd0c238d808f39b19c7"
+      }
+    },
+    "checksums": {
+      "version": "0.2.1",
+      "vcsRevision": "f8f6bd34bfa3fe12c64b919059ad856a96efcba0",
+      "url": "https://github.com/nim-lang/checksums",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "d3c7a1d0c0dee8fa089bd7f4d474e005877b608a"
+      }
+    },
+    "chroma": {
+      "version": "0.2.7",
+      "vcsRevision": "b2e71179174e040884ebf6a16cbac711c84620b9",
+      "url": "https://github.com/treeform/chroma",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "f873f4b97e87a82e27e0b85bf9130fe3e320a2b8"
+      }
+    },
+    "chrono": {
+      "version": "0.3.1",
+      "vcsRevision": "e431d023453cf4292e58b3a0cf36f876d31c428c",
+      "url": "https://github.com/treeform/chrono",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "deac69a313df5422db074f0bf95448607cc52c18"
       }
     },
     "nimsimd": {
@@ -33,106 +95,14 @@
         "sha1": "3afda170fbe40158cd78e00375e34690f1fae263"
       }
     },
-    "vmath": {
-      "version": "2.0.0",
-      "vcsRevision": "7282ae1247f2f384ebeaec3826d7fa38fd0e1df1",
-      "url": "https://github.com/treeform/vmath",
+    "flatty": {
+      "version": "0.3.4",
+      "vcsRevision": "07f6ba8ab96238e5bd1264cf0cea1d1746abb00c",
+      "url": "https://github.com/treeform/flatty",
       "downloadMethod": "git",
       "dependencies": [],
       "checksums": {
-        "sha1": "c90a664f3425d26219e1262ed9a888b859b3127c"
-      }
-    },
-    "asynctools": {
-      "version": "0.1.1",
-      "vcsRevision": "0e6bdc3ed5bae8c7cc9e03cfbf66b7c882a908a7",
-      "url": "https://github.com/cheatfate/asynctools",
-      "downloadMethod": "git",
-      "dependencies": [],
-      "checksums": {
-        "sha1": "54314dceabb06b20908ecb0f2c007e9ff3aaa054"
-      }
-    },
-    "chroma": {
-      "version": "0.2.7",
-      "vcsRevision": "b2e71179174e040884ebf6a16cbac711c84620b9",
-      "url": "https://github.com/treeform/chroma",
-      "downloadMethod": "git",
-      "dependencies": [],
-      "checksums": {
-        "sha1": "f873f4b97e87a82e27e0b85bf9130fe3e320a2b8"
-      }
-    },
-    "zippy": {
-      "version": "0.10.11",
-      "vcsRevision": "9560f3d20479fb390c97f731ef8d100f1ed54e6c",
-      "url": "https://github.com/guzba/zippy",
-      "downloadMethod": "git",
-      "dependencies": [],
-      "checksums": {
-        "sha1": "12e761e18ccc0a1b0e931c74dd02bb4b74544d56"
-      }
-    },
-    "bumpy": {
-      "version": "1.1.2",
-      "vcsRevision": "d7eaf00c24820ad0317c9926737402e62431e931",
-      "url": "https://github.com/treeform/bumpy",
-      "downloadMethod": "git",
-      "dependencies": [
-        "vmath"
-      ],
-      "checksums": {
-        "sha1": "acc789c4e31b3ee969a13dd0c238d808f39b19c7"
-      }
-    },
-    "pixie": {
-      "version": "5.0.6",
-      "vcsRevision": "f3e73f722fbb0e5d496fbc59ee860a9fd49983de",
-      "url": "https://github.com/treeform/pixie",
-      "downloadMethod": "git",
-      "dependencies": [
-        "vmath",
-        "chroma",
-        "zippy",
-        "flatty",
-        "nimsimd",
-        "bumpy",
-        "crunchy"
-      ],
-      "checksums": {
-        "sha1": "fd4c5d12bba41aac760fc86c2de820e1a367dbfd"
-      }
-    },
-    "linuxfb": {
-      "version": "0.1.0",
-      "vcsRevision": "ed5671d9aab99ca2c2fea74bea57b42e0a685c2d",
-      "url": "https://github.com/luked99/linuxfb.nim",
-      "downloadMethod": "git",
-      "dependencies": [],
-      "checksums": {
-        "sha1": "8e639fafa952f3e9d0315f181aa05e0694603bfc"
-      }
-    },
-    "unpack": {
-      "version": "0.4.0",
-      "vcsRevision": "1b6d749473bfb6bd7b749abf823503df633ba04c",
-      "url": "https://github.com/technicallyagd/unpack",
-      "downloadMethod": "git",
-      "dependencies": [],
-      "checksums": {
-        "sha1": "d65465ca8e74e9fcb590255491c8fe7763e38c42"
-      }
-    },
-    "psutil": {
-      "version": "0.6.1",
-      "vcsRevision": "8e5db60edb22a5fc21268127eb385e5d8f70b474",
-      "url": "https://github.com/juancarlospaco/psutil-nim",
-      "downloadMethod": "git",
-      "dependencies": [
-        "unpack"
-      ],
-      "checksums": {
-        "sha1": "137403c200c58c6cd566ab5fbfd597b535303fc6"
+        "sha1": "5775e6ea6ca339efc5bd37b082b8294342d49dc5"
       }
     },
     "httpbeast": {
@@ -159,6 +129,66 @@
         "sha1": "a5120cfff525e23be29bb2ff47b6ba2f4b2674a3"
       }
     },
+    "linuxfb": {
+      "version": "0.1.0",
+      "vcsRevision": "ed5671d9aab99ca2c2fea74bea57b42e0a685c2d",
+      "url": "https://github.com/luked99/linuxfb.nim",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "8e639fafa952f3e9d0315f181aa05e0694603bfc"
+      }
+    },
+    "zippy": {
+      "version": "0.10.11",
+      "vcsRevision": "9560f3d20479fb390c97f731ef8d100f1ed54e6c",
+      "url": "https://github.com/guzba/zippy",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "12e761e18ccc0a1b0e931c74dd02bb4b74544d56"
+      }
+    },
+    "pixie": {
+      "version": "5.0.6",
+      "vcsRevision": "f3e73f722fbb0e5d496fbc59ee860a9fd49983de",
+      "url": "https://github.com/treeform/pixie",
+      "downloadMethod": "git",
+      "dependencies": [
+        "vmath",
+        "chroma",
+        "zippy",
+        "flatty",
+        "nimsimd",
+        "bumpy",
+        "crunchy"
+      ],
+      "checksums": {
+        "sha1": "fd4c5d12bba41aac760fc86c2de820e1a367dbfd"
+      }
+    },
+    "unpack": {
+      "version": "0.4.0",
+      "vcsRevision": "1b6d749473bfb6bd7b749abf823503df633ba04c",
+      "url": "https://github.com/technicallyagd/unpack",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "d65465ca8e74e9fcb590255491c8fe7763e38c42"
+      }
+    },
+    "psutil": {
+      "version": "0.6.1",
+      "vcsRevision": "8e5db60edb22a5fc21268127eb385e5d8f70b474",
+      "url": "https://github.com/juancarlospaco/psutil-nim",
+      "downloadMethod": "git",
+      "dependencies": [
+        "unpack"
+      ],
+      "checksums": {
+        "sha1": "137403c200c58c6cd566ab5fbfd597b535303fc6"
+      }
+    },
     "ws": {
       "version": "0.5.0",
       "vcsRevision": "9536bf99ddf5948db221ccb7bb3663aa238a8e21",
@@ -167,36 +197,6 @@
       "dependencies": [],
       "checksums": {
         "sha1": "ae4daf4ae302d0431f3c2d385ae9d2fe767a3246"
-      }
-    },
-    "QRgen": {
-      "version": "3.1.0",
-      "vcsRevision": "4445bb93a126ec33004901e9486963a40cbb97fc",
-      "url": "https://github.com/aruZeta/QRgen",
-      "downloadMethod": "git",
-      "dependencies": [],
-      "checksums": {
-        "sha1": "41a7a63b515a4cad66091a70509925e2dcc5a0e4"
-      }
-    },
-    "chrono": {
-      "version": "0.3.1",
-      "vcsRevision": "e431d023453cf4292e58b3a0cf36f876d31c428c",
-      "url": "https://github.com/treeform/chrono",
-      "downloadMethod": "git",
-      "dependencies": [],
-      "checksums": {
-        "sha1": "deac69a313df5422db074f0bf95448607cc52c18"
-      }
-    },
-    "checksums": {
-      "version": "0.1.0",
-      "vcsRevision": "7ff0b762332d2591bbeb65df9bb86d52ea44ec01",
-      "url": "https://github.com/nim-lang/checksums",
-      "downloadMethod": "git",
-      "dependencies": [],
-      "checksums": {
-        "sha1": "3b0211c13e33fa7c8bbf1504604206d983fd3491"
       }
     }
   },
