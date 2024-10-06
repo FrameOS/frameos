@@ -4,7 +4,7 @@ import options
 import json
 import strutils
 import chrono
-import lib/httpclient
+import httpclient
 import frameos/apps
 import frameos/types
 

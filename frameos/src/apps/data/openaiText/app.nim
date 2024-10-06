@@ -2,7 +2,7 @@ import pixie
 import options
 import json
 import strformat
-import lib/httpclient
+import httpclient
 import frameos/apps
 import frameos/types
 

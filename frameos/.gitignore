@@ -1,4 +1,5 @@
 src/assets/
+src/codegen/
 build/
 tmp/
 frameos.deps

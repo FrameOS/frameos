@@ -1,5 +1,5 @@
 import options
-import lib/httpclient
+import httpclient
 import frameos/apps
 import frameos/types
 

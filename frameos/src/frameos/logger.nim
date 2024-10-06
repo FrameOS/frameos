@@ -1,5 +1,4 @@
-import zippy, json, os, times, strutils, net
-import lib/httpclient
+import zippy, json, os, times, strutils, net, httpclient
 
 import frameos/channels
 import frameos/types

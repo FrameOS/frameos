@@ -3,7 +3,7 @@ import json
 import uri
 import strformat
 import strutils
-import lib/httpclient
+import httpclient
 import frameos/apps
 import frameos/types
 import frameos/utils/image
