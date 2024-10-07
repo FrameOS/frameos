@@ -16,6 +16,17 @@ export const assetsLogic = kea<assetsLogicType>([
   props({} as AssetsLogicProps),
   connect(({ frameId }: AssetsLogicProps) => ({ logic: [socketLogic], values: [frameLogic({ frameId }), ['frame']] })),
   key((props) => props.frameId),
+  actions({
+    setSortKey: (sortKey: string) => ({ sortKey }),
+  }),
+  reducers({
+    sortKey: [
+      'path',
+      {
+        setSortKey: (_, { sortKey }) => sortKey,
+      },
+    ],
+  }),
   loaders(({ props }) => ({
     assets: [
       [] as AssetType[],
@@ -38,13 +49,29 @@ export const assetsLogic = kea<assetsLogicType>([
   })),
   selectors({
     cleanedAssets: [
-      (s) => [s.assets, s.frame],
-      (assets, frame) => {
+      (s) => [s.assets, s.frame, s.sortKey],
+      (assets, frame, sortKey) => {
         const assetsPath = frame.assets_path ?? '/srv/assets'
-        return assets.map((asset) => ({
+        const cleanedAssets = assets.map((asset) => ({
           ...asset,
-          path: asset.path.startsWith(assetsPath + '/') ? asset.path.substring(assetsPath.length + 1) : asset.path,
+          path: asset.path.startsWith(assetsPath + '/') ? '.' + asset.path.substring(assetsPath.length) : asset.path,
         }))
+        const sorter: (a: any, b: any) => number =
+          sortKey === 'path'
+            ? (a, b) => a.path.localeCompare(b.path)
+            : sortKey === '-path'
+            ? (a, b) => b.path.localeCompare(a.path)
+            : sortKey === 'size'
+            ? (a, b) => a.size - b.size
+            : sortKey === '-size'
+            ? (a, b) => b.size - a.size
+            : sortKey === 'mtime'
+            ? (a, b) => a.mtime - b.mtime
+            : sortKey === '-mtime'
+            ? (a, b) => b.mtime - a.mtime
+            : () => 0
+        cleanedAssets.sort(sorter)
+        return cleanedAssets
       },
     ],
   }),

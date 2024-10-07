@@ -17,7 +17,8 @@ function humaniseSize(size: number) {
 
 export function Assets(): JSX.Element {
   const { frame } = useValues(frameLogic)
-  const { assetsLoading, cleanedAssets } = useValues(assetsLogic({ frameId: frame.id }))
+  const { assetsLoading, cleanedAssets, sortKey } = useValues(assetsLogic({ frameId: frame.id }))
+  const { setSortKey } = useActions(assetsLogic({ frameId: frame.id }))
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
   return (
     <div className="space-y-2">
@@ -25,6 +26,32 @@ export function Assets(): JSX.Element {
         <div>Loading assets...</div>
       ) : (
         <table className="w-full">
+          <thead>
+            <tr className="bg-gray-900">
+              <th
+                onClick={() => setSortKey(sortKey === 'path' ? '-path' : 'path')}
+                className="cursor-pointer hover:underline"
+              >
+                Path
+                {sortKey === 'path' ? ' ▲' : sortKey === '-path' ? ' ▼' : ''}
+              </th>
+              <th
+                onClick={() => setSortKey(sortKey === 'size' ? '-size' : 'size')}
+                className="cursor-pointer hover:underline"
+              >
+                Size
+                {sortKey === 'size' ? ' ▲' : sortKey === '-size' ? ' ▼' : ''}
+              </th>
+              <th
+                onClick={() => setSortKey(sortKey === 'mtime' ? '-mtime' : 'mtime')}
+                className="cursor-pointer hover:underline"
+              >
+                Date
+                {sortKey === 'mtime' ? ' ▲' : sortKey === '-mtime' ? ' ▼' : ''}
+              </th>
+              <th>&nbsp;</th>
+            </tr>
+          </thead>
           <tbody>
             {cleanedAssets.map((asset) => (
               <tr key={asset.path} className="even:bg-gray-700 hover:bg-gray-900">
@@ -32,6 +59,9 @@ export function Assets(): JSX.Element {
                   {asset.path}
                 </td>
                 <td className="text-nowrap">{humaniseSize(asset.size)}</td>
+                <td title={new Date(asset.mtime * 1000).toLocaleString()}>
+                  {new Date(asset.mtime * 1000).toLocaleString()}
+                </td>
                 <td>
                   <a href={`/api/frames/${frame.id}/asset?path=${encodeURIComponent(asset.path)}`} download>
                     <CloudArrowDownIcon className="w-5 h-5" />

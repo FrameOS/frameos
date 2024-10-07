@@ -144,9 +144,13 @@ export const panelsLogic = kea<panelsLogicType>([
         }),
         openAsset: (state, { path }) => ({
           ...state,
-          [Area.TopLeft]: state[Area.TopLeft].find((a) => a.panel === Panel.Asset && a.key === path)
+          [Area.TopLeft]: state[Area.TopLeft].find((a) => a.panel === Panel.Asset)
             ? state[Area.TopLeft].map((a) =>
-                a.key === path ? { ...a, active: true } : a.active ? { ...a, active: false } : a
+                a.panel === Panel.Asset
+                  ? { ...a, metadata: { path }, active: true }
+                  : a.active
+                  ? { ...a, active: false }
+                  : a
               )
             : [
                 ...state[Area.TopLeft].map((a) => ({ ...a, active: false })),
