@@ -17,7 +17,7 @@ function humaniseSize(size: number) {
 
 export function Assets(): JSX.Element {
   const { frame } = useValues(frameLogic)
-  const { assetsLoading, assets } = useValues(assetsLogic({ frameId: frame.id }))
+  const { assetsLoading, cleanedAssets } = useValues(assetsLogic({ frameId: frame.id }))
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
   return (
     <div className="space-y-2">
@@ -26,7 +26,7 @@ export function Assets(): JSX.Element {
       ) : (
         <table className="w-full">
           <tbody>
-            {assets.map((asset) => (
+            {cleanedAssets.map((asset) => (
               <tr key={asset.path} className="even:bg-gray-700 hover:bg-gray-900">
                 <td onClick={() => openAsset(asset.path)} className="hover:underline cursor-pointer">
                   {asset.path}
