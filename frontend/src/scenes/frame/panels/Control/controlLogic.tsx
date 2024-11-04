@@ -3,7 +3,7 @@ import { actions, afterMount, connect, kea, key, listeners, path, props, reducer
 import { frameLogic } from '../../frameLogic'
 
 import { forms } from 'kea-forms'
-import { FrameScene } from '../../../../types'
+import { FrameScene, FrameStateRecord } from '../../../../types'
 
 import { loaders } from 'kea-loaders'
 
@@ -12,11 +12,6 @@ import { socketLogic } from '../../../socketLogic'
 
 export interface ControlLogicProps {
   frameId: number
-}
-
-export interface StateRecord {
-  sceneId: string
-  state: Record<string, any>
 }
 
 export const controlLogic = kea<controlLogicType>([
@@ -34,7 +29,7 @@ export const controlLogic = kea<controlLogicType>([
   }),
   loaders(({ props, values }) => ({
     stateRecord: [
-      {} as StateRecord,
+      {} as FrameStateRecord,
       {
         sync: async (_, breakpoint) => {
           await breakpoint(100)
@@ -54,7 +49,7 @@ export const controlLogic = kea<controlLogicType>([
   })),
   reducers({
     stateRecord: [
-      {} as StateRecord,
+      {} as FrameStateRecord,
       {
         currentSceneChanged: (state, { sceneId }) => ({ ...state, sceneId }),
       },

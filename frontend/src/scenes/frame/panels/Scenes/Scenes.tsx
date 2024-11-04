@@ -23,11 +23,14 @@ import { SceneSettings } from './SceneSettings'
 import React from 'react'
 import { SceneDropDown } from './SceneDropDown'
 import { showAsFps } from '../../../../decorators/refreshInterval'
+import clsx from 'clsx'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
   const { editScene, openTemplates } = useActions(panelsLogic)
-  const { scenes, showNewSceneForm, isNewSceneSubmitting, showingSettings } = useValues(scenesLogic({ frameId }))
+  const { scenes, showNewSceneForm, isNewSceneSubmitting, showingSettings, activeSceneId } = useValues(
+    scenesLogic({ frameId })
+  )
   const { toggleSettings, submitNewScene, toggleNewScene, createNewScene, closeNewScene } = useActions(
     scenesLogic({ frameId })
   )
@@ -86,7 +89,16 @@ export function Scenes() {
         ) : null}
         {scenes.map((scene) => (
           <React.Fragment key={scene.id}>
-            <Box className="p-2 pl-4 pr-3 space-y-2 bg-gray-900 flex items-start justify-between gap-1">
+            <div
+              className={clsx(
+                'border rounded-lg shadow bg-gray-900 break-inside-avoid',
+                'p-2 pl-4 pr-3 space-y-2 flex items-start justify-between gap-1',
+                activeSceneId === scene.id
+                  ? 'border border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
+                  : 'border-gray-700'
+              )}
+              onClick={() => editScene(scene.id)}
+            >
               <div>
                 <H6>
                   <span className="cursor-pointer" onClick={() => editScene(scene.id)}>
@@ -106,6 +118,11 @@ export function Scenes() {
                       {showAsFps(scene.settings.refreshInterval)}
                     </Tag>
                   ) : null}
+                  {activeSceneId === scene.id ? (
+                    <Tag className="ml-2" color="primary">
+                      active
+                    </Tag>
+                  ) : null}
                 </H6>
                 <div className="text-xs text-gray-400">id: {scene.id}</div>
               </div>
@@ -115,7 +132,7 @@ export function Scenes() {
                 </Button>
                 <SceneDropDown context="scenes" sceneId={scene.id} />
               </div>
-            </Box>
+            </div>
             {showingSettings[scene.id] ? (
               <Box className="p-2 pl-4 pr-3 space-y-2 bg-gray-900 flex items-start justify-between gap-1 ml-4">
                 <SceneSettings sceneId={scene.id} onClose={() => toggleSettings(scene.id)} />

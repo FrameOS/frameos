@@ -422,3 +422,8 @@ export interface FrameOSSettings {
     accessKey?: string
   }
 }
+
+export interface FrameStateRecord {
+  sceneId: string
+  state: Record<string, any>
+}

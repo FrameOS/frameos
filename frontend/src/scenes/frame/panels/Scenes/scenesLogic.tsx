@@ -1,4 +1,4 @@
-import { actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import type { scenesLogicType } from './scenesLogicType'
 import { FrameScene, Panel } from '../../../../types'
 import { frameLogic, sanitizeScene } from '../../frameLogic'
@@ -6,9 +6,9 @@ import { appsModel } from '../../../../models/appsModel'
 import { forms } from 'kea-forms'
 import { v4 as uuidv4 } from 'uuid'
 import { panelsLogic } from '../panelsLogic'
-import { Option } from '../../../../components/Select'
 
 import _sceneTemplates from '../../../../../schema/templates.json'
+import { controlLogic } from '../Control/controlLogic'
 const sceneTemplates: Record<string, Record<string, any>> = _sceneTemplates
 
 export interface ScenesLogicProps {
@@ -20,8 +20,22 @@ export const scenesLogic = kea<scenesLogicType>([
   props({} as ScenesLogicProps),
   key((props) => props.frameId),
   connect(({ frameId }: ScenesLogicProps) => ({
-    values: [frameLogic({ frameId }), ['frame', 'frameForm'], appsModel, ['apps']],
-    actions: [frameLogic({ frameId }), ['applyTemplate'], panelsLogic({ frameId }), ['editScene', 'closePanel']],
+    values: [
+      frameLogic({ frameId }),
+      ['frame', 'frameForm'],
+      appsModel,
+      ['apps'],
+      controlLogic({ frameId }),
+      ['sceneId as activeSceneId'],
+    ],
+    actions: [
+      frameLogic({ frameId }),
+      ['applyTemplate'],
+      panelsLogic({ frameId }),
+      ['editScene', 'closePanel'],
+      controlLogic({ frameId }),
+      ['sync as syncActiveScene'],
+    ],
   })),
   actions({
     toggleSettings: (sceneId: string) => ({ sceneId }),
@@ -33,6 +47,7 @@ export const scenesLogic = kea<scenesLogicType>([
     toggleNewScene: true,
     closeNewScene: true,
     createNewScene: true,
+    sync: true,
   }),
   forms(({ actions, values, props }) => ({
     newScene: {
@@ -181,5 +196,8 @@ export const scenesLogic = kea<scenesLogicType>([
         toggleSettings: (state, { sceneId }) => ({ ...state, [sceneId]: !state[sceneId] }),
       },
     ],
+  }),
+  afterMount(({ actions }) => {
+    actions.syncActiveScene()
   }),
 ])
