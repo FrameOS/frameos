@@ -1,0 +1,26 @@
+{
+    "framePort": 8787,
+    "frameHost": "localhost",
+    "serverHost": "localhost",
+    "serverPort": 8989,
+    "serverApiKey": "test-api-key",
+    "width": 800,
+    "height": 480,
+    "device": "web_only",
+    "color": null,
+    "backgroundColor": "blue",
+    "interval": 1.0,
+    "metricsInterval": 60.0,
+    "scalingMode": "cover",
+    "frameAccess": "public",
+    "logToFile": "./tmp/frameos.log",
+    "assetsPath": "./tmp",
+    "saveAssets": false,
+    "rotate": 0,
+    "debug": true,
+    "settings": {
+        "sentry": {
+            "frame_dsn": null
+        }
+    }
+}
