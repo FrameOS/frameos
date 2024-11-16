@@ -152,7 +152,7 @@ router myrouter:
 
       fieldsHtml.add(fmt"<label for='{h($key)}'>{h(label)}</label><br/>")
       if fieldType == "text":
-        fieldsHtml.add(fmt"<textarea id='{h($key)}' placeholder='{h(placeholder)}'>{h(stringValue)}</textarea><br/><br/>")
+        fieldsHtml.add(fmt"<textarea id='{h($key)}' placeholder='{h(placeholder)}' rows=5>{h(stringValue)}</textarea><br/><br/>")
       elif fieldType == "select" or fieldType == "boolean":
         fieldsHtml.add(fmt"<select id='{h($key)}' placeholder='{h(placeholder)}'>")
         let options = if fieldType == "boolean": @["true", "false"]
