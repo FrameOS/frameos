@@ -7,13 +7,16 @@ proc main() {.async.} =
       let data = parseFile("./frame.json")
       let serverHost = data{"serverHost"}.getStr()
       let serverPort = data{"serverPort"}.getInt()
-      let url = &"ws://{serverHost}:{serverPort}/ws"
+      let url = &"ws://{serverHost}:{serverPort}/ws/agent"
 
       echo &"Connecting to {url}"
       var ws = await newWebSocket(url)
       echo "Connected"
 
       while true:
+        echo "Sending message"
+        await ws.send("Welcome to simple echo server")
+        echo "Receiving message"
         echo await ws.receiveStrPacket()
       ws.close()
     except IOError as e:

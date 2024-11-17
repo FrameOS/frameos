@@ -1,8 +1,8 @@
-from typing import Optional
-
 from gevent import monkey
+
 monkey.patch_all()
 
+from typing import Optional
 import sentry_sdk
 import os
 from sqlalchemy.exc import OperationalError
@@ -12,6 +12,7 @@ from flask_login import LoginManager
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_socketio import SocketIO
+from flask_sockets import Sockets
 from config import Config, get_config
 from urllib.parse import urlparse
 from redis import Redis
@@ -22,6 +23,7 @@ login_manager = LoginManager()
 login_manager.login_view = 'api.login'
 migrate = Migrate()
 socketio = SocketIO(async_mode='gevent')
+sockets = Sockets()
 
 DEFAULT_REDIS_URL = 'redis://localhost:6379/0'
 
@@ -60,6 +62,7 @@ def create_app(config: Optional[Config] = None):
         db.create_all()
     login_manager.init_app(app)
     migrate.init_app(app, db)
+    sockets.init_app(app)
     socketio.init_app(app, cors_allowed_origins="*", message_queue=os.environ.get('REDIS_URL', DEFAULT_REDIS_URL))
     initialize_sentry(app)
 

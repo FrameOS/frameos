@@ -4,6 +4,8 @@ flask
 Flask-migrate
 flask_socketio
 flask_sqlalchemy
+gevent-websocket
+Flask-Sockets
 sqlalchemy
 huey
 honcho
