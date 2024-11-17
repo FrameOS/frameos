@@ -17,6 +17,7 @@
         },
         {
             "name": "Backend",
+            "consoleName": "Backend",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/backend/run.py",
@@ -36,6 +37,7 @@
         },
         {
             "name": "Huey",
+            "consoleName": "Huey",
             "type": "debugpy",
             "justMyCode": true,
             "autoReload": {
