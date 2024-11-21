@@ -1,7 +1,3 @@
-from gevent import monkey
-
-monkey.patch_all()
-
 from typing import Optional
 import sentry_sdk
 import os
@@ -12,7 +8,7 @@ from flask_login import LoginManager
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_socketio import SocketIO
-from flask_sockets import Sockets
+from flask_sock import Sock
 from config import Config, get_config
 from urllib.parse import urlparse
 from redis import Redis
@@ -22,8 +18,8 @@ db = SQLAlchemy()
 login_manager = LoginManager()
 login_manager.login_view = 'api.login'
 migrate = Migrate()
-socketio = SocketIO(async_mode='gevent')
-sockets = Sockets()
+socketio = SocketIO(async_mode='eventlet')
+sock = Sock()
 
 DEFAULT_REDIS_URL = 'redis://localhost:6379/0'
 
@@ -36,6 +32,18 @@ def create_redis_connection():
     return Redis(host=redis_host, port=redis_port)
 
 redis = create_redis_connection()
+
+@sock.route('/ws')
+def ws_handler(ws):
+    print("WebSocket connection established")
+    ws.send("Hello from server")
+    while True:
+        message = ws.receive()
+        if message is None:
+            print("Client disconnected")
+            break
+        print(f"Received message: {message}")
+        ws.send(f"Echo: {message}")
 
 # Sentry setup
 def initialize_sentry(app):
@@ -58,12 +66,11 @@ def create_app(config: Optional[Config] = None):
     db.init_app(app)
     with app.app_context():
         os.makedirs('../db', exist_ok=True)
-
         db.create_all()
     login_manager.init_app(app)
     migrate.init_app(app, db)
-    sockets.init_app(app)
     socketio.init_app(app, cors_allowed_origins="*", message_queue=os.environ.get('REDIS_URL', DEFAULT_REDIS_URL))
+    sock.init_app(app)  # Initialize sock with app
     initialize_sentry(app)
 
     from app.views.base import setup_base_routes

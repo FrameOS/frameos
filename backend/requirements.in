@@ -1,11 +1,10 @@
-gevent==23.7.0
-gevent-websocket
+eventlet
 flask
 Flask-migrate
 flask_socketio
 flask_sqlalchemy
-gevent-websocket
-Flask-Sockets
+flask-sock
+gunicorn
 sqlalchemy
 huey
 honcho

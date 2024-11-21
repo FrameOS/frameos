@@ -7,7 +7,7 @@ proc main() {.async.} =
       let data = parseFile("./frame.json")
       let serverHost = data{"serverHost"}.getStr()
       let serverPort = data{"serverPort"}.getInt()
-      let url = &"ws://{serverHost}:{serverPort}/ws/agent"
+      let url = &"ws://{serverHost}:{serverPort}/ws"
       let welcomePayload = %*{
         "apiKey": data{"serverApiKey"}.getStr(),
         "frameHost": data{"frameHost"}.getStr(),
@@ -16,6 +16,7 @@ proc main() {.async.} =
       echo &"Connecting to {url}"
       var ws = await newWebSocket(url)
       echo "Connected"
+      attempts = 0
       await ws.send($welcomePayload)
       echo "Sent welcome message"
       while true:
@@ -28,7 +29,6 @@ proc main() {.async.} =
     except Exception as e:
       echo "Error"
       echo e.msg
-
     if attempts < 60:
       attempts += 1
     echo &"Retrying in {attempts} seconds"

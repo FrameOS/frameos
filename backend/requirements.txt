@@ -44,8 +44,11 @@ decorator==5.1.1
 distlib==0.3.8
     # via virtualenv
 dnspython==2.4.2
-    # via email-validator
+    # via
+    #   email-validator
+    #   eventlet
 email-validator==2.0.0.post2
+eventlet==0.38.0
 executing==1.2.0
     # via stack-data
 filelock==3.13.1
@@ -54,26 +57,23 @@ flask==2.3.2
     # via
     #   flask-login
     #   flask-migrate
+    #   flask-sock
     #   flask-socketio
-    #   flask-sockets
     #   flask-sqlalchemy
     #   flask-wtf
     #   sentry-sdk
 flask-login==0.6.3
 flask-migrate==4.0.4
+flask-sock==0.7.0
 flask-socketio==5.3.5
-flask-sockets==0.2.1
 flask-sqlalchemy==3.0.5
     # via flask-migrate
 flask-wtf==1.2.1
-gevent==23.7.0
-    # via
-    #   flask-sockets
-    #   gevent-websocket
-gevent-websocket==0.10.1
-    # via flask-sockets
-greenlet==2.0.2
-    # via gevent
+greenlet==3.1.1
+    # via eventlet
+gunicorn==23.0.0
+h11==0.14.0
+    # via wsproto
 honcho==1.1.0
 huey==2.4.5
 identify==2.5.33
@@ -117,6 +117,7 @@ numpy==1.26.4
 packaging==23.2
     # via
     #   build
+    #   gunicorn
     #   pytest
 paramiko==3.3.1
     # via scp
@@ -170,8 +171,8 @@ setuptools==75.5.0
     # via
     #   nodeenv
     #   pip-tools
-    #   zope-event
-    #   zope-interface
+simple-websocket==1.1.0
+    # via flask-sock
 six==1.16.0
     # via asttokens
 sqlalchemy==2.0.19
@@ -202,9 +203,7 @@ werkzeug==2.3.6
     #   flask-login
 wheel==0.41.3
     # via pip-tools
+wsproto==1.2.0
+    # via simple-websocket
 wtforms==3.0.1
     # via flask-wtf
-zope-event==5.0
-    # via gevent
-zope-interface==6.1
-    # via gevent

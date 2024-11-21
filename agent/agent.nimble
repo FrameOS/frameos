@@ -9,6 +9,7 @@ binDir        = "build"
 bin           = @["agent"]  
 
 
+
 # Dependencies
 
 requires "chrono >= 0.3.1"
@@ -20,3 +21,7 @@ requires "ws >= 0.5.0"
 
 task test, "Run tests":
   exec "testament pattern './src/tests/*.nim' --lineTrace:on"
+
+
+task build, "Build the agent":
+  exec "nimble build -d:release -d:ssl"

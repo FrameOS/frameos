@@ -33,4 +33,17 @@ All demo frames (of the same type) that are up for sale would be running the sam
 
 To swap accounts, enter a pairing code. s
 
+Secure by default!
+- Each frame can have a "connection mode".
+  - SSH
+  - Agent
 
+
+What will the agent do?
+- Maintains a connection with the host. 
+- Maintains a SECURE connection with the host.
+- Send logs to the host
+- Receive commands from the host to send files
+- Receive commands from the host to run commands
+- Receive commands from the host to update frameos
+- Proxy a terminal session into the frame to the host
