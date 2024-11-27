@@ -1,21 +1,25 @@
-from flask import request
-from . import api
+from fastapi import APIRouter, Request, HTTPException, status
 from app.models.frame import Frame
 from app.models.log import process_log
 
-@api.route('/log', methods=["POST"])
-def api_log():
+router = APIRouter()
+
+@router.post("/")
+async def api_log(request: Request):
+    print("!!!!!!!")
     auth_header = request.headers.get('Authorization')
     if not auth_header:
-        return 'Unauthorized', 401  # Or handle the missing header as appropriate
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
+    print(auth_header)
 
     server_api_key = auth_header.split(' ')[1]
     frame = Frame.query.filter_by(server_api_key=server_api_key).first()
 
     if not frame:
-        return 'Unauthorized', 401
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
-    data = request.json
+    data = await request.json()
     if log := data.get('log', None):
         process_log(frame, log)
 
@@ -23,4 +27,4 @@ def api_log():
         for log in logs:
             process_log(frame, log)
 
-    return 'OK', 200
+    return {"message": "OK"}

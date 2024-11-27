@@ -1,13 +1,11 @@
-from flask import Blueprint
+from fastapi import APIRouter
 
-api = Blueprint('api', __name__)
+# Import all route modules
+from .frames import router as frames_router
+from .log import router as log_router
 
-from .apps import *
-from .frames import *
-from .log import *
-from .login import *
-from .repositories import *
-from .signup import *
-from .settings import *
-from .templates import *
-from .misc import *
+api_router = APIRouter()
+
+# Include the routers
+api_router.include_router(frames_router, prefix="/frames")
+api_router.include_router(log_router, prefix="/log")

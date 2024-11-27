@@ -1,11 +1,13 @@
 fastapi[standard]
+sqlmodel
+passlib
 
-gevent==23.7.0
-gevent-websocket
-flask
-Flask-migrate
-flask_socketio
-flask_sqlalchemy
+# gevent==23.7.0
+# gevent-websocket
+# flask
+# Flask-migrate
+# flask_socketio
+# flask_sqlalchemy
 
 sqlalchemy
 huey

@@ -1,14 +1,23 @@
-from app import db
-from flask_login import UserMixin
-from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy import Column, Integer, String
+from sqlalchemy.ext.declarative import declarative_base
+from passlib.context import CryptContext
 
-class User(db.Model, UserMixin):
-    id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(120), unique=True)
-    password = db.Column(db.String(128))
+# SQLAlchemy Base
+Base = declarative_base()
 
-    def set_password(self, password):
-        self.password = generate_password_hash(password)
+# Password hashing context
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-    def check_password(self, password):
-        return check_password_hash(self.password, password)
+
+class User(Base):
+    __tablename__ = "user"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(120), unique=True, nullable=False)
+    password = Column(String(128), nullable=False)
+
+    def set_password(self, password: str):
+        self.password = pwd_context.hash(password)
+
+    def check_password(self, password: str) -> bool:
+        return pwd_context.verify(password, self.password)

@@ -1,58 +1,71 @@
 import json
 import os
 from datetime import timezone
-from app import db, socketio, redis
-from typing import Optional
-from sqlalchemy.dialects.sqlite import JSON
+from typing import Optional, Dict, Any, Set
 
-from app.models.apps import get_app_configs
-from app.models.settings import get_settings_dict
-from app.utils.token import secure_token
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, JSON
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import Session
+
+# from .apps import get_app_configs
+# from .settings import get_settings_dict
+# from ..utils.token import secure_token
+
+def secure_token(length: int) -> str:
+    return "token" # TODO
+def get_app_configs() -> Dict[str, Any]:
+    return {} # TODO
+def get_settings_dict() -> Dict[str, Any]:
+    return {} # TODO
+
+# SQLAlchemy Base
+Base = declarative_base()
 
 
-# NB! Update frontend/src/types.tsx if you change this
-class Frame(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(256), nullable=False)
-    # sending commands to frame
-    frame_host = db.Column(db.String(256), nullable=False)
-    frame_port = db.Column(db.Integer, default=8787)
-    frame_access_key = db.Column(db.String(256), nullable=True)
-    frame_access = db.Column(db.String(50), nullable=True)
-    ssh_user = db.Column(db.String(50), nullable=True)
-    ssh_pass = db.Column(db.String(50), nullable=True)
-    ssh_port = db.Column(db.Integer, default=22)
-    # receiving logs, connection from frame to us
-    server_host = db.Column(db.String(256), nullable=True)
-    server_port = db.Column(db.Integer, default=8989)
-    server_api_key = db.Column(db.String(64), nullable=True)
-    # frame metadata
-    status = db.Column(db.String(15), nullable=False)
-    version = db.Column(db.String(50), nullable=True)
-    width = db.Column(db.Integer, nullable=True)
-    height = db.Column(db.Integer, nullable=True)
-    device = db.Column(db.String(256), nullable=True)
-    color = db.Column(db.String(256), nullable=True)
-    interval = db.Column(db.Double, default=300)
-    metrics_interval = db.Column(db.Double, default=60)
-    scaling_mode = db.Column(db.String(64), nullable=True)  # contain (default), cover, stretch, center
-    rotate = db.Column(db.Integer, nullable=True)
-    log_to_file = db.Column(db.String(256), nullable=True)
-    assets_path = db.Column(db.String(256), nullable=True)
-    save_assets = db.Column(JSON, nullable=True)
-    debug = db.Column(db.Boolean, nullable=True)
-    last_log_at = db.Column(db.DateTime, nullable=True)
-    reboot = db.Column(JSON, nullable=True)
-    control_code = db.Column(JSON, nullable=True)
-    # apps
-    apps = db.Column(JSON, nullable=True)
-    scenes = db.Column(JSON, nullable=True)
+class Frame(Base):
+    __tablename__ = "frame"
 
-    # deprecated
-    image_url = db.Column(db.String(256), nullable=True)
-    background_color = db.Column(db.String(64), nullable=True) # still used as fallback in frontend
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(256), nullable=False)
+    # Sending commands to frame
+    frame_host = Column(String(256), nullable=False)
+    frame_port = Column(Integer, default=8787)
+    frame_access_key = Column(String(256), nullable=True)
+    frame_access = Column(String(50), nullable=True)
+    ssh_user = Column(String(50), nullable=True)
+    ssh_pass = Column(String(50), nullable=True)
+    ssh_port = Column(Integer, default=22)
+    # Receiving logs, connection from frame to us
+    server_host = Column(String(256), nullable=True)
+    server_port = Column(Integer, default=8989)
+    server_api_key = Column(String(64), nullable=True)
+    # Frame metadata
+    status = Column(String(15), nullable=False)
+    version = Column(String(50), nullable=True)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    device = Column(String(256), nullable=True)
+    color = Column(String(256), nullable=True)
+    interval = Column(Float, default=300)
+    metrics_interval = Column(Float, default=60)
+    scaling_mode = Column(String(64), nullable=True)  # contain (default), cover, stretch, center
+    rotate = Column(Integer, nullable=True)
+    log_to_file = Column(String(256), nullable=True)
+    assets_path = Column(String(256), nullable=True)
+    save_assets = Column(JSON, nullable=True)
+    debug = Column(Boolean, nullable=True)
+    last_log_at = Column(DateTime, nullable=True)
+    reboot = Column(JSON, nullable=True)
+    control_code = Column(JSON, nullable=True)
+    # Apps
+    apps = Column(JSON, nullable=True)
+    scenes = Column(JSON, nullable=True)
 
-    def to_dict(self):
+    # Deprecated
+    image_url = Column(String(256), nullable=True)
+    background_color = Column(String(64), nullable=True)  # still used as fallback in frontend
+
+    def to_dict(self) -> Dict[str, Any]:
         return {
             'id': self.id,
             'name': self.name,
@@ -87,7 +100,15 @@ class Frame(db.Model):
             'control_code': self.control_code,
         }
 
-def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:
+
+def new_frame(
+    db: Session,
+    name: str,
+    frame_host: str,
+    server_host: str,
+    device: Optional[str] = None,
+    interval: Optional[float] = None
+) -> Frame:
     if '@' in frame_host:
         user_pass, frame_host = frame_host.split('@')
     else:
@@ -129,47 +150,54 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         scaling_mode="contain",
         rotate=0,
         device=device or "web_only",
-        log_to_file=None, # spare the SD card from load
+        log_to_file=None,  # Spare the SD card from load
         assets_path='/srv/assets',
         save_assets=True,
         control_code={"enabled": "true", "position": "top-right"},
         reboot={"enabled": "true", "crontab": "4 0 * * *"},
     )
-    db.session.add(frame)
-    db.session.commit()
-    socketio.emit('new_frame', frame.to_dict())
+    db.add(frame)
+    db.commit()
+    db.refresh(frame)
+    # You may need to implement socketio.emit in FastAPI
+    # socketio.emit('new_frame', frame.to_dict())
 
-    from app.models import new_log
-    new_log(frame.id, "welcome", f"The frame \"{frame.name}\" has been created!")
+    # Implement your own logging mechanism or use a logger
+    # new_log(frame.id, "welcome", f"The frame \"{frame.name}\" has been created!")
 
     return frame
 
 
-def update_frame(frame: Frame):
-    db.session.add(frame)
-    db.session.commit()
-    socketio.emit('update_frame', frame.to_dict())
+def update_frame(db: Session, frame: Frame):
+    db.add(frame)
+    db.commit()
+    db.refresh(frame)
+    # You may need to implement socketio.emit in FastAPI
+    # socketio.emit('update_frame', frame.to_dict())
 
 
-def delete_frame(frame_id: int):
-    if frame := Frame.query.get(frame_id):
-        # delete corresonding log and metric entries first
+def delete_frame(db: Session, frame_id: int):
+    frame = db.query(Frame).get(frame_id)
+    if frame:
+        # Delete corresponding log and metric entries first
         from .log import Log
-        Log.query.filter_by(frame_id=frame_id).delete()
+        db.query(Log).filter_by(frame_id=frame_id).delete()
         from .metrics import Metrics
-        Metrics.query.filter_by(frame_id=frame_id).delete()
+        db.query(Metrics).filter_by(frame_id=frame_id).delete()
 
-        cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
-        redis.delete(cache_key)
+        # cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+        # Adjust Redis usage as needed in FastAPI
+        # redis.delete(cache_key)
 
-        db.session.delete(frame)
-        db.session.commit()
-        socketio.emit('delete_frame', {'id': frame_id})
+        db.delete(frame)
+        db.commit()
+        # You may need to implement socketio.emit in FastAPI
+        # socketio.emit('delete_frame', {'id': frame_id})
         return True
     return False
 
 
-def get_templates_json() -> dict:
+def get_templates_json() -> Dict[str, Any]:
     templates_schema_path = os.path.join("..", "frontend", "schema", "templates.json")
     if os.path.exists(templates_schema_path):
         with open(templates_schema_path, 'r') as file:
@@ -177,7 +205,8 @@ def get_templates_json() -> dict:
     else:
         return {}
 
-def get_frame_json(frame: Frame) -> dict:
+
+def get_frame_json(db: Session, frame: Frame) -> Dict[str, Any]:
     frame_json = {
         "name": frame.name,
         "frameHost": frame.frame_host or "localhost",
@@ -199,7 +228,7 @@ def get_frame_json(frame: Frame) -> dict:
         "saveAssets": frame.save_assets,
     }
 
-    setting_keys = set()
+    setting_keys: Set[str] = set()
     app_configs = get_app_configs()
     for scene in frame.scenes:
         for node in scene.get('nodes', []):
