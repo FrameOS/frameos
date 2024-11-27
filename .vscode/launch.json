@@ -3,12 +3,11 @@
     "configurations": [
         {
             "name": "Python: FastAPI",
-            "type": "debugpy",
+            "type": "python",
             "request": "launch",
-            "program": "env/bin/fastapi",
+            "program": "${workspaceFolder}/backend/env/bin/uvicorn",
             "args": [
-                "dev",
-                "main.py",
+                "main:app",
                 "--host",
                 "0.0.0.0",
                 "--port",

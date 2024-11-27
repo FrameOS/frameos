@@ -4,8 +4,8 @@ from datetime import timezone
 from typing import Optional, Dict, Any, Set
 
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, JSON
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session
+from ..database import Base
 
 # from .apps import get_app_configs
 # from .settings import get_settings_dict
@@ -17,9 +17,6 @@ def get_app_configs() -> Dict[str, Any]:
     return {} # TODO
 def get_settings_dict() -> Dict[str, Any]:
     return {} # TODO
-
-# SQLAlchemy Base
-Base = declarative_base()
 
 
 class Frame(Base):
