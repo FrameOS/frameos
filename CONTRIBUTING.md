@@ -10,7 +10,7 @@ Python >= 3.11
 `nim >=2.0.0` (https://nim-lang.org/install.html)
 (Note that Debian distros have only packaged `1.6.x` as of Jan 2024)
 
-## FrameOS Controller
+## FrameOS Backend
 
 
 ```bash
@@ -44,6 +44,7 @@ flask db migrate -m "something changed"
 # apply the migrations
 flask db upgrade
 ```
+
 ## Installing pre-commit
 
 ```bash
@@ -62,7 +63,7 @@ cd backend
 bin/tests
 ```
 
-## FrameOS on-device software
+## FrameOS on-frame software
 
 Running it natively on a Mac will fail with
 
@@ -75,7 +76,7 @@ So we use Docker:
 
 ```bash
 cd frameos
-docker build -t frameos . && docker run -t -i frameos python3 test.py
+docker build -t frameos-frame . && docker run -t -i frameos python3 test.py
 ```
 
 # TODO
