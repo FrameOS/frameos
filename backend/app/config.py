@@ -13,7 +13,6 @@ class DevelopmentConfig(Config):
 class TestConfig(Config):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
-    WTF_CSRF_ENABLED = False
 
 class ProductionConfig(Config):
     pass
@@ -26,6 +25,6 @@ configs = {
 }
 
 def get_config() -> Config:
-    config_name = os.getenv('FLASK_CONFIG') or 'default'
+    config_name = os.getenv('APP_ENV') or 'default'
     config_class = configs.get(config_name)
     return config_class or cast(Config, configs['default'])
