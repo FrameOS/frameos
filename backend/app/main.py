@@ -5,11 +5,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-
-from app.api import api_router
+from app.routers import auth, frames
 
 app = FastAPI()
-app.include_router(api_router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
+app.include_router(frames.router, prefix="/api")
 
 app.mount("/assets", StaticFiles(directory="../frontend/dist/assets"), name="assets")
 app.mount("/img", StaticFiles(directory="../frontend/dist/img"), name="img")

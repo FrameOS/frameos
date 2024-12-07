@@ -1,6 +1,7 @@
 fastapi[standard]
 sqlmodel
 passlib
+jwt
 
 # gevent==23.7.0
 # gevent-websocket
