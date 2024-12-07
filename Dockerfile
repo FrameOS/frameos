@@ -82,4 +82,4 @@ RUN rm -rf /app/frontend && mv /tmp/frontend /app/
 EXPOSE 8989
 
 # Start huey in the background and then run the Flask application
-CMD ["bash", "-c", "(redis-server --daemonize yes) && (cd backend && source .venv/bin/activate && flask db upgrade) && (cd backend && source .venv/bin/activate && huey_consumer.py app.huey.huey --worker-type=greenlet --workers=10 --flush-locks) & (cd backend && source .venv/bin/activate && python3 run.py)"]
+CMD ["./docker-entrypoint.sh"]
