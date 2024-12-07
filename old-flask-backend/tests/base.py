@@ -4,7 +4,7 @@ import unittest
 from flask import Flask
 from app import create_app, db
 from app.models import User
-from config import TestConfig
+from backend.app.config import TestConfig
 
 class BaseTestCase(unittest.TestCase):
     app: Flask = None

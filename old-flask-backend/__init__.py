@@ -12,7 +12,7 @@ from flask_login import LoginManager
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_socketio import SocketIO
-from config import Config, get_config
+from backend.app.config import Config, get_config
 from urllib.parse import urlparse
 from redis import Redis
 
