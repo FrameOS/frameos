@@ -1,7 +1,4 @@
 import json
-from gevent import monkey
-monkey.patch_all()
-
 from app.drivers.waveshare import get_variant_keys, convert_waveshare_source
 
 if __name__ == '__main__':

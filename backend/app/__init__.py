@@ -1,7 +1,7 @@
 from typing import Optional
 
-from gevent import monkey
-monkey.patch_all()
+# from gevent import monkey
+# monkey.patch_all()
 
 import sentry_sdk
 import os
@@ -67,6 +67,7 @@ def create_app(config: Optional[Config] = None):
     setup_base_routes(app)
 
     from app.api import api as api_blueprint
-    app.register_blueprint(api_blueprint, url_prefix='/api')
+    # app.register_blueprint(api_blueprint, url_prefix='/api')
+    app.register_blueprint(api_blueprint)
 
     return app

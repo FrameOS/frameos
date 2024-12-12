@@ -1,9 +1,13 @@
-gevent==23.7.0
-gevent-websocket
+fastapi[standard]
+sqlmodel
+passlib
+jwt
+
 flask
 Flask-migrate
 flask_socketio
 flask_sqlalchemy
+
 sqlalchemy
 huey
 honcho
