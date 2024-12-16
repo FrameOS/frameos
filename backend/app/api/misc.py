@@ -1,10 +1,8 @@
 from flask import jsonify
-from flask_login import login_required
 from . import api
 
 
 @api.route("/generate_ssh_keys", methods=["POST"])
-@login_required
 def generate_ssh_keys():
     from cryptography.hazmat.primitives.asymmetric import rsa
     from cryptography.hazmat.primitives import serialization
@@ -14,7 +12,7 @@ def generate_ssh_keys():
             public_exponent=65537,
             key_size=3072,
         )
-    except:
+    except:  # noqa: E722
         return jsonify(error="Key generation error"), 500
 
     public_key = private_key.public_key()

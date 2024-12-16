@@ -2,12 +2,15 @@ import secrets
 import unittest
 
 from flask import Flask
-from app import create_app, db
+from app.flask import create_app
 from app.models import User
-from config import TestConfig
+from app.config import TestConfig
+from sqlalchemy.orm import Session
+from ..database import SessionLocal
 
 class BaseTestCase(unittest.TestCase):
-    app: Flask = None
+    app: Flask
+    db: Session
 
     @classmethod
     def setUpClass(cls):
@@ -17,11 +20,14 @@ class BaseTestCase(unittest.TestCase):
     def setUp(self):
         self.app_context = self.app.test_request_context()
         self.app_context.push()
-        db.drop_all()
-        db.create_all()
+        self.db = SessionLocal()
         self.app.config['SECRET_KEY'] = secrets.token_hex(32)
         self.init_user()
         self.init_tests()
+
+    def tearDown(self):
+        self.db.close()
+        self.app_context.pop()
 
     def init_user(self):
         self.create_user( "test@example.com", "testpassword")
@@ -31,17 +37,14 @@ class BaseTestCase(unittest.TestCase):
     def init_tests(self):
         pass
 
-    def tearDown(self):
-        self.app_context.pop()
-
     def create_user(self, email, password):
         try:
             user = User(email=email)
             user.set_password(password)
-            db.session.add(user)
-            db.session.commit()
+            self.db.add(user)
+            self.db.commit()
         except:
-            db.session.rollback()
+            self.db.rollback()
             raise
 
     def login(self, email, password):

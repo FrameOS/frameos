@@ -4,17 +4,18 @@ import json
 
 from flask import Flask, current_app, flash, redirect, request, jsonify
 from flask_login import current_user
-from app import login_manager
+from app.flask import login_manager
+from sqlalchemy.orm import Session
 
-def has_first_user():
+def has_first_user(db: Session):
     from app.models import User
-    return User.query.first() is not None
+    return db.query(User).first() is not None
 
-def setup_base_routes(app: Flask):
+def setup_base_routes(app: Flask, db: Session):
     @login_manager.user_loader
     def load_user(user_id):
         from app.models import User
-        return User.query.get(int(user_id))
+        return db.query(User).get(int(user_id))
 
     @login_manager.unauthorized_handler
     def unauthorized():

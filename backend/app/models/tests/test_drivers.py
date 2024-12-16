@@ -6,7 +6,7 @@ class TestDrivers(BaseTestCase):
 
     def setUp(self):
         super().setUp()
-        self.frame = new_frame("frame", "pi@192.168.1.1:8787", "server_host.com", "device_test")
+        self.frame = new_frame(self.db, "frame", "pi@192.168.1.1:8787", "server_host.com", "device_test")
 
     def test_waveshare_variants(self):
         variants = get_variant_keys()

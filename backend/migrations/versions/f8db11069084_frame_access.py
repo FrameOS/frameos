@@ -23,7 +23,7 @@ def upgrade():
         batch_op.add_column(sa.Column('frame_access', sa.String(length=50), nullable=True))
 
     from app.models import Frame
-    from app import db
+    from backend.app.flask import db
 
     frames = db.session.query(Frame.id).all()
     for (frame_id,) in frames:

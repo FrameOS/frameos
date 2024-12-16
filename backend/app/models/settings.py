@@ -1,10 +1,13 @@
-from app import db
+from sqlalchemy import Integer, String
+from sqlalchemy.orm import Session, mapped_column
+from app.database import Base
 from sqlalchemy.dialects.sqlite import JSON
 
-class Settings(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    key = db.Column(db.String(128), nullable=False)
-    value = db.Column(JSON, nullable=True)
+class Settings(Base):
+    __tablename__ = 'settings'
+    id = mapped_column(Integer, primary_key=True)
+    key = mapped_column(String(128), nullable=False)
+    value = mapped_column(JSON, nullable=True)
 
     def to_dict(self):
         return {
@@ -14,5 +17,5 @@ class Settings(db.Model):
         }
 
 
-def get_settings_dict() -> dict:
-    return {setting.key: setting.value for setting in Settings.query.all()}
+def get_settings_dict(db: Session) -> dict:
+    return {setting.key: setting.value for setting in db.query(Settings).all()}

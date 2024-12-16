@@ -1,56 +1,61 @@
 import json
 import os
 from datetime import timezone
-from app import db, socketio, redis
+from app.redis import redis
 from typing import Optional
 from sqlalchemy.dialects.sqlite import JSON
+from sqlalchemy import Integer, String, Double, DateTime, Boolean
+from sqlalchemy.orm import Session, mapped_column
+from app.database import Base
 
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
 from app.utils.token import secure_token
+from app.views.ws_broadcast import publish_message
 
 
 # NB! Update frontend/src/types.tsx if you change this
-class Frame(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(256), nullable=False)
+class Frame(Base):
+    __tablename__ = 'frame'
+    id = mapped_column(Integer, primary_key=True)
+    name = mapped_column(String(256), nullable=False)
     # sending commands to frame
-    frame_host = db.Column(db.String(256), nullable=False)
-    frame_port = db.Column(db.Integer, default=8787)
-    frame_access_key = db.Column(db.String(256), nullable=True)
-    frame_access = db.Column(db.String(50), nullable=True)
-    ssh_user = db.Column(db.String(50), nullable=True)
-    ssh_pass = db.Column(db.String(50), nullable=True)
-    ssh_port = db.Column(db.Integer, default=22)
+    frame_host = mapped_column(String(256), nullable=False)
+    frame_port = mapped_column(Integer, default=8787)
+    frame_access_key = mapped_column(String(256), nullable=True)
+    frame_access = mapped_column(String(50), nullable=True)
+    ssh_user = mapped_column(String(50), nullable=True)
+    ssh_pass = mapped_column(String(50), nullable=True)
+    ssh_port = mapped_column(Integer, default=22)
     # receiving logs, connection from frame to us
-    server_host = db.Column(db.String(256), nullable=True)
-    server_port = db.Column(db.Integer, default=8989)
-    server_api_key = db.Column(db.String(64), nullable=True)
+    server_host = mapped_column(String(256), nullable=True)
+    server_port = mapped_column(Integer, default=8989)
+    server_api_key = mapped_column(String(64), nullable=True)
     # frame metadata
-    status = db.Column(db.String(15), nullable=False)
-    version = db.Column(db.String(50), nullable=True)
-    width = db.Column(db.Integer, nullable=True)
-    height = db.Column(db.Integer, nullable=True)
-    device = db.Column(db.String(256), nullable=True)
-    color = db.Column(db.String(256), nullable=True)
-    interval = db.Column(db.Double, default=300)
-    metrics_interval = db.Column(db.Double, default=60)
-    scaling_mode = db.Column(db.String(64), nullable=True)  # contain (default), cover, stretch, center
-    rotate = db.Column(db.Integer, nullable=True)
-    log_to_file = db.Column(db.String(256), nullable=True)
-    assets_path = db.Column(db.String(256), nullable=True)
-    save_assets = db.Column(JSON, nullable=True)
-    debug = db.Column(db.Boolean, nullable=True)
-    last_log_at = db.Column(db.DateTime, nullable=True)
-    reboot = db.Column(JSON, nullable=True)
-    control_code = db.Column(JSON, nullable=True)
+    status = mapped_column(String(15), nullable=False)
+    version = mapped_column(String(50), nullable=True)
+    width = mapped_column(Integer, nullable=True)
+    height = mapped_column(Integer, nullable=True)
+    device = mapped_column(String(256), nullable=True)
+    color = mapped_column(String(256), nullable=True)
+    interval = mapped_column(Double, default=300)
+    metrics_interval = mapped_column(Double, default=60)
+    scaling_mode = mapped_column(String(64), nullable=True)  # contain (default), cover, stretch, center
+    rotate = mapped_column(Integer, nullable=True)
+    log_to_file = mapped_column(String(256), nullable=True)
+    assets_path = mapped_column(String(256), nullable=True)
+    save_assets = mapped_column(JSON, nullable=True)
+    debug = mapped_column(Boolean, nullable=True)
+    last_log_at = mapped_column(DateTime, nullable=True)
+    reboot = mapped_column(JSON, nullable=True)
+    control_code = mapped_column(JSON, nullable=True)
     # apps
-    apps = db.Column(JSON, nullable=True)
-    scenes = db.Column(JSON, nullable=True)
+    apps = mapped_column(JSON, nullable=True)
+    scenes = mapped_column(JSON, nullable=True, default=list)
 
     # deprecated
-    image_url = db.Column(db.String(256), nullable=True)
-    background_color = db.Column(db.String(64), nullable=True) # still used as fallback in frontend
+    image_url = mapped_column(String(256), nullable=True)
+    background_color = mapped_column(String(64), nullable=True) # still used as fallback in frontend
 
     def to_dict(self):
         return {
@@ -87,16 +92,16 @@ class Frame(db.Model):
             'control_code': self.control_code,
         }
 
-def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:
+async def new_frame(db: Session, name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:
     if '@' in frame_host:
         user_pass, frame_host = frame_host.split('@')
     else:
         user_pass, frame_host = 'pi', frame_host
 
     if ':' in frame_host:
-        frame_host, ssh_port = frame_host.split(':')
-        ssh_port = int(ssh_port or '22')
-        if int(ssh_port) > 65535 or int(ssh_port) < 0:
+        frame_host, ssh_port_initial = frame_host.split(':')
+        ssh_port = int(ssh_port_initial or '22')
+        if ssh_port > 65535 or ssh_port < 0:
             raise ValueError("Invalid frame port")
     else:
         ssh_port = 22
@@ -107,7 +112,8 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         user, password = user_pass, None
 
     if ':' in server_host:
-        server_host, server_port = server_host.split(':')
+        server_host, server_port_initial = server_host.split(':')
+        server_port = int(server_port_initial or '8989')
     else:
         server_port = 8989
 
@@ -135,36 +141,36 @@ def new_frame(name: str, frame_host: str, server_host: str, device: Optional[str
         control_code={"enabled": "true", "position": "top-right"},
         reboot={"enabled": "true", "crontab": "4 0 * * *"},
     )
-    db.session.add(frame)
-    db.session.commit()
-    socketio.emit('new_frame', frame.to_dict())
+    db.add(frame)
+    db.commit()
+    await publish_message("new_frame", frame.to_dict())
 
     from app.models import new_log
-    new_log(frame.id, "welcome", f"The frame \"{frame.name}\" has been created!")
+    await new_log(db, int(frame.id), "welcome", f"The frame \"{frame.name}\" has been created!")
 
     return frame
 
 
-def update_frame(frame: Frame):
-    db.session.add(frame)
-    db.session.commit()
-    socketio.emit('update_frame', frame.to_dict())
+async def update_frame(db: Session, frame: Frame):
+    db.add(frame)
+    db.commit()
+    await publish_message("update_frame", frame.to_dict())
 
 
-def delete_frame(frame_id: int):
-    if frame := Frame.query.get(frame_id):
+async def delete_frame(db: Session, frame_id: int):
+    if frame := db.query(Frame).get(frame_id):
         # delete corresonding log and metric entries first
         from .log import Log
-        Log.query.filter_by(frame_id=frame_id).delete()
+        db.query(Log).filter_by(frame_id=frame_id).delete()
         from .metrics import Metrics
-        Metrics.query.filter_by(frame_id=frame_id).delete()
+        db.query(Metrics).filter_by(frame_id=frame_id).delete()
 
         cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
         redis.delete(cache_key)
 
-        db.session.delete(frame)
-        db.session.commit()
-        socketio.emit('delete_frame', {'id': frame_id})
+        db.delete(frame)
+        db.commit()
+        await publish_message("delete_frame", {"id": frame_id})
         return True
     return False
 
@@ -177,8 +183,8 @@ def get_templates_json() -> dict:
     else:
         return {}
 
-def get_frame_json(frame: Frame) -> dict:
-    frame_json = {
+def get_frame_json(db, frame: Frame) -> dict:
+    frame_json: dict = {
         "name": frame.name,
         "frameHost": frame.frame_host or "localhost",
         "framePort": frame.frame_port or 8787,
@@ -201,7 +207,7 @@ def get_frame_json(frame: Frame) -> dict:
 
     setting_keys = set()
     app_configs = get_app_configs()
-    for scene in frame.scenes:
+    for scene in list(frame.scenes):
         for node in scene.get('nodes', []):
             if node.get('type', None) == 'app':
                 sources = node.get('data', {}).get('sources', None)
@@ -212,7 +218,7 @@ def get_frame_json(frame: Frame) -> dict:
                         settings = config.get('settings', [])
                         for key in settings:
                             setting_keys.add(key)
-                    except:
+                    except:  # noqa: E722
                         pass
                 else:
                     keyword = node.get('data', {}).get('keyword', None)
@@ -223,7 +229,7 @@ def get_frame_json(frame: Frame) -> dict:
                             for key in settings:
                                 setting_keys.add(key)
 
-    all_settings = get_settings_dict()
+    all_settings = get_settings_dict(db)
     final_settings = {}
     for key in setting_keys:
         final_settings[key] = all_settings.get(key, None)

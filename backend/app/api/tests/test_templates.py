@@ -1,5 +1,4 @@
 import json
-from app import db
 from app.models import Template
 from app.tests.base import BaseTestCase
 
@@ -13,7 +12,7 @@ class TestTemplateAPI(BaseTestCase):
         }
         response = self.client.post('/api/templates', json=data)
         self.assertEqual(response.status_code, 201)
-        new_template = Template.query.filter_by(name='New Template').first()
+        new_template = self.db.query(Template).filter_by(name='New Template').first()
         self.assertIsNotNone(new_template)
 
     def test_get_templates(self):
@@ -24,8 +23,8 @@ class TestTemplateAPI(BaseTestCase):
 
     def test_get_template(self):
         template = Template(name='Test Template')
-        db.session.add(template)
-        db.session.commit()
+        self.db.add(template)
+        self.db.commit()
 
         response = self.client.get(f'/api/templates/{template.id}')
         self.assertEqual(response.status_code, 200)
@@ -35,31 +34,31 @@ class TestTemplateAPI(BaseTestCase):
 
     def test_update_template(self):
         template = Template(name='Old Template')
-        db.session.add(template)
-        db.session.commit()
+        self.db.add(template)
+        self.db.commit()
 
         data = {'name': 'Updated Template'}
         response = self.client.patch(f'/api/templates/{template.id}', json=data)
         self.assertEqual(response.status_code, 200)
-        updated_template = Template.query.get(template.id)
+        updated_template = self.db.query(Template).get(template.id)
         self.assertEqual(updated_template.name, 'Updated Template')
 
     def test_delete_template(self):
         template = Template(name='Test Template')
-        db.session.add(template)
-        db.session.commit()
+        self.db.add(template)
+        self.db.commit()
 
         response = self.client.delete(f'/api/templates/{template.id}')
         self.assertEqual(response.status_code, 200)
-        deleted_template = Template.query.get(template.id)
+        deleted_template = self.db.query(Template).get(template.id)
         self.assertIsNone(deleted_template)
 
     # def test_get_template_image(self):
     #     with open('test_image.jpg', 'rb') as img_file:
     #         image_data = img_file.read()
     #     template = Template(name='Test Template', image=image_data)
-    #     db.session.add(template)
-    #     db.session.commit()
+    #     self.db.add(template)
+    #     self.db.commit()
     #
     #     response = self.client.get(f'/api/templates/{template.id}/image')
     #     self.assertEqual(response.status_code, 200)
@@ -67,8 +66,8 @@ class TestTemplateAPI(BaseTestCase):
 
     # def test_export_template(self):
     #     template = Template(name='Test Template', scenes=[], config={})
-    #     db.session.add(template)
-    #     db.session.commit()
+    #     self.db.add(template)
+    #     self.db.commit()
     #
     #     response = self.client.get(f'/api/templates/{template.id}/export')
     #     self.assertEqual(response.status_code, 200)

@@ -17,7 +17,7 @@ depends_on = None
 
 def upgrade():
     from app.models import Frame
-    from app import db
+    from backend.app.flask import db
     frames = Frame.query.options(load_only(Frame.id, Frame.scenes)).all()
     for frame in frames:
         frame.scenes = list(frame.scenes)
@@ -38,7 +38,7 @@ def upgrade():
 
 def downgrade():
     from app.models import Frame
-    from app import db
+    from backend.app.flask import db
     frames = Frame.query.all()
     for frame in frames:
         frame.scenes = list(frame.scenes)

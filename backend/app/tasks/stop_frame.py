@@ -1,35 +1,37 @@
 
 
-from app import create_app
 from app.huey import huey
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection
+from ..database import SessionLocal
 
 @huey.task()
-def stop_frame(id: int):
-    app = create_app()
-    with app.app_context():
+async def stop_frame(id: int):
+    with SessionLocal() as db:
         ssh = None
         try:
-            frame = Frame.query.get_or_404(id)
+            frame = db.query(Frame).get(id)
+            if not frame:
+                return
 
             frame.status = 'stopping'
-            update_frame(frame)
+            await update_frame(db, frame)
 
-            ssh = get_ssh_connection(frame)
-            exec_command(frame, ssh, "sudo systemctl stop frameos.service || true")
-            exec_command(frame, ssh, "sudo systemctl disable frameos.service")
+            ssh = await get_ssh_connection(db, frame)
+            await exec_command(db, frame, ssh, "sudo systemctl stop frameos.service || true")
+            await exec_command(db, frame, ssh, "sudo systemctl disable frameos.service")
 
             frame.status = 'stopped'
-            update_frame(frame)
+            await update_frame(db, frame)
 
         except Exception as e:
-            log(id, "stderr", str(e))
-            frame.status = 'uninitialized'
-            update_frame(frame)
+            await log(db, id, "stderr", str(e))
+            if frame:
+                frame.status = 'uninitialized'
+                await update_frame(db, frame)
         finally:
             if ssh is not None:
                 ssh.close()
-                log(id, "stdinfo", "SSH connection closed")
+                await log(db, id, "stdinfo", "SSH connection closed")
                 remove_ssh_connection(ssh)

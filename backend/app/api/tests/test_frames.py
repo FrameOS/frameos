@@ -1,15 +1,16 @@
 from unittest import mock
 
 from flask import json
-from app import models, redis
+from app import models
 from app.models import new_frame, new_log
 from app.tests.base import BaseTestCase, MockResponse
+from app.redis import redis
 
 
 class TestFrames(BaseTestCase):
 
     def init_tests(self):
-        self.frame = new_frame('Frame', 'localhost', 'localhost')
+        self.frame = new_frame(self.db, 'Frame', 'localhost', 'localhost')
 
     def test_api_frames(self):
         response = self.client.get('/api/frames')
@@ -28,8 +29,8 @@ class TestFrames(BaseTestCase):
         assert response.status_code == 404
 
     def test_api_frame_get_logs(self):
-        log1 = new_log(self.frame.id, 'logtype', "Test log 1")
-        log2 = new_log(self.frame.id, 'logtype', "Test log 2")
+        log1 = new_log(self.db, self.frame.id, 'logtype', "Test log 1")
+        log2 = new_log(self.db, self.frame.id, 'logtype', "Test log 2")
         response = self.client.get(f'/api/frames/{self.frame.id}/logs')
         data = json.loads(response.data)
         assert response.status_code == 200
@@ -37,7 +38,7 @@ class TestFrames(BaseTestCase):
 
     def test_api_frame_get_logs_limit(self):
         for i in range(0, 1010):
-            new_log(self.frame.id, 'logtype', "Test log 2")
+            new_log(self.db, self.frame.id, 'logtype', "Test log 2")
         response = self.client.get(f'/api/frames/{self.frame.id}/logs')
         data = json.loads(response.data)
         assert response.status_code == 200
@@ -116,7 +117,7 @@ class TestFrames(BaseTestCase):
     def test_api_frame_update_name(self):
         response = self.client.post(f'/api/frames/{self.frame.id}', json={'name': 'Updated Name'})
         assert response.status_code == 200
-        updated_frame = models.Frame.query.get(self.frame.id)
+        updated_frame = self.db.query(models.Frame).get(self.frame.id)
         assert updated_frame.name == 'Updated Name'
 
     def test_api_frame_update_a_lot(self):
@@ -134,7 +135,7 @@ class TestFrames(BaseTestCase):
             'scenes': json.dumps([{"sceneName": "Scene1"}, {"sceneName": "Scene2"}]),
         })
         assert response.status_code == 200
-        updated_frame = models.Frame.query.get(self.frame.id)
+        updated_frame = self.db.query(models.Frame).get(self.frame.id)
         assert updated_frame.name == 'Updated Name'
         assert updated_frame.frame_host == 'penguin'
         assert updated_frame.ssh_user == 'tux'
@@ -148,12 +149,12 @@ class TestFrames(BaseTestCase):
         assert updated_frame.scenes == [{"sceneName": "Scene1"}, {"sceneName": "Scene2"}]
 
     def test_api_frame_update_scenes_json_format(self):
-        frame = new_frame('Frame', 'localhost', 'localhost')
+        frame = new_frame(self.db, 'Frame', 'localhost', 'localhost')
 
         valid_scenes_json = json.dumps([{"sceneName": "Scene1"}, {"sceneName": "Scene2"}])
         response = self.client.post(f'/api/frames/{frame.id}', json={'scenes': valid_scenes_json})
         self.assertEqual(response.status_code, 200)
-        updated_frame = models.Frame.query.get(frame.id)
+        updated_frame = self.db.query(models.Frame).get(frame.id)
         self.assertEqual(updated_frame.scenes, json.loads(valid_scenes_json))
 
         invalid_scenes_json = "Not a valid JSON"
@@ -212,7 +213,7 @@ class TestFrames(BaseTestCase):
             return len(data['frames'])
 
         assert api_length() == 1
-        frame = new_frame('Frame', 'localhost', 'localhost')
+        frame = new_frame(self.db, 'Frame', 'localhost', 'localhost')
         assert api_length() == 2
         response = self.client.delete(f'/api/frames/{frame.id}')
         data = json.loads(response.data)

@@ -3,7 +3,6 @@ from unittest.mock import patch
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.tests.base import BaseTestCase
-from app import db
 from app.models import Repository
 
 class TestRepositoryAPI(BaseTestCase):
@@ -14,7 +13,7 @@ class TestRepositoryAPI(BaseTestCase):
         }
         response = self.client.post('/api/repositories', json=data)
         self.assertEqual(response.status_code, 201)
-        new_repo = Repository.query.first()
+        new_repo = self.db.query(Repository).first()
         self.assertIsNotNone(new_repo)
 
     def test_get_repositories(self):
@@ -28,8 +27,8 @@ class TestRepositoryAPI(BaseTestCase):
         # Test the GET /repositories/<repository_id> endpoint
         # Add a repository first
         repo = Repository(name='Test Repo', url='http://example.com/repo')
-        db.session.add(repo)
-        db.session.commit()
+        self.db.add(repo)
+        self.db.commit()
 
         response = self.client.get(f'/api/repositories/{repo.id}')
         self.assertEqual(response.status_code, 200)
@@ -40,8 +39,8 @@ class TestRepositoryAPI(BaseTestCase):
         # Test the PATCH /repositories/<repository_id> endpoint
         # Add a repository first
         repo = Repository(name='Test Repo', url='http://example.com/repo')
-        db.session.add(repo)
-        db.session.commit()
+        self.db.add(repo)
+        self.db.commit()
 
         updated_data = {
             'name': 'Updated Repo',
@@ -49,19 +48,19 @@ class TestRepositoryAPI(BaseTestCase):
         }
         response = self.client.patch(f'/api/repositories/{repo.id}', json=updated_data)
         self.assertEqual(response.status_code, 200)
-        updated_repo = Repository.query.get(repo.id)
+        updated_repo = self.db.query(Repository).get(repo.id)
         self.assertEqual(updated_repo.name, 'Updated Repo')
 
     def test_delete_repository(self):
         # Test the DELETE /repositories/<repository_id> endpoint
         # Add a repository first
         repo = Repository(name='Test Repo', url='http://example.com/repo')
-        db.session.add(repo)
-        db.session.commit()
+        self.db.add(repo)
+        self.db.commit()
 
         response = self.client.delete(f'/api/repositories/{repo.id}')
         self.assertEqual(response.status_code, 200)
-        deleted_repo = Repository.query.get(repo.id)
+        deleted_repo = self.db.query(Repository).get(repo.id)
         self.assertIsNone(deleted_repo)
 
 
@@ -99,7 +98,7 @@ class TestRepositoryAPI(BaseTestCase):
             self.assertEqual(response.status_code, 401)  # Unauthorized
 
     def test_get_repositories_exception_handling(self):
-        with patch('app.models.Repository.query') as mock_query:
+        with patch('app.models.db.query(Repository)') as mock_query:
             mock_query.all.side_effect = SQLAlchemyError("Database error")
             response = self.client.get('/api/repositories')
             self.assertEqual(response.status_code, 500)  # Internal Server Error
@@ -123,8 +122,8 @@ class TestRepositoryAPI(BaseTestCase):
     def test_update_repository_calls_update_templates(self):
         # Add a repository first
         repo = Repository(name='Test Repo', url='http://example.com/repo')
-        db.session.add(repo)
-        db.session.commit()
+        self.db.add(repo)
+        self.db.commit()
 
         with patch('app.models.repository.Repository.update_templates') as mock_update_templates:
             data = {'name': 'Updated Repo', 'url': 'http://example.com/new_repo'}

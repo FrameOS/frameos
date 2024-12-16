@@ -1,5 +1,4 @@
 import { actions, afterMount, beforeUnmount, kea, path } from 'kea'
-import { connect } from 'socket.io-client'
 import { FrameType, LogType } from '../types'
 
 import type { socketLogicType } from './socketLogicType'
@@ -12,16 +11,51 @@ export const socketLogic = kea<socketLogicType>([
     updateFrame: (frame: FrameType) => ({ frame }),
     deleteFrame: ({ id }: { id: number }) => ({ id }),
     updateSettings: (settings: Record<string, any>) => ({ settings }),
+    newMetrics: (metrics: Record<string, any>) => ({ metrics }),
   }),
   afterMount(({ actions, cache }) => {
-    cache.socket = connect('/')
-    cache.socket.on('new_log', actions.newLog)
-    cache.socket.on('new_frame', actions.newFrame)
-    cache.socket.on('update_frame', actions.updateFrame)
-    cache.socket.on('delete_frame', actions.deleteFrame)
-    cache.socket.on('update_settings', actions.updateSettings)
+    cache.ws = new WebSocket('/ws')
+    cache.ws.onopen = function (event: any) {
+      console.log('🔵 Connected to the WebSocket server.')
+    }
+
+    cache.ws.onmessage = function (event: any) {
+      try {
+        const data = JSON.parse(event.data)
+        switch (data.event) {
+          case 'new_log':
+            actions.newLog(data.data)
+            break
+          case 'new_frame':
+            actions.newFrame(data.data)
+            break
+          case 'update_frame':
+            actions.updateFrame(data.data)
+            break
+          case 'delete_frame':
+            actions.deleteFrame(data.data)
+            break
+          case 'update_settings':
+            actions.updateSettings(data.data)
+            break
+          case 'new_metrics':
+            actions.newMetrics(data.data)
+            break
+          default:
+            console.log('🟡 Unhandled websocket event:', data)
+        }
+      } catch (err) {
+        console.error('🔴 Failed to parse message as JSON:', event.data)
+      }
+    }
+
+    cache.ws.onerror = function (error: any) {
+      console.error('🔴 WebSocket error:', error)
+    }
+
+    cache.ws.onclose = function (event: any) {
+      console.log('🔴 WebSocket connection closed:', event)
+    }
   }),
-  beforeUnmount(({ cache }) => {
-    cache.socket.close()
-  }),
+  beforeUnmount(({ cache }) => {}),
 ])

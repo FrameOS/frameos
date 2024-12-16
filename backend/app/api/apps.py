@@ -8,26 +8,22 @@ import os
 import subprocess
 
 from flask import jsonify, request
-from flask_login import login_required
 
 from . import api
 from app.models.apps import get_app_configs, get_one_app_sources
 from app.models.settings import get_settings_dict
 
 @api.route("/apps", methods=["GET"])
-@login_required
 def api_apps():
     return jsonify(apps=get_app_configs())
 
 @api.route("/apps/source", methods=["GET"])
-@login_required
 def api_apps_source():
     keyword = request.args.get("keyword")
     return jsonify(get_one_app_sources(keyword))
 
 
 @api.route("/apps/validate_source", methods=["POST"])
-@login_required
 def validate_python_frame_source():
     data = request.json
     file = data.get('file')
@@ -50,7 +46,7 @@ def validate_python_frame_source():
 
 
 @api.route("/apps/enhance_source", methods=["POST"])
-@login_required
+
 def enhance_python_frame_source():
     data = request.json
     source = data.get('source')

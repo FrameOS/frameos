@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional
 import json
 import os
 
@@ -55,7 +55,7 @@ def get_one_app_sources(keyword: str) -> Optional[dict[str, str]]:
     return sources
 
 
-def get_apps_from_scenes(scenes: List[dict]) -> dict[str, dict]:
+def get_apps_from_scenes(scenes: list[dict]) -> dict[str, dict]:
     apps = {}
     for scene in scenes:
         for node in scene.get('nodes', []):

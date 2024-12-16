@@ -5,21 +5,14 @@
             "name": "Python: FastAPI",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/backend/env/bin/uvicorn",
-            "args": [
-                "app.fastapi:app",
-                "--host",
-                "0.0.0.0",
-                "--port",
-                "8989",
-                "--reload"
-            ],
+            "cwd": "${workspaceFolder}/backend",
+            "module": "app.fastapi",
             "console": "integratedTerminal",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}",
                 "GEVENT_SUPPORT": "True"
             },
-            "cwd": "${workspaceFolder}/backend"
+            "justMyCode": false
         }
     ]
 }

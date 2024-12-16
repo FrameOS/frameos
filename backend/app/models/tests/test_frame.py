@@ -3,7 +3,7 @@ from app.tests.base import BaseTestCase
 
 class TestModelsFrame(BaseTestCase):
     def test_frame_creation(self):
-        frame = new_frame("frame2", "pi@192.168.1.1:8787", "server_host.com", "device_test")
+        frame = new_frame(self.db, "frame2", "pi@192.168.1.1:8787", "server_host.com", "device_test")
         self.assertEqual(frame.name, "frame2")
         self.assertEqual(frame.frame_host, "192.168.1.1")
         self.assertEqual(frame.frame_port, 8787)
@@ -15,21 +15,21 @@ class TestModelsFrame(BaseTestCase):
         self.assertEqual(frame.device, "device_test")
 
     def test_frame_update(self):
-        frame = new_frame("frame", "pi@192.168.1.1", "server_host.com", None)
+        frame = new_frame(self.db, "frame", "pi@192.168.1.1", "server_host.com", None)
         frame.frame_host = "updated_host.com"
-        update_frame(frame)
-        updated_frame = Frame.query.get(frame.id)
+        update_frame(self.db, frame)
+        updated_frame = self.db.query(Frame).get(frame.id)
         self.assertEqual(updated_frame.frame_host, "updated_host.com")
 
     def test_frame_delete(self):
-        frame = new_frame("frame", "pi@192.168.1.1", "server_host.com", None)
+        frame = new_frame(self.db, "frame", "pi@192.168.1.1", "server_host.com", None)
         result = delete_frame(frame.id)
         self.assertTrue(result)
-        deleted_frame = Frame.query.get(frame.id)
+        deleted_frame = self.db.query(Frame).get(frame.id)
         self.assertIsNone(deleted_frame)
 
     def test_to_dict_method(self):
-        frame = new_frame("frame", "pi@192.168.1.1", "server_host.com", None, 55)
+        frame = new_frame(self.db, "frame", "pi@192.168.1.1", "server_host.com", None, 55)
         frame_dict = frame.to_dict()
         self.assertEqual(frame_dict['frame_host'], "192.168.1.1")
         self.assertEqual(frame_dict['frame_port'], 8787)
@@ -42,9 +42,9 @@ class TestModelsFrame(BaseTestCase):
         self.assertEqual(frame_dict['interval'], 55)
 
     def test_get_frame_by_host(self):
-        frame1 = new_frame("frame", "pi@192.168.1.1", "server_host.com", None)
-        frame2 = new_frame("frame", "pi@192.168.1.2", "server_host.com", None)
-        frames_from_host = Frame.query.filter_by(frame_host="192.168.1.1").all()
+        frame1 = new_frame(self.db, "frame", "pi@192.168.1.1", "server_host.com", None)
+        frame2 = new_frame(self.db, "frame", "pi@192.168.1.2", "server_host.com", None)
+        frames_from_host = self.db.query(Frame).filter_by(frame_host="192.168.1.1").all()
         self.assertIn(frame1, frames_from_host)
         self.assertNotIn(frame2, frames_from_host)
 
@@ -54,4 +54,4 @@ class TestModelsFrame(BaseTestCase):
 
     def test_max_frame_port_limit(self):
         with self.assertRaises(ValueError):
-            new_frame("frame", "pi@192.168.1.1:70000", "server_host.com", None)
+            new_frame(self.db, "frame", "pi@192.168.1.1:70000", "server_host.com", None)

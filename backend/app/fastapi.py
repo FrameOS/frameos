@@ -1,17 +1,27 @@
 import os
-from fastapi import FastAPI, Request
-
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.wsgi import WSGIMiddleware
-from app import create_app
+from app.flask import create_app
+from fastapi import FastAPI, Request
+from app.api.log import api_log as api_log_router
+from fastapi.middleware.gzip import GZipMiddleware
+from app.middleware.gzip import GzipRequestMiddleware
 
+from app.views.ws_broadcast import register_ws_routes
 
-flask_app = create_app()
 
 app = FastAPI()
+app.add_middleware(GZipMiddleware)
+app.add_middleware(GzipRequestMiddleware)
+
+register_ws_routes(app)
+
+app.include_router(api_log_router, prefix="/api/log", tags=["log"])
+
+flask_app = create_app()
 app.mount("/api", WSGIMiddleware(flask_app))
 
 app.mount("/assets", StaticFiles(directory="../frontend/dist/assets"), name="assets")
@@ -19,6 +29,7 @@ app.mount("/img", StaticFiles(directory="../frontend/dist/img"), name="img")
 app.mount("/static", StaticFiles(directory="../frontend/dist/static"), name="static")
 
 non_404_routes = ("/api", "/assets", "/img", "/static")
+
 
 @app.get("/")
 async def read_index():
@@ -39,4 +50,4 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 if __name__ == '__main__':
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8989, log_level="debug")
+    uvicorn.run(app, host="0.0.0.0", port=8989)

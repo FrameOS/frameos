@@ -5,13 +5,12 @@ jwt
 
 flask
 Flask-migrate
-flask_socketio
-flask_sqlalchemy
 
 sqlalchemy
 huey
 honcho
 redis
+aioredis
 paramiko
 scp
 requests
@@ -28,3 +27,8 @@ pip-tools
 pre-commit
 ruff
 imagehash
+mypy
+types-requests
+types-Pillow
+types-paramiko
+types-redis

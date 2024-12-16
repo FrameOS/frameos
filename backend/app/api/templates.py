@@ -5,10 +5,10 @@ import requests
 import json
 import string
 
-from flask import jsonify, request, send_file, Response
-from flask_login import login_required
+from flask import jsonify, request, send_file, Response, g
+
+from app.redis import redis
 from . import api
-from app import db, redis
 from app.models.template import Template
 from app.models.frame import Frame
 from PIL import Image
@@ -36,8 +36,8 @@ def respond_with_template(template: Template):
     return Response(in_memory.getvalue(), content_type='application/zip', headers={"Content-Disposition": f"attachment; filename={template_name}.zip"})
 
 @api.route("/templates", methods=["POST"])
-@login_required
 def create_template():
+    db = g.db
     if 'file' in request.files:
         zip_file = request.files['file'].read()
     elif 'url' in request.json:
@@ -85,7 +85,7 @@ def create_template():
 
     if data.get('from_frame_id'):
         frame_id = data.get('from_frame_id')
-        frame = Frame.query.get_or_404(frame_id)
+        frame = db.query(Frame).get(frame_id)
         # TODO: move to shared util
         cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
         last_image = redis.get(cache_key)
@@ -115,48 +115,48 @@ def create_template():
     elif request.json.get('format') == 'scenes':
         return jsonify(new_template.scenes), 201
     else:
-        db.session.add(new_template)
-        db.session.commit()
+        db.add(new_template)
+        db.commit()
         return jsonify(new_template.to_dict()), 201
 
 # Read (GET) for all templates
 @api.route("/templates", methods=["GET"])
-@login_required
 def get_templates():
-    templates = [template.to_dict() for template in Template.query.all()]
+    db = g.db
+    templates = [template.to_dict() for template in db.query(Template).all()]
     return jsonify(templates)
 
 # Read (GET) for a specific template
 @api.route("/templates/<template_id>", methods=["GET"])
-@login_required
 def get_template(template_id):
-    template = Template.query.get(template_id)
+    db = g.db
+    template = db.query(Template).get(template_id)
     if not template:
         return jsonify({"error": "Template not found"}), 404
     return jsonify(template.to_dict())
 
 # Read (GET) for a specific template
 @api.route("/templates/<template_id>/image", methods=["GET"])
-@login_required
 def get_template_image(template_id):
-    template = Template.query.get(template_id)
+    db = g.db
+    template = db.query(Template).get(template_id)
     if not template or not template.image:
         return jsonify({"error": "Template not found"}), 404
     return send_file(io.BytesIO(template.image), mimetype='image/jpeg')
 
 # Export (GET) for a specific template
 @api.route("/templates/<template_id>/export", methods=["GET"])
-@login_required
 def export_template(template_id):
-    template = Template.query.get(template_id)
+    db = g.db
+    template = db.query(Template).get(template_id)
     return respond_with_template(template)
 
 
 # Update (PUT)
 @api.route("/templates/<template_id>", methods=["PATCH"])
-@login_required
 def update_template(template_id):
-    template = Template.query.get(template_id)
+    db = g.db
+    template = db.query(Template).get(template_id)
     if not template:
         return jsonify({"error": "Template not found"}), 404
     data = request.json
@@ -164,16 +164,16 @@ def update_template(template_id):
         template.name = data.get('name', template.name)
     if 'description' in data:
         template.description = data.get('description', template.description)
-    db.session.commit()
+    db.commit()
     return jsonify(template.to_dict())
 
 # Delete (DELETE)
 @api.route("/templates/<template_id>", methods=["DELETE"])
-@login_required
 def delete_template(template_id):
-    template = Template.query.get(template_id)
+    db = g.db
+    template = db.query(Template).get(template_id)
     if not template:
         return jsonify({"error": "Template not found"}), 404
-    db.session.delete(template)
-    db.session.commit()
+    db.delete(template)
+    db.commit()
     return jsonify({"message": "Template deleted successfully"}), 200

@@ -1,26 +1,34 @@
-from flask import request
-from . import api
+from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi.responses import JSONResponse
+from app.database import get_db
+from sqlalchemy.orm import Session
 from app.models.frame import Frame
 from app.models.log import process_log
 
-@api.route('/log', methods=["POST"])
-def api_log():
+api_log = APIRouter()
+
+@api_log.post("")
+async def post_api_log(request: Request, db: Session = Depends(get_db)):
     auth_header = request.headers.get('Authorization')
     if not auth_header:
-        return 'Unauthorized', 401  # Or handle the missing header as appropriate
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    server_api_key = auth_header.split(' ')[1]
-    frame = Frame.query.filter_by(server_api_key=server_api_key).first()
+    parts = auth_header.split(' ')
+    if len(parts) != 2:
+        raise HTTPException(status_code=401, detail="Invalid Authorization header")
+
+    server_api_key = parts[1]
+    frame = db.query(Frame).filter_by(server_api_key=server_api_key).first()
 
     if not frame:
-        return 'Unauthorized', 401
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    data = request.json
-    if log := data.get('log', None):
-        process_log(frame, log)
+    data = await request.json()
+    if log := data.get('log'):
+        await process_log(db, frame, log)
 
-    if logs := data.get('logs', None):
+    if logs := data.get('logs'):
         for log in logs:
-            process_log(frame, log)
+            await process_log(db, frame, log)
 
-    return 'OK', 200
+    return JSONResponse(status_code=200, content={"message": "OK"})
