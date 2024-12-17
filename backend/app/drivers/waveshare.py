@@ -103,14 +103,16 @@ def key_to_float(key: str) -> tuple[Optional[float], Optional[str]]:
     else:
         return None, None
 
-def convert_waveshare_source(variant_key: str) -> WaveshareVariant:
+def convert_waveshare_source(variant_key: Optional[str]) -> WaveshareVariant:
     if not variant_key:
         raise Exception("No waveshare driver variant specified")
     if variant_key not in get_variant_keys(): # checks if a file called variant.nim exists
         raise Exception(f"Unknown waveshare driver variant {variant_key}")
+    size, code = key_to_float(variant_key)
+    if size is None or code is None:
+        raise Exception(f"Invalid waveshare driver variant {variant_key}")
 
     with open(os.path.join("..", "frameos", "src", "drivers", "waveshare", get_variant_folder(variant_key), f"{variant_key}.nim"), "r") as f:
-        size, code = key_to_float(variant_key)
         variant = WaveshareVariant(key=variant_key, prefix='', size=size, code=code)
         lines = []
         in_proc = False

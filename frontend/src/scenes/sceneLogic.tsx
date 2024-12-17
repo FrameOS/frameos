@@ -3,6 +3,7 @@ import { actions, kea, listeners, path, reducers } from 'kea'
 import type { sceneLogicType } from './sceneLogicType'
 import { urlToAction } from 'kea-router'
 import { routes } from './scenes'
+import { apiFetch } from '../utils/apiFetch'
 
 // Note: this should not connect to any other logic that pulls in data, as it's used even when the user is not logged in
 export const sceneLogic = kea<sceneLogicType>([
@@ -34,8 +35,8 @@ export const sceneLogic = kea<sceneLogicType>([
   }),
   listeners(({ actions }) => ({
     logout: async () => {
-      await fetch('/api/logout', { method: 'POST' })
-      location.href = '/login'
+      localStorage.removeItem('token')
+      location.href = '/'
     },
   })),
 ])

@@ -1,21 +1,18 @@
-from flask import jsonify
-from flask_login import login_required
-from . import api
+from fastapi import HTTPException
+from fastapi.responses import JSONResponse
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
+from . import private_api
 
-
-@api.route("/generate_ssh_keys", methods=["POST"])
-@login_required
-def generate_ssh_keys():
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.hazmat.primitives import serialization
-
+@private_api.post("/generate_ssh_keys")
+async def generate_ssh_keys():
     try:
         private_key = rsa.generate_private_key(
             public_exponent=65537,
             key_size=3072,
         )
-    except:
-        return jsonify(error="Key generation error"), 500
+    except Exception:
+        raise HTTPException(status_code=500, detail="Key generation error")
 
     public_key = private_key.public_key()
     private_key_bytes = private_key.private_bytes(
@@ -28,4 +25,7 @@ def generate_ssh_keys():
         format=serialization.PublicFormat.OpenSSH
     )
 
-    return jsonify({"private": private_key_bytes.decode('utf-8'), "public": public_key_bytes.decode('utf-8')})
+    return JSONResponse(content={
+        "private": private_key_bytes.decode('utf-8'),
+        "public": public_key_bytes.decode('utf-8')
+    })
