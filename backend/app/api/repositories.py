@@ -8,12 +8,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.settings import Settings
 from app.models.repository import Repository
-from . import api
+from . import private_api
 
 FRAMEOS_SAMPLES_URL = "https://repo.frameos.net/samples/repository.json"
 FRAMEOS_GALLERY_URL = "https://repo.frameos.net/gallery/repository.json"
 
-@api.post("/repositories")
+@private_api.post("/repositories")
 async def create_repository(request: Request, db: Session = Depends(get_db)):
     data = await request.json()
     url = data.get('url')
@@ -31,7 +31,7 @@ async def create_repository(request: Request, db: Session = Depends(get_db)):
         logging.error(f'Database error: {e}')
         return JSONResponse(content={'error': 'Database error'}, status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.get("/repositories")
+@private_api.get("/repositories")
 async def get_repositories(db: Session = Depends(get_db)):
     try:
         # Remove old repo if it exists
@@ -65,7 +65,7 @@ async def get_repositories(db: Session = Depends(get_db)):
         logging.error(f'Database error: {e}')
         return JSONResponse(content={'error': 'Database error'}, status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.get("/repositories/{repository_id}")
+@private_api.get("/repositories/{repository_id}")
 async def get_repository(repository_id: int, db: Session = Depends(get_db)):
     try:
         repository = db.query(Repository).get(repository_id)
@@ -76,7 +76,7 @@ async def get_repository(repository_id: int, db: Session = Depends(get_db)):
         logging.error(f'Database error: {e}')
         return JSONResponse(content={'error': 'Database error'}, status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.patch("/repositories/{repository_id}")
+@private_api.patch("/repositories/{repository_id}")
 async def update_repository(repository_id: int, request: Request, db: Session = Depends(get_db)):
     data = await request.json()
     try:
@@ -95,7 +95,7 @@ async def update_repository(repository_id: int, request: Request, db: Session = 
         logging.error(f'Database error: {e}')
         return JSONResponse(content={'error': 'Database error'}, status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.delete("/repositories/{repository_id}")
+@private_api.delete("/repositories/{repository_id}")
 async def delete_repository(repository_id: int, db: Session = Depends(get_db)):
     try:
         repository = db.query(Repository).get(repository_id)

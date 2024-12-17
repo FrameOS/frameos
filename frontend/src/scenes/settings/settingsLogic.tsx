@@ -6,6 +6,7 @@ import { socketLogic } from '../socketLogic'
 import type { settingsLogicType } from './settingsLogicType'
 import { forms } from 'kea-forms'
 import { FrameOSSettings } from '../../types'
+import { apiFetch } from '../../utils/apiFetch'
 
 function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, any>): FrameOSSettings {
   return {
@@ -35,7 +36,7 @@ export const settingsLogic = kea<settingsLogicType>([
       {
         loadSettings: async () => {
           try {
-            const response = await fetch(`/api/settings`)
+            const response = await apiFetch(`/api/settings`)
             if (!response.ok) {
               throw new Error('Failed to fetch settings')
             }
@@ -58,7 +59,7 @@ export const settingsLogic = kea<settingsLogicType>([
     settings: {
       defaults: setDefaultSettings({}),
       submit: async (formValues) => {
-        const response = await fetch(`/api/settings`, {
+        const response = await apiFetch(`/api/settings`, {
           method: 'POST',
           body: JSON.stringify(formValues),
           headers: { 'Content-Type': 'application/json' },
@@ -87,7 +88,7 @@ export const settingsLogic = kea<settingsLogicType>([
           return
         }
       }
-      const response = await fetch(`/api/generate_ssh_keys`, {
+      const response = await apiFetch(`/api/generate_ssh_keys`, {
         method: 'POST',
       })
       if (!response.ok) {

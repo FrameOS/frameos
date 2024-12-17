@@ -7,6 +7,7 @@ import { socketLogic } from '../scenes/socketLogic'
 import type { framesModelType } from './framesModelType'
 import { router } from 'kea-router'
 import { sanitizeScene } from '../scenes/frame/frameLogic'
+import { apiFetch } from '../utils/apiFetch'
 
 export const framesModel = kea<framesModelType>([
   connect({ logic: [socketLogic] }),
@@ -26,7 +27,7 @@ export const framesModel = kea<framesModelType>([
       {
         loadFrame: async ({ id }) => {
           try {
-            const response = await fetch(`/api/frames/${id}`)
+            const response = await apiFetch(`/api/frames/${id}`)
             if (!response.ok) {
               throw new Error('Failed to fetch logs')
             }
@@ -43,7 +44,7 @@ export const framesModel = kea<framesModelType>([
         },
         loadFrames: async () => {
           try {
-            const response = await fetch('/api/frames')
+            const response = await apiFetch('/api/frames')
             if (!response.ok) {
               throw new Error('Failed to fetch frames')
             }
@@ -100,16 +101,16 @@ export const framesModel = kea<framesModelType>([
   }),
   listeners(({ props, actions }) => ({
     renderFrame: async ({ id }) => {
-      await fetch(`/api/frames/${id}/event/render`, { method: 'POST' })
+      await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
     },
     redeployFrame: async ({ id }) => {
-      await fetch(`/api/frames/${id}/redeploy`, { method: 'POST' })
+      await apiFetch(`/api/frames/${id}/redeploy`, { method: 'POST' })
     },
     restartFrame: async ({ id }) => {
-      await fetch(`/api/frames/${id}/restart`, { method: 'POST' })
+      await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
     },
     deleteFrame: async ({ id }) => {
-      await fetch(`/api/frames/${id}`, { method: 'DELETE' })
+      await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
       if (router.values.location.pathname == '/frames/' + id) {
         router.actions.push('/')
       }

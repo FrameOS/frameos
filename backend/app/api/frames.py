@@ -19,10 +19,10 @@ from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection
 from scp import SCPClient
-from . import api
+from . import private_api
 
 
-@api.get("/frames")
+@private_api.get("/frames")
 async def api_frames_list(db: Session = Depends(get_db)):
     try:
         frames = db.query(Frame).all()
@@ -33,7 +33,7 @@ async def api_frames_list(db: Session = Depends(get_db)):
                             status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
-@api.get("/frames/{id}")
+@private_api.get("/frames/{id}")
 async def api_frame_get(id: int, db: Session = Depends(get_db)):
     try:
         frame = db.query(Frame).get(id)
@@ -45,7 +45,7 @@ async def api_frame_get(id: int, db: Session = Depends(get_db)):
                             status_code=HTTPStatus.NOT_FOUND)
 
 
-@api.get("/frames/{id}/logs")
+@private_api.get("/frames/{id}/logs")
 async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
     try:
         frame = db.query(Frame).get(id)
@@ -58,7 +58,7 @@ async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
                             status_code=HTTPStatus.NOT_FOUND)
 
 
-@api.get("/frames/{id}/image")
+@private_api.get("/frames/{id}/image")
 async def api_frame_get_image(id: int, request: Request, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
     if frame is None:
@@ -95,7 +95,7 @@ async def api_frame_get_image(id: int, request: Request, db: Session = Depends(g
                             status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
-@api.get("/frames/{id}/state")
+@private_api.get("/frames/{id}/state")
 async def api_frame_get_state(id: int, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
     if frame is None:
@@ -130,7 +130,7 @@ async def api_frame_get_state(id: int, db: Session = Depends(get_db)):
                             status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
-@api.post("/frames/{id}/event/{event}")
+@private_api.post("/frames/{id}/event/{event}")
 async def api_frame_event(id: int, event: str, request: Request, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
     if frame is None:
@@ -162,7 +162,7 @@ async def api_frame_event(id: int, event: str, request: Request, db: Session = D
                             status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
-@api.get("/frames/{id}/scene_source/{scene}")
+@private_api.get("/frames/{id}/scene_source/{scene}")
 async def api_frame_scene_source(id: int, scene: str, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
     if frame is None:
@@ -173,7 +173,7 @@ async def api_frame_scene_source(id: int, scene: str, db: Session = Depends(get_
     return JSONResponse(content={'error': f'Scene {scene} not found'}, status_code=HTTPStatus.NOT_FOUND)
 
 
-@api.get("/frames/{id}/assets")
+@private_api.get("/frames/{id}/assets")
 async def api_frame_get_assets(id: int, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
     if frame is None:
@@ -199,7 +199,7 @@ async def api_frame_get_assets(id: int, db: Session = Depends(get_db)):
     return JSONResponse(content={"assets": assets}, status_code=200)
 
 
-@api.get("/frames/{id}/asset")
+@private_api.get("/frames/{id}/asset")
 async def api_frame_get_asset(id: int, request: Request, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
     if frame is None:
@@ -264,7 +264,7 @@ async def api_frame_get_asset(id: int, request: Request, db: Session = Depends(g
                             status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
-@api.post("/frames/{id}/reset")
+@private_api.post("/frames/{id}/reset")
 async def api_frame_reset_event(id: int):
     try:
         from app.tasks import reset_frame
@@ -275,7 +275,7 @@ async def api_frame_reset_event(id: int):
                             status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
-@api.post("/frames/{id}/restart")
+@private_api.post("/frames/{id}/restart")
 async def api_frame_restart_event(id: int):
     try:
         from app.tasks import restart_frame
@@ -286,7 +286,7 @@ async def api_frame_restart_event(id: int):
                             status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
-@api.post("/frames/{id}/stop")
+@private_api.post("/frames/{id}/stop")
 async def api_frame_stop_event(id: int):
     try:
         from app.tasks import stop_frame
@@ -297,7 +297,7 @@ async def api_frame_stop_event(id: int):
                             status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
-@api.post("/frames/{id}/deploy")
+@private_api.post("/frames/{id}/deploy")
 async def api_frame_deploy_event(id: int):
     try:
         from app.tasks import deploy_frame
@@ -308,7 +308,7 @@ async def api_frame_deploy_event(id: int):
                             status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
-@api.post("/frames/{id}")
+@private_api.post("/frames/{id}")
 async def api_frame_update(id: int, request: Request, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
     if frame is None:
@@ -367,7 +367,7 @@ async def api_frame_update(id: int, request: Request, db: Session = Depends(get_
                             status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
-@api.post("/frames/new")
+@private_api.post("/frames/new")
 async def api_frame_new(request: Request, db: Session = Depends(get_db)):
     try:
         payload = await request.json()
@@ -383,7 +383,7 @@ async def api_frame_new(request: Request, db: Session = Depends(get_db)):
                             status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
-@api.delete("/frames/{frame_id}")
+@private_api.delete("/frames/{frame_id}")
 async def api_frame_delete(frame_id: int, db: Session = Depends(get_db)):
     try:
         success = await delete_frame(db, frame_id)
@@ -396,7 +396,7 @@ async def api_frame_delete(frame_id: int, db: Session = Depends(get_db)):
                             status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
-@api.get("/frames/{id}/metrics")
+@private_api.get("/frames/{id}/metrics")
 async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
     if frame is None:

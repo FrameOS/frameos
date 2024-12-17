@@ -7,6 +7,7 @@ import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
 import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
+import { apiFetch } from '../../utils/apiFetch'
 
 export interface FrameLogicProps {
   frameId: number
@@ -160,7 +161,7 @@ export const frameLogic = kea<frameLogicType>([
         if (values.nextAction) {
           json['next_action'] = values.nextAction
         }
-        const response = await fetch(`/api/frames/${values.frameId}`, {
+        const response = await apiFetch(`/api/frames/${values.frameId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(json),

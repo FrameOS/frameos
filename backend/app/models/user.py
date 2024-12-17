@@ -1,10 +1,9 @@
-from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import Integer, String
 from sqlalchemy.orm import mapped_column
 from app.database import Base
 
-class User(Base, UserMixin):
+class User(Base):
     __tablename__ = 'user'
     id = mapped_column(Integer, primary_key=True)
     email = mapped_column(String(120), unique=True)

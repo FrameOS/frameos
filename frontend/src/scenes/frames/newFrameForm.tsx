@@ -6,6 +6,7 @@ import { FrameType } from '../../types'
 import type { newFrameFormType } from './newFrameFormType'
 import { framesModel } from '../../models/framesModel'
 import { router } from 'kea-router'
+import { apiFetch } from '../../utils/apiFetch'
 
 export const newFrameForm = kea<newFrameFormType>([
   path(['src', 'scenes', 'frames', 'newFrameForm']),
@@ -36,7 +37,7 @@ export const newFrameForm = kea<newFrameFormType>([
       }),
       submit: async (frame) => {
         try {
-          const response = await fetch('/api/frames/new', {
+          const response = await apiFetch('/api/frames/new', {
             method: 'POST',
             body: JSON.stringify(frame),
             headers: {

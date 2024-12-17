@@ -16,7 +16,7 @@ config = context.config
 fileConfig(config.config_file_name)
 
 # Set your DB URL from environment or alembic.ini
-database_url = get_config().SQLALCHEMY_DATABASE_URI
+database_url = get_config().DATABASE_URL
 config.set_main_option("sqlalchemy.url", database_url)
 
 target_metadata = Base.metadata

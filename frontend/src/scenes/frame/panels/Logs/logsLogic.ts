@@ -5,6 +5,7 @@ import { loaders } from 'kea-loaders'
 import { socketLogic } from '../../../socketLogic'
 
 import type { logsLogicType } from './logsLogicType'
+import { apiFetch } from '../../../../utils/apiFetch'
 
 export interface logsLogicProps {
   frameId: number
@@ -22,7 +23,7 @@ export const logsLogic = kea<logsLogicType>([
       {
         loadLogs: async () => {
           try {
-            const response = await fetch(`/api/frames/${props.frameId}/logs`)
+            const response = await apiFetch(`/api/frames/${props.frameId}/logs`)
             if (!response.ok) {
               throw new Error('Failed to fetch logs')
             }

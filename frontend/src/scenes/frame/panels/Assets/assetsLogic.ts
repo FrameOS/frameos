@@ -6,6 +6,7 @@ import { socketLogic } from '../../../socketLogic'
 
 import type { assetsLogicType } from './assetsLogicType'
 import { frameLogic } from '../../frameLogic'
+import { apiFetch } from '../../../../utils/apiFetch'
 
 export interface AssetsLogicProps {
   frameId: number
@@ -33,7 +34,7 @@ export const assetsLogic = kea<assetsLogicType>([
       {
         loadAssets: async () => {
           try {
-            const response = await fetch(`/api/frames/${props.frameId}/assets`)
+            const response = await apiFetch(`/api/frames/${props.frameId}/assets`)
             if (!response.ok) {
               throw new Error('Failed to fetch assets')
             }

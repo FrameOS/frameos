@@ -15,7 +15,7 @@ from app.redis import redis
 from app.models.template import Template
 from app.models.frame import Frame
 
-from . import api
+from . import private_api
 
 def respond_with_template(template: Template):
     if not template:
@@ -42,7 +42,7 @@ def respond_with_template(template: Template):
                     headers={"Content-Disposition": f"attachment; filename={template_name}.zip"})
 
 
-@api.post("/templates")
+@private_api.post("/templates")
 async def create_template(request: Request, db: Session = Depends(get_db)):
     # Attempt to handle file from form-data
     form = await request.form()
@@ -147,13 +147,13 @@ async def create_template(request: Request, db: Session = Depends(get_db)):
         return JSONResponse(content=new_template.to_dict(), status_code=201)
 
 
-@api.get("/templates")
+@private_api.get("/templates")
 async def get_templates(db: Session = Depends(get_db)):
     templates = [template.to_dict() for template in db.query(Template).all()]
     return JSONResponse(content=templates, status_code=200)
 
 
-@api.get("/templates/{template_id}/image")
+@private_api.get("/templates/{template_id}/image")
 async def get_template_image(template_id: int, db: Session = Depends(get_db)):
     template = db.query(Template).get(template_id)
     if not template or not template.image:
@@ -161,13 +161,13 @@ async def get_template_image(template_id: int, db: Session = Depends(get_db)):
     return StreamingResponse(io.BytesIO(template.image), media_type='image/jpeg')
 
 
-@api.get("/templates/{template_id}/export")
+@private_api.get("/templates/{template_id}/export")
 async def export_template(template_id: int, db: Session = Depends(get_db)):
     template = db.query(Template).get(template_id)
     return respond_with_template(template)
 
 
-@api.get("/templates/{template_id}")
+@private_api.get("/templates/{template_id}")
 async def get_template(template_id: int, db: Session = Depends(get_db)):
     template = db.query(Template).get(template_id)
     if not template:
@@ -175,7 +175,7 @@ async def get_template(template_id: int, db: Session = Depends(get_db)):
     return JSONResponse(content=template.to_dict(), status_code=200)
 
 
-@api.patch("/templates/{template_id}")
+@private_api.patch("/templates/{template_id}")
 async def update_template(template_id: int, request: Request, db: Session = Depends(get_db)):
     template = db.query(Template).get(template_id)
     if not template:
@@ -189,7 +189,7 @@ async def update_template(template_id: int, request: Request, db: Session = Depe
     return JSONResponse(content=template.to_dict(), status_code=200)
 
 
-@api.delete("/templates/{template_id}")
+@private_api.delete("/templates/{template_id}")
 async def delete_template(template_id: int, db: Session = Depends(get_db)):
     template = db.query(Template).get(template_id)
     if not template:

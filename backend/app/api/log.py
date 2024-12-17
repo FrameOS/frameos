@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 from app.models.frame import Frame
 from app.models.log import process_log
 
-from . import api
+from . import public_api
 
-@api.post("/log")
+@public_api.post("/log")
 async def post_api_log(request: Request, db: Session = Depends(get_db)):
     auth_header = request.headers.get('Authorization')
     if not auth_header:

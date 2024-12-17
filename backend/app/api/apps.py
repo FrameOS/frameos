@@ -11,19 +11,19 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.apps import get_app_configs, get_one_app_sources
 from app.models.settings import get_settings_dict
-from . import api
+from . import private_api
 
-@api.get("/apps")
+@private_api.get("/apps")
 async def api_apps_list(db: Session = Depends(get_db)):
     return JSONResponse(content={"apps": get_app_configs()}, status_code=200)
 
 
-@api.get("/apps/source")
+@private_api.get("/apps/source")
 async def api_apps_source(keyword: str = None, db: Session = Depends(get_db)):
     return JSONResponse(content=get_one_app_sources(keyword), status_code=200)
 
 
-@api.post("/apps/validate_source")
+@private_api.post("/apps/validate_source")
 async def validate_python_frame_source(request: Request):
     data = await request.json()
     file = data.get('file')
@@ -45,7 +45,7 @@ async def validate_python_frame_source(request: Request):
     return JSONResponse(content={"errors": errors}, status_code=200)
 
 
-@api.post("/apps/enhance_source")
+@private_api.post("/apps/enhance_source")
 async def enhance_python_frame_source(request: Request, db: Session = Depends(get_db)):
     data = await request.json()
     source = data.get('source')

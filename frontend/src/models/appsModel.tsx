@@ -3,6 +3,7 @@ import { afterMount, kea, path, selectors } from 'kea'
 import type { appsModelType } from './appsModelType'
 import { loaders } from 'kea-loaders'
 import { AppConfig } from '../types'
+import { apiFetch } from '../utils/apiFetch'
 
 export const categoryLabels: Record<string, any> = {
   render: 'Render',
@@ -18,7 +19,7 @@ export const appsModel = kea<appsModelType>([
       {
         loadApps: async () => {
           try {
-            const response = await fetch('/api/apps')
+            const response = await apiFetch('/api/apps')
             if (!response.ok) {
               throw new Error('Failed to fetch apps')
             }
