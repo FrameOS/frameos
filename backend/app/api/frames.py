@@ -1,8 +1,10 @@
+from datetime import datetime, timedelta
 import io
 import json
 import os
 import shlex
 import asyncio
+from jose import JWTError, jwt
 from http import HTTPStatus
 from tempfile import NamedTemporaryFile
 
@@ -19,7 +21,9 @@ from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection
 from scp import SCPClient
-from . import private_api
+
+from app.api.auth import ALGORITHM, SECRET_KEY, get_current_user
+from . import private_api, public_api
 
 
 @private_api.get("/frames")
@@ -58,8 +62,30 @@ async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
                             status_code=HTTPStatus.NOT_FOUND)
 
 
-@private_api.get("/frames/{id}/image")
-async def api_frame_get_image(id: int, request: Request, db: Session = Depends(get_db)):
+@private_api.get("/frames/{id}/image_link")
+async def get_image_link(id: int, user=Depends(get_current_user)):
+    expire_minutes = 5
+    now = datetime.utcnow()
+    expire = now + timedelta(minutes=expire_minutes)
+    to_encode = {"sub": str(id), "exp": expire}
+    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+    expires_in = int((expire - now).total_seconds())
+
+    return {
+        "url": f"/api/frames/{id}/image?token={token}",
+        "expires_in": expires_in
+    }
+
+@public_api.get("/frames/{id}/image")
+async def api_frame_get_image(id: int, token: str, request: Request, db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("sub") != str(id):
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    except JWTError:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
     frame = db.query(Frame).get(id)
     if frame is None:
         return JSONResponse(content={'error': 'Frame not found'}, status_code=HTTPStatus.NOT_FOUND)
@@ -70,6 +96,8 @@ async def api_frame_get_image(id: int, request: Request, db: Session = Depends(g
         url += "?k=" + frame.frame_access_key
 
     try:
+        # We can check if a cached version exists
+        # TODO: no request object here
         if request.query_params.get('t') == '-1':
             last_image = await redis.get(cache_key)
             if last_image:
@@ -82,9 +110,6 @@ async def api_frame_get_image(id: int, request: Request, db: Session = Depends(g
             await redis.set(cache_key, response.content, ex=86400 * 30)
             return Response(content=response.content, media_type='image/png')
         else:
-            last_image = await redis.get(cache_key)
-            if last_image:
-                return Response(content=last_image, media_type='image/png')
             return JSONResponse(content={"error": "Unable to fetch image"}, status_code=response.status_code)
 
     except httpx.ReadTimeout:
@@ -93,7 +118,6 @@ async def api_frame_get_image(id: int, request: Request, db: Session = Depends(g
     except Exception as e:
         return JSONResponse(content={'error': 'Internal Server Error', 'message': str(e)},
                             status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
-
 
 @private_api.get("/frames/{id}/state")
 async def api_frame_get_state(id: int, db: Session = Depends(get_db)):

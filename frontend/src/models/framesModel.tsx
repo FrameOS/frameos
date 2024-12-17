@@ -1,13 +1,16 @@
 import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
-
 import { loaders } from 'kea-loaders'
 import { FrameScene, FrameType } from '../types'
 import { socketLogic } from '../scenes/socketLogic'
-
 import type { framesModelType } from './framesModelType'
 import { router } from 'kea-router'
 import { sanitizeScene } from '../scenes/frame/frameLogic'
 import { apiFetch } from '../utils/apiFetch'
+
+export interface FrameImageInfo {
+  url: string
+  expiresAt: number
+}
 
 export const framesModel = kea<framesModelType>([
   connect({ logic: [socketLogic] }),
@@ -18,8 +21,10 @@ export const framesModel = kea<framesModelType>([
     redeployFrame: (id: number) => ({ id }),
     restartFrame: (id: number) => ({ id }),
     renderFrame: (id: number) => ({ id }),
-    updateFrameImage: (id: number) => ({ id }),
+    updateFrameImage: (id: number, force = true) => ({ id, force }),
     deleteFrame: (id: number) => ({ id }),
+    setFrameImageInfo: (id: number, imageInfo: FrameImageInfo) => ({ id, imageInfo }),
+    updateFrameImageTimestamp: (id: number) => ({ id }),
   }),
   loaders(({ values }) => ({
     frames: [
@@ -29,13 +34,16 @@ export const framesModel = kea<framesModelType>([
           try {
             const response = await apiFetch(`/api/frames/${id}`)
             if (!response.ok) {
-              throw new Error('Failed to fetch logs')
+              throw new Error('Failed to fetch frame')
             }
             const data = await response.json()
             const frame = data.frame as FrameType
             return {
               ...values.frames,
-              frame: { ...frame, scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)) },
+              [frame.id]: {
+                ...frame,
+                scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)),
+              },
             }
           } catch (error) {
             console.error(error)
@@ -49,7 +57,16 @@ export const framesModel = kea<framesModelType>([
               throw new Error('Failed to fetch frames')
             }
             const data = await response.json()
-            return Object.fromEntries((data.frames as FrameType[]).map((frame) => [frame.id, frame]))
+            const framesDict = Object.fromEntries(
+              (data.frames as FrameType[]).map((frame) => [
+                frame.id,
+                {
+                  ...frame,
+                  scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)),
+                },
+              ])
+            )
+            return framesDict
           } catch (error) {
             console.error(error)
             return values.frames
@@ -60,7 +77,7 @@ export const framesModel = kea<framesModelType>([
   })),
   reducers(() => ({
     frames: [
-      {} as Record<string, FrameType>,
+      {} as Record<number, FrameType>,
       {
         [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
         [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
@@ -71,11 +88,20 @@ export const framesModel = kea<framesModelType>([
         },
       },
     ],
-    frameImageTimestamps: [
-      {} as Record<string, number>,
+    frameImageInfos: [
+      {} as Record<number, FrameImageInfo>,
       {
-        updateFrameImage: (state, { id }) =>
-          state[id] === Math.floor(Date.now() / 1000) ? state : { ...state, [id]: Math.floor(Date.now() / 1000) },
+        setFrameImageInfo: (state, { id, imageInfo }) => ({ ...state, [id]: imageInfo }),
+      },
+    ],
+    frameImageTimestamps: [
+      {} as Record<number, number>,
+      {
+        updateFrameImageTimestamp: (state, { id }) => {
+          const nowSeconds = Math.floor(Date.now() / 1000)
+          // Only update if it's different, to ensure a re-render
+          return state[id] === nowSeconds ? state : { ...state, [id]: nowSeconds }
+        },
       },
     ],
   })),
@@ -88,10 +114,23 @@ export const framesModel = kea<framesModelType>([
         ) as FrameType[],
     ],
     getFrameImage: [
-      (s) => [s.frameImageTimestamps],
-      (frameImageTimestamps) => {
-        return (id) => {
-          return `/api/frames/${id}/image?t=${frameImageTimestamps[id] ?? -1}`
+      (s) => [s.frameImageInfos, s.frameImageTimestamps],
+      (frameImageInfos, frameImageTimestamps) => {
+        return (id: number) => {
+          const info = frameImageInfos[id]
+          if (!info) {
+            return null
+          }
+
+          const now = Math.floor(Date.now() / 1000)
+          if (!info.expiresAt || now >= info.expiresAt) {
+            // URL expired or invalid
+            return null
+          }
+
+          const timestamp = frameImageTimestamps[id] ?? -1
+          // Append timestamp as a cache-buster
+          return `${info.url}${info.url.includes('?') ? '&' : '?'}t=${timestamp}`
         }
       },
     ],
@@ -99,7 +138,7 @@ export const framesModel = kea<framesModelType>([
   afterMount(({ actions }) => {
     actions.loadFrames()
   }),
-  listeners(({ props, actions }) => ({
+  listeners(({ actions, values }) => ({
     renderFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
     },
@@ -113,6 +152,33 @@ export const framesModel = kea<framesModelType>([
       await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
       if (router.values.location.pathname == '/frames/' + id) {
         router.actions.push('/')
+      }
+    },
+    updateFrameImage: async ({ id, force }) => {
+      // Check if we have a valid URL
+      const imageUrl = values.getFrameImage(id)
+      if (imageUrl) {
+        // The URL is still valid, no need to refetch new signed URL
+        // Just update timestamp to refresh (force reload)
+        if (force) {
+          actions.updateFrameImageTimestamp(id)
+        }
+        return
+      }
+
+      // Need a new signed URL
+      const resp = await apiFetch(`/api/frames/${id}/image_link`)
+      if (resp.ok) {
+        const data = await resp.json()
+        const expiresAt = Math.floor(Date.now() / 1000) + data.expires_in
+        const imageInfo: FrameImageInfo = { url: data.url, expiresAt }
+        actions.setFrameImageInfo(id, imageInfo)
+        // Update timestamp to ensure a new request even if the URL is same
+        if (force) {
+          actions.updateFrameImageTimestamp(id)
+        }
+      } else {
+        console.error('Failed to get image link for frame', id)
       }
     },
     [socketLogic.actionTypes.newLog]: ({ log }) => {
