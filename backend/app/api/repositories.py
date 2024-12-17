@@ -1,37 +1,40 @@
 import logging
-from flask import jsonify, request, g
+from http import HTTPStatus
+from fastapi import Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
-from . import api
+from sqlalchemy.orm import Session
+
+from app.database import get_db
 from app.models.settings import Settings
 from app.models.repository import Repository
+from . import api
 
 FRAMEOS_SAMPLES_URL = "https://repo.frameos.net/samples/repository.json"
 FRAMEOS_GALLERY_URL = "https://repo.frameos.net/gallery/repository.json"
 
-@api.route("/repositories", methods=["POST"])
-def create_repository():
-    db = g.db
-    data = request.json or {}
+@api.post("/repositories")
+async def create_repository(request: Request, db: Session = Depends(get_db)):
+    data = await request.json()
     url = data.get('url')
 
     if not url:
-        return jsonify({'error': 'Missing URL'}), 400
+        return JSONResponse(content={'error': 'Missing URL'}, status_code=HTTPStatus.BAD_REQUEST)
 
     try:
         new_repository = Repository(name="", url=url)
-        new_repository.update_templates()
+        new_repository.update_templates()  # synchronous operation
         db.add(new_repository)
         db.commit()
-        return jsonify(new_repository.to_dict()), 201
+        return JSONResponse(content=new_repository.to_dict(), status_code=HTTPStatus.CREATED)
     except SQLAlchemyError as e:
         logging.error(f'Database error: {e}')
-        return jsonify({'error': 'Database error'}), 500
+        return JSONResponse(content={'error': 'Database error'}, status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.route("/repositories", methods=["GET"])
-def get_repositories():
-    db = g.db
+@api.get("/repositories")
+async def get_repositories(db: Session = Depends(get_db)):
     try:
-        # We have created an old repo URL. Remove it.
+        # Remove old repo if it exists
         if db.query(Settings).filter_by(key="@system/repository_init_done").first():
             old_url = "https://repo.frameos.net/versions/0/templates.json"
             repository = db.query(Repository).filter_by(url=old_url).first()
@@ -40,70 +43,67 @@ def get_repositories():
             db.delete(db.query(Settings).filter_by(key="@system/repository_init_done").first())
             db.commit()
 
-        # We have not created a new samples repo URL
+        # Create samples repo if not done
         if not db.query(Settings).filter_by(key="@system/repository_samples_done").first():
             repository = Repository(name="", url=FRAMEOS_SAMPLES_URL)
-            repository.update_templates()
+            repository.update_templates()  # synchronous
             db.add(repository)
             db.add(Settings(key="@system/repository_samples_done", value="true"))
             db.commit()
 
-        # We have not created a new gallery repo URL
+        # Create gallery repo if not done
         if not db.query(Settings).filter_by(key="@system/repository_gallery_done").first():
             repository = Repository(name="", url=FRAMEOS_GALLERY_URL)
-            repository.update_templates()
+            repository.update_templates()  # synchronous
             db.add(repository)
             db.add(Settings(key="@system/repository_gallery_done", value="true"))
             db.commit()
 
-        repositories = [repo.to_dict() for repo in db.query(Repository).all()]
-        return jsonify(repositories)
+        repositories = [repo.to_json() for repo in db.query(Repository).all()]
+        return JSONResponse(content=repositories, status_code=200)
     except SQLAlchemyError as e:
         logging.error(f'Database error: {e}')
-        return jsonify({'error': 'Database error'}), 500
+        return JSONResponse(content={'error': 'Database error'}, status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.route("/repositories/<repository_id>", methods=["GET"])
-def get_repository(repository_id):
-    db = g.db
+@api.get("/repositories/{repository_id}")
+async def get_repository(repository_id: int, db: Session = Depends(get_db)):
     try:
         repository = db.query(Repository).get(repository_id)
         if not repository:
-            return jsonify({"error": "Repository not found"}), 404
-        return jsonify(repository.to_dict())
+            return JSONResponse(content={"error": "Repository not found"}, status_code=HTTPStatus.NOT_FOUND)
+        return JSONResponse(content=repository.to_dict(), status_code=200)
     except SQLAlchemyError as e:
         logging.error(f'Database error: {e}')
-        return jsonify({'error': 'Database error'}), 500
+        return JSONResponse(content={'error': 'Database error'}, status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.route("/repositories/<repository_id>", methods=["PATCH"])
-def update_repository(repository_id, ):
-    db = g.db
-    data = request.json or {}
+@api.patch("/repositories/{repository_id}")
+async def update_repository(repository_id: int, request: Request, db: Session = Depends(get_db)):
+    data = await request.json()
     try:
         repository = db.query(Repository).get(repository_id)
         if not repository:
-            return jsonify({"error": "Repository not found"}), 404
+            return JSONResponse(content={"error": "Repository not found"}, status_code=HTTPStatus.NOT_FOUND)
 
         if data.get('name'):
             repository.name = data.get('name', repository.name)
         if data.get('url'):
             repository.url = data.get('url', repository.url)
-        repository.update_templates()
+        repository.update_templates()  # synchronous
         db.commit()
-        return jsonify(repository.to_dict())
+        return JSONResponse(content=repository.to_dict(), status_code=200)
     except SQLAlchemyError as e:
         logging.error(f'Database error: {e}')
-        return jsonify({'error': 'Database error'}), 500
+        return JSONResponse(content={'error': 'Database error'}, status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.route("/repositories/<repository_id>", methods=["DELETE"])
-def delete_repository(repository_id):
-    db = g.db
+@api.delete("/repositories/{repository_id}")
+async def delete_repository(repository_id: int, db: Session = Depends(get_db)):
     try:
         repository = db.query(Repository).get(repository_id)
         if not repository:
-            return jsonify({"error": "Repository not found"}), 404
+            return JSONResponse(content={"error": "Repository not found"}, status_code=HTTPStatus.NOT_FOUND)
         db.delete(repository)
         db.commit()
-        return jsonify({"message": "Repository deleted successfully"}), 200
+        return JSONResponse(content={"message": "Repository deleted successfully"}, status_code=200)
     except SQLAlchemyError as e:
         logging.error(f'Database error: {e}')
-        return jsonify({'error': 'Database error'}), 500
+        return JSONResponse(content={'error': 'Database error'}, status_code=HTTPStatus.INTERNAL_SERVER_ERROR)

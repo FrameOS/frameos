@@ -1,12 +1,8 @@
-
-
-from app.huey import huey
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection
 from ..database import SessionLocal
 
-@huey.task()
 async def stop_frame(id: int):
     with SessionLocal() as db:
         ssh = None

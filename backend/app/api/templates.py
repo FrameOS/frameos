@@ -1,31 +1,36 @@
 import base64
 import io
 import zipfile
-import requests
 import json
 import string
 
-from flask import jsonify, request, send_file, Response, g
+import httpx
+from fastapi import Depends, Request, UploadFile
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from sqlalchemy.orm import Session
+from PIL import Image
 
+from app.database import get_db
 from app.redis import redis
-from . import api
 from app.models.template import Template
 from app.models.frame import Frame
-from PIL import Image
+
+from . import api
 
 def respond_with_template(template: Template):
     if not template:
-        return jsonify({"error": "Template not found"}), 404
-    template_name = template.name
+        return JSONResponse(content={"error": "Template not found"}, status_code=404)
+
+    template_name = template.name or 'Template'
     safe_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
     template_name = ''.join(c if c in safe_chars else ' ' for c in template_name).strip()
     template_name = ' '.join(template_name.split()) or 'Template'
 
     template_dict = template.to_dict()
-    template_dict.pop('id')
+    template_dict.pop('id', None)
     in_memory = io.BytesIO()
     with zipfile.ZipFile(in_memory, 'a', zipfile.ZIP_DEFLATED) as zf:
-        scenes = template_dict.pop('scenes')
+        scenes = template_dict.pop('scenes', [])
         template_dict['scenes'] = './scenes.json'
         template_dict['image'] = './image.jpg'
         zf.writestr(f"{template_name}/scenes.json", json.dumps(scenes, indent=2))
@@ -33,30 +38,46 @@ def respond_with_template(template: Template):
         if template.image:
             zf.writestr(f"{template_name}/image.jpg", template.image)
     in_memory.seek(0)
-    return Response(in_memory.getvalue(), content_type='application/zip', headers={"Content-Disposition": f"attachment; filename={template_name}.zip"})
+    return Response(in_memory.getvalue(), media_type='application/zip',
+                    headers={"Content-Disposition": f"attachment; filename={template_name}.zip"})
 
-@api.route("/templates", methods=["POST"])
-def create_template():
-    db = g.db
-    if 'file' in request.files:
-        zip_file = request.files['file'].read()
-    elif 'url' in request.json:
-        zip_file = requests.get(request.json['url']).content
+
+@api.post("/templates")
+async def create_template(request: Request, db: Session = Depends(get_db)):
+    # Attempt to handle file from form-data
+    form = await request.form()
+    file_upload = form.get('file')
+    data = {}
+    zip_file = None
+
+    # If we got a file from the form
+    if file_upload and isinstance(file_upload, UploadFile):
+        file_bytes = await file_upload.read()
+        zip_file = zipfile.ZipFile(io.BytesIO(file_bytes))
     else:
-        data = request.json
-        zip_file = None
-        if data.get('url'):
-            zip_file = requests.get(data.get('url')).content
+        # If not form file, check JSON body
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
 
+        url = data.get('url')
+        if url:
+            # Fetch zip from URL
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url)
+            resp.raise_for_status()
+            zip_file = zipfile.ZipFile(io.BytesIO(resp.content))
+
+    # If we have a zip_file
     if zip_file:
-        zip_file = zipfile.ZipFile(io.BytesIO(zip_file))
         folder_name = ''
         for name in zip_file.namelist():
-            print(name)
             if name == 'template.json':
                 folder_name = ''
                 break
             elif name.endswith('/template.json'):
+                # Find the shortest matching folder_name if multiple
                 if folder_name == '' or len(name) < len(folder_name):
                     folder_name = name[:-len('template.json')]
 
@@ -67,16 +88,23 @@ def create_template():
         data['scenes'] = json.loads(scenes_json)
 
         image = data.get('image', '')
-        if image.startswith('data:image/'):
-            image = image[len('data:image/'):].split(';base64,')[1]
-            image = base64.b64decode(image)
-        elif image.startswith('./'):
-            image = image[len('./'):]
-            image = zip_file.read(f'{folder_name}{image}')
-        elif image.startswith('http:') or image.startswith('https:'):
-            image = requests.get(image).content
-        else:
-            image = None
+        if isinstance(image, str):
+            if image.startswith('data:image/'):
+                # base64 embedded image
+                image = image[len('data:image/'):]
+                _, b64data = image.split(';base64,', 1)
+                image = base64.b64decode(b64data)
+            elif image.startswith('./'):
+                image_path = image[len('./'):]
+                image = zip_file.read(f'{folder_name}{image_path}')
+            elif image.startswith('http:') or image.startswith('https:'):
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(image)
+                resp.raise_for_status()
+                image = resp.content
+            else:
+                image = None
+
         data['image'] = image
         if image:
             img = Image.open(io.BytesIO(image))
@@ -86,18 +114,17 @@ def create_template():
     if data.get('from_frame_id'):
         frame_id = data.get('from_frame_id')
         frame = db.query(Frame).get(frame_id)
-        # TODO: move to shared util
-        cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
-        last_image = redis.get(cache_key)
-        if last_image:
-            try:
-                image = Image.open(io.BytesIO(last_image))
-                data['image'] = last_image
-                data['imageWidth'] = image.width
-                data['imageHeight'] = image.height
-            except Exception as e:
-                print(e)
-                pass
+        if frame:
+            cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+            last_image = await redis.get(cache_key)
+            if last_image:
+                try:
+                    image = Image.open(io.BytesIO(last_image))
+                    data['image'] = last_image
+                    data['imageWidth'] = image.width
+                    data['imageHeight'] = image.height
+                except Exception as e:
+                    print(e)
 
     new_template = Template(
         name=data.get('name'),
@@ -105,75 +132,68 @@ def create_template():
         scenes=data.get('scenes'),
         config=data.get('config'),
         image=data.get('image'),
-        # older templates might have image_width and image_height
         image_width=data.get('imageWidth', data.get('image_width')),
         image_height=data.get('imageHeight', data.get('image_height')),
     )
 
-    if request.json.get('format') == 'zip':
+    format_type = data.get('format')
+    if format_type == 'zip':
         return respond_with_template(new_template)
-    elif request.json.get('format') == 'scenes':
-        return jsonify(new_template.scenes), 201
+    elif format_type == 'scenes':
+        return JSONResponse(content=new_template.scenes, status_code=201)
     else:
         db.add(new_template)
         db.commit()
-        return jsonify(new_template.to_dict()), 201
+        return JSONResponse(content=new_template.to_dict(), status_code=201)
 
-# Read (GET) for all templates
-@api.route("/templates", methods=["GET"])
-def get_templates():
-    db = g.db
+
+@api.get("/templates")
+async def get_templates(db: Session = Depends(get_db)):
     templates = [template.to_dict() for template in db.query(Template).all()]
-    return jsonify(templates)
+    return JSONResponse(content=templates, status_code=200)
 
-# Read (GET) for a specific template
-@api.route("/templates/<template_id>", methods=["GET"])
-def get_template(template_id):
-    db = g.db
-    template = db.query(Template).get(template_id)
-    if not template:
-        return jsonify({"error": "Template not found"}), 404
-    return jsonify(template.to_dict())
 
-# Read (GET) for a specific template
-@api.route("/templates/<template_id>/image", methods=["GET"])
-def get_template_image(template_id):
-    db = g.db
+@api.get("/templates/{template_id}/image")
+async def get_template_image(template_id: int, db: Session = Depends(get_db)):
     template = db.query(Template).get(template_id)
     if not template or not template.image:
-        return jsonify({"error": "Template not found"}), 404
-    return send_file(io.BytesIO(template.image), mimetype='image/jpeg')
+        return JSONResponse(content={"error": "Template not found"}, status_code=404)
+    return StreamingResponse(io.BytesIO(template.image), media_type='image/jpeg')
 
-# Export (GET) for a specific template
-@api.route("/templates/<template_id>/export", methods=["GET"])
-def export_template(template_id):
-    db = g.db
+
+@api.get("/templates/{template_id}/export")
+async def export_template(template_id: int, db: Session = Depends(get_db)):
     template = db.query(Template).get(template_id)
     return respond_with_template(template)
 
 
-# Update (PUT)
-@api.route("/templates/<template_id>", methods=["PATCH"])
-def update_template(template_id):
-    db = g.db
+@api.get("/templates/{template_id}")
+async def get_template(template_id: int, db: Session = Depends(get_db)):
     template = db.query(Template).get(template_id)
     if not template:
-        return jsonify({"error": "Template not found"}), 404
-    data = request.json
+        return JSONResponse(content={"error": "Template not found"}, status_code=404)
+    return JSONResponse(content=template.to_dict(), status_code=200)
+
+
+@api.patch("/templates/{template_id}")
+async def update_template(template_id: int, request: Request, db: Session = Depends(get_db)):
+    template = db.query(Template).get(template_id)
+    if not template:
+        return JSONResponse(content={"error": "Template not found"}, status_code=404)
+    data = await request.json()
     if 'name' in data:
         template.name = data.get('name', template.name)
     if 'description' in data:
         template.description = data.get('description', template.description)
     db.commit()
-    return jsonify(template.to_dict())
+    return JSONResponse(content=template.to_dict(), status_code=200)
 
-# Delete (DELETE)
-@api.route("/templates/<template_id>", methods=["DELETE"])
-def delete_template(template_id):
-    db = g.db
+
+@api.delete("/templates/{template_id}")
+async def delete_template(template_id: int, db: Session = Depends(get_db)):
     template = db.query(Template).get(template_id)
     if not template:
-        return jsonify({"error": "Template not found"}), 404
+        return JSONResponse(content={"error": "Template not found"}, status_code=404)
     db.delete(template)
     db.commit()
-    return jsonify({"message": "Template deleted successfully"}), 200
+    return JSONResponse(content={"message": "Template deleted successfully"}, status_code=200)

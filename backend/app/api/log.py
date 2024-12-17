@@ -1,13 +1,13 @@
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
 from app.database import get_db
 from sqlalchemy.orm import Session
 from app.models.frame import Frame
 from app.models.log import process_log
 
-api_log = APIRouter()
+from . import api
 
-@api_log.post("")
+@api.post("/log")
 async def post_api_log(request: Request, db: Session = Depends(get_db)):
     auth_header = request.headers.get('Authorization')
     if not auth_header:

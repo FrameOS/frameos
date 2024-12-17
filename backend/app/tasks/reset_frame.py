@@ -1,9 +1,7 @@
-from app.huey import huey
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame
 from ..database import SessionLocal
 
-@huey.task()
 async def reset_frame(id: int):
     with SessionLocal() as db:
         frame = db.query(Frame).get(id)

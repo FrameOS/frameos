@@ -3,14 +3,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi.middleware.wsgi import WSGIMiddleware
-from app.flask import create_app
 from fastapi import FastAPI, Request
-from app.api.log import api_log as api_log_router
+from app.api import api as api_router
 from fastapi.middleware.gzip import GZipMiddleware
-from app.middleware.gzip import GzipRequestMiddleware
+from app.middleware import GzipRequestMiddleware
+from alembic.config import Config as AlembicConfig
+from alembic import command as alembic_command
 
-from app.views.ws_broadcast import register_ws_routes
+from app.services.ws_broadcast import register_ws_routes
+from app.config import get_config
 
 
 app = FastAPI()
@@ -19,10 +20,7 @@ app.add_middleware(GzipRequestMiddleware)
 
 register_ws_routes(app)
 
-app.include_router(api_log_router, prefix="/api/log", tags=["log"])
-
-flask_app = create_app()
-app.mount("/api", WSGIMiddleware(flask_app))
+app.include_router(api_router, prefix="/api", tags=["api"])
 
 app.mount("/assets", StaticFiles(directory="../frontend/dist/assets"), name="assets")
 app.mount("/img", StaticFiles(directory="../frontend/dist/img"), name="img")
@@ -49,5 +47,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return FileResponse(index_path)
 
 if __name__ == '__main__':
+    # run migrations
+    database_url = get_config().DATABASE_URL
+    if database_url.startswith("sqlite:///../db/"):
+        os.makedirs('../db', exist_ok=True)
+    alembic_ini_path = os.path.join(os.path.dirname(__file__), "..", "migrations", "alembic.ini")
+    alembic_cfg = AlembicConfig(alembic_ini_path)
+    alembic_command.upgrade(alembic_cfg, "head")
+
+    # start server
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8989)

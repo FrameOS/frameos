@@ -20,7 +20,6 @@ from app.codegen.drivers_nim import write_drivers_nim
 from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.drivers.devices import drivers_for_device
 from app.drivers.waveshare import write_waveshare_driver_nim, get_variant_folder
-from app.huey import huey
 from app.models import get_apps_from_scenes
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json
@@ -29,7 +28,6 @@ from ..database import SessionLocal
 from sqlalchemy.orm import Session
 
 
-@huey.task()
 async def deploy_frame(id: int):
     with SessionLocal() as db:
         ssh = None
@@ -46,7 +44,7 @@ async def deploy_frame(id: int):
                 raise Exception("Already deploying, will not deploy again. Request again to force deploy.")
 
             frame.status = 'deploying'
-            update_frame(db, frame)
+            await update_frame(db, frame)
 
             # TODO: add the concept of builds into the backend (track each build in the database)
             build_id = ''.join(random.choice(string.ascii_lowercase) for i in range(12))

@@ -1,12 +1,12 @@
-from flask import Blueprint
+from fastapi import APIRouter
 
-api: Blueprint = Blueprint('api', __name__)
+api = APIRouter()
 
 from .apps import *
 from .frames import *
-from .login import *
+from .log import *
 from .repositories import *
-from .signup import *
 from .settings import *
+from .ssh import *
 from .templates import *
-from .misc import *
+

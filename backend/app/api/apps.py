@@ -1,65 +1,63 @@
 import ast
 import re
-
-import requests
 import json
 import tempfile
 import os
-import subprocess
-
-from flask import jsonify, request
-
-from . import api
+import asyncio
+import httpx
+from fastapi import Depends, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
+from app.database import get_db
 from app.models.apps import get_app_configs, get_one_app_sources
 from app.models.settings import get_settings_dict
+from . import api
 
-@api.route("/apps", methods=["GET"])
-def api_apps():
-    return jsonify(apps=get_app_configs())
-
-@api.route("/apps/source", methods=["GET"])
-def api_apps_source():
-    keyword = request.args.get("keyword")
-    return jsonify(get_one_app_sources(keyword))
+@api.get("/apps")
+async def api_apps_list(db: Session = Depends(get_db)):
+    return JSONResponse(content={"apps": get_app_configs()}, status_code=200)
 
 
-@api.route("/apps/validate_source", methods=["POST"])
-def validate_python_frame_source():
-    data = request.json
+@api.get("/apps/source")
+async def api_apps_source(keyword: str = None, db: Session = Depends(get_db)):
+    return JSONResponse(content=get_one_app_sources(keyword), status_code=200)
+
+
+@api.post("/apps/validate_source")
+async def validate_python_frame_source(request: Request):
+    data = await request.json()
     file = data.get('file')
     source = data.get('source')
 
     if file.endswith('.py'):
         errors = validate_python(source)
     elif file.endswith('.nim'):
-        errors = validate_nim(source)
+        errors = await validate_nim(source)  # now async
     elif file.endswith('.json'):
         errors = validate_json(source)
     else:
-        return jsonify({"errors": [
-            {"line": 1, "column": 1, "error": f"Don't know how to validate files of this extension: {file}"}]}), 400
+        return JSONResponse(content={
+            "errors": [
+                {"line": 1, "column": 1, "error": f"Don't know how to validate files of this extension: {file}"}
+            ]
+        }, status_code=400)
 
-    if errors:
-        return jsonify({"errors": errors}), 200
-    else:
-        return jsonify({"errors": []}), 200
+    return JSONResponse(content={"errors": errors}, status_code=200)
 
 
-@api.route("/apps/enhance_source", methods=["POST"])
-
-def enhance_python_frame_source():
-    data = request.json
+@api.post("/apps/enhance_source")
+async def enhance_python_frame_source(request: Request, db: Session = Depends(get_db)):
+    data = await request.json()
     source = data.get('source')
     prompt = data.get('prompt')
-    api_key = get_settings_dict().get('openAI', {}).get('apiKey', None)
+    api_key = get_settings_dict(db).get('openAI', {}).get('apiKey', None)
 
     if api_key is None:
-        return jsonify({"error": "OpenAI API key not set"}), 400
+        return JSONResponse(content={"error": "OpenAI API key not set"}, status_code=400)
 
     ai_context = f"""
-    You are helping a python developer write ea FrameOS application. You are editing app.nim, the main file in FrameOS.
-    This controls an e-ink display and runs on a Raspberry Pi. Help the user with their changes. Be mindful of what
-    you do and do not know.
+    You are helping a python developer write a FrameOS application. You are editing app.nim, the main file in FrameOS.
+    This controls an e-ink display and runs on a Raspberry Pi. Help the user with their changes.
 
     This is the current source of app.nim:
     ```nim
@@ -85,17 +83,21 @@ def enhance_python_frame_source():
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
-    response = requests.post("https://api.openai.com/v1/chat/completions", json=payload, headers=headers)
-    result = response.json()
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post("https://api.openai.com/v1/chat/completions", json=payload, headers=headers)
+        result = response.json()
+
     error = result.get('error', None)
     suggestion = result['choices'][0]['message']['content'] if 'choices' in result else None
+
     if error:
-        return jsonify({"error": error}), 500
+        return JSONResponse(content={"error": error}, status_code=500)
     else:
-        return jsonify({"suggestion": suggestion}), 200
+        return JSONResponse(content={"suggestion": suggestion}, status_code=200)
 
 
-def validate_python(source):
+def validate_python(source: str):
     try:
         ast.parse(source)
         return []
@@ -103,7 +105,7 @@ def validate_python(source):
         return [{"line": e.lineno, "column": e.offset, "error": str(e)}]
 
 
-def validate_nim(source):
+async def validate_nim(source: str):
     temp_file_name = ''
     try:
         os.makedirs("../frameos/src/codegen", exist_ok=True)
@@ -113,11 +115,18 @@ def validate_nim(source):
         temp_file.write(source)
         temp_file.close()
 
-        result = subprocess.run(['nim', 'check', temp_file_name], capture_output=True, text=True)
+        proc = await asyncio.create_subprocess_exec(
+            'nim', 'check', temp_file_name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            text=True
+        )
+
+        stdout, stderr = await proc.communicate()
+
         errors = []
-        for line in result.stderr.split('\n'):
+        for line in stderr.split('\n'):
             if line.startswith(temp_file_name) or line.startswith(temp_file_abs_name):
-                # "tmps4sk1v2t.nim(22, 12) Error: expression 'scene' has no type (or is ambiguous)"
                 if line.startswith(temp_file_name):
                     line = line[len(temp_file_name):]
                 elif line.startswith(temp_file_abs_name):
@@ -126,17 +135,18 @@ def validate_nim(source):
                 if "Error:" in line:
                     match = re.search(r'\((\d+), (\d+)\) (Error: .+)', line)
                     if match:
-                        line_no, column, error = int(match.group(1)), int(match.group(2)), match.group(3)
-                        errors.append({"line": line_no, "column": column, "error": error})
+                        line_no, column, error_msg = int(match.group(1)), int(match.group(2)), match.group(3)
+                        errors.append({"line": line_no, "column": column, "error": error_msg})
         return errors
 
     except Exception as e:
         return [{"error": str(e)}]
     finally:
-        if temp_file_name:
+        if temp_file_name and os.path.exists(temp_file_name):
             os.remove(temp_file_name)
 
-def validate_json(source):
+
+def validate_json(source: str):
     try:
         json.loads(source)
         return []

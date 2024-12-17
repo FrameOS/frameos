@@ -30,13 +30,13 @@ class ConnectionManager:
         await websocket.accept()
         async with self.lock:
             self.active_connections.append(websocket)
-        print(f"Client connected: {websocket.client}")
+        print(f"Websocket client connected: {websocket.client}")
 
     async def disconnect(self, websocket: WebSocket):
         async with self.lock:
             if websocket in self.active_connections:
                 self.active_connections.remove(websocket)
-        print(f"Client disconnected: {websocket.client}")
+        print(f"Websocket client disconnected: {websocket.client}")
 
     async def send_personal_message(self, message: str, websocket: WebSocket):
         await websocket.send_text(message)
@@ -60,7 +60,6 @@ async def redis_listener():
     async for message in pubsub.listen():
         if message["type"] == "message":
             msg = message["data"]
-            # print(f"Received message from Redis: {msg}")
             await manager.broadcast(msg)
 
 
@@ -71,7 +70,6 @@ def register_ws_routes(app):
         try:
             while True:
                 data = await websocket.receive_text()
-                # print(f"Received message from {websocket.client}: {data}")
                 # Handle incoming messages
                 await manager.send_personal_message(f"You said: {data}", websocket)
         except WebSocketDisconnect:

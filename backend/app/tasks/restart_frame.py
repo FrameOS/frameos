@@ -1,13 +1,12 @@
-from app.huey import huey
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection
-from ..database import SessionLocal
+from app.database import SessionLocal
 
-@huey.task()
 async def restart_frame(id: int):
     with SessionLocal() as db:
         ssh = None
+        frame = None
         try:
             frame = db.query(Frame).get(id)
             if not frame:

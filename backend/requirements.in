@@ -2,15 +2,12 @@ fastapi[standard]
 sqlmodel
 passlib
 jwt
-
-flask
-Flask-migrate
-
+flask[async]
+alembic
 sqlalchemy
 huey
 honcho
 redis
-aioredis
 paramiko
 scp
 requests
@@ -23,6 +20,7 @@ ipdb
 pillow==9.5.0
 sentry-sdk[flask]
 pytest
+pytest-asyncio
 pip-tools
 pre-commit
 ruff

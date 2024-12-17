@@ -1,18 +1,22 @@
 import os
 import secrets
 
+def get_bool_env(key: str) -> bool:
+    return os.environ.get(key, '0').lower() in ['true', '1', 'yes']
+
 class Config:
+    DEBUG = get_bool_env('DEBUG')
+    TEST = get_bool_env('TEST')
     SECRET_KEY = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
-    SQLALCHEMY_DATABASE_URI = os.environ.get('SQLALCHEMY_DATABASE_URI') or 'sqlite:///../db/frameos.db'
+    DATABASE_URL = os.environ.get('DATABASE_URL') or 'sqlite:///../db/frameos.db'
     REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
 
 class DevelopmentConfig(Config):
     DEBUG = True
 
 class TestConfig(Config):
-    TESTING = True
-    SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
-    WTF_CSRF_ENABLED = False
+    TEST = True
+    DATABASE_URL = 'sqlite:///:memory:'
 
 class ProductionConfig(Config):
     pass
@@ -25,6 +29,7 @@ configs = {
 }
 
 def get_config() -> Config:
-    config_name = os.getenv('FLASK_CONFIG', 'default')
-    config_class = configs.get(config_name, DevelopmentConfig)
+    is_test = get_bool_env('TEST')
+    is_dev = get_bool_env('DEBUG')
+    config_class = TestConfig if is_test else DevelopmentConfig if is_dev else ProductionConfig
     return config_class()

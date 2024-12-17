@@ -1,13 +1,17 @@
 import io
 import json
-import shlex
-
-import requests
 import os
-
+import shlex
+import asyncio
 from http import HTTPStatus
-from flask import jsonify, request, Response, send_file, g
-from . import api
+from tempfile import NamedTemporaryFile
+
+import httpx
+from fastapi import Depends, Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from sqlalchemy.orm import Session
+
+from app.database import get_db
 from app.redis import redis
 from app.models.frame import Frame, new_frame, delete_frame, update_frame
 from app.models.log import new_log as log
@@ -15,129 +19,165 @@ from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection
 from scp import SCPClient
-from tempfile import NamedTemporaryFile
+from . import api
 
 
-@api.route("/frames", methods=["GET"])
-def api_frames():
-    db = g.db
+@api.get("/frames")
+async def api_frames_list(db: Session = Depends(get_db)):
     try:
         frames = db.query(Frame).all()
         frames_list = [frame.to_dict() for frame in frames]
-        return jsonify(frames=frames_list)
+        return JSONResponse(content={"frames": frames_list}, status_code=200)
     except Exception as e:
-        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+        return JSONResponse(content={'error': 'Internal Server Error', 'message': str(e)},
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.route('/frames/<int:id>', methods=['GET'])
-def api_frame_get(id: int):
-    db = g.db
+
+@api.get("/frames/{id}")
+async def api_frame_get(id: int, db: Session = Depends(get_db)):
     try:
         frame = db.query(Frame).get(id)
-        return jsonify(frame=frame.to_dict())
+        if frame is None:
+            return JSONResponse(content={'error': 'Frame not found'}, status_code=HTTPStatus.NOT_FOUND)
+        return JSONResponse(content={"frame": frame.to_dict()}, status_code=200)
     except Exception as e:
-        return jsonify({'error': 'Frame not found', 'message': str(e)}), HTTPStatus.NOT_FOUND
+        return JSONResponse(content={'error': 'Frame not found', 'message': str(e)},
+                            status_code=HTTPStatus.NOT_FOUND)
 
-@api.route('/frames/<int:id>/logs', methods=['GET'])
-def api_frame_get_logs(id: int):
-    db = g.db
+
+@api.get("/frames/{id}/logs")
+async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
     try:
         frame = db.query(Frame).get(id)
-        logs = [log.to_dict() for log in frame.logs]
-        logs = logs[-1000:]  # limit the logs to the last 1000 entries
-        return jsonify(logs=logs)
+        if frame is None:
+            return JSONResponse(content={'error': 'Frame not found'}, status_code=HTTPStatus.NOT_FOUND)
+        logs = [ll.to_dict() for ll in frame.logs][-1000:]
+        return JSONResponse(content={"logs": logs}, status_code=200)
     except Exception as e:
-        return jsonify({'error': 'Logs not found', 'message': str(e)}), HTTPStatus.NOT_FOUND
+        return JSONResponse(content={'error': 'Logs not found', 'message': str(e)},
+                            status_code=HTTPStatus.NOT_FOUND)
 
-@api.route('/frames/<int:id>/image', methods=['GET'])
-def api_frame_get_image(id: int):
-    db = g.db
+
+@api.get("/frames/{id}/image")
+async def api_frame_get_image(id: int, request: Request, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
+    if frame is None:
+        return JSONResponse(content={'error': 'Frame not found'}, status_code=HTTPStatus.NOT_FOUND)
+
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
     url = f'http://{frame.frame_host}:{frame.frame_port}/image'
-    if frame.frame_access != "public" and frame.frame_access != "protected" and frame.frame_access_key is not None:
+    if frame.frame_access not in ["public", "protected"] and frame.frame_access_key is not None:
         url += "?k=" + frame.frame_access_key
 
     try:
-        if request.args.get('t') == '-1':
-            last_image = redis.get(cache_key)
+        if request.query_params.get('t') == '-1':
+            last_image = await redis.get(cache_key)
             if last_image:
-                return Response(last_image, content_type='image/png')
+                return Response(content=last_image, media_type='image/png')
 
-        response = requests.get(url, timeout=15)
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=15.0)
+
         if response.status_code == 200:
-            redis.set(cache_key, response.content, ex=86400 * 30)  # cache for 30 days
-            return Response(response.content, content_type='image/png')
+            await redis.set(cache_key, response.content, ex=86400 * 30)
+            return Response(content=response.content, media_type='image/png')
         else:
-            last_image = redis.get(cache_key)
+            last_image = await redis.get(cache_key)
             if last_image:
-                return Response(last_image, content_type='image/png')
-            return jsonify({"error": "Unable to fetch image"}), response.status_code
-    except requests.exceptions.Timeout:
-        return jsonify({'error': f'Request Timeout to {url}'}), HTTPStatus.REQUEST_TIMEOUT
-    except Exception as e:
-        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+                return Response(content=last_image, media_type='image/png')
+            return JSONResponse(content={"error": "Unable to fetch image"}, status_code=response.status_code)
 
-@api.route('/frames/<int:id>/state', methods=['GET'])
-def api_frame_get_state(id: int):
-    db = g.db
+    except httpx.ReadTimeout:
+        return JSONResponse(content={'error': f'Request Timeout to {url}'},
+                            status_code=HTTPStatus.REQUEST_TIMEOUT)
+    except Exception as e:
+        return JSONResponse(content={'error': 'Internal Server Error', 'message': str(e)},
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
+
+
+@api.get("/frames/{id}/state")
+async def api_frame_get_state(id: int, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
+    if frame is None:
+        return JSONResponse(content={'error': 'Frame not found'}, status_code=HTTPStatus.NOT_FOUND)
+
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:state'
     url = f'http://{frame.frame_host}:{frame.frame_port}/state'
     if frame.frame_access != "public" and frame.frame_access_key is not None:
         url += "?k=" + frame.frame_access_key
 
     try:
-        last_state = redis.get(cache_key)
+        last_state = await redis.get(cache_key)
         if last_state:
-            return Response(last_state, content_type='application/json')
+            return Response(content=last_state, media_type='application/json')
 
-        response = requests.get(url, timeout=15)
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=15.0)
+
         if response.status_code == 200:
-            redis.set(cache_key, response.content, ex=1)  # cache for 1 second
-            return Response(response.content, content_type='application/json')
+            await redis.set(cache_key, response.content, ex=1)
+            return Response(content=response.content, media_type='application/json')
         else:
-            last_state = redis.get(cache_key)
+            last_state = await redis.get(cache_key)
             if last_state:
-                return Response(last_state, content_type='application/json')
-            return jsonify({"error": "Unable to fetch state"}), response.status_code
-    except requests.exceptions.Timeout:
-        return jsonify({'error': f'Request Timeout to {url}'}), HTTPStatus.REQUEST_TIMEOUT
+                return Response(content=last_state, media_type='application/json')
+            return JSONResponse(content={"error": "Unable to fetch state"}, status_code=response.status_code)
+    except httpx.ReadTimeout:
+        return JSONResponse(content={'error': f'Request Timeout to {url}'},
+                            status_code=HTTPStatus.REQUEST_TIMEOUT)
     except Exception as e:
-        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+        return JSONResponse(content={'error': 'Internal Server Error', 'message': str(e)},
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.route('/frames/<int:id>/event/<event>', methods=['POST'])
-def api_frame_event(id: int, event: str):
-    db = g.db
+
+@api.post("/frames/{id}/event/{event}")
+async def api_frame_event(id: int, event: str, request: Request, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
+    if frame is None:
+        return JSONResponse(content={'error': 'Frame not found'}, status_code=HTTPStatus.NOT_FOUND)
     try:
         headers = {}
         if frame.frame_access != "public" and frame.frame_access_key is not None:
             headers["Authorization"] = f'Bearer {frame.frame_access_key}'
-        if request.is_json:
-            headers["Content-Type"] = "application/json"
-            response = requests.post(f'http://{frame.frame_host}:{frame.frame_port}/event/{event}', json=request.json, headers=headers)
-        else:
-            response = requests.post(f'http://{frame.frame_host}:{frame.frame_port}/event/{event}', headers=headers)
+
+        async with httpx.AsyncClient() as client:
+            if request.headers.get('content-type') == 'application/json':
+                body = await request.json()
+                response = await client.post(
+                    f'http://{frame.frame_host}:{frame.frame_port}/event/{event}',
+                    json=body, headers=headers, timeout=15.0
+                )
+            else:
+                response = await client.post(
+                    f'http://{frame.frame_host}:{frame.frame_port}/event/{event}',
+                    headers=headers, timeout=15.0
+                )
+
         if response.status_code == 200:
-            return "OK", 200
+            return Response(content="OK", status_code=200)
         else:
-            return jsonify({"error": "Unable to reach frame"}), response.status_code
+            return JSONResponse(content={"error": "Unable to reach frame"}, status_code=response.status_code)
     except Exception as e:
-        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+        return JSONResponse(content={'error': 'Internal Server Error', 'message': str(e)},
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.route('/frames/<int:id>/scene_source/<scene>', methods=['GET'])
-def api_frame_scene_source(id: int, scene: str):
-    db = g.db
+
+@api.get("/frames/{id}/scene_source/{scene}")
+async def api_frame_scene_source(id: int, scene: str, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
+    if frame is None:
+        return JSONResponse(content={'error': 'Frame not found'}, status_code=HTTPStatus.NOT_FOUND)
     for scene_json in frame.scenes:
-         if scene_json.get('id') == scene:
-            return jsonify({'source': write_scene_nim(frame, scene_json)})
-    return jsonify({'error': f'Scene {scene} not found'}), HTTPStatus.NOT_FOUND
+        if scene_json.get('id') == scene:
+            return JSONResponse(content={'source': write_scene_nim(frame, scene_json)}, status_code=200)
+    return JSONResponse(content={'error': f'Scene {scene} not found'}, status_code=HTTPStatus.NOT_FOUND)
 
-@api.route('/frames/<int:id>/assets', methods=['GET'])
-async def api_frame_get_assets(id: int):
-    db = g.db
+
+@api.get("/frames/{id}/assets")
+async def api_frame_get_assets(id: int, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
+    if frame is None:
+        return JSONResponse(content={'error': 'Frame not found'}, status_code=HTTPStatus.NOT_FOUND)
     assets_path = frame.assets_path or "/srv/assets"
     ssh = await get_ssh_connection(db, frame)
     command = f"find {assets_path} -type f -exec stat --format='%s %Y %n' {{}} +"
@@ -145,7 +185,7 @@ async def api_frame_get_assets(id: int):
     await exec_command(db, frame, ssh, command, output, log_output=False)
     remove_ssh_connection(ssh)
 
-    assets: list[dict] = []
+    assets = []
     for line in output:
         parts = line.split(' ', 2)
         size, mtime, path = parts
@@ -156,115 +196,130 @@ async def api_frame_get_assets(id: int):
         })
 
     assets.sort(key=lambda x: x['path'])
-    return jsonify(assets=assets)
+    return JSONResponse(content={"assets": assets}, status_code=200)
 
-@api.route('/frames/<int:id>/asset', methods=['GET'])
-async def api_frame_get_asset(id: int):
-    db = g.db
+
+@api.get("/frames/{id}/asset")
+async def api_frame_get_asset(id: int, request: Request, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
+    if frame is None:
+        return JSONResponse(content={'error': 'Frame not found'}, status_code=HTTPStatus.NOT_FOUND)
     assets_path = frame.assets_path or "/srv/assets"
-    path = request.args.get('path')
-    mode = request.args.get('mode', 'download')  # Default mode is 'download'
-    filename: str = request.args.get('filename', os.path.basename(path or "."))
+    path = request.query_params.get('path')
+    mode = request.query_params.get('mode', 'download')
+    filename = request.query_params.get('filename', os.path.basename(path or "."))
 
     if not path:
-        return jsonify({'error': 'Path parameter is required'}), HTTPStatus.BAD_REQUEST
+        return JSONResponse(content={'error': 'Path parameter is required'},
+                            status_code=HTTPStatus.BAD_REQUEST)
 
-    # Normalize and validate the path
     normalized_path = os.path.normpath(os.path.join(assets_path, path))
     if not normalized_path.startswith(os.path.normpath(assets_path)):
-        return jsonify({'error': 'Invalid asset path'}), HTTPStatus.BAD_REQUEST
+        return JSONResponse(content={'error': 'Invalid asset path'},
+                            status_code=HTTPStatus.BAD_REQUEST)
 
     try:
         ssh = await get_ssh_connection(db, frame)
         try:
             escaped_path = shlex.quote(normalized_path)
-            # Check if the asset exists and get its MD5 hash
             command = f"md5sum {escaped_path}"
             await log(db, frame.id, "stdinfo", f"> {command}")
             stdin, stdout, stderr = ssh.exec_command(command)
             md5sum_output = stdout.read().decode().strip()
             if not md5sum_output:
-                return jsonify({'error': 'Asset not found'}), HTTPStatus.NOT_FOUND
+                return JSONResponse(content={'error': 'Asset not found'},
+                                    status_code=HTTPStatus.NOT_FOUND)
 
             md5sum = md5sum_output.split()[0]
             cache_key = f'asset:{md5sum}'
 
-            cached_asset = redis.get(cache_key)
+            cached_asset = await redis.get(cache_key)
             if cached_asset:
-                return send_file(
+                return StreamingResponse(
                     io.BytesIO(cached_asset),
-                    download_name=filename,
-                    as_attachment=(mode == 'download'),
-                    mimetype='image/png' if mode == 'image' else 'application/octet-stream'
+                    media_type='image/png' if mode == 'image' else 'application/octet-stream',
+                    headers={
+                        "Content-Disposition": f'{"attachment" if mode == "download" else "inline"}; filename={filename}'
+                    }
                 )
 
-            # Download the file to a temporary file
+            # TODO: SCP is synchronous; wrap it with threads
             with NamedTemporaryFile(delete=True) as temp_file:
                 with SCPClient(ssh.get_transport()) as scp:
                     scp.get(normalized_path, temp_file.name)
                 temp_file.seek(0)
                 asset_content = temp_file.read()
-                redis.set(cache_key, asset_content, ex=86400 * 30)  # Cache for 30 days
-                return send_file(
+                await redis.set(cache_key, asset_content, ex=86400 * 30)
+                return StreamingResponse(
                     io.BytesIO(asset_content),
-                    download_name=filename,
-                    as_attachment=(mode == 'download'),
-                    mimetype='image/png' if mode == 'image' else 'application/octet-stream'
+                    media_type='image/png' if mode == 'image' else 'application/octet-stream',
+                    headers={
+                        "Content-Disposition": f'{"attachment" if mode == "download" else "inline"}; filename={filename}'
+                    }
                 )
         finally:
             remove_ssh_connection(ssh)
     except Exception as e:
-        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+        return JSONResponse(content={'error': 'Internal Server Error', 'message': str(e)},
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
-@api.route('/frames/<int:id>/reset', methods=['POST'])
-def api_frame_reset_event(id: int):
+@api.post("/frames/{id}/reset")
+async def api_frame_reset_event(id: int):
     try:
         from app.tasks import reset_frame
-        reset_frame(id)
-        return 'Success', 200
+        asyncio.create_task(reset_frame(id))
+        return Response(content='Success', status_code=200)
     except Exception as e:
-        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+        return JSONResponse(content={'error': 'Internal Server Error', 'message': str(e)},
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.route('/frames/<int:id>/restart', methods=['POST'])
-def api_frame_restart_event(id: int):
+
+@api.post("/frames/{id}/restart")
+async def api_frame_restart_event(id: int):
     try:
         from app.tasks import restart_frame
-        restart_frame(id)
-        return 'Success', 200
+        asyncio.create_task(restart_frame(id))
+        return Response(content='Success', status_code=200)
     except Exception as e:
-        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+        return JSONResponse(content={'error': 'Internal Server Error', 'message': str(e)},
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.route('/frames/<int:id>/stop', methods=['POST'])
-def api_frame_stop_event(id: int):
+
+@api.post("/frames/{id}/stop")
+async def api_frame_stop_event(id: int):
     try:
         from app.tasks import stop_frame
-        stop_frame(id)
-        return 'Success', 200
+        asyncio.create_task(stop_frame(id))
+        return Response(content='Success', status_code=200)
     except Exception as e:
-        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+        return JSONResponse(content={'error': 'Internal Server Error', 'message': str(e)},
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.route('/frames/<int:id>/deploy', methods=['POST'])
-def api_frame_deploy_event(id: int):
+
+@api.post("/frames/{id}/deploy")
+async def api_frame_deploy_event(id: int):
     try:
         from app.tasks import deploy_frame
-        deploy_frame(id)
-        return 'Success', 200
+        asyncio.create_task(deploy_frame(id))
+        return Response(content='Success', status_code=200)
     except Exception as e:
-        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+        return JSONResponse(content={'error': 'Internal Server Error', 'message': str(e)},
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.route('/frames/<int:id>', methods=['POST'])
-async def api_frame_update(id: int):
-    db = g.db
+
+@api.post("/frames/{id}")
+async def api_frame_update(id: int, request: Request, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
-    fields = ['scenes', 'name', 'frame_host', 'frame_port', 'frame_access_key', 'frame_access', 'ssh_user', 'ssh_pass', 'ssh_port', 'server_host',
-              'server_port', 'server_api_key', 'width', 'height', 'rotate', 'color', 'interval', 'metrics_interval', 'log_to_file',
-              'assets_path', 'save_assets', 'scaling_mode', 'device', 'debug', 'reboot', 'control_code']
+    if frame is None:
+        return JSONResponse(content={'error': 'Frame not found'}, status_code=HTTPStatus.NOT_FOUND)
+    fields = ['scenes', 'name', 'frame_host', 'frame_port', 'frame_access_key', 'frame_access', 'ssh_user', 'ssh_pass',
+              'ssh_port', 'server_host', 'server_port', 'server_api_key', 'width', 'height', 'rotate', 'color',
+              'interval', 'metrics_interval', 'log_to_file', 'assets_path', 'save_assets', 'scaling_mode', 'device',
+              'debug', 'reboot', 'control_code']
     defaults = {'frame_port': 8787, 'ssh_port': 22}
     try:
-        payload = request.json
-        assert payload, 'No input provided'
+        payload = await request.json()
         for field in fields:
             if field in payload:
                 value = payload[field]
@@ -274,15 +329,14 @@ async def api_frame_update(id: int):
                     value = int(value)
                 elif field in ['interval', 'metrics_interval'] and value is not None:
                     value = float(value)
-                elif field in ['debug']:
+                elif field == 'debug':
                     value = value == 'true' or value is True
-                elif field in ['scenes', 'reboot', 'control_code']:
-                    if isinstance(value, str):
-                        value = json.loads(value) if value is not None else None
-                elif field in ['save_assets']:
-                    if value == 'true' or value is True:
+                elif field in ['scenes', 'reboot', 'control_code'] and isinstance(value, str):
+                    value = json.loads(value) if value is not None else None
+                elif field == 'save_assets':
+                    if value in ['true', True]:
                         value = True
-                    elif value == 'false' or value is False:
+                    elif value in ['false', False]:
                         value = False
                     elif isinstance(value, str):
                         value = json.loads(value) if value is not None else None
@@ -291,56 +345,65 @@ async def api_frame_update(id: int):
                     else:
                         value = None
                 setattr(frame, field, value)
+
         await update_frame(db, frame)
 
         if payload.get('next_action') == 'restart':
             from app.tasks import restart_frame
-            restart_frame(frame.id)
-        if payload.get('next_action') == 'stop':
+            asyncio.create_task(restart_frame(frame.id))
+        elif payload.get('next_action') == 'stop':
             from app.tasks import stop_frame
-            stop_frame(frame.id)
+            asyncio.create_task(stop_frame(frame.id))
         elif payload.get('next_action') == 'deploy':
             from app.tasks import deploy_frame
-            deploy_frame(frame.id)
+            asyncio.create_task(deploy_frame(frame.id))
 
-        return jsonify({'message': 'Frame updated successfully'}), HTTPStatus.OK
+        return JSONResponse(content={'message': 'Frame updated successfully'}, status_code=200)
     except ValueError as e:
-        return jsonify({'error': 'Invalid input', 'message': str(e)}), HTTPStatus.BAD_REQUEST
+        return JSONResponse(content={'error': 'Invalid input', 'message': str(e)},
+                            status_code=HTTPStatus.BAD_REQUEST)
     except Exception as e:
-        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+        return JSONResponse(content={'error': 'Internal Server Error', 'message': str(e)},
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.route("/frames/new", methods=["POST"])
-def api_frame_new():
-    db = g.db
+
+@api.post("/frames/new")
+async def api_frame_new(request: Request, db: Session = Depends(get_db)):
     try:
-        name = request.json['name']
-        frame_host = request.json['frame_host']
-        server_host = request.json['server_host']
-        interval = request.json.get('interval', 60)
-        device = request.json.get('device', 'web_only')
-        frame = new_frame(db, name, frame_host, server_host, device, interval)
-        return jsonify(frame=frame.to_dict())
+        payload = await request.json()
+        name = payload['name']
+        frame_host = payload['frame_host']
+        server_host = payload['server_host']
+        interval = payload.get('interval', 60)
+        device = payload.get('device', 'web_only')
+        frame = await new_frame(db, name, frame_host, server_host, device, interval)
+        return JSONResponse(content={"frame": frame.to_dict()}, status_code=200)
     except Exception as e:
-        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+        return JSONResponse(content={'error': 'Internal Server Error', 'message': str(e)},
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.route('/frames/<int:frame_id>', methods=['DELETE'])
-def api_frame_delete(frame_id):
+
+@api.delete("/frames/{frame_id}")
+async def api_frame_delete(frame_id: int, db: Session = Depends(get_db)):
     try:
-        success = delete_frame(frame_id)
+        success = await delete_frame(db, frame_id)
         if success:
-            return jsonify({'message': 'Frame deleted successfully'}), 200
+            return JSONResponse(content={'message': 'Frame deleted successfully'}, status_code=200)
         else:
-            return jsonify({'message': 'Frame not found'}), 404
+            return JSONResponse(content={'message': 'Frame not found'}, status_code=404)
     except Exception as e:
-        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+        return JSONResponse(content={'error': 'Internal Server Error', 'message': str(e)},
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@api.route('/frames/<int:id>/metrics', methods=['GET'])
-def api_frame_metrics(id: int):
-    db = g.db
-    db.query(Frame).get(id)
+
+@api.get("/frames/{id}/metrics")
+async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
+    frame = db.query(Frame).get(id)
+    if frame is None:
+        return JSONResponse(content={'error': 'Frame not found'}, status_code=HTTPStatus.NOT_FOUND)
     try:
         metrics = db.query(Metrics).filter_by(frame_id=id).all()
-        metrics = [
+        metrics_list = [
             {
                 'id': metric.id,
                 'timestamp': metric.timestamp.isoformat(),
@@ -349,6 +412,7 @@ def api_frame_metrics(id: int):
             }
             for metric in metrics
         ]
-        return jsonify({"metrics": metrics}), HTTPStatus.OK
+        return JSONResponse(content={"metrics": metrics_list}, status_code=200)
     except Exception as e:
-        return jsonify({'error': 'Internal Server Error', 'message': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+        return JSONResponse(content={'error': 'Internal Server Error', 'message': str(e)},
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR)

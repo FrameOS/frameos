@@ -27,6 +27,16 @@ class Repository(Base):
             'templates': self.templates,
         }
 
+    def to_json(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'url': self.url,
+            'last_updated_at': str(self.last_updated_at),
+            'templates': self.templates,
+        }
+
     def update_templates(self):
         response = requests.get(self.url)
         if response.status_code == 200:

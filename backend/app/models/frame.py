@@ -11,7 +11,7 @@ from app.database import Base
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
 from app.utils.token import secure_token
-from app.views.ws_broadcast import publish_message
+from app.services.ws_broadcast import publish_message
 
 
 # NB! Update frontend/src/types.tsx if you change this
@@ -166,7 +166,7 @@ async def delete_frame(db: Session, frame_id: int):
         db.query(Metrics).filter_by(frame_id=frame_id).delete()
 
         cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
-        redis.delete(cache_key)
+        await redis.delete(cache_key)
 
         db.delete(frame)
         db.commit()
@@ -183,7 +183,7 @@ def get_templates_json() -> dict:
     else:
         return {}
 
-def get_frame_json(db, frame: Frame) -> dict:
+def get_frame_json(db: Session, frame: Frame) -> dict:
     frame_json: dict = {
         "name": frame.name,
         "frameHost": frame.frame_host or "localhost",
