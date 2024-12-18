@@ -23,6 +23,7 @@ from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_con
 from scp import SCPClient
 
 from app.api.auth import ALGORITHM, SECRET_KEY, get_current_user
+from app.utils.network import is_safe_host
 from . import private_api, public_api
 
 
@@ -124,6 +125,9 @@ async def api_frame_get_state(id: int, db: Session = Depends(get_db)):
     frame = db.query(Frame).get(id)
     if frame is None:
         return JSONResponse(content={'error': 'Frame not found'}, status_code=HTTPStatus.NOT_FOUND)
+
+    if not is_safe_host(frame.frame_host):
+        return JSONResponse(content={"error": "Unsafe frame host"}, status_code=400)
 
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:state'
     url = f'http://{frame.frame_host}:{frame.frame_port}/state'

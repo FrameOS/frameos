@@ -4,10 +4,12 @@ from fastapi import Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from urllib.parse import urlparse
 
 from app.database import get_db
 from app.models.settings import Settings
 from app.models.repository import Repository
+from app.utils.network import is_safe_host
 from . import private_api
 
 FRAMEOS_SAMPLES_URL = "https://repo.frameos.net/samples/repository.json"
@@ -20,6 +22,9 @@ async def create_repository(request: Request, db: Session = Depends(get_db)):
 
     if not url:
         return JSONResponse(content={'error': 'Missing URL'}, status_code=HTTPStatus.BAD_REQUEST)
+
+    if not is_safe_host(urlparse(url).hostname):
+        return JSONResponse(content={"error": "URL not allowed"}, status_code=400)
 
     try:
         new_repository = Repository(name="", url=url)

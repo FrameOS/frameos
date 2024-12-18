@@ -38,8 +38,6 @@ export function FrameImage({ frameId, className, refreshable = true, ...props }:
     }
   }, [imageUrl])
 
-  console.log({ imageUrl })
-
   // Determine if we should show the fade-in-out or loading cursor
   const visiblyLoading = (isLoading || frame?.status !== 'ready') && frame?.interval > 5
 

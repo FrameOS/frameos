@@ -2,26 +2,26 @@ import { kea, path } from 'kea'
 
 import { forms } from 'kea-forms'
 
-import type { loginFormType } from './loginFormType'
+import type { loginLogicType } from './loginLogicType'
 
-export interface LoginFormForm {
+export interface LoginLogicForm {
   email: string
   password: string
 }
 
-export const loginForm = kea<loginFormType>([
+export const loginLogic = kea<loginLogicType>([
   path(['src', 'scenes', 'login', 'loginForm']),
   forms(({ actions }) => ({
     loginForm: {
       defaults: {
         email: '',
         password: '',
-      } as LoginFormForm,
+      } as LoginLogicForm,
       options: {
         showErrorsOnTouch: true,
         canSubmitWithErrors: true,
       },
-      errors: (frame: Partial<LoginFormForm>) => ({
+      errors: (frame: Partial<LoginLogicForm>) => ({
         email: !frame.email ? 'Please enter an e-mail address' : null,
         password: !frame.password ? 'Please enter a password' : null,
       }),

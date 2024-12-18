@@ -1,7 +1,7 @@
 import datetime
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt, JWTError
 from pydantic import BaseModel
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import get_config
 from app.models.user import User
 from app.database import get_db
+from app.redis import redis
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from . import public_api
@@ -67,13 +68,22 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     return user
 
 @public_api.post("/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     email = form_data.username
     password = form_data.password
+    ip = request.client.host
+    key = f"login_attempts:{ip}"
+    attempts = redis.get(key) or 0
+    if int(attempts) > 10:  # limit to 10 attempts for example
+        raise HTTPException(status_code=429, detail="Too many login attempts")
+
     user = db.query(User).filter_by(email=email).first()
     if user is None or not check_password_hash(user.password, password):
+        redis.incr(key)
+        redis.expire(key, 300)  # expire after 5 minutes
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    redis.delete(key)
     access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
     return {"access_token": access_token, "token_type": "bearer"}
@@ -90,6 +100,8 @@ def signup(data: UserSignup, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Password is required.")
     if data.password != data.password2:
         raise HTTPException(status_code=400, detail="Passwords do not match.")
+    if len(data.password) < 8:
+        raise HTTPException(status_code=400, detail="Password too short.")
 
     if db.query(User).filter_by(email=data.email).first():
         raise HTTPException(status_code=400, detail="Email already in use.")

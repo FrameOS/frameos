@@ -37,6 +37,7 @@ export function LoggedInApp() {
 }
 
 export function LoggedOutApp() {
+  useMountedLogic(socketLogic)
   const { scene, params } = useValues(sceneLogic)
   const SceneComponent: (() => JSX.Element) | LazyExoticComponent<any> =
     scenes[scene as keyof typeof scenes] || scenes.error404
