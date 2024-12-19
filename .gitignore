@@ -34,3 +34,6 @@ dist-ssr
 # Nim
 frameos/tmp/
 e2e/tmp/
+
+gpt.txt
+.env

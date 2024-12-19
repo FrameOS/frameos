@@ -3,14 +3,15 @@
     "configurations": [
         {
             "name": "Python: FastAPI",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "cwd": "${workspaceFolder}/backend",
             "module": "app.fastapi",
             "console": "integratedTerminal",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}",
-                "GEVENT_SUPPORT": "True"
+                "GEVENT_SUPPORT": "True",
+                "DEBUG": "True",
             },
             "justMyCode": false
         }
