@@ -1,10 +1,10 @@
 from fastapi import HTTPException
-from fastapi.responses import JSONResponse
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from . import private_api
+from app.schemas.ssh import SSHKeyResponse
 
-@private_api.post("/generate_ssh_keys")
+@private_api.post("/generate_ssh_keys", response_model=SSHKeyResponse)
 async def generate_ssh_keys():
     try:
         private_key = rsa.generate_private_key(
@@ -25,7 +25,7 @@ async def generate_ssh_keys():
         format=serialization.PublicFormat.OpenSSH
     )
 
-    return JSONResponse(content={
+    return {
         "private": private_key_bytes.decode('utf-8'),
         "public": public_key_bytes.decode('utf-8')
-    })
+    }

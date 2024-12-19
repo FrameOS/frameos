@@ -5,55 +5,65 @@ import tempfile
 import os
 import asyncio
 import httpx
-from fastapi import Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
+
 from app.database import get_db
 from app.models.apps import get_app_configs, get_one_app_sources
 from app.models.settings import get_settings_dict
+from app.schemas.apps import (
+ AppsListResponse,
+ AppsSourceResponse,
+ ValidateSourceRequest,
+ ValidateSourceResponse,
+ EnhanceSourceRequest,
+ EnhanceSourceResponse
+)
 from . import private_api
 
-@private_api.get("/apps")
+from typing import Optional
+
+@private_api.get("/apps", response_model=AppsListResponse)
 async def api_apps_list(db: Session = Depends(get_db)):
-    return JSONResponse(content={"apps": get_app_configs()}, status_code=200)
+    return {"apps": get_app_configs()}
 
 
-@private_api.get("/apps/source")
-async def api_apps_source(keyword: str = None, db: Session = Depends(get_db)):
-    return JSONResponse(content=get_one_app_sources(keyword), status_code=200)
+@private_api.get("/apps/source", response_model=AppsSourceResponse)
+async def api_apps_source(keyword: Optional[str] = None, db: Session = Depends(get_db)):
+    sources = get_one_app_sources(keyword)
+    if sources is None:
+        raise HTTPException(status_code=404, detail="App sources not found")
+    return sources
 
 
-@private_api.post("/apps/validate_source")
-async def validate_python_frame_source(request: Request):
-    data = await request.json()
-    file = data.get('file')
-    source = data.get('source')
+@private_api.post("/apps/validate_source", response_model=ValidateSourceResponse)
+async def validate_python_frame_source(data: ValidateSourceRequest):
+    file = data.file
+    source = data.source
 
     if file.endswith('.py'):
         errors = validate_python(source)
     elif file.endswith('.nim'):
-        errors = await validate_nim(source)  # now async
+        errors = await validate_nim(source)
     elif file.endswith('.json'):
         errors = validate_json(source)
     else:
-        return JSONResponse(content={
-            "errors": [
-                {"line": 1, "column": 1, "error": f"Don't know how to validate files of this extension: {file}"}
-            ]
-        }, status_code=400)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Don't know how to validate files of this extension: {file}"
+        )
 
-    return JSONResponse(content={"errors": errors}, status_code=200)
+    return {"errors": errors}
 
 
-@private_api.post("/apps/enhance_source")
-async def enhance_python_frame_source(request: Request, db: Session = Depends(get_db)):
-    data = await request.json()
-    source = data.get('source')
-    prompt = data.get('prompt')
+@private_api.post("/apps/enhance_source", response_model=EnhanceSourceResponse)
+async def enhance_python_frame_source(data: EnhanceSourceRequest, db: Session = Depends(get_db)):
+    source = data.source
+    prompt = data.prompt
     api_key = get_settings_dict(db).get('openAI', {}).get('apiKey', None)
 
     if api_key is None:
-        return JSONResponse(content={"error": "OpenAI API key not set"}, status_code=400)
+        raise HTTPException(status_code=400, detail="OpenAI API key not set")
 
     ai_context = f"""
     You are helping a python developer write a FrameOS application. You are editing app.nim, the main file in FrameOS.
@@ -67,14 +77,8 @@ async def enhance_python_frame_source(request: Request, db: Session = Depends(ge
 
     payload = {
         "messages": [
-            {
-                "role": "system",
-                "content": ai_context
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
+            {"role": "system", "content": ai_context},
+            {"role": "user", "content": prompt}
         ],
         "model": "gpt-4",
     }
@@ -88,13 +92,13 @@ async def enhance_python_frame_source(request: Request, db: Session = Depends(ge
         response = await client.post("https://api.openai.com/v1/chat/completions", json=payload, headers=headers)
         result = response.json()
 
-    error = result.get('error', None)
+    error = result.get('error')
     suggestion = result['choices'][0]['message']['content'] if 'choices' in result else None
 
     if error:
-        return JSONResponse(content={"error": error}, status_code=500)
-    else:
-        return JSONResponse(content={"suggestion": suggestion}, status_code=200)
+        raise HTTPException(status_code=500, detail=str(error))
+
+    return {"suggestion": suggestion}
 
 
 def validate_python(source: str):
@@ -140,7 +144,7 @@ async def validate_nim(source: str):
         return errors
 
     except Exception as e:
-        return [{"error": str(e)}]
+        return [{"line": 1, "column": 1, "error": str(e)}]
     finally:
         if temp_file_name and os.path.exists(temp_file_name):
             os.remove(temp_file_name)

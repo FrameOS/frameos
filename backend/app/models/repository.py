@@ -23,7 +23,7 @@ class Repository(Base):
             'name': self.name,
             'description': self.description,
             'url': self.url,
-            'last_updated_at': self.last_updated_at,
+            'last_updated_at': self.last_updated_at.isoformat() if self.last_updated_at else None,
             'templates': self.templates,
         }
 

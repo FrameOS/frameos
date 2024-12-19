@@ -1,19 +1,22 @@
-from fastapi import HTTPException, Request, Depends
-from fastapi.responses import JSONResponse
-from app.database import get_db
+from fastapi import HTTPException, Depends, Header
 from sqlalchemy.orm import Session
+
+from app.database import get_db
 from app.models.frame import Frame
 from app.models.log import process_log
-
+from app.schemas.log import LogRequest, LogResponse
 from . import public_api
 
-@public_api.post("/log")
-async def post_api_log(request: Request, db: Session = Depends(get_db)):
-    auth_header = request.headers.get('Authorization')
-    if not auth_header:
+@public_api.post("/log", response_model=LogResponse)
+async def post_api_log(
+    data: LogRequest,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None)
+):
+    if not authorization:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    parts = auth_header.split(' ')
+    parts = authorization.split(' ')
     if len(parts) != 2:
         raise HTTPException(status_code=401, detail="Invalid Authorization header")
 
@@ -23,12 +26,11 @@ async def post_api_log(request: Request, db: Session = Depends(get_db)):
     if not frame:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    data = await request.json()
-    if log := data.get('log'):
-        await process_log(db, frame, log)
+    if data.log:
+        await process_log(db, frame, data.log)
 
-    if logs := data.get('logs'):
-        for log in logs:
+    if data.logs:
+        for log in data.logs:
             await process_log(db, frame, log)
 
-    return JSONResponse(status_code=200, content={"message": "OK"})
+    return LogResponse(message="OK")
