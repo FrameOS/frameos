@@ -1,14 +1,17 @@
 import asyncio
 import json
+import uuid
 from typing import List
 from redis.asyncio import from_url as create_redis
-
 from fastapi import WebSocket, WebSocketDisconnect
 
 from app.config import get_config
 
 redis_pub = None
 redis_sub = None
+
+# Generate a unique ID for this instance
+INSTANCE_ID = str(uuid.uuid4())
 
 async def init_redis():
     global redis_pub, redis_sub
@@ -56,15 +59,26 @@ async def redis_listener():
 
     async for message in pubsub.listen():
         if message["type"] == "message":
-            await manager.broadcast(message["data"])
+            # Parse the message
+            try:
+                parsed = json.loads(message["data"])
+                # Only broadcast if not from this instance
+                if parsed.get("instance_id") != INSTANCE_ID:
+                    await manager.broadcast(message["data"])
+            except json.JSONDecodeError:
+                # If it can't parse as JSON, just ignore or handle error
+                pass
 
 async def publish_message(event: str, data: dict):
     if not redis_pub:
         await init_redis()
-    msg = {"event": event, "data": data}
+    msg = {"event": event, "data": data, "instance_id": INSTANCE_ID}
+
+    # Broadcast locally first
+    await manager.broadcast(json.dumps(msg))
+
+    # Then publish to redis
     await redis_pub.publish("broadcast_channel", json.dumps(msg))
-    # TODO: broadcast to local clients directly, to the rest via redis
-    # await manager.broadcast(json.dumps(msg))
 
 def register_ws_routes(app):
     @app.websocket("/ws")
