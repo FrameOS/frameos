@@ -3,12 +3,14 @@ import io
 import zipfile
 import json
 import string
+from datetime import datetime, timedelta
 
 import httpx
-from fastapi import Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import Response, StreamingResponse
-from sqlalchemy.orm import Session
 from PIL import Image
+from fastapi import Depends, HTTPException, UploadFile, File, Form, Request
+from fastapi.responses import Response, StreamingResponse
+from jose import jwt, JWTError
+from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.redis import redis
@@ -17,7 +19,10 @@ from app.models.frame import Frame
 from app.schemas.templates import (
     TemplateResponse, TemplatesListResponse, CreateTemplateRequest, UpdateTemplateRequest
 )
-from . import private_api
+from app.schemas.frames import FrameImageLinkResponse
+from app.api.auth import SECRET_KEY, ALGORITHM, get_current_user
+from app.api import private_api, public_api
+
 
 def respond_with_template(template: Template):
     if not template:
@@ -45,6 +50,7 @@ def respond_with_template(template: Template):
         media_type='application/zip',
         headers={"Content-Disposition": f"attachment; filename={template_name}.zip"}
     )
+
 
 @private_api.post("/templates")
 async def create_template(
@@ -176,29 +182,55 @@ async def create_template(
     db.refresh(new_template)
     return new_template.to_dict()
 
+
 @private_api.get("/templates", response_model=TemplatesListResponse)
 async def get_templates(db: Session = Depends(get_db)):
     templates = db.query(Template).all()
-    # Convert each to dict and ensure it matches TemplateResponse shape
     result = []
     for t in templates:
         d = t.to_dict()
-        # Ensure 'id' is a string if it's originally UUID
         d['id'] = str(d['id'])
         result.append(d)
     return result
 
-@private_api.get("/templates/{template_id}/image")
-async def get_template_image(template_id: int, db: Session = Depends(get_db)):
+
+@private_api.get("/templates/{template_id}/image_link", response_model=FrameImageLinkResponse)
+async def get_template_image_link(template_id: int, user=Depends(get_current_user)):
+    expire_minutes = 5
+    now = datetime.utcnow()
+    expire = now + timedelta(minutes=expire_minutes)
+    to_encode = {"sub": f"template:{template_id}", "exp": expire}
+    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+    expires_in = int((expire - now).total_seconds())
+
+    return {
+        "url": f"/api/templates/{template_id}/image?token={token}",
+        "expires_in": expires_in
+    }
+
+
+@public_api.get("/templates/{template_id}/image")
+async def get_template_image(template_id: int, token: str, request: Request, db: Session = Depends(get_db)):
+    # Validate token
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("sub") != f"template:{template_id}":
+            raise HTTPException(status_code=401, detail="Unauthorized")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     template = db.query(Template).get(template_id)
     if not template or not template.image:
         raise HTTPException(status_code=404, detail="Template not found")
     return StreamingResponse(io.BytesIO(template.image), media_type='image/jpeg')
 
+
 @private_api.get("/templates/{template_id}/export")
 async def export_template(template_id: int, db: Session = Depends(get_db)):
     template = db.query(Template).get(template_id)
     return respond_with_template(template)
+
 
 @private_api.get("/templates/{template_id}", response_model=TemplateResponse)
 async def get_template(template_id: int, db: Session = Depends(get_db)):
@@ -206,8 +238,9 @@ async def get_template(template_id: int, db: Session = Depends(get_db)):
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     d = template.to_dict()
-    d['id'] = str(d['id'])  # Ensure correct type if needed
+    d['id'] = str(d['id'])
     return d
+
 
 @private_api.patch("/templates/{template_id}", response_model=TemplateResponse)
 async def update_template(template_id: int, data: UpdateTemplateRequest, db: Session = Depends(get_db)):
@@ -225,6 +258,7 @@ async def update_template(template_id: int, data: UpdateTemplateRequest, db: Ses
     d = template.to_dict()
     d['id'] = str(d['id'])
     return d
+
 
 @private_api.delete("/templates/{template_id}")
 async def delete_template(template_id: int, db: Session = Depends(get_db)):
