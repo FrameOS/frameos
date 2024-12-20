@@ -1,3 +1,4 @@
+import asyncio
 import os
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -11,12 +12,13 @@ from app.middleware import GzipRequestMiddleware
 from alembic.config import Config as AlembicConfig
 from alembic import command as alembic_command
 
-from app.services.ws_broadcast import register_ws_routes
+from app.services.ws_broadcast import register_ws_routes, redis_listener
 from app.config import get_config
 from backend.app.utils.sentry import initialize_sentry
 
 def lifespan(app: FastAPI):
     initialize_sentry()
+    asyncio.create_task(redis_listener())
     yield
 
 app = FastAPI(lifespan=lifespan)

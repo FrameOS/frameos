@@ -7,19 +7,15 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from app.config import get_config
 
-redis = None
+redis_pub = None
+redis_sub = None
 
 async def init_redis():
-    global redis
-    if redis is None:
-        redis = create_redis(get_config().REDIS_URL, decode_responses=True)
-
-async def publish_message(event: str, data: dict):
-    if not redis:
-        await init_redis()
-    msg = {"event": event, "data": data}
-    await redis.publish("broadcast_channel", json.dumps(msg))
-
+    global redis_pub, redis_sub
+    if redis_pub is None:
+        redis_pub = create_redis(get_config().REDIS_URL, decode_responses=True)
+    if redis_sub is None:
+        redis_sub = create_redis(get_config().REDIS_URL, decode_responses=True)
 
 class ConnectionManager:
     def __init__(self):
@@ -50,18 +46,25 @@ class ConnectionManager:
                     print(f"Error sending message to {connection.client}: {e}")
                     await self.disconnect(connection)
 
-manager = ConnectionManager()
+manager = ConnectionManager() # Local clients
 
 async def redis_listener():
-    await init_redis()
-    pubsub = redis.pubsub()
+    if not redis_sub:
+        await init_redis()
+    pubsub = redis_sub.pubsub()
     await pubsub.subscribe("broadcast_channel")
 
     async for message in pubsub.listen():
         if message["type"] == "message":
-            msg = message["data"]
-            await manager.broadcast(msg)
+            await manager.broadcast(message["data"])
 
+async def publish_message(event: str, data: dict):
+    if not redis_pub:
+        await init_redis()
+    msg = {"event": event, "data": data}
+    await redis_pub.publish("broadcast_channel", json.dumps(msg))
+    # TODO: broadcast to local clients directly, to the rest via redis
+    # await manager.broadcast(json.dumps(msg))
 
 def register_ws_routes(app):
     @app.websocket("/ws")
@@ -77,9 +80,5 @@ def register_ws_routes(app):
         except Exception as e:
             print(f"Error: {e}")
             await manager.disconnect(websocket)
-
-    @app.on_event("startup")
-    async def startup_event():
-        asyncio.create_task(redis_listener())
 
     return manager
