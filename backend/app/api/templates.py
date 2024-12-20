@@ -19,8 +19,7 @@ from app.models.frame import Frame
 from app.schemas.templates import (
     TemplateResponse, TemplatesListResponse, CreateTemplateRequest, UpdateTemplateRequest
 )
-from app.schemas.frames import FrameImageLinkResponse
-from app.api.auth import SECRET_KEY, ALGORITHM, get_current_user
+from app.api.auth import SECRET_KEY, ALGORITHM
 from app.api import private_api, public_api
 
 
@@ -189,33 +188,17 @@ async def get_templates(db: Session = Depends(get_db)):
     result = []
     for t in templates:
         d = t.to_dict()
-        d['id'] = str(d['id'])
+        _update_image(d)
         result.append(d)
     return result
 
 
-@private_api.get("/templates/{template_id}/image_link", response_model=FrameImageLinkResponse)
-async def get_template_image_link(template_id: int, user=Depends(get_current_user)):
-    expire_minutes = 5
-    now = datetime.utcnow()
-    expire = now + timedelta(minutes=expire_minutes)
-    to_encode = {"sub": f"template:{template_id}", "exp": expire}
-    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-    expires_in = int((expire - now).total_seconds())
-
-    return {
-        "url": f"/api/templates/{template_id}/image?token={token}",
-        "expires_in": expires_in
-    }
-
-
 @public_api.get("/templates/{template_id}/image")
-async def get_template_image(template_id: int, token: str, request: Request, db: Session = Depends(get_db)):
+async def get_template_image(template_id: str, token: str, request: Request, db: Session = Depends(get_db)):
     # Validate token
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        if payload.get("sub") != f"template:{template_id}":
+        if payload.get("sub") != f"t:{template_id}":
             raise HTTPException(status_code=401, detail="Unauthorized")
     except JWTError:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -238,7 +221,7 @@ async def get_template(template_id: int, db: Session = Depends(get_db)):
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     d = template.to_dict()
-    d['id'] = str(d['id'])
+    _update_image(d)
     return d
 
 
@@ -256,7 +239,7 @@ async def update_template(template_id: int, data: UpdateTemplateRequest, db: Ses
     db.refresh(template)
 
     d = template.to_dict()
-    d['id'] = str(d['id'])
+    _update_image(d)
     return d
 
 
@@ -268,3 +251,14 @@ async def delete_template(template_id: int, db: Session = Depends(get_db)):
     db.delete(template)
     db.commit()
     return {"message": "Template deleted successfully"}
+
+
+def _update_image(d):
+    d['id'] = str(d['id'])
+    if d['image']:
+        expire_minutes = 5
+        now = datetime.utcnow()
+        expire = now + timedelta(minutes=expire_minutes)
+        to_encode = {"sub": f"t:{d['id']}", "exp": expire}
+        token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+        d['image'] = f'{d["image"]}?token={token}'

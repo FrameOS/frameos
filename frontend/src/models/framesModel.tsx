@@ -118,18 +118,11 @@ export const framesModel = kea<framesModelType>([
       (frameImageInfos, frameImageTimestamps) => {
         return (id: number) => {
           const info = frameImageInfos[id]
-          if (!info) {
-            return null
-          }
-
           const now = Math.floor(Date.now() / 1000)
-          if (!info.expiresAt || now >= info.expiresAt) {
-            // URL expired or invalid
+          if (!info || !info.expiresAt || !info.url || now >= info.expiresAt) {
             return null
           }
-
           const timestamp = frameImageTimestamps[id] ?? -1
-          // Append timestamp as a cache-buster
           return `${info.url}${info.url.includes('?') ? '&' : '?'}t=${timestamp}`
         }
       },
