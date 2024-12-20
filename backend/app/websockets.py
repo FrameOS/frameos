@@ -1,11 +1,15 @@
 import asyncio
 import json
 import uuid
+from jose import jwt, JWTError
 from typing import List
 from redis.asyncio import from_url as create_redis
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket, WebSocketDisconnect, Depends
+from sqlalchemy.orm import Session
+from app.database import get_db
 
 from app.config import get_config
+from app.models.user import User
 
 redis_pub = None
 redis_sub = None
@@ -82,17 +86,35 @@ async def publish_message(event: str, data: dict):
 
 def register_ws_routes(app):
     @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
+    async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
+        token = websocket.query_params.get('token')
+        if not token:
+            await websocket.close(code=1008, reason="Missing token")
+            return
+
+        try:
+            from app.api.auth import ALGORITHM, SECRET_KEY
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            user_email = payload.get("sub")
+            if not user_email:
+                raise ValueError("Invalid token")
+        except JWTError:
+            await websocket.close(code=1008, reason="Invalid token")
+            return
+
+        user = db.query(User).filter(User.email == user_email).first()
+        if user is None:
+            await websocket.close(code=1008, reason="User not found")
+            return
+
         await manager.connect(websocket)
         try:
             while True:
                 data = await websocket.receive_text()
-                # Handle incoming messages
-                await manager.send_personal_message(f"You said: {data}", websocket)
+                # Optionally handle incoming messages
+                await manager.send_personal_message("You said: " + data, websocket)
         except WebSocketDisconnect:
             await manager.disconnect(websocket)
-        except Exception as e:
-            print(f"Error: {e}")
-            await manager.disconnect(websocket)
+
 
     return manager

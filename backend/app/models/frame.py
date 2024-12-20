@@ -11,7 +11,7 @@ from app.database import Base
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
 from app.utils.token import secure_token
-from app.services.ws_broadcast import publish_message
+from app.websockets import publish_message
 
 
 # NB! Update frontend/src/types.tsx if you change this

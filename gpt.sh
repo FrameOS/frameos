@@ -7,11 +7,13 @@ OUTPUT="gpt.txt"
 
 # Define the patterns you want to collect files from:
 patterns=(
-    "app/*.py"
-    "app/schemas/*.py"
-    "app/models/*.py"
-    "app/api/*.py"
-    "app/services/*.py"
+    "backend/app/*.py"
+    "backend/app/schemas/*.py"
+    "backend/app/models/*.py"
+    "backend/app/api/*.py"
+    "backend/app/services/*.py"
+    "backend/app/services/ws_broadcast.py"
+    "frontend/src/scenes/socketLogic.tsx"
 )
 
 for pattern in "${patterns[@]}"; do

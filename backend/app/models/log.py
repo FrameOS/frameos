@@ -8,7 +8,7 @@ from .metrics import new_metrics
 from app.database import Base
 from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, func
 from sqlalchemy.orm import relationship, backref, Session, mapped_column
-from app.services.ws_broadcast import publish_message
+from app.websockets import publish_message
 
 class Log(Base):
     __tablename__ = 'log'

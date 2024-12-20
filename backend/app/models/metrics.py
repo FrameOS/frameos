@@ -3,7 +3,7 @@ from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy import Integer, String, ForeignKey, DateTime, func
 from app.database import Base
 from sqlalchemy.orm import relationship, backref, Session, mapped_column
-from app.services.ws_broadcast import publish_message
+from app.websockets import publish_message
 
 class Metrics(Base):
     __tablename__ = 'metrics'
