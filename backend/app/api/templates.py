@@ -1,31 +1,38 @@
 import base64
 import io
 import zipfile
-import requests
 import json
 import string
 
-from flask import jsonify, request, send_file, Response
-from flask_login import login_required
-from . import api
-from app import db, redis
+import httpx
+from fastapi import Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import Response, StreamingResponse
+from sqlalchemy.orm import Session
+from PIL import Image
+
+from app.database import get_db
+from app.redis import redis
 from app.models.template import Template
 from app.models.frame import Frame
-from PIL import Image
+from app.schemas.templates import (
+    TemplateResponse, TemplatesListResponse, CreateTemplateRequest, UpdateTemplateRequest
+)
+from . import private_api
 
 def respond_with_template(template: Template):
     if not template:
-        return jsonify({"error": "Template not found"}), 404
-    template_name = template.name
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    template_name = template.name or 'Template'
     safe_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
     template_name = ''.join(c if c in safe_chars else ' ' for c in template_name).strip()
     template_name = ' '.join(template_name.split()) or 'Template'
 
     template_dict = template.to_dict()
-    template_dict.pop('id')
+    template_dict.pop('id', None)
     in_memory = io.BytesIO()
     with zipfile.ZipFile(in_memory, 'a', zipfile.ZIP_DEFLATED) as zf:
-        scenes = template_dict.pop('scenes')
+        scenes = template_dict.pop('scenes', [])
         template_dict['scenes'] = './scenes.json'
         template_dict['image'] = './image.jpg'
         zf.writestr(f"{template_name}/scenes.json", json.dumps(scenes, indent=2))
@@ -33,147 +40,197 @@ def respond_with_template(template: Template):
         if template.image:
             zf.writestr(f"{template_name}/image.jpg", template.image)
     in_memory.seek(0)
-    return Response(in_memory.getvalue(), content_type='application/zip', headers={"Content-Disposition": f"attachment; filename={template_name}.zip"})
+    return Response(
+        in_memory.getvalue(),
+        media_type='application/zip',
+        headers={"Content-Disposition": f"attachment; filename={template_name}.zip"}
+    )
 
-@api.route("/templates", methods=["POST"])
-@login_required
-def create_template():
-    if 'file' in request.files:
-        zip_file = request.files['file'].read()
-    elif 'url' in request.json:
-        zip_file = requests.get(request.json['url']).content
-    else:
-        data = request.json
-        zip_file = None
-        if data.get('url'):
-            zip_file = requests.get(data.get('url')).content
+@private_api.post("/templates")
+async def create_template(
+    db: Session = Depends(get_db),
+    file: UploadFile = File(None),
+    url: str = Form(None),
+    from_frame_id: int = Form(None),
+    format: str = Form(None),
+    name: str = Form(None),
+    description: str = Form(None),
+    scenes: str = Form(None),
+    config: str = Form(None),
+    image: str = Form(None),
+    imageWidth: int = Form(None),
+    imageHeight: int = Form(None)
+):
+    # We combine both form-data and JSON scenarios into one endpoint:
+    # If file is provided, we treat it as a zip upload.
+    # If not, we rely on URL or direct JSON form fields.
 
+    data = {
+        "from_frame_id": from_frame_id,
+        "url": url,
+        "format": format,
+        "name": name,
+        "description": description,
+        "scenes": json.loads(scenes) if scenes else None,
+        "config": json.loads(config) if config else None,
+        "image": image,
+        "imageWidth": imageWidth,
+        "imageHeight": imageHeight
+    }
+
+    zip_file = None
+    # If we got a file from the form
+    if file and file.filename:
+        file_bytes = await file.read()
+        zip_file = zipfile.ZipFile(io.BytesIO(file_bytes))
+    elif url:
+        # Fetch zip from URL
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url)
+        resp.raise_for_status()
+        zip_file = zipfile.ZipFile(io.BytesIO(resp.content))
+
+    # If we have a zip_file, parse template.json and scenes.json
     if zip_file:
-        zip_file = zipfile.ZipFile(io.BytesIO(zip_file))
         folder_name = ''
-        for name in zip_file.namelist():
-            print(name)
-            if name == 'template.json':
+        for name_in_zip in zip_file.namelist():
+            if name_in_zip == 'template.json':
                 folder_name = ''
                 break
-            elif name.endswith('/template.json'):
-                if folder_name == '' or len(name) < len(folder_name):
-                    folder_name = name[:-len('template.json')]
+            elif name_in_zip.endswith('/template.json'):
+                if folder_name == '' or len(name_in_zip) < len(folder_name):
+                    folder_name = name_in_zip[:-len('template.json')]
 
         template_json = zip_file.read(f'{folder_name}template.json')
         scenes_json = zip_file.read(f'{folder_name}scenes.json')
 
-        data = json.loads(template_json)
-        data['scenes'] = json.loads(scenes_json)
+        parsed_data = json.loads(template_json)
+        parsed_data['scenes'] = json.loads(scenes_json)
+        # Merge parsed_data into data if not provided
+        for k, v in parsed_data.items():
+            if data.get(k) is None:
+                data[k] = v
 
-        image = data.get('image', '')
-        if image.startswith('data:image/'):
-            image = image[len('data:image/'):].split(';base64,')[1]
-            image = base64.b64decode(image)
-        elif image.startswith('./'):
-            image = image[len('./'):]
-            image = zip_file.read(f'{folder_name}{image}')
-        elif image.startswith('http:') or image.startswith('https:'):
-            image = requests.get(image).content
-        else:
-            image = None
-        data['image'] = image
-        if image:
-            img = Image.open(io.BytesIO(image))
-            data['imageWidth'] = img.width
-            data['imageHeight'] = img.height
+        # Handle image
+        img_val = data.get('image', '')
+        if isinstance(img_val, str):
+            if img_val.startswith('data:image/'):
+                # base64 embedded image
+                img_val = img_val[len('data:image/'):]
+                _, b64data = img_val.split(';base64,', 1)
+                img_val = base64.b64decode(b64data)
+            elif img_val.startswith('./'):
+                image_path = img_val[len('./'):]
+                img_val = zip_file.read(f'{folder_name}{image_path}')
+            elif img_val.startswith('http:') or img_val.startswith('https:'):
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(img_val)
+                resp.raise_for_status()
+                img_val = resp.content
+            else:
+                img_val = None
+            data['image'] = img_val
+            if img_val:
+                img_obj = Image.open(io.BytesIO(img_val))
+                data['imageWidth'] = img_obj.width
+                data['imageHeight'] = img_obj.height
 
+    # If from_frame_id is provided, attempt to fetch image from frame cache
     if data.get('from_frame_id'):
-        frame_id = data.get('from_frame_id')
-        frame = Frame.query.get_or_404(frame_id)
-        # TODO: move to shared util
-        cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
-        last_image = redis.get(cache_key)
-        if last_image:
-            try:
-                image = Image.open(io.BytesIO(last_image))
-                data['image'] = last_image
-                data['imageWidth'] = image.width
-                data['imageHeight'] = image.height
-            except Exception as e:
-                print(e)
-                pass
+        frame_id = data['from_frame_id']
+        frame = db.query(Frame).get(frame_id)
+        if frame:
+            cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+            last_image = await redis.get(cache_key)
+            if last_image:
+                try:
+                    img_obj = Image.open(io.BytesIO(last_image))
+                    data['image'] = last_image
+                    data['imageWidth'] = img_obj.width
+                    data['imageHeight'] = img_obj.height
+                except Exception:
+                    pass
+
+    # Validate the incoming data using CreateTemplateRequest
+    create_req = CreateTemplateRequest(**data)
 
     new_template = Template(
-        name=data.get('name'),
-        description=data.get('description'),
-        scenes=data.get('scenes'),
-        config=data.get('config'),
-        image=data.get('image'),
-        # older templates might have image_width and image_height
-        image_width=data.get('imageWidth', data.get('image_width')),
-        image_height=data.get('imageHeight', data.get('image_height')),
+        name=create_req.name,
+        description=create_req.description,
+        scenes=create_req.scenes,
+        config=create_req.config,
+        image=create_req.image,
+        image_width=create_req.imageWidth,
+        image_height=create_req.imageHeight,
     )
 
-    if request.json.get('format') == 'zip':
+    format_type = create_req.format
+    if format_type == 'zip':
+        # Return zip response directly
         return respond_with_template(new_template)
-    elif request.json.get('format') == 'scenes':
-        return jsonify(new_template.scenes), 201
-    else:
-        db.session.add(new_template)
-        db.session.commit()
-        return jsonify(new_template.to_dict()), 201
+    elif format_type == 'scenes':
+        return new_template.scenes or []
 
-# Read (GET) for all templates
-@api.route("/templates", methods=["GET"])
-@login_required
-def get_templates():
-    templates = [template.to_dict() for template in Template.query.all()]
-    return jsonify(templates)
+    db.add(new_template)
+    db.commit()
+    db.refresh(new_template)
+    return new_template.to_dict()
 
-# Read (GET) for a specific template
-@api.route("/templates/<template_id>", methods=["GET"])
-@login_required
-def get_template(template_id):
-    template = Template.query.get(template_id)
-    if not template:
-        return jsonify({"error": "Template not found"}), 404
-    return jsonify(template.to_dict())
+@private_api.get("/templates", response_model=TemplatesListResponse)
+async def get_templates(db: Session = Depends(get_db)):
+    templates = db.query(Template).all()
+    # Convert each to dict and ensure it matches TemplateResponse shape
+    result = []
+    for t in templates:
+        d = t.to_dict()
+        # Ensure 'id' is a string if it's originally UUID
+        d['id'] = str(d['id'])
+        result.append(d)
+    return result
 
-# Read (GET) for a specific template
-@api.route("/templates/<template_id>/image", methods=["GET"])
-@login_required
-def get_template_image(template_id):
-    template = Template.query.get(template_id)
+@private_api.get("/templates/{template_id}/image")
+async def get_template_image(template_id: int, db: Session = Depends(get_db)):
+    template = db.query(Template).get(template_id)
     if not template or not template.image:
-        return jsonify({"error": "Template not found"}), 404
-    return send_file(io.BytesIO(template.image), mimetype='image/jpeg')
+        raise HTTPException(status_code=404, detail="Template not found")
+    return StreamingResponse(io.BytesIO(template.image), media_type='image/jpeg')
 
-# Export (GET) for a specific template
-@api.route("/templates/<template_id>/export", methods=["GET"])
-@login_required
-def export_template(template_id):
-    template = Template.query.get(template_id)
+@private_api.get("/templates/{template_id}/export")
+async def export_template(template_id: int, db: Session = Depends(get_db)):
+    template = db.query(Template).get(template_id)
     return respond_with_template(template)
 
-
-# Update (PUT)
-@api.route("/templates/<template_id>", methods=["PATCH"])
-@login_required
-def update_template(template_id):
-    template = Template.query.get(template_id)
+@private_api.get("/templates/{template_id}", response_model=TemplateResponse)
+async def get_template(template_id: int, db: Session = Depends(get_db)):
+    template = db.query(Template).get(template_id)
     if not template:
-        return jsonify({"error": "Template not found"}), 404
-    data = request.json
-    if 'name' in data:
-        template.name = data.get('name', template.name)
-    if 'description' in data:
-        template.description = data.get('description', template.description)
-    db.session.commit()
-    return jsonify(template.to_dict())
+        raise HTTPException(status_code=404, detail="Template not found")
+    d = template.to_dict()
+    d['id'] = str(d['id'])  # Ensure correct type if needed
+    return d
 
-# Delete (DELETE)
-@api.route("/templates/<template_id>", methods=["DELETE"])
-@login_required
-def delete_template(template_id):
-    template = Template.query.get(template_id)
+@private_api.patch("/templates/{template_id}", response_model=TemplateResponse)
+async def update_template(template_id: int, data: UpdateTemplateRequest, db: Session = Depends(get_db)):
+    template = db.query(Template).get(template_id)
     if not template:
-        return jsonify({"error": "Template not found"}), 404
-    db.session.delete(template)
-    db.session.commit()
-    return jsonify({"message": "Template deleted successfully"}), 200
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    if data.name is not None:
+        template.name = data.name
+    if data.description is not None:
+        template.description = data.description
+    db.commit()
+    db.refresh(template)
+
+    d = template.to_dict()
+    d['id'] = str(d['id'])
+    return d
+
+@private_api.delete("/templates/{template_id}")
+async def delete_template(template_id: int, db: Session = Depends(get_db)):
+    template = db.query(Template).get(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    db.delete(template)
+    db.commit()
+    return {"message": "Template deleted successfully"}

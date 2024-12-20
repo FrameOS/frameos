@@ -3,6 +3,7 @@ import { actions, afterMount, kea, listeners, path, reducers, selectors } from '
 import type { templatesModelType } from './templatesModelType'
 import { loaders } from 'kea-loaders'
 import { TemplateType } from '../types'
+import { apiFetch } from '../utils/apiFetch'
 
 export const templatesModel = kea<templatesModelType>([
   path(['src', 'models', 'templatesModel']),
@@ -17,7 +18,7 @@ export const templatesModel = kea<templatesModelType>([
       {
         loadTemplates: async () => {
           try {
-            const response = await fetch('/api/templates')
+            const response = await apiFetch('/api/templates')
             if (!response.ok) {
               throw new Error('Failed to fetch templates')
             }
@@ -30,7 +31,7 @@ export const templatesModel = kea<templatesModelType>([
         },
         removeTemplate: async ({ id }) => {
           try {
-            const response = await fetch(`/api/templates/${id}`, { method: 'DELETE' })
+            const response = await apiFetch(`/api/templates/${id}`, { method: 'DELETE' })
             if (!response.ok) {
               throw new Error('Failed to remove template')
             }
@@ -56,7 +57,7 @@ export const templatesModel = kea<templatesModelType>([
   }),
   listeners(({ values }) => ({
     exportTemplate: async ({ id, format }) => {
-      const response = await fetch(`/api/templates/${id}/export${format ? `?format=${format}` : ''}`)
+      const response = await apiFetch(`/api/templates/${id}/export${format ? `?format=${format}` : ''}`)
       if (!response.ok) {
         throw new Error('Failed to export template')
       }

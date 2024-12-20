@@ -3,6 +3,7 @@ import { actions, afterMount, kea, listeners, path, reducers, selectors } from '
 import type { repositoriesModelType } from './repositoriesModelType'
 import { loaders } from 'kea-loaders'
 import { RepositoryType } from '../types'
+import { apiFetch } from '../utils/apiFetch'
 
 export const repositoriesModel = kea<repositoriesModelType>([
   path(['src', 'models', 'repositoriesModel']),
@@ -17,7 +18,7 @@ export const repositoriesModel = kea<repositoriesModelType>([
       {
         loadRepositories: async () => {
           try {
-            const response = await fetch('/api/repositories')
+            const response = await apiFetch('/api/repositories')
             if (!response.ok) {
               throw new Error('Failed to fetch repositories')
             }
@@ -30,7 +31,7 @@ export const repositoriesModel = kea<repositoriesModelType>([
         },
         removeRepository: async ({ id }) => {
           try {
-            const response = await fetch(`/api/repositories/${id}`, { method: 'DELETE' })
+            const response = await apiFetch(`/api/repositories/${id}`, { method: 'DELETE' })
             if (!response.ok) {
               throw new Error('Failed to remove repository')
             }
@@ -42,7 +43,7 @@ export const repositoriesModel = kea<repositoriesModelType>([
         },
         refreshRepository: async ({ id }) => {
           try {
-            const response = await fetch(`/api/repositories/${id}`, {
+            const response = await apiFetch(`/api/repositories/${id}`, {
               method: 'PATCH',
               body: '{}',
               headers: {

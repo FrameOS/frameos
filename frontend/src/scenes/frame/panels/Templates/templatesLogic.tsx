@@ -7,6 +7,7 @@ import { frameLogic } from '../../frameLogic'
 import { templatesModel } from '../../../../models/templatesModel'
 import { repositoriesModel } from '../../../../models/repositoriesModel'
 import { searchInText } from '../../../../utils/searchInText'
+import { apiFetch } from '../../../../utils/apiFetch'
 
 export interface TemplateLogicProps {
   frameId: number
@@ -65,7 +66,7 @@ export const templatesLogic = kea<templatesLogicType>([
             name: formValues.name,
             description: formValues.description,
           }
-          const response = await fetch(`/api/templates/${formValues.id}`, {
+          const response = await apiFetch(`/api/templates/${formValues.id}`, {
             method: 'PATCH',
             body: JSON.stringify(request),
             headers: {
@@ -86,7 +87,7 @@ export const templatesLogic = kea<templatesLogicType>([
             from_frame_id: props.frameId,
             format: target === 'zip' ? 'zip' : 'json',
           }
-          const response = await fetch('/api/templates', {
+          const response = await apiFetch('/api/templates', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(request),
@@ -126,7 +127,7 @@ export const templatesLogic = kea<templatesLogicType>([
         const request = {
           url: formValues.url,
         }
-        const response = await fetch(`/api/templates`, {
+        const response = await apiFetch(`/api/templates`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(request),
@@ -148,7 +149,7 @@ export const templatesLogic = kea<templatesLogicType>([
       submit: async (formValues) => {
         const formData = new FormData()
         formData.append('file', formValues.file)
-        const response = await fetch(`/api/templates`, {
+        const response = await apiFetch(`/api/templates`, {
           method: 'POST',
           body: formData,
         })
@@ -170,7 +171,7 @@ export const templatesLogic = kea<templatesLogicType>([
         const request = {
           url: formValues.url,
         }
-        const response = await fetch(`/api/repositories`, {
+        const response = await apiFetch(`/api/repositories`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(request),
@@ -303,7 +304,7 @@ export const templatesLogic = kea<templatesLogicType>([
       } else {
         throw new Error('Failed to load template')
       }
-      const response = await fetch(`/api/templates`, {
+      const response = await apiFetch(`/api/templates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),

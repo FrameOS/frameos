@@ -23,11 +23,12 @@ def upgrade():
         batch_op.add_column(sa.Column('frame_access', sa.String(length=50), nullable=True))
 
     from app.models import Frame
-    from app import db
+    from app.database import SessionLocal
+    db = SessionLocal()
 
-    frames = db.session.query(Frame.id).all()
+    frames = db.query(Frame.id).all()
     for (frame_id,) in frames:
-        db.session.execute(
+        db.execute(
             sa.update(Frame).
             where(Frame.id == frame_id).
             values({
@@ -37,7 +38,8 @@ def upgrade():
         )
 
     # Commit changes
-    db.session.commit()
+    db.commit()
+    db.close()
     # ### end Alembic commands ###
 
 

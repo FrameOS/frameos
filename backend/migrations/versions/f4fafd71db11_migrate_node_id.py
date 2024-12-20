@@ -17,8 +17,9 @@ depends_on = None
 
 def upgrade():
     from app.models import Frame
-    from app import db
-    frames = Frame.query.options(load_only(Frame.id, Frame.scenes)).all()
+    from app.database import SessionLocal
+    db = SessionLocal()
+    frames = db.query(Frame).options(load_only(Frame.id, Frame.scenes)).all()
     for frame in frames:
         frame.scenes = list(frame.scenes)
         changed = False
@@ -32,14 +33,16 @@ def upgrade():
                         changed = True
         if changed:
             attributes.flag_modified(frame, "scenes")
-            db.session.add(frame)
-            db.session.commit()
-    db.session.flush()
+            db.add(frame)
+            db.commit()
+    db.flush()
+    db.close()
 
 def downgrade():
     from app.models import Frame
-    from app import db
-    frames = Frame.query.all()
+    from app.database import SessionLocal
+    db = SessionLocal()
+    frames = db.query(Frame).all()
     for frame in frames:
         frame.scenes = list(frame.scenes)
         changed = False
@@ -53,6 +56,7 @@ def downgrade():
                         changed = True
         if changed:
             attributes.flag_modified(frame, "scenes")
-            db.session.add(frame)
-            db.session.commit()
-    db.session.flush()
+            db.add(frame)
+            db.commit()
+    db.flush()
+    db.close()

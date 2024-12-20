@@ -37,14 +37,11 @@ export const signupLogic = kea<signupLogicType>([
             body: JSON.stringify({ email, password, password2, newsletter }),
           })
           if (response.ok) {
-            const response = await fetch(`/api/login`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email, password }),
-            })
+            const json = await response.json()
+            localStorage.setItem('token', json.access_token)
             window.location.href = '/'
           } else {
-            let errors: Record<string, string> = {}
+            let errors = {}
             try {
               const json = await response.json()
               if (json.errors) {

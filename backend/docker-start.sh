@@ -12,6 +12,6 @@ flask db upgrade
 echo "Starting Huey"
 huey_consumer.py app.huey.huey --worker-type=greenlet --workers=10 --flush-locks &
 
-# Start the Flask application
-echo "Starting Flask"
-python3 run.py
+# Start the application
+echo "Starting FastAPI"
+env/bin/uvicorn app.fastapi:app --host 0.0.0.0 --port 8989 --reload

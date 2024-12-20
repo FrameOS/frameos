@@ -58,7 +58,7 @@ def field_type_to_nim_type(field_type: str, required: bool = True) -> str:
             raise ValueError(f"Invalid field type {field_type}")
 
 
-def field_type_to_getter(type):
+def field_type_to_getter(type: str) -> str:
     options: dict = {
         'integer': '.getInt()',
         'string': '.getStr()',
@@ -114,20 +114,18 @@ class SceneWriter:
         self.run_node_lines = []
         self.after_node_lines = []
         self.run_event_lines = []
-        self.after_render_lines = []
+        self.after_render_lines: list[str] = []
         self.event_nodes = {}
         self.next_nodes = {}
         self.prev_nodes = {}
         self.field_inputs = {}
-        self.required_fields = {}
-        self.field_types = {}
-        self.app_sources = {}
-        self.app_capabilities = {}
+        self.required_fields: dict[str, dict[str, bool]] = {}
+        self.field_types: dict[str, dict[str, str]] = {}
+        self.app_sources: dict[str, list[str]] = {}
+        self.app_capabilities: dict[str, set[str]] = {}
         self.code_field_source_nodes = {}
         self.source_field_inputs = {}
         self.node_fields = {}
-        self.node_fields_targets = {}
-        self.app_node_outputs = {}
         self.cache_counter = 0
         self.cache_indexes = {}
         self.cache_fields = []
@@ -287,7 +285,6 @@ class SceneWriter:
             else:
                 config = {}
         self.app_configs[node_id] = config
-        self.app_node_outputs[node_id] = config.get("output", None)
         self.required_fields[node_id] = {}
         self.field_types[node_id] = {}
 
@@ -987,7 +984,7 @@ var exportedScene* = ExportedScene(
             else:
                 raise NotImplementedError(f"Unknown node type, can't fetch fields for node {node_id}")
 
-            return result
+        return result
 
     def wrap_with_cache(self, node_id: str, value_list: list[str], data: dict):
         duration_enabled = data.get('cache', {}).get('durationEnabled', False)
@@ -1007,7 +1004,7 @@ var exportedScene* = ExportedScene(
         cache_data_type = 'string'
         if self.app_configs.get(node_id) is not None:
             app_config = self.app_configs[node_id]
-            if app_config.get('output') is not None and len(app_config.get('output')) > 0:
+            if app_config.get('output') is not None and len(app_config.get('output', [])) > 0:
                 output = app_config['output'][0]
                 cache_data_type = field_type_to_nim_type(output.get('type', 'string'))
 
@@ -1044,6 +1041,7 @@ var exportedScene* = ExportedScene(
         # input fields
         if input_enabled:
             node = self.nodes_by_id.get(node_id)
+            assert node is not None
             if node.get("type") == "app":
                 cache_fields = self.get_app_node_cacheable_fields_with_types(node_id)
             else:

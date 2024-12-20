@@ -7,6 +7,7 @@ import { frameLogic } from '../../frameLogic'
 import { editor, MarkerSeverity } from 'monaco-editor'
 import { AppNodeData } from '../../../../types'
 import { appsLogic } from '../Apps/appsLogic'
+import { apiFetch } from '../../../../utils/apiFetch'
 
 export interface ModelMarker extends editor.IMarkerData {}
 
@@ -65,7 +66,7 @@ export const editAppLogic = kea<editAppLogicType>([
             return values.savedSources
           }
           if (values.savedKeyword) {
-            const response = await fetch(`/api/apps/source?keyword=${encodeURIComponent(values.savedKeyword)}`)
+            const response = await apiFetch(`/api/apps/source?keyword=${encodeURIComponent(values.savedKeyword)}`)
             return await response.json()
           }
           return {}
@@ -78,7 +79,7 @@ export const editAppLogic = kea<editAppLogicType>([
         enhance: async () => {
           const source = values.sources['app.nim']
           const prompt = values.prompt
-          const response = await fetch(`/api/apps/enhance_source`, {
+          const response = await apiFetch(`/api/apps/enhance_source`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt, source }),
@@ -212,7 +213,7 @@ export const editAppLogic = kea<editAppLogicType>([
       if (!initial) {
         await breakpoint(300)
       }
-      const response = await fetch(`/api/apps/validate_source`, {
+      const response = await apiFetch(`/api/apps/validate_source`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file, source }),
