@@ -6,7 +6,7 @@ def write_drivers_nim(drivers: dict[str, Driver]) -> str:
     vars = []
     init_drivers = []
     render_drivers = []
-    png_drivers = []
+    png_drivers: list[str] = []
     on_drivers = []
     off_drivers = []
 

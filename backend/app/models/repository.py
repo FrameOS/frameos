@@ -1,18 +1,21 @@
 import requests
 import uuid
-from app import db
 from sqlalchemy.dialects.sqlite import JSON
 from datetime import datetime
 from urllib.parse import urljoin
+from sqlalchemy import String, Text, DateTime
+from sqlalchemy.orm import mapped_column
+from app.database import Base
 
 
-class Repository(db.Model):
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    name = db.Column(db.String(128), nullable=False)
-    description = db.Column(db.Text(), nullable=True)
-    url = db.Column(db.Text(), nullable=True)
-    last_updated_at = db.Column(db.DateTime(), nullable=True)
-    templates = db.Column(JSON, nullable=True)
+class Repository(Base):
+    __tablename__ = 'repository'
+    id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = mapped_column(String(128), nullable=False)
+    description = mapped_column(Text(), nullable=True)
+    url = mapped_column(Text(), nullable=True)
+    last_updated_at = mapped_column(DateTime(), nullable=True)
+    templates = mapped_column(JSON, nullable=True)
 
     def to_dict(self):
         return {
@@ -20,7 +23,17 @@ class Repository(db.Model):
             'name': self.name,
             'description': self.description,
             'url': self.url,
-            'last_updated_at': self.last_updated_at,
+            'last_updated_at': self.last_updated_at.isoformat() if self.last_updated_at else None,
+            'templates': self.templates,
+        }
+
+    def to_json(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'url': self.url,
+            'last_updated_at': str(self.last_updated_at),
             'templates': self.templates,
         }
 

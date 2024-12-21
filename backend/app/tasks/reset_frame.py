@@ -1,15 +1,12 @@
-from app import create_app
-from app.huey import huey
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame
+from app.redis import get_redis
+from ..database import SessionLocal
 
-
-@huey.task()
-def reset_frame(id: int):
-    app = create_app()
-    with app.app_context():
-        frame = Frame.query.get_or_404(id)
-        if frame.status != 'uninitialized':
+async def reset_frame(id: int):
+    with SessionLocal() as db, get_redis() as redis:
+        frame = db.get(Frame, id)
+        if frame and frame.status != 'uninitialized':
             frame.status = 'uninitialized'
-            update_frame(frame)
-        log(id, "admin", "Resetting frame status to 'uninitialized'")
+            await update_frame(db, redis, frame)
+        await log(db, redis, id, "admin", "Resetting frame status to 'uninitialized'")

@@ -1,5 +1,4 @@
 from app.tests.base import BaseTestCase
-from app import db
 from app.models.user import User
 
 class SignupTestCase(BaseTestCase):
@@ -18,7 +17,7 @@ class SignupTestCase(BaseTestCase):
         self.assertTrue(data.get('success'))
 
         # Ensure the user is created in the database
-        user = User.query.filter_by(email='test@example.com').first()
+        user = self.db.query(User).filter_by(email='test@example.com').first()
         self.assertIsNotNone(user)
         self.assertTrue(user.check_password('password123'))
 
@@ -47,8 +46,8 @@ class SignupTestCase(BaseTestCase):
         # Create an existing user
         user = User(email='test@example.com')
         user.set_password('password123')
-        db.session.add(user)
-        db.session.commit()
+        self.db.add(user)
+        self.db.commit()
         response = self.client.post('/api/signup', json={
             'email': 'test@example.com',
             'password': 'newpassword',

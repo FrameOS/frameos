@@ -1,4 +1,3 @@
-from app import db
 from app.tests.base import BaseTestCase
 from app.models import User
 
@@ -7,8 +6,8 @@ class TestLogin(BaseTestCase):
     def init_user(self):
         self.user = User(email='me@test.com')
         self.user.set_password('banana')
-        db.session.add(self.user)
-        db.session.commit()
+        self.db.add(self.user)
+        self.db.commit()
 
     def test_login_valid(self):
         data = {'email': 'me@test.com', 'password': 'banana'}

@@ -3,11 +3,11 @@ import { FrameType } from '../../types'
 import { H5 } from '../../components/H5'
 import { Box } from '../../components/Box'
 import { frameHost, frameStatus } from '../../decorators/frame'
-import { Image } from './Image'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { TrashIcon } from '@heroicons/react/24/solid'
 import { useActions } from 'kea'
 import { framesModel } from '../../models/framesModel'
+import { FrameImage } from '../../components/FrameImage'
 
 interface FrameProps {
   frame: FrameType
@@ -31,7 +31,7 @@ export function Frame({ frame }: FrameProps): JSX.Element {
         />
       </div>
       <A href={`/frames/${frame.id}`}>
-        <Image id={frame.id} />
+        <FrameImage frameId={frame.id} className="p-2 m-auto" refreshable={false} />
       </A>
       <div className="flex justify-between px-4 pt-2 mb-2">
         <H5 className="text-ellipsis overflow-hidden">
