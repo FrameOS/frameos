@@ -39,7 +39,7 @@ async def api_frames_list(db: Session = Depends(get_db)):
     return {"frames": frames_list}
 
 
-@private_api.get("/frames/{id}", response_model=FrameResponse)
+@private_api.get("/frames/{id:int}", response_model=FrameResponse)
 async def api_frame_get(id: int, db: Session = Depends(get_db)):
     frame = db.get(Frame, id)
     if frame is None:
@@ -47,7 +47,7 @@ async def api_frame_get(id: int, db: Session = Depends(get_db)):
     return {"frame": frame.to_dict()}
 
 
-@private_api.get("/frames/{id}/logs", response_model=FrameLogsResponse)
+@private_api.get("/frames/{id:int}/logs", response_model=FrameLogsResponse)
 async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
     frame = db.get(Frame, id)
     if frame is None:
@@ -56,7 +56,7 @@ async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
     return {"logs": logs}
 
 
-@private_api.get("/frames/{id}/image_link", response_model=FrameImageLinkResponse)
+@private_api.get("/frames/{id:int}/image_link", response_model=FrameImageLinkResponse)
 async def get_image_link(id: int, user=Depends(get_current_user)):
     expire_minutes = 5
     now = datetime.utcnow()
@@ -71,7 +71,7 @@ async def get_image_link(id: int, user=Depends(get_current_user)):
         "expires_in": expires_in
     }
 
-@public_api.get("/frames/{id}/image")
+@public_api.get("/frames/{id:int}/image")
 async def api_frame_get_image(id: int, token: str, request: Request, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -110,7 +110,7 @@ async def api_frame_get_image(id: int, token: str, request: Request, db: Session
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@private_api.get("/frames/{id}/state", response_model=FrameStateResponse)
+@private_api.get("/frames/{id:int}/state", response_model=FrameStateResponse)
 async def api_frame_get_state(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
     frame = db.get(Frame, id)
     if frame is None:
@@ -146,7 +146,7 @@ async def api_frame_get_state(id: int, db: Session = Depends(get_db), redis: Red
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@private_api.post("/frames/{id}/event/{event}")
+@private_api.post("/frames/{id:int}/event/{event}")
 async def api_frame_event(id: int, event: str, request: Request, db: Session = Depends(get_db)):
     frame = db.get(Frame, id)
     if frame is None:
@@ -178,7 +178,7 @@ async def api_frame_event(id: int, event: str, request: Request, db: Session = D
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@private_api.get("/frames/{id}/scene_source/{scene}")
+@private_api.get("/frames/{id:int}/scene_source/{scene}")
 async def api_frame_scene_source(id: int, scene: str, db: Session = Depends(get_db)):
     frame = db.get(Frame, id)
     if frame is None:
@@ -190,7 +190,7 @@ async def api_frame_scene_source(id: int, scene: str, db: Session = Depends(get_
     raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=f"Scene {scene} not found")
 
 
-@private_api.get("/frames/{id}/assets", response_model=FrameAssetsResponse)
+@private_api.get("/frames/{id:int}/assets", response_model=FrameAssetsResponse)
 async def api_frame_get_assets(id: int, db: Session = Depends(get_db)):
     frame = db.get(Frame, id)
     if frame is None:
@@ -217,7 +217,7 @@ async def api_frame_get_assets(id: int, db: Session = Depends(get_db)):
     return {"assets": assets}
 
 
-@private_api.get("/frames/{id}/asset")
+@private_api.get("/frames/{id:int}/asset")
 async def api_frame_get_asset(id: int, request: Request, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
     frame = db.get(Frame, id)
     if frame is None:
@@ -280,7 +280,7 @@ async def api_frame_get_asset(id: int, request: Request, db: Session = Depends(g
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@private_api.post("/frames/{id}/reset")
+@private_api.post("/frames/{id:int}/reset")
 async def api_frame_reset_event(id: int):
     try:
         from app.tasks import reset_frame
@@ -290,7 +290,7 @@ async def api_frame_reset_event(id: int):
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@private_api.post("/frames/{id}/restart")
+@private_api.post("/frames/{id:int}/restart")
 async def api_frame_restart_event(id: int):
     try:
         from app.tasks import restart_frame
@@ -300,7 +300,7 @@ async def api_frame_restart_event(id: int):
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@private_api.post("/frames/{id}/stop")
+@private_api.post("/frames/{id:int}/stop")
 async def api_frame_stop_event(id: int):
     try:
         from app.tasks import stop_frame
@@ -310,7 +310,7 @@ async def api_frame_stop_event(id: int):
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@private_api.post("/frames/{id}/deploy")
+@private_api.post("/frames/{id:int}/deploy")
 async def api_frame_deploy_event(id: int):
     try:
         from app.tasks import deploy_frame
@@ -320,7 +320,7 @@ async def api_frame_deploy_event(id: int):
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@private_api.post("/frames/{id}")
+@private_api.post("/frames/{id:int}")
 async def api_frame_update_endpoint(
     id: int,
     data: FrameUpdateRequest,
@@ -332,6 +332,14 @@ async def api_frame_update_endpoint(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     update_data = data.dict(exclude_unset=True)
+
+    # If 'scenes' is a string, parse it as JSON
+    if isinstance(update_data.get('scenes'), str):
+        try:
+            update_data['scenes'] = json.loads(update_data['scenes'])
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
+
     for field, value in update_data.items():
         setattr(frame, field, value)
 
@@ -360,18 +368,19 @@ async def api_frame_new(data: FrameCreateRequest, db: Session = Depends(get_db),
 
 
 @private_api.delete("/frames/{frame_id}")
-async def api_frame_delete(frame_id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
-    try:
-        success = await delete_frame(db, redis, frame_id)
-        if success:
-            return {"message": "Frame deleted successfully"}
-        else:
-            raise HTTPException(status_code=404, detail="Frame not found")
-    except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+async def api_frame_delete(
+    frame_id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis)
+):
+    success = await delete_frame(db, redis, frame_id)
+    if success:
+        return {"message": "Frame deleted successfully"}
+    else:
+        raise HTTPException(status_code=404, detail="Frame not found")
 
 
-@private_api.get("/frames/{id}/metrics", response_model=FrameMetricsResponse)
+@private_api.get("/frames/{id:int}/metrics", response_model=FrameMetricsResponse)
 async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
     frame = db.get(Frame, id)
     if frame is None:
