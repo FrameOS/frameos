@@ -1,9 +1,10 @@
 import pytest
+import pytest_asyncio
 from app.models import new_frame, update_frame, Log
 
-@pytest.fixture
-async def frame_with_key(db_session):
-    frame = await new_frame(db_session, 'Frame', 'localhost', 'localhost')
+@pytest_asyncio.fixture
+async def frame_with_key(db_session, redis):
+    frame = await new_frame(db_session, redis, 'Frame', 'localhost', 'localhost')
     frame.server_api_key = 'testkey'
     await update_frame(db_session, frame)
     # Ensure no non-welcome logs

@@ -15,7 +15,7 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.redis import redis
+from redis.asyncio import Redis
 from app.models.frame import Frame, new_frame, delete_frame, update_frame
 from app.models.log import new_log as log
 from app.models.metrics import Metrics
@@ -28,6 +28,7 @@ from app.schemas.frames import (
 )
 from app.api.auth import ALGORITHM, SECRET_KEY, get_current_user
 from app.utils.network import is_safe_host
+from app.redis import get_redis
 from . import private_api, public_api
 
 
@@ -40,7 +41,7 @@ async def api_frames_list(db: Session = Depends(get_db)):
 
 @private_api.get("/frames/{id}", response_model=FrameResponse)
 async def api_frame_get(id: int, db: Session = Depends(get_db)):
-    frame = db.query(Frame).get(id)
+    frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
     return {"frame": frame.to_dict()}
@@ -48,7 +49,7 @@ async def api_frame_get(id: int, db: Session = Depends(get_db)):
 
 @private_api.get("/frames/{id}/logs", response_model=FrameLogsResponse)
 async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
-    frame = db.query(Frame).get(id)
+    frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
     logs = [ll.to_dict() for ll in frame.logs][-1000:]
@@ -71,7 +72,7 @@ async def get_image_link(id: int, user=Depends(get_current_user)):
     }
 
 @public_api.get("/frames/{id}/image")
-async def api_frame_get_image(id: int, token: str, request: Request, db: Session = Depends(get_db)):
+async def api_frame_get_image(id: int, token: str, request: Request, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("sub") != str(id):
@@ -79,7 +80,7 @@ async def api_frame_get_image(id: int, token: str, request: Request, db: Session
     except JWTError:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    frame = db.query(Frame).get(id)
+    frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
@@ -110,8 +111,8 @@ async def api_frame_get_image(id: int, token: str, request: Request, db: Session
 
 
 @private_api.get("/frames/{id}/state", response_model=FrameStateResponse)
-async def api_frame_get_state(id: int, db: Session = Depends(get_db)):
-    frame = db.query(Frame).get(id)
+async def api_frame_get_state(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+    frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
@@ -147,7 +148,7 @@ async def api_frame_get_state(id: int, db: Session = Depends(get_db)):
 
 @private_api.post("/frames/{id}/event/{event}")
 async def api_frame_event(id: int, event: str, request: Request, db: Session = Depends(get_db)):
-    frame = db.query(Frame).get(id)
+    frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
@@ -179,7 +180,7 @@ async def api_frame_event(id: int, event: str, request: Request, db: Session = D
 
 @private_api.get("/frames/{id}/scene_source/{scene}")
 async def api_frame_scene_source(id: int, scene: str, db: Session = Depends(get_db)):
-    frame = db.query(Frame).get(id)
+    frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
@@ -191,7 +192,7 @@ async def api_frame_scene_source(id: int, scene: str, db: Session = Depends(get_
 
 @private_api.get("/frames/{id}/assets", response_model=FrameAssetsResponse)
 async def api_frame_get_assets(id: int, db: Session = Depends(get_db)):
-    frame = db.query(Frame).get(id)
+    frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
@@ -217,8 +218,8 @@ async def api_frame_get_assets(id: int, db: Session = Depends(get_db)):
 
 
 @private_api.get("/frames/{id}/asset")
-async def api_frame_get_asset(id: int, request: Request, db: Session = Depends(get_db)):
-    frame = db.query(Frame).get(id)
+async def api_frame_get_asset(id: int, request: Request, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+    frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
@@ -325,7 +326,7 @@ async def api_frame_update_endpoint(
     data: FrameUpdateRequest,
     db: Session = Depends(get_db)
 ):
-    frame = db.query(Frame).get(id)
+    frame = db.get(Frame, id)
     if not frame:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
@@ -349,18 +350,18 @@ async def api_frame_update_endpoint(
 
 
 @private_api.post("/frames/new", response_model=FrameResponse)
-async def api_frame_new(data: FrameCreateRequest, db: Session = Depends(get_db)):
+async def api_frame_new(data: FrameCreateRequest, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
     try:
-        frame = await new_frame(db, data.name, data.frame_host, data.server_host, data.device, data.interval)
+        frame = await new_frame(db, redis, data.name, data.frame_host, data.server_host, data.device, data.interval)
         return {"frame": frame.to_dict()}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @private_api.delete("/frames/{frame_id}")
-async def api_frame_delete(frame_id: int, db: Session = Depends(get_db)):
+async def api_frame_delete(frame_id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
     try:
-        success = await delete_frame(db, frame_id)
+        success = await delete_frame(db, redis, frame_id)
         if success:
             return {"message": "Frame deleted successfully"}
         else:
@@ -371,7 +372,7 @@ async def api_frame_delete(frame_id: int, db: Session = Depends(get_db)):
 
 @private_api.get("/frames/{id}/metrics", response_model=FrameMetricsResponse)
 async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
-    frame = db.query(Frame).get(id)
+    frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
     try:

@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import timezone
-from app.redis import redis
+from redis.asyncio import Redis
 from typing import Optional
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy import Integer, String, Double, DateTime, Boolean
@@ -92,7 +92,7 @@ class Frame(Base):
             'control_code': self.control_code,
         }
 
-async def new_frame(db: Session, name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:
+async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:
     if '@' in frame_host:
         user_pass, frame_host = frame_host.split('@')
     else:
@@ -143,22 +143,22 @@ async def new_frame(db: Session, name: str, frame_host: str, server_host: str, d
     )
     db.add(frame)
     db.commit()
-    await publish_message("new_frame", frame.to_dict())
+    await publish_message(redis, "new_frame", frame.to_dict())
 
     from app.models import new_log
-    await new_log(db, int(frame.id), "welcome", f"The frame \"{frame.name}\" has been created!")
+    await new_log(db, redis, int(frame.id), "welcome", f"The frame \"{frame.name}\" has been created!")
 
     return frame
 
 
-async def update_frame(db: Session, frame: Frame):
+async def update_frame(db: Session, redis: Redis, frame: Frame):
     db.add(frame)
     db.commit()
-    await publish_message("update_frame", frame.to_dict())
+    await publish_message(redis, "update_frame", frame.to_dict())
 
 
-async def delete_frame(db: Session, frame_id: int):
-    if frame := db.query(Frame).get(frame_id):
+async def delete_frame(db: Session, redis: Redis, frame_id: int):
+    if frame := db.get(Frame, frame_id):
         # delete corresonding log and metric entries first
         from .log import Log
         db.query(Log).filter_by(frame_id=frame_id).delete()
@@ -170,7 +170,7 @@ async def delete_frame(db: Session, frame_id: int):
 
         db.delete(frame)
         db.commit()
-        await publish_message("delete_frame", {"id": frame_id})
+        await publish_message(redis, "delete_frame", {"id": frame_id})
         return True
     return False
 

@@ -1,16 +1,19 @@
 from fastapi import HTTPException, Depends, Header
 from sqlalchemy.orm import Session
+from redis.asyncio import Redis
 
 from app.database import get_db
 from app.models.frame import Frame
 from app.models.log import process_log
 from app.schemas.log import LogRequest, LogResponse
+from app.redis import get_redis
 from . import public_api
 
 @public_api.post("/log", response_model=LogResponse)
 async def post_api_log(
     data: LogRequest,
     db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
     authorization: str = Header(None)
 ):
     if not authorization:
@@ -27,10 +30,10 @@ async def post_api_log(
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     if data.log:
-        await process_log(db, frame, data.log)
+        await process_log(db, redis, frame, data.log)
 
     if data.logs:
         for log in data.logs:
-            await process_log(db, frame, log)
+            await process_log(db, redis, frame, log)
 
     return LogResponse(message="OK")

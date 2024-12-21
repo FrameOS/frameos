@@ -4,7 +4,7 @@ from ..database import SessionLocal
 
 async def reset_frame(id: int):
     with SessionLocal() as db:
-        frame = db.query(Frame).get(id)
+        frame = db.get(Frame, id)
         if frame and frame.status != 'uninitialized':
             frame.status = 'uninitialized'
             await update_frame(db, frame)

@@ -3,7 +3,7 @@ import json
 import uuid
 from jose import jwt, JWTError
 from typing import List
-from redis.asyncio import from_url as create_redis
+from redis.asyncio import from_url as create_redis, Redis
 from fastapi import WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -73,16 +73,14 @@ async def redis_listener():
                 # If it can't parse as JSON, just ignore or handle error
                 pass
 
-async def publish_message(event: str, data: dict):
-    if not redis_pub:
-        await init_redis()
+async def publish_message(redis: Redis, event: str, data: dict):
     msg = {"event": event, "data": data, "instance_id": INSTANCE_ID}
 
     # Broadcast locally first
     await manager.broadcast(json.dumps(msg))
 
     # Then publish to redis
-    await redis_pub.publish("broadcast_channel", json.dumps(msg))
+    await redis.publish("broadcast_channel", json.dumps(msg))
 
 def register_ws_routes(app):
     @app.websocket("/ws")

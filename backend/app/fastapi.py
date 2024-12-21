@@ -1,5 +1,6 @@
 import asyncio
 import os
+import contextlib
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -16,10 +17,13 @@ from app.websockets import register_ws_routes, redis_listener
 from app.config import get_config
 from app.utils.sentry import initialize_sentry
 
-def lifespan(app: FastAPI):
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
     initialize_sentry()
-    asyncio.create_task(redis_listener())
+    task = asyncio.create_task(redis_listener())
     yield
+    # optionally do cleanup here
+    task.cancel()
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(GZipMiddleware)

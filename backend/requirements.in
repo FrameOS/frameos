@@ -8,6 +8,7 @@ sqlalchemy
 huey
 honcho
 redis
+fakeredis[aioredis]
 paramiko
 scp
 requests

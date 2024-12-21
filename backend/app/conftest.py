@@ -1,10 +1,12 @@
 import os
+
 # Ensure TEST=1 before anything else, so we always run in test mode
 os.environ["TEST"] = "1"
 
 import json  # noqa: E402
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
+import fakeredis.aioredis as fakeredis  # noqa: E402
 from httpx import AsyncClient  # noqa: E402
 from httpx._transports.asgi import ASGITransport  # noqa: E402
 from app.config import get_config  # noqa: E402
@@ -32,7 +34,12 @@ async def db_session():
         db.close()
 
 @pytest_asyncio.fixture
-async def async_client(db_session):
+async def redis():
+    client = fakeredis.FakeRedis()
+    yield client
+
+@pytest_asyncio.fixture
+async def async_client(db_session, redis):
     user = User(email="test@example.com")
     user.set_password("testpassword")
     db_session.add(user)

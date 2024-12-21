@@ -2,7 +2,7 @@ from app.drivers.waveshare import get_variant_keys, convert_waveshare_source
 import pytest
 
 @pytest.mark.asyncio
-def test_waveshare_variants():
+async def test_waveshare_variants():
     variants = get_variant_keys()
     assert len(variants) > 0
     assert "EPD_2in13_V2" in variants

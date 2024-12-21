@@ -53,7 +53,7 @@ async def test_update_template(async_client, db_session):
     data = {'name': 'Updated Template', 'description': 'Updated description'}
     response = await async_client.patch(f'/api/templates/{template.id}', json=data)
     assert response.status_code == 200
-    updated_template = db_session.query(Template).get(template.id)
+    updated_template = db_session.get(Template, template.id)
     assert updated_template.name == 'Updated Template'
     assert updated_template.description == 'Updated description'
 
@@ -65,7 +65,7 @@ async def test_delete_template(async_client, db_session):
 
     response = await async_client.delete(f'/api/templates/{template.id}')
     assert response.status_code == 200
-    deleted_template = db_session.query(Template).get(template.id)
+    deleted_template = db_session.get(Template, template.id)
     assert deleted_template is None
 
 @pytest.mark.asyncio

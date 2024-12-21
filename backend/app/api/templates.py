@@ -13,7 +13,7 @@ from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.redis import redis
+from redis.asyncio import Redis
 from app.models.template import Template
 from app.models.frame import Frame
 from app.schemas.templates import (
@@ -21,6 +21,7 @@ from app.schemas.templates import (
 )
 from app.api.auth import SECRET_KEY, ALGORITHM
 from app.api import private_api, public_api
+from app.redis import get_redis
 
 
 def respond_with_template(template: Template):
@@ -54,6 +55,7 @@ def respond_with_template(template: Template):
 @private_api.post("/templates")
 async def create_template(
     db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
     file: UploadFile = File(None),
     url: str = Form(None),
     from_frame_id: int = Form(None),
@@ -143,7 +145,7 @@ async def create_template(
     # If from_frame_id is provided, attempt to fetch image from frame cache
     if data.get('from_frame_id'):
         frame_id = data['from_frame_id']
-        frame = db.query(Frame).get(frame_id)
+        frame = db.get(Frame, frame_id)
         if frame:
             cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
             last_image = await redis.get(cache_key)
@@ -203,7 +205,7 @@ async def get_template_image(template_id: str, token: str, request: Request, db:
     except JWTError:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    template = db.query(Template).get(template_id)
+    template = db.get(Template, template_id)
     if not template or not template.image:
         raise HTTPException(status_code=404, detail="Template not found")
     return StreamingResponse(io.BytesIO(template.image), media_type='image/jpeg')
@@ -211,13 +213,13 @@ async def get_template_image(template_id: str, token: str, request: Request, db:
 
 @private_api.get("/templates/{template_id}/export")
 async def export_template(template_id: int, db: Session = Depends(get_db)):
-    template = db.query(Template).get(template_id)
+    template = db.get(Template, template_id)
     return respond_with_template(template)
 
 
 @private_api.get("/templates/{template_id}", response_model=TemplateResponse)
 async def get_template(template_id: int, db: Session = Depends(get_db)):
-    template = db.query(Template).get(template_id)
+    template = db.get(Template, template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     d = template.to_dict()
@@ -227,7 +229,7 @@ async def get_template(template_id: int, db: Session = Depends(get_db)):
 
 @private_api.patch("/templates/{template_id}", response_model=TemplateResponse)
 async def update_template(template_id: int, data: UpdateTemplateRequest, db: Session = Depends(get_db)):
-    template = db.query(Template).get(template_id)
+    template = db.get(Template, template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
 
@@ -245,7 +247,7 @@ async def update_template(template_id: int, data: UpdateTemplateRequest, db: Ses
 
 @private_api.delete("/templates/{template_id}")
 async def delete_template(template_id: int, db: Session = Depends(get_db)):
-    template = db.query(Template).get(template_id)
+    template = db.get(Template, template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     db.delete(template)

@@ -2,6 +2,7 @@ import json
 from datetime import timezone, datetime
 from copy import deepcopy
 from typing import Any, Optional
+from redis.asyncio import Redis
 
 from .frame import Frame, update_frame
 from .metrics import new_metrics
@@ -30,7 +31,7 @@ class Log(Base):
         }
 
 
-async def new_log(db: Session, frame_id: int, type: str, line: str, timestamp: Optional[datetime] = None) -> Log:
+async def new_log(db: Session, redis: Redis, frame_id: int, type: str, line: str, timestamp: Optional[datetime] = None) -> Log:
     log = Log(frame_id=frame_id, type=type, line=line, timestamp=timestamp or datetime.utcnow())
     db.add(log)
     db.commit()
@@ -45,18 +46,18 @@ async def new_log(db: Session, frame_id: int, type: str, line: str, timestamp: O
             db.delete(old_log)
         db.commit()
 
-    await publish_message("new_log", {**log.to_dict(), "timestamp": log.timestamp.replace(tzinfo=timezone.utc).isoformat()})
+    await publish_message(redis, "new_log", {**log.to_dict(), "timestamp": log.timestamp.replace(tzinfo=timezone.utc).isoformat()})
     return log
 
 
-async def process_log(db: Session, frame: Frame, log: dict | list):
+async def process_log(db: Session, redis: Redis, frame: Frame, log: dict | list):
     if isinstance(log, list):
         timestamp = datetime.utcfromtimestamp(log[0])
         log = log[1]
     else:
         timestamp = datetime.utcnow()
 
-    await new_log(db, int(frame.id), "webhook", json.dumps(log), timestamp)
+    await new_log(db, redis, int(frame.id), "webhook", json.dumps(log), timestamp)
 
     assert isinstance(log, dict), f"Log must be a dict, got {type(log)}"
 
@@ -81,7 +82,7 @@ async def process_log(db: Session, frame: Frame, log: dict | list):
             changes['last_log_at'] = timestamp
         for key, value in changes.items():
             setattr(frame, key, value)
-        await update_frame(db, frame)
+        await update_frame(db, redis, frame)
 
     if event == 'metrics':
         metrics_dict = deepcopy(log)
@@ -89,5 +90,5 @@ async def process_log(db: Session, frame: Frame, log: dict | list):
             del metrics_dict['event']
         if 'timestamp' in metrics_dict:
             del metrics_dict['timestamp']
-        await new_metrics(db, int(frame.id), metrics_dict)
+        await new_metrics(db, redis, int(frame.id), metrics_dict)
 

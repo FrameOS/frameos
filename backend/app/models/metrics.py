@@ -1,6 +1,7 @@
 import uuid
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy import Integer, String, ForeignKey, DateTime, func
+from redis.asyncio import Redis
 from app.database import Base
 from sqlalchemy.orm import relationship, backref, Session, mapped_column
 from app.websockets import publish_message
@@ -22,7 +23,7 @@ class Metrics(Base):
         }
 
 
-async def new_metrics(db: Session, frame_id: int, metrics: dict) -> Metrics:
+async def new_metrics(db: Session, redis: Redis, frame_id: int, metrics: dict) -> Metrics:
     metrics = Metrics(frame_id=frame_id, metrics=metrics)
     db.add(metrics)
     db.commit()
@@ -37,5 +38,5 @@ async def new_metrics(db: Session, frame_id: int, metrics: dict) -> Metrics:
             db.delete(old_metric)
         db.commit()
 
-    await publish_message("new_metrics", {**metrics.to_dict(), "timestamp": str(metrics.timestamp)})
+    await publish_message(redis, "new_metrics", {**metrics.to_dict(), "timestamp": str(metrics.timestamp)})
     return metrics

@@ -1,8 +1,10 @@
-from pydantic import BaseModel, RootModel
+from pydantic import BaseModel, ConfigDict, RootModel
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 class FrameBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     frame_host: str
@@ -34,9 +36,6 @@ class FrameBase(BaseModel):
     reboot: Any
     control_code: Any
     scenes: Optional[List[Dict[str, Any]]]
-
-    class Config:
-        orm_mode = True
 
 class FrameResponse(BaseModel):
     frame: FrameBase

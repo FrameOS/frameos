@@ -81,7 +81,7 @@ async def get_repositories(db: Session = Depends(get_db)):
 @private_api.get("/repositories/{repository_id}", response_model=RepositoryResponse)
 async def get_repository(repository_id: int, db: Session = Depends(get_db)):
     try:
-        repository = db.query(Repository).get(repository_id)
+        repository = db.get(Repository, repository_id)
         if not repository:
             raise HTTPException(status_code=404, detail="Repository not found")
         repo_dict = repository.to_dict()
@@ -93,7 +93,7 @@ async def get_repository(repository_id: int, db: Session = Depends(get_db)):
 @private_api.patch("/repositories/{repository_id}", response_model=RepositoryResponse)
 async def update_repository(repository_id: int, data: RepositoryUpdateRequest, db: Session = Depends(get_db)):
     try:
-        repository = db.query(Repository).get(repository_id)
+        repository = db.get(Repository, repository_id)
         if not repository:
             raise HTTPException(status_code=404, detail="Repository not found")
 
@@ -112,7 +112,7 @@ async def update_repository(repository_id: int, data: RepositoryUpdateRequest, d
 @private_api.delete("/repositories/{repository_id}")
 async def delete_repository(repository_id: int, db: Session = Depends(get_db)):
     try:
-        repository = db.query(Repository).get(repository_id)
+        repository = db.get(Repository, repository_id)
         if not repository:
             raise HTTPException(status_code=404, detail="Repository not found")
         db.delete(repository)

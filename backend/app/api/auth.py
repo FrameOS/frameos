@@ -5,11 +5,12 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
+from redis.asyncio import Redis
 
 from app.config import get_config
 from app.models.user import User
 from app.database import get_db
-from app.redis import redis
+from app.redis import get_redis
 from werkzeug.security import generate_password_hash, check_password_hash
 from app.schemas.auth import Token, UserSignup
 
@@ -18,7 +19,7 @@ from . import public_api
 config = get_config()
 SECRET_KEY = config.SECRET_KEY
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+ACCESS_TOKEN_EXPIRE_MINUTES = 7 * 24 * 60  # 7 days
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
 
@@ -52,7 +53,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     return user
 
 @public_api.post("/login", response_model=Token)
-async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
     email = form_data.username
     password = form_data.password
     ip = request.client.host

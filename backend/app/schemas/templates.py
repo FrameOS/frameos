@@ -1,7 +1,9 @@
-from pydantic import BaseModel, RootModel
+from pydantic import BaseModel, ConfigDict, RootModel
 from typing import Any, List, Optional
 
 class TemplateBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: Optional[str]
     name: str
     description: Optional[str]
@@ -9,9 +11,6 @@ class TemplateBase(BaseModel):
     image: Optional[str] = None
     imageWidth: Optional[int] = None
     imageHeight: Optional[int] = None
-
-    class Config:
-        orm_mode = True
 
 class TemplateResponse(BaseModel):
     id: str

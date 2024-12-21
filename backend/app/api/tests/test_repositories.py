@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import patch
+import pytest_asyncio
 from sqlalchemy.exc import SQLAlchemyError
 from app.models import Repository
 
@@ -41,7 +42,7 @@ async def test_update_repository(async_client, db_session):
     }
     response = await async_client.patch(f'/api/repositories/{repo.id}', json=updated_data)
     assert response.status_code == 200
-    updated_repo = db_session.query(Repository).get(repo.id)
+    updated_repo = db_session.get(Repository, repo.id)
     assert updated_repo.name == 'Updated Repo'
 
 @pytest.mark.asyncio
@@ -52,7 +53,7 @@ async def test_delete_repository(async_client, db_session):
 
     response = await async_client.delete(f'/api/repositories/{repo.id}')
     assert response.status_code == 200
-    deleted_repo = db_session.query(Repository).get(repo.id)
+    deleted_repo = db_session.get(Repository, repo.id)
     assert deleted_repo is None
 
 @pytest.mark.asyncio
@@ -77,7 +78,7 @@ async def test_delete_nonexistent_repository(async_client):
     response = await async_client.delete('/api/repositories/9999')
     assert response.status_code == 404
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def no_auth_client():
     from httpx import AsyncClient
     from httpx._transports.asgi import ASGITransport

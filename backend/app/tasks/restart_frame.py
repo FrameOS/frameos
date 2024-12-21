@@ -8,7 +8,7 @@ async def restart_frame(id: int):
         ssh = None
         frame = None
         try:
-            frame = db.query(Frame).get(id)
+            frame = db.get(Frame, id)
             if not frame:
                 await log(db, id, "stderr", "Frame not found")
                 return

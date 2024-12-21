@@ -7,7 +7,7 @@ async def stop_frame(id: int):
     with SessionLocal() as db:
         ssh = None
         try:
-            frame = db.query(Frame).get(id)
+            frame = db.get(Frame, id)
             if not frame:
                 return
 
