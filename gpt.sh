@@ -5,15 +5,18 @@ OUTPUT="gpt.txt"
 # Start fresh
 > "$OUTPUT"
 
+echo "" > "$OUTPUT"
+
+echo "\n\n" > "$OUTPUT"
+
 # Define the patterns you want to collect files from:
 patterns=(
     "backend/app/*.py"
     "backend/app/schemas/*.py"
-    "backend/app/models/*.py"
     "backend/app/api/*.py"
-    "backend/app/services/*.py"
-    "backend/app/services/ws_broadcast.py"
-    "frontend/src/scenes/socketLogic.tsx"
+    "backend/app/api/tests/*.py"
+    "backend/app/models/*.py"
+    "backend/app/models/tests/*.py"
 )
 
 for pattern in "${patterns[@]}"; do

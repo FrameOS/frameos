@@ -1,12 +1,16 @@
-import json
-import pytest
-import pytest_asyncio
-from httpx import AsyncClient
-from httpx._transports.asgi import ASGITransport
-from app.config import get_config
-from app.fastapi import app
-from app.models import User
-from app.database import SessionLocal, engine, Base
+import os
+# Ensure TEST=1 before anything else, so we always run in test mode
+os.environ["TEST"] = "1"
+
+import json  # noqa: E402
+import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from httpx import AsyncClient  # noqa: E402
+from httpx._transports.asgi import ASGITransport  # noqa: E402
+from app.config import get_config  # noqa: E402
+from app.fastapi import app  # noqa: E402
+from app.models import User  # noqa: E402
+from app.database import SessionLocal, engine, Base  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def setup_and_teardown_db():
@@ -19,7 +23,7 @@ def setup_and_teardown_db():
     # Drop all tables after each test
     Base.metadata.drop_all(bind=engine)
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture
 async def db_session():
     db = SessionLocal()
     try:
@@ -36,8 +40,12 @@ async def async_client(db_session):
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        # r = await ac.post('/api/login', json={"email": "test@example.com", "password": "testpassword"})
-        # assert r.status_code == 200, f"Login failed: {r.text}"
+        login_data = {"username": "test@example.com", "password": "testpassword"}
+        login_response = await ac.post('/api/login', data=login_data)
+        token = login_response.json().get('access_token')
+        headers = {"Authorization": f"Bearer {token}"}
+        ac.headers.update(headers)
+
         yield ac
 
 @pytest_asyncio.fixture

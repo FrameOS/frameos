@@ -31,7 +31,7 @@ class DevelopmentConfig(Config):
 
 class TestConfig(Config):
     TEST = True
-    DATABASE_URL = 'sqlite:///:memory:'
+    DATABASE_URL = 'sqlite:///:memory:?check_same_thread=False'
     def __init__(self):
         super().__init__()
         if self.SECRET_KEY is None:
