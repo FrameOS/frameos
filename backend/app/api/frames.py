@@ -324,7 +324,8 @@ async def api_frame_deploy_event(id: int):
 async def api_frame_update_endpoint(
     id: int,
     data: FrameUpdateRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis)
 ):
     frame = db.get(Frame, id)
     if not frame:
@@ -334,7 +335,7 @@ async def api_frame_update_endpoint(
     for field, value in update_data.items():
         setattr(frame, field, value)
 
-    await update_frame(db, frame)
+    await update_frame(db, redis, frame)
 
     if data.next_action == 'restart':
         from app.tasks import restart_frame

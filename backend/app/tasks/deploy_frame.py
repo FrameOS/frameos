@@ -24,12 +24,13 @@ from app.models import get_apps_from_scenes
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection, exec_local_command
+from app.redis import get_redis
 from ..database import SessionLocal
 from sqlalchemy.orm import Session
 
 
 async def deploy_frame(id: int):
-    with SessionLocal() as db:
+    with SessionLocal() as db, get_redis() as redis:
         ssh = None
         try:
             frame = db.get(Frame, id)
@@ -44,7 +45,7 @@ async def deploy_frame(id: int):
                 raise Exception("Already deploying, will not deploy again. Request again to force deploy.")
 
             frame.status = 'deploying'
-            await update_frame(db, frame)
+            await update_frame(db, redis, frame)
 
             # TODO: add the concept of builds into the backend (track each build in the database)
             build_id = ''.join(random.choice(string.ascii_lowercase) for i in range(12))
@@ -197,13 +198,13 @@ async def deploy_frame(id: int):
             await exec_command(db, frame, ssh, "sudo systemctl status frameos.service")
 
             frame.status = 'starting'
-            await update_frame(db, frame)
+            await update_frame(db, redis, frame)
 
         except Exception as e:
             await log(db, id, "stderr", str(e))
             if frame is not None:
                 frame.status = 'uninitialized'
-                await update_frame(db, frame)
+                await update_frame(db, redis, frame)
         finally:
             if ssh is not None:
                 ssh.close()

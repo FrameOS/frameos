@@ -11,6 +11,7 @@ from app.models.repository import Repository
 from app.utils.network import is_safe_host
 from app.schemas.repositories import (
     RepositoryCreateRequest,
+    RepositoryUpdateRequest,
     RepositoryResponse,
     RepositoriesListResponse
 )
@@ -19,10 +20,6 @@ from . import private_api
 FRAMEOS_SAMPLES_URL = "https://repo.frameos.net/samples/repository.json"
 FRAMEOS_GALLERY_URL = "https://repo.frameos.net/gallery/repository.json"
 
-class RepositoryUpdateRequest(RepositoryCreateRequest):
-    # Both fields optional for partial update
-    url: str | None = None
-    name: str | None = None
 
 @private_api.post("/repositories", response_model=RepositoryResponse, status_code=201)
 async def create_repository(data: RepositoryCreateRequest, db: Session = Depends(get_db)):
@@ -79,7 +76,7 @@ async def get_repositories(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Database error")
 
 @private_api.get("/repositories/{repository_id}", response_model=RepositoryResponse)
-async def get_repository(repository_id: int, db: Session = Depends(get_db)):
+async def get_repository(repository_id: str, db: Session = Depends(get_db)):
     try:
         repository = db.get(Repository, repository_id)
         if not repository:
@@ -91,7 +88,7 @@ async def get_repository(repository_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Database error")
 
 @private_api.patch("/repositories/{repository_id}", response_model=RepositoryResponse)
-async def update_repository(repository_id: int, data: RepositoryUpdateRequest, db: Session = Depends(get_db)):
+async def update_repository(repository_id: str, data: RepositoryUpdateRequest, db: Session = Depends(get_db)):
     try:
         repository = db.get(Repository, repository_id)
         if not repository:
@@ -110,7 +107,7 @@ async def update_repository(repository_id: int, data: RepositoryUpdateRequest, d
         raise HTTPException(status_code=500, detail="Database error")
 
 @private_api.delete("/repositories/{repository_id}")
-async def delete_repository(repository_id: int, db: Session = Depends(get_db)):
+async def delete_repository(repository_id: str, db: Session = Depends(get_db)):
     try:
         repository = db.get(Repository, repository_id)
         if not repository:

@@ -212,7 +212,7 @@ async def get_template_image(template_id: str, token: str, request: Request, db:
 
 
 @private_api.get("/templates/{template_id}/export")
-async def export_template(template_id: int, db: Session = Depends(get_db)):
+async def export_template(template_id: str, db: Session = Depends(get_db)):
     template = db.get(Template, template_id)
     return respond_with_template(template)
 

@@ -47,13 +47,21 @@ async def read_index():
 
 @app.exception_handler(StarletteHTTPException)
 async def custom_404_handler(request: Request, exc: StarletteHTTPException):
-    if exc.status_code == 404 and not request.url.path.startswith(non_404_routes):
-        index_path = os.path.join("../frontend/dist", "index.html")
-        return FileResponse(index_path)
-    return JSONResponse(status_code=exc.status_code, content={"message": "Not Found" if exc.status_code == 404 else f"Error {exc.status_code}"})
+    if os.environ.get("TEST") == "1" or exc.status_code != 404:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail or f"Error {exc.status_code}"}
+        )
+    index_path = os.path.join("../frontend/dist", "index.html")
+    return FileResponse(index_path)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    if os.environ.get("TEST") == "1":
+        return JSONResponse(
+            status_code=422,
+            content={"detail": exc.errors()}
+        )
     index_path = os.path.join("../frontend/dist", "index.html")
     return FileResponse(index_path)
 

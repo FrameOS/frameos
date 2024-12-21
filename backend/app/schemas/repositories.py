@@ -15,6 +15,10 @@ class RepositoryBase(BaseModel):
 class RepositoryCreateRequest(BaseModel):
     url: str
 
+class RepositoryUpdateRequest(RepositoryCreateRequest):
+    url: str | None = None
+    name: str | None = None
+
 class RepositoriesListResponse(RootModel):
     pass
 

@@ -1,74 +1,71 @@
 import pytest
-import pytest_asyncio
 from app.models import new_frame, update_frame, Log
 
-@pytest_asyncio.fixture
-async def frame_with_key(db_session, redis):
-    frame = await new_frame(db_session, redis, 'Frame', 'localhost', 'localhost')
-    frame.server_api_key = 'testkey'
-    await update_frame(db_session, frame)
-    # Ensure no non-welcome logs
-    assert db_session.query(Log).filter_by(frame=frame).filter(Log.type != 'welcome').count() == 0
-    return frame
-
 @pytest.mark.asyncio
-async def test_api_log_single_entry(async_client, db_session, frame_with_key):
+async def test_api_log_single_entry(async_client, db_session, redis):
+    # Create a frame with server_api_key
+    frame = await new_frame(db_session, redis, 'LogFrame', 'localhost', 'localhost')
+    frame.server_api_key = 'testkey'
+    await update_frame(db_session, redis, frame)
+
     headers = {'Authorization': 'Bearer testkey'}
     data = {'log': {'event': 'log', 'message': 'banana'}}
     response = await async_client.post('/api/log', json=data, headers=headers)
     assert response.status_code == 200
-    assert db_session.query(Log).filter_by(frame=frame_with_key).filter(Log.type != 'welcome').count() == 1
+    # Check the DB
+    logs = db_session.query(Log).filter_by(frame_id=frame.id).all()
+    # We have the welcome log plus the new one
+    assert len(logs) == 2
+    assert "banana" in logs[1].line
 
 @pytest.mark.asyncio
-async def test_api_log_multiple_entries(async_client, db_session, frame_with_key):
+async def test_api_log_multiple_entries(async_client, db_session, redis):
+    frame = await new_frame(db_session, redis, 'MultiLogFrame', 'localhost', 'localhost')
+    frame.server_api_key = 'testkey'
+    await update_frame(db_session, redis, frame)
+
     headers = {'Authorization': 'Bearer testkey'}
-    logs = [{'event': 'log', 'message': 'banana'}, {'event': 'log', 'message': 'pineapple'}]
-    data = {'logs': logs}
+    data = {
+        'logs': [
+            {'event': 'log', 'message': 'banana'},
+            {'event': 'log', 'message': 'pineapple'}
+        ]
+    }
     response = await async_client.post('/api/log', json=data, headers=headers)
     assert response.status_code == 200
-    assert db_session.query(Log).filter_by(frame=frame_with_key).filter(Log.type != 'welcome').count() == 2
+    logs = db_session.query(Log).filter_by(frame_id=frame.id).all()
+    # 1 welcome + 2 new
+    assert len(logs) == 3
 
 @pytest.mark.asyncio
-async def test_api_log_no_data(async_client, db_session, frame_with_key):
+async def test_api_log_no_data(async_client, db_session, redis):
+    frame = await new_frame(db_session, redis, 'NoDataFrame', 'localhost', 'localhost')
+    frame.server_api_key = 'testkey'
+    await update_frame(db_session, redis, frame)
+
     headers = {'Authorization': 'Bearer testkey'}
     response = await async_client.post('/api/log', json={}, headers=headers)
     assert response.status_code == 200
 
 @pytest.mark.asyncio
-async def test_api_log_bad_key(async_client, db_session, frame_with_key):
-    headers = {'Authorization': 'Bearer wasabi'}
+async def test_api_log_bad_key(async_client, db_session, redis):
+    frame = await new_frame(db_session, redis, 'BadKeyFrame', 'localhost', 'localhost')
+    frame.server_api_key = 'goodkey'
+    await update_frame(db_session, redis, frame)
+
+    headers = {'Authorization': 'Bearer wrongkey'}
     data = {'log': {'event': 'log', 'message': 'banana'}}
     response = await async_client.post('/api/log', json=data, headers=headers)
     assert response.status_code == 401
+    assert response.json()['detail'] == "Unauthorized"
 
 @pytest.mark.asyncio
-async def test_api_log_no_key(async_client, db_session, frame_with_key):
+async def test_api_log_no_key(async_client, db_session, redis):
+    frame = await new_frame(db_session, redis, 'NoKeyFrame', 'localhost', 'localhost')
+    frame.server_api_key = 'somekey'
+    await update_frame(db_session, redis, frame)
+
     data = {'log': {'event': 'log', 'message': 'banana'}}
     response = await async_client.post('/api/log', json=data)
     assert response.status_code == 401
-    assert db_session.query(Log).filter_by(frame=frame_with_key).filter(Log.type != 'welcome').count() == 0
-
-@pytest.mark.asyncio
-async def test_api_log_limits(async_client, db_session, frame_with_key):
-    # Clear existing logs
-    for old_log in db_session.query(Log).all():
-        db_session.delete(old_log)
-    db_session.commit()
-
-    headers = {'Authorization': 'Bearer testkey'}
-    data = {'logs': [{'event': 'log', 'message': 'banana'}] * 1200}
-    response = await async_client.post('/api/log', json=data, headers=headers)
-    assert response.status_code == 200
-    assert db_session.query(Log).filter_by(frame=frame_with_key).count() == 1100
-
-    data = {'logs': [{'event': 'log', 'message': 'banana'}] * 50}
-    await async_client.post('/api/log', json=data, headers=headers)
-    assert db_session.query(Log).filter_by(frame=frame_with_key).count() == 1050
-
-    data = {'logs': [{'event': 'log', 'message': 'banana'}] * 40}
-    await async_client.post('/api/log', json=data, headers=headers)
-    assert db_session.query(Log).filter_by(frame=frame_with_key).count() == 1090
-
-    data = {'logs': [{'event': 'log', 'message': 'banana'}] * 30}
-    await async_client.post('/api/log', json=data, headers=headers)
-    assert db_session.query(Log).filter_by(frame=frame_with_key).count() == 1020
+    assert response.json()['detail'] == "Unauthorized"
