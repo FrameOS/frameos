@@ -39,7 +39,7 @@ async def redis():
     try:
         yield client
     finally:
-        client.close()
+        await client.close()
 
 @pytest_asyncio.fixture
 async def async_client(db, redis):

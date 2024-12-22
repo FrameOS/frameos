@@ -1,4 +1,4 @@
-from pydantic import BaseModel, RootModel, Field
+from pydantic import BaseModel, ConfigDict, RootModel, Field
 from typing import Dict, List, Optional, Union, Any
 from enum import Enum
 
@@ -182,7 +182,7 @@ class AppConfigSchema(BaseModel):
     )
     cache: Optional[CacheConfig] = Field(None, description="Default cache settings for this app")
 
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
                 "name": "My Custom Clock",
@@ -216,6 +216,7 @@ class AppConfigSchema(BaseModel):
                 }
             }
         }
+    )
 
 
 #

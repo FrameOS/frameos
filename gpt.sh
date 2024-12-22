@@ -14,9 +14,11 @@ patterns=(
     "backend/app/*.py"
     "backend/app/schemas/*.py"
     "backend/app/api/*.py"
-    "backend/app/api/tests/*.py"
+    # "backend/app/api/tests/*.py"
     "backend/app/models/*.py"
-    "backend/app/models/tests/*.py"
+    # "backend/app/models/tests/*.py"
+    "frontend/src/types.tsx"
+    # "frameos/src/apps/*/*/config.json"
 )
 
 for pattern in "${patterns[@]}"; do
