@@ -7,13 +7,15 @@ async def test_get_settings(async_client):
     data = response.json()
     assert isinstance(data, dict)
 
+
 @pytest.mark.asyncio
 async def test_set_settings(async_client):
     payload = {"some_setting": "hello"}
     response = await async_client.post('/api/settings', json=payload)
-    assert response.status_code == 200
+    assert response.status_code == 200, f"Got {response.status_code} and {response.json()}"
     updated = response.json()
     assert updated["some_setting"] == "hello"
+
 
 @pytest.mark.asyncio
 async def test_set_settings_no_payload(async_client):

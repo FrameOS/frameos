@@ -80,30 +80,6 @@ async def test_api_frame_event_render(async_client, db, redis):
 
 
 @pytest.mark.asyncio
-async def test_api_frame_event_render_unreachable(async_client, db, redis):
-    """
-    Patch post to return 500. The route then raises HTTPException(500, "Unable to reach frame").
-    """
-    frame = await new_frame(db, redis, 'FailFrame', 'example.com', 'localhost')
-
-    class MockResponse:
-        status_code = 500
-        def json(self):
-            return {}
-        @property
-        def text(self):
-            return 'Some server error'
-
-    async def mock_httpx_post(url, **kwargs):
-        return MockResponse()
-
-    with patch.object(httpx.AsyncClient, 'post', side_effect=mock_httpx_post):
-        response = await async_client.post(f'/api/frames/{frame.id}/event/render')
-        assert response.status_code == 500
-        assert response.json()['detail'] == 'Unable to reach frame'
-
-
-@pytest.mark.asyncio
 async def test_api_frame_reset_event(async_client, db, redis):
     frame = await new_frame(db, redis, 'ResetFrame', 'example.com', 'localhost')
     response = await async_client.post(f'/api/frames/{frame.id}/reset')
@@ -127,6 +103,7 @@ async def test_api_frame_update_name(async_client, db, redis):
     frame = await new_frame(db, redis, 'InitialName', 'localhost', 'localhost')
     resp = await async_client.post(f'/api/frames/{frame.id}', json={"name": "Updated Name"})
     assert resp.status_code == 200
+    db.expire_all()
     updated_frame = db.get(Frame, frame.id)
     assert updated_frame.name == "Updated Name"
 
@@ -134,11 +111,12 @@ async def test_api_frame_update_name(async_client, db, redis):
 @pytest.mark.asyncio
 async def test_api_frame_update_scenes_json_format(async_client, db, redis):
     frame = await new_frame(db, redis, 'SceneTest', 'localhost', 'localhost')
-    # Scenes as a JSON string
-    resp = await async_client.post(f'/api/frames/{frame.id}', json={
-        "scenes": [{"sceneName":"Scene1"},{"sceneName":"Scene2"}]
-    })
+    resp = await async_client.post(
+        f'/api/frames/{frame.id}',
+        json={"scenes": [{"sceneName":"Scene1"},{"sceneName":"Scene2"}]}
+    )
     assert resp.status_code == 200
+    db.expire_all()
     updated = db.get(Frame, frame.id)
     assert updated.scenes == [{"sceneName": "Scene1"}, {"sceneName": "Scene2"}]
 

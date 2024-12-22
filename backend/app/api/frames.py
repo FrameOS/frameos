@@ -332,7 +332,6 @@ async def api_frame_update_endpoint(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     update_data = data.model_dump(exclude_unset=True)
-
     # If 'scenes' is a string, parse it as JSON
     if isinstance(update_data.get('scenes'), str):
         try:
@@ -341,6 +340,7 @@ async def api_frame_update_endpoint(
             raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
 
     for field, value in update_data.items():
+        print(field, value)
         setattr(frame, field, value)
 
     await update_frame(db, redis, frame)

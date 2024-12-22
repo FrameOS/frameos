@@ -15,6 +15,8 @@ patterns=(
     "backend/app/schemas/*.py"
     "backend/app/api/*.py"
     # "backend/app/api/tests/*.py"
+    "backend/app/api/tests/test_frames.py"
+    "backend/app/api/tests/test_settings.py"
     "backend/app/models/*.py"
     # "backend/app/models/tests/*.py"
     "frontend/src/types.tsx"
