@@ -183,7 +183,7 @@ class AppConfigSchema(BaseModel):
     cache: Optional[CacheConfig] = Field(None, description="Default cache settings for this app")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "name": "My Custom Clock",
                 "category": "clocks",

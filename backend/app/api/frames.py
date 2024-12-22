@@ -331,7 +331,7 @@ async def api_frame_update_endpoint(
     if not frame:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
-    update_data = data.dict(exclude_unset=True)
+    update_data = data.model_dump(exclude_unset=True)
 
     # If 'scenes' is a string, parse it as JSON
     if isinstance(update_data.get('scenes'), str):

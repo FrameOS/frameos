@@ -59,7 +59,7 @@ async def test_delete_repository(async_client, db_session):
     response = await async_client.delete(f'/api/repositories/{repo.id}')
     assert response.status_code == 200
     assert response.json()['message'] == "Repository deleted successfully"
-    assert db_session.query(Repository).get(repo.id) is None
+    assert db_session.get(Repository, repo.id) is None
 
 @pytest.mark.asyncio
 async def test_delete_nonexistent_repository(async_client):

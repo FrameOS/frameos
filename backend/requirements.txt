@@ -10,8 +10,6 @@ anyio==4.7.0
     #   watchfiles
 appnope==0.1.4
     # via ipython
-asgiref==3.8.1
-    # via flask
 asttokens==2.4.0
     # via stack-data
 backcall==0.2.0
@@ -65,7 +63,6 @@ email-validator==2.0.0.post2
     # via fastapi
 executing==1.2.0
     # via stack-data
-fakeredis==2.26.2
 fastapi==0.115.6
 fastapi-cli==0.0.6
     # via fastapi
@@ -89,7 +86,6 @@ httptools==0.6.4
     # via uvicorn
 httpx==0.28.1
     # via fastapi
-huey==2.4.5
 identify==2.5.33
     # via pre-commit
 idna==3.4
@@ -199,7 +195,6 @@ pyyaml==6.0.1
     #   pre-commit
     #   uvicorn
 redis==4.6.0
-    # via fakeredis
 requests==2.31.0
 rich==13.9.4
     # via
@@ -222,8 +217,6 @@ six==1.16.0
     # via asttokens
 sniffio==1.3.1
     # via anyio
-sortedcontainers==2.4.0
-    # via fakeredis
 sqlalchemy==2.0.19
     # via
     #   alembic
