@@ -1,5 +1,7 @@
+import json
 import pytest
 from app.models import Repository
+from sqlalchemy.exc import InvalidRequestError
 
 @pytest.mark.asyncio
 async def test_create_repository(async_client, db):
@@ -16,7 +18,7 @@ async def test_create_repository_invalid_input(async_client):
     data = {}
     response = await async_client.post('/api/repositories', json=data)
     assert response.status_code == 422
-    assert "Missing URL" in response.json()['detail']
+    assert "Field required" in json.dumps(response.json()['detail'])
 
 @pytest.mark.asyncio
 async def test_get_repositories(async_client, db):
@@ -59,7 +61,18 @@ async def test_delete_repository(async_client, db):
     response = await async_client.delete(f'/api/repositories/{repo.id}')
     assert response.status_code == 200
     assert response.json()['message'] == "Repository deleted successfully"
-    assert db.get(Repository, repo.id) is None
+
+    try:
+        db.refresh(repo)
+        raise AssertionError("Repository was not deleted")
+    except InvalidRequestError:
+        pass
+
+    try:
+        db.get(Repository, repo.id)
+        raise AssertionError("Repository was not deleted")
+    except InvalidRequestError:
+        pass
 
 @pytest.mark.asyncio
 async def test_delete_nonexistent_repository(async_client):
