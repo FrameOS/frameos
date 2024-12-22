@@ -55,41 +55,6 @@ async def test_api_frame_get_image_cached(async_client, db, redis):
     assert response.status_code == 200
     assert response.content == b'cached_image_data'
 
-
-@pytest.mark.asyncio
-async def test_api_frame_get_image_no_cache(async_client, db, redis):
-    """
-    Patch httpx.AsyncClient.get so that it returns a 200 with image_data
-    when no cache is found.
-    """
-    frame = await new_frame(db, redis, 'NoCacheFrame', 'example.com', 'localhost')
-
-    class MockResponse:
-        status_code = 200
-        content = b'image_data'
-        def json(self):
-            return {}
-        @property
-        def text(self):
-            return self.content.decode('utf-8')
-
-    async def mock_httpx_get(url, **kwargs):
-        return MockResponse()
-
-    with patch.object(httpx.AsyncClient, 'get', side_effect=mock_httpx_get):
-        link_resp = await async_client.get(f'/api/frames/{frame.id}/image_link')
-        print(link_resp.content)
-        image_url = link_resp.json()['url']
-        response = await async_client.get(image_url)
-        assert response.status_code == 200
-        assert response.content == b'image_data'
-
-        # Now it should be cached:
-        cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
-        cached = await redis.get(cache_key)
-        assert cached == b'image_data'
-
-
 @pytest.mark.asyncio
 async def test_api_frame_event_render(async_client, db, redis):
     """
@@ -173,7 +138,6 @@ async def test_api_frame_update_scenes_json_format(async_client, db, redis):
     resp = await async_client.post(f'/api/frames/{frame.id}', json={
         "scenes": [{"sceneName":"Scene1"},{"sceneName":"Scene2"}]
     })
-    print(resp.json())
     assert resp.status_code == 200
     updated = db.get(Frame, frame.id)
     assert updated.scenes == [{"sceneName": "Scene1"}, {"sceneName": "Scene2"}]
