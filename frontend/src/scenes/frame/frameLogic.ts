@@ -219,8 +219,12 @@ export const frameLogic = kea<frameLogicType>([
     renderFrame: () => framesModel.actions.renderFrame(props.frameId),
     saveFrame: () => actions.submitFrameForm(),
     deployFrame: () => actions.submitFrameForm(),
-    restartFrame: () => actions.submitFrameForm(),
-    stopFrame: () => actions.submitFrameForm(),
+    restartFrame: async () => {
+      await apiFetch(`/api/frames/${values.frameId}/restart`, { method: 'POST' })
+    },
+    stopFrame: async () => {
+      await apiFetch(`/api/frames/${values.frameId}/stop`, { method: 'POST' })
+    },
     updateScene: ({ sceneId, scene }) => {
       const { frameForm } = values
       const hasScene = frameForm.scenes?.some(({ id }) => id === sceneId)
