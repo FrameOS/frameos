@@ -7,7 +7,6 @@ Flask-Login==0.6.3
 honcho
 imagehash
 ipdb
-jose
 jwt
 mypy
 paramiko
@@ -17,6 +16,7 @@ pip-tools
 pre-commit
 pytest
 pytest-asyncio
+python-jose
 redis
 requests
 ruff
