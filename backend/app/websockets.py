@@ -11,18 +11,8 @@ from app.database import get_db
 from app.config import get_config
 from app.models.user import User
 
-redis_pub = None
-redis_sub = None
-
 # Generate a unique ID for this instance
 INSTANCE_ID = str(uuid.uuid4())
-
-async def init_redis():
-    global redis_pub, redis_sub
-    if redis_pub is None:
-        redis_pub = create_redis(get_config().REDIS_URL, decode_responses=True)
-    if redis_sub is None:
-        redis_sub = create_redis(get_config().REDIS_URL, decode_responses=True)
 
 class ConnectionManager:
     def __init__(self):
@@ -56,22 +46,22 @@ class ConnectionManager:
 manager = ConnectionManager() # Local clients
 
 async def redis_listener():
-    if not redis_sub:
-        await init_redis()
-    pubsub = redis_sub.pubsub()
-    await pubsub.subscribe("broadcast_channel")
+    redis_sub = create_redis(get_config().REDIS_URL, decode_responses=True)
+    try:
+        pubsub = redis_sub.pubsub()
+        await pubsub.subscribe("broadcast_channel")
 
-    async for message in pubsub.listen():
-        if message["type"] == "message":
-            # Parse the message
-            try:
-                parsed = json.loads(message["data"])
-                # Only broadcast if not from this instance
-                if parsed.get("instance_id") != INSTANCE_ID:
-                    await manager.broadcast(message["data"])
-            except json.JSONDecodeError:
-                # If it can't parse as JSON, just ignore or handle error
-                pass
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                try:
+                    parsed = json.loads(message["data"])
+                    # Only broadcast if not from this instance
+                    if parsed.get("instance_id") != INSTANCE_ID:
+                        await manager.broadcast(message["data"])
+                except json.JSONDecodeError:
+                    pass
+    finally:
+        await redis_sub.close()
 
 async def publish_message(redis: Redis, event: str, data: dict):
     msg = {"event": event, "data": data, "instance_id": INSTANCE_ID}
