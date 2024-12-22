@@ -3,7 +3,7 @@ import pytest
 from app.models.template import Template
 
 @pytest.mark.asyncio
-async def test_create_template(async_client, db_session):
+async def test_create_template(async_client, db):
     payload = {
         "name": "New Template",
         "description": "A test template",
@@ -23,12 +23,12 @@ async def test_create_template(async_client, db_session):
     # else if your code returns e.g. { "id": "...", "name": "...", ... } do that check.
 
 @pytest.mark.asyncio
-async def test_get_templates(async_client, db_session):
+async def test_get_templates(async_client, db):
     # Insert a couple
     t1 = Template(name="Template1")
     t2 = Template(name="Template2")
-    db_session.add_all([t1, t2])
-    db_session.commit()
+    db.add_all([t1, t2])
+    db.commit()
 
     response = await async_client.get('/api/templates')
     assert response.status_code == 200
@@ -42,10 +42,10 @@ async def test_get_nonexistent_template(async_client):
     assert response.status_code == 404
 
 @pytest.mark.asyncio
-async def test_export_template(async_client, db_session):
+async def test_export_template(async_client, db):
     t = Template(name="Exportable", scenes=[], config={})
-    db_session.add(t)
-    db_session.commit()
+    db.add(t)
+    db.commit()
 
     response = await async_client.get(f'/api/templates/{t.id}/export')
     assert response.status_code == 200

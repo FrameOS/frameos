@@ -2,11 +2,11 @@ import pytest
 from app.models import Repository
 
 @pytest.mark.asyncio
-async def test_create_repository(async_client, db_session):
+async def test_create_repository(async_client, db):
     data = {'url': 'http://example.com/repo.json'}
     response = await async_client.post('/api/repositories', json=data)
     assert response.status_code == 201
-    repo = db_session.query(Repository).first()
+    repo = db.query(Repository).first()
     assert repo is not None
     assert repo.url == 'http://example.com/repo.json'
 
@@ -19,7 +19,7 @@ async def test_create_repository_invalid_input(async_client):
     assert "Missing URL" in response.json()['detail']
 
 @pytest.mark.asyncio
-async def test_get_repositories(async_client, db_session):
+async def test_get_repositories(async_client, db):
     # Possibly your code also ensures the "samples" and "gallery" repos are created
     response = await async_client.get('/api/repositories')
     assert response.status_code == 200
@@ -28,38 +28,38 @@ async def test_get_repositories(async_client, db_session):
     assert isinstance(repos, list)
 
 @pytest.mark.asyncio
-async def test_get_repository(async_client, db_session):
+async def test_get_repository(async_client, db):
     repo = Repository(name="Test Repo", url="http://example.com/test.json")
-    db_session.add(repo)
-    db_session.commit()
+    db.add(repo)
+    db.commit()
     response = await async_client.get(f'/api/repositories/{repo.id}')
     assert response.status_code == 200
     data = response.json()
     assert data['name'] == 'Test Repo'
 
 @pytest.mark.asyncio
-async def test_update_repository(async_client, db_session):
+async def test_update_repository(async_client, db):
     repo = Repository(name="Old Repo", url="http://example.com/old.json")
-    db_session.add(repo)
-    db_session.commit()
+    db.add(repo)
+    db.commit()
 
     updated_data = {"name": "Updated Repo", "url": "http://example.com/updated.json"}
     response = await async_client.patch(f'/api/repositories/{repo.id}', json=updated_data)
     assert response.status_code == 200
-    db_session.refresh(repo)
+    db.refresh(repo)
     assert repo.name == "Updated Repo"
     assert repo.url == "http://example.com/updated.json"
 
 @pytest.mark.asyncio
-async def test_delete_repository(async_client, db_session):
+async def test_delete_repository(async_client, db):
     repo = Repository(name="DeleteMe", url="http://example.com/delete.json")
-    db_session.add(repo)
-    db_session.commit()
+    db.add(repo)
+    db.commit()
 
     response = await async_client.delete(f'/api/repositories/{repo.id}')
     assert response.status_code == 200
     assert response.json()['message'] == "Repository deleted successfully"
-    assert db_session.get(Repository, repo.id) is None
+    assert db.get(Repository, repo.id) is None
 
 @pytest.mark.asyncio
 async def test_delete_nonexistent_repository(async_client):

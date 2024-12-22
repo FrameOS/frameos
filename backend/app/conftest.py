@@ -26,7 +26,7 @@ def setup_and_teardown_db():
     Base.metadata.drop_all(bind=engine)
 
 @pytest_asyncio.fixture
-async def db_session():
+async def db():
     db = SessionLocal()
     try:
         yield db
@@ -36,15 +36,17 @@ async def db_session():
 @pytest_asyncio.fixture
 async def redis():
     client = Redis.from_url(get_config().REDIS_URL)
-    yield client
-    client.close()
+    try:
+        yield client
+    finally:
+        client.close()
 
 @pytest_asyncio.fixture
-async def async_client(db_session, redis):
+async def async_client(db, redis):
     user = User(email="test@example.com")
     user.set_password("testpassword")
-    db_session.add(user)
-    db_session.commit()
+    db.add(user)
+    db.commit()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
