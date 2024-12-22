@@ -95,6 +95,10 @@ jobs:
         run: |
           cd backend
           source .venv/bin/activate
+          # fake these folders so static asset serving doesn't fail
+          mkdir -p ../frontend/dist/assets
+          mkdir -p ../frontend/dist/img
+          mkdir -p ../frontend/dist/static
           TEST=1 pytest
 
   typescript:

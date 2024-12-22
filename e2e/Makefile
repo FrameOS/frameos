@@ -3,7 +3,7 @@
 all: nim_scenes snapshots
 
 nim_scenes:
-	export PYTHONPATH="../backend:${PYTHONPATH}" DEBUG=1 python3 ./makescenes.py
+	PYTHONPATH="../backend:${PYTHONPATH}" DEBUG=1 python3 ./makescenes.py
 
 snapshots:
 	mkdir -p ./tmp && \
@@ -16,4 +16,4 @@ snapshots:
 	rm -rf "$$tmpdir"
 
 	ls -l ./tmp/frameos	
-	python3 ./makesnapshots.py
+	DEBUG=1 python3 ./makesnapshots.py
