@@ -1,6 +1,6 @@
 from fastapi import HTTPException, Depends, Header
 from sqlalchemy.orm import Session
-from redis.asyncio import Redis
+from arq import ArqRedis as Redis
 
 from app.database import get_db
 from app.models.frame import Frame

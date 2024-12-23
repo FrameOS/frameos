@@ -14,6 +14,7 @@ from app.models.frame import Frame
 from app.models.settings import Settings
 from app.models.log import new_log as log
 from sqlalchemy.orm import Session
+from arq import ArqRedis as Redis
 
 ssh_connections: set[SSHClient] = set()
 
@@ -37,9 +38,9 @@ signal.signal(signal.SIGINT, handle_signal)
 def remove_ssh_connection(ssh: SSHClient):
     ssh_connections.remove(ssh)
 
-async def get_ssh_connection(db: Session, frame: Frame) -> SSHClient:
+async def get_ssh_connection(db: Session, redis: Redis, frame: Frame) -> SSHClient:
     ssh_type = '(password)' if frame.ssh_pass else '(keypair)'
-    await log(db, frame.id, "stdinfo", f"Connecting via SSH to {frame.ssh_user}@{frame.frame_host} {ssh_type}")
+    await log(db, redis, frame.id, "stdinfo", f"Connecting via SSH to {frame.ssh_user}@{frame.frame_host} {ssh_type}")
     ssh = SSHClient()
     ssh_connections.add(ssh)
     ssh.set_missing_host_key_policy(AutoAddPolicy())
@@ -69,23 +70,23 @@ async def get_ssh_connection(db: Session, frame: Frame) -> SSHClient:
             ssh.connect(frame.frame_host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=30)
         else:
             raise Exception("Set up SSH keys in the settings page, or provide a password for the frame")
-    await log(db, int(frame.id), "stdinfo", f"Connected via SSH to {frame.ssh_user}@{frame.frame_host}")
+    await log(db, redis, int(frame.id), "stdinfo", f"Connected via SSH to {frame.ssh_user}@{frame.frame_host}")
     return ssh
 
 
-async def exec_command(db: Session, frame: Frame, ssh: SSHClient, command: str, output: Optional[list[str]] = None, raise_on_error = True, log_output = True) -> int:
-    await log(db, int(frame.id), "stdout", f"> {command}")
+async def exec_command(db: Session, redis: Redis, frame: Frame, ssh: SSHClient, command: str, output: Optional[list[str]] = None, raise_on_error = True, log_output = True) -> int:
+    await log(db, redis, int(frame.id), "stdout", f"> {command}")
     _stdin, stdout, stderr = ssh.exec_command(command)
     exit_status = None
     while exit_status is None:
         while line := stdout.readline():
             if log_output:
-                await log(db, int(frame.id), "stdout", line)
+                await log(db, redis, int(frame.id), "stdout", line)
             if output is not None:
                 output.append(line)
         while line := stderr.readline():
             if log_output:
-                await log(db, int(frame.id), "stderr", line)
+                await log(db, redis, int(frame.id), "stderr", line)
             if output is not None:
                 output.append(line)
 
@@ -100,14 +101,14 @@ async def exec_command(db: Session, frame: Frame, ssh: SSHClient, command: str, 
         if raise_on_error:
             raise Exception(f"Command exited with status {exit_status}")
         else:
-            await log(db, int(frame.id), "exit_status", f"The command exited with status {exit_status}")
+            await log(db, redis, int(frame.id), "exit_status", f"The command exited with status {exit_status}")
 
     return exit_status
 
 
-async def exec_local_command(db: Session, frame: Frame, command: str, generate_log = True) -> tuple[int, Optional[str], Optional[str]]:
+async def exec_local_command(db: Session, redis: Redis, frame: Frame, command: str, generate_log = True) -> tuple[int, Optional[str], Optional[str]]:
     if generate_log:
-        await log(db, int(frame.id), "stdout", f"$ {command}")
+        await log(db, redis, int(frame.id), "stdout", f"$ {command}")
     process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     errors = []
     outputs = []
@@ -116,11 +117,11 @@ async def exec_local_command(db: Session, frame: Frame, command: str, generate_l
     while True:
         if process.stdout:
             while output := process.stdout.readline():
-                await log(db, int(frame.id), "stdout", output)
+                await log(db, redis, int(frame.id), "stdout", output)
                 outputs.append(output)
         if process.stderr:
             while error := process.stderr.readline():
-                await log(db, int(frame.id), "stderr", error)
+                await log(db, redis, int(frame.id), "stderr", error)
                 errors.append(error)
         if break_next:
             break
@@ -131,6 +132,6 @@ async def exec_local_command(db: Session, frame: Frame, command: str, generate_l
     exit_status = process.returncode
 
     if exit_status != 0:
-        await log(db, int(frame.id), "exit_status", f"The command exited with status {exit_status}")
+        await log(db, redis, int(frame.id), "exit_status", f"The command exited with status {exit_status}")
 
     return (exit_status, ''.join(outputs) if len(outputs) > 0 else None, ''.join(errors) if len(errors) > 0 else None)

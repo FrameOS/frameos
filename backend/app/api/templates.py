@@ -13,7 +13,7 @@ from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from redis.asyncio import Redis
+from arq import ArqRedis as Redis
 from app.models.template import Template
 from app.models.frame import Frame
 from app.schemas.templates import (

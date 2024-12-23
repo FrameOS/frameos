@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import timezone
-from redis.asyncio import Redis
+from arq import ArqRedis as Redis
 from typing import Optional
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy import Integer, String, Double, DateTime, Boolean

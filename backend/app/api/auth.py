@@ -5,7 +5,7 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
-from redis.asyncio import Redis
+from arq import ArqRedis as Redis
 
 from app.config import get_config
 from app.models.user import User

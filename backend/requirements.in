@@ -1,4 +1,5 @@
 alembic
+arq
 dacite
 email_validator
 fastapi[standard]

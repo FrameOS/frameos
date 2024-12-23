@@ -2,7 +2,7 @@ import json
 from datetime import timezone, datetime
 from copy import deepcopy
 from typing import Any, Optional
-from redis.asyncio import Redis
+from arq import ArqRedis as Redis
 
 from .frame import Frame, update_frame
 from .metrics import new_metrics

@@ -1,8 +1,10 @@
-from redis.asyncio import from_url as create_redis
+from arq import ArqRedis
+from arq.connections import ConnectionPool
 from app.config import get_config
 
 def create_redis_connection():
-    return create_redis(get_config().REDIS_URL)
+    pool = ConnectionPool.from_url(get_config().REDIS_URL)
+    return ArqRedis(pool)
 
 async def get_redis():
     redis = create_redis_connection()

@@ -1,7 +1,7 @@
 import uuid
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy import Integer, String, ForeignKey, DateTime, func
-from redis.asyncio import Redis
+from arq import ArqRedis as Redis
 from app.database import Base
 from sqlalchemy.orm import relationship, backref, Session, mapped_column
 from app.websockets import publish_message

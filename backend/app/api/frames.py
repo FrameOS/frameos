@@ -3,7 +3,6 @@ import io
 import json
 import os
 import shlex
-import asyncio
 from jose import JWTError, jwt
 from http import HTTPStatus
 from tempfile import NamedTemporaryFile
@@ -15,7 +14,7 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from redis.asyncio import Redis
+from arq import ArqRedis as Redis
 from app.models.frame import Frame, new_frame, delete_frame, update_frame
 from app.models.log import new_log as log
 from app.models.metrics import Metrics
@@ -191,16 +190,16 @@ async def api_frame_scene_source(id: int, scene: str, db: Session = Depends(get_
 
 
 @private_api.get("/frames/{id:int}/assets", response_model=FrameAssetsResponse)
-async def api_frame_get_assets(id: int, db: Session = Depends(get_db)):
+async def api_frame_get_assets(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
     frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     assets_path = frame.assets_path or "/srv/assets"
-    ssh = await get_ssh_connection(db, frame)
+    ssh = await get_ssh_connection(db, redis, frame)
     command = f"find {assets_path} -type f -exec stat --format='%s %Y %n' {{}} +"
     output: list[str] = []
-    await exec_command(db, frame, ssh, command, output, log_output=False)
+    await exec_command(db, redis, frame, ssh, command, output, log_output=False)
     remove_ssh_connection(ssh)
 
     assets = []
@@ -236,11 +235,11 @@ async def api_frame_get_asset(id: int, request: Request, db: Session = Depends(g
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid asset path")
 
     try:
-        ssh = await get_ssh_connection(db, frame)
+        ssh = await get_ssh_connection(db, redis, frame)
         try:
             escaped_path = shlex.quote(normalized_path)
             command = f"md5sum {escaped_path}"
-            await log(db, frame.id, "stdinfo", f"> {command}")
+            await log(db, redis, frame.id, "stdinfo", f"> {command}")
             stdin, stdout, stderr = ssh.exec_command(command)
             md5sum_output = stdout.read().decode().strip()
             if not md5sum_output:
@@ -281,40 +280,40 @@ async def api_frame_get_asset(id: int, request: Request, db: Session = Depends(g
 
 
 @private_api.post("/frames/{id:int}/reset")
-async def api_frame_reset_event(id: int):
+async def api_frame_reset_event(id: int, redis: Redis = Depends(get_redis)):
     try:
         from app.tasks import reset_frame
-        asyncio.create_task(reset_frame(id))
+        await reset_frame(id, redis)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @private_api.post("/frames/{id:int}/restart")
-async def api_frame_restart_event(id: int):
+async def api_frame_restart_event(id: int, redis: Redis = Depends(get_redis)):
     try:
         from app.tasks import restart_frame
-        asyncio.create_task(restart_frame(id))
+        await restart_frame(id, redis)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @private_api.post("/frames/{id:int}/stop")
-async def api_frame_stop_event(id: int):
+async def api_frame_stop_event(id: int, redis: Redis = Depends(get_redis)):
     try:
         from app.tasks import stop_frame
-        asyncio.create_task(stop_frame(id))
+        await stop_frame(id, redis)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @private_api.post("/frames/{id:int}/deploy")
-async def api_frame_deploy_event(id: int):
+async def api_frame_deploy_event(id: int, redis: Redis = Depends(get_redis)):
     try:
         from app.tasks import deploy_frame
-        asyncio.create_task(deploy_frame(id))
+        await deploy_frame(id, redis)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -325,7 +324,7 @@ async def api_frame_update_endpoint(
     id: int,
     data: FrameUpdateRequest,
     db: Session = Depends(get_db),
-    redis: Redis = Depends(get_redis)
+    redis: Redis = Depends(get_redis),
 ):
     frame = db.get(Frame, id)
     if not frame:
@@ -340,20 +339,21 @@ async def api_frame_update_endpoint(
             raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
 
     for field, value in update_data.items():
-        print(field, value)
         setattr(frame, field, value)
 
     await update_frame(db, redis, frame)
 
     if data.next_action == 'restart':
         from app.tasks import restart_frame
-        asyncio.create_task(restart_frame(frame.id))
+        await restart_frame(id, redis)
     elif data.next_action == 'stop':
         from app.tasks import stop_frame
-        asyncio.create_task(stop_frame(frame.id))
+        await stop_frame(id, redis)
     elif data.next_action == 'deploy':
         from app.tasks import deploy_frame
-        asyncio.create_task(deploy_frame(frame.id))
+        print(data.next_action)
+        await deploy_frame(id, redis)
+        print(data.next_action)
 
     return {"message": "Frame updated successfully"}
 

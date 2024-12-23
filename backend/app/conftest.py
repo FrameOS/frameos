@@ -6,7 +6,7 @@ os.environ["TEST"] = "1"
 import json  # noqa: E402
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
-from redis.asyncio import Redis  # noqa: E402
+from arq import ArqRedis as Redis  # noqa: E402
 from httpx import AsyncClient  # noqa: E402
 from httpx._transports.asgi import ASGITransport  # noqa: E402
 from app.config import get_config  # noqa: E402

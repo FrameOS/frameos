@@ -9,10 +9,10 @@ cd backend
 source .venv/bin/activate 
 
 echo "🏃‍♂️ Running migrations"
-flask db upgrade
+alembic upgrade head
 
-echo "🍿 Launching Huey"
-huey_consumer.py app.huey.huey --worker-type=greenlet --workers=10 --flush-locks &
+echo "⛵️ Launching Arq"
+arq app.tasks.worker.WorkerSettings
 
-echo "🔦 Launching Flask"
-python3 run.py
+echo "🔦 Launching FastAPI"
+uvicorn app.fastapi:app --host 0.0.0.0 --port 8989 --reload

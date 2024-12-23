@@ -10,6 +10,7 @@ anyio==4.7.0
     #   watchfiles
 appnope==0.1.4
     # via ipython
+arq==0.26.1
 asttokens==2.4.0
     # via stack-data
 backcall==0.2.0
@@ -38,6 +39,7 @@ charset-normalizer==3.2.0
     # via requests
 click==8.1.7
     # via
+    #   arq
     #   flask
     #   pip-tools
     #   rich-toolkit
@@ -81,6 +83,8 @@ h11==0.14.0
     # via
     #   httpcore
     #   uvicorn
+hiredis==3.1.0
+    # via redis
 honcho==1.1.0
 httpcore==1.0.7
     # via httpx
@@ -202,6 +206,7 @@ pyyaml==6.0.1
     #   pre-commit
     #   uvicorn
 redis==4.6.0
+    # via arq
 requests==2.31.0
 rich==13.9.4
     # via

@@ -7,7 +7,9 @@ import shutil
 import string
 import subprocess
 import tempfile
+from typing import Any
 
+from arq import ArqRedis as Redis
 from packaging import version
 
 import platform
@@ -24,193 +26,195 @@ from app.models import get_apps_from_scenes
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection, exec_local_command
-from app.redis import get_redis
-from ..database import SessionLocal
 from sqlalchemy.orm import Session
 
+async def deploy_frame(id: int, redis: Redis):
+    await redis.enqueue_job("deploy_frame", id=id)
 
-async def deploy_frame(id: int):
-    with SessionLocal() as db, get_redis() as redis:
-        ssh = None
-        try:
-            frame = db.get(Frame, id)
+async def deploy_frame_task(ctx: dict[str, Any], id: int):
+    db: Session = ctx['db']
+    redis: Redis = ctx['redis']
 
-            if frame is None:
-                raise Exception("Frame not found")
+    ssh = None
+    try:
+        frame = db.get(Frame, id)
 
-            if frame.scenes is None or len(frame.scenes) == 0:
-                raise Exception("You must have at least one installed scene to deploy a frame.")
+        if frame is None:
+            raise Exception("Frame not found")
 
-            if frame.status == 'deploying':
-                raise Exception("Already deploying, will not deploy again. Request again to force deploy.")
+        if frame.scenes is None or len(frame.scenes) == 0:
+            raise Exception("You must have at least one installed scene to deploy a frame.")
 
-            frame.status = 'deploying'
-            await update_frame(db, redis, frame)
+        if frame.status == 'deploying':
+            raise Exception("Already deploying, will not deploy again. Request again to force deploy.")
 
-            # TODO: add the concept of builds into the backend (track each build in the database)
-            build_id = ''.join(random.choice(string.ascii_lowercase) for i in range(12))
-            await log(db, id, "stdout", f"Deploying frame {frame.name} with build id {build_id}")
+        frame.status = 'deploying'
+        await update_frame(db, redis, frame)
 
-            nim_path = find_nim_v2()
-            ssh = await get_ssh_connection(db, frame)
+        # TODO: add the concept of builds into the backend (track each build in the database)
+        build_id = ''.join(random.choice(string.ascii_lowercase) for i in range(12))
+        await log(db, redis, id, "stdout", f"Deploying frame {frame.name} with build id {build_id}")
 
-            async def install_if_necessary(package: str, raise_on_error = True) -> int:
-                """If a package is not installed, install it."""
-                return await exec_command(db, frame, ssh, f"dpkg -l | grep -q \"^ii  {package}\" || sudo apt-get install -y {package}", raise_on_error=raise_on_error)
+        nim_path = find_nim_v2()
+        ssh = await get_ssh_connection(db, redis, frame)
 
-            with tempfile.TemporaryDirectory() as temp_dir:
-                await log(db, id, "stdout", "- Getting target architecture")
-                uname_output: list[str] = []
-                await exec_command(db, frame, ssh, "uname -m", uname_output)
-                arch = "".join(uname_output).strip()
-                if arch == "aarch64" or arch == "arm64":
-                    cpu = "arm64"
-                elif arch == "armv6l" or arch == "armv7l":
-                    cpu = "arm"
-                elif arch == "i386":
-                    cpu = "i386"
-                else:
-                    cpu = "amd64"
+        async def install_if_necessary(package: str, raise_on_error = True) -> int:
+            """If a package is not installed, install it."""
+            return await exec_command(db, redis, frame, ssh, f"dpkg -l | grep -q \"^ii  {package}\" || sudo apt-get install -y {package}", raise_on_error=raise_on_error)
 
-                total_memory = 0
-                try:
-                    mem_output: list[str] = []
-                    await exec_command(db, frame, ssh, "free -m", mem_output)
-                    total_memory = int(mem_output[1].split()[1])
-                except Exception as e:
-                    await log(db, id, "stderr", str(e))
-                low_memory = total_memory < 512
+        with tempfile.TemporaryDirectory() as temp_dir:
+            await log(db, redis, id, "stdout", "- Getting target architecture")
+            uname_output: list[str] = []
+            await exec_command(db, redis, frame, ssh, "uname -m", uname_output)
+            arch = "".join(uname_output).strip()
+            if arch == "aarch64" or arch == "arm64":
+                cpu = "arm64"
+            elif arch == "armv6l" or arch == "armv7l":
+                cpu = "arm"
+            elif arch == "i386":
+                cpu = "i386"
+            else:
+                cpu = "amd64"
 
-                drivers = drivers_for_device(frame.device)
+            total_memory = 0
+            try:
+                mem_output: list[str] = []
+                await exec_command(db, redis, frame, ssh, "free -m", mem_output)
+                total_memory = int(mem_output[1].split()[1])
+            except Exception as e:
+                await log(db, redis, id, "stderr", str(e))
+            low_memory = total_memory < 512
 
-                # create a build .tar.gz
-                await log(db, id, "stdout", "- Copying build folders")
-                build_dir, source_dir = create_build_folders(temp_dir, build_id)
-                await log(db, id, "stdout", "- Applying local modifications")
-                await make_local_modifications(db, frame, source_dir)
-                await log(db, id, "stdout", "- Creating build archive")
-                archive_path = await create_local_build_archive(db, frame, build_dir, build_id, nim_path, source_dir, temp_dir, cpu)
+            drivers = drivers_for_device(frame.device)
 
-                if low_memory:
-                    await log(db, id, "stdout", "- Low memory detected, stopping FrameOS for compilation")
-                    await exec_command(db, frame, ssh, "sudo service frameos stop", raise_on_error=False)
-
-                with SCPClient(ssh.get_transport()) as scp:
-                    # build the release on the server
-                    await install_if_necessary("ntp")
-                    await install_if_necessary("build-essential")
-                    if drivers.get("evdev"):
-                        await install_if_necessary("libevdev-dev")
-                    if drivers.get('waveshare') or drivers.get('gpioButton'):
-                        if await exec_command(db, frame, ssh, '[[ -f "/usr/local/include/lgpio.h" || -f "/usr/include/lgpio.h" ]] && exit 0 || exit 1', raise_on_error=False) != 0:
-                            if await install_if_necessary("liblgpio-dev", raise_on_error=False) != 0:
-                                await log(db, id, "stdout", "--> Could not find liblgpio-dev package, installing from source")
-                                command = "if [ ! -f /usr/local/include/lgpio.h ]; then "\
-                                          "rm -rf /tmp/lgpio-install && "\
-                                          "mkdir -p /tmp/lgpio-install && "\
-                                          "cd /tmp/lgpio-install && "\
-                                          "wget -q -O v0.2.2.tar.gz https://github.com/joan2937/lg/archive/refs/tags/v0.2.2.tar.gz && "\
-                                          "tar -xzf v0.2.2.tar.gz && "\
-                                          "cd lg-0.2.2 && "\
-                                          "make && "\
-                                          "sudo make install && "\
-                                          "sudo rm -rf /tmp/lgpio-install; "\
-                                          "fi"
-                                await exec_command(db, frame, ssh, command)
-
-                    await exec_command(db, frame, ssh, "if [ ! -d /srv/frameos/ ]; then sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; fi")
-                    await exec_command(db, frame, ssh, "mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
-                    await log(db, id, "stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
-                    scp.put(archive_path, f"/srv/frameos/build/build_{build_id}.tar.gz")
-                    await exec_command(db, frame, ssh, f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz")
-                    await exec_command(db, frame, ssh, f"cd /srv/frameos/build/build_{build_id} && PARALLEL_MEM=$(awk '/MemTotal/{{printf \"%.0f\\n\", $2/1024/250}}' /proc/meminfo) && PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && make -j$PARALLEL")
-                    await exec_command(db, frame, ssh, f"mkdir -p /srv/frameos/releases/release_{build_id}")
-                    await exec_command(db, frame, ssh, f"cp /srv/frameos/build/build_{build_id}/frameos /srv/frameos/releases/release_{build_id}/frameos")
-                    await log(db, id, "stdout", f"> add /srv/frameos/releases/release_{build_id}/frame.json")
-                    scp.putfo(StringIO(json.dumps(get_frame_json(db, frame), indent=4) + "\n"), f"/srv/frameos/releases/release_{build_id}/frame.json")
-
-                    # TODO: abstract driver-specific install steps
-                    # TODO: abstract vendor logic
-                    if inkyPython := drivers.get("inkyPython"):
-                        await exec_command(db, frame, ssh, f"mkdir -p /srv/frameos/vendor && cp -r /srv/frameos/build/build_{build_id}/vendor/inkyPython /srv/frameos/vendor/")
-                        await install_if_necessary("python3-pip")
-                        await install_if_necessary("python3-venv")
-                        await exec_command(db, frame, ssh, f"cd /srv/frameos/vendor/{inkyPython.vendor_folder} && ([ ! -d env ] && python3 -m venv env || echo 'env exists') && (sha256sum -c requirements.txt.sha256sum 2>/dev/null || (echo '> env/bin/pip3 install -r requirements.txt' && env/bin/pip3 install -r requirements.txt && sha256sum requirements.txt > requirements.txt.sha256sum))")
-
-                    if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
-                        await exec_command(db, frame, ssh, f"mkdir -p /srv/frameos/vendor && cp -r /srv/frameos/build/build_{build_id}/vendor/inkyHyperPixel2r /srv/frameos/vendor/")
-                        await install_if_necessary("python3-dev")
-                        await install_if_necessary("python3-pip")
-                        await install_if_necessary("python3-venv")
-                        await exec_command(db, frame, ssh, f"cd /srv/frameos/vendor/{inkyHyperPixel2r.vendor_folder} && ([ ! -d env ] && python3 -m venv env || echo 'env exists') && (sha256sum -c requirements.txt.sha256sum 2>/dev/null || (echo '> env/bin/pip3 install -r requirements.txt' && env/bin/pip3 install -r requirements.txt && sha256sum requirements.txt > requirements.txt.sha256sum))")
-
-                    # add frameos.service
-                    with open("../frameos/frameos.service", "r") as file:
-                        service_contents = file.read().replace("%I", frame.ssh_user)
-                    with SCPClient(ssh.get_transport()) as scp:
-                        scp.putfo(StringIO(service_contents), f"/srv/frameos/releases/release_{build_id}/frameos.service")
-                    await exec_command(db, frame, ssh, f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state /srv/frameos/releases/release_{build_id}/state")
-                    await exec_command(db, frame, ssh, f"sudo cp /srv/frameos/releases/release_{build_id}/frameos.service /etc/systemd/system/frameos.service")
-                    await exec_command(db, frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
-                    await exec_command(db, frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")
-
-                # swap out the release
-                await exec_command(db, frame, ssh, f"rm -rf /srv/frameos/current && ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current")
-
-                # Make sure /srv/assets is writable, if not create it and assign to our user
-                assets_path = frame.assets_path or "/srv/assets"
-                await exec_command(db, frame, ssh, f"if [ ! -d {assets_path} ]; then sudo mkdir -p {assets_path} && sudo chown $(whoami):$(whoami) {assets_path}; elif [ ! -w {assets_path} ]; then echo 'User does not have write access to {assets_path}. Changing ownership...'; sudo chown $(whoami):$(whoami) {assets_path}; fi")
-
-                # clean old build and release and cache folders
-                await exec_command(db, frame, ssh, "cd /srv/frameos/build && ls -dt1 build_* | tail -n +11 | xargs rm -rf")
-                await exec_command(db, frame, ssh, "cd /srv/frameos/build/cache && find . -type f \( -atime +0 -a -mtime +0 \) | xargs rm -rf")
-                await exec_command(db, frame, ssh, "cd /srv/frameos/releases && ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" | tail -n +11 | xargs rm -rf")
-
-            if drivers.get("i2c"):
-                await exec_command(db, frame, ssh, 'grep -q "^dtparam=i2c_vc=on$" /boot/config.txt || echo "dtparam=i2c_vc=on" | sudo tee -a /boot/config.txt')
-                await exec_command(db, frame, ssh, 'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1" && { sudo raspi-config nonint do_i2c 0; echo "I2C is now enabled"; } || echo "I2C is already enabled"')
-
-            if drivers.get("spi"):
-                await exec_command(db, frame, ssh, 'sudo raspi-config nonint do_spi 0')
-            elif drivers.get("noSpi"):
-                await exec_command(db, frame, ssh, 'sudo raspi-config nonint do_spi 1')
+            # create a build .tar.gz
+            await log(db, redis, id, "stdout", "- Copying build folders")
+            build_dir, source_dir = create_build_folders(temp_dir, build_id)
+            await log(db, redis, id, "stdout", "- Applying local modifications")
+            await make_local_modifications(db, redis, frame, source_dir)
+            await log(db, redis, id, "stdout", "- Creating build archive")
+            archive_path = await create_local_build_archive(db, redis, frame, build_dir, build_id, nim_path, source_dir, temp_dir, cpu)
 
             if low_memory:
-                # disable apt-daily-upgrade (sudden +70mb memory usage, might lead a Zero W 2 to endlessly swap)
-                await exec_command(db, frame, ssh, "sudo systemctl mask apt-daily-upgrade && sudo systemctl mask apt-daily && sudo systemctl disable apt-daily.service apt-daily.timer apt-daily-upgrade.timer apt-daily-upgrade.service")
-                # # disable swap while we're at it
-                # await exec_command(db, frame, ssh, "sudo systemctl disable dphys-swapfile.service")
+                await log(db, redis, id, "stdout", "- Low memory detected, stopping FrameOS for compilation")
+                await exec_command(db, redis, frame, ssh, "sudo service frameos stop", raise_on_error=False)
 
-            if frame.reboot and frame.reboot.get('enabled') == 'true':
-                cron_schedule = frame.reboot.get('crontab', '0 0 * * *')
-                if frame.reboot.get('type') == 'raspberry':
-                    crontab = f"{cron_schedule} root /sbin/shutdown -r now"
-                else:
-                    crontab = f"{cron_schedule} root systemctl restart frameos.service"
-                await exec_command(db, frame, ssh, f"echo '{crontab}' | sudo tee /etc/cron.d/frameos-reboot")
+            with SCPClient(ssh.get_transport()) as scp:
+                # build the release on the server
+                await install_if_necessary("ntp")
+                await install_if_necessary("build-essential")
+                if drivers.get("evdev"):
+                    await install_if_necessary("libevdev-dev")
+                if drivers.get('waveshare') or drivers.get('gpioButton'):
+                    if await exec_command(db, redis, frame, ssh, '[[ -f "/usr/local/include/lgpio.h" || -f "/usr/include/lgpio.h" ]] && exit 0 || exit 1', raise_on_error=False) != 0:
+                        if await install_if_necessary("liblgpio-dev", raise_on_error=False) != 0:
+                            await log(db, redis, id, "stdout", "--> Could not find liblgpio-dev package, installing from source")
+                            command = "if [ ! -f /usr/local/include/lgpio.h ]; then "\
+                                        "rm -rf /tmp/lgpio-install && "\
+                                        "mkdir -p /tmp/lgpio-install && "\
+                                        "cd /tmp/lgpio-install && "\
+                                        "wget -q -O v0.2.2.tar.gz https://github.com/joan2937/lg/archive/refs/tags/v0.2.2.tar.gz && "\
+                                        "tar -xzf v0.2.2.tar.gz && "\
+                                        "cd lg-0.2.2 && "\
+                                        "make && "\
+                                        "sudo make install && "\
+                                        "sudo rm -rf /tmp/lgpio-install; "\
+                                        "fi"
+                            await exec_command(db, redis, frame, ssh, command)
+
+                await exec_command(db, redis, frame, ssh, "if [ ! -d /srv/frameos/ ]; then sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; fi")
+                await exec_command(db, redis, frame, ssh, "mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
+                await log(db, redis, id, "stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
+                scp.put(archive_path, f"/srv/frameos/build/build_{build_id}.tar.gz")
+                await exec_command(db, redis, frame, ssh, f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz")
+                await exec_command(db, redis, frame, ssh, f"cd /srv/frameos/build/build_{build_id} && PARALLEL_MEM=$(awk '/MemTotal/{{printf \"%.0f\\n\", $2/1024/250}}' /proc/meminfo) && PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && make -j$PARALLEL")
+                await exec_command(db, redis, frame, ssh, f"mkdir -p /srv/frameos/releases/release_{build_id}")
+                await exec_command(db, redis, frame, ssh, f"cp /srv/frameos/build/build_{build_id}/frameos /srv/frameos/releases/release_{build_id}/frameos")
+                await log(db, redis, id, "stdout", f"> add /srv/frameos/releases/release_{build_id}/frame.json")
+                scp.putfo(StringIO(json.dumps(get_frame_json(db, frame), indent=4) + "\n"), f"/srv/frameos/releases/release_{build_id}/frame.json")
+
+                # TODO: abstract driver-specific install steps
+                # TODO: abstract vendor logic
+                if inkyPython := drivers.get("inkyPython"):
+                    await exec_command(db, redis, frame, ssh, f"mkdir -p /srv/frameos/vendor && cp -r /srv/frameos/build/build_{build_id}/vendor/inkyPython /srv/frameos/vendor/")
+                    await install_if_necessary("python3-pip")
+                    await install_if_necessary("python3-venv")
+                    await exec_command(db, redis, frame, ssh, f"cd /srv/frameos/vendor/{inkyPython.vendor_folder} && ([ ! -d env ] && python3 -m venv env || echo 'env exists') && (sha256sum -c requirements.txt.sha256sum 2>/dev/null || (echo '> env/bin/pip3 install -r requirements.txt' && env/bin/pip3 install -r requirements.txt && sha256sum requirements.txt > requirements.txt.sha256sum))")
+
+                if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
+                    await exec_command(db, redis, frame, ssh, f"mkdir -p /srv/frameos/vendor && cp -r /srv/frameos/build/build_{build_id}/vendor/inkyHyperPixel2r /srv/frameos/vendor/")
+                    await install_if_necessary("python3-dev")
+                    await install_if_necessary("python3-pip")
+                    await install_if_necessary("python3-venv")
+                    await exec_command(db, redis, frame, ssh, f"cd /srv/frameos/vendor/{inkyHyperPixel2r.vendor_folder} && ([ ! -d env ] && python3 -m venv env || echo 'env exists') && (sha256sum -c requirements.txt.sha256sum 2>/dev/null || (echo '> env/bin/pip3 install -r requirements.txt' && env/bin/pip3 install -r requirements.txt && sha256sum requirements.txt > requirements.txt.sha256sum))")
+
+                # add frameos.service
+                with open("../frameos/frameos.service", "r") as file:
+                    service_contents = file.read().replace("%I", frame.ssh_user)
+                with SCPClient(ssh.get_transport()) as scp:
+                    scp.putfo(StringIO(service_contents), f"/srv/frameos/releases/release_{build_id}/frameos.service")
+                await exec_command(db, redis, frame, ssh, f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state /srv/frameos/releases/release_{build_id}/state")
+                await exec_command(db, redis, frame, ssh, f"sudo cp /srv/frameos/releases/release_{build_id}/frameos.service /etc/systemd/system/frameos.service")
+                await exec_command(db, redis, frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
+                await exec_command(db, redis, frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")
+
+            # swap out the release
+            await exec_command(db, redis, frame, ssh, f"rm -rf /srv/frameos/current && ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current")
+
+            # Make sure /srv/assets is writable, if not create it and assign to our user
+            assets_path = frame.assets_path or "/srv/assets"
+            await exec_command(db, redis, frame, ssh, f"if [ ! -d {assets_path} ]; then sudo mkdir -p {assets_path} && sudo chown $(whoami):$(whoami) {assets_path}; elif [ ! -w {assets_path} ]; then echo 'User does not have write access to {assets_path}. Changing ownership...'; sudo chown $(whoami):$(whoami) {assets_path}; fi")
+
+            # clean old build and release and cache folders
+            await exec_command(db, redis, frame, ssh, "cd /srv/frameos/build && ls -dt1 build_* | tail -n +11 | xargs rm -rf")
+            await exec_command(db, redis, frame, ssh, "cd /srv/frameos/build/cache && find . -type f \( -atime +0 -a -mtime +0 \) | xargs rm -rf")
+            await exec_command(db, redis, frame, ssh, "cd /srv/frameos/releases && ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" | tail -n +11 | xargs rm -rf")
+
+        if drivers.get("i2c"):
+            await exec_command(db, redis, frame, ssh, 'grep -q "^dtparam=i2c_vc=on$" /boot/config.txt || echo "dtparam=i2c_vc=on" | sudo tee -a /boot/config.txt')
+            await exec_command(db, redis, frame, ssh, 'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1" && { sudo raspi-config nonint do_i2c 0; echo "I2C is now enabled"; } || echo "I2C is already enabled"')
+
+        if drivers.get("spi"):
+            await exec_command(db, redis, frame, ssh, 'sudo raspi-config nonint do_spi 0')
+        elif drivers.get("noSpi"):
+            await exec_command(db, redis, frame, ssh, 'sudo raspi-config nonint do_spi 1')
+
+        if low_memory:
+            # disable apt-daily-upgrade (sudden +70mb memory usage, might lead a Zero W 2 to endlessly swap)
+            await exec_command(db, redis, frame, ssh, "sudo systemctl mask apt-daily-upgrade && sudo systemctl mask apt-daily && sudo systemctl disable apt-daily.service apt-daily.timer apt-daily-upgrade.timer apt-daily-upgrade.service")
+            # # disable swap while we're at it
+            # await exec_command(db, redis, frame, ssh, "sudo systemctl disable dphys-swapfile.service")
+
+        if frame.reboot and frame.reboot.get('enabled') == 'true':
+            cron_schedule = frame.reboot.get('crontab', '0 0 * * *')
+            if frame.reboot.get('type') == 'raspberry':
+                crontab = f"{cron_schedule} root /sbin/shutdown -r now"
             else:
-                await exec_command(db, frame, ssh, "sudo rm -f /etc/cron.d/frameos-reboot")
+                crontab = f"{cron_schedule} root systemctl restart frameos.service"
+            await exec_command(db, redis, frame, ssh, f"echo '{crontab}' | sudo tee /etc/cron.d/frameos-reboot")
+        else:
+            await exec_command(db, redis, frame, ssh, "sudo rm -f /etc/cron.d/frameos-reboot")
 
-            # restart
-            await exec_command(db, frame, ssh, "sudo systemctl daemon-reload")
-            await exec_command(db, frame, ssh, "sudo systemctl enable frameos.service")
-            await exec_command(db, frame, ssh, "sudo systemctl restart frameos.service")
-            await exec_command(db, frame, ssh, "sudo systemctl status frameos.service")
+        # restart
+        await exec_command(db, redis, frame, ssh, "sudo systemctl daemon-reload")
+        await exec_command(db, redis, frame, ssh, "sudo systemctl enable frameos.service")
+        await exec_command(db, redis, frame, ssh, "sudo systemctl restart frameos.service")
+        await exec_command(db, redis, frame, ssh, "sudo systemctl status frameos.service")
 
-            frame.status = 'starting'
+        frame.status = 'starting'
+        await update_frame(db, redis, frame)
+
+    except Exception as e:
+        await log(db, redis, id, "stderr", str(e))
+        if frame is not None:
+            frame.status = 'uninitialized'
             await update_frame(db, redis, frame)
-
-        except Exception as e:
-            await log(db, id, "stderr", str(e))
+    finally:
+        if ssh is not None:
+            ssh.close()
             if frame is not None:
-                frame.status = 'uninitialized'
-                await update_frame(db, redis, frame)
-        finally:
-            if ssh is not None:
-                ssh.close()
-                if frame is not None:
-                    await log(db, int(frame.id), "stdinfo", "SSH connection closed")
-                remove_ssh_connection(ssh)
+                await log(db, redis, int(frame.id), "stdinfo", "SSH connection closed")
+            remove_ssh_connection(ssh)
 
 
 def find_nim_v2():
@@ -234,7 +238,7 @@ def create_build_folders(temp_dir, build_id):
     return build_dir, source_dir
 
 
-async def make_local_modifications(db: Session, frame: Frame, source_dir: str):
+async def make_local_modifications(db: Session, redis: Redis, frame: Frame, source_dir: str):
     shutil.rmtree(os.path.join(source_dir, "src", "scenes"), ignore_errors=True)
     os.makedirs(os.path.join(source_dir, "src", "scenes"), exist_ok=True)
 
@@ -255,7 +259,7 @@ async def make_local_modifications(db: Session, frame: Frame, source_dir: str):
             with open(os.path.join(source_dir, "src", "scenes", f"scene_{id}.nim"), "w") as file:
                 file.write(scene_source)
         except Exception as e:
-            await log(db, int(frame.id), "stderr", f"Error writing scene \"{scene.get('name', '')}\" ({scene.get('id', 'default')}): {e}")
+            await log(db, redis, int(frame.id), "stderr", f"Error writing scene \"{scene.get('name', '')}\" ({scene.get('id', 'default')}): {e}")
             raise
     with open(os.path.join(source_dir, "src", "scenes", "scenes.nim"), "w") as file:
         file.write(write_scenes_nim(frame))
@@ -285,7 +289,7 @@ def compile_line_md5(input: str) -> str:
     md5_hash = hash_object.hexdigest()
     return md5_hash
 
-async def create_local_build_archive(db: Session, frame: Frame, build_dir: str, build_id: str, nim_path: str, source_dir: str, temp_dir: str, cpu: str):
+async def create_local_build_archive(db: Session, redis: Redis, frame: Frame, build_dir: str, build_id: str, nim_path: str, source_dir: str, temp_dir: str, cpu: str):
     # TODO: abstract driver-specific vendor steps
     drivers = drivers_for_device(frame.device)
     if inkyPython := drivers.get('inkyPython'):
@@ -302,7 +306,7 @@ async def create_local_build_archive(db: Session, frame: Frame, build_dir: str, 
         shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
 
     # Tell a white lie
-    await log(db, int(frame.id), "stdout", "- No cross compilation. Generating source code for compilation on frame.")
+    await log(db, redis, int(frame.id), "stdout", "- No cross compilation. Generating source code for compilation on frame.")
 
     # run "nim c --os:linux --cpu:arm64 --compileOnly --genScript --nimcache:tmp/build_1 src/frameos.nim"
     debug_options = ""
@@ -310,6 +314,7 @@ async def create_local_build_archive(db: Session, frame: Frame, build_dir: str, 
         debug_options = "--lineTrace:on"
     status, out, err = await exec_local_command(
         db,
+        redis,
         frame,
         f"cd {source_dir} && nimble assets -y && nimble setup && {nim_path} compile --os:linux --cpu:{cpu} --compileOnly --genScript --nimcache:{build_dir} {debug_options} src/frameos.nim 2>&1"
     )
@@ -325,11 +330,11 @@ async def create_local_build_archive(db: Session, frame: Frame, build_dir: str, 
                 filename = final_path[len(source_path) + 1:]
                 with open(final_path, "r") as open_file:
                     lines = open_file.readlines()
-                await log(db, int(frame.id), "stdout", f"Error in {filename}:{line_nr}:{column}")
-                await log(db, int(frame.id), "stdout", f"Line {line_nr}: {lines[line_nr - 1]}")
-                await log(db, int(frame.id), "stdout", f".......{'.' * (column - 1 + len(str(line_nr)))}^")
+                await log(db, redis, int(frame.id), "stdout", f"Error in {filename}:{line_nr}:{column}")
+                await log(db, redis, int(frame.id), "stdout", f"Line {line_nr}: {lines[line_nr - 1]}")
+                await log(db, redis, int(frame.id), "stdout", f".......{'.' * (column - 1 + len(str(line_nr)))}^")
             else:
-                await log(db, int(frame.id), "stdout", f"Error in {filename}:{line_nr}:{column}")
+                await log(db, redis, int(frame.id), "stdout", f"Error in {filename}:{line_nr}:{column}")
 
         raise Exception("Failed to generate frameos sources")
 
