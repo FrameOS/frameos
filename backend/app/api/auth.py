@@ -58,6 +58,8 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
     password = form_data.password
     ip = request.client.host
     key = f"login_attempts:{ip}"
+    if config.TEST:
+        key += f":{config.INSTANCE_ID}"
     attempts = (await redis.get(key)) or '0'
     if int(attempts) > 10:  # limit to 10 attempts for example
         raise HTTPException(status_code=429, detail="Too many login attempts")

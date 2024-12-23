@@ -70,7 +70,7 @@ if __name__ == '__main__':
     database_url = get_config().DATABASE_URL
     if database_url.startswith("sqlite:///../db/"):
         os.makedirs('../db', exist_ok=True)
-    alembic_ini_path = os.path.join(os.path.dirname(__file__), "..", "migrations", "alembic.ini")
+    alembic_ini_path = os.path.join(os.path.dirname(__file__), "..", "alembic.ini")
     alembic_cfg = AlembicConfig(alembic_ini_path)
     alembic_command.upgrade(alembic_cfg, "head")
 

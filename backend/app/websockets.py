@@ -1,6 +1,5 @@
 import asyncio
 import json
-import uuid
 from jose import jwt, JWTError
 from typing import List
 from redis.asyncio import from_url as create_redis, Redis
@@ -10,9 +9,6 @@ from app.database import get_db
 
 from app.config import get_config
 from app.models.user import User
-
-# Generate a unique ID for this instance
-INSTANCE_ID = str(uuid.uuid4())
 
 class ConnectionManager:
     def __init__(self):
@@ -46,7 +42,8 @@ class ConnectionManager:
 manager = ConnectionManager() # Local clients
 
 async def redis_listener():
-    redis_sub = create_redis(get_config().REDIS_URL, decode_responses=True)
+    config = get_config()
+    redis_sub = create_redis(config.REDIS_URL, decode_responses=True)
     try:
         pubsub = redis_sub.pubsub()
         await pubsub.subscribe("broadcast_channel")
@@ -56,7 +53,7 @@ async def redis_listener():
                 try:
                     parsed = json.loads(message["data"])
                     # Only broadcast if not from this instance
-                    if parsed.get("instance_id") != INSTANCE_ID:
+                    if parsed.get("instance_id") != config.INSTANCE_ID:
                         await manager.broadcast(message["data"])
                 except json.JSONDecodeError:
                     pass
@@ -64,7 +61,7 @@ async def redis_listener():
         await redis_sub.close()
 
 async def publish_message(redis: Redis, event: str, data: dict):
-    msg = {"event": event, "data": data, "instance_id": INSTANCE_ID}
+    msg = {"event": event, "data": data, "instance_id": get_config().INSTANCE_ID}
 
     # Broadcast locally first
     await manager.broadcast(json.dumps(msg))

@@ -1,5 +1,6 @@
 import os
 import secrets
+import uuid
 from dotenv import load_dotenv
 
 def get_bool_env(key: str) -> bool:
@@ -15,12 +16,16 @@ if get_bool_env('DEBUG'):
             f.write(f'# Development environment variables. Don\'t commit.\nSECRET_KEY={secret}')
         os.environ['SECRET_KEY'] = secret
 
+
+INSTANCE_ID = str(uuid.uuid4())
+
 class Config:
     DEBUG = get_bool_env('DEBUG')
     TEST = get_bool_env('TEST')
     SECRET_KEY = os.environ.get('SECRET_KEY')
     DATABASE_URL = os.environ.get('DATABASE_URL') or 'sqlite:///../db/frameos.db'
     REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
+    INSTANCE_ID = INSTANCE_ID
 
 class DevelopmentConfig(Config):
     DEBUG = True
