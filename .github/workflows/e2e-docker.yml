@@ -36,8 +36,8 @@ jobs:
         id: signup-test
         run: |
           # We'll capture the HTTP status code so we can fail the step if it's not 2xx
-          echo "Testing /signup with a sample payload..."
-          HTTP_CODE=$(curl -s -o /dev/stderr -w "%{http_code}" -X POST http://localhost:8989/signup \
+          echo "Testing /api/signup with a sample payload..."
+          HTTP_CODE=$(curl -s -o /dev/stderr -w "%{http_code}" -X POST http://localhost:8989/api/signup \
             -H "Content-Type: application/json" \
             -d '{"email":"test@example.com","password":"asdf","password2":"asdf","newsletter":false}')
 
