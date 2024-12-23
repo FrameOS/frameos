@@ -14,7 +14,13 @@ export const socketLogic = kea<socketLogicType>([
     newMetrics: (metrics: Record<string, any>) => ({ metrics }),
   }),
   afterMount(({ actions, cache }) => {
-    cache.ws = new WebSocket('/ws?token=' + localStorage.getItem('token'))
+    const token = localStorage.getItem('token')
+    if (!token) {
+      console.error('🔴 No token found in localStorage, cannot connect to WebSocket.')
+      return
+    }
+
+    cache.ws = new WebSocket(`/ws?token=${token}`)
     cache.ws.onopen = function (event: any) {
       console.log('🔵 Connected to the WebSocket server.')
     }
