@@ -12,7 +12,7 @@ echo "🏃‍♂️ Running migrations"
 python -m alembic upgrade head
 
 echo "⛵️ Launching Arq"
-arq app.tasks.worker.WorkerSettings
+arq app.tasks.worker.WorkerSettings &
 
 echo "🔦 Launching FastAPI"
 uvicorn app.fastapi:app --host 0.0.0.0 --port 8989 --reload
