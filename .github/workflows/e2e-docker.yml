@@ -39,7 +39,7 @@ jobs:
           echo "Testing /api/signup with a sample payload..."
           HTTP_CODE=$(curl -s -o /dev/stderr -w "%{http_code}" -X POST http://localhost:8989/api/signup \
             -H "Content-Type: application/json" \
-            -d '{"email":"test@example.com","password":"asdf","password2":"asdf","newsletter":false}')
+            -d '{"email":"test@example.com","password":"asdfasdf","password2":"asdfasdf","newsletter":false}')
 
           if [ "$HTTP_CODE" -ne 200 ]; then
             echo "Signup request failed with status code $HTTP_CODE"
