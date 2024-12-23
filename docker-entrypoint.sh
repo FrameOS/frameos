@@ -9,7 +9,7 @@ cd backend
 source .venv/bin/activate 
 
 echo "🏃‍♂️ Running migrations"
-alembic upgrade head
+python -m alembic upgrade head
 
 echo "⛵️ Launching Arq"
 arq app.tasks.worker.WorkerSettings

@@ -351,9 +351,7 @@ async def api_frame_update_endpoint(
         await stop_frame(id, redis)
     elif data.next_action == 'deploy':
         from app.tasks import deploy_frame
-        print(data.next_action)
         await deploy_frame(id, redis)
-        print(data.next_action)
 
     return {"message": "Frame updated successfully"}
 
