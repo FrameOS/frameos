@@ -42,22 +42,21 @@ async def test_login_unknown_email(async_client):
 
 
 @pytest.mark.asyncio
-async def test_login_too_many_attempts(no_auth_client, redis):
+async def test_login_too_many_attempts(no_auth_client, redis, db):
     """
     Test that after too many failed login attempts, we get 429 Too Many Requests.
     The code sets the limit to 10 attempts.
     """
-    ip = "testclient"  # we can rely on starlette's request.client.host
-    key = f"login_attempts:{ip}"
+    user = User(email="toomany@example.com")
+    user.set_password("testpassword")
+    db.add(user)
+    db.commit()
 
-    # Just in case, reset the Redis key for attempts
-    await redis.delete(key)
-
-    login_data = {"username": "test@example.com", "password": "wrongpassword"}
+    login_data = {"username": "toomany@example.com", "password": "wrongpassword"}
     # Make 11 attempts
     for i in range(11):
         resp = await no_auth_client.post("/api/login", data=login_data)
-        if i < 10:
+        if i <= 10:
             # first 10 attempts => 401
             assert resp.status_code == HTTP_401_UNAUTHORIZED, f"Expected 401 on attempt {i+1}, got {resp.status_code}"
         else:
@@ -77,10 +76,8 @@ async def test_signup_first_user(no_auth_client, db: Session):
     Test that signing up when no user exists will succeed.
     We'll delete all existing users first to ensure DB is empty.
     """
-    print("!")
     db.query(User).delete()
     db.commit()
-    print("!")
 
     signup_data = {
         "email": "newuser@example.com",
@@ -88,9 +85,7 @@ async def test_signup_first_user(no_auth_client, db: Session):
         "password2": "newpassword",
         "newsletter": False
     }
-    print("!")
     response = await no_auth_client.post("/api/signup", json=signup_data)
-    print("!")
     assert response.status_code == 200, f"Expected 200, got {response.status_code}"
     json_data = response.json()
     # Should contain success, access_token, token_type

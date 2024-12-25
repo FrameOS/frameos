@@ -57,7 +57,7 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
     email = form_data.username
     password = form_data.password
     ip = request.client.host
-    key = f"login_attempts:{ip}"
+    key = f"login_attempts:{ip}:{email}"
     if config.TEST:
         key += f":{config.INSTANCE_ID}"
     attempts = (await redis.get(key)) or '0'
