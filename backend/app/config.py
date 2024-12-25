@@ -36,7 +36,7 @@ class DevelopmentConfig(Config):
 
 class TestConfig(Config):
     TEST = True
-    DATABASE_URL = "sqlite:///../db/test.db"
+    DATABASE_URL = "sqlite:///migrations/test.db"
     REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/1'
     def __init__(self):
         super().__init__()
