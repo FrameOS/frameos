@@ -23,13 +23,15 @@ export const newFrameForm = kea<newFrameFormType>([
   forms(({ actions }) => ({
     newFrame: {
       defaults: {
+        name: '',
+        frame_host: '',
+        device: 'web_only',
         server_host:
           typeof window !== 'undefined'
             ? `${window.location.hostname}:${
                 window.location.port || (window.location.protocol === 'https:' ? 443 : 80)
               }`
             : null,
-        interval: 60,
       } as FrameType,
       errors: (frame: Partial<FrameType>) => ({
         name: !frame.name ? 'Please enter a name' : null,
