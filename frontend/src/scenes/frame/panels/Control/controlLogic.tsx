@@ -37,7 +37,7 @@ export const controlLogic = kea<controlLogicType>([
           try {
             const response = await apiFetch(`/api/frames/${props.frameId}/state`)
             if (!response.ok) {
-              throw new Error('Failed to fetch logs')
+              throw new Error('Failed to fetch frame state')
             }
             return await response.json()
           } catch (error) {

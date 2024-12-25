@@ -50,11 +50,11 @@
       ],
       "showIf": [
         {
-          "op": "notEmpty"
+          "operator": "notEmpty"
         },
         {
           "field": "hideEmpty",
-          "op": "eq",
+          "operator": "eq",
           "value": "false"
         }
       ]

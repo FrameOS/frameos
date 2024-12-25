@@ -53,8 +53,8 @@ class ConfigFieldCondition(BaseModel):
         description="Key of the field to compare (optional if using operators like 'notEmpty')."
     )
     operator: Optional[ConfigFieldConditionOperator] = Field(
-        None, alias="op",
-        description="Comparison operator used for this condition (aliased to 'op')."
+        None,
+        description="Comparison operator used for this condition."
     )
     value: Optional[Any] = Field(
         None,
