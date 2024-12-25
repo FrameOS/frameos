@@ -231,7 +231,7 @@ async def get_templates(db: Session = Depends(get_db)):
 
 
 @private_api.get("/templates/{template_id}", response_model=TemplateResponse)
-async def get_template(template_id: int, db: Session = Depends(get_db)):
+async def get_template(template_id: str, db: Session = Depends(get_db)):
     template = db.get(Template, template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -266,7 +266,7 @@ async def export_template(template_id: str, db: Session = Depends(get_db)):
 
 
 @private_api.patch("/templates/{template_id}", response_model=TemplateResponse)
-async def update_template(template_id: int, data: UpdateTemplateRequest, db: Session = Depends(get_db)):
+async def update_template(template_id: str, data: UpdateTemplateRequest, db: Session = Depends(get_db)):
     template = db.get(Template, template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -284,7 +284,7 @@ async def update_template(template_id: int, data: UpdateTemplateRequest, db: Ses
 
 
 @private_api.delete("/templates/{template_id}")
-async def delete_template(template_id: int, db: Session = Depends(get_db)):
+async def delete_template(template_id: str, db: Session = Depends(get_db)):
     template = db.get(Template, template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
