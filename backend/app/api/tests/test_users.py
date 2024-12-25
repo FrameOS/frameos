@@ -1,8 +1,9 @@
 import pytest
 from app.models.user import User
+from sqlalchemy.orm import Session
 
 @pytest.mark.asyncio
-async def test_has_first_user_no_users(async_client, db):
+async def test_has_first_user_no_users(async_client, db: Session):
     """
     Ensure that has_first_user returns false when there are no users in the DB.
     """
@@ -18,13 +19,14 @@ async def test_has_first_user_no_users(async_client, db):
 
 
 @pytest.mark.asyncio
-async def test_has_first_user_exists(async_client, db):
+async def test_has_first_user_exists(async_client, db: Session):
     """
     Ensure that has_first_user returns true when at least one user is in the DB.
     """
     # Clear all users and then add a new one
     db.query(User).delete()
     db.commit()
+    db.expunge_all()
 
     user = User(email="someone@example.com")
     user.set_password("somepassword")
