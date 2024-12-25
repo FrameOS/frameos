@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, RootModel
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 
 class TemplateBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -32,7 +32,7 @@ class CreateTemplateRequest(BaseModel):
     description: Optional[str] = None
     scenes: Optional[List[Any]] = None
     config: Optional[Any] = None
-    image: Optional[str] = None
+    image: Union[str, bytes, None] = None
     imageWidth: Optional[int] = None
     imageHeight: Optional[int] = None
 

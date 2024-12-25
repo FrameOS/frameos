@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import httpx
 from PIL import Image
 from fastapi import Depends, HTTPException, UploadFile, File, Form, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse, JSONResponse
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 
@@ -17,7 +17,10 @@ from arq import ArqRedis as Redis
 from app.models.template import Template
 from app.models.frame import Frame
 from app.schemas.templates import (
-    TemplateResponse, TemplatesListResponse, CreateTemplateRequest, UpdateTemplateRequest
+    TemplateResponse,
+    TemplatesListResponse,
+    CreateTemplateRequest,
+    UpdateTemplateRequest,
 )
 from app.api.auth import SECRET_KEY, ALGORITHM
 from app.api import private_api, public_api
@@ -52,8 +55,9 @@ def respond_with_template(template: Template):
     )
 
 
-@private_api.post("/templates")
+@private_api.post("/templates", status_code=201)
 async def create_template(
+    request: Request,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
     file: UploadFile = File(None),
@@ -66,38 +70,70 @@ async def create_template(
     config: str = Form(None),
     image: str = Form(None),
     imageWidth: int = Form(None),
-    imageHeight: int = Form(None)
+    imageHeight: int = Form(None),
 ):
-    # We combine both form-data and JSON scenarios into one endpoint:
-    # If file is provided, we treat it as a zip upload.
-    # If not, we rely on URL or direct JSON form fields.
+    """
+    Create a template. Supports:
+      - multipart/form-data with file upload
+      - multipart/form-data with "url"
+      - raw JSON body (application/json) containing name, scenes, etc.
+      - merges old Flask logic that handled either request.files['file'] or request.json['url'] etc.
+    """
+    # Attempt to parse any JSON body if the Content-Type is application/json
+    try:
+        parsed_json = await request.json()
+    except:
+        parsed_json = {}
 
-    data = {
-        "from_frame_id": from_frame_id,
-        "url": url,
-        "format": format,
-        "name": name,
-        "description": description,
-        "scenes": json.loads(scenes) if scenes else None,
-        "config": json.loads(config) if config else None,
-        "image": image,
-        "imageWidth": imageWidth,
-        "imageHeight": imageHeight
-    }
+    # Merge JSON fields if form fields are None
+    url = url or parsed_json.get('url')
+    format = format or parsed_json.get('format')
+    name = name or parsed_json.get('name')
+    description = description or parsed_json.get('description')
+    from_frame_id = from_frame_id or parsed_json.get('from_frame_id')
+
+    # Scenes/config might come as JSON arrays or as strings
+    if not scenes and parsed_json.get('scenes') is not None:
+        scenes = json.dumps(parsed_json.get('scenes'))
+    if not config and parsed_json.get('config') is not None:
+        config = json.dumps(parsed_json.get('config'))
+
+    # Convert them from JSON string -> Python object
+    scenes = json.loads(scenes) if scenes else None
+    config = json.loads(config) if config else None
+
+    # If image is not in form, use JSON
+    if not image and parsed_json.get('image'):
+        image = parsed_json.get('image')
+
+    imageWidth = imageWidth or parsed_json.get('imageWidth') or parsed_json.get('image_width')
+    imageHeight = imageHeight or parsed_json.get('imageHeight') or parsed_json.get('image_height')
 
     zip_file = None
-    # If we got a file from the form
+    # If file was uploaded via form
     if file and file.filename:
         file_bytes = await file.read()
         zip_file = zipfile.ZipFile(io.BytesIO(file_bytes))
     elif url:
-        # Fetch zip from URL
+        # If we have a URL, fetch it (like the old requests.get)
         async with httpx.AsyncClient() as client:
             resp = await client.get(url)
         resp.raise_for_status()
         zip_file = zipfile.ZipFile(io.BytesIO(resp.content))
 
-    # If we have a zip_file, parse template.json and scenes.json
+    data = {
+        "from_frame_id": from_frame_id,
+        "name": name,
+        "description": description,
+        "scenes": scenes,
+        "config": config,
+        "format": format,
+        "image": image,
+        "imageWidth": imageWidth,
+        "imageHeight": imageHeight,
+    }
+
+    # If we have a zip file, parse template.json and scenes.json
     if zip_file:
         folder_name = ''
         for name_in_zip in zip_file.namelist():
@@ -113,17 +149,16 @@ async def create_template(
 
         parsed_data = json.loads(template_json)
         parsed_data['scenes'] = json.loads(scenes_json)
-        # Merge parsed_data into data if not provided
+
+        # Merge into data if not already provided
         for k, v in parsed_data.items():
             if data.get(k) is None:
                 data[k] = v
 
-        # Handle image
+        # If there's an image
         img_val = data.get('image', '')
         if isinstance(img_val, str):
             if img_val.startswith('data:image/'):
-                # base64 embedded image
-                img_val = img_val[len('data:image/'):]
                 _, b64data = img_val.split(';base64,', 1)
                 img_val = base64.b64decode(b64data)
             elif img_val.startswith('./'):
@@ -158,7 +193,7 @@ async def create_template(
                 except Exception:
                     pass
 
-    # Validate the incoming data using CreateTemplateRequest
+    # Now validate data with the updated Pydantic model
     create_req = CreateTemplateRequest(**data)
 
     new_template = Template(
@@ -166,18 +201,18 @@ async def create_template(
         description=create_req.description,
         scenes=create_req.scenes,
         config=create_req.config,
-        image=create_req.image,
+        image=create_req.image if isinstance(create_req.image, bytes) else create_req.image,
         image_width=create_req.imageWidth,
         image_height=create_req.imageHeight,
     )
 
-    format_type = create_req.format
-    if format_type == 'zip':
-        # Return zip response directly
+    # If user requested an immediate response format
+    if create_req.format == 'zip':
         return respond_with_template(new_template)
-    elif format_type == 'scenes':
-        return new_template.scenes or []
+    elif create_req.format == 'scenes':
+        return JSONResponse(content=new_template.scenes or [], status_code=201)
 
+    # Otherwise, persist it in DB
     db.add(new_template)
     db.commit()
     db.refresh(new_template)
@@ -195,9 +230,21 @@ async def get_templates(db: Session = Depends(get_db)):
     return result
 
 
+@private_api.get("/templates/{template_id}", response_model=TemplateResponse)
+async def get_template(template_id: int, db: Session = Depends(get_db)):
+    template = db.get(Template, template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    d = template.to_dict()
+    _update_image(d)
+    return d
+
+
 @public_api.get("/templates/{template_id}/image")
 async def get_template_image(template_id: str, token: str, request: Request, db: Session = Depends(get_db)):
-    # Validate token
+    """
+    Access to image is via token. This is how we originally protected direct image access.
+    """
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("sub") != f"t:{template_id}":
@@ -208,6 +255,7 @@ async def get_template_image(template_id: str, token: str, request: Request, db:
     template = db.get(Template, template_id)
     if not template or not template.image:
         raise HTTPException(status_code=404, detail="Template not found")
+
     return StreamingResponse(io.BytesIO(template.image), media_type='image/jpeg')
 
 
@@ -215,16 +263,6 @@ async def get_template_image(template_id: str, token: str, request: Request, db:
 async def export_template(template_id: str, db: Session = Depends(get_db)):
     template = db.get(Template, template_id)
     return respond_with_template(template)
-
-
-@private_api.get("/templates/{template_id}", response_model=TemplateResponse)
-async def get_template(template_id: int, db: Session = Depends(get_db)):
-    template = db.get(Template, template_id)
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
-    d = template.to_dict()
-    _update_image(d)
-    return d
 
 
 @private_api.patch("/templates/{template_id}", response_model=TemplateResponse)

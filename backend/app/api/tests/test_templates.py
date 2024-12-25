@@ -1,26 +1,26 @@
-import json
 import pytest
 from app.models.template import Template
+
 
 @pytest.mark.asyncio
 async def test_create_template(async_client, db):
     payload = {
         "name": "New Template",
         "description": "A test template",
-        "scenes": json.dumps([]),
-        "config": json.dumps({}),
+        "scenes": [],
+        "config": {},
     }
+    # Post JSON (the same style as your fetch call):
     response = await async_client.post(
         "/api/templates",
-        data=payload,
+        json=payload,
     )
-    # If your endpoint returns 200 or 201, pick one:
-    assert response.status_code == 201 or response.status_code == 200
+    # Should return 201 on create
+    assert response.status_code == 201
     data = response.json()
-    # If the code returns the new Template as dict, check it:
-    if isinstance(data, dict) and 'name' in data:
-        assert data['name'] == 'New Template'
-    # else if your code returns e.g. { "id": "...", "name": "...", ... } do that check.
+    assert isinstance(data, dict)
+    assert data.get('name') == 'New Template'
+
 
 @pytest.mark.asyncio
 async def test_get_templates(async_client, db):
@@ -34,12 +34,14 @@ async def test_get_templates(async_client, db):
     assert response.status_code == 200
     templates = response.json()
     assert isinstance(templates, list)
-    assert len(templates) >= 2
+    assert len(templates) >= 2  # We added at least 2
+
 
 @pytest.mark.asyncio
 async def test_get_nonexistent_template(async_client):
     response = await async_client.get('/api/templates/999999')
     assert response.status_code == 404
+
 
 @pytest.mark.asyncio
 async def test_export_template(async_client, db):
@@ -50,6 +52,7 @@ async def test_export_template(async_client, db):
     response = await async_client.get(f'/api/templates/{t.id}/export')
     assert response.status_code == 200
     assert response.headers['content-type'] == 'application/zip'
+
 
 @pytest.mark.asyncio
 async def test_delete_nonexistent_template(async_client):

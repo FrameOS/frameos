@@ -93,7 +93,7 @@ export const templatesLogic = kea<templatesLogicType>([
             body: JSON.stringify(request),
           })
           if (!response.ok) {
-            throw new Error('Failed to update frame')
+            throw new Error('Failed to create template')
           }
           if (target === 'zip') {
             const blob = await response.blob()
