@@ -11,7 +11,6 @@ from httpx import AsyncClient  # noqa: E402
 from httpx._transports.asgi import ASGITransport  # noqa: E402
 from app.config import get_config  # noqa: E402
 from app.fastapi import app  # noqa: E402
-from app.models import User  # noqa: E402
 from app.database import SessionLocal, engine, Base  # noqa: E402
 
 @pytest.fixture(autouse=True)
@@ -42,7 +41,8 @@ async def redis():
         await client.close(True)
 
 @pytest_asyncio.fixture
-async def async_client(db, redis):
+async def async_client(db):
+    from app.models.user import User
     user = User(email="test@example.com")
     user.set_password("testpassword")
     db.add(user)
