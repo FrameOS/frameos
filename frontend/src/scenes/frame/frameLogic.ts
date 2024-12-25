@@ -207,6 +207,7 @@ export const frameLogic = kea<frameLogicType>([
       (s) => [s.frameForm],
       (frameForm) => (frameForm.rotate === 90 || frameForm.rotate === 270 ? frameForm.width : frameForm.height),
     ],
+    defaultInterval: [(s) => [s.frameForm], (frameForm) => frameForm.interval ?? 300],
   })),
   subscriptions(({ actions }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {

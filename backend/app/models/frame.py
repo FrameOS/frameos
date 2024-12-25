@@ -128,7 +128,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         server_host=server_host,
         server_port=int(server_port),
         server_api_key=secure_token(32),
-        interval=interval or 60,
+        interval=interval or 300,
         status="uninitialized",
         apps=[],
         scenes=[],
