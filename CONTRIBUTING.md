@@ -12,6 +12,12 @@ Python >= 3.11
 
 ## FrameOS Backend
 
+Start a redis server if not running
+
+```bash
+redis-server --daemonize yes
+```
+
 Installing deps
 
 ```bash
@@ -30,15 +36,26 @@ nimble setup
 cd ..
 ```
 
-Run all of these separately
+To run all services at once:
 
+```bash
+cd frontend
+npm run dev &
+cd ../backend
+bin/dev
 ```
-# start a redis server if not running
-redis-server --daemonize yes
 
+To run all of these separately:
+
+```bash
 # start the frontend
 cd frontend
 npm run dev
+cd ..
+
+# apply any migrations
+cd backend
+DEBUG=1 python -m alembic upgrade head
 
 # start the backend
 cd backend
@@ -55,8 +72,6 @@ DEBUG=1 arq app.tasks.worker
 cd backend
 # create migration after changing a model
 DEBUG=1 python -m alembic revision --autogenerate -m "name of migration"
-# apply the migrations
-DEBUG=1 python -m alembic upgrade head
 ```
 
 ## Installing pre-commit

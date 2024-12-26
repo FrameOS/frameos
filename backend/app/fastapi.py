@@ -10,8 +10,6 @@ from app.api.auth import get_current_user
 from app.api import public_api as public_api_router, private_api as private_api_router
 from fastapi.middleware.gzip import GZipMiddleware
 from app.middleware import GzipRequestMiddleware
-from alembic.config import Config as AlembicConfig
-from alembic import command as alembic_command
 
 from app.websockets import register_ws_routes, redis_listener
 from app.config import get_config
@@ -67,13 +65,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 if __name__ == '__main__':
     # run migrations
-    database_url = get_config().DATABASE_URL
-    if database_url.startswith("sqlite:///../db/"):
-        os.makedirs('../db', exist_ok=True)
-    alembic_ini_path = os.path.join(os.path.dirname(__file__), "..", "alembic.ini")
-    alembic_cfg = AlembicConfig(alembic_ini_path)
-    alembic_command.upgrade(alembic_cfg, "head")
-
+    if get_config().DEBUG:
+        database_url = get_config().DATABASE_URL
+        if database_url.startswith("sqlite:///../db/"):
+            os.makedirs('../db', exist_ok=True)
     # start server
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8989)
