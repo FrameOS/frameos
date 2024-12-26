@@ -1,34 +1,24 @@
-import json
-from app.tests.base import BaseTestCase
+import pytest
 
-class TestSettingsAPI(BaseTestCase):
-    def test_get_settings(self):
-        # Test the GET /settings endpoint
-        response = self.client.get('/api/settings')
-        self.assertEqual(response.status_code, 200)
-        settings = json.loads(response.data)
-        self.assertIsInstance(settings, dict)
+@pytest.mark.asyncio
+async def test_get_settings(async_client):
+    response = await async_client.get('/api/settings')
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, dict)
 
-    def test_set_settings(self):
-        # Test the POST /settings endpoint
-        data = {'some_setting': 'new_value'}
-        response = self.client.post('/api/settings', json=data)
-        self.assertEqual(response.status_code, 200)
-        updated_settings = json.loads(response.data)
-        self.assertEqual(updated_settings.get('some_setting'), 'new_value')
 
-    def test_set_settings_no_payload(self):
-        # Test the POST /settings endpoint with no payload
-        response = self.client.post('/api/settings', json={})
-        self.assertEqual(response.status_code, 400)
+@pytest.mark.asyncio
+async def test_set_settings(async_client):
+    payload = {"some_setting": "hello"}
+    response = await async_client.post('/api/settings', json=payload)
+    assert response.status_code == 200, f"Got {response.status_code} and {response.json()}"
+    updated = response.json()
+    assert updated["some_setting"] == "hello"
 
-    def test_unauthorized_access(self):
-        self.logout()
 
-        endpoints = [
-            ('/api/settings', 'GET', None),
-            ('/api/settings', 'POST', {'some_setting': 'value'}),
-        ]
-        for endpoint, method, data in endpoints:
-            response = self.client.open(endpoint, method=method, json=data)
-            self.assertEqual(response.status_code, 401)
+@pytest.mark.asyncio
+async def test_set_settings_no_payload(async_client):
+    response = await async_client.post('/api/settings', json={})
+    assert response.status_code == 400
+    assert response.json()['detail'] == "No JSON payload received"

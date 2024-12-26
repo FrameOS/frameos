@@ -6,6 +6,7 @@ import { socketLogic } from './socketLogic'
 import { framesModel } from '../models/framesModel'
 import { appsModel } from '../models/appsModel'
 import { templatesModel } from '../models/templatesModel'
+import { entityImagesModel } from '../models/entityImagesModel'
 
 export function DelayedLoading() {
   const [delayed, setDelayed] = useState(false)
@@ -22,6 +23,7 @@ export function DelayedLoading() {
 export function LoggedInApp() {
   useMountedLogic(socketLogic)
   useMountedLogic(appsModel)
+  useMountedLogic(entityImagesModel)
   useMountedLogic(framesModel)
   useMountedLogic(templatesModel)
   const { scene, params } = useValues(sceneLogic)
@@ -37,6 +39,7 @@ export function LoggedInApp() {
 }
 
 export function LoggedOutApp() {
+  useMountedLogic(socketLogic)
   const { scene, params } = useValues(sceneLogic)
   const SceneComponent: (() => JSX.Element) | LazyExoticComponent<any> =
     scenes[scene as keyof typeof scenes] || scenes.error404

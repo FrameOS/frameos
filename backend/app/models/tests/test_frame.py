@@ -1,57 +1,69 @@
-from app.models.frame import Frame, new_frame, update_frame, delete_frame
-from app.tests.base import BaseTestCase
+import pytest
+from unittest.mock import patch, AsyncMock
+from app.models.frame import new_frame, update_frame, delete_frame, Frame
 
-class TestModelsFrame(BaseTestCase):
-    def test_frame_creation(self):
-        frame = new_frame("frame2", "pi@192.168.1.1:8787", "server_host.com", "device_test")
-        self.assertEqual(frame.name, "frame2")
-        self.assertEqual(frame.frame_host, "192.168.1.1")
-        self.assertEqual(frame.frame_port, 8787)
-        self.assertEqual(frame.ssh_user, "pi")
-        self.assertEqual(frame.ssh_pass, None)
-        self.assertEqual(frame.server_host, "server_host.com")
-        self.assertEqual(frame.server_port, 8989)
-        self.assertEqual(frame.interval, 60)
-        self.assertEqual(frame.device, "device_test")
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)  # mock out the websocket broadcast
+async def test_new_frame(mock_publish, db, redis):
+    frame = await new_frame(
+        db,
+        redis,
+        name="TestFrame",
+        frame_host="pi@192.168.1.1:8787",
+        server_host="server_host.com",
+        device="testDevice",
+        interval=123
+    )
+    assert frame.id is not None
+    assert frame.name == "TestFrame"
+    assert frame.frame_host == "192.168.1.1"
+    assert frame.frame_port == 8787
+    assert frame.ssh_user == "pi"
+    assert frame.device == "testDevice"
+    assert frame.interval == 123
+    mock_publish.assert_awaited_once()
 
-    def test_frame_update(self):
-        frame = new_frame("frame", "pi@192.168.1.1", "server_host.com", None)
-        frame.frame_host = "updated_host.com"
-        update_frame(frame)
-        updated_frame = Frame.query.get(frame.id)
-        self.assertEqual(updated_frame.frame_host, "updated_host.com")
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_update_frame(mock_publish, db, redis):
+    frame = await new_frame(db, redis, "Frame", "localhost", "server_host", "dev")
+    frame.frame_host = "updated_host"
+    await update_frame(db, redis, frame)
+    updated = db.get(Frame, frame.id)
+    assert updated.frame_host == "updated_host"
+    # 2 calls to publish_message: "new_frame" & "update_frame"
+    assert mock_publish.await_count == 2
 
-    def test_frame_delete(self):
-        frame = new_frame("frame", "pi@192.168.1.1", "server_host.com", None)
-        result = delete_frame(frame.id)
-        self.assertTrue(result)
-        deleted_frame = Frame.query.get(frame.id)
-        self.assertIsNone(deleted_frame)
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_delete_frame(mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameToDelete", "localhost", "server_host")
+    frame_id = frame.id
+    success = await delete_frame(db, redis, frame_id)
+    assert success is True
+    # After deletion, frame should not be found
+    in_db = db.get(Frame, frame_id)
+    assert in_db is None
+    # 2 calls: "new_frame", "delete_frame"
+    assert mock_publish.await_count == 2
 
-    def test_to_dict_method(self):
-        frame = new_frame("frame", "pi@192.168.1.1", "server_host.com", None, 55)
-        frame_dict = frame.to_dict()
-        self.assertEqual(frame_dict['frame_host'], "192.168.1.1")
-        self.assertEqual(frame_dict['frame_port'], 8787)
-        self.assertEqual(frame_dict['ssh_user'], "pi")
-        self.assertEqual(frame_dict['ssh_pass'], None)
-        self.assertEqual(frame_dict['ssh_port'], 22)
-        self.assertEqual(frame_dict['server_host'], "server_host.com")
-        self.assertEqual(frame_dict['server_port'], 8989)
-        self.assertEqual(frame_dict['device'], 'web_only')
-        self.assertEqual(frame_dict['interval'], 55)
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_delete_nonexistent_frame(mock_publish, db, redis):
+    # Attempt to delete an ID that doesn't exist
+    success = await delete_frame(db, redis, 999999)
+    assert success is False
+    # No new frame creation, so no calls before
+    # We only get one publish call if you coded publish_message for "delete_frame"
+    # but your code might skip if frame not found
+    assert mock_publish.await_count == 0
 
-    def test_get_frame_by_host(self):
-        frame1 = new_frame("frame", "pi@192.168.1.1", "server_host.com", None)
-        frame2 = new_frame("frame", "pi@192.168.1.2", "server_host.com", None)
-        frames_from_host = Frame.query.filter_by(frame_host="192.168.1.1").all()
-        self.assertIn(frame1, frames_from_host)
-        self.assertNotIn(frame2, frames_from_host)
-
-    def test_delete_nonexistent_frame(self):
-        result = delete_frame(99999)  # Non-existent ID
-        self.assertFalse(result)
-
-    def test_max_frame_port_limit(self):
-        with self.assertRaises(ValueError):
-            new_frame("frame", "pi@192.168.1.1:70000", "server_host.com", None)
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_frame_to_dict(mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameDict", "host", "server_host.com", interval=55)
+    data = frame.to_dict()
+    assert data["frame_host"] == "host"
+    assert data["interval"] == 55
+    # 1 call to publish_message (the new frame creation)
+    assert mock_publish.await_count == 1

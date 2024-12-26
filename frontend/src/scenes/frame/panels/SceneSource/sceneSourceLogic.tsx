@@ -5,6 +5,7 @@ import { loaders } from 'kea-loaders'
 import { frameLogic } from '../../frameLogic'
 import { SourceError } from '../EditApp/editAppLogic'
 import { editor, MarkerSeverity } from 'monaco-editor'
+import { apiFetch } from '../../../../utils/apiFetch'
 
 export interface ModelMarker extends editor.IMarkerData {}
 
@@ -31,7 +32,7 @@ export const sceneSourceLogic = kea<sceneSourceLogicType>([
           if (!props.sceneId) {
             return ''
           }
-          const response = await fetch(`/api/frames/${props.frameId}/scene_source/${props.sceneId}`)
+          const response = await apiFetch(`/api/frames/${props.frameId}/scene_source/${props.sceneId}`)
           const result = await response.json()
           return result.source
         },
@@ -76,7 +77,7 @@ export const sceneSourceLogic = kea<sceneSourceLogicType>([
       actions.validateSource(source)
     },
     validateSource: async ({ source }, breakpoint) => {
-      const response = await fetch(`/api/apps/validate_source`, {
+      const response = await apiFetch(`/api/apps/validate_source`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file: 'scene.nim', source }),

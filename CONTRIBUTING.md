@@ -12,13 +12,20 @@ Python >= 3.11
 
 ## FrameOS Backend
 
+Start a redis server if not running
+
+```bash
+redis-server --daemonize yes
+```
+
+Installing deps
 
 ```bash
 cd backend
 python3 -m venv env
 source env/bin/activate
-pip install -r requirements.txt
-flask db upgrade
+uv pip install -r requirements.txt
+DEBUG=1 alembic ugprade head
 
 cd ../frontend
 npm install
@@ -26,13 +33,37 @@ npm install
 cd ../frameos
 nimble install -d
 nimble setup
+cd ..
+```
 
+To run all services at once:
+
+```bash
+cd frontend
+npm run dev &
+cd ../backend
+bin/dev
+```
+
+To run all of these separately:
+
+```bash
+# start the frontend
+cd frontend
+npm run dev
 cd ..
 
-# start a redis server
-redis-server --daemonize yes
+# apply any migrations
+cd backend
+DEBUG=1 python -m alembic upgrade head
 
-honcho start
+# start the backend
+cd backend
+DEBUG=1 python -m app.fastapi
+
+# start the job queue
+cd backend
+DEBUG=1 arq app.tasks.worker
 ```
 
 ## Running migrations
@@ -40,9 +71,7 @@ honcho start
 ```bash
 cd backend
 # create migration after changing a model
-flask db migrate -m "something changed"
-# apply the migrations
-flask db upgrade
+DEBUG=1 python -m alembic revision --autogenerate -m "name of migration"
 ```
 
 ## Installing pre-commit
@@ -60,7 +89,7 @@ pre-commit uninstall
 
 ```bash
 cd backend
-bin/tests
+pytest
 ```
 
 ## FrameOS on-frame software

@@ -1,0 +1,49 @@
+name: E2E Docker Image
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Build Docker image
+        run: |
+          docker build -t frameos .
+
+      - name: Run Docker container
+        run: |
+          docker run -d \
+            -p 8989:8989 \
+            -v ./db:/app/db \
+            --name frameos \
+            --restart always \
+            -e SECRET_KEY="bananana" \
+            frameos
+
+      - name: Wait for service on port 8989
+        run: |
+          echo "Waiting up to 30s for the service to respond on port 8989..."
+          timeout 30 bash -c "until curl -s http://localhost:8989; do sleep 1; done"
+
+      - name: Test /signup endpoint
+        id: signup-test
+        run: |
+          # We'll capture the HTTP status code so we can fail the step if it's not 2xx
+          echo "Testing /api/signup with a sample payload..."
+          HTTP_CODE=$(curl -s -o /dev/stderr -w "%{http_code}" -X POST http://localhost:8989/api/signup \
+            -H "Content-Type: application/json" \
+            -d '{"email":"test@example.com","password":"asdfasdf","password2":"asdfasdf","newsletter":false}')
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "Signup request failed with status code $HTTP_CODE"
+            exit 1
+          else
+            echo "Signup request succeeded with status code $HTTP_CODE"
+          fi

@@ -1,34 +1,35 @@
-from flask import jsonify, request
-from flask_login import login_required
+from http import HTTPStatus
+from fastapi import Depends, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
-from app import db
-from . import api
+from sqlalchemy.orm import Session
+
+from app.database import get_db
 from app.models.settings import get_settings_dict, Settings
+from app.schemas.settings import SettingsResponse, SettingsUpdateRequest
+from . import private_api
 
-@api.route("/settings", methods=["GET"])
-@login_required
-def settings():
-    return jsonify(get_settings_dict())
+@private_api.get("/settings", response_model=SettingsResponse)
+async def get_settings(db: Session = Depends(get_db)):
+    return get_settings_dict(db)
 
-@api.route("/settings", methods=["POST"])
-@login_required
-def set_settings():
-    payload = request.get_json()
+@private_api.post("/settings", response_model=SettingsResponse)
+async def set_settings(data: SettingsUpdateRequest, db: Session = Depends(get_db)):
+    payload = data.to_dict()
     if not payload:
-        return jsonify(error="No JSON payload received"), 400
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="No JSON payload received")
 
     try:
-        current_settings = get_settings_dict()
+        current_settings = get_settings_dict(db)
         for key, value in payload.items():
-            if value != current_settings.get(key, None):
-                if key in current_settings:
-                    setting = Settings.query.filter_by(key=key).first()
+            if value != current_settings.get(key):
+                setting = db.query(Settings).filter_by(key=key).first()
+                if setting:
                     setting.value = value
                 else:
-                    setting = Settings(key=key, value=value)
-                    db.session.add(setting)
-        db.session.commit()
+                    new_setting = Settings(key=key, value=value)
+                    db.add(new_setting)
+        db.commit()
     except SQLAlchemyError:
-        return jsonify(error="Database error"), 500
+        raise HTTPException(status_code=500, detail="Database error")
 
-    return jsonify(get_settings_dict())
+    return get_settings_dict(db)

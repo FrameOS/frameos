@@ -7,6 +7,7 @@ import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
 import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
+import { apiFetch } from '../../utils/apiFetch'
 
 export interface FrameLogicProps {
   frameId: number
@@ -160,7 +161,7 @@ export const frameLogic = kea<frameLogicType>([
         if (values.nextAction) {
           json['next_action'] = values.nextAction
         }
-        const response = await fetch(`/api/frames/${values.frameId}`, {
+        const response = await apiFetch(`/api/frames/${values.frameId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(json),
@@ -206,6 +207,7 @@ export const frameLogic = kea<frameLogicType>([
       (s) => [s.frameForm],
       (frameForm) => (frameForm.rotate === 90 || frameForm.rotate === 270 ? frameForm.width : frameForm.height),
     ],
+    defaultInterval: [(s) => [s.frameForm], (frameForm) => frameForm.interval ?? 300],
   })),
   subscriptions(({ actions }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
@@ -218,8 +220,12 @@ export const frameLogic = kea<frameLogicType>([
     renderFrame: () => framesModel.actions.renderFrame(props.frameId),
     saveFrame: () => actions.submitFrameForm(),
     deployFrame: () => actions.submitFrameForm(),
-    restartFrame: () => actions.submitFrameForm(),
-    stopFrame: () => actions.submitFrameForm(),
+    restartFrame: async () => {
+      await apiFetch(`/api/frames/${values.frameId}/restart`, { method: 'POST' })
+    },
+    stopFrame: async () => {
+      await apiFetch(`/api/frames/${values.frameId}/stop`, { method: 'POST' })
+    },
     updateScene: ({ sceneId, scene }) => {
       const { frameForm } = values
       const hasScene = frameForm.scenes?.some(({ id }) => id === sceneId)

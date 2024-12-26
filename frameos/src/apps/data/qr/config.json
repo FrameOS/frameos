@@ -21,7 +21,7 @@
       "showIf": [
         {
           "field": "codeType",
-          "op": "eq",
+          "operator": "eq",
           "value": "Custom"
         }
       ]

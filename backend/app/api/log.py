@@ -1,26 +1,39 @@
-from flask import request
-from . import api
+from fastapi import HTTPException, Depends, Header
+from sqlalchemy.orm import Session
+from arq import ArqRedis as Redis
+
+from app.database import get_db
 from app.models.frame import Frame
 from app.models.log import process_log
+from app.schemas.log import LogRequest, LogResponse
+from app.redis import get_redis
+from . import public_api
 
-@api.route('/log', methods=["POST"])
-def api_log():
-    auth_header = request.headers.get('Authorization')
-    if not auth_header:
-        return 'Unauthorized', 401  # Or handle the missing header as appropriate
+@public_api.post("/log", response_model=LogResponse)
+async def post_api_log(
+    data: LogRequest,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    authorization: str = Header(None)
+):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    server_api_key = auth_header.split(' ')[1]
-    frame = Frame.query.filter_by(server_api_key=server_api_key).first()
+    parts = authorization.split(' ')
+    if len(parts) != 2:
+        raise HTTPException(status_code=401, detail="Invalid Authorization header")
+
+    server_api_key = parts[1]
+    frame = db.query(Frame).filter_by(server_api_key=server_api_key).first()
 
     if not frame:
-        return 'Unauthorized', 401
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    data = request.json
-    if log := data.get('log', None):
-        process_log(frame, log)
+    if data.log:
+        await process_log(db, redis, frame, data.log)
 
-    if logs := data.get('logs', None):
-        for log in logs:
-            process_log(frame, log)
+    if data.logs:
+        for log in data.logs:
+            await process_log(db, redis, frame, log)
 
-    return 'OK', 200
+    return LogResponse(message="OK")

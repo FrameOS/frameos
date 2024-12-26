@@ -21,6 +21,7 @@ dist-ssr
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
+!.vscode/launch.json
 .idea
 .DS_Store
 *.suo
@@ -33,3 +34,6 @@ dist-ssr
 # Nim
 frameos/tmp/
 e2e/tmp/
+
+gpt.txt
+.env

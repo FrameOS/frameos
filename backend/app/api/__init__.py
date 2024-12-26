@@ -1,13 +1,15 @@
-from flask import Blueprint
+from fastapi import APIRouter
 
-api = Blueprint('api', __name__)
+public_api = APIRouter()
+private_api = APIRouter()
 
-from .apps import *
-from .frames import *
-from .log import *
-from .login import *
-from .repositories import *
-from .signup import *
-from .settings import *
-from .templates import *
-from .misc import *
+from .auth import *  # noqa: E402, F403
+from .apps import *  # noqa: E402, F403
+from .frames import *  # noqa: E402, F403
+from .log import *  # noqa: E402, F403
+from .repositories import *  # noqa: E402, F403
+from .settings import *  # noqa: E402, F403
+from .ssh import *  # noqa: E402, F403
+from .templates import *  # noqa: E402, F403
+from .users import *  # noqa: E402, F403
+

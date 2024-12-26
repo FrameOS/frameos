@@ -22,7 +22,7 @@ const events: FrameEvent[] = _events as any
 export function EventNode(props: NodeProps): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
   const { id } = props
-  const { width, height } = useValues(frameLogic)
+  const { width, height, defaultInterval } = useValues(frameLogic)
   const { selectedNodeId, scene } = useValues(diagramLogic)
   const { selectNode } = useActions(diagramLogic)
 
@@ -122,11 +122,10 @@ export function EventNode(props: NodeProps): JSX.Element {
           >
             {scene?.nodes?.length === 1 ? <div className="text-md mb-1 p-2">Connect a node to get started.</div> : null}
             {width && height ? <div className="text-2xl mb-1">{`${width}x${height}`}</div> : null}
-            {scene?.settings?.refreshInterval ? (
-              <div className="text-xl">
-                {(scene.settings.refreshInterval >= 1 ? 'every ' : '') + showAsFps(scene.settings.refreshInterval)}
-              </div>
-            ) : null}
+            <div className="text-xl">
+              {((scene?.settings?.refreshInterval ?? defaultInterval) >= 1 ? 'every ' : '') +
+                showAsFps(scene?.settings?.refreshInterval ?? defaultInterval)}
+            </div>
           </div>
         </div>
       ) : null}

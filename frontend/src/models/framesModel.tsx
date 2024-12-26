@@ -1,15 +1,20 @@
 import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
-
 import { loaders } from 'kea-loaders'
 import { FrameScene, FrameType } from '../types'
 import { socketLogic } from '../scenes/socketLogic'
-
 import type { framesModelType } from './framesModelType'
 import { router } from 'kea-router'
 import { sanitizeScene } from '../scenes/frame/frameLogic'
+import { apiFetch } from '../utils/apiFetch'
+import { entityImagesModel } from './entityImagesModel'
+
+export interface FrameImageInfo {
+  url: string
+  expiresAt: number
+}
 
 export const framesModel = kea<framesModelType>([
-  connect({ logic: [socketLogic] }),
+  connect({ logic: [socketLogic, entityImagesModel] }),
   path(['src', 'models', 'framesModel']),
   actions({
     addFrame: (frame: FrameType) => ({ frame }),
@@ -17,7 +22,6 @@ export const framesModel = kea<framesModelType>([
     redeployFrame: (id: number) => ({ id }),
     restartFrame: (id: number) => ({ id }),
     renderFrame: (id: number) => ({ id }),
-    updateFrameImage: (id: number) => ({ id }),
     deleteFrame: (id: number) => ({ id }),
   }),
   loaders(({ values }) => ({
@@ -26,15 +30,18 @@ export const framesModel = kea<framesModelType>([
       {
         loadFrame: async ({ id }) => {
           try {
-            const response = await fetch(`/api/frames/${id}`)
+            const response = await apiFetch(`/api/frames/${id}`)
             if (!response.ok) {
-              throw new Error('Failed to fetch logs')
+              throw new Error('Failed to fetch frame')
             }
             const data = await response.json()
             const frame = data.frame as FrameType
             return {
               ...values.frames,
-              frame: { ...frame, scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)) },
+              [frame.id]: {
+                ...frame,
+                scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)),
+              },
             }
           } catch (error) {
             console.error(error)
@@ -43,12 +50,21 @@ export const framesModel = kea<framesModelType>([
         },
         loadFrames: async () => {
           try {
-            const response = await fetch('/api/frames')
+            const response = await apiFetch('/api/frames')
             if (!response.ok) {
               throw new Error('Failed to fetch frames')
             }
             const data = await response.json()
-            return Object.fromEntries((data.frames as FrameType[]).map((frame) => [frame.id, frame]))
+            const framesDict = Object.fromEntries(
+              (data.frames as FrameType[]).map((frame) => [
+                frame.id,
+                {
+                  ...frame,
+                  scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)),
+                },
+              ])
+            )
+            return framesDict
           } catch (error) {
             console.error(error)
             return values.frames
@@ -59,7 +75,7 @@ export const framesModel = kea<framesModelType>([
   })),
   reducers(() => ({
     frames: [
-      {} as Record<string, FrameType>,
+      {} as Record<number, FrameType>,
       {
         [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
         [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
@@ -68,13 +84,6 @@ export const framesModel = kea<framesModelType>([
           delete newState[id]
           return newState
         },
-      },
-    ],
-    frameImageTimestamps: [
-      {} as Record<string, number>,
-      {
-        updateFrameImage: (state, { id }) =>
-          state[id] === Math.floor(Date.now() / 1000) ? state : { ...state, [id]: Math.floor(Date.now() / 1000) },
       },
     ],
   })),
@@ -86,30 +95,22 @@ export const framesModel = kea<framesModelType>([
           (a, b) => a.frame_host.localeCompare(b.frame_host) || (a.ssh_user || '').localeCompare(b.ssh_user || '')
         ) as FrameType[],
     ],
-    getFrameImage: [
-      (s) => [s.frameImageTimestamps],
-      (frameImageTimestamps) => {
-        return (id) => {
-          return `/api/frames/${id}/image?t=${frameImageTimestamps[id] ?? -1}`
-        }
-      },
-    ],
   }),
   afterMount(({ actions }) => {
     actions.loadFrames()
   }),
-  listeners(({ props, actions }) => ({
+  listeners(({ actions, values }) => ({
     renderFrame: async ({ id }) => {
-      await fetch(`/api/frames/${id}/event/render`, { method: 'POST' })
+      await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
     },
     redeployFrame: async ({ id }) => {
-      await fetch(`/api/frames/${id}/redeploy`, { method: 'POST' })
+      await apiFetch(`/api/frames/${id}/redeploy`, { method: 'POST' })
     },
     restartFrame: async ({ id }) => {
-      await fetch(`/api/frames/${id}/restart`, { method: 'POST' })
+      await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
     },
     deleteFrame: async ({ id }) => {
-      await fetch(`/api/frames/${id}`, { method: 'DELETE' })
+      await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
       if (router.values.location.pathname == '/frames/' + id) {
         router.actions.push('/')
       }
@@ -118,7 +119,7 @@ export const framesModel = kea<framesModelType>([
       if (log.type === 'webhook') {
         const parsed = JSON.parse(log.line)
         if (parsed.event == 'render:dither' || parsed.event == 'render:done' || parsed.event == 'server:start') {
-          actions.updateFrameImage(log.frame_id)
+          entityImagesModel.actions.updateEntityImage(`frames/${log.frame_id}`)
         }
       }
     },

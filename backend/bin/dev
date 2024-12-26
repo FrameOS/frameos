@@ -1,0 +1,8 @@
+#!/bin/bash
+set -e
+
+export DEBUG=${DEBUG:-1}
+
+python -m alembic upgrade head
+arq app.tasks.worker.WorkerSettings &
+uvicorn app.fastapi:app --host 0.0.0.0 --port 8989 --reload

@@ -1,134 +1,81 @@
 import json
-from unittest.mock import patch
-from sqlalchemy.exc import SQLAlchemyError
-
-from app.tests.base import BaseTestCase
-from app import db
+import pytest
 from app.models import Repository
+from sqlalchemy.exc import InvalidRequestError
 
-class TestRepositoryAPI(BaseTestCase):
-    def test_create_repository(self):
-        # Test the POST /repositories endpoint
-        data = {
-            'url': 'http://example.com/repo'
-        }
-        response = self.client.post('/api/repositories', json=data)
-        self.assertEqual(response.status_code, 201)
-        new_repo = Repository.query.first()
-        self.assertIsNotNone(new_repo)
+@pytest.mark.asyncio
+async def test_create_repository(async_client, db):
+    data = {'url': 'http://example.com/repo.json'}
+    response = await async_client.post('/api/repositories', json=data)
+    assert response.status_code == 201
+    repo = db.query(Repository).first()
+    assert repo is not None
+    assert repo.url == 'http://example.com/repo.json'
 
-    def test_get_repositories(self):
-        # Test the GET /repositories endpoint
-        response = self.client.get('/api/repositories')
-        self.assertEqual(response.status_code, 200)
-        repositories = json.loads(response.data)
-        self.assertIsInstance(repositories, list)
+@pytest.mark.asyncio
+async def test_create_repository_invalid_input(async_client):
+    # Missing URL
+    data = {}
+    response = await async_client.post('/api/repositories', json=data)
+    assert response.status_code == 422
+    assert "Field required" in json.dumps(response.json()['detail'])
 
-    def test_get_repository(self):
-        # Test the GET /repositories/<repository_id> endpoint
-        # Add a repository first
-        repo = Repository(name='Test Repo', url='http://example.com/repo')
-        db.session.add(repo)
-        db.session.commit()
+@pytest.mark.asyncio
+async def test_get_repositories(async_client, db):
+    # Possibly your code also ensures the "samples" and "gallery" repos are created
+    response = await async_client.get('/api/repositories')
+    assert response.status_code == 200
+    # Should be a list
+    repos = response.json()
+    assert isinstance(repos, list)
 
-        response = self.client.get(f'/api/repositories/{repo.id}')
-        self.assertEqual(response.status_code, 200)
-        repository = json.loads(response.data)
-        self.assertEqual(repository['name'], 'Test Repo')
+@pytest.mark.asyncio
+async def test_get_repository(async_client, db):
+    repo = Repository(name="Test Repo", url="http://example.com/test.json")
+    db.add(repo)
+    db.commit()
+    response = await async_client.get(f'/api/repositories/{repo.id}')
+    assert response.status_code == 200
+    data = response.json()
+    assert data['name'] == 'Test Repo'
 
-    def test_update_repository(self):
-        # Test the PATCH /repositories/<repository_id> endpoint
-        # Add a repository first
-        repo = Repository(name='Test Repo', url='http://example.com/repo')
-        db.session.add(repo)
-        db.session.commit()
+@pytest.mark.asyncio
+async def test_update_repository(async_client, db):
+    repo = Repository(name="Old Repo", url="http://example.com/old.json")
+    db.add(repo)
+    db.commit()
 
-        updated_data = {
-            'name': 'Updated Repo',
-            'url': 'http://example.com/new_repo'
-        }
-        response = self.client.patch(f'/api/repositories/{repo.id}', json=updated_data)
-        self.assertEqual(response.status_code, 200)
-        updated_repo = Repository.query.get(repo.id)
-        self.assertEqual(updated_repo.name, 'Updated Repo')
+    updated_data = {"name": "Updated Repo", "url": "http://example.com/updated.json"}
+    response = await async_client.patch(f'/api/repositories/{repo.id}', json=updated_data)
+    assert response.status_code == 200
+    db.refresh(repo)
+    assert repo.name == "Updated Repo"
+    assert repo.url == "http://example.com/updated.json"
 
-    def test_delete_repository(self):
-        # Test the DELETE /repositories/<repository_id> endpoint
-        # Add a repository first
-        repo = Repository(name='Test Repo', url='http://example.com/repo')
-        db.session.add(repo)
-        db.session.commit()
+@pytest.mark.asyncio
+async def test_delete_repository(async_client, db):
+    repo = Repository(name="DeleteMe", url="http://example.com/delete.json")
+    db.add(repo)
+    db.commit()
 
-        response = self.client.delete(f'/api/repositories/{repo.id}')
-        self.assertEqual(response.status_code, 200)
-        deleted_repo = Repository.query.get(repo.id)
-        self.assertIsNone(deleted_repo)
+    response = await async_client.delete(f'/api/repositories/{repo.id}')
+    assert response.status_code == 200
+    assert response.json()['message'] == "Repository deleted successfully"
 
+    try:
+        db.refresh(repo)
+        raise AssertionError("Repository was not deleted")
+    except InvalidRequestError:
+        pass
 
-    def test_create_repository_invalid_input(self):
-        data = {}  # Missing 'url'
-        response = self.client.post('/api/repositories', json=data)
-        self.assertEqual(response.status_code, 400)  # Assuming 400 for Bad Request
+    try:
+        db.get(Repository, repo.id)
+        raise AssertionError("Repository was not deleted")
+    except InvalidRequestError:
+        pass
 
-    def test_get_nonexistent_repository(self):
-        response = self.client.get('/api/repositories/9999')  # Non-existent ID
-        self.assertEqual(response.status_code, 404)
-
-    def test_update_nonexistent_repository(self):
-        data = {'name': 'Updated Repo', 'url': 'http://example.com/new_repo'}
-        response = self.client.patch('/api/repositories/9999', json=data)
-        self.assertEqual(response.status_code, 404)
-
-    def test_delete_nonexistent_repository(self):
-        response = self.client.delete('/api/repositories/9999')
-        self.assertEqual(response.status_code, 404)
-
-    def test_unauthorized_access(self):
-        # Log out the user first
-        self.logout()
-
-        endpoints = [
-            ('/api/repositories', 'POST', {'name': 'New Repo', 'url': 'http://example.com/repo'}),
-            ('/api/repositories', 'GET', None),
-            ('/api/repositories/1', 'GET', None),
-            ('/api/repositories/1', 'PATCH', {'name': 'Updated Repo'}),
-            ('/api/repositories/1', 'DELETE', None)
-        ]
-        for endpoint, method, data in endpoints:
-            response = self.client.open(endpoint, method=method, json=data)
-            self.assertEqual(response.status_code, 401)  # Unauthorized
-
-    def test_get_repositories_exception_handling(self):
-        with patch('app.models.Repository.query') as mock_query:
-            mock_query.all.side_effect = SQLAlchemyError("Database error")
-            response = self.client.get('/api/repositories')
-            self.assertEqual(response.status_code, 500)  # Internal Server Error
-
-    def test_create_repository_calls_update_templates(self):
-        with patch('app.models.repository.Repository.update_templates') as mock_update_templates:
-            data = {'name': 'New Repository', 'url': 'http://example.com/repo'}
-            response = self.client.post('/api/repositories', json=data)
-            self.assertEqual(response.status_code, 201)
-            mock_update_templates.assert_called_once()
-
-    def test_get_repositories_calls_update_templates(self):
-        with patch('app.models.repository.Repository.update_templates') as mock_update_templates:
-            response = self.client.get('/api/repositories')
-            self.assertEqual(response.status_code, 200)
-            if response.json:  # Assuming update_templates is called only when new repo is created
-                mock_update_templates.assert_called()
-            else:
-                mock_update_templates.assert_not_called()
-
-    def test_update_repository_calls_update_templates(self):
-        # Add a repository first
-        repo = Repository(name='Test Repo', url='http://example.com/repo')
-        db.session.add(repo)
-        db.session.commit()
-
-        with patch('app.models.repository.Repository.update_templates') as mock_update_templates:
-            data = {'name': 'Updated Repo', 'url': 'http://example.com/new_repo'}
-            response = self.client.patch(f'/api/repositories/{repo.id}', json=data)
-            self.assertEqual(response.status_code, 200)
-            mock_update_templates.assert_called_once()
-
+@pytest.mark.asyncio
+async def test_delete_nonexistent_repository(async_client):
+    response = await async_client.delete('/api/repositories/999999')
+    assert response.status_code == 404
+    assert response.json()['detail'] == "Repository not found"

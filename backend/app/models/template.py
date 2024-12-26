@@ -1,18 +1,20 @@
 import uuid
-from app import db
 from sqlalchemy.dialects.sqlite import JSON
-from sqlalchemy import LargeBinary
+from sqlalchemy import LargeBinary, Integer, String, Text
+from sqlalchemy.orm import mapped_column
+from app.database import Base
 
 
-class Template(db.Model):
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    name = db.Column(db.String(128), nullable=False)
-    description = db.Column(db.Text(), nullable=True)
-    scenes = db.Column(JSON, nullable=True)
-    config = db.Column(JSON, nullable=True)
-    image = db.Column(LargeBinary, nullable=True)
-    image_width = db.Column(db.Integer, nullable=True)
-    image_height = db.Column(db.Integer, nullable=True)
+class Template(Base):
+    __tablename__ = 'template'
+    id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = mapped_column(String(128), nullable=False)
+    description = mapped_column(Text(), nullable=True)
+    scenes = mapped_column(JSON, nullable=True)
+    config = mapped_column(JSON, nullable=True)
+    image = mapped_column(LargeBinary, nullable=True)
+    image_width = mapped_column(Integer, nullable=True)
+    image_height = mapped_column(Integer, nullable=True)
 
     def to_dict(self):
         return {

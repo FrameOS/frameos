@@ -9,6 +9,7 @@ import { loaders } from 'kea-loaders'
 
 import type { controlLogicType } from './controlLogicType'
 import { socketLogic } from '../../../socketLogic'
+import { apiFetch } from '../../../../utils/apiFetch'
 
 export interface ControlLogicProps {
   frameId: number
@@ -34,9 +35,9 @@ export const controlLogic = kea<controlLogicType>([
         sync: async (_, breakpoint) => {
           await breakpoint(100)
           try {
-            const response = await fetch(`/api/frames/${props.frameId}/state`)
+            const response = await apiFetch(`/api/frames/${props.frameId}/state`)
             if (!response.ok) {
-              throw new Error('Failed to fetch logs')
+              throw new Error('Failed to fetch frame state')
             }
             return await response.json()
           } catch (error) {
@@ -105,7 +106,7 @@ export const controlLogic = kea<controlLogicType>([
             }
           }
         }
-        const response = await fetch(`/api/frames/${props.frameId}/event/setSceneState`, {
+        const response = await apiFetch(`/api/frames/${props.frameId}/event/setSceneState`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ render: true, state }),
@@ -116,7 +117,7 @@ export const controlLogic = kea<controlLogicType>([
   })),
   listeners(({ actions, props, values }) => ({
     setCurrentScene: async ({ sceneId }) => {
-      const response = await fetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
+      const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sceneId }),

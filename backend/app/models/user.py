@@ -1,11 +1,13 @@
-from app import db
-from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy import Integer, String
+from sqlalchemy.orm import mapped_column
+from app.database import Base
 
-class User(db.Model, UserMixin):
-    id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(120), unique=True)
-    password = db.Column(db.String(128))
+class User(Base):
+    __tablename__ = 'user'
+    id = mapped_column(Integer, primary_key=True)
+    email = mapped_column(String(120), unique=True)
+    password = mapped_column(String(128))
 
     def set_password(self, password):
         self.password = generate_password_hash(password)

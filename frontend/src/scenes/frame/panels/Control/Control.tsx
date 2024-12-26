@@ -74,7 +74,7 @@ export function Control(): JSX.Element {
       ) : (
         <Form logic={controlLogic} props={{ frameId, sceneId }} formKey="stateChanges" className="space-y-4">
           {fields.map((field) => (
-            <div className="bg-gray-900 p-2 space-y-2">
+            <div key={field.name} className="bg-gray-900 p-2 space-y-2">
               <div className="flex items-center w-full gap-2">
                 {field.label || field.name}
                 {field.name in stateChanges && stateChanges[field.name] !== (state[field.name] ?? field.value)

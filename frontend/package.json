@@ -52,7 +52,6 @@
     "react-virtuoso": "^4.6.1",
     "reactflow": "^11.8.3",
     "remark-gfm": "^4.0.0",
-    "socket.io-client": "^4.7.2",
     "uuid": "^9.0.0"
   },
   "devDependencies": {

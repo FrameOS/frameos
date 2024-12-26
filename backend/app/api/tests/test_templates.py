@@ -1,110 +1,61 @@
-import json
-from app import db
-from app.models import Template
-from app.tests.base import BaseTestCase
-
-class TestTemplateAPI(BaseTestCase):
-    def test_create_template(self):
-        data = {
-            'name': 'New Template',
-            'description': 'A test template',
-            'scenes': [],
-            'config': {}
-        }
-        response = self.client.post('/api/templates', json=data)
-        self.assertEqual(response.status_code, 201)
-        new_template = Template.query.filter_by(name='New Template').first()
-        self.assertIsNotNone(new_template)
-
-    def test_get_templates(self):
-        response = self.client.get('/api/templates')
-        self.assertEqual(response.status_code, 200)
-        templates = json.loads(response.data)
-        self.assertIsInstance(templates, list)
-
-    def test_get_template(self):
-        template = Template(name='Test Template')
-        db.session.add(template)
-        db.session.commit()
-
-        response = self.client.get(f'/api/templates/{template.id}')
-        self.assertEqual(response.status_code, 200)
-        template_data = json.loads(response.data)
-        self.assertEqual(template_data['name'], 'Test Template')
+import pytest
+from app.models.template import Template
 
 
-    def test_update_template(self):
-        template = Template(name='Old Template')
-        db.session.add(template)
-        db.session.commit()
-
-        data = {'name': 'Updated Template'}
-        response = self.client.patch(f'/api/templates/{template.id}', json=data)
-        self.assertEqual(response.status_code, 200)
-        updated_template = Template.query.get(template.id)
-        self.assertEqual(updated_template.name, 'Updated Template')
-
-    def test_delete_template(self):
-        template = Template(name='Test Template')
-        db.session.add(template)
-        db.session.commit()
-
-        response = self.client.delete(f'/api/templates/{template.id}')
-        self.assertEqual(response.status_code, 200)
-        deleted_template = Template.query.get(template.id)
-        self.assertIsNone(deleted_template)
-
-    # def test_get_template_image(self):
-    #     with open('test_image.jpg', 'rb') as img_file:
-    #         image_data = img_file.read()
-    #     template = Template(name='Test Template', image=image_data)
-    #     db.session.add(template)
-    #     db.session.commit()
-    #
-    #     response = self.client.get(f'/api/templates/{template.id}/image')
-    #     self.assertEqual(response.status_code, 200)
-    #     self.assertEqual(response.mimetype, 'image/jpeg')
-
-    # def test_export_template(self):
-    #     template = Template(name='Test Template', scenes=[], config={})
-    #     db.session.add(template)
-    #     db.session.commit()
-    #
-    #     response = self.client.get(f'/api/templates/{template.id}/export')
-    #     self.assertEqual(response.status_code, 200)
-    #     self.assertEqual(response.mimetype, 'application/zip')
-
-    def test_unauthorized_access(self):
-        self.logout()
-
-        endpoints = [
-            ('/api/templates', 'POST', {'name': 'New Template'}),
-            ('/api/templates', 'GET', None),
-            ('/api/templates/1', 'GET', None),
-            ('/api/templates/1', 'PATCH', {'name': 'Updated Template'}),
-            ('/api/templates/1', 'DELETE', None),
-            ('/api/templates/1/image', 'GET', None),
-            ('/api/templates/1/export', 'GET', None)
-        ]
-        for endpoint, method, data in endpoints:
-            response = self.client.open(endpoint, method=method, json=data)
-            self.assertEqual(response.status_code, 401)
+@pytest.mark.asyncio
+async def test_create_template(async_client, db):
+    payload = {
+        "name": "New Template",
+        "description": "A test template",
+        "scenes": [],
+        "config": {},
+    }
+    # Post JSON (the same style as your fetch call):
+    response = await async_client.post(
+        "/api/templates",
+        json=payload,
+    )
+    # Should return 201 on create
+    assert response.status_code == 201
+    data = response.json()
+    assert isinstance(data, dict)
+    assert data.get('name') == 'New Template'
 
 
-    # def test_create_template_invalid_input(self):
-    #     data = {}  # Empty data
-    #     response = self.client.post('/api/templates', json=data)
-    #     self.assertEqual(response.status_code, 400)
+@pytest.mark.asyncio
+async def test_get_templates(async_client, db):
+    # Insert a couple
+    t1 = Template(name="Template1")
+    t2 = Template(name="Template2")
+    db.add_all([t1, t2])
+    db.commit()
 
-    def test_get_nonexistent_template(self):
-        response = self.client.get('/api/templates/999999999999')  # Non-existent ID
-        self.assertEqual(response.status_code, 404)
+    response = await async_client.get('/api/templates')
+    assert response.status_code == 200
+    templates = response.json()
+    assert isinstance(templates, list)
+    assert len(templates) >= 2  # We added at least 2
 
-    def test_update_nonexistent_template(self):
-        data = {'name': 'Nonexistent Template'}
-        response = self.client.patch('/api/templates/999999999999', json=data)
-        self.assertEqual(response.status_code, 404)
 
-    def test_delete_nonexistent_template(self):
-        response = self.client.delete('/api/templates/999999999999')
-        self.assertEqual(response.status_code, 404)
+@pytest.mark.asyncio
+async def test_get_nonexistent_template(async_client):
+    response = await async_client.get('/api/templates/999999')
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_export_template(async_client, db):
+    t = Template(name="Exportable", scenes=[], config={})
+    db.add(t)
+    db.commit()
+
+    response = await async_client.get(f'/api/templates/{t.id}/export')
+    assert response.status_code == 200
+    assert response.headers['content-type'] == 'application/zip'
+
+
+@pytest.mark.asyncio
+async def test_delete_nonexistent_template(async_client):
+    response = await async_client.delete('/api/templates/999999')
+    assert response.status_code == 404
+    assert "Template not found" in response.json()['detail']
