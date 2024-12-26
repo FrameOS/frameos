@@ -2,6 +2,7 @@ import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { framesModel } from '../models/framesModel'
 import { useEffect, useState } from 'react'
+import { entityImagesModel } from '../models/entityImagesModel'
 
 export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
   frameId: number
@@ -18,16 +19,17 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
  * - Optionally allows clicking the image container to refresh the image link if `refreshable` is true
  */
 export function FrameImage({ frameId, className, refreshable = true, ...props }: FrameImageProps) {
-  const { getFrameImage, frames } = useValues(framesModel)
-  const { updateFrameImage } = useActions(framesModel)
+  const { frames } = useValues(framesModel)
+  const { getEntityImage } = useValues(entityImagesModel)
+  const { updateEntityImage } = useActions(entityImagesModel)
 
   const [isLoading, setIsLoading] = useState(true)
 
-  const imageUrl = getFrameImage(frameId)
+  const imageUrl = getEntityImage(`frames/${frameId}`)
   const frame = frames[frameId]
 
   useEffect(() => {
-    updateFrameImage(frameId, false)
+    updateEntityImage(`frames/${frameId}`, false)
   }, [!!imageUrl])
 
   useEffect(() => {
@@ -43,7 +45,7 @@ export function FrameImage({ frameId, className, refreshable = true, ...props }:
 
   const handleRefreshClick = () => {
     if (refreshable) {
-      updateFrameImage(frameId)
+      updateEntityImage(`frames/${frameId}`)
     }
   }
 

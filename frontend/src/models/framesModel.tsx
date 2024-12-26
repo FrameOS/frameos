@@ -6,6 +6,7 @@ import type { framesModelType } from './framesModelType'
 import { router } from 'kea-router'
 import { sanitizeScene } from '../scenes/frame/frameLogic'
 import { apiFetch } from '../utils/apiFetch'
+import { entityImagesModel } from './entityImagesModel'
 
 export interface FrameImageInfo {
   url: string
@@ -13,7 +14,7 @@ export interface FrameImageInfo {
 }
 
 export const framesModel = kea<framesModelType>([
-  connect({ logic: [socketLogic] }),
+  connect({ logic: [socketLogic, entityImagesModel] }),
   path(['src', 'models', 'framesModel']),
   actions({
     addFrame: (frame: FrameType) => ({ frame }),
@@ -21,10 +22,7 @@ export const framesModel = kea<framesModelType>([
     redeployFrame: (id: number) => ({ id }),
     restartFrame: (id: number) => ({ id }),
     renderFrame: (id: number) => ({ id }),
-    updateFrameImage: (id: number, force = true) => ({ id, force }),
     deleteFrame: (id: number) => ({ id }),
-    setFrameImageInfo: (id: number, imageInfo: FrameImageInfo) => ({ id, imageInfo }),
-    updateFrameImageTimestamp: (id: number) => ({ id }),
   }),
   loaders(({ values }) => ({
     frames: [
@@ -88,22 +86,6 @@ export const framesModel = kea<framesModelType>([
         },
       },
     ],
-    frameImageInfos: [
-      {} as Record<number, FrameImageInfo>,
-      {
-        setFrameImageInfo: (state, { id, imageInfo }) => ({ ...state, [id]: imageInfo }),
-      },
-    ],
-    frameImageTimestamps: [
-      {} as Record<number, number>,
-      {
-        updateFrameImageTimestamp: (state, { id }) => {
-          const nowSeconds = Math.floor(Date.now() / 1000)
-          // Only update if it's different, to ensure a re-render
-          return state[id] === nowSeconds ? state : { ...state, [id]: nowSeconds }
-        },
-      },
-    ],
   })),
   selectors({
     framesList: [
@@ -112,20 +94,6 @@ export const framesModel = kea<framesModelType>([
         Object.values(frames).sort(
           (a, b) => a.frame_host.localeCompare(b.frame_host) || (a.ssh_user || '').localeCompare(b.ssh_user || '')
         ) as FrameType[],
-    ],
-    getFrameImage: [
-      (s) => [s.frameImageInfos, s.frameImageTimestamps],
-      (frameImageInfos, frameImageTimestamps) => {
-        return (id: number) => {
-          const info = frameImageInfos[id]
-          const now = Math.floor(Date.now() / 1000)
-          if (!info || !info.expiresAt || !info.url || now >= info.expiresAt) {
-            return null
-          }
-          const timestamp = frameImageTimestamps[id] ?? -1
-          return `${info.url}${info.url.includes('?') ? '&' : '?'}t=${timestamp}`
-        }
-      },
     ],
   }),
   afterMount(({ actions }) => {
@@ -147,38 +115,11 @@ export const framesModel = kea<framesModelType>([
         router.actions.push('/')
       }
     },
-    updateFrameImage: async ({ id, force }) => {
-      // Check if we have a valid URL
-      const imageUrl = values.getFrameImage(id)
-      if (imageUrl) {
-        // The URL is still valid, no need to refetch new signed URL
-        // Just update timestamp to refresh (force reload)
-        if (force) {
-          actions.updateFrameImageTimestamp(id)
-        }
-        return
-      }
-
-      // Need a new signed URL
-      const resp = await apiFetch(`/api/frames/${id}/image_link`)
-      if (resp.ok) {
-        const data = await resp.json()
-        const expiresAt = Math.floor(Date.now() / 1000) + data.expires_in
-        const imageInfo: FrameImageInfo = { url: data.url, expiresAt }
-        actions.setFrameImageInfo(id, imageInfo)
-        // Update timestamp to ensure a new request even if the URL is same
-        if (force) {
-          actions.updateFrameImageTimestamp(id)
-        }
-      } else {
-        console.error('Failed to get image link for frame', id)
-      }
-    },
     [socketLogic.actionTypes.newLog]: ({ log }) => {
       if (log.type === 'webhook') {
         const parsed = JSON.parse(log.line)
         if (parsed.event == 'render:dither' || parsed.event == 'render:done' || parsed.event == 'server:start') {
-          actions.updateFrameImage(log.frame_id)
+          entityImagesModel.actions.updateEntityImage(`frames/${log.frame_id}`)
         }
       }
     },
