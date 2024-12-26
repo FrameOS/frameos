@@ -6,6 +6,7 @@ from alembic import context
 
 # Import your Base from the FastAPI application
 from app.database import Base
+from app.models import *  # noqa
 from app.config import get_config
 
 # this is the Alembic Config object, which provides

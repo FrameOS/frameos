@@ -10,15 +10,22 @@ Python >= 3.11
 `nim >=2.0.0` (https://nim-lang.org/install.html)
 (Note that Debian distros have only packaged `1.6.x` as of Jan 2024)
 
-## FrameOS Backend
+## FrameOS Frontend
 
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## FrameOS Backend
 
 ```bash
 cd backend
 python3 -m venv env
 source env/bin/activate
-pip install -r requirements.txt
-flask db upgrade
+uv pip install -r requirements.txt
+DEBUG=1 alembic ugprade head
 
 cd ../frontend
 npm install
@@ -32,7 +39,7 @@ cd ..
 # start a redis server
 redis-server --daemonize yes
 
-honcho start
+DEBUG=1 python -m app.fastapi
 ```
 
 ## Running migrations
@@ -40,9 +47,9 @@ honcho start
 ```bash
 cd backend
 # create migration after changing a model
-flask db migrate -m "something changed"
+DEBUG=1 python -m alembic revision --autogenerate -m "name of migration"
 # apply the migrations
-flask db upgrade
+DEBUG=1 python -m alembic upgrade head
 ```
 
 ## Installing pre-commit
@@ -60,7 +67,7 @@ pre-commit uninstall
 
 ```bash
 cd backend
-bin/tests
+pytest
 ```
 
 ## FrameOS on-frame software
