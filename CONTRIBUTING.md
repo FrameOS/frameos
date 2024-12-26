@@ -10,15 +10,9 @@ Python >= 3.11
 `nim >=2.0.0` (https://nim-lang.org/install.html)
 (Note that Debian distros have only packaged `1.6.x` as of Jan 2024)
 
-## FrameOS Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
 ## FrameOS Backend
+
+Installing deps
 
 ```bash
 cd backend
@@ -33,13 +27,26 @@ npm install
 cd ../frameos
 nimble install -d
 nimble setup
-
 cd ..
+```
 
-# start a redis server
+Run all of these separately
+
+```
+# start a redis server if not running
 redis-server --daemonize yes
 
+# start the frontend
+cd frontend
+npm run dev
+
+# start the backend
+cd backend
 DEBUG=1 python -m app.fastapi
+
+# start the job queue
+cd backend
+DEBUG=1 arq app.tasks.worker
 ```
 
 ## Running migrations

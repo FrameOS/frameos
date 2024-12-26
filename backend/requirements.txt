@@ -73,12 +73,7 @@ fastapi-cli==0.0.6
 filelock==3.13.1
     # via virtualenv
 flask==2.3.2
-    # via
-    #   flask-login
-    #   flask-wtf
-    #   sentry-sdk
-flask-login==0.6.3
-flask-wtf==1.2.1
+    # via sentry-sdk
 h11==0.14.0
     # via
     #   httpcore
@@ -107,9 +102,7 @@ ipdb==0.13.13
 ipython==8.15.0
     # via ipdb
 itsdangerous==2.1.2
-    # via
-    #   flask
-    #   flask-wtf
+    # via flask
 jedi==0.19.0
     # via ipython
 jinja2==3.1.2
@@ -127,7 +120,6 @@ markupsafe==2.1.3
     #   mako
     #   sentry-sdk
     #   werkzeug
-    #   wtforms
 matplotlib-inline==0.1.6
     # via ipython
 mdurl==0.1.2
@@ -289,10 +281,6 @@ wcwidth==0.2.6
 websockets==14.1
     # via uvicorn
 werkzeug==2.3.6
-    # via
-    #   flask
-    #   flask-login
+    # via flask
 wheel==0.41.3
     # via pip-tools
-wtforms==3.0.1
-    # via flask-wtf

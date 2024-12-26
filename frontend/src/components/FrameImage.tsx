@@ -74,9 +74,6 @@ export function FrameImage({ frameId, className, refreshable = true, ...props }:
                       : `${frame.width} / ${frame.height}`,
                   maxWidth: '100%',
                   maxHeight: '100%',
-                  // If you need a fixed width/height based on rotation:
-                  // width: frame.rotate === 90 || frame.rotate === 270 ? frame.height : frame.width,
-                  // height: 'auto',
                 }
               : {}),
           }}

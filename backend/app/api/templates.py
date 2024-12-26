@@ -115,7 +115,7 @@ async def create_template(
         file_bytes = await file.read()
         zip_file = zipfile.ZipFile(io.BytesIO(file_bytes))
     elif url:
-        # If we have a URL, fetch it (like the old requests.get)
+        # If we have a URL, fetch it
         async with httpx.AsyncClient() as client:
             resp = await client.get(url)
         resp.raise_for_status()

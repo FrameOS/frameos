@@ -3,8 +3,6 @@ arq
 dacite
 email_validator
 fastapi[standard]
-flask_wtf==1.2.1
-Flask-Login==0.6.3
 honcho
 imagehash
 ipdb
@@ -29,4 +27,3 @@ types-paramiko
 types-Pillow
 types-redis
 types-requests
-wtforms
