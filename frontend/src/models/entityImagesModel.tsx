@@ -1,11 +1,39 @@
-import { actions, connect, kea, listeners, reducers, path, selectors } from 'kea'
+import { actions, connect, kea, listeners, reducers, path, selectors, useValues, useActions } from 'kea'
 import { socketLogic } from '../scenes/socketLogic'
 import type { entityImagesModelType } from './entityImagesModelType'
 import { apiFetch } from '../utils/apiFetch'
+import { useEffect, useState } from 'react'
 
 export interface EntityImageInfo {
   url: string
   expiresAt: number
+}
+
+export function useEntityImage(entity: string): {
+  imageUrl: string | null
+  isLoading: boolean
+  setIsLoading: (loading: boolean) => void
+} {
+  const { getEntityImage } = useValues(entityImagesModel)
+  const { updateEntityImage } = useActions(entityImagesModel)
+
+  const [isLoading, setIsLoading] = useState(true)
+
+  const imageUrl = getEntityImage(entity)
+
+  useEffect(() => {
+    updateEntityImage(entity, false)
+  }, [!!imageUrl])
+
+  useEffect(() => {
+    // Whenever the image URL changes, we consider the image as loading again
+    // because the <img> will re-attempt to load the new URL.
+    if (imageUrl) {
+      setIsLoading(true)
+    }
+  }, [imageUrl])
+
+  return { imageUrl, isLoading, setIsLoading }
 }
 
 export const entityImagesModel = kea<entityImagesModelType>([

@@ -60,7 +60,7 @@ async def get_image_link(id: int, user=Depends(get_current_user)):
     expire_minutes = 5
     now = datetime.utcnow()
     expire = now + timedelta(minutes=expire_minutes)
-    to_encode = {"sub": str(id), "exp": expire}
+    to_encode = {"sub": f"frame={id}", "exp": expire}
     token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
     expires_in = int((expire - now).total_seconds())
@@ -74,7 +74,7 @@ async def get_image_link(id: int, user=Depends(get_current_user)):
 async def api_frame_get_image(id: int, token: str, request: Request, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        if payload.get("sub") != str(id):
+        if payload.get("sub") != f"frame={id}":
             raise HTTPException(status_code=401, detail="Unauthorized")
     except JWTError:
         raise HTTPException(status_code=401, detail="Unauthorized")

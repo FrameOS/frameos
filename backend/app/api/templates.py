@@ -243,7 +243,7 @@ async def get_image_link(template_id: str):
     expire_minutes = 5
     now = datetime.utcnow()
     expire = now + timedelta(minutes=expire_minutes)
-    to_encode = {"sub": template_id, "exp": expire}
+    to_encode = {"sub": f"template={template_id}", "exp": expire}
     token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     expires_in = int((expire - now).total_seconds())
 
@@ -259,7 +259,7 @@ async def get_template_image(template_id: str, token: str, request: Request, db:
     """
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        if payload.get("sub") != f"t:{template_id}":
+        if payload.get("sub") != f"template={template_id}":
             raise HTTPException(status_code=401, detail="Unauthorized")
     except JWTError:
         raise HTTPException(status_code=401, detail="Unauthorized")

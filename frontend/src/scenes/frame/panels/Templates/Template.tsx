@@ -5,6 +5,7 @@ import { ArrowDownTrayIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { FolderPlusIcon, CloudArrowDownIcon, DocumentPlusIcon, DocumentIcon } from '@heroicons/react/24/outline'
 import { Button } from '../../../../components/Button'
+import { useEntityImage } from '../../../../models/entityImagesModel'
 
 interface TemplateProps {
   template: TemplateType
@@ -14,6 +15,7 @@ interface TemplateProps {
   removeTemplate?: (id: string) => void
   editTemplate?: (template: TemplateType) => void
 }
+
 export function Template({
   template,
   exportTemplate,
@@ -22,13 +24,16 @@ export function Template({
   editTemplate,
   saveRemoteAsLocal,
 }: TemplateProps): JSX.Element {
+  // I know the order of hooks is weird here, but the "if" should never change for this component
+  const imageUrl = template.id ? useEntityImage(`templates/${template.id}`).imageUrl : template.image
+
   return (
     <div
       className="shadow bg-gray-900 break-inside-avoid dndnode relative rounded-lg mb-4"
       style={
-        template.image
+        imageUrl
           ? {
-              backgroundImage: `url("${template.image}")`,
+              backgroundImage: imageUrl ? `url("${imageUrl}")` : '',
               backgroundSize: 'cover',
               backgroundPosition: 'center',
               // aspectRatio: `${template.imageWidth} / ${template.imageHeight}`,
@@ -43,7 +48,7 @@ export function Template({
             'linear-gradient(to bottom, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.6) 30%, rgba(0, 0, 0, 0.7) 70%, rgba(0, 0, 0, 0.8) 100%)',
         }}
       >
-        <img src={template.image} alt={template.name} className="w-full max-h-full border" />
+        {imageUrl ? <img src={imageUrl} alt={template.name} className="w-full max-h-full border" /> : null}
         <div className="flex gap-2 items-right">
           {applyTemplate ? (
             <Button size="small" color="secondary" onClick={() => applyTemplate(template)} title="Install scene">

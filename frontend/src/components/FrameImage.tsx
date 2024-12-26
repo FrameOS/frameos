@@ -1,8 +1,7 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { framesModel } from '../models/framesModel'
-import { useEffect, useState } from 'react'
-import { entityImagesModel } from '../models/entityImagesModel'
+import { entityImagesModel, useEntityImage } from '../models/entityImagesModel'
 
 export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
   frameId: number
@@ -20,25 +19,10 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
  */
 export function FrameImage({ frameId, className, refreshable = true, ...props }: FrameImageProps) {
   const { frames } = useValues(framesModel)
-  const { getEntityImage } = useValues(entityImagesModel)
   const { updateEntityImage } = useActions(entityImagesModel)
-
-  const [isLoading, setIsLoading] = useState(true)
-
-  const imageUrl = getEntityImage(`frames/${frameId}`)
   const frame = frames[frameId]
 
-  useEffect(() => {
-    updateEntityImage(`frames/${frameId}`, false)
-  }, [!!imageUrl])
-
-  useEffect(() => {
-    // Whenever the image URL changes, we consider the image as loading again
-    // because the <img> will re-attempt to load the new URL.
-    if (imageUrl) {
-      setIsLoading(true)
-    }
-  }, [imageUrl])
+  const { imageUrl, isLoading, setIsLoading } = useEntityImage(`frames/${frameId}`)
 
   // Determine if we should show the fade-in-out or loading cursor
   const visiblyLoading = (isLoading || frame?.status !== 'ready') && frame?.interval > 5
