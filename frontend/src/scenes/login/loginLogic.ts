@@ -46,7 +46,7 @@ export const loginLogic = kea<loginLogicType>([
             let error
             try {
               const json = await response.json()
-              error = json.error
+              error = json.detail || json.error
             } catch (e) {
               error = response.statusText
             }

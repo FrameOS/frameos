@@ -48,6 +48,8 @@ export const signupLogic = kea<signupLogicType>([
                 errors = json.errors
               } else if (json.error) {
                 errors = { password2: json.error }
+              } else if (json.detail) {
+                errors = { password2: json.detail }
               }
             } catch (e) {
               errors = { password2: response.statusText }
