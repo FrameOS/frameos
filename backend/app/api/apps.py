@@ -123,10 +123,11 @@ async def validate_nim(source: str):
             'nim', 'check', temp_file_name,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            text=True
         )
 
         stdout, stderr = await proc.communicate()
+        stdout = stdout.decode('utf-8', errors='replace')
+        stderr = stderr.decode('utf-8', errors='replace')
 
         errors = []
         for line in stderr.split('\n'):
