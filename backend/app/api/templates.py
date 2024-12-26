@@ -17,6 +17,7 @@ from arq import ArqRedis as Redis
 from app.models.template import Template
 from app.models.frame import Frame
 from app.schemas.templates import (
+    TemplateImageLinkResponse,
     TemplateResponse,
     TemplatesListResponse,
     CreateTemplateRequest,
@@ -225,7 +226,6 @@ async def get_templates(db: Session = Depends(get_db)):
     result = []
     for t in templates:
         d = t.to_dict()
-        _update_image(d)
         result.append(d)
     return result
 
@@ -236,9 +236,21 @@ async def get_template(template_id: str, db: Session = Depends(get_db)):
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     d = template.to_dict()
-    _update_image(d)
     return d
 
+@private_api.get("/templates/{template_id}/image_link", response_model=TemplateImageLinkResponse)
+async def get_image_link(template_id: str):
+    expire_minutes = 5
+    now = datetime.utcnow()
+    expire = now + timedelta(minutes=expire_minutes)
+    to_encode = {"sub": template_id, "exp": expire}
+    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    expires_in = int((expire - now).total_seconds())
+
+    return {
+        "url": f"/api/templates/{template_id}/image?token={token}",
+        "expires_in": expires_in
+    }
 
 @public_api.get("/templates/{template_id}/image")
 async def get_template_image(template_id: str, token: str, request: Request, db: Session = Depends(get_db)):
@@ -279,7 +291,6 @@ async def update_template(template_id: str, data: UpdateTemplateRequest, db: Ses
     db.refresh(template)
 
     d = template.to_dict()
-    _update_image(d)
     return d
 
 
@@ -291,14 +302,3 @@ async def delete_template(template_id: str, db: Session = Depends(get_db)):
     db.delete(template)
     db.commit()
     return {"message": "Template deleted successfully"}
-
-
-def _update_image(d):
-    d['id'] = str(d['id'])
-    if d['image']:
-        expire_minutes = 5
-        now = datetime.utcnow()
-        expire = now + timedelta(minutes=expire_minutes)
-        to_encode = {"sub": f"t:{d['id']}", "exp": expire}
-        token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-        d['image'] = f'{d["image"]}?token={token}'

@@ -39,3 +39,7 @@ class CreateTemplateRequest(BaseModel):
 class UpdateTemplateRequest(BaseModel):
     name: Optional[str]
     description: Optional[str]
+
+class TemplateImageLinkResponse(BaseModel):
+    url: str
+    expires_in: int
