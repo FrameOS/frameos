@@ -1,4 +1,6 @@
 import { router } from 'kea-router'
+import { inHassioIngress } from './inHassioIngress'
+import { getBasePath } from './getBasePath'
 
 export interface ApiFetchOptions extends RequestInit {}
 
@@ -25,7 +27,7 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
       ...headers,
       Authorization: `Bearer ${token}`,
     }
-  } else {
+  } else if (!inHassioIngress()) {
     const exists = await userExists()
     if (exists) {
       router.actions.push('/login')
@@ -36,9 +38,13 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
     }
   }
 
+  if (typeof input === 'string' && getBasePath()) {
+    input = getBasePath() + input
+  }
+
   const response = await fetch(input, { ...options, headers })
 
-  if (response.status === 401) {
+  if (!inHassioIngress() && response.status === 401) {
     const exists = await userExists()
     if (exists) {
       router.actions.push('/login')

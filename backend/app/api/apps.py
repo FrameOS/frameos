@@ -19,16 +19,16 @@ from app.schemas.apps import (
  EnhanceSourceRequest,
  EnhanceSourceResponse
 )
-from . import private_api
+from . import api_with_auth
 
 from typing import Optional
 
-@private_api.get("/apps", response_model=AppsListResponse)
+@api_with_auth.get("/apps", response_model=AppsListResponse)
 async def api_apps_list(db: Session = Depends(get_db)):
     return {"apps": get_app_configs()}
 
 
-@private_api.get("/apps/source", response_model=AppsSourceResponse)
+@api_with_auth.get("/apps/source", response_model=AppsSourceResponse)
 async def api_apps_source(keyword: Optional[str] = None, db: Session = Depends(get_db)):
     sources = get_one_app_sources(keyword)
     if sources is None:
@@ -36,7 +36,7 @@ async def api_apps_source(keyword: Optional[str] = None, db: Session = Depends(g
     return sources
 
 
-@private_api.post("/apps/validate_source", response_model=ValidateSourceResponse)
+@api_with_auth.post("/apps/validate_source", response_model=ValidateSourceResponse)
 async def validate_python_frame_source(data: ValidateSourceRequest):
     file = data.file
     source = data.source
@@ -56,7 +56,7 @@ async def validate_python_frame_source(data: ValidateSourceRequest):
     return {"errors": errors}
 
 
-@private_api.post("/apps/enhance_source", response_model=EnhanceSourceResponse)
+@api_with_auth.post("/apps/enhance_source", response_model=EnhanceSourceResponse)
 async def enhance_python_frame_source(data: EnhanceSourceRequest, db: Session = Depends(get_db)):
     source = data.source
     prompt = data.prompt

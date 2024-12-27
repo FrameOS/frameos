@@ -10,6 +10,8 @@ from app.database import get_db
 from app.config import get_config
 from app.models.user import User
 
+config = get_config()
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -70,27 +72,29 @@ async def publish_message(redis: Redis, event: str, data: dict):
     await redis.publish("broadcast_channel", json.dumps(msg))
 
 def register_ws_routes(app):
-    @app.websocket("/ws")
+    @app.websocket(config.base_path + "/ws")
     async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
-        token = websocket.query_params.get('token')
-        if not token:
-            await websocket.close(code=1008, reason="Missing token")
-            return
+        # Full access in the HASSIO ingress mode
+        if not get_config().HASSIO_MODE == "ingress":
+            token = websocket.query_params.get('token')
+            if not token:
+                await websocket.close(code=1008, reason="Missing token")
+                return
 
-        try:
-            from app.api.auth import ALGORITHM, SECRET_KEY
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            user_email = payload.get("sub")
-            if not user_email:
-                raise ValueError("Invalid token")
-        except JWTError:
-            await websocket.close(code=1008, reason="Invalid token")
-            return
+            try:
+                from app.api.auth import ALGORITHM, SECRET_KEY
+                payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+                user_email = payload.get("sub")
+                if not user_email:
+                    raise ValueError("Invalid token")
+            except JWTError:
+                await websocket.close(code=1008, reason="Invalid token")
+                return
 
-        user = db.query(User).filter(User.email == user_email).first()
-        if user is None:
-            await websocket.close(code=1008, reason="User not found")
-            return
+            user = db.query(User).filter(User.email == user_email).first()
+            if user is None:
+                await websocket.close(code=1008, reason="User not found")
+                return
 
         await manager.connect(websocket)
         try:

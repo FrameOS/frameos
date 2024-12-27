@@ -2,6 +2,8 @@ import { actions, afterMount, beforeUnmount, kea, path } from 'kea'
 import { FrameType, LogType } from '../types'
 
 import type { socketLogicType } from './socketLogicType'
+import { inHassioIngress } from '../utils/inHassioIngress'
+import { getBasePath } from '../utils/getBasePath'
 
 export const socketLogic = kea<socketLogicType>([
   path(['src', 'scenes', 'socketLogic']),
@@ -15,12 +17,12 @@ export const socketLogic = kea<socketLogicType>([
   }),
   afterMount(({ actions, cache }) => {
     const token = localStorage.getItem('token')
-    if (!token) {
+    if (!token && !inHassioIngress()) {
       console.error('🔴 No token found in localStorage, cannot connect to WebSocket.')
       return
     }
 
-    cache.ws = new WebSocket(`/ws?token=${token}`)
+    cache.ws = new WebSocket(`${getBasePath()}/ws` + (token ? `?token=${token}` : ''))
     cache.ws.onopen = function (event: any) {
       console.log('🔵 Connected to the WebSocket server.')
     }

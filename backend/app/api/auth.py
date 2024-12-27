@@ -15,7 +15,7 @@ from app.redis import get_redis
 from werkzeug.security import generate_password_hash, check_password_hash
 from app.schemas.auth import Token, UserSignup
 
-from . import public_api
+from . import api_no_auth
 
 config = get_config()
 SECRET_KEY = config.SECRET_KEY
@@ -35,6 +35,14 @@ def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] 
     return encoded_jwt
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    # if config.HASSIO_MODE == "ingress":
+    #     user = db.query(User).first()
+    #     if user is None:
+    #         user = User(email="frameos@homeassistant.local", password="")
+    #         db.add(user)
+    #         db.commit()
+    #     return user
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -53,8 +61,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         raise credentials_exception
     return user
 
-@public_api.post("/login", response_model=Token)
+@api_no_auth.post("/login", response_model=Token)
 async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+    if config.HASSIO_MODE is not None:
+        raise HTTPException(status_code=401, detail="Login not allowed with HASSIO_MODE")
     email = form_data.username
     password = form_data.password
     ip = request.client.host
@@ -76,8 +86,11 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
     access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
     return {"access_token": access_token, "token_type": "bearer"}
 
-@public_api.post("/signup")
+@api_no_auth.post("/signup")
 async def signup(data: UserSignup, db: Session = Depends(get_db)):
+    if config.HASSIO_MODE is not None:
+        raise HTTPException(status_code=401, detail="Signup not allowed with HASSIO_MODE")
+
     # Check if there is already a user registered (one-user system)
     if db.query(User).first() is not None:
         raise HTTPException(status_code=400, detail="Only one user is allowed. Please login!")

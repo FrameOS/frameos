@@ -24,7 +24,8 @@ from app.schemas.templates import (
     UpdateTemplateRequest,
 )
 from app.api.auth import SECRET_KEY, ALGORITHM
-from app.api import private_api, public_api
+from app.api import api_with_auth, api_no_auth
+from app.config import Config, get_config
 from app.redis import get_redis
 
 
@@ -56,7 +57,7 @@ def respond_with_template(template: Template):
     )
 
 
-@private_api.post("/templates", status_code=201)
+@api_with_auth.post("/templates", status_code=201)
 async def create_template(
     request: Request,
     db: Session = Depends(get_db),
@@ -220,7 +221,7 @@ async def create_template(
     return new_template.to_dict()
 
 
-@private_api.get("/templates", response_model=TemplatesListResponse)
+@api_with_auth.get("/templates", response_model=TemplatesListResponse)
 async def get_templates(db: Session = Depends(get_db)):
     templates = db.query(Template).all()
     result = []
@@ -230,7 +231,7 @@ async def get_templates(db: Session = Depends(get_db)):
     return result
 
 
-@private_api.get("/templates/{template_id}", response_model=TemplateResponse)
+@api_with_auth.get("/templates/{template_id}", response_model=TemplateResponse)
 async def get_template(template_id: str, db: Session = Depends(get_db)):
     template = db.get(Template, template_id)
     if not template:
@@ -238,8 +239,8 @@ async def get_template(template_id: str, db: Session = Depends(get_db)):
     d = template.to_dict()
     return d
 
-@private_api.get("/templates/{template_id}/image_link", response_model=TemplateImageLinkResponse)
-async def get_image_link(template_id: str):
+@api_with_auth.get("/templates/{template_id}/image_link", response_model=TemplateImageLinkResponse)
+async def get_image_link(template_id: str, config: Config = Depends(get_config)):
     expire_minutes = 5
     now = datetime.utcnow()
     expire = now + timedelta(minutes=expire_minutes)
@@ -248,11 +249,11 @@ async def get_image_link(template_id: str):
     expires_in = int((expire - now).total_seconds())
 
     return {
-        "url": f"/api/templates/{template_id}/image?token={token}",
+        "url": config.base_path + f"/api/templates/{template_id}/image?token={token}",
         "expires_in": expires_in
     }
 
-@public_api.get("/templates/{template_id}/image")
+@api_no_auth.get("/templates/{template_id}/image")
 async def get_template_image(template_id: str, token: str, request: Request, db: Session = Depends(get_db)):
     """
     Access to image is via token. This is how we originally protected direct image access.
@@ -271,13 +272,13 @@ async def get_template_image(template_id: str, token: str, request: Request, db:
     return StreamingResponse(io.BytesIO(template.image), media_type='image/jpeg')
 
 
-@private_api.get("/templates/{template_id}/export")
+@api_with_auth.get("/templates/{template_id}/export")
 async def export_template(template_id: str, db: Session = Depends(get_db)):
     template = db.get(Template, template_id)
     return respond_with_template(template)
 
 
-@private_api.patch("/templates/{template_id}", response_model=TemplateResponse)
+@api_with_auth.patch("/templates/{template_id}", response_model=TemplateResponse)
 async def update_template(template_id: str, data: UpdateTemplateRequest, db: Session = Depends(get_db)):
     template = db.get(Template, template_id)
     if not template:
@@ -294,7 +295,7 @@ async def update_template(template_id: str, data: UpdateTemplateRequest, db: Ses
     return d
 
 
-@private_api.delete("/templates/{template_id}")
+@api_with_auth.delete("/templates/{template_id}")
 async def delete_template(template_id: str, db: Session = Depends(get_db)):
     template = db.get(Template, template_id)
     if not template:

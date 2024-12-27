@@ -53,7 +53,7 @@ export function copyIndexHtml(
   const scriptCode = `
         window.ESBUILD_LOAD_SCRIPT = async function (file) {
             try {
-                await import((window.JS_URL || '') + '/static/' + file)
+                await import((window.FRAMEOS_APP_CONFIG?.base_path || '') + '/static/' + file)
             } catch (error) {
                 console.error('Error loading chunk: "' + file + '"')
                 console.error(error)
@@ -80,7 +80,7 @@ export function copyIndexHtml(
   const cssLoader = `
         const link = document.createElement("link");
         link.rel = "stylesheet";
-        link.href = (window.JS_URL || '') + "/static/" + ${JSON.stringify(cssFile)};
+        link.href = (window.FRAMEOS_APP_CONFIG?.base_path || '') + "/static/" + ${JSON.stringify(cssFile)};
         document.head.appendChild(link)
     `
 
@@ -123,7 +123,7 @@ export const commonConfig = {
   sourcemap: true,
   minify: !isDev,
   resolveExtensions: ['.ts', '.tsx', '.js', '.jsx', '.scss', '.css', '.less'],
-  publicPath: '/static',
+  publicPath: './',
   assetNames: '../assets/[name]-[hash]',
   chunkNames: '[name]-[hash]',
   // no hashes in dev mode for faster reloads --> we save the old hash in index.html otherwise

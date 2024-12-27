@@ -7,9 +7,9 @@ from app.models.frame import Frame
 from app.models.log import process_log
 from app.schemas.log import LogRequest, LogResponse
 from app.redis import get_redis
-from . import public_api
+from . import api_public
 
-@public_api.post("/log", response_model=LogResponse)
+@api_public.post("/log", response_model=LogResponse)
 async def post_api_log(
     data: LogRequest,
     db: Session = Depends(get_db),

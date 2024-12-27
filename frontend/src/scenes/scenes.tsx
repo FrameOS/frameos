@@ -1,4 +1,5 @@
 import { lazy } from 'react'
+import { urls } from '../urls'
 
 export const scenes = {
   error404: () => <div>404</div>,
@@ -9,10 +10,11 @@ export const scenes = {
   signup: lazy(() => import('./signup/Signup')),
 }
 
-export const routes = {
-  '/': 'frames',
-  '/frames/:id': 'frame',
-  '/settings': 'settings',
-  '/login': 'login',
-  '/signup': 'signup',
-}
+export const getRoutes = () =>
+  ({
+    [urls.frames()]: 'frames',
+    [urls.frame(':id')]: 'frame',
+    [urls.settings()]: 'settings',
+    '/login': 'login',
+    '/signup': 'signup',
+  } as const)

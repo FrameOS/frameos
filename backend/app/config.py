@@ -26,6 +26,12 @@ class Config:
     DATABASE_URL = os.environ.get('DATABASE_URL') or 'sqlite:///../db/frameos.db'
     REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
     INSTANCE_ID = INSTANCE_ID
+    HASSIO_MODE = os.environ.get('HASSIO_MODE', None)
+    HASSIO_INGRESS_PATH = os.environ.get('HASSIO_INGRESS_PATH', None)
+
+    @property
+    def base_path(self) -> str:
+        return self.HASSIO_INGRESS_PATH or ""
 
 class DevelopmentConfig(Config):
     DEBUG = True

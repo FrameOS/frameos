@@ -7,6 +7,7 @@ import { router } from 'kea-router'
 import { sanitizeScene } from '../scenes/frame/frameLogic'
 import { apiFetch } from '../utils/apiFetch'
 import { entityImagesModel } from './entityImagesModel'
+import { urls } from '../urls'
 
 export interface FrameImageInfo {
   url: string
@@ -111,8 +112,8 @@ export const framesModel = kea<framesModelType>([
     },
     deleteFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
-      if (router.values.location.pathname == '/frames/' + id) {
-        router.actions.push('/')
+      if (router.values.location.pathname.includes('/frames/' + id)) {
+        router.actions.push(urls.frames())
       }
     },
     [socketLogic.actionTypes.newLog]: ({ log }) => {
