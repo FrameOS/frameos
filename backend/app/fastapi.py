@@ -55,7 +55,15 @@ if serve_html:
 
     # Public config for the frontend
     frameos_app_config = {}
-    index_html = open("../frontend/dist/index.html").read()
+    try:
+        index_html = open("../frontend/dist/index.html").read()
+    except FileNotFoundError:
+        if config.TEST:
+            # don't need the compiled frontend when testing
+            index_html = open("../frontend/src/index.html").read()
+        else:
+            raise
+
     if config.HASSIO_MODE:
         frameos_app_config["HASSIO_MODE"] = config.HASSIO_MODE
     if config.base_path:

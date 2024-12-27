@@ -15,6 +15,6 @@ export const getRoutes = () =>
     [urls.frames()]: 'frames',
     [urls.frame(':id')]: 'frame',
     [urls.settings()]: 'settings',
-    '/login': 'login',
-    '/signup': 'signup',
+    [urls.login()]: 'login',
+    [urls.signup()]: 'signup',
   } as const)
