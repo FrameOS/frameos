@@ -21,8 +21,6 @@ arq app.tasks.worker.WorkerSettings &
 
 # 2. Check for Home Assistant Ingress
 if [ -n "$HASSIO_TOKEN" ]; then
-  env
-  
   echo "🔦 Detected HASSIO_TOKEN -> Running two uvicorns: public (8989) + ingress (8990)"
 
   # Public server on port 8989 in background
