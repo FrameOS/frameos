@@ -30,8 +30,7 @@ class Config:
     HASSIO_RUN_MODE = os.environ.get('HASSIO_RUN_MODE', None)
     HASSIO_TOKEN = os.environ.get('HASSIO_TOKEN', None)
     SUPERVISOR_TOKEN = os.environ.get('SUPERVISOR_TOKEN', None)
-    HOSTNAME = os.environ.get('HOSTNAME', None)
-    base_path = ''
+    ingress_path = ''
 
     def __init__(self):
         # Get Home Assistant Supervisor Ingress URL
@@ -46,8 +45,8 @@ class Config:
                 ingress_url = info.get("data", {}).get("ingress_url")
                 if ingress_url and ingress_url.endswith("/"):
                     ingress_url = ingress_url[:-1]
-                self.base_path = ingress_url
-                print(f"🟢 Fetched HA ingress URL: {self.base_path}")
+                self.ingress_path = ingress_url
+                print(f"🟢 Fetched HA ingress URL: {self.ingress_path}")
             except Exception as e:
                 print(f"🔴 Failed to get HA ingress URL: {e}")
 
@@ -71,7 +70,7 @@ class ProductionConfig(Config):
     def __init__(self):
         super().__init__()
         if self.SECRET_KEY is None:
-            if self.HASSIO_TOKEN is not None:
+            if self.HASSIO_RUN_MODE is not None:
                 self.SECRET_KEY = secrets.token_urlsafe(32)
             else:
                 raise ValueError('SECRET_KEY must be set in production')

@@ -26,7 +26,6 @@ from app.schemas.templates import (
 )
 from app.api.auth import SECRET_KEY, ALGORITHM
 from app.api import api_with_auth, api_no_auth
-from app.config import Config, get_config
 from app.redis import get_redis
 
 
@@ -241,7 +240,7 @@ async def get_template(template_id: str, db: Session = Depends(get_db)):
     return d
 
 @api_with_auth.get("/templates/{template_id}/image_link", response_model=TemplateImageLinkResponse)
-async def get_image_link(template_id: str, config: Config = Depends(get_config)):
+async def get_image_link(template_id: str):
     expire_minutes = 5
     now = datetime.utcnow()
     expire = now + timedelta(minutes=expire_minutes)
@@ -250,13 +249,14 @@ async def get_image_link(template_id: str, config: Config = Depends(get_config))
     expires_in = int((expire - now).total_seconds())
 
     return {
-        "url": config.base_path + f"/api/templates/{template_id}/image?token={token}",
+        "url": config.ingress_path + f"/api/templates/{template_id}/image?token={token}",
         "expires_in": expires_in
     }
 
 @api_no_auth.get("/templates/{template_id}/image")
 async def get_template_image(template_id: str, token: str, request: Request, db: Session = Depends(get_db)):
     if config.HASSIO_RUN_MODE != 'ingress':
+        # All modes except ingress require a token in the url
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             if payload.get("sub") != f"template={template_id}":

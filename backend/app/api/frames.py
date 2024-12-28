@@ -29,7 +29,6 @@ from app.api.auth import ALGORITHM, SECRET_KEY
 from app.config import config
 from app.utils.network import is_safe_host
 from app.redis import get_redis
-from app.config import Config, get_config
 from . import api_with_auth, api_no_auth
 
 
@@ -58,7 +57,7 @@ async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
 
 
 @api_with_auth.get("/frames/{id:int}/image_link", response_model=FrameImageLinkResponse)
-async def get_image_link(id: int, config: Config = Depends(get_config)):
+async def get_image_link(id: int):
     expire_minutes = 5
     now = datetime.utcnow()
     expire = now + timedelta(minutes=expire_minutes)
@@ -68,13 +67,14 @@ async def get_image_link(id: int, config: Config = Depends(get_config)):
     expires_in = int((expire - now).total_seconds())
 
     return {
-        "url": config.base_path + f"/api/frames/{id}/image?token={token}",
+        "url": config.ingress_path + f"/api/frames/{id}/image?token={token}",
         "expires_in": expires_in
     }
 
 @api_no_auth.get("/frames/{id:int}/image")
 async def api_frame_get_image(id: int, token: str, request: Request, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
     if config.HASSIO_RUN_MODE != 'ingress':
+        # All modes except ingress require a token in the url
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             if payload.get("sub") != f"frame={id}":

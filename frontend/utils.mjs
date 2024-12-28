@@ -53,7 +53,7 @@ export function copyIndexHtml(
   const scriptCode = `
         window.ESBUILD_LOAD_SCRIPT = async function (file) {
             try {
-                await import((window.FRAMEOS_APP_CONFIG?.base_path || '') + '/static/' + file)
+                await import((window.FRAMEOS_APP_CONFIG?.ingress_path || '') + '/static/' + file)
             } catch (error) {
                 console.error('Error loading chunk: "' + file + '"')
                 console.error(error)
@@ -80,7 +80,7 @@ export function copyIndexHtml(
   const cssLoader = `
         const link = document.createElement("link");
         link.rel = "stylesheet";
-        link.href = (window.FRAMEOS_APP_CONFIG?.base_path || '') + "/static/" + ${JSON.stringify(cssFile)};
+        link.href = (window.FRAMEOS_APP_CONFIG?.ingress_path || '') + "/static/" + ${JSON.stringify(cssFile)};
         document.head.appendChild(link)
     `
 

@@ -64,8 +64,8 @@ if serve_html:
 
     if config.HASSIO_RUN_MODE:
         frameos_app_config["HASSIO_RUN_MODE"] = config.HASSIO_RUN_MODE
-    if config.base_path:
-        frameos_app_config["base_path"] = config.base_path
+    if config.ingress_path:
+        frameos_app_config["ingress_path"] = config.ingress_path
 
     index_html = index_html.replace('<head>', f'<head><script>window.FRAMEOS_APP_CONFIG={json.dumps(frameos_app_config)}</script>')
 

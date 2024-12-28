@@ -13,7 +13,6 @@ def clear_env(monkeypatch):
     """
     monkeypatch.delenv("HASSIO_RUN_MODE", raising=False)
     monkeypatch.delenv("HASSIO_TOKEN", raising=False)
-    monkeypatch.delenv("HOSTNAME", raising=False)
     monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
 
 def _reload_app_and_config():
@@ -47,7 +46,7 @@ async def test_no_hassio_env(clear_env):
     app, conf = _reload_app_and_config()
     assert conf.HASSIO_TOKEN is None
     assert conf.HASSIO_RUN_MODE is None
-    assert conf.base_path == ""
+    assert conf.ingress_path == ""
 
     client = TestClient(app)
 
@@ -77,7 +76,7 @@ async def test_hassio_run_mode_public(clear_env, monkeypatch):
     app, conf = _reload_app_and_config()
     assert conf.HASSIO_TOKEN == "token"
     assert conf.HASSIO_RUN_MODE == "public"
-    assert conf.base_path == ""
+    assert conf.ingress_path == ""
 
     client = TestClient(app)
 
@@ -104,7 +103,6 @@ async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
     custom_ingress = "/hostname/ingress"
     monkeypatch.setenv("HASSIO_TOKEN", "token")
     monkeypatch.setenv("HASSIO_RUN_MODE", "ingress")
-    monkeypatch.setenv("HOSTNAME", "hostname")
     monkeypatch.setenv("SUPERVISOR_TOKEN", "token")
 
     def mock_requests_get(url, headers):
@@ -118,7 +116,7 @@ async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
 
     assert conf.HASSIO_TOKEN == "token"
     assert conf.HASSIO_RUN_MODE == "ingress"
-    assert conf.base_path == custom_ingress, f"Expected conf.base_path={custom_ingress}, got '{conf.base_path}'"
+    assert conf.ingress_path == custom_ingress, f"Expected conf.ingress_path={custom_ingress}, got '{conf.ingress_path}'"
 
     client = TestClient(app)
 
