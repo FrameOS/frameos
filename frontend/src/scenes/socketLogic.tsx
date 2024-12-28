@@ -22,48 +22,53 @@ export const socketLogic = kea<socketLogicType>([
       return
     }
 
-    cache.ws = new WebSocket(`${getBasePath()}/ws` + (token ? `?token=${token}` : ''))
-    cache.ws.onopen = function (event: any) {
-      console.log('🔵 Connected to the WebSocket server.')
-    }
+    function openConnection() {
+      cache.ws = new WebSocket(`${getBasePath()}/ws` + (token ? `?token=${token}` : ''))
+      cache.ws.onopen = function (event: any) {
+        console.log('🔵 Connected to the WebSocket server.')
+      }
 
-    cache.ws.onmessage = function (event: any) {
-      try {
-        const data = JSON.parse(event.data)
-        switch (data.event) {
-          case 'new_log':
-            actions.newLog(data.data)
-            break
-          case 'new_frame':
-            actions.newFrame(data.data)
-            break
-          case 'update_frame':
-            actions.updateFrame(data.data)
-            break
-          case 'delete_frame':
-            actions.deleteFrame(data.data)
-            break
-          case 'update_settings':
-            actions.updateSettings(data.data)
-            break
-          case 'new_metrics':
-            actions.newMetrics(data.data)
-            break
-          default:
-            console.log('🟡 Unhandled websocket event:', data)
+      cache.ws.onmessage = function (event: any) {
+        try {
+          const data = JSON.parse(event.data)
+          switch (data.event) {
+            case 'new_log':
+              actions.newLog(data.data)
+              break
+            case 'new_frame':
+              actions.newFrame(data.data)
+              break
+            case 'update_frame':
+              actions.updateFrame(data.data)
+              break
+            case 'delete_frame':
+              actions.deleteFrame(data.data)
+              break
+            case 'update_settings':
+              actions.updateSettings(data.data)
+              break
+            case 'new_metrics':
+              actions.newMetrics(data.data)
+              break
+            default:
+              console.log('🟡 Unhandled websocket event:', data)
+          }
+        } catch (err) {
+          console.error('🔴 Failed to parse message as JSON:', event.data)
         }
-      } catch (err) {
-        console.error('🔴 Failed to parse message as JSON:', event.data)
+      }
+
+      cache.ws.onerror = function (error: any) {
+        console.error('🔴 WebSocket error:', error)
+      }
+
+      cache.ws.onclose = function (event: any) {
+        console.log('🔴 WebSocket connection closed. Reconnecting in 1 sec.', event)
+        window.setTimeout(openConnection, 1000)
       }
     }
 
-    cache.ws.onerror = function (error: any) {
-      console.error('🔴 WebSocket error:', error)
-    }
-
-    cache.ws.onclose = function (event: any) {
-      console.log('🔴 WebSocket connection closed:', event)
-    }
+    openConnection()
   }),
   beforeUnmount(({ cache }) => {}),
 ])
