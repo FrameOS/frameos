@@ -30,7 +30,9 @@ export const newFrameForm = kea<newFrameFormType>([
         server_host:
           typeof window !== 'undefined'
             ? `${window.location.hostname}:${
-                window.location.port || (window.location.protocol === 'https:' ? 443 : 80)
+                window.location.port === '8123'
+                  ? '8989' // using ingress with home assistant
+                  : window.location.port || (window.location.protocol === 'https:' ? '443' : '80')
               }`
             : null,
       } as FrameType,
