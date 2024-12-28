@@ -70,7 +70,7 @@ class ProductionConfig(Config):
     def __init__(self):
         super().__init__()
         if self.SECRET_KEY is None:
-            if self.HASSIO_RUN_MODE is not None:
+            if self.HASSIO_TOKEN is not None:
                 self.SECRET_KEY = secrets.token_urlsafe(32)
             else:
                 raise ValueError('SECRET_KEY must be set in production')
