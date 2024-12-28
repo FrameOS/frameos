@@ -97,8 +97,7 @@ def register_ws_routes(app):
         try:
             while True:
                 data = await websocket.receive_text()
-                # Optionally handle incoming messages
-                await manager.send_personal_message("You said: " + data, websocket)
+                await manager.send_personal_message(json.dumps({'event': "pong", 'payload': data}), websocket)
         except WebSocketDisconnect:
             await manager.disconnect(websocket)
 

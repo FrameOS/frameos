@@ -50,6 +50,8 @@ export const socketLogic = kea<socketLogicType>([
             case 'new_metrics':
               actions.newMetrics(data.data)
               break
+            case 'pong':
+              break
             default:
               console.log('🟡 Unhandled websocket event:', data)
           }
@@ -61,10 +63,20 @@ export const socketLogic = kea<socketLogicType>([
       cache.ws.onerror = function (error: any) {
         console.error('🔴 WebSocket error:', error)
       }
+      cache.wsPing = setInterval(() => {
+        if (cache.ws) {
+          cache.ws.send('ping')
+        }
+      }, 30000)
 
       cache.ws.onclose = function (event: any) {
-        console.log('🔴 WebSocket connection closed. Reconnecting in 1 sec.', event)
-        window.setTimeout(openConnection, 1000)
+        console.log('🔴 WebSocket connection closed. Reconnecting...', event)
+        clearInterval(cache.wsPing)
+        if (event.code === 1000) {
+          window.setTimeout(openConnection, 0)
+        } else {
+          window.setTimeout(openConnection, 1000)
+        }
       }
     }
 

@@ -70,7 +70,8 @@ export const entityImagesModel = kea<entityImagesModelType>([
       (entityImageInfos, entityImageTimestamps) => {
         return (entity: string) => {
           if (inHassioIngress()) {
-            return `${getBasePath()}/api/${entity}/image?token`
+            const timestamp = entityImageTimestamps[entity] ?? -1
+            return `${getBasePath()}/api/${entity}/image?token&t=${timestamp}`
           }
 
           const info = entityImageInfos[entity]
