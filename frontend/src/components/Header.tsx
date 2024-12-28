@@ -1,6 +1,8 @@
 import { A } from 'kea-router'
 import React from 'react'
 import { H5 } from './H5'
+import { urls } from '../urls'
+import { getBasePath } from '../utils/getBasePath'
 
 interface HeaderProps {
   title: React.ReactNode
@@ -16,9 +18,9 @@ export function Header({ title, version, right, buttons }: HeaderProps) {
       style={{ height: 60 }}
     >
       <div className="truncate flex items-center justify-center gap-3">
-        <A href="/">
+        <A href={urls.frames()}>
           <img
-            src="/img/logo/dark-mark-small.png"
+            src={getBasePath() + '/img/logo/dark-mark-small.png'}
             className="w-[28px] h-[28px] inline-block align-center"
             alt="FrameOS"
           />

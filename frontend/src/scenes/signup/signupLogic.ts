@@ -1,6 +1,7 @@
 import { kea, path } from 'kea'
 import { forms } from 'kea-forms'
 import type { signupLogicType } from './signupLogicType'
+import { urls } from '../../urls'
 
 export interface SignupForm {
   email: string
@@ -39,7 +40,7 @@ export const signupLogic = kea<signupLogicType>([
           if (response.ok) {
             const json = await response.json()
             localStorage.setItem('token', json.access_token)
-            window.location.href = '/'
+            window.location.href = urls.frames()
           } else {
             let errors = {}
             try {

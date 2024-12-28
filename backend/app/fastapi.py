@@ -1,18 +1,19 @@
 import asyncio
+import json
 import os
 import contextlib
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi import FastAPI, Request, Depends
 from app.api.auth import get_current_user
-from app.api import public_api as public_api_router, private_api as private_api_router
+from app.api import api_no_auth, api_with_auth, api_public
 from fastapi.middleware.gzip import GZipMiddleware
 from app.middleware import GzipRequestMiddleware
 
 from app.websockets import register_ws_routes, redis_listener
-from app.config import get_config
+from app.config import config
 from app.utils.sentry import initialize_sentry
 
 @contextlib.asynccontextmanager
@@ -29,44 +30,71 @@ app.add_middleware(GzipRequestMiddleware)
 
 register_ws_routes(app)
 
-app.include_router(public_api_router, prefix="/api")
-app.include_router(private_api_router, prefix="/api", dependencies=[Depends(get_current_user)])
+if config.HASSIO_RUN_MODE:
+    if config.HASSIO_RUN_MODE == "public":
+        app.include_router(api_public, prefix="/api")
+    elif config.HASSIO_RUN_MODE == "ingress":
+        app.include_router(api_public, prefix="/api")
+        app.include_router(api_no_auth, prefix="/api")
+        app.include_router(api_with_auth, prefix="/api")
+    else:
+        raise ValueError("Invalid HASSIO_RUN_MODE")
+else:
+    app.include_router(api_public, prefix="/api")
+    app.include_router(api_no_auth, prefix="/api")
+    app.include_router(api_with_auth, prefix="/api", dependencies=[Depends(get_current_user)])
 
-app.mount("/assets", StaticFiles(directory="../frontend/dist/assets"), name="assets")
-app.mount("/img", StaticFiles(directory="../frontend/dist/img"), name="img")
-app.mount("/static", StaticFiles(directory="../frontend/dist/static"), name="static")
+# Serve HTML and static files in all cases except for public HASSIO_RUN_MODE
+serve_html = config.HASSIO_RUN_MODE != "public"
+if serve_html:
+    app.mount("/assets", StaticFiles(directory="../frontend/dist/assets"), name="assets")
+    app.mount("/img", StaticFiles(directory="../frontend/dist/img"), name="img")
+    app.mount("/static", StaticFiles(directory="../frontend/dist/static"), name="static")
 
-non_404_routes = ("/api", "/assets", "/img", "/static")
+    # Public config for the frontend
+    frameos_app_config = {}
+    try:
+        index_html = open("../frontend/dist/index.html").read()
+    except FileNotFoundError:
+        if config.TEST:
+            # don't need the compiled frontend when testing
+            index_html = open("../frontend/src/index.html").read()
+        else:
+            raise
 
-@app.get("/")
-async def read_index():
-    index_path = os.path.join("../frontend/dist", "index.html")
-    return FileResponse(index_path)
+    if config.HASSIO_RUN_MODE:
+        frameos_app_config["HASSIO_RUN_MODE"] = config.HASSIO_RUN_MODE
+    if config.ingress_path:
+        frameos_app_config["ingress_path"] = config.ingress_path
 
-@app.exception_handler(StarletteHTTPException)
-async def custom_404_handler(request: Request, exc: StarletteHTTPException):
-    if os.environ.get("TEST") == "1" or exc.status_code != 404:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"detail": exc.detail or f"Error {exc.status_code}"}
-        )
-    index_path = os.path.join("../frontend/dist", "index.html")
-    return FileResponse(index_path)
+    index_html = index_html.replace('<head>', f'<head><script>window.FRAMEOS_APP_CONFIG={json.dumps(frameos_app_config)}</script>')
 
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    if os.environ.get("TEST") == "1":
-        return JSONResponse(
-            status_code=422,
-            content={"detail": exc.errors()}
-        )
-    index_path = os.path.join("../frontend/dist", "index.html")
-    return FileResponse(index_path)
+    @app.get("/")
+    async def read_index():
+        return HTMLResponse(index_html)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def custom_404_handler(request: Request, exc: StarletteHTTPException):
+        if os.environ.get("TEST") == "1" or exc.status_code != 404:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": exc.detail or f"Error {exc.status_code}"}
+            )
+        return HTMLResponse(index_html)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        if os.environ.get("TEST") == "1":
+            return JSONResponse(
+                status_code=422,
+                content={"detail": exc.errors()}
+            )
+        return HTMLResponse(index_html)
 
 if __name__ == '__main__':
     # run migrations
-    if get_config().DEBUG:
-        database_url = get_config().DATABASE_URL
+    if config.DEBUG:
+        database_url = config.DATABASE_URL
         if database_url.startswith("sqlite:///../db/"):
             os.makedirs('../db', exist_ok=True)
     # start server

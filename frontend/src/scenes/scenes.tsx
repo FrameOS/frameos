@@ -1,4 +1,6 @@
 import { lazy } from 'react'
+import { urls } from '../urls'
+import { getBasePath } from '../utils/getBasePath'
 
 export const scenes = {
   error404: () => <div>404</div>,
@@ -9,10 +11,12 @@ export const scenes = {
   signup: lazy(() => import('./signup/Signup')),
 }
 
-export const routes = {
-  '/': 'frames',
-  '/frames/:id': 'frame',
-  '/settings': 'settings',
-  '/login': 'login',
-  '/signup': 'signup',
-}
+export const getRoutes = () =>
+  ({
+    ...(getBasePath() ? { [getBasePath() + '/']: 'frames' } : {}),
+    [urls.frames()]: 'frames',
+    [urls.frame(':id')]: 'frame',
+    [urls.settings()]: 'settings',
+    [urls.login()]: 'login',
+    [urls.signup()]: 'signup',
+  } as const)

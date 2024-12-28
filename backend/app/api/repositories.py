@@ -15,13 +15,13 @@ from app.schemas.repositories import (
     RepositoryResponse,
     RepositoriesListResponse
 )
-from . import private_api
+from . import api_with_auth
 
 FRAMEOS_SAMPLES_URL = "https://repo.frameos.net/samples/repository.json"
 FRAMEOS_GALLERY_URL = "https://repo.frameos.net/gallery/repository.json"
 
 
-@private_api.post("/repositories", response_model=RepositoryResponse, status_code=201)
+@api_with_auth.post("/repositories", response_model=RepositoryResponse, status_code=201)
 async def create_repository(data: RepositoryCreateRequest, db: Session = Depends(get_db)):
     url = data.url
     if not url:
@@ -41,7 +41,7 @@ async def create_repository(data: RepositoryCreateRequest, db: Session = Depends
         logging.error(f'Database error: {e}')
         raise HTTPException(status_code=500, detail="Database error")
 
-@private_api.get("/repositories", response_model=RepositoriesListResponse)
+@api_with_auth.get("/repositories", response_model=RepositoriesListResponse)
 async def get_repositories(db: Session = Depends(get_db)):
     try:
         # Remove old repo if it exists
@@ -75,7 +75,7 @@ async def get_repositories(db: Session = Depends(get_db)):
         logging.error(f'Database error: {e}')
         raise HTTPException(status_code=500, detail="Database error")
 
-@private_api.get("/repositories/{repository_id}", response_model=RepositoryResponse)
+@api_with_auth.get("/repositories/{repository_id}", response_model=RepositoryResponse)
 async def get_repository(repository_id: str, db: Session = Depends(get_db)):
     try:
         repository = db.get(Repository, repository_id)
@@ -87,7 +87,7 @@ async def get_repository(repository_id: str, db: Session = Depends(get_db)):
         logging.error(f'Database error: {e}')
         raise HTTPException(status_code=500, detail="Database error")
 
-@private_api.patch("/repositories/{repository_id}", response_model=RepositoryResponse)
+@api_with_auth.patch("/repositories/{repository_id}", response_model=RepositoryResponse)
 async def update_repository(repository_id: str, data: RepositoryUpdateRequest, db: Session = Depends(get_db)):
     try:
         repository = db.get(Repository, repository_id)
@@ -106,7 +106,7 @@ async def update_repository(repository_id: str, data: RepositoryUpdateRequest, d
         logging.error(f'Database error: {e}')
         raise HTTPException(status_code=500, detail="Database error")
 
-@private_api.delete("/repositories/{repository_id}")
+@api_with_auth.delete("/repositories/{repository_id}")
 async def delete_repository(repository_id: str, db: Session = Depends(get_db)):
     try:
         repository = db.get(Repository, repository_id)

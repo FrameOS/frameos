@@ -150,8 +150,8 @@
       }
     },
     "pixie": {
-      "version": "5.0.6",
-      "vcsRevision": "f3e73f722fbb0e5d496fbc59ee860a9fd49983de",
+      "version": "5.0.7",
+      "vcsRevision": "3b65ca5605a1156987041bf0295449e4c56128cf",
       "url": "https://github.com/treeform/pixie",
       "downloadMethod": "git",
       "dependencies": [
@@ -164,7 +164,7 @@
         "crunchy"
       ],
       "checksums": {
-        "sha1": "fd4c5d12bba41aac760fc86c2de820e1a367dbfd"
+        "sha1": "64999611cd1093e28b62ed80e695783839441538"
       }
     },
     "unpack": {

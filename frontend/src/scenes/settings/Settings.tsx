@@ -15,6 +15,7 @@ import { Masonry } from '../../components/Masonry'
 export function Settings() {
   const { savedSettings, savedSettingsLoading, settingsChanged } = useValues(settingsLogic)
   const { submitSettings, newKey } = useActions(settingsLogic)
+  const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
 
   return (
@@ -25,7 +26,7 @@ export function Settings() {
             title="Settings"
             right={
               <div className="flex gap-2">
-                <Button onClick={logout}>Logout</Button>
+                {!isHassioIngress ? <Button onClick={logout}>Logout</Button> : null}
                 <Button color={settingsChanged ? 'primary' : 'secondary'} onClick={submitSettings}>
                   Save
                 </Button>

@@ -2,8 +2,10 @@ import { actions, kea, listeners, path, reducers } from 'kea'
 
 import type { sceneLogicType } from './sceneLogicType'
 import { urlToAction } from 'kea-router'
-import { routes } from './scenes'
-import { apiFetch } from '../utils/apiFetch'
+import { getRoutes } from './scenes'
+import { getBasePath } from '../utils/getBasePath'
+import { urls } from '../urls'
+import { inHassioIngress } from '../utils/inHassioIngress'
 
 // Note: this should not connect to any other logic that pulls in data, as it's used even when the user is not logged in
 export const sceneLogic = kea<sceneLogicType>([
@@ -12,7 +14,9 @@ export const sceneLogic = kea<sceneLogicType>([
     setScene: (scene, params) => ({ scene, params }),
     logout: true,
   }),
-  reducers({
+  reducers(() => ({
+    basePath: [getBasePath(), {}],
+    isHassioIngress: [inHassioIngress(), {}],
     scene: [
       null as string | null,
       {
@@ -25,10 +29,10 @@ export const sceneLogic = kea<sceneLogicType>([
         setScene: (_, payload) => payload.params || {},
       },
     ],
-  }),
+  })),
   urlToAction(({ actions }) => {
     return Object.fromEntries(
-      Object.entries(routes).map(([path, scene]) => {
+      Object.entries(getRoutes()).map(([path, scene]) => {
         return [path, (params) => actions.setScene(scene, params)]
       })
     )
@@ -36,7 +40,7 @@ export const sceneLogic = kea<sceneLogicType>([
   listeners(({ actions }) => ({
     logout: async () => {
       localStorage.removeItem('token')
-      location.href = '/'
+      location.href = urls.frames()
     },
   })),
 ])

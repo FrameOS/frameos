@@ -7,7 +7,7 @@ from fastapi import WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
 
-from app.config import get_config
+from app.config import config
 from app.models.user import User
 
 class ConnectionManager:
@@ -42,7 +42,6 @@ class ConnectionManager:
 manager = ConnectionManager() # Local clients
 
 async def redis_listener():
-    config = get_config()
     redis_sub = create_redis(config.REDIS_URL, decode_responses=True)
     try:
         pubsub = redis_sub.pubsub()
@@ -61,7 +60,7 @@ async def redis_listener():
         await redis_sub.close()
 
 async def publish_message(redis: Redis, event: str, data: dict):
-    msg = {"event": event, "data": data, "instance_id": get_config().INSTANCE_ID}
+    msg = {"event": event, "data": data, "instance_id": config.INSTANCE_ID}
 
     # Broadcast locally first
     await manager.broadcast(json.dumps(msg))
@@ -72,32 +71,33 @@ async def publish_message(redis: Redis, event: str, data: dict):
 def register_ws_routes(app):
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
-        token = websocket.query_params.get('token')
-        if not token:
-            await websocket.close(code=1008, reason="Missing token")
-            return
+        # Full access in the HASSIO ingress mode
+        if config.HASSIO_RUN_MODE != "ingress":
+            token = websocket.query_params.get('token')
+            if not token:
+                await websocket.close(code=1008, reason="Missing token")
+                return
 
-        try:
-            from app.api.auth import ALGORITHM, SECRET_KEY
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            user_email = payload.get("sub")
-            if not user_email:
-                raise ValueError("Invalid token")
-        except JWTError:
-            await websocket.close(code=1008, reason="Invalid token")
-            return
+            try:
+                from app.api.auth import ALGORITHM, SECRET_KEY
+                payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+                user_email = payload.get("sub")
+                if not user_email:
+                    raise ValueError("Invalid token")
+            except JWTError:
+                await websocket.close(code=1008, reason="Invalid token")
+                return
 
-        user = db.query(User).filter(User.email == user_email).first()
-        if user is None:
-            await websocket.close(code=1008, reason="User not found")
-            return
+            user = db.query(User).filter(User.email == user_email).first()
+            if user is None:
+                await websocket.close(code=1008, reason="User not found")
+                return
 
         await manager.connect(websocket)
         try:
             while True:
                 data = await websocket.receive_text()
-                # Optionally handle incoming messages
-                await manager.send_personal_message("You said: " + data, websocket)
+                await manager.send_personal_message(json.dumps({'event': "pong", 'payload': data}), websocket)
         except WebSocketDisconnect:
             await manager.disconnect(websocket)
 

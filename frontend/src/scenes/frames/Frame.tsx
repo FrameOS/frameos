@@ -8,6 +8,7 @@ import { TrashIcon } from '@heroicons/react/24/solid'
 import { useActions } from 'kea'
 import { framesModel } from '../../models/framesModel'
 import { FrameImage } from '../../components/FrameImage'
+import { urls } from '../../urls'
 
 interface FrameProps {
   frame: FrameType
@@ -30,12 +31,12 @@ export function Frame({ frame }: FrameProps): JSX.Element {
           ]}
         />
       </div>
-      <A href={`/frames/${frame.id}`}>
+      <A href={urls.frame(frame.id)}>
         <FrameImage frameId={frame.id} className="p-2 m-auto" refreshable={false} />
       </A>
       <div className="flex justify-between px-4 pt-2 mb-2">
         <H5 className="text-ellipsis overflow-hidden">
-          <A href={`/frames/${frame.id}`}>{frame.name || frameHost(frame)}</A>
+          <A href={urls.frame(frame.id)}>{frame.name || frameHost(frame)}</A>
         </H5>
       </div>
       <div className="px-4 pb-4">

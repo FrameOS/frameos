@@ -7,6 +7,7 @@ import { framesModel } from '../models/framesModel'
 import { appsModel } from '../models/appsModel'
 import { templatesModel } from '../models/templatesModel'
 import { entityImagesModel } from '../models/entityImagesModel'
+import { inHassioIngress } from '../utils/inHassioIngress'
 
 export function DelayedLoading() {
   const [delayed, setDelayed] = useState(false)
@@ -53,7 +54,7 @@ export function LoggedOutApp() {
 
 export function App() {
   const { scene, params } = useValues(sceneLogic)
-  if (scene === 'login' || scene === 'signup') {
+  if (!inHassioIngress() && (scene === 'login' || scene === 'signup')) {
     return <LoggedOutApp />
   }
   return <LoggedInApp />

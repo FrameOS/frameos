@@ -6,13 +6,13 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.settings import get_settings_dict, Settings
 from app.schemas.settings import SettingsResponse, SettingsUpdateRequest
-from . import private_api
+from . import api_with_auth
 
-@private_api.get("/settings", response_model=SettingsResponse)
+@api_with_auth.get("/settings", response_model=SettingsResponse)
 async def get_settings(db: Session = Depends(get_db)):
     return get_settings_dict(db)
 
-@private_api.post("/settings", response_model=SettingsResponse)
+@api_with_auth.post("/settings", response_model=SettingsResponse)
 async def set_settings(data: SettingsUpdateRequest, db: Session = Depends(get_db)):
     payload = data.to_dict()
     if not payload:

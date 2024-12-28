@@ -9,6 +9,7 @@ import { version } from '../../../../version.json'
 import { Button } from '../../components/Button'
 import { newFrameForm } from './newFrameForm'
 import { Masonry } from '../../components/Masonry'
+import { urls } from '../../urls'
 
 export function Frames() {
   const { framesList } = useValues(framesModel)
@@ -23,7 +24,7 @@ export function Frames() {
             title="FrameOS"
             version={version}
             right={
-              <Button color="secondary" onClick={() => router.actions.push('/settings')}>
+              <Button color="secondary" onClick={() => router.actions.push(urls.settings())}>
                 Settings
               </Button>
             }

@@ -9,6 +9,7 @@ import { Select } from '../../components/Select'
 import { useActions, useValues } from 'kea'
 import { devices } from '../../devices'
 import { A } from 'kea-router'
+import { urls } from '../../urls'
 
 export function NewFrame(): JSX.Element {
   const { hideForm, resetNewFrame } = useActions(newFrameForm)
@@ -25,7 +26,7 @@ export function NewFrame(): JSX.Element {
             label={
               <>
                 SSH connection string{' '}
-                <A href="/settings" className="text-blue-400 hover:underline">
+                <A href={urls.settings()} className="text-blue-400 hover:underline">
                   (setup keys)
                 </A>
               </>
