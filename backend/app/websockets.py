@@ -7,10 +7,8 @@ from fastapi import WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
 
-from app.config import get_config
+from app.config import config
 from app.models.user import User
-
-config = get_config()
 
 class ConnectionManager:
     def __init__(self):
@@ -44,7 +42,6 @@ class ConnectionManager:
 manager = ConnectionManager() # Local clients
 
 async def redis_listener():
-    config = get_config()
     redis_sub = create_redis(config.REDIS_URL, decode_responses=True)
     try:
         pubsub = redis_sub.pubsub()
@@ -63,7 +60,7 @@ async def redis_listener():
         await redis_sub.close()
 
 async def publish_message(redis: Redis, event: str, data: dict):
-    msg = {"event": event, "data": data, "instance_id": get_config().INSTANCE_ID}
+    msg = {"event": event, "data": data, "instance_id": config.INSTANCE_ID}
 
     # Broadcast locally first
     await manager.broadcast(json.dumps(msg))
@@ -72,10 +69,10 @@ async def publish_message(redis: Redis, event: str, data: dict):
     await redis.publish("broadcast_channel", json.dumps(msg))
 
 def register_ws_routes(app):
-    @app.websocket(config.base_path + "/ws")
+    @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
         # Full access in the HASSIO ingress mode
-        if not get_config().HASSIO_MODE == "ingress":
+        if config.HASSIO_RUN_MODE != "ingress":
             token = websocket.query_params.get('token')
             if not token:
                 await websocket.close(code=1008, reason="Missing token")

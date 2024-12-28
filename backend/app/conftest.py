@@ -9,14 +9,14 @@ import pytest_asyncio  # noqa: E402
 from arq import ArqRedis as Redis  # noqa: E402
 from httpx import AsyncClient  # noqa: E402
 from httpx._transports.asgi import ASGITransport  # noqa: E402
-from app.config import get_config  # noqa: E402
+from app.config import config  # noqa: E402
 from app.fastapi import app  # noqa: E402
 from app.database import SessionLocal, engine, Base  # noqa: E402
 from app.models.user import User  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def setup_and_teardown_db():
-    if not get_config().TEST:
+    if not config.TEST:
         raise ValueError("Tests should only be run with TEST=1 (or via bin/tests) as doing otherwise may wipe your database")
 
     # Create all tables before each test
@@ -35,7 +35,7 @@ async def db():
 
 @pytest_asyncio.fixture
 async def redis():
-    client = Redis.from_url(get_config().REDIS_URL)
+    client = Redis.from_url(config.REDIS_URL)
     try:
         yield client
     finally:

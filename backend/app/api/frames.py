@@ -26,6 +26,7 @@ from app.schemas.frames import (
     FrameAssetsResponse, FrameCreateRequest, FrameUpdateRequest
 )
 from app.api.auth import ALGORITHM, SECRET_KEY
+from app.config import config
 from app.utils.network import is_safe_host
 from app.redis import get_redis
 from app.config import Config, get_config
@@ -73,12 +74,13 @@ async def get_image_link(id: int, config: Config = Depends(get_config)):
 
 @api_no_auth.get("/frames/{id:int}/image")
 async def api_frame_get_image(id: int, token: str, request: Request, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        if payload.get("sub") != f"frame={id}":
+    if config.HASSIO_RUN_MODE != 'ingress':
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            if payload.get("sub") != f"frame={id}":
+                raise HTTPException(status_code=401, detail="Unauthorized")
+        except JWTError:
             raise HTTPException(status_code=401, detail="Unauthorized")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Unauthorized")
 
     frame = db.get(Frame, id)
     if frame is None:

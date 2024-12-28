@@ -8,7 +8,7 @@ from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 
-from app.config import get_config
+from app.config import config
 from app.models.user import User
 from app.database import get_db
 from app.redis import get_redis
@@ -17,7 +17,6 @@ from app.schemas.auth import Token, UserSignup
 
 from . import api_no_auth
 
-config = get_config()
 SECRET_KEY = config.SECRET_KEY
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 7 * 24 * 60  # 7 days
@@ -35,14 +34,6 @@ def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] 
     return encoded_jwt
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    # if config.HASSIO_MODE == "ingress":
-    #     user = db.query(User).first()
-    #     if user is None:
-    #         user = User(email="frameos@homeassistant.local", password="")
-    #         db.add(user)
-    #         db.commit()
-    #     return user
-
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -63,8 +54,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
 
 @api_no_auth.post("/login", response_model=Token)
 async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
-    if config.HASSIO_MODE is not None:
-        raise HTTPException(status_code=401, detail="Login not allowed with HASSIO_MODE")
+    if config.HASSIO_RUN_MODE is not None:
+        raise HTTPException(status_code=401, detail="Login not allowed with HASSIO_RUN_MODE")
     email = form_data.username
     password = form_data.password
     ip = request.client.host
@@ -88,8 +79,8 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
 
 @api_no_auth.post("/signup")
 async def signup(data: UserSignup, db: Session = Depends(get_db)):
-    if config.HASSIO_MODE is not None:
-        raise HTTPException(status_code=401, detail="Signup not allowed with HASSIO_MODE")
+    if config.HASSIO_RUN_MODE is not None:
+        raise HTTPException(status_code=401, detail="Signup not allowed with HASSIO_RUN_MODE")
 
     # Check if there is already a user registered (one-user system)
     if db.query(User).first() is not None:

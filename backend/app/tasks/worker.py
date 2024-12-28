@@ -15,12 +15,11 @@ from app.tasks.deploy_frame import deploy_frame_task
 from app.tasks.reset_frame import reset_frame_task
 from app.tasks.restart_frame import restart_frame_task
 from app.tasks.stop_frame import stop_frame_task
-from app.config import get_config
+from app.config import config
 from app.redis import create_redis_connection
 from app.database import SessionLocal
 
-
-REDIS_SETTINGS = RedisSettings.from_dsn(get_config().REDIS_URL)
+REDIS_SETTINGS = RedisSettings.from_dsn(config.REDIS_URL)
 
 # Optional: on_startup logic
 async def startup(ctx: Dict[str, Any]):

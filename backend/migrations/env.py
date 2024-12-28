@@ -7,7 +7,7 @@ from alembic import context
 # Import your Base from the FastAPI application
 from app.database import Base
 from app.models import *  # noqa
-from app.config import get_config
+from app.config import config as app_config
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -17,7 +17,7 @@ config = context.config
 fileConfig(config.config_file_name)
 
 # Set your DB URL from environment or alembic.ini
-config.set_main_option("sqlalchemy.url", get_config().DATABASE_URL)
+config.set_main_option("sqlalchemy.url", app_config.DATABASE_URL)
 
 target_metadata = Base.metadata
 

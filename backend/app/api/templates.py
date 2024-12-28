@@ -13,6 +13,7 @@ from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.config import config
 from arq import ArqRedis as Redis
 from app.models.template import Template
 from app.models.frame import Frame
@@ -255,15 +256,13 @@ async def get_image_link(template_id: str, config: Config = Depends(get_config))
 
 @api_no_auth.get("/templates/{template_id}/image")
 async def get_template_image(template_id: str, token: str, request: Request, db: Session = Depends(get_db)):
-    """
-    Access to image is via token. This is how we originally protected direct image access.
-    """
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        if payload.get("sub") != f"template={template_id}":
+    if config.HASSIO_RUN_MODE != 'ingress':
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            if payload.get("sub") != f"template={template_id}":
+                raise HTTPException(status_code=401, detail="Unauthorized")
+        except JWTError:
             raise HTTPException(status_code=401, detail="Unauthorized")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Unauthorized")
 
     template = db.get(Template, template_id)
     if not template or not template.image:

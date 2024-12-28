@@ -20,19 +20,21 @@ echo "⛵️ Launching Arq worker"
 arq app.tasks.worker.WorkerSettings &
 
 # 2. Check for Home Assistant Ingress
-if [ -n "$HASSIO_INGRESS_PATH" ]; then
-  echo "🔦 Detected HASSIO_INGRESS_PATH -> Running two uvicorns: public (8989) + ingress (8990)"
+if [ -n "$HASSIO_TOKEN" ]; then
+  env
+  
+  echo "🔦 Detected HASSIO_TOKEN -> Running two uvicorns: public (8989) + ingress (8990)"
 
   # Public server on port 8989 in background
-  echo "🔓 Launching HASSIO_MODE=public uvicorn on port 8989"
-  HASSIO_MODE="public" uvicorn app.fastapi:app \
+  echo "🔓 Launching HASSIO_RUN_MODE=public uvicorn on port 8989"
+  HASSIO_RUN_MODE="public" uvicorn app.fastapi:app \
       --host 0.0.0.0 \
       --port 8989 \
       --reload &
 
   # Ingress server on port 8990 in foreground
-  echo "🔒 Launching HASSIO_MODE=ingress uvicorn on port 8990"
-  HASSIO_MODE="ingress" uvicorn app.fastapi:app \
+  echo "🔒 Launching HASSIO_RUN_MODE=ingress uvicorn on port 8990"
+  HASSIO_RUN_MODE="ingress" uvicorn app.fastapi:app \
       --host 0.0.0.0 \
       --port 8990 \
       --reload

@@ -3,6 +3,8 @@ import { socketLogic } from '../scenes/socketLogic'
 import type { entityImagesModelType } from './entityImagesModelType'
 import { apiFetch } from '../utils/apiFetch'
 import { useEffect, useState } from 'react'
+import { inHassioIngress } from '../utils/inHassioIngress'
+import { getBasePath } from '../utils/getBasePath'
 
 export interface EntityImageInfo {
   url: string
@@ -67,6 +69,10 @@ export const entityImagesModel = kea<entityImagesModelType>([
       (s) => [s.entityImageInfos, s.entityImageTimestamps],
       (entityImageInfos, entityImageTimestamps) => {
         return (entity: string) => {
+          if (inHassioIngress()) {
+            return `${getBasePath()}/api/${entity}/image`
+          }
+
           const info = entityImageInfos[entity]
           const now = Math.floor(Date.now() / 1000)
           if (!info || !info.expiresAt || !info.url || now >= info.expiresAt) {

@@ -25,3 +25,4 @@ npm-debug.log
 .env
 .aws
 frameos/nimble.paths
+db
