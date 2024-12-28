@@ -81,5 +81,4 @@ RUN rm -rf /app/frontend && mv /tmp/frontend /app/
 
 EXPOSE 8989
 
-# Start huey in the background and then run the Flask application
 CMD ["./docker-entrypoint.sh"]
