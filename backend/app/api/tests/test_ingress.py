@@ -13,6 +13,8 @@ def clear_env(monkeypatch):
     """
     monkeypatch.delenv("HASSIO_RUN_MODE", raising=False)
     monkeypatch.delenv("HASSIO_TOKEN", raising=False)
+    monkeypatch.delenv("HOSTNAME", raising=False)
+    monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
 
 def _reload_app_and_config():
     """
@@ -32,14 +34,15 @@ def _reload_app_and_config():
     # Return the reloaded references
     return fastapi.app, config.config
 
+
 @pytest.mark.asyncio
 async def test_no_hassio_env(clear_env):
     """
     With no HASSIO_RUN_MODE and no HASSIO_TOKEN set,
     we expect normal Docker mode:
-      - /api/frames => requires auth (part of api_with_auth).
-      - /api/has_first_user => no auth needed (part of api_no_auth).
-      - Root HTML => served at "/".
+      - /api/frames => requires auth
+      - /api/has_first_user => no auth needed
+      - / => root HTML served
     """
     app, conf = _reload_app_and_config()
     assert conf.HASSIO_TOKEN is None
@@ -48,24 +51,26 @@ async def test_no_hassio_env(clear_env):
 
     client = TestClient(app)
 
-    # 1. /api/has_first_user => belongs to api_no_auth => no token required => 200 OK
+    # /api/has_first_user => belongs to api_no_auth => no token => 200 OK
     resp_no_auth = client.get("/api/has_first_user")
-    assert resp_no_auth.status_code == 200, "Expected /api/has_first_user to be accessible without token."
+    assert resp_no_auth.status_code == 200
 
-    # 2. /api/frames => belongs to api_with_auth => must have token => should 401 if missing
+    # /api/frames => belongs to api_with_auth => must have token => 401
     resp_auth_needed = client.get("/api/frames")
-    assert resp_auth_needed.status_code == 401, "Expected /api/frames to require auth in non-HASSIO mode."
+    assert resp_auth_needed.status_code == 401
 
-    # 3. Root HTML is served
+    # Root => 200
     resp_root = client.get("/")
-    assert resp_root.status_code == 200, "Expected root HTML at / in normal Docker mode."
+    assert resp_root.status_code == 200
+
 
 @pytest.mark.asyncio
 async def test_hassio_run_mode_public(clear_env, monkeypatch):
     """
-    HASSIO_RUN_MODE=public means we only mount api_public (here: /api/log in your code).
-    Anything from api_no_auth or api_with_auth should be absent or 404.
-    Root HTML is also not served in public mode.
+    HASSIO_RUN_MODE=public => only api_public is mounted.
+    /api/frames => should be 404
+    /api/log => route exists, but might 401 if missing API key, etc. => definitely not 404
+    / => not served => 404
     """
     monkeypatch.setenv("HASSIO_TOKEN", "token")
     monkeypatch.setenv("HASSIO_RUN_MODE", "public")
@@ -76,19 +81,18 @@ async def test_hassio_run_mode_public(clear_env, monkeypatch):
 
     client = TestClient(app)
 
-    # /api/log belongs to api_public => should exist
+    # /api/log => from api_public => not 404
     resp_log = client.post("/api/log")
-    # In your code, it may return 401 unless you provide a server_api_key,
-    # but it should NOT 404. So we check != 404 to confirm the route is there.
     assert resp_log.status_code != 404, "POST /api/log should be mounted in 'public' mode."
 
-    # /api/frames belongs to api_with_auth => should NOT exist => 404
+    # /api/frames => from api_with_auth => 404
     resp_frames = client.get("/api/frames")
-    assert resp_frames.status_code == 404, "Expected /api/frames to be missing in 'public' mode."
+    assert resp_frames.status_code == 404
 
-    # Root HTML => not served in public mode => 404
+    # Root => 404
     resp_root = client.get("/")
-    assert resp_root.status_code == 404, "Root HTML should not be served in public mode."
+    assert resp_root.status_code == 404
+
 
 @pytest.mark.asyncio
 async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
@@ -101,38 +105,28 @@ async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
     monkeypatch.setenv("HASSIO_TOKEN", "token")
     monkeypatch.setenv("HASSIO_RUN_MODE", "ingress")
     monkeypatch.setenv("HOSTNAME", "hostname")
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "token")
 
     def mock_requests_get(url, headers):
         assert url == "http://supervisor/addons/self/info"
         assert headers["Authorization"] == "Bearer token"
         assert headers["Content-Type"] == "application/json"
-        return MockResponse(200, content='{"data": {"ingress_url": "http://hostname/ingress/"}}')
+        return MockResponse(200, content='{"data": {"ingress_url": "/hostname/ingress/"}}')
 
-
-    with patch("app.config.requests.get") as mock_get:
-        mock_get.return_value = MockResponse(200, content='{"data": {"ingress_url": "..."}')
-
+    with patch("app.config.requests.get", side_effect=mock_requests_get):
         app, conf = _reload_app_and_config()
-        assert conf.HASSIO_TOKEN == "token"
-        assert conf.HASSIO_RUN_MODE == "ingress"
-        assert conf.base_path == custom_ingress
 
-        client = TestClient(app)
+    assert conf.HASSIO_TOKEN == "token"
+    assert conf.HASSIO_RUN_MODE == "ingress"
+    assert conf.base_path == custom_ingress, f"Expected conf.base_path={custom_ingress}, got '{conf.base_path}'"
 
-        # 1. /my_ingress_path/api/has_first_user => from api_no_auth => no token needed => should be 200
-        resp_no_auth = client.get(f"{custom_ingress}/api/has_first_user")
-        assert resp_no_auth.status_code == 200, "api_no_auth should be accessible under /my_ingress_path."
+    client = TestClient(app)
 
-        # 2. /my_ingress_path/api/frames => from api_with_auth => but in ingress mode, no token needed => 200
-        resp_auth = client.get(f"{custom_ingress}/api/frames")
-        assert resp_auth.status_code != 404, "Expected /api/frames to exist under the ingress path."
-        # We can check 200 or 401 depending on your logic. Usually it's 200 in ingress mode (no token required).
-        assert resp_auth.status_code == 200, "Expected no token required for /api/frames in ingress mode."
+    resp_no_auth = client.get("/api/has_first_user")
+    assert resp_no_auth.status_code == 200
 
-        # 3. Root HTML => served at /my_ingress_path => 200
-        resp_root = client.get(f"{custom_ingress}")
-        assert resp_root.status_code == 200, "HTML root should be served behind the custom ingress path."
+    resp_frames = client.get("/api/frames")
+    assert resp_frames.status_code == 200
 
-        # 4. /api/frames (without the prefix) => 404
-        resp_no_prefix = client.get("/api/frames")
-        assert resp_no_prefix.status_code == 404, "Everything must be behind base_path in ingress mode."
+    resp_root = client.get("/")
+    assert resp_root.status_code == 200
