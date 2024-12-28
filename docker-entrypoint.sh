@@ -29,21 +29,18 @@ if [ -n "$HASSIO_TOKEN" ]; then
   echo "🔓 Launching HASSIO_RUN_MODE=public uvicorn on port 8989"
   HASSIO_RUN_MODE="public" uvicorn app.fastapi:app \
       --host 0.0.0.0 \
-      --port 8989 \
-      --reload &
+      --port 8989 &
 
   # Ingress server on port 8990 in foreground
   echo "🔒 Launching HASSIO_RUN_MODE=ingress uvicorn on port 8990"
   HASSIO_RUN_MODE="ingress" uvicorn app.fastapi:app \
       --host 0.0.0.0 \
-      --port 8990 \
-      --reload
+      --port 8990
 
 else
   # No Ingress: single server on port 8989
   echo "🔦 Launching uvicorn on port 8989"
   uvicorn app.fastapi:app \
       --host 0.0.0.0 \
-      --port 8989 \
-      --reload
+      --port 8989
 fi
