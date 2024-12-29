@@ -82,6 +82,10 @@ jobs:
         shell: bash
         run: echo "BRANCH_NAME=${GITHUB_REF##*/}" >> $GITHUB_ENV
 
+      - name: Short SHA
+        shell: bash
+        run: echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
+
       - name: Set up Depot CLI
         uses: depot/setup-action@v1
 
@@ -95,7 +99,7 @@ jobs:
           file: ./${{ matrix.dockerfile }}
           push: false
           platforms: ${{ matrix.platform }}
-          tags: frameos/frameos:${{ env.BRANCH_NAME }}-${{ github.sha }}
+          tags: frameos/frameos:${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
 
@@ -125,6 +129,10 @@ jobs:
         shell: bash
         run: echo "BRANCH_NAME=${GITHUB_REF##*/}" >> $GITHUB_ENV
 
+      - name: Short SHA
+        shell: bash
+        run: echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
+
       - name: Set up Depot CLI
         uses: depot/setup-action@v1
 
@@ -138,5 +146,5 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64/v8
           tags: |
-            frameos/frameos:${{ env.BRANCH_NAME }}-${{ github.sha }}
+            frameos/frameos:${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}
             frameos/frameos:latest
