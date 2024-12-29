@@ -27,7 +27,7 @@ import clsx from 'clsx'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
-  const { editScene, openTemplates } = useActions(panelsLogic)
+  const { editScene, openTemplates, openControl } = useActions(panelsLogic)
   const { scenes, showNewSceneForm, isNewSceneSubmitting, showingSettings, activeSceneId } = useValues(
     scenesLogic({ frameId })
   )
@@ -97,7 +97,6 @@ export function Scenes() {
                   ? 'border border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
                   : 'border-gray-700'
               )}
-              onClick={() => editScene(scene.id)}
             >
               <div>
                 <H6>
@@ -119,7 +118,7 @@ export function Scenes() {
                     </Tag>
                   ) : null}
                   {activeSceneId === scene.id ? (
-                    <Tag className="ml-2" color="primary">
+                    <Tag className="ml-2 cursor-pointer" color="primary" onClick={() => openControl()}>
                       active
                     </Tag>
                   ) : null}

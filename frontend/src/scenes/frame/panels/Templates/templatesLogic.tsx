@@ -245,7 +245,7 @@ export const templatesLogic = kea<templatesLogicType>([
     ],
     expanded: [
       {} as Record<string, boolean>,
-      { persist: true },
+      { persist: true, storageKey: 'templatesLogic.expanded' },
       {
         toggleExpanded: (state, { url }) => ({ ...state, [url]: !(state[url] ?? true) }),
       },

@@ -51,8 +51,15 @@ export function Template({
         {imageUrl ? <img src={imageUrl} alt={template.name} className="w-full max-h-full border" /> : null}
         <div className="flex gap-2 items-right">
           {applyTemplate ? (
-            <Button size="small" color="secondary" onClick={() => applyTemplate(template)} title="Install scene">
+            <Button
+              className="flex gap-1"
+              size="small"
+              color="secondary"
+              onClick={() => applyTemplate(template)}
+              title="Install scene"
+            >
               <FolderPlusIcon className="w-5 h-5" />
+              Install
             </Button>
           ) : null}
           <DropdownMenu
