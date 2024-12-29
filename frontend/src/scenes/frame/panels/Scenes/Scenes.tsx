@@ -68,7 +68,7 @@ export function Scenes() {
       <div className="space-y-2">
         {scenes.length > 0 ? (
           <div className="flex justify-between w-full items-center">
-            <H6>Installed scenes</H6>
+            <H6>Installed on frame</H6>
             <DropdownMenu
               buttonColor="secondary"
               className="mr-3"
@@ -127,7 +127,15 @@ export function Scenes() {
                 <div className="text-xs text-gray-400">id: {scene.id}</div>
               </div>
               <div className="flex gap-1">
-                <Button size="small" className="!px-1" color="secondary" onClick={() => toggleSettings(scene.id)}>
+                <Button
+                  size="small"
+                  className="!px-1"
+                  color="secondary"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    toggleSettings(scene.id)
+                  }}
+                >
                   <AdjustmentsHorizontalIcon className="w-5 h-5" />
                 </Button>
                 <SceneDropDown context="scenes" sceneId={scene.id} />

@@ -32,6 +32,7 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
         <>
           <Menu.Button
             ref={setReferenceElement}
+            onClick={(e) => e.stopPropagation()}
             className={clsx(
               buttonColor(_buttonColor),
               'inline-flex justify-center px-1 py-1 text-sm font-medium text-white rounded-md focus:outline-none shadow-sm',
@@ -75,6 +76,7 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
                             item.onClick
                               ? (e) => {
                                   e.preventDefault()
+                                  e.stopPropagation()
                                   if (item.confirm) {
                                     if (confirm(item.confirm)) {
                                       item.onClick?.()

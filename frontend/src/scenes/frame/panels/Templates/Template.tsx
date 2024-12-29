@@ -65,8 +65,8 @@ export function Template({
                         'scenes' in template && Array.isArray(template.scenes)
                           ? `Install ${(template.scenes || []).length} scene${
                               (template.scenes || []).length === 1 ? '' : 's'
-                            }`
-                          : 'Install on frame',
+                            } onto frame`
+                          : 'Install onto frame',
                       onClick: () => applyTemplate(template),
                       icon: <DocumentPlusIcon className="w-5 h-5" />,
                     },

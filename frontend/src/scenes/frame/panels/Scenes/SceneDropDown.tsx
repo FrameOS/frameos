@@ -2,16 +2,16 @@ import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { scenesLogic } from './scenesLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { PencilSquareIcon, TrashIcon, FlagIcon, FolderOpenIcon } from '@heroicons/react/24/solid'
+import { PencilSquareIcon, TrashIcon, FlagIcon, FolderOpenIcon, RocketLaunchIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import {
-  AdjustmentsHorizontalIcon,
   CloudArrowDownIcon,
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
   FolderPlusIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
+import { controlLogic } from '../Control/controlLogic'
 
 interface SceneDropDownProps {
   sceneId: string
@@ -26,10 +26,9 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
   const { editScene, editSceneJSON } = useActions(panelsLogic)
   const { scenes } = useValues(scenesLogic({ frameId }))
-  const { toggleSettings, renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault } = useActions(
-    scenesLogic({ frameId })
-  )
+  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault } = useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
+  const { setCurrentScene } = useActions(controlLogic({ frameId }))
   const scene = scenes.find((s) => s.id === sceneId)
   if (!scene) {
     return null
@@ -38,6 +37,13 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
     <DropdownMenu
       buttonColor="secondary"
       items={[
+        context === 'scenes'
+          ? {
+              label: 'Activate',
+              onClick: () => setCurrentScene(scene.id),
+              icon: <RocketLaunchIcon className="w-5 h-5" />,
+            }
+          : null,
         context === 'scenes'
           ? {
               label: 'Edit scene',
@@ -50,13 +56,6 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
           onClick: () => editSceneJSON(scene.id),
           icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
         },
-        context === 'scenes'
-          ? {
-              label: 'Toggle settings',
-              onClick: () => toggleSettings(scene.id),
-              icon: <AdjustmentsHorizontalIcon className="w-5 h-5" />,
-            }
-          : null,
         {
           label: 'Save to "My scenes"',
           onClick: () => saveAsTemplate({ name: scene.name ?? '', exportScenes: [scene.id] }),
