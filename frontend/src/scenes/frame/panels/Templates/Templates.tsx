@@ -10,7 +10,7 @@ import { Box } from '../../../../components/Box'
 import { Field } from '../../../../components/Field'
 import { TextInput } from '../../../../components/TextInput'
 import { repositoriesModel } from '../../../../models/repositoriesModel'
-import { TrashIcon, ArrowPathIcon, PlusIcon } from '@heroicons/react/24/solid'
+import { TrashIcon, ArrowPathIcon, PlusIcon, ChevronRightIcon, ChevronDownIcon } from '@heroicons/react/24/solid'
 import React from 'react'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import copy from 'copy-to-clipboard'
@@ -33,6 +33,7 @@ export function Templates() {
     hideUploadTemplate,
     showAddRepository,
     hideAddRepository,
+    toggleExpanded,
     setSearch,
   } = useActions(templatesLogic({ frameId }))
   const {
@@ -42,6 +43,7 @@ export function Templates() {
     showingUploadTemplate,
     showingAddRepository,
     templates,
+    isExpanded,
     search,
   } = useValues(templatesLogic({ frameId }))
   const { fullScreenPanel } = useValues(panelsLogic({ frameId }))
@@ -50,7 +52,7 @@ export function Templates() {
 
   return (
     <div className="space-y-4">
-      <TextInput placeholder="Search templates..." onChange={setSearch} value={search} />
+      <TextInput placeholder="Search..." onChange={setSearch} value={search} />
       {showingRemoteTemplate ? (
         <Box className="p-4 space-y-2 bg-gray-900">
           <H6>Add template from URL</H6>
@@ -110,9 +112,14 @@ export function Templates() {
           </Form>
         </Box>
       ) : null}
+
       <div className="space-y-2">
         <div className="flex justify-between w-full items-center">
-          <H6>My scenes</H6>
+          <H6 className="flex items-center cursor-pointer" onClick={() => toggleExpanded('')}>
+            {isExpanded('') ? <ChevronDownIcon className="w-6 h-6" /> : <ChevronRightIcon className="w-6 h-6" />}
+            My scenes
+            {templates.length ? ` (${templates.length})` : ''}
+          </H6>
           <DropdownMenu
             buttonColor="secondary"
             className="mr-3"
@@ -130,22 +137,24 @@ export function Templates() {
             ]}
           />
         </div>
-        <Masonry>
-          {templates.map((template, index) => (
-            <Template
-              key={template.id ?? -index}
-              template={template}
-              exportTemplate={exportTemplate}
-              removeTemplate={removeTemplate}
-              applyTemplate={(template: TemplateType, wipe?: boolean) => {
-                applyTemplate(template, wipe)
-                disableFullscreenPanel()
-              }}
-              editTemplate={editLocalTemplate}
-            />
-          ))}
-        </Masonry>
-        {templates.length === 0 ? (
+        {isExpanded('') && (
+          <Masonry>
+            {templates.map((template, index) => (
+              <Template
+                key={template.id ?? -index}
+                template={template}
+                exportTemplate={exportTemplate}
+                removeTemplate={removeTemplate}
+                applyTemplate={(template: TemplateType, wipe?: boolean) => {
+                  applyTemplate(template, wipe)
+                  disableFullscreenPanel()
+                }}
+                editTemplate={editLocalTemplate}
+              />
+            ))}
+          </Masonry>
+        )}
+        {isExpanded('') && templates.length === 0 ? (
           <div className="text-muted">
             {search === '' ? 'You have no saved scenes.' : `No saved scenes match "${search}"`}
           </div>
@@ -155,7 +164,15 @@ export function Templates() {
       {(repositories ?? []).map((repository) => (
         <div className="space-y-2 !mt-8" key={repository.id}>
           <div className="flex gap-2 items-start justify-between">
-            <H6>{repository.name || repository.url}</H6>
+            <H6 className="flex items-center cursor-pointer" onClick={() => toggleExpanded(repository.url)}>
+              {isExpanded(repository.url) ? (
+                <ChevronDownIcon className="w-6 h-6" />
+              ) : (
+                <ChevronRightIcon className="w-6 h-6" />
+              )}
+              {repository.name || repository.url}
+              {repository.templates?.length ? ` (${repository.templates.length})` : ''}
+            </H6>
             <DropdownMenu
               buttonColor="secondary"
               className="mr-3"
@@ -180,21 +197,25 @@ export function Templates() {
               ]}
             />
           </div>
-          {repository.description ? <div className="text-gray-400">{repository.description}</div> : null}
-          <Masonry>
-            {(repository.templates || []).map((template, index) => (
-              <Template
-                key={template.id ?? -index}
-                template={template}
-                saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
-                applyTemplate={(template, replace) => {
-                  applyRemoteToFrame(repository, template, replace)
-                  disableFullscreenPanel()
-                }}
-              />
-            ))}
-          </Masonry>
-          {repository.templates?.length === 0 ? (
+          {isExpanded(repository.url) && repository.description ? (
+            <div className="text-gray-400">{repository.description}</div>
+          ) : null}
+          {isExpanded(repository.url) && (
+            <Masonry>
+              {(repository.templates || []).map((template, index) => (
+                <Template
+                  key={template.id ?? -index}
+                  template={template}
+                  saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
+                  applyTemplate={(template, replace) => {
+                    applyRemoteToFrame(repository, template, replace)
+                    disableFullscreenPanel()
+                  }}
+                />
+              ))}
+            </Masonry>
+          )}
+          {isExpanded(repository.url) && repository.templates?.length === 0 ? (
             <div className="text-gray-400">This repository has no scenes.</div>
           ) : null}
         </div>
