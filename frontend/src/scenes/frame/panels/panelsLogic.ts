@@ -12,12 +12,12 @@ export interface PanelsLogicProps {
 export interface AnyBuiltLogic extends BuiltLogic {}
 
 const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
-  [Area.TopLeft]: [{ panel: Panel.Scenes, active: false, hidden: false }],
+  [Area.TopLeft]: [{ panel: Panel.Templates, active: false, hidden: false }],
   [Area.TopRight]: [
     { panel: Panel.Apps, active: true, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
     { panel: Panel.SceneState, active: false, hidden: false },
-    { panel: Panel.Templates, active: false, hidden: false },
+    { panel: Panel.Scenes, active: false, hidden: false },
     { panel: Panel.FrameSettings, active: false, hidden: false },
     { panel: Panel.Control, active: false, hidden: false },
   ],
