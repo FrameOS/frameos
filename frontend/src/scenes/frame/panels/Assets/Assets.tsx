@@ -57,7 +57,7 @@ function TreeNode({
     // This is a file
     return (
       <div className="ml-1 flex items-center space-x-2">
-        <div className="flex-1 cursor-pointer hover:underline text-green-400" onClick={() => openAsset(node.path)}>
+        <div className="flex-1 cursor-pointer hover:underline text-white" onClick={() => openAsset(node.path)}>
           {node.name}
         </div>
         {node.size != null && <span className="text-xs text-gray-400">{humaniseSize(node.size)}</span>}
