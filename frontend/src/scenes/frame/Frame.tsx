@@ -5,6 +5,7 @@ import { Spinner } from '../../components/Spinner'
 import { Button } from '../../components/Button'
 import { Header } from '../../components/Header'
 import { Panels } from './panels/Panels'
+import { DropdownMenu } from '../../components/DropdownMenu'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -24,21 +25,21 @@ export function Frame(props: FrameSceneProps) {
             title={!frame ? `Loading frame ${props.id}...` : frame.name || frameHost(frame)}
             buttons={
               <div className="flex divide-x divide-gray-700 space-x-2">
-                <Button color="secondary" type="button" onClick={() => renderFrame()}>
-                  Re-Render
-                </Button>
-                <Button color="secondary" type="button" onClick={() => restartFrame()}>
-                  Restart
-                </Button>
-                <Button color="secondary" type="button" onClick={() => stopFrame()}>
-                  Stop
-                </Button>
+                <DropdownMenu
+                  buttonColor="secondary"
+                  className="items-center"
+                  items={[
+                    { label: 'Re-Render', onClick: () => renderFrame() },
+                    { label: 'Restart', onClick: () => restartFrame() },
+                    { label: 'Stop', onClick: () => stopFrame() },
+                  ]}
+                />
                 <div className="flex pl-2 space-x-2">
                   <Button color={frameChanged ? 'primary' : 'secondary'} type="button" onClick={() => saveFrame()}>
                     Save
                   </Button>
-                  <Button color={frameChanged ? 'primary' : 'secondary'} type="button" onClick={() => deployFrame()}>
-                    Save&nbsp;&&nbsp;Redeploy
+                  <Button color={'secondary'} type="button" onClick={() => deployFrame()}>
+                    Redeploy
                   </Button>
                 </div>
               </div>
