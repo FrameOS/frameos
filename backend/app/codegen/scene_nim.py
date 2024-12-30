@@ -360,17 +360,9 @@ class SceneWriter:
         app_config_pairs: list[list[str]] = []
         for key, value in app_config.items():
             if key not in field_types_for_node:
-                message = f'- ERROR: When generating scene {self.scene_id}. Config key "{key}" not found for app "{name}", node "{node_id}"'
-                try:
-                    from app.models.log import new_log as log
-                    log(
-                        self.frame.id,
-                        "stderr",
-                        message,
-                    )
-                    continue
-                except Exception:
-                    raise ValueError(message)
+                # message = f'- ERROR: When generating scene {self.scene_id}. Config key "{key}" not found for app "{name}", node "{node_id}"'
+                # raise ValueError(message)
+                continue
             type = field_types_for_node[key]
 
             app_config_pairs.append(

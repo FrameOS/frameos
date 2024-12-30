@@ -52,6 +52,7 @@ export const templatesLogic = kea<templatesLogicType>([
     showAddRepository: true,
     hideAddRepository: true,
     setSearch: (search: string) => ({ search }),
+    toggleExpanded: (url: string) => ({ url }),
   }),
   forms(({ actions, values, props }) => ({
     templateForm: {
@@ -242,6 +243,13 @@ export const templatesLogic = kea<templatesLogicType>([
         submitAddRepositoryFormSuccess: () => false,
       },
     ],
+    expanded: [
+      {} as Record<string, boolean>,
+      { persist: true, storageKey: 'templatesLogic.expanded' },
+      {
+        toggleExpanded: (state, { url }) => ({ ...state, [url]: !(state[url] ?? true) }),
+      },
+    ],
   }),
   selectors({
     templates: [
@@ -277,6 +285,7 @@ export const templatesLogic = kea<templatesLogicType>([
       (s) => [s.allRepositories, s.repositories],
       (allRepositories, repositories) => allRepositories.length - repositories.length,
     ],
+    isExpanded: [(s) => [s.expanded], (expanded) => (url: string) => expanded[url] ?? true],
   }),
   listeners(({ actions, values, props }) => ({
     saveRemoteAsLocal: async ({ template, repository }) => {

@@ -1,4 +1,4 @@
-import { actions, afterMount, connect, kea, key, path, props, reducers, selectors } from 'kea'
+import { afterMount, connect, kea, key, path, props, selectors } from 'kea'
 
 import { AssetType } from '../../../../types'
 import { loaders } from 'kea-loaders'
@@ -12,22 +12,57 @@ export interface AssetsLogicProps {
   frameId: number
 }
 
+export interface AssetNode {
+  name: string
+  path: string
+  isFolder: boolean
+  size?: number
+  mtime?: number
+  children: Record<string, AssetNode>
+}
+
+function buildAssetTree(assets: AssetType[]): AssetNode {
+  const root: AssetNode = {
+    name: '/srv/assets',
+    path: '',
+    isFolder: true,
+    children: {},
+  }
+
+  for (const asset of assets) {
+    let normalizedPath = asset.path.startsWith('./') ? asset.path.slice(2) : asset.path
+    const parts = normalizedPath.split('/').filter(Boolean)
+
+    let currentNode = root
+
+    // Traverse or build the tree structure
+    parts.forEach((part, index) => {
+      if (!currentNode.children[part]) {
+        currentNode.children[part] = {
+          name: part,
+          path: parts.slice(0, index + 1).join('/'),
+          isFolder: true,
+          children: {},
+        }
+      }
+      currentNode = currentNode.children[part]
+    })
+
+    if (Object.keys(currentNode.children).length === 0) {
+      currentNode.isFolder = false
+    }
+
+    currentNode.size = asset.size
+    currentNode.mtime = asset.mtime
+  }
+  return root
+}
+
 export const assetsLogic = kea<assetsLogicType>([
   path(['src', 'scenes', 'frame', 'assetsLogic']),
   props({} as AssetsLogicProps),
   connect(({ frameId }: AssetsLogicProps) => ({ logic: [socketLogic], values: [frameLogic({ frameId }), ['frame']] })),
   key((props) => props.frameId),
-  actions({
-    setSortKey: (sortKey: string) => ({ sortKey }),
-  }),
-  reducers({
-    sortKey: [
-      'path',
-      {
-        setSortKey: (_, { sortKey }) => sortKey,
-      },
-    ],
-  }),
   loaders(({ props }) => ({
     assets: [
       [] as AssetType[],
@@ -50,29 +85,21 @@ export const assetsLogic = kea<assetsLogicType>([
   })),
   selectors({
     cleanedAssets: [
-      (s) => [s.assets, s.frame, s.sortKey],
-      (assets, frame, sortKey) => {
+      (s) => [s.assets, s.frame],
+      (assets, frame) => {
         const assetsPath = frame.assets_path ?? '/srv/assets'
         const cleanedAssets = assets.map((asset) => ({
           ...asset,
           path: asset.path.startsWith(assetsPath + '/') ? '.' + asset.path.substring(assetsPath.length) : asset.path,
         }))
-        const sorter: (a: any, b: any) => number =
-          sortKey === 'path'
-            ? (a, b) => a.path.localeCompare(b.path)
-            : sortKey === '-path'
-            ? (a, b) => b.path.localeCompare(a.path)
-            : sortKey === 'size'
-            ? (a, b) => a.size - b.size
-            : sortKey === '-size'
-            ? (a, b) => b.size - a.size
-            : sortKey === 'mtime'
-            ? (a, b) => a.mtime - b.mtime
-            : sortKey === '-mtime'
-            ? (a, b) => b.mtime - a.mtime
-            : () => 0
-        cleanedAssets.sort(sorter)
+        cleanedAssets.sort((a, b) => a.path.localeCompare(b.path))
         return cleanedAssets
+      },
+    ],
+    assetTree: [
+      (s) => [s.cleanedAssets],
+      (cleanedAssets) => {
+        return buildAssetTree(cleanedAssets)
       },
     ],
   }),
