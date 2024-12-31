@@ -6,7 +6,6 @@ import shlex
 from jose import JWTError, jwt
 from http import HTTPStatus
 from tempfile import NamedTemporaryFile
-from scp import SCPClient
 
 import httpx
 from fastapi import Depends, Request, HTTPException
@@ -207,20 +206,30 @@ async def api_frame_get_assets(id: int, db: Session = Depends(get_db), redis: Re
 
     assets = []
     for line in output:
-        parts = line.split(' ', 2)
-        size, mtime, path = parts
-        assets.append({
-            'path': path.strip(),
-            'size': int(size.strip()),
-            'mtime': int(mtime.strip()),
-        })
+        if line.strip():
+            parts = line.split(' ', 2)
+            size, mtime, path = parts
+            assets.append({
+                'path': path.strip(),
+                'size': int(size.strip()),
+                'mtime': int(mtime.strip()),
+            })
 
     assets.sort(key=lambda x: x['path'])
     return {"assets": assets}
 
 
 @api_with_auth.get("/frames/{id:int}/asset")
-async def api_frame_get_asset(id: int, request: Request, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+async def api_frame_get_asset(
+    id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis)
+):
+    """
+    Download or stream an asset from the remote frame's filesystem using async SSH.
+    Uses an MD5 of the remote file to cache the content in Redis.
+    """
     frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
@@ -234,53 +243,84 @@ async def api_frame_get_asset(id: int, request: Request, db: Session = Depends(g
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Path parameter is required")
 
     normalized_path = os.path.normpath(os.path.join(assets_path, path))
+    # Ensure the requested asset is inside the assets_path directory
     if not normalized_path.startswith(os.path.normpath(assets_path)):
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid asset path")
 
     try:
         ssh = await get_ssh_connection(db, redis, frame)
         try:
+            # 1) Generate an MD5 sum of the remote file
             escaped_path = shlex.quote(normalized_path)
             command = f"md5sum {escaped_path}"
             await log(db, redis, frame.id, "stdinfo", f"> {command}")
-            stdin, stdout, stderr = ssh.exec_command(command)
-            md5sum_output = stdout.read().decode().strip()
+
+            # We'll read the MD5 from the command output
+            md5_output: list[str] = []
+            await exec_command(db, redis, frame, ssh, command, output=md5_output, log_output=False)
+            md5sum_output = "".join(md5_output).strip()
             if not md5sum_output:
                 raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Asset not found")
 
             md5sum = md5sum_output.split()[0]
             cache_key = f'asset:{md5sum}'
 
+            # 2) Check if we already have this asset cached in Redis
             cached_asset = await redis.get(cache_key)
             if cached_asset:
                 return StreamingResponse(
                     io.BytesIO(cached_asset),
                     media_type='image/png' if mode == 'image' else 'application/octet-stream',
                     headers={
-                        "Content-Disposition": f'{"attachment" if mode == "download" else "inline"}; filename={filename}'
+                        "Content-Disposition": (
+                            f'{"attachment" if mode == "download" else "inline"}; filename={filename}'
+                        )
                     }
                 )
 
-            with NamedTemporaryFile(delete=True) as temp_file:
-                with SCPClient(ssh.get_transport()) as scp:
-                    scp.get(normalized_path, temp_file.name)
-                temp_file.seek(0)
-                asset_content = temp_file.read()
-                await redis.set(cache_key, asset_content, ex=86400 * 30)
-                return StreamingResponse(
-                    io.BytesIO(asset_content),
-                    media_type='image/png' if mode == 'image' else 'application/octet-stream',
-                    headers={
-                        "Content-Disposition": f'{"attachment" if mode == "download" else "inline"}; filename={filename}'
-                    }
-                )
+            # 3) No cache found. Use asyncssh.scp to copy the remote file into a local temp file.
+            with NamedTemporaryFile(delete=False) as temp_file:
+                local_temp_path = temp_file.name
+
+            # scp from remote -> local
+            #  Note: (ssh, normalized_path) means "download from 'normalized_path' on the remote `ssh` connection"
+            import asyncssh
+            await asyncssh.scp(
+                (ssh, escaped_path),
+                local_temp_path,
+                recurse=False
+            )
+
+            # 4) Read file contents and store in Redis
+            with open(local_temp_path, "rb") as f:
+                asset_content = f.read()
+
+            await redis.set(cache_key, asset_content, ex=86400 * 30)
+
+            # Cleanup temp file
+            os.remove(local_temp_path)
+
+            # 5) Return the file to the user
+            return StreamingResponse(
+                io.BytesIO(asset_content),
+                media_type='image/png' if mode == 'image' else 'application/octet-stream',
+                headers={
+                    "Content-Disposition": (
+                        f'{"attachment" if mode == "download" else "inline"}; filename={filename}'
+                    )
+                }
+            )
+        except Exception as e:
+            print(e)
+            raise e
+
         finally:
             await remove_ssh_connection(ssh)
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
 
 @api_with_auth.post("/frames/{id:int}/reset")
 async def api_frame_reset_event(id: int, redis: Redis = Depends(get_redis)):

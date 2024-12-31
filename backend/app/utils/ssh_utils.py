@@ -120,7 +120,7 @@ async def exec_command(db, redis, frame, ssh, command: str,
         # (We only store stdout in `output`, but you can also append stderr if desired.)
         if output is not None:
             stdout_data = "".join(stdout_buffer)
-            output.append(stdout_data)
+            output.extend(stdout_data.split("\n"))
 
         # Handle non-zero exit
         if exit_status != 0:

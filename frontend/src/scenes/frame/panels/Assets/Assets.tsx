@@ -4,6 +4,8 @@ import { assetsLogic } from './assetsLogic'
 import { panelsLogic } from '../panelsLogic'
 import { CloudArrowDownIcon } from '@heroicons/react/24/outline'
 import { useState } from 'react'
+import { apiFetch } from '../../../../utils/apiFetch'
+import { Spinner } from '../../../../components/Spinner'
 
 function humaniseSize(size: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -36,6 +38,7 @@ function TreeNode({
   openAsset: (path: string) => void
 }): JSX.Element {
   const [expanded, setExpanded] = useState(node.path === '')
+  const [isDownloading, setIsDownloading] = useState(false)
 
   // If this node is a folder, display a collapsible section
   if (node.isFolder) {
@@ -67,13 +70,27 @@ function TreeNode({
           </span>
         )}
 
-        {/* Download link */}
         <a
-          href={`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}`}
-          download
-          className="text-gray-300 hover:text-white"
+          className="text-gray-300 hover:text-white cursor-pointer"
+          onClick={async (e) => {
+            e.preventDefault()
+            setIsDownloading(true)
+            const resource = await apiFetch(`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}`)
+            const blob = await resource.blob()
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = node.name
+            a.click()
+            URL.revokeObjectURL(url)
+            setIsDownloading(false)
+          }}
         >
-          <CloudArrowDownIcon className="w-4 h-4 inline-block" />
+          {isDownloading ? (
+            <Spinner className="w-4 h-4 inline-block" />
+          ) : (
+            <CloudArrowDownIcon className="w-4 h-4 inline-block" />
+          )}
         </a>
       </div>
     )
