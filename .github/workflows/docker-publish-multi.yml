@@ -151,13 +151,12 @@ jobs:
 
   update-addon-repo:
     name: Update Home Assistant Addon
-    needs: push-multiarch  # ensures this only runs after images are pushed
+    needs: push-multiarch
     runs-on: ubuntu-latest
     steps:
       - name: Checkout frameos-home-assistant-addon
         uses: actions/checkout@v2
         with:
-          # This tells checkout to clone a different repository
           repository: frameos/frameos-home-assistant-addon
           token: ${{ secrets.ACTIONS_WRITE_TOKEN }}
           ref: main
@@ -168,11 +167,8 @@ jobs:
           cd home-assistant-addon/frameos
           echo "Updating version in config.yml to main-${{ env.SHORT_SHA }}"
           sed -i "s/^version: .*/version: main-${{ env.SHORT_SHA }}/" config.yml
-          # If you also want to ensure the image: matches the new Docker Hub tag, you could do:
-          # sed -i "s|^image: .*|image: frameos/frameos:main-${{ env.SHORT_SHA }}|" config.yml
 
       - name: Commit changes
-        # Using EndBug/add-and-commit to auto-commit and push in one step
         uses: EndBug/add-and-commit@v9
         with:
           message: "Update FrameOS version to main-${{ env.SHORT_SHA }}"
