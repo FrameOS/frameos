@@ -1,6 +1,8 @@
 import { useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { apiFetch } from '../../../../utils/apiFetch'
+import { Button } from '../../../../components/Button'
 
 interface AssetProps {
   path: string
@@ -8,24 +10,51 @@ interface AssetProps {
 
 export function Asset({ path }: AssetProps) {
   const { frame } = useValues(frameLogic)
+
   const isImage = path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.jpeg') || path.endsWith('.gif')
   const [isLoading, setIsLoading] = useState(true)
+  const [asset, setAsset] = useState<string | null>(null)
+
+  useEffect(() => {
+    async function fetchAsset() {
+      setIsLoading(true)
+      setAsset(null)
+      const resource = await apiFetch(`/api/frames/${frame.id}/asset?path=${encodeURIComponent(path)}`)
+      const blob = await resource.blob()
+      setAsset(URL.createObjectURL(blob))
+      setIsLoading(false)
+    }
+    fetchAsset()
+  }, [path])
 
   return (
     <div className="w-full">
-      {isImage ? (
-        <>
-          <img
-            onLoad={() => setIsLoading(false)}
-            onError={() => setIsLoading(false)}
-            className="max-w-full"
-            src={`/api/frames/${frame.id}/asset?path=${encodeURIComponent(path)}`}
-            alt={path}
-          />
-          {isLoading ? <div>Loading...</div> : null}
-        </>
+      {isLoading ? (
+        <div>Loading...</div>
+      ) : !asset ? (
+        <div>Error loading asset</div>
+      ) : isImage ? (
+        <img
+          onLoad={() => setIsLoading(false)}
+          onError={() => setIsLoading(false)}
+          className="max-w-full"
+          src={asset}
+          alt={path}
+        />
       ) : (
-        <>{path}</>
+        <div className="space-y-2">
+          <div>{path}</div>
+          <Button
+            onClick={() => {
+              const a = document.createElement('a')
+              a.href = asset
+              a.download = path
+              a.click()
+            }}
+          >
+            Download
+          </Button>
+        </div>
       )}
     </div>
   )
