@@ -1,5 +1,6 @@
 alembic
 arq
+asyncssh
 dacite
 email_validator
 fastapi[standard]

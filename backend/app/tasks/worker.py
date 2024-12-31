@@ -1,9 +1,7 @@
 """
 backend/app/tasks/worker.py
 
-This file defines:
-- The arq worker settings (how to run the worker).
-- The tasks/coroutines that run via arq.
+Defines the arq worker settings and the task functions that run via arq.
 """
 
 from httpx import AsyncClient
@@ -23,19 +21,13 @@ REDIS_SETTINGS = RedisSettings.from_dsn(config.REDIS_URL)
 
 # Optional: on_startup logic
 async def startup(ctx: Dict[str, Any]):
-    """
-    Example: if you want to open a single shared httpx session or DB session in the worker
-    """
     ctx['client'] = AsyncClient()
     ctx['redis'] = create_redis_connection()
     ctx['db'] = SessionLocal()
-    print("Worker startup: created shared HTTPX client")
+    print("Worker startup: created shared HTTPX client, Redis, and DB session")
 
 # Optional: on_shutdown logic
 async def shutdown(ctx: Dict[str, Any]):
-    """
-    Example: close that shared session
-    """
     if 'client' in ctx:
         await ctx['client'].aclose()
     if 'redis' in ctx:
@@ -43,13 +35,13 @@ async def shutdown(ctx: Dict[str, Any]):
     if 'db' in ctx:
         ctx['db'].close()
 
-    print("Worker shutdown: closed shared HTTPX client")
+    print("Worker shutdown: closed resources")
 
 
 class WorkerSettings:
     """
-    WorkerSettings is what `arq` uses to actually run the worker process.
-    You will run it with `arq app.tasks.WorkerSettings`.
+    WorkerSettings is what `arq` uses to run the worker process.
+    You run it with: `arq app.tasks.worker.WorkerSettings`.
     """
     functions = [
         func(deploy_frame_task,  name="deploy_frame"),
@@ -60,14 +52,7 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
 
-    # Connect to the same redis instance used in your app:
     redis_settings = REDIS_SETTINGS
-
-    # Keep results for 1 hour (3600s) by default, or set any other retention
-    keep_result = 3600
-
-    # max concurrency:
+    keep_result = 3600  # Keep results for 1 hour
     max_jobs = 10
-
-    # If you want to allow job abort (stop/cancel):
     allow_abort_jobs = True
