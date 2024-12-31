@@ -10,9 +10,8 @@ import { Form } from 'kea-forms'
 import { Field } from '../../../../components/Field'
 import { H6 } from '../../../../components/H6'
 import { Tag } from '../../../../components/Tag'
-import { Select } from '../../../../components/Select'
 import {
-  AdjustmentsHorizontalIcon,
+  ArrowPathIcon,
   CloudArrowDownIcon,
   FolderArrowDownIcon,
   PlusIcon,
@@ -24,6 +23,9 @@ import React from 'react'
 import { SceneDropDown } from './SceneDropDown'
 import { showAsFps } from '../../../../decorators/refreshInterval'
 import clsx from 'clsx'
+import { ChevronDownIcon, ChevronRightIcon, RocketLaunchIcon } from '@heroicons/react/24/solid'
+import { controlLogic } from '../Control/controlLogic'
+import { Spinner } from '../../../../components/Spinner'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
@@ -35,6 +37,8 @@ export function Scenes() {
     scenesLogic({ frameId })
   )
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
+  const { sceneId, sceneChanging } = useValues(controlLogic({ frameId }))
+  const { setCurrentScene, sync } = useActions(controlLogic({ frameId }))
 
   if (scenes.length === 0 && !showNewSceneForm) {
     return (
@@ -74,6 +78,11 @@ export function Scenes() {
               className="mr-3"
               items={[
                 {
+                  label: 'Refresh active scene',
+                  onClick: () => sync(),
+                  icon: <ArrowPathIcon className="w-5 h-5" />,
+                },
+                {
                   label: 'Save to "My scenes"',
                   onClick: () => saveAsTemplate({ name: frameForm.name }),
                   icon: <FolderArrowDownIcon className="w-5 h-5" />,
@@ -91,53 +100,57 @@ export function Scenes() {
           <React.Fragment key={scene.id}>
             <div
               className={clsx(
-                'border rounded-lg shadow bg-gray-900 break-inside-avoid',
-                'p-2 pl-4 pr-3 space-y-2 flex items-start justify-between gap-1',
+                'border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1',
                 activeSceneId === scene.id
                   ? 'border border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
                   : 'border-gray-700'
               )}
             >
-              <div>
-                <H6>
-                  <span className="cursor-pointer" onClick={() => editScene(scene.id)}>
-                    {scene.name || scene.id}
-                  </span>
-                  {scene.default ? (
-                    <Tag className="ml-2" color="primary">
-                      start on boot
-                    </Tag>
-                  ) : null}
-                  {scene?.settings?.refreshInterval && Number.isFinite(scene.settings.refreshInterval) ? (
-                    <Tag
-                      className="ml-2 cursor-pointer"
-                      color={scene.settings.refreshInterval > 1 ? 'secondary' : 'red'}
-                      onClick={() => toggleSettings(scene.id)}
+              <div className={clsx('flex items-start justify-between gap-1')}>
+                <div>{false ? <ChevronDownIcon className="w-6 h-6" /> : <ChevronRightIcon className="w-6 h-6" />}</div>
+                <div className="flex-1">
+                  <H6>
+                    <span className="cursor-pointer" onClick={() => editScene(scene.id)}>
+                      {scene.name || scene.id}
+                    </span>
+                    {scene.default ? (
+                      <Tag className="ml-2" color="primary">
+                        start on boot
+                      </Tag>
+                    ) : null}
+                  </H6>
+                </div>
+                <div className="flex gap-1">
+                  {sceneId !== scene.id ? (
+                    <Button
+                      size="small"
+                      className="!px-1"
+                      color="primary"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setCurrentScene(scene.id)
+                      }}
+                      title="Activate"
                     >
-                      {showAsFps(scene.settings.refreshInterval)}
-                    </Tag>
-                  ) : null}
-                  {activeSceneId === scene.id ? (
-                    <Tag className="ml-2 cursor-pointer" color="primary" onClick={() => openControl()}>
+                      {sceneChanging === scene.id ? (
+                        <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
+                      ) : (
+                        <RocketLaunchIcon className="w-5 h-5" />
+                      )}
+                    </Button>
+                  ) : (
+                    <Tag className="ml-2 cursor-pointer items-center inline-flex" color="primary">
                       active
                     </Tag>
-                  ) : null}
-                </H6>
-                <div className="text-xs text-gray-400">id: {scene.id}</div>
+                  )}
+                  <SceneDropDown context="scenes" sceneId={scene.id} />
+                </div>
               </div>
-              <div className="flex gap-1">
-                <Button
-                  size="small"
-                  className="!px-1"
-                  color="secondary"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    toggleSettings(scene.id)
-                  }}
-                >
-                  <AdjustmentsHorizontalIcon className="w-5 h-5" />
-                </Button>
-                <SceneDropDown context="scenes" sceneId={scene.id} />
+              <div className="flex items-center gap-2 w-full pl-7 justify-between">
+                <div className="text-xs text-gray-400">{scene.id}</div>
+                {scene?.settings?.refreshInterval && Number.isFinite(scene.settings.refreshInterval) ? (
+                  <div className="text-xs ml-2 uppercase">{showAsFps(scene.settings.refreshInterval)}</div>
+                ) : null}
               </div>
             </div>
             {showingSettings[scene.id] ? (

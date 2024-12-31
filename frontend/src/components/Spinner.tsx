@@ -28,7 +28,6 @@ export function Spinner({ className, color }: SpinnerProps): JSX.Element {
           fill="currentFill"
         />
       </svg>
-      <span className="sr-only">Loading...</span>
     </div>
   )
 }

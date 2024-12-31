@@ -56,12 +56,12 @@ export const controlLogic = kea<controlLogicType>([
       },
     ],
     sceneChanging: [
-      false,
+      null as null | string,
       {
-        setCurrentScene: () => true,
-        syncSuccess: () => false,
-        syncFailure: () => false,
-        currentSceneChanged: () => false,
+        setCurrentScene: (_, { sceneId }) => sceneId,
+        syncSuccess: () => null,
+        syncFailure: () => null,
+        currentSceneChanged: () => null,
       },
     ],
   }),
@@ -84,7 +84,8 @@ export const controlLogic = kea<controlLogicType>([
     sceneId: [(s) => [s.stateRecord], (stateRecord) => stateRecord?.sceneId ?? null],
     loading: [
       (s) => [s.stateRecord, s.sceneChanging, s.stateRecordLoading],
-      (stateRecord, stateRecordLoading, sceneChanging) => !stateRecord?.sceneId || stateRecordLoading || sceneChanging,
+      (stateRecord, stateRecordLoading, sceneChanging) =>
+        !stateRecord?.sceneId || stateRecordLoading || !!sceneChanging,
     ],
   }),
   forms(({ values, props }) => ({
