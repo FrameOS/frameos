@@ -207,13 +207,14 @@ async def api_frame_get_assets(id: int, db: Session = Depends(get_db), redis: Re
 
     assets = []
     for line in output:
-        parts = line.split(' ', 2)
-        size, mtime, path = parts
-        assets.append({
-            'path': path.strip(),
-            'size': int(size.strip()),
-            'mtime': int(mtime.strip()),
-        })
+        if line.strip():
+            parts = line.split(' ', 2)
+            size, mtime, path = parts
+            assets.append({
+                'path': path.strip(),
+                'size': int(size.strip()),
+                'mtime': int(mtime.strip()),
+            })
 
     assets.sort(key=lambda x: x['path'])
     return {"assets": assets}
