@@ -1,112 +1,173 @@
-from asyncio import sleep
-import atexit
-import signal
 import subprocess
-from io import StringIO
-from typing import Optional
-from cryptography.hazmat.primitives.serialization import load_pem_private_key
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.backends import default_backend
-
-from paramiko import RSAKey, SSHClient, AutoAddPolicy
-
+from arq import ArqRedis
+import asyncssh
+import asyncio
+from typing import Optional, List
+from sqlalchemy.orm import Session
+from app.models.log import new_log as log
 from app.models.frame import Frame
 from app.models.settings import Settings
-from app.models.log import new_log as log
-from sqlalchemy.orm import Session
-from arq import ArqRedis as Redis
 
-ssh_connections: set[SSHClient] = set()
-
-def close_ssh_connections():
-    for ssh in ssh_connections:
+async def remove_ssh_connection(ssh):
+    """
+    Close the asyncssh connection.
+    """
+    if ssh:
+        ssh.close()
+        # Wait for the connection to be fully closed
         try:
-            ssh.close()
-            print("SSH connection closed.")
-        except:  # noqa: E722
+            await ssh.wait_closed()
+        except asyncio.CancelledError:
             pass
 
-atexit.register(close_ssh_connections)
+async def get_ssh_connection(db, redis, frame):
+    """
+    Create and return an asyncssh connection object to the frame.
+    """
+    host = frame.frame_host
+    port = frame.ssh_port or 22
+    username = frame.ssh_user
+    password = frame.ssh_pass
 
-def handle_signal(signum, frame):
-    close_ssh_connections()
-    exit(1)
+    await log(db, redis, frame.id, "stdinfo",
+              f"Connecting via SSH to {username}@{host} "
+              f"({'password' if password else 'keypair'})")
 
-signal.signal(signal.SIGTERM, handle_signal)
-signal.signal(signal.SIGINT, handle_signal)
+    # 1) If password is set, just do password-based auth
+    # 2) Otherwise, load the private key from DB
+    client_keys = []
+    if not password:
+        # Attempt to load SSH keys from DB
+        ssh_keys_row = db.query(Settings).filter_by(key="ssh_keys").first()
+        if ssh_keys_row and ssh_keys_row.value:
+            default_key = ssh_keys_row.value.get("default", None)
+            if default_key:
+                # Convert string -> asyncssh private key object
+                try:
+                    # asyncssh can parse the key directly:
+                    private_key_obj = asyncssh.import_private_key(default_key)
+                except (asyncssh.KeyImportError, TypeError):
+                    # If that fails, see if there's any other fallback
+                    raise Exception("Could not parse the private key from DB. "
+                                    "Check that it’s in valid PEM format.")
 
-def remove_ssh_connection(ssh: SSHClient):
-    ssh_connections.remove(ssh)
-
-async def get_ssh_connection(db: Session, redis: Redis, frame: Frame) -> SSHClient:
-    ssh_type = '(password)' if frame.ssh_pass else '(keypair)'
-    await log(db, redis, frame.id, "stdinfo", f"Connecting via SSH to {frame.ssh_user}@{frame.frame_host} {ssh_type}")
-    ssh = SSHClient()
-    ssh_connections.add(ssh)
-    ssh.set_missing_host_key_policy(AutoAddPolicy())
-
-    if frame.ssh_pass:
-        ssh.connect(frame.frame_host, username=frame.ssh_user, password=frame.ssh_pass, timeout=30)
-    else:
-        ssh_keys = db.query(Settings).filter_by(key="ssh_keys").first()
-        default_key: Optional[str] = None
-        if ssh_keys and ssh_keys.value:
-            default_key = ssh_keys.value.get("default", None)
-        if default_key:
-            try:
-                private_key_cryptography = load_pem_private_key(
-                    default_key.encode(),
-                    password=None,
-                    backend=default_backend()
-                )
-                pem = private_key_cryptography.private_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PrivateFormat.TraditionalOpenSSL,
-                    encryption_algorithm=serialization.NoEncryption()
-                )
-                ssh_key_obj = RSAKey(file_obj=StringIO(pem.decode()))
-            except:  # noqa: E722
-                ssh_key_obj = RSAKey.from_private_key(StringIO(default_key))
-            ssh.connect(frame.frame_host, username=frame.ssh_user, pkey=ssh_key_obj, timeout=30)
+                client_keys = [private_key_obj]
+            else:
+                raise Exception("Key-based auth chosen but no default key found in DB.")
         else:
-            raise Exception("Set up SSH keys in the settings page, or provide a password for the frame")
-    await log(db, redis, int(frame.id), "stdinfo", f"Connected via SSH to {frame.ssh_user}@{frame.frame_host}")
-    return ssh
+            raise Exception("No password set and no SSH keys found in settings. "
+                            "Either set a password or store a default key under 'ssh_keys'.")
+
+    try:
+        ssh = await asyncssh.connect(
+            host=host,
+            port=port,
+            username=username,
+            password=password if password else None,
+            client_keys=client_keys if not password else None,
+            known_hosts=None  # disable known_hosts checking (or provide a file)
+        )
+        await log(db, redis, frame.id, "stdinfo",
+                  f"SSH connection established to {username}@{host}")
+        return ssh
+    except (OSError, asyncssh.Error) as exc:
+        raise Exception(f"Unable to connect to {host}:{port} via SSH: {exc}")
 
 
-async def exec_command(db: Session, redis: Redis, frame: Frame, ssh: SSHClient, command: str, output: Optional[list[str]] = None, raise_on_error = True, log_output = True) -> int:
-    await log(db, redis, int(frame.id), "stdout", f"> {command}")
-    _stdin, stdout, stderr = ssh.exec_command(command)
-    exit_status = None
-    while exit_status is None:
-        while line := stdout.readline():
-            if log_output:
-                await log(db, redis, int(frame.id), "stdout", line)
-            if output is not None:
-                output.append(line)
-        while line := stderr.readline():
-            if log_output:
-                await log(db, redis, int(frame.id), "stderr", line)
-            if output is not None:
-                output.append(line)
+async def exec_command(db, redis, frame, ssh, command: str,
+                       output: Optional[List[str]] = None,
+                       log_output: bool = True,
+                       raise_on_error: bool = True) -> int:
+    """
+    Execute a command on the remote host using an existing SSH connection.
+    Stream stdout and stderr lines as they arrive, optionally storing them
+    into 'output' and logging them in the database.
+    Returns the process exit status.
+    """
 
-        # Check if the command has finished running
-        if stdout.channel.exit_status_ready():
-            exit_status = stdout.channel.recv_exit_status()
+    await log(db, redis, frame.id, "stdout", f"> {command}")
 
-        # Sleep to prevent busy-waiting
-        await sleep(0.1)
+    # We will capture output in these buffers if needed
+    stdout_buffer = []
+    stderr_buffer = []
 
-    if exit_status != 0:
-        if raise_on_error:
-            raise Exception(f"Command exited with status {exit_status}")
-        else:
-            await log(db, redis, int(frame.id), "exit_status", f"The command exited with status {exit_status}")
+    try:
+        # Start the remote process
+        process = await ssh.create_process(command)
 
-    return exit_status
+        # Create tasks to read stdout and stderr lines in parallel
+        stdout_task = asyncio.create_task(
+            _stream_lines(
+                db, redis, frame, process.stdout, "stdout",
+                log_output, stdout_buffer if output is not None else None
+            )
+        )
+        stderr_task = asyncio.create_task(
+            _stream_lines(
+                db, redis, frame, process.stderr, "stderr",
+                log_output, stderr_buffer if output is not None else None
+            )
+        )
+
+        # Wait for both streaming tasks to complete
+        await asyncio.gather(stdout_task, stderr_task)
+
+        # Wait for the process to exit
+        respoonse = await process.wait()
+        exit_status = respoonse.exit_status
+
+        # If the caller wants the entire stdout combined, put it into output
+        # (We only store stdout in `output`, but you can also append stderr if desired.)
+        if output is not None:
+            stdout_data = "".join(stdout_buffer)
+            output.append(stdout_data)
+
+        # Handle non-zero exit
+        if exit_status != 0:
+            # Grab final aggregated output for the exception details
+            stderr_data = "".join(stderr_buffer).strip()
+            stdout_data = "".join(stdout_buffer).strip()
+
+            if raise_on_error:
+                raise Exception(
+                    f"Command '{command}' failed with code {exit_status}\n"
+                    f"stderr: {stderr_data}\n"
+                    f"stdout: {stdout_data}"
+                )
+            else:
+                await log(
+                    db, redis, frame.id, "exit_status",
+                    f"The command exited with status {exit_status}"
+                )
+
+        return exit_status
+
+    except asyncssh.ProcessError as e:
+        # If the remote command cannot even be started
+        raise Exception(f"Error running command '{command}': {e}") from e
 
 
-async def exec_local_command(db: Session, redis: Redis, frame: Frame, command: str, generate_log = True) -> tuple[int, Optional[str], Optional[str]]:
+async def _stream_lines(db, redis, frame, stream, log_type: str,
+                        log_output: bool, buffer_list: Optional[List[str]]):
+    """
+    Helper coroutine that reads lines from `stream` (stdout or stderr)
+    and writes them to the DB log and/or appends them to buffer_list for
+    later use, as each line arrives.
+    """
+    while True:
+        line = await stream.readline()
+        if not line:  # no more data
+            break
+
+        if buffer_list is not None:
+            buffer_list.append(line)
+
+        if log_output:
+            # Optionally strip the trailing newline for cleaner logs
+            await log(db, redis, frame.id, log_type, line.rstrip('\n'))
+
+
+async def exec_local_command(db: Session, redis: ArqRedis, frame: Frame, command: str, generate_log = True) -> tuple[int, Optional[str], Optional[str]]:
     if generate_log:
         await log(db, redis, int(frame.id), "stdout", f"$ {command}")
     process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -127,7 +188,7 @@ async def exec_local_command(db: Session, redis: Redis, frame: Frame, command: s
             break
         if process.poll() is not None:
             break_next = True
-        await sleep(0.1)
+        await asyncio.sleep(0.1)
 
     exit_status = process.returncode
 

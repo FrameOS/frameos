@@ -13,6 +13,7 @@ appnope==0.1.4
 arq==0.26.1
 asttokens==2.4.0
     # via stack-data
+asyncssh==2.19.0
 backcall==0.2.0
     # via ipython
 bcrypt==4.0.1
@@ -47,6 +48,7 @@ click==8.1.7
     #   uvicorn
 cryptography==41.0.3
     # via
+    #   asyncssh
     #   jwt
     #   paramiko
     #   types-paramiko
@@ -254,6 +256,7 @@ typing-extensions==4.12.2
     # via
     #   alembic
     #   anyio
+    #   asyncssh
     #   fastapi
     #   mypy
     #   pydantic

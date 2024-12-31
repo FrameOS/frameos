@@ -148,3 +148,32 @@ jobs:
           tags: |
             frameos/frameos:${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}
             frameos/frameos:latest
+
+  update-addon-repo:
+    name: Update Home Assistant Addon
+    needs: push-multiarch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout frameos-home-assistant-addon
+        uses: actions/checkout@v2
+        with:
+          repository: frameos/frameos-home-assistant-addon
+          token: ${{ secrets.ACTIONS_WRITE_TOKEN }}
+          ref: main
+          path: home-assistant-addon
+
+      - name: Update version in config.yml
+        run: |
+          cd home-assistant-addon/frameos
+          echo "Updating version in config.yml to main-${{ env.SHORT_SHA }}"
+          sed -i "s/^version: .*/version: main-${{ env.SHORT_SHA }}/" config.yml
+
+      - name: Commit changes
+        uses: EndBug/add-and-commit@v9
+        with:
+          message: "Update FrameOS version to main-${{ env.SHORT_SHA }}"
+          add: "."
+          push: true
+          author_name: FrameOS Bot
+          author_email: git@frameos.net
+          

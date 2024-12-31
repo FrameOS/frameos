@@ -203,7 +203,7 @@ async def api_frame_get_assets(id: int, db: Session = Depends(get_db), redis: Re
     command = f"find {assets_path} -type f -exec stat --format='%s %Y %n' {{}} +"
     output: list[str] = []
     await exec_command(db, redis, frame, ssh, command, output, log_output=False)
-    remove_ssh_connection(ssh)
+    await remove_ssh_connection(ssh)
 
     assets = []
     for line in output:
@@ -275,7 +275,7 @@ async def api_frame_get_asset(id: int, request: Request, db: Session = Depends(g
                     }
                 )
         finally:
-            remove_ssh_connection(ssh)
+            await remove_ssh_connection(ssh)
     except HTTPException:
         raise
     except Exception as e:

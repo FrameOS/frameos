@@ -1,9 +1,10 @@
 from typing import Any
+from sqlalchemy.orm import Session
+from arq import ArqRedis as Redis
+
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection
-from sqlalchemy.orm import Session
-from arq import ArqRedis as Redis
 
 async def restart_frame(id: int, redis: Redis):
     await redis.enqueue_job("restart_frame", id=id)
@@ -41,4 +42,4 @@ async def restart_frame_task(ctx: dict[str, Any], id: int):
         if ssh is not None:
             ssh.close()
             await log(db, redis, id, "stdinfo", "SSH connection closed")
-            remove_ssh_connection(ssh)
+            await remove_ssh_connection(ssh)
