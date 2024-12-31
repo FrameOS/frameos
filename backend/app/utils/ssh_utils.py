@@ -113,7 +113,8 @@ async def exec_command(db, redis, frame, ssh, command: str,
         await asyncio.gather(stdout_task, stderr_task)
 
         # Wait for the process to exit
-        exit_status = process.exit_status
+        respoonse = await process.wait()
+        exit_status = respoonse.exit_status
 
         # If the caller wants the entire stdout combined, put it into output
         # (We only store stdout in `output`, but you can also append stderr if desired.)
