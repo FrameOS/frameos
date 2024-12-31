@@ -162,11 +162,11 @@ jobs:
           ref: main
           path: home-assistant-addon
 
-      - name: Update version in config.yml
+      - name: Update version in config.yaml
         run: |
           cd home-assistant-addon/frameos
-          echo "Updating version in config.yml to main-${{ env.SHORT_SHA }}"
-          sed -i "s/^version: .*/version: main-${{ env.SHORT_SHA }}/" config.yml
+          echo "Updating version in config.yaml to main-${{ env.SHORT_SHA }}"
+          sed -i "s/^version: .*/version: main-${{ env.SHORT_SHA }}/" config.yaml
 
       - name: Commit changes
         uses: EndBug/add-and-commit@v9
