@@ -162,17 +162,26 @@ jobs:
           ref: main
           path: home-assistant-addon
 
+      - name: Extract branch name
+        shell: bash
+        run: echo "BRANCH_NAME=${GITHUB_REF##*/}" >> $GITHUB_ENV
+
+      - name: Short SHA
+        shell: bash
+        run: echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
+  
       - name: Update version in config.yaml
         run: |
           cd home-assistant-addon/frameos
-          echo "Updating version in config.yaml to main-${{ env.SHORT_SHA }}"
-          sed -i "s/^version: .*/version: main-${{ env.SHORT_SHA }}/" config.yaml
+          echo "Updating version in config.yaml to ${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}"
+          sed -i "s/^version: .*/version: ${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}/" config.yaml
 
       - name: Commit changes
         uses: EndBug/add-and-commit@v9
         with:
-          message: "Update FrameOS version to main-${{ env.SHORT_SHA }}"
+          message: "Update FrameOS version to ${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}"
           add: "."
+          cwd: home-assistant-addon
           push: true
           author_name: FrameOS Bot
           author_email: git@frameos.net
