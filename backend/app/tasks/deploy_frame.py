@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import json
 import hashlib
 import os
@@ -45,6 +46,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
         if frame.status == 'deploying':
             raise Exception("Already deploying. Request again to force redeploy.")
+
+        frame_dict = frame.to_dict() # persisted as frame.last_successful_deploy if successful
 
         frame.status = 'deploying'
         await update_frame(db, redis, frame)
@@ -298,6 +301,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         await exec_command(db, redis, frame, ssh, "sudo systemctl status frameos.service")
 
         frame.status = 'starting'
+        frame.last_successful_deploy = frame_dict
+        frame.last_successful_deploy_at = datetime.now(timezone.utc)
         await update_frame(db, redis, frame)
 
     except Exception as e:

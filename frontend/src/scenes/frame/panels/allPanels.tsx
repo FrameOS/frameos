@@ -1,7 +1,6 @@
 import { Apps } from './Apps/Apps'
 import { Asset } from './Assets/Asset'
 import { Assets } from './Assets/Assets'
-import { Control } from './Control/Control'
 import { Debug } from './Debug/Debug'
 import { Diagram } from './Diagram/Diagram'
 import { EditApp } from './EditApp/EditApp'
@@ -24,7 +23,6 @@ export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   Apps,
   Asset,
   Assets,
-  Control,
   Debug,
   Diagram,
   EditApp,

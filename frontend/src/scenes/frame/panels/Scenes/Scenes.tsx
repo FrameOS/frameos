@@ -14,7 +14,6 @@ import {
   ArrowPathIcon,
   CloudArrowDownIcon,
   FolderArrowDownIcon,
-  PencilIcon,
   PencilSquareIcon,
   PlusIcon,
   SparklesIcon,
@@ -26,16 +25,17 @@ import { SceneDropDown } from './SceneDropDown'
 import { showAsFps } from '../../../../decorators/refreshInterval'
 import clsx from 'clsx'
 import { ChevronDownIcon, ChevronRightIcon, PlayIcon } from '@heroicons/react/24/solid'
-import { controlLogic } from '../Control/controlLogic'
 import { Spinner } from '../../../../components/Spinner'
+import { ExpandedScene } from './ExpandedScene'
+import { controlLogic } from './controlLogic'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
-  const { editScene, openTemplates, openControl } = useActions(panelsLogic)
-  const { scenes, showNewSceneForm, isNewSceneSubmitting, showingSettings, activeSceneId } = useValues(
+  const { editScene, openTemplates } = useActions(panelsLogic)
+  const { scenes, showNewSceneForm, isNewSceneSubmitting, showingSettings, expandedScenes } = useValues(
     scenesLogic({ frameId })
   )
-  const { toggleSettings, submitNewScene, toggleNewScene, createNewScene, closeNewScene } = useActions(
+  const { toggleSettings, submitNewScene, toggleNewScene, createNewScene, closeNewScene, expandScene } = useActions(
     scenesLogic({ frameId })
   )
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
@@ -76,7 +76,7 @@ export function Scenes() {
           <div className="flex justify-between w-full items-center">
             <H6>Installed on frame</H6>
             <div className="flex gap-1">
-              <Button size="small" color="secondary" onClick={() => sync()} title="Refresh active scene">
+              <Button size="small" color="secondary" onClick={() => sync()} title="Sync active scene">
                 {loading ? <Spinner color="white" /> : <ArrowPathIcon className="w-5 h-5" />}
               </Button>
               <DropdownMenu
@@ -84,7 +84,7 @@ export function Scenes() {
                 className="mr-2"
                 items={[
                   {
-                    label: 'Refresh active scene',
+                    label: 'Sync active scene',
                     onClick: () => sync(),
                     icon: <ArrowPathIcon className="w-5 h-5" />,
                   },
@@ -108,15 +108,21 @@ export function Scenes() {
             <div
               className={clsx(
                 'border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1',
-                activeSceneId === scene.id
+                sceneId === scene.id
                   ? 'border border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
                   : 'border-gray-700'
               )}
             >
               <div className={clsx('flex items-start justify-between gap-1')}>
-                <div>{false ? <ChevronDownIcon className="w-6 h-6" /> : <ChevronRightIcon className="w-6 h-6" />}</div>
+                <div onClick={() => expandScene(scene.id)} className="cursor-pointer">
+                  {expandedScenes[scene.id] ? (
+                    <ChevronDownIcon className="w-6 h-6" />
+                  ) : (
+                    <ChevronRightIcon className="w-6 h-6" />
+                  )}
+                </div>
                 <div className="flex-1">
-                  <H6>
+                  <H6 onClick={() => expandScene(scene.id)} className="cursor-pointer">
                     <span className="cursor-pointer">{scene.name || scene.id}</span>
                     {scene.default ? (
                       <Tag className="ml-2" color="primary">
@@ -144,7 +150,14 @@ export function Scenes() {
                       )}
                     </Button>
                   ) : (
-                    <Tag className="ml-2 cursor-pointer items-center inline-flex" color="primary">
+                    <Tag
+                      className="ml-2 cursor-pointer items-center inline-flex"
+                      color="primary"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        expandScene(scene.id)
+                      }}
+                    >
                       active
                     </Tag>
                   )}
@@ -169,6 +182,11 @@ export function Scenes() {
                   <div className="text-xs ml-2 uppercase">{showAsFps(scene.settings.refreshInterval)}</div>
                 ) : null}
               </div>
+              {expandedScenes[scene.id] ? (
+                <div className="pl-7">
+                  <ExpandedScene sceneId={scene.id} frameId={frameId} />
+                </div>
+              ) : null}
             </div>
             {showingSettings[scene.id] ? (
               <Box className="p-2 pl-4 pr-3 space-y-2 bg-gray-900 flex items-start justify-between gap-1 ml-4">

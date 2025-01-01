@@ -6,10 +6,7 @@ import { appsModel } from '../../../../models/appsModel'
 import { forms } from 'kea-forms'
 import { v4 as uuidv4 } from 'uuid'
 import { panelsLogic } from '../panelsLogic'
-
-import _sceneTemplates from '../../../../../schema/templates.json'
-import { controlLogic } from '../Control/controlLogic'
-const sceneTemplates: Record<string, Record<string, any>> = _sceneTemplates
+import { controlLogic } from './controlLogic'
 
 export interface ScenesLogicProps {
   frameId: number
@@ -48,6 +45,7 @@ export const scenesLogic = kea<scenesLogicType>([
     closeNewScene: true,
     createNewScene: true,
     sync: true,
+    expandScene: (sceneId: string) => ({ sceneId }),
   }),
   forms(({ actions, values, props }) => ({
     newScene: {
@@ -94,6 +92,28 @@ export const scenesLogic = kea<scenesLogicType>([
       },
     },
   })),
+  reducers({
+    showNewSceneForm: [
+      false,
+      {
+        toggleNewScene: (state) => !state,
+        closeNewScene: () => false,
+        submitNewSceneSuccess: () => false,
+      },
+    ],
+    showingSettings: [
+      {} as Record<string, boolean>,
+      {
+        toggleSettings: (state, { sceneId }) => ({ ...state, [sceneId]: !state[sceneId] }),
+      },
+    ],
+    expandedScenes: [
+      {} as Record<string, boolean>,
+      {
+        expandScene: (state, { sceneId }) => ({ ...state, [sceneId]: !state[sceneId] }),
+      },
+    ],
+  }),
   selectors({
     frameId: [() => [(_, props: ScenesLogicProps) => props.frameId], (frameId) => frameId],
     editingFrame: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm || frame || null],
@@ -181,22 +201,6 @@ export const scenesLogic = kea<scenesLogicType>([
       actions.resetNewScene()
     },
   })),
-  reducers({
-    showNewSceneForm: [
-      false,
-      {
-        toggleNewScene: (state) => !state,
-        closeNewScene: () => false,
-        submitNewSceneSuccess: () => false,
-      },
-    ],
-    showingSettings: [
-      {} as Record<string, boolean>,
-      {
-        toggleSettings: (state, { sceneId }) => ({ ...state, [sceneId]: !state[sceneId] }),
-      },
-    ],
-  }),
   afterMount(({ actions }) => {
     actions.syncActiveScene()
   }),

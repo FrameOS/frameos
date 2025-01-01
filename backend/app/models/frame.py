@@ -49,11 +49,12 @@ class Frame(Base):
     last_log_at = mapped_column(DateTime, nullable=True)
     reboot = mapped_column(JSON, nullable=True)
     control_code = mapped_column(JSON, nullable=True)
-    # apps
-    apps = mapped_column(JSON, nullable=True)
     scenes = mapped_column(JSON, nullable=True, default=list)
+    last_successful_deploy = mapped_column(JSON, nullable=True) # contains frame.to_dict() of last successful deploy
+    last_successful_deploy_at = mapped_column(DateTime, nullable=True)
 
-    # deprecated
+    # not used
+    apps = mapped_column(JSON, nullable=True)
     image_url = mapped_column(String(256), nullable=True)
     background_color = mapped_column(String(64), nullable=True) # still used as fallback in frontend
 
@@ -130,8 +131,8 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         server_api_key=secure_token(32),
         interval=interval or 300,
         status="uninitialized",
-        apps=[],
         scenes=[],
+        apps=[],
         scaling_mode="contain",
         rotate=0,
         device=device or "web_only",

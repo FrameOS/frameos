@@ -19,7 +19,6 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
     { panel: Panel.Events, active: false, hidden: false },
     { panel: Panel.SceneState, active: false, hidden: false },
     { panel: Panel.FrameSettings, active: false, hidden: false },
-    { panel: Panel.Control, active: false, hidden: false },
   ],
   [Area.BottomLeft]: [
     { panel: Panel.Logs, active: true, hidden: false },
@@ -52,7 +51,6 @@ export const panelsLogic = kea<panelsLogicType>([
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
     disableFullscreenPanel: true,
     openTemplates: true,
-    openControl: true,
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
     editScene: (sceneId: string) => ({ sceneId }),
     editSceneJSON: (sceneId: string) => ({ sceneId }),
@@ -141,12 +139,6 @@ export const panelsLogic = kea<panelsLogicType>([
           ...state,
           [Area.TopRight]: state[Area.TopRight].map((a) =>
             a.panel === Panel.Templates ? { ...a, active: true } : a.active ? { ...a, active: false } : a
-          ),
-        }),
-        openControl: (state, _) => ({
-          ...state,
-          [Area.TopRight]: state[Area.TopRight].map((a) =>
-            a.panel === Panel.Control ? { ...a, active: true } : a.active ? { ...a, active: false } : a
           ),
         }),
         openAsset: (state, { path }) => ({

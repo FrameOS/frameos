@@ -147,6 +147,42 @@ async def api_frame_get_state(id: int, db: Session = Depends(get_db), redis: Red
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@api_with_auth.get("/frames/{id:int}/states", response_model=FrameStateResponse)
+async def api_frame_get_states(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+    frame = db.get(Frame, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    if not is_safe_host(frame.frame_host):
+        raise HTTPException(status_code=400, detail="Unsafe frame host")
+
+    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:states'
+    url = f'http://{frame.frame_host}:{frame.frame_port}/states'
+    if frame.frame_access != "public" and frame.frame_access_key is not None:
+        url += "?k=" + frame.frame_access_key
+
+    try:
+        last_states = await redis.get(cache_key)
+        if last_states:
+            return json.loads(last_states)
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=15.0)
+
+        if response.status_code == 200:
+            await redis.set(cache_key, response.content, ex=1)
+            return response.json()
+        else:
+            last_states = await redis.get(cache_key)
+            if last_states:
+                return json.loads(last_states)
+            raise HTTPException(status_code=response.status_code, detail="Unable to fetch state")
+    except httpx.ReadTimeout:
+        raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Request Timeout to {url}")
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 @api_with_auth.post("/frames/{id:int}/event/{event}")
 async def api_frame_event(id: int, event: str, request: Request, db: Session = Depends(get_db)):
     frame = db.get(Frame, id)

@@ -12,7 +12,7 @@ import {
   TagIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
-import { controlLogic } from '../Control/controlLogic'
+import { controlLogic } from './controlLogic'
 
 interface SceneDropDownProps {
   sceneId: string

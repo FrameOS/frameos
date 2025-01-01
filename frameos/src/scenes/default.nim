@@ -73,7 +73,7 @@ proc runEvent*(context: var ExecutionContext) =
     try: self.runNode(3.NodeId, context)
     except Exception as e: self.logger.log(%*{"event": "render:error", "node": 3, "error": $e.msg,
         "stacktrace": e.getStackTrace()})
-  of "setSceneState":
+  of "setSceneState", "setCurrentScene":
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
       let payload = context.payload["state"]
       for field in PUBLIC_STATE_FIELDS:

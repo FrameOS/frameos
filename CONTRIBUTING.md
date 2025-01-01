@@ -66,12 +66,14 @@ cd backend
 DEBUG=1 arq app.tasks.worker
 ```
 
-## Running migrations
+## Creating migrations
 
 ```bash
 cd backend
 # create migration after changing a model
 DEBUG=1 python -m alembic revision --autogenerate -m "name of migration"
+# run pending migrations
+DEBUG=1 python -m alembic upgrade head
 ```
 
 ## Installing pre-commit
