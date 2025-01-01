@@ -39,7 +39,7 @@ export function Scenes() {
     scenesLogic({ frameId })
   )
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
-  const { sceneId, sceneChanging } = useValues(controlLogic({ frameId }))
+  const { sceneId, sceneChanging, loading } = useValues(controlLogic({ frameId }))
   const { setCurrentScene, sync } = useActions(controlLogic({ frameId }))
 
   if (scenes.length === 0 && !showNewSceneForm) {
@@ -75,27 +75,32 @@ export function Scenes() {
         {scenes.length > 0 ? (
           <div className="flex justify-between w-full items-center">
             <H6>Installed on frame</H6>
-            <DropdownMenu
-              buttonColor="secondary"
-              className="mr-3"
-              items={[
-                {
-                  label: 'Refresh active scene',
-                  onClick: () => sync(),
-                  icon: <ArrowPathIcon className="w-5 h-5" />,
-                },
-                {
-                  label: 'Save to "My scenes"',
-                  onClick: () => saveAsTemplate({ name: frameForm.name }),
-                  icon: <FolderArrowDownIcon className="w-5 h-5" />,
-                },
-                {
-                  label: 'Download as .zip',
-                  onClick: () => saveAsZip({ name: frameForm.name || 'Exported scenes' }),
-                  icon: <CloudArrowDownIcon className="w-5 h-5" />,
-                },
-              ]}
-            />
+            <div className="flex gap-2">
+              <Button size="small" color="secondary" onClick={() => sync()} title="Refresh active scene">
+                {loading ? <Spinner color="white" /> : <ArrowPathIcon className="w-5 h-5" />}
+              </Button>
+              <DropdownMenu
+                buttonColor="secondary"
+                className="mr-2"
+                items={[
+                  {
+                    label: 'Refresh active scene',
+                    onClick: () => sync(),
+                    icon: <ArrowPathIcon className="w-5 h-5" />,
+                  },
+                  {
+                    label: 'Save to "My scenes"',
+                    onClick: () => saveAsTemplate({ name: frameForm.name }),
+                    icon: <FolderArrowDownIcon className="w-5 h-5" />,
+                  },
+                  {
+                    label: 'Download as .zip',
+                    onClick: () => saveAsZip({ name: frameForm.name || 'Exported scenes' }),
+                    icon: <CloudArrowDownIcon className="w-5 h-5" />,
+                  },
+                ]}
+              />
+            </div>
           </div>
         ) : null}
         {scenes.map((scene) => (
