@@ -16,7 +16,7 @@ import frameos/types
 import frameos/channels
 import frameos/utils/image
 from net import Port
-from frameos/runner import getLastImagePng, getLastPublicState
+from frameos/runner import getLastImagePng, getLastPublicState, getAllPublicStates
 from scenes/scenes import sceneOptions
 
 var globalFrameConfig: FrameConfig
@@ -115,6 +115,13 @@ router myrouter:
     let payload = parseJson(if request.body == "": "{}" else: request.body)
     sendEvent(@"name", payload)
     resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
+  get "/states":
+    if not hasAccess(request, Write):
+      resp Http401, "Unauthorized"
+    log(%*{"event": "http", "get": request.pathInfo})
+    {.gcsafe.}: # It's a copy of the state, so it's fine.
+      let (sceneId, states) = getAllPublicStates()
+      resp Http200, {"Content-Type": "application/json"}, $(%*{"sceneId": $sceneId, "states": states})
   get "/state":
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"

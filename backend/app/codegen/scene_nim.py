@@ -556,13 +556,16 @@ class SceneWriter:
 
         self.scene_object_fields.sort(key=natural_keys)
 
-        set_scene_state_lines = [
+        set_current_scene_lines = [
             '  if context.payload.hasKey("state") and context.payload["state"].kind == JObject:',
             '    let payload = context.payload["state"]',
             "    for field in PUBLIC_STATE_FIELDS:",
             "      let key = field.name",
             "      if payload.hasKey(key) and payload[key] != self.state{key}:",
             "        self.state[key] = copy(payload[key])",
+        ]
+        set_scene_state_lines = [
+            *set_current_scene_lines,
             '  if context.payload.hasKey("render"):',
             '    sendEvent("render", %*{})',
         ]
@@ -571,6 +574,8 @@ class SceneWriter:
             self.run_event_lines += [f'of "{event}":']
             if event == "setSceneState":
                 self.run_event_lines += set_scene_state_lines
+            if event == "setCurrentScene":
+                self.run_event_lines += set_current_scene_lines
             for node in nodes:
                 next_node = self.next_nodes.get(node["id"], "-1")
                 self.run_event_lines += [
@@ -581,6 +586,9 @@ class SceneWriter:
         if not self.event_nodes.get("setSceneState", None):
             self.run_event_lines += ['of "setSceneState":']
             self.run_event_lines += set_scene_state_lines
+        if not self.event_nodes.get("setCurrentScene", None):
+            self.run_event_lines += ['of "setCurrentScene":']
+            self.run_event_lines += set_current_scene_lines
 
     def write_source(self) -> str:
         state_init_fields = []

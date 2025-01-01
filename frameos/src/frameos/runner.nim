@@ -57,6 +57,11 @@ proc getLastPublicState*(): (SceneId, JsonNode, seq[StateField]) =
         state = lastPublicStates[lastPublicSceneId.string].copy()
       return (lastPublicSceneId, state, exportedScenes[lastPublicSceneId].publicStateFields)
 
+proc getAllPublicStates*(): (SceneId, JsonNode) =
+  {.gcsafe.}: # It's fine: state is copied and .publicStateFields don't change
+    withLock lastPublicStatesLock:
+      return (lastPublicSceneId, lastPublicStates.copy())
+
 proc updateLastPublicState*(self: FrameScene) =
   if not exportedScenes.hasKey(self.id):
     return
@@ -281,7 +286,7 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
     nextSleep: -1
   )
   exportedScene.runEvent(context)
-  if event == "setSceneState":
+  if event == "setSceneState" or event == "setCurrentScene":
     scene.updateLastPublicState()
     scene.updateLastPersistedState()
 
@@ -309,20 +314,22 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
               payload["y"] = %*((self.frameConfig.height.float * payload["y"].getInt().float / 32767.0).int)
           of "setCurrentScene":
             let sceneId = SceneId(payload["sceneId"].getStr())
-            if sceneId == self.currentSceneId:
-              continue
             if not exportedScenes.hasKey(sceneId):
               self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
                   "event": event, "payload": payload})
               continue
-            self.dispatchSceneEvent(some(self.currentSceneId), "close", payload)
-            if not self.scenes.hasKey(sceneId):
-              let scene = exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
-              self.scenes[sceneId] = scene
-              scene.updateLastPublicState()
-            self.currentSceneId = sceneId
-            self.triggerRenderNext = true
-            self.dispatchSceneEvent(some(sceneId), "open", payload)
+            if sceneId != self.currentSceneId:
+              self.dispatchSceneEvent(some(self.currentSceneId), "close", payload)
+              if not self.scenes.hasKey(sceneId):
+                let scene = exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+                self.scenes[sceneId] = scene
+                scene.updateLastPublicState()
+              self.currentSceneId = sceneId
+              self.triggerRenderNext = true
+              self.dispatchSceneEvent(some(sceneId), event, payload)
+            elif payload.hasKey("state"):
+              self.triggerRenderNext = true
+              self.dispatchSceneEvent(some(sceneId), event, payload)
             continue # don't dispatch this event to the scene
           else: discard
         self.dispatchSceneEvent(sceneId, event, payload)

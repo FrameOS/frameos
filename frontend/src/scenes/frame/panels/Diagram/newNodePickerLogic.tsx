@@ -505,9 +505,13 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         return
       }
 
+      // Dragged onto the canvas from a "+" codefield arg
       if (handleId === 'codeField/+') {
         const codeArgs = (values.nodes.find((node) => node.id === nodeId)?.data as CodeNodeData)?.codeArgs ?? []
-        let newArg = { name: keyword || getNewFieldName(codeArgs), type: type ?? 'string' } satisfies CodeArg
+        let newArg = {
+          name: keyword === '+' ? getNewFieldName(codeArgs) : keyword,
+          type: type ?? 'string',
+        } satisfies CodeArg
         actions.setNodes([
           ...values.nodes.map((node) =>
             node.id === nodeId ? { ...node, data: { ...node.data, codeArgs: [...codeArgs, newArg] } } : node

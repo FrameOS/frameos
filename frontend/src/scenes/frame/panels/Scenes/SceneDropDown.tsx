@@ -2,16 +2,17 @@ import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { scenesLogic } from './scenesLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { PencilSquareIcon, TrashIcon, FlagIcon, FolderOpenIcon, RocketLaunchIcon } from '@heroicons/react/24/solid'
+import { PencilSquareIcon, TrashIcon, FlagIcon, FolderOpenIcon, PlayIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import {
   CloudArrowDownIcon,
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
   FolderPlusIcon,
+  TagIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
-import { controlLogic } from '../Control/controlLogic'
+import { controlLogic } from './controlLogic'
 
 interface SceneDropDownProps {
   sceneId: string
@@ -41,14 +42,14 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
           ? {
               label: 'Activate',
               onClick: () => setCurrentScene(scene.id),
-              icon: <RocketLaunchIcon className="w-5 h-5" />,
+              icon: <PlayIcon className="w-5 h-5" />,
             }
           : null,
         context === 'scenes'
           ? {
               label: 'Edit scene',
               onClick: () => editScene(scene.id),
-              icon: <FolderOpenIcon className="w-5 h-5" />,
+              icon: <PencilSquareIcon className="w-5 h-5" />,
             }
           : null,
         {
@@ -76,7 +77,7 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
         {
           label: 'Rename',
           onClick: () => renameScene(scene.id),
-          icon: <PencilSquareIcon className="w-5 h-5" />,
+          icon: <TagIcon className="w-5 h-5" />,
         },
 
         scene.default

@@ -367,7 +367,6 @@ export enum Panel {
   Apps = 'Apps',
   Asset = 'Asset',
   Assets = 'Assets',
-  Control = 'Control',
   Debug = 'Debug',
   Diagram = 'Diagram',
   EditApp = 'EditApp',
@@ -425,5 +424,5 @@ export interface FrameOSSettings {
 
 export interface FrameStateRecord {
   sceneId: string
-  state: Record<string, any>
+  states: Record<string, Record<string, any>>
 }

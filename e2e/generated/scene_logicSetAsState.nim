@@ -89,6 +89,13 @@ proc runEvent*(context: var ExecutionContext) =
           self.state[key] = copy(payload[key])
     if context.payload.hasKey("render"):
       sendEvent("render", %*{})
+  of "setCurrentScene":
+    if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
+      let payload = context.payload["state"]
+      for field in PUBLIC_STATE_FIELDS:
+        let key = field.name
+        if payload.hasKey(key) and payload[key] != self.state{key}:
+          self.state[key] = copy(payload[key])
   else: discard
 
 proc render*(self: FrameScene, context: var ExecutionContext): Image =

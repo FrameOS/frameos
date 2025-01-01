@@ -34,16 +34,23 @@ export const controlLogic = kea<controlLogicType>([
       {
         sync: async (_, breakpoint) => {
           await breakpoint(100)
+
           try {
-            const response = await apiFetch(`/api/frames/${props.frameId}/state`)
-            if (!response.ok) {
-              throw new Error('Failed to fetch frame state')
+            const statesResponse = await apiFetch(`/api/frames/${props.frameId}/states`)
+            if (statesResponse.ok) {
+              return await statesResponse.json()
             }
-            return await response.json()
           } catch (error) {
             console.error(error)
-            return values.stateRecord
           }
+
+          const response = await apiFetch(`/api/frames/${props.frameId}/state`)
+          if (!response.ok) {
+            throw new Error('Failed to fetch frame state')
+          }
+          console.error('Failed to fetch frame states, but could load one state. You might need to redeploy the frame.')
+          const resp = await response.json()
+          return { states: { [resp.sceneId]: resp.state }, sceneId: resp.sceneId }
         },
       },
     ],
@@ -56,12 +63,12 @@ export const controlLogic = kea<controlLogicType>([
       },
     ],
     sceneChanging: [
-      false,
+      null as null | string,
       {
-        setCurrentScene: () => true,
-        syncSuccess: () => false,
-        syncFailure: () => false,
-        currentSceneChanged: () => false,
+        setCurrentScene: (_, { sceneId }) => sceneId,
+        syncSuccess: () => null,
+        syncFailure: () => null,
+        currentSceneChanged: () => null,
       },
     ],
   }),
@@ -80,41 +87,14 @@ export const controlLogic = kea<controlLogicType>([
           value: scene.id || '',
         })),
     ],
-    state: [(s) => [s.stateRecord], (stateRecord) => stateRecord?.state ?? {}],
+    states: [(s) => [s.stateRecord], (stateRecord) => stateRecord?.states ?? {}],
     sceneId: [(s) => [s.stateRecord], (stateRecord) => stateRecord?.sceneId ?? null],
     loading: [
       (s) => [s.stateRecord, s.sceneChanging, s.stateRecordLoading],
-      (stateRecord, stateRecordLoading, sceneChanging) => !stateRecord?.sceneId || stateRecordLoading || sceneChanging,
+      (stateRecord, stateRecordLoading, sceneChanging) =>
+        !stateRecord?.sceneId || stateRecordLoading || !!sceneChanging,
     ],
   }),
-  forms(({ values, props }) => ({
-    stateChanges: {
-      defaults: {} as Record<string, any>,
-      submit: async (formValues) => {
-        const state: Record<string, any> = {}
-        const fields = values.scene?.fields ?? []
-        for (const field of fields) {
-          if (field.name in formValues && field.access === 'public') {
-            if (field.type === 'boolean') {
-              state[field.name] = formValues[field.name] === 'true' || field.value
-            } else if (field.type === 'integer') {
-              state[field.name] = parseInt(formValues[field.name] ?? field.value)
-            } else if (field.type === 'float') {
-              state[field.name] = parseFloat(formValues[field.name] ?? field.value)
-            } else {
-              state[field.name] = formValues[field.name] ?? field.value
-            }
-          }
-        }
-        const response = await apiFetch(`/api/frames/${props.frameId}/event/setSceneState`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ render: true, state }),
-        })
-        await response.json()
-      },
-    },
-  })),
   listeners(({ actions, props, values }) => ({
     setCurrentScene: async ({ sceneId }) => {
       const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
@@ -134,7 +114,7 @@ export const controlLogic = kea<controlLogicType>([
           } else {
             actions.currentSceneChanged(sceneId)
           }
-        } else if (event === 'event:setSceneState') {
+        } else if (event === 'event:setSceneState' || event === 'event:setCurrentScene') {
           actions.sync()
         }
       } catch (error) {}
