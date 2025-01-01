@@ -25,7 +25,7 @@ export function ExpandedScene({ frameId, sceneId }: ExpandedSceneProps) {
     <div className="py-2">
       {fieldCount === 0 ? (
         <div className="space-y-2">
-          <div>This scene does not export publicly controllable state. Use the "State" panel to configure.</div>
+          <div>This scene does not export publicly controllable state.</div>
           <Button onClick={submitStateChanges} color={sceneId !== currentSceneId ? 'primary' : 'secondary'}>
             Activate scene
           </Button>

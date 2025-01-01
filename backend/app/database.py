@@ -4,8 +4,8 @@ from app.config import config
 
 engine = create_engine(
     config.DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=20,
+    max_overflow=40,
     pool_timeout=30,  # seconds
     pool_recycle=1800  # seconds
 )
