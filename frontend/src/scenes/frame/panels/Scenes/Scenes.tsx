@@ -14,6 +14,8 @@ import {
   ArrowPathIcon,
   CloudArrowDownIcon,
   FolderArrowDownIcon,
+  PencilIcon,
+  PencilSquareIcon,
   PlusIcon,
   SparklesIcon,
 } from '@heroicons/react/24/outline'
@@ -110,9 +112,7 @@ export function Scenes() {
                 <div>{false ? <ChevronDownIcon className="w-6 h-6" /> : <ChevronRightIcon className="w-6 h-6" />}</div>
                 <div className="flex-1">
                   <H6>
-                    <span className="cursor-pointer" onClick={() => editScene(scene.id)}>
-                      {scene.name || scene.id}
-                    </span>
+                    <span className="cursor-pointer">{scene.name || scene.id}</span>
                     {scene.default ? (
                       <Tag className="ml-2" color="primary">
                         start on boot
@@ -143,6 +143,18 @@ export function Scenes() {
                       active
                     </Tag>
                   )}
+                  <Button
+                    size="small"
+                    className="!px-1"
+                    color="secondary"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      editScene(scene.id)
+                    }}
+                    title="Activate"
+                  >
+                    <PencilSquareIcon className="w-5 h-5" />
+                  </Button>
                   <SceneDropDown context="scenes" sceneId={scene.id} />
                 </div>
               </div>
