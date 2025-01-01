@@ -7,6 +7,7 @@ import { TextArea } from '../../../../components/TextArea'
 import { TextInput } from '../../../../components/TextInput'
 import { Button } from '../../../../components/Button'
 import { controlLogic } from './controlLogic'
+import { panelsLogic } from '../panelsLogic'
 
 export interface ExpandedSceneProps {
   sceneId: string
@@ -17,6 +18,7 @@ export function ExpandedScene({ frameId, sceneId }: ExpandedSceneProps) {
   const { stateChanges, hasStateChanges, fields } = useValues(expandedSceneLogic({ frameId, sceneId }))
   const { states, sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
   const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId }))
+  const { editScene } = useActions(panelsLogic)
   const fieldCount = fields.length ?? 0
 
   const currentState = states[sceneId] ?? {}
@@ -26,9 +28,14 @@ export function ExpandedScene({ frameId, sceneId }: ExpandedSceneProps) {
       {fieldCount === 0 ? (
         <div className="space-y-2">
           <div>This scene does not export publicly controllable state.</div>
-          <Button onClick={submitStateChanges} color={sceneId !== currentSceneId ? 'primary' : 'secondary'}>
-            Activate scene
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={submitStateChanges} color={sceneId !== currentSceneId ? 'primary' : 'secondary'}>
+              Activate scene
+            </Button>
+            <Button onClick={() => editScene(sceneId)} color="secondary">
+              Edit scene
+            </Button>
+          </div>
         </div>
       ) : (
         <Form logic={expandedSceneLogic} props={{ frameId, sceneId }} formKey="stateChanges" className="space-y-2">
@@ -99,6 +106,9 @@ export function ExpandedScene({ frameId, sceneId }: ExpandedSceneProps) {
               </Button>
               <Button onClick={() => resetStateChanges()} color="secondary">
                 Reset
+              </Button>
+              <Button onClick={() => editScene(sceneId)} color="secondary">
+                Edit scene
               </Button>
             </div>
           ) : null}

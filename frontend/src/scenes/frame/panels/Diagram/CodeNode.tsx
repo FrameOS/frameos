@@ -1,5 +1,5 @@
 import { BindLogic, useActions, useValues } from 'kea'
-import { NodeProps, Handle, Position, NodeResizer } from 'reactflow'
+import { NodeProps, Handle, Position, NodeResizer, useUpdateNodeInternals } from 'reactflow'
 import { CodeNodeData } from '../../../../types'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
@@ -12,8 +12,9 @@ import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
 
 export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
+  const updateNodeInternals = useUpdateNodeInternals()
   const { frameId, sceneId } = useValues(diagramLogic)
-  const { updateNodeData, copyAppJSON, deleteApp } = useActions(diagramLogic)
+  const { updateNodeData, updateEdge, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const { isSelected, node, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
   const data: CodeNodeData = (node?.data as CodeNodeData) ?? ({ code: '' } satisfies CodeNodeData)
@@ -93,11 +94,17 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
                     <CodeArg
                       key={`${codeField.type}/${codeField.name}`}
                       codeArg={codeField}
-                      onChange={(value) =>
+                      onChange={(value) => {
                         updateNodeData(id, {
                           codeArgs: data.codeArgs?.map((c, j) => (i === j ? { ...c, ...value } : c)),
                         })
-                      }
+                        nodeEdges.forEach((edge) => {
+                          if (edge.target === id && edge.targetHandle === `codeField/${codeField.name}`) {
+                            updateEdge({ ...edge, targetHandle: `codeField/${value.name}` })
+                          }
+                        })
+                        updateNodeInternals(id)
+                      }}
                       onDelete={() => editCodeField(codeField.name, '')}
                     />
                   </div>

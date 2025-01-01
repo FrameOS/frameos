@@ -74,6 +74,7 @@ export const diagramLogic = kea<diagramLogicType>([
     fitDiagramView: true,
     keywordDropped: (keyword: string, type: string, position: XYPosition) => ({ keyword, type, position }),
     updateNodeData: (id: string, data: Record<string, any>) => ({ id, data }),
+    updateEdge: (edge: Edge) => ({ edge }),
     updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
     copyAppJSON: (nodeId: string) => ({ nodeId }),
     deleteApp: (id: string) => ({ id }),
@@ -137,6 +138,10 @@ export const diagramLogic = kea<diagramLogicType>([
         },
         deleteApp: (state, { id }) => {
           const newEdges = state.filter((edge) => edge.source !== id && edge.target !== id)
+          return equal(state, newEdges) ? state : newEdges
+        },
+        updateEdge: (state, { edge }) => {
+          const newEdges = state.map((oldEdge) => (oldEdge.id === edge.id ? { ...oldEdge, ...edge } : oldEdge))
           return equal(state, newEdges) ? state : newEdges
         },
       },
