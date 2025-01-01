@@ -23,7 +23,7 @@ import React from 'react'
 import { SceneDropDown } from './SceneDropDown'
 import { showAsFps } from '../../../../decorators/refreshInterval'
 import clsx from 'clsx'
-import { ChevronDownIcon, ChevronRightIcon, RocketLaunchIcon } from '@heroicons/react/24/solid'
+import { ChevronDownIcon, ChevronRightIcon, PlayIcon } from '@heroicons/react/24/solid'
 import { controlLogic } from '../Control/controlLogic'
 import { Spinner } from '../../../../components/Spinner'
 
@@ -135,7 +135,7 @@ export function Scenes() {
                       {sceneChanging === scene.id ? (
                         <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
                       ) : (
-                        <RocketLaunchIcon className="w-5 h-5" />
+                        <PlayIcon className="w-5 h-5" />
                       )}
                     </Button>
                   ) : (
