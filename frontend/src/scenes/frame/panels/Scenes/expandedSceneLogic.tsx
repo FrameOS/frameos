@@ -5,6 +5,7 @@ import { forms } from 'kea-forms'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { FrameScene } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
+import { controlLogic } from './controlLogic'
 
 export interface ExpandedSceneLogicProps {
   frameId: number
@@ -16,25 +17,9 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
   props({} as ExpandedSceneLogicProps),
   key((props) => `${props.frameId}${props.sceneId}`),
   connect(({ frameId }: ExpandedSceneLogicProps) => ({
-    values: [frameLogic({ frameId }), ['frame', 'frameForm']],
+    values: [frameLogic({ frameId }), ['frame', 'frameForm'], controlLogic({ frameId }), ['states', 'loading']],
     actions: [frameLogic({ frameId }), ['updateScene', 'applyTemplate']],
   })),
-  selectors({
-    scenes: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm.scenes ?? frame.scenes],
-    scene: [
-      (s) => [s.scenes, (_, props) => props.sceneId],
-      (scenes, sceneId): FrameScene | null => scenes?.find((scene) => scene.id === sceneId) ?? null,
-    ],
-    fields: [(s) => [s.scene], (scene) => (scene?.fields ?? []).filter((field) => field.access === 'public')],
-    scenesAsOptions: [
-      (s) => [s.scenes],
-      (scenes): { label: string; value: string }[] =>
-        (scenes ?? []).map((scene) => ({
-          label: scene.name || 'Unnamed Scene',
-          value: scene.id || '',
-        })),
-    ],
-  }),
   forms(({ values, props }) => ({
     stateChanges: {
       defaults: {} as Record<string, any>,
@@ -63,4 +48,30 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
       },
     },
   })),
+  selectors({
+    scenes: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm.scenes ?? frame.scenes],
+    scene: [
+      (s) => [s.scenes, (_, props) => props.sceneId],
+      (scenes, sceneId): FrameScene | null => scenes?.find((scene) => scene.id === sceneId) ?? null,
+    ],
+    fields: [(s) => [s.scene], (scene) => (scene?.fields ?? []).filter((field) => field.access === 'public')],
+    scenesAsOptions: [
+      (s) => [s.scenes],
+      (scenes): { label: string; value: string }[] =>
+        (scenes ?? []).map((scene) => ({
+          label: scene.name || 'Unnamed Scene',
+          value: scene.id || '',
+        })),
+    ],
+    hasStateChanges: [
+      (s) => [s.stateChanges, s.loading, s.states, (_, props) => props.sceneId],
+      (stateChanges, loading, states, sceneId) => {
+        if (loading && !states) {
+          return false
+        }
+        const currentState = states[sceneId] ?? {}
+        return Object.keys(stateChanges).some((key) => stateChanges[key] !== currentState[key])
+      },
+    ],
+  }),
 ])

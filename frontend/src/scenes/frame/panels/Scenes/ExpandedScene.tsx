@@ -14,7 +14,7 @@ export interface ExpandedSceneProps {
 }
 
 export function ExpandedScene({ frameId, sceneId }: ExpandedSceneProps) {
-  const { stateChanges, stateChangesChanged, fields } = useValues(expandedSceneLogic({ frameId, sceneId }))
+  const { stateChanges, hasStateChanges, fields } = useValues(expandedSceneLogic({ frameId, sceneId }))
   const { states, sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
   const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId }))
   const fieldCount = fields.length ?? 0
@@ -93,7 +93,7 @@ export function ExpandedScene({ frameId, sceneId }: ExpandedSceneProps) {
             <div className="flex w-full items-center gap-2">
               <Button
                 onClick={submitStateChanges}
-                color={sceneId !== currentSceneId || stateChangesChanged ? 'primary' : 'secondary'}
+                color={sceneId !== currentSceneId || hasStateChanges ? 'primary' : 'secondary'}
               >
                 {sceneId === currentSceneId ? 'Update active scene' : 'Activate scene'}
               </Button>
