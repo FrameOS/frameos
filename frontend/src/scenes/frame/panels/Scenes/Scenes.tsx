@@ -75,7 +75,7 @@ export function Scenes() {
         {scenes.length > 0 ? (
           <div className="flex justify-between w-full items-center">
             <H6>Installed on frame</H6>
-            <div className="flex gap-2">
+            <div className="flex gap-1">
               <Button size="small" color="secondary" onClick={() => sync()} title="Refresh active scene">
                 {loading ? <Spinner color="white" /> : <ArrowPathIcon className="w-5 h-5" />}
               </Button>
