@@ -55,4 +55,5 @@ class WorkerSettings:
     redis_settings = REDIS_SETTINGS
     keep_result = 3600  # Keep results for 1 hour
     max_jobs = 10
+    job_timeout = 7200
     allow_abort_jobs = True

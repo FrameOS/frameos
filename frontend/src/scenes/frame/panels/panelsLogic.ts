@@ -14,20 +14,20 @@ export interface AnyBuiltLogic extends BuiltLogic {}
 const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
   [Area.TopLeft]: [{ panel: Panel.Scenes, active: false, hidden: false }],
   [Area.TopRight]: [
-    { panel: Panel.Templates, active: false, hidden: false },
-    { panel: Panel.Apps, active: true, hidden: false },
+    { panel: Panel.SceneState, active: true, hidden: false },
+    { panel: Panel.Apps, active: false, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
-    { panel: Panel.SceneState, active: false, hidden: false },
-    { panel: Panel.FrameSettings, active: false, hidden: false },
+    { panel: Panel.Templates, active: false, hidden: false },
   ],
   [Area.BottomLeft]: [
     { panel: Panel.Logs, active: true, hidden: false },
     { panel: Panel.FrameDetails, active: false, hidden: false },
+    { panel: Panel.FrameSettings, active: false, hidden: false },
     { panel: Panel.Metrics, active: false, hidden: false },
     { panel: Panel.Terminal, active: false, hidden: false },
     { panel: Panel.Debug, active: false, hidden: false },
-    { panel: Panel.SceneSource, active: false, hidden: false },
     { panel: Panel.Assets, active: false, hidden: false },
+    { panel: Panel.SceneSource, active: false, hidden: false },
   ],
   [Area.BottomRight]: [{ panel: Panel.Image, active: true, hidden: false }],
 }
@@ -198,25 +198,26 @@ export const panelsLogic = kea<panelsLogicType>([
   }),
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
-    diagramOpen: [
+    scenesOpen: [
       (s) => [s.panels, s.fullScreenPanel],
       (panels, fullScreenPanel): boolean =>
-        fullScreenPanel?.panel === Panel.Diagram ||
-        !!panels[Area.TopLeft].find(
-          (p) => p.panel === Panel.Diagram && (p.active || panels[Area.TopLeft].length === 1)
-        ),
+        fullScreenPanel?.panel === Panel.Scenes ||
+        panels[Area.TopLeft].filter((p) => p.active).length === 0 ||
+        !!panels[Area.TopLeft].find((p) => p.panel === Panel.Scenes && p.active),
     ],
     panelsWithConditions: [
-      (s) => [s.panels, s.fullScreenPanel, s.diagramOpen],
-      (panels, fullScreenPanel, diagramOpen): Record<Area, PanelWithMetadata[]> => {
+      (s) => [s.panels, s.fullScreenPanel, s.scenesOpen],
+      (panels, fullScreenPanel, scenesOpen): Record<Area, PanelWithMetadata[]> => {
         if (!fullScreenPanel) {
           return {
             ...panels,
             [Area.TopRight]: panels[Area.TopRight].filter((p) =>
-              diagramOpen ? true : p.panel !== Panel.Apps && p.panel !== Panel.Events && p.panel !== Panel.SceneState
+              scenesOpen
+                ? [Panel.Templates].includes(p.panel)
+                : [Panel.Apps, Panel.Events, Panel.SceneState].includes(p.panel)
             ),
             [Area.BottomLeft]: panels[Area.BottomLeft].filter((p) =>
-              diagramOpen ? true : p.panel !== Panel.SceneSource
+              !scenesOpen ? true : p.panel !== Panel.SceneSource
             ),
           }
         }

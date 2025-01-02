@@ -275,5 +275,5 @@ export function Templates() {
 }
 
 Templates.PanelTitle = function TemplatesPanelTitle() {
-  return <>Scenes to install</>
+  return <>Available scenes</>
 }
