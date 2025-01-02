@@ -202,7 +202,8 @@ export const panelsLogic = kea<panelsLogicType>([
       (s) => [s.panels, s.fullScreenPanel],
       (panels, fullScreenPanel): boolean =>
         fullScreenPanel?.panel === Panel.Scenes ||
-        !!panels[Area.TopLeft].find((p) => p.panel === Panel.Scenes && (p.active || panels[Area.TopLeft].length === 1)),
+        panels[Area.TopLeft].filter((p) => p.active).length === 0 ||
+        !!panels[Area.TopLeft].find((p) => p.panel === Panel.Scenes && p.active),
     ],
     panelsWithConditions: [
       (s) => [s.panels, s.fullScreenPanel, s.scenesOpen],
