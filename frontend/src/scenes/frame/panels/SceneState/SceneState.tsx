@@ -45,7 +45,7 @@ export function SceneState(): JSX.Element {
   return (
     <Form logic={frameLogic} props={{ frameId }} formKey="frameForm">
       <Group name={['scenes', sceneIndex]}>
-        <div className="flex justify-between w-full items-center gap-2 mb-2 mt-4">
+        <div className="flex justify-between w-full items-center gap-2 mb-2">
           <H6>
             State fields{' '}
             <div className="inline-block align-text-top">

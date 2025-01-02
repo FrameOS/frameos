@@ -14,20 +14,20 @@ export interface AnyBuiltLogic extends BuiltLogic {}
 const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
   [Area.TopLeft]: [{ panel: Panel.Scenes, active: false, hidden: false }],
   [Area.TopRight]: [
-    { panel: Panel.Templates, active: false, hidden: false },
-    { panel: Panel.Apps, active: true, hidden: false },
+    { panel: Panel.SceneState, active: true, hidden: false },
+    { panel: Panel.Apps, active: false, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
-    { panel: Panel.SceneState, active: false, hidden: false },
-    { panel: Panel.FrameSettings, active: false, hidden: false },
+    { panel: Panel.Templates, active: false, hidden: false },
   ],
   [Area.BottomLeft]: [
     { panel: Panel.Logs, active: true, hidden: false },
     { panel: Panel.FrameDetails, active: false, hidden: false },
+    { panel: Panel.FrameSettings, active: false, hidden: false },
     { panel: Panel.Metrics, active: false, hidden: false },
     { panel: Panel.Terminal, active: false, hidden: false },
     { panel: Panel.Debug, active: false, hidden: false },
-    { panel: Panel.SceneSource, active: false, hidden: false },
     { panel: Panel.Assets, active: false, hidden: false },
+    { panel: Panel.SceneSource, active: false, hidden: false },
   ],
   [Area.BottomRight]: [{ panel: Panel.Image, active: true, hidden: false }],
 }
