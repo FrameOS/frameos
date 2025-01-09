@@ -3,6 +3,7 @@ arq
 asyncssh
 email_validator
 fastapi[standard]
+fonttools
 honcho
 imagehash
 jwt

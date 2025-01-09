@@ -5,6 +5,7 @@ import { scenes } from './scenes'
 import { socketLogic } from './socketLogic'
 import { framesModel } from '../models/framesModel'
 import { appsModel } from '../models/appsModel'
+import { fontsModel } from '../models/fontsModel'
 import { templatesModel } from '../models/templatesModel'
 import { entityImagesModel } from '../models/entityImagesModel'
 import { inHassioIngress } from '../utils/inHassioIngress'
@@ -24,6 +25,7 @@ export function DelayedLoading() {
 export function LoggedInApp() {
   useMountedLogic(socketLogic)
   useMountedLogic(appsModel)
+  useMountedLogic(fontsModel)
   useMountedLogic(entityImagesModel)
   useMountedLogic(framesModel)
   useMountedLogic(templatesModel)

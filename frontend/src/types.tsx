@@ -173,6 +173,14 @@ export interface AppConfig {
   cache?: CacheConfig
 }
 
+export interface FontMetadata {
+  file: string
+  name: string
+  weight: number
+  weight_title: string
+  italic: boolean
+}
+
 export interface StateField extends AppConfigField {
   persist?: 'memory' | 'disk'
   access?: 'private' | 'public'
