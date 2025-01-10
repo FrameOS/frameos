@@ -18,6 +18,7 @@ import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { Tooltip } from '../../../../components/Tooltip'
+import { fontsModel } from '../../../../models/fontsModel'
 
 export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
   const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
@@ -43,6 +44,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
   } = useValues(appNodeLogic(appNodeLogicProps))
   const data: AppNodeData = (node?.data as AppNodeData) ?? ({ keyword: '', config: {} } satisfies AppNodeData)
   const { select } = useActions(appNodeLogic(appNodeLogicProps))
+  const { fontsOptions } = useValues(fontsModel)
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
 
@@ -335,6 +337,15 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                 <RevealDots
                                   onClick={() => setSecretRevealed({ ...secretRevealed, [field.name]: true })}
                                 />
+                              ) : field.type === 'font' ? (
+                                <>
+                                  <Select
+                                    theme="node"
+                                    value={field.name in data.config ? data.config[field.name] : field.value}
+                                    options={fontsOptions}
+                                    // onChange={(value) => updateNodeConfig(id, field.name, { ...value, })}
+                                  />
+                                </>
                               ) : field.type === 'select' ? (
                                 <Select
                                   theme="node"

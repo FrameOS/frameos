@@ -1,4 +1,4 @@
-import { afterMount, kea, path } from 'kea'
+import { afterMount, kea, path, selectors } from 'kea'
 
 import type { fontsModelType } from './fontsModelType'
 import { loaders } from 'kea-loaders'
@@ -33,6 +33,16 @@ export const fontsModel = kea<fontsModelType>([
       },
     ],
   })),
+  selectors({
+    fontsOptions: [
+      (s) => [s.fonts],
+      (fonts): { label: string; value: string }[] =>
+        fonts.map((font) => ({
+          label: font.name,
+          value: font.file,
+        })),
+    ],
+  }),
   afterMount(({ actions }) => {
     actions.loadFonts()
   }),

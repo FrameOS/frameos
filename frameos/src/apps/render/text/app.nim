@@ -62,10 +62,9 @@ proc toTypeset*(self: App, text: string, fontSize: float, baseFontSize: float, c
                 bounds: Vec2, hAlign: HorizontalAlignment, vAlign: VerticalAlignment, border: bool): Arrangement =
   let factor = fontSize / baseFontSize
   var spans: seq[Span] = @[]
-  var currentColor = color
-  var currentSize = fontSize
-  var currentUnderline = false
-  var currentStrikethrough = false
+  var fontStyles: seq[FontStyle] = @[]
+  var currentFontStyle = FontStyle(typeface: typeface, name: "", size: fontSize, color: color, underline: false,
+      strikethrough: false, borderWidth: 0)
 
   if self.appConfig.richText == "basic-caret":
     var i = 0
@@ -82,24 +81,29 @@ proc toTypeset*(self: App, text: string, fontSize: float, baseFontSize: float, c
             let parts = tag.split(',')
             for p in parts:
               let part = strutils.strip(p)
-              if part.startsWith('#'):
+              if part == "/" and parts.len == 1:
+                discard pop(fontStyles)
+                break
+              elif part.startsWith('#'):
                 if not border:
-                  currentColor = parseHtmlColor(part)
+                  currentFontStyle.color = parseHtmlColor(part)
               elif part.isNumber():
-                currentSize = part.parseFloat() * factor
+                currentFontStyle.size = part.parseFloat() * factor
               elif part == "underline":
-                currentUnderline = true
+                currentFontStyle.underline = true
               elif part == "strikethrough":
-                currentStrikethrough = true
+                currentFontStyle.strikethrough = true
               elif part == "no-underline":
-                currentUnderline = false
+                currentFontStyle.underline = false
               elif part == "no-strikethrough":
-                currentStrikethrough = false
+                currentFontStyle.strikethrough = false
               elif part == "reset":
-                currentColor = color
-                currentSize = fontSize
-                currentUnderline = false
-                currentStrikethrough = false
+                currentFontStyle.color = color
+                currentFontStyle.size = fontSize
+                currentFontStyle.underline = false
+                currentFontStyle.strikethrough = false
+              elif part.endsWith(".ttf"):
+                currentFontStyle.typeface = getTypeface(part)
               else:
                 self.logError("Invalid tag component: " & part)
             # Move past the closing ')'
@@ -113,14 +117,14 @@ proc toTypeset*(self: App, text: string, fontSize: float, baseFontSize: float, c
       while i < text.len and text[i] != '^':
         i += 1
       if i > start:
-        let font = newFont(typeface, currentSize, currentColor)
-        if currentUnderline:
+        let font = newFont(currentFontStyle.typeface, currentFontStyle.size, currentFontStyle.color)
+        if currentFontStyle.underline:
           font.underline = true
-        if currentStrikethrough:
+        if currentFontStyle.strikethrough:
           font.strikethrough = true
         spans.add(newSpan(text[start ..< i], font))
   else:
-    spans.add(newSpan(text, newFont(typeface, currentSize, currentColor)))
+    spans.add(newSpan(text, newFont(currentFontStyle.typeface, currentFontStyle.size, currentFontStyle.color)))
 
   return typeset(spans, bounds, hAlign, vAlign)
 

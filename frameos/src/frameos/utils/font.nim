@@ -1,15 +1,22 @@
-import options
 import pixie
+import tables
+import strutils
 import assets/fonts as fontAssets
 
-var typeface: Option[Typeface] = none(TypeFace)
+var defaultFont = "Ubuntu-Regular_1.ttf"
+var typefaces: Table[string, Typeface] = initTable[string, Typeface]()
+
+proc getTypeface*(font: string): Typeface =
+  {.cast(gcsafe).}: # We're reading an immutable global. It's fine.
+    # sanitize input, expect only a legit file name (can't go .. or /etc/passwd)\
+    if "/" in font or ".." in font:
+      raise newException(ValueError, "Invalid font name")
+    if not typefaces.hasKey(font):
+      typefaces[font] = parseTtf(fontAssets.getAsset("assets/fonts/" & font))
+    return typefaces[font]
 
 proc getDefaultTypeface*(): Typeface =
-  {.cast(gcsafe).}: # We're reading an immutable global. It's fine.
-    if typeface.isNone:
-      typeface = some(parseTtf(fontAssets.getAsset(
-          "assets/fonts/Ubuntu-Regular_1.ttf")))
-    return typeface.get()
+  return getTypeface(defaultFont)
 
 proc newFont*(typeface: Typeface, size: float, color: Color): Font =
   result = newFont(typeface)

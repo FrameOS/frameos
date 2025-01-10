@@ -91,9 +91,34 @@ export interface MetricsType {
   metrics: Record<string, any>
 }
 
-export type FieldType = 'string' | 'float' | 'integer' | 'boolean' | 'color' | 'json' | 'node' | 'scene' | 'image'
-export const fieldTypes = ['string', 'float', 'integer', 'boolean', 'color', 'json', 'node', 'scene', 'image'] as const
-export type AppConfigFieldType = FieldType | 'text' | 'select'
+export type FieldType =
+  | 'string'
+  | 'text'
+  | 'float'
+  | 'integer'
+  | 'boolean'
+  | 'color'
+  | 'json'
+  | 'node'
+  | 'scene'
+  | 'image'
+  | 'font'
+
+export const fieldTypes = [
+  'string',
+  'text',
+  'float',
+  'integer',
+  'boolean',
+  'color',
+  'json',
+  'node',
+  'scene',
+  'image',
+  'font',
+] as const
+
+export type AppConfigFieldType = FieldType | 'select' | 'font'
 export const toFieldType: (value: string | AppConfigFieldType) => FieldType = (value) =>
   fieldTypes.includes(value as any) ? (value as FieldType) : 'string'
 
