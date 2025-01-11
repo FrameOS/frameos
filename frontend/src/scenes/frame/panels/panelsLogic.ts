@@ -4,6 +4,8 @@ import { AppNodeData, Area, Panel, PanelWithMetadata } from '../../../types'
 
 import type { panelsLogicType } from './panelsLogicType'
 import { frameLogic } from '../frameLogic'
+import { actionToUrl, router, urlToAction } from 'kea-router'
+import { subscriptions } from 'kea-subscriptions'
 
 export interface PanelsLogicProps {
   frameId: number
@@ -45,6 +47,7 @@ export const panelsLogic = kea<panelsLogicType>([
     actions: [frameLogic(props), ['closeScenePanels']],
   })),
   actions({
+    setPanels: (panels: Record<Area, PanelWithMetadata[]>) => ({ panels }),
     setPanel: (area: Area, panel: PanelWithMetadata) => ({ area, panel }),
     openPanel: (panel: PanelWithMetadata) => ({ panel }),
     closePanel: (panel: PanelWithMetadata) => ({ panel }),
@@ -57,11 +60,13 @@ export const panelsLogic = kea<panelsLogicType>([
     editStateScene: (sceneId: string) => ({ sceneId }),
     openAsset: (path: string) => ({ path }),
     persistUntilClosed: (panel: PanelWithMetadata, logic: AnyBuiltLogic) => ({ panel, logic }),
+    updateUrl: true,
   }),
   reducers({
     panels: [
       DEFAULT_LAYOUT as Record<Area, PanelWithMetadata[]>,
       {
+        setPanels: (_, { panels }) => panels,
         setPanel: (state, { area, panel }) => {
           const newPanels = { ...state }
           newPanels[area] = newPanels[area].map((p) => ({
@@ -286,9 +291,40 @@ export const panelsLogic = kea<panelsLogicType>([
     },
   })),
   afterMount(({ values, actions }) => {
-    const scenesPanel = values.panels[Area.TopRight].find((p) => p.panel === Panel.Scenes)
-    if (scenesPanel) {
-      actions.setPanel(Area.TopRight, scenesPanel)
+    const routerPanels = router.values.hashParams?.p
+    if (routerPanels && !equal(values.panels, routerPanels)) {
+      actions.setPanels(routerPanels)
+    } else {
+      const scenesPanel = values.panels[Area.TopRight].find((p) => p.panel === Panel.Scenes)
+      if (scenesPanel) {
+        actions.setPanel(Area.TopRight, scenesPanel)
+      }
     }
   }),
+  subscriptions(({ actions }) => ({
+    panels: (panels) => {
+      const routerPanels = router.values.hashParams?.p
+      if (!routerPanels || !equal(panels, routerPanels)) {
+        actions.updateUrl()
+      }
+    },
+  })),
+  urlToAction(({ actions, props, values }) => ({
+    '/frames/:id': ({ id }, _search, hash) => {
+      if (id && props.frameId !== parseInt(id)) {
+        return
+      }
+      const panels = hash.p || null
+      if (panels && typeof panels === 'object' && !equal(panels, values.panels)) {
+        actions.setPanels(panels)
+      }
+    },
+  })),
+  actionToUrl(({ values }) => ({
+    updateUrl: () => [
+      router.values.location.pathname,
+      router.values.searchParams,
+      { ...router.values.hashParams, p: values.panels },
+    ],
+  })),
 ])
