@@ -17,6 +17,7 @@ class FieldTypeEnum(str, Enum):
     image = "image"
     text = "text"
     select = "select"
+    font = "font"
 
 
 class ConfigFieldConditionOperator(str, Enum):
