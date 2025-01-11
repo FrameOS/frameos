@@ -14,13 +14,13 @@ export function FontSelect({ value, onChange, className }: FontSelectProps): JSX
   const { fonts, fontsOptions, fontLoaded, fontLoading } = useValues(fontsModel)
   const font = fonts.find((font) => font.file === value)
   useEffect(() => {
-    if (font) {
+    if (font && !fontLoaded[font.file] && !fontLoading[font.file]) {
       fontsModel.actions.loadFont(font)
     }
-  }, [font])
+  }, [font, fontLoaded, fontLoading])
   return (
     <div>
-      <Select theme="node" value={value} options={fontsOptions} onChange={onChange} className={clsx(className)} />
+      <Select theme="node" value={value || ''} options={fontsOptions} onChange={onChange} className={clsx(className)} />
       {font && fontLoaded[font.file] ? (
         <div style={{ fontFamily: font.name, fontWeight: font.weight, fontStyle: font.italic ? 'italic' : undefined }}>
           Hello from a font!

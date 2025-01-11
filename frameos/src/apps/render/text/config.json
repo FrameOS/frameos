@@ -107,6 +107,12 @@
       "placeholder": "10"
     },
     {
+      "name": "font",
+      "type": "font",
+      "required": false,
+      "label": "Font"
+    },
+    {
       "name": "fontColor",
       "type": "color",
       "value": "#ffffff",

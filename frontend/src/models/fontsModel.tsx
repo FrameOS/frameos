@@ -92,7 +92,7 @@ export const fontsModel = kea<fontsModelType>([
       (s) => [s.fonts],
       (fonts): { label: string; value: string }[] =>
         [
-          { label: 'Default', value: '' },
+          { label: '- Default -', value: '' },
           ...fonts.map((font) => ({
             label: `${font.name} - ${font.weight} ${font.weight_title} ${font.italic ? 'Italic' : ''}`.trim(),
             value: font.file,
