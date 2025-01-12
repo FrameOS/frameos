@@ -1,5 +1,7 @@
 import os
+import io
 from fontTools.ttLib import TTFont
+from app.schemas.fonts import FontMetadata
 
 # Simple mapping from weight class to a rough textual label
 WEIGHT_MAP = {
@@ -136,6 +138,68 @@ def get_font_info(ttf_path):
         "weight_title": weight_title,     # e.g. "Book", "Light", "SemiBold", ...
         "italic": is_italic,
     }
+
+def parse_font_info_in_memory(font_data: bytes, filename: str) -> FontMetadata:
+    """
+    Parse a TTF font entirely in memory (e.g. from DB asset) and produce metadata.
+    """
+    try:
+        font = TTFont(io.BytesIO(font_data))
+    except Exception:
+        raise ValueError("Unable to parse font data from memory")
+
+    name_table = font["name"]
+    family_name = None
+
+    # Attempt nameID=16 (typographic family name), else fallback to nameID=1
+    for record in name_table.names:
+        if record.nameID == 16 and (record.platformID, record.platEncID, record.langID) in [(3, 1, 0x409), (1, 0, 0)]:
+            family_name = record.toUnicode()
+            break
+    if not family_name:
+        for record in name_table.names:
+            if record.nameID == 1 and (record.platformID, record.platEncID, record.langID) in [(3, 1, 0x409), (1, 0, 0)]:
+                family_name = record.toUnicode()
+                break
+    if not family_name:
+        family_name = "Unknown"
+
+    # subfamily name (check ID=17, else fallback to ID=2)
+    subfamily_name = None
+    for record in name_table.names:
+        if record.nameID == 17 and (record.platformID, record.platEncID, record.langID) in [(3, 1, 0x409), (1, 0, 0)]:
+            subfamily_name = record.toUnicode()
+            break
+    if not subfamily_name:
+        for record in name_table.names:
+            if record.nameID == 2 and (record.platformID, record.platEncID, record.langID) in [(3, 1, 0x409), (1, 0, 0)]:
+                subfamily_name = record.toUnicode()
+                break
+    if not subfamily_name:
+        subfamily_name = "Unknown"
+
+    os2_table = font["OS/2"]
+    numeric_weight = os2_table.usWeightClass
+    is_italic = bool(os2_table.fsSelection & 0x01)
+    weight_title = get_weight_title_from_usWeightClass(numeric_weight)
+
+    # If subfamily has more specific info (besides 'Regular'/'Unknown'/'Italic'), override
+    subfam_lower = subfamily_name.lower()
+    if "italic" in subfam_lower:
+        possible_weight_title = subfam_lower.replace("italic", "").strip()
+    else:
+        possible_weight_title = subfam_lower
+    if possible_weight_title not in ["regular", "unknown", ""]:
+        weight_title = possible_weight_title.title()
+
+    return FontMetadata(
+        file=filename,
+        name=family_name,
+        weight=numeric_weight,
+        weight_title=weight_title,
+        italic=is_italic
+    )
+
 
 def gather_all_fonts_info(folder_path):
     """
