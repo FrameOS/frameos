@@ -18,5 +18,6 @@
         "sentry": {
             "frame_dsn": null
         }
-    }
+    },
+    "assetsPath": "../frameos/assets/copied"
 }
