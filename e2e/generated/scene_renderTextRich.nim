@@ -95,7 +95,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     fontSize: 32.0,
     overflow: "fit-bounds",
   ))
-  scene.node1.init()
   runEvent(context)
   
 {.pop.}

@@ -123,7 +123,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderWidth: 2,
     overflow: "fit-bounds",
   ))
-  scene.node3.init()
   runEvent(context)
   
 {.pop.}
