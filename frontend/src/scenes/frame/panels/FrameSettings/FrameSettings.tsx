@@ -334,7 +334,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
             <Field
               name="upload_fonts"
               label="Upload fonts"
-              tooltip="When deploying a frame, FrameOS uploads system fonts to /srv/assets/fonts. You can disable this here"
+              tooltip="When deploying a frame, FrameOS uploads fonts to /srv/assets/fonts. You can disable this here"
             >
               <Select
                 name="upload_fonts"

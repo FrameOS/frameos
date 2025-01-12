@@ -55,9 +55,12 @@ export function FontSelect({ value, onChange, className, theme }: FontSelectProp
           className={clsx(className)}
         />
       ) : null}
-      {font && fontLoaded[font.file] ? (
-        <div style={{ fontFamily: font.name, fontWeight: font.weight, fontStyle: font.italic ? 'italic' : undefined }}>
-          Hello from a font!
+      {font ? (
+        <div
+          style={{ fontFamily: font.name, fontWeight: font.weight, fontStyle: font.italic ? 'italic' : undefined }}
+          contentEditable
+        >
+          Hello from a font! 13457
         </div>
       ) : null}
     </div>
