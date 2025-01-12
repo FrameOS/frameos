@@ -8,20 +8,19 @@ var defaultFont = "Ubuntu-Regular_1.ttf" # compiled into the binary by nimassets
 var typefaces: Table[string, Typeface] = initTable[string, Typeface]()
 
 proc getTypeface*(font: string, assetsPath: string): Typeface =
-  {.cast(gcsafe).}: # We're reading an immutable global. It's fine.
-    # sanitize input, expect only a legit file name (can't go .. or /etc/passwd)\
-    if "/" in font or ".." in font:
+  if not typefaces.hasKey(font):
+    # sanitize input, expect only a legit file name (can't go .. or /etc/passwd)
+    if "/" in font or ".." in font or "~" in font:
       raise newException(ValueError, "Invalid font name")
-    if not typefaces.hasKey(font):
-      let ttf = if font == defaultFont:
-        fontAssets.getAsset("assets/compiled/fonts/" & font)
-      else:
-        readFile(assetsPath & "/fonts/" & font)
-      typefaces[font] = parseTtf(ttf)
-    return typefaces[font]
+    let ttf = if font == defaultFont:
+      fontAssets.getAsset("assets/compiled/fonts/" & font)
+    else:
+      readFile(assetsPath & "/fonts/" & font)
+    typefaces[font] = parseTtf(ttf)
+  return typefaces[font]
 
 proc hasTypeface*(font: string, assetsPath: string): bool =
-  if "/" in font or ".." in font:
+  if "/" in font or ".." in font or "~" in font:
     raise newException(ValueError, "Invalid font name")
   return typefaces.hasKey(font) or font == defaultFont or fileExists(assetsPath & "/fonts/" & font)
 
