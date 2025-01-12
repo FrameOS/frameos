@@ -22,6 +22,7 @@ from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.drivers.devices import drivers_for_device
 from app.drivers.waveshare import write_waveshare_driver_nim, get_variant_folder
 from app.models import get_apps_from_scenes
+from app.models.assets import sync_assets
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection, exec_local_command
@@ -36,11 +37,11 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
     redis: Redis = ctx['redis']
 
     ssh = None
-    try:
-        frame = db.get(Frame, id)
-        if not frame:
-            raise Exception("Frame not found")
+    frame = db.get(Frame, id)
+    if not frame:
+        raise Exception("Frame not found")
 
+    try:
         if not frame.scenes or len(frame.scenes) == 0:
             raise Exception("You must have at least one installed scene to deploy.")
 
@@ -237,17 +238,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                                f"rm -rf /srv/frameos/current && "
                                f"ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current")
 
-            # Ensure /srv/assets
-            assets_path = frame.assets_path or "/srv/assets"
-            await exec_command(
-                db, redis, frame, ssh,
-                f"if [ ! -d {assets_path} ]; then "
-                f"  sudo mkdir -p {assets_path} && sudo chown $(whoami):$(whoami) {assets_path}; "
-                f"elif [ ! -w {assets_path} ]; then "
-                f"  echo 'User lacks write access to {assets_path}. Fixing...'; "
-                f"  sudo chown $(whoami):$(whoami) {assets_path}; "
-                f"fi"
-            )
+            # Figure out the difference between /srv/assets and the local assets folder
+            sync_assets(db, redis, frame, ssh)
 
             # Clean old builds
             await exec_command(db, redis, frame, ssh,
@@ -312,10 +304,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await update_frame(db, redis, frame)
     finally:
         if ssh is not None:
-            ssh.close()
-            if frame:
-                await log(db, redis, int(frame.id), "stdinfo", "SSH connection closed")
             await remove_ssh_connection(ssh)
+            await log(db, redis, int(frame.id), "stdinfo", "SSH connection closed")
 
 
 def find_nim_v2():

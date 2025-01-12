@@ -82,6 +82,25 @@ export const assetsLogic = kea<assetsLogicType>([
         },
       },
     ],
+    assetSync: [
+      false,
+      {
+        syncAssets: async () => {
+          try {
+            const response = await apiFetch(`/api/frames/${props.frameId}/assets/sync`, {
+              method: 'POST',
+            })
+            if (!response.ok) {
+              throw new Error('Failed to upload fonts')
+            }
+            return true
+          } catch (error) {
+            console.error(error)
+            return false
+          }
+        },
+      },
+    ],
   })),
   selectors({
     cleanedAssets: [

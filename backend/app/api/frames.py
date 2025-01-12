@@ -239,6 +239,7 @@ async def api_frame_get_assets(id: int, db: Session = Depends(get_db), redis: Re
     output: list[str] = []
     await exec_command(db, redis, frame, ssh, command, output, log_output=False)
     await remove_ssh_connection(ssh)
+    await log(db, redis, id, "stdinfo", "SSH connection closed")
 
     assets = []
     for line in output:
@@ -352,9 +353,27 @@ async def api_frame_get_asset(
 
         finally:
             await remove_ssh_connection(ssh)
+            await log(db, redis, id, "stdinfo", "SSH connection closed")
 
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+@api_with_auth.post("/frames/{id:int}/assets/sync")
+async def api_frame_get_assets_upload_fonts(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+    frame = db.get(Frame, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    try:
+        from app.models.assets import sync_assets
+        ssh = await get_ssh_connection(db, redis, frame)
+        try:
+            await sync_assets(db, redis, frame, ssh)
+        finally:
+            await remove_ssh_connection(ssh)
+            await log(db, redis, id, "stdinfo", "SSH connection closed")
+        return {"message": "Assets synced successfully"}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
