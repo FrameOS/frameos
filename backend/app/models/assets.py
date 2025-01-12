@@ -12,18 +12,30 @@ local_fonts_path = "../frameos/assets/copied/fonts"
 async def sync_assets(db: Session, redis: Redis, frame: Frame, ssh):
     assets_path = frame.assets_path or default_assets_path
     await make_asset_folders(db, redis, frame, ssh, assets_path)
-    await upload_font_assets(db, redis, frame, ssh, assets_path)
+    if frame.upload_fonts != "none":
+        await upload_font_assets(db, redis, frame, ssh, assets_path)
 
 async def make_asset_folders(db: Session, redis: Redis, frame: Frame, ssh, assets_path: str):
-    await exec_command(
-        db, redis, frame, ssh,
-        f"if [ ! -d {assets_path}/fonts ]; then "
-        f"  sudo mkdir -p {assets_path}/fonts && sudo chown -R $(whoami):$(whoami) {assets_path}; "
-        f"elif [ ! -w {assets_path} ] || [ ! -w {assets_path}/fonts ]; then "
-        f"  echo 'User lacks write access to {assets_path}. Fixing...'; "
-        f"  sudo chown -R $(whoami):$(whoami) {assets_path}; "
-        f"fi"
-    )
+    if frame.upload_fonts != "none":
+        await exec_command(
+            db, redis, frame, ssh,
+            f"if [ ! -d {assets_path}/fonts ]; then "
+            f"  sudo mkdir -p {assets_path}/fonts && sudo chown -R $(whoami):$(whoami) {assets_path}; "
+            f"elif [ ! -w {assets_path} ] || [ ! -w {assets_path}/fonts ]; then "
+            f"  echo 'User lacks write access to {assets_path}. Fixing...'; "
+            f"  sudo chown -R $(whoami):$(whoami) {assets_path}; "
+            f"fi"
+        )
+    else:
+        await exec_command(
+            db, redis, frame, ssh,
+            f"if [ ! -d {assets_path} ]; then "
+            f"  sudo mkdir -p {assets_path} && sudo chown -R $(whoami):$(whoami) {assets_path}; "
+            f"elif [ ! -w {assets_path} ]; then "
+            f"  echo 'User lacks write access to {assets_path}. Fixing...'; "
+            f"  sudo chown -R $(whoami):$(whoami) {assets_path}; "
+            f"fi"
+        )
 
 async def upload_font_assets(db: Session, redis: Redis, frame: Frame, ssh, assets_path: str):
     command = f"find {assets_path}/fonts -type f -exec stat --format='%s %Y %n' {{}} +"

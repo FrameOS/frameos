@@ -46,6 +46,7 @@ class Frame(Base):
     assets_path = mapped_column(String(256), nullable=True)
     save_assets = mapped_column(JSON, nullable=True)
     debug = mapped_column(Boolean, nullable=True)
+    upload_fonts = mapped_column(String(10), nullable=True)
     last_log_at = mapped_column(DateTime, nullable=True)
     reboot = mapped_column(JSON, nullable=True)
     control_code = mapped_column(JSON, nullable=True)
@@ -89,6 +90,7 @@ class Frame(Base):
             'log_to_file': self.log_to_file,
             'assets_path': self.assets_path,
             'save_assets': self.save_assets,
+            'upload_fonts': self.upload_fonts,
             'reboot': self.reboot,
             'control_code': self.control_code,
         }
@@ -139,6 +141,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         log_to_file=None, # spare the SD card from load
         assets_path='/srv/assets',
         save_assets=True,
+        upload_fonts='', # all
         control_code={"enabled": "true", "position": "top-right"},
         reboot={"enabled": "true", "crontab": "4 0 * * *"},
     )

@@ -332,6 +332,19 @@ export function FrameSettings({ className }: FrameSettingsProps) {
               </>
             </Field>
             <Field
+              name="upload_fonts"
+              label="Upload fonts"
+              tooltip="When deploying a frame, FrameOS uploads system fonts to /srv/assets/fonts. You can disable this here"
+            >
+              <Select
+                name="upload_fonts"
+                options={[
+                  { value: '', label: 'All' },
+                  { value: 'none', label: 'None' },
+                ]}
+              />
+            </Field>
+            <Field
               name="log_to_file"
               label={<div>Save logs to file</div>}
               labelRight={

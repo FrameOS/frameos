@@ -33,6 +33,7 @@ class FrameBase(BaseModel):
     log_to_file: Optional[str]
     assets_path: Optional[str]
     save_assets: Any
+    upload_fonts: Optional[str]
     reboot: Any
     control_code: Any
     scenes: Optional[List[Dict[str, Any]]]
@@ -72,6 +73,7 @@ class FrameUpdateRequest(BaseModel):
     log_to_file: Optional[str] = None
     assets_path: Optional[str] = None
     save_assets: Any = None
+    upload_fonts: Optional[str] = None
     scaling_mode: Optional[str] = None
     device: Optional[str] = None
     debug: Optional[bool] = None

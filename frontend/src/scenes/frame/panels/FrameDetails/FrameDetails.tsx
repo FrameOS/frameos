@@ -159,6 +159,10 @@ export function FrameDetails({ className }: DetailsProps) {
                 </td>
               </tr>
               <tr>
+                <td className="text-blue-200 text-right">Upload fonts:</td>
+                <td className="break-words">{frame.upload_fonts || 'all'}</td>
+              </tr>
+              <tr>
                 <td className="text-blue-200 text-right">Log to file:</td>
                 <td className="break-words">{frame.log_to_file || <em>disabled</em>}</td>
               </tr>
