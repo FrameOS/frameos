@@ -15,20 +15,27 @@ export const fontsModel = kea<fontsModelType>([
   path(['src', 'models', 'fontsModel']),
   actions({
     loadFont: (font: FontMetadata) => ({ font }),
-    setFontLoading: (font: FontMetadata, loaded: boolean) => ({ font, loaded }),
+    setFontLoading: (font: FontMetadata, loading: boolean) => ({ font, loading }),
     setFontLoaded: (font: FontMetadata, loaded: boolean) => ({ font, loaded }),
   }),
   reducers({
     fontLoading: [
       {} as Record<string, boolean>,
       {
-        setFontLoading: (state, { font, loaded }) => ({ ...state, [font.file]: loaded }),
+        setFontLoading: (state, { font, loading }) => ({ ...state, [font.file]: loading }),
       },
     ],
     fontLoaded: [
       {} as Record<string, boolean>,
       {
         setFontLoaded: (state, { font, loaded }) => ({ ...state, [font.file]: loaded }),
+      },
+    ],
+    fontLoadAttempts: [
+      {} as Record<string, number>,
+      {
+        setFontLoading: (state, { font, loading }) =>
+          loading ? { ...state, [font.file]: (state[font.file] || 0) + 1 } : state,
       },
     ],
   }),
@@ -54,10 +61,14 @@ export const fontsModel = kea<fontsModelType>([
   })),
   listeners(({ values, actions }) => ({
     loadFont: async ({ font }, breakpoint) => {
-      if (values.fontLoading[font.file] || values.fontLoaded[font.file]) {
+      const loadAttempt = values.fontLoadAttempts[font.file]
+      if (values.fontLoading[font.file] || values.fontLoaded[font.file] || loadAttempt >= 3) {
         return
       }
       try {
+        if (loadAttempt > 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000 * loadAttempt))
+        }
         actions.setFontLoading(font, true)
         const response = await apiFetch(`/api/fonts/${font.file}`)
         if (!response.ok) {
