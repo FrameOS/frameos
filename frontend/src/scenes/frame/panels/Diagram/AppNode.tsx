@@ -340,13 +340,13 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                 />
                               ) : field.type === 'font' ? (
                                 <FontSelect
+                                  theme="node"
                                   value={(field.name in data.config ? data.config[field.name] : field.value) || ''}
                                   onChange={(value) => updateNodeConfig(id, field.name, value)}
                                 />
                               ) : field.type === 'select' ? (
                                 <Select
                                   theme="node"
-                                  placeholder={field.placeholder}
                                   value={field.name in data.config ? data.config[field.name] : field.value}
                                   options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
                                   onChange={(value) => updateNodeConfig(id, field.name, value)}
@@ -354,7 +354,6 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                               ) : field.type === 'scene' ? (
                                 <Select
                                   theme="node"
-                                  placeholder={field.placeholder}
                                   value={field.name in data.config ? data.config[field.name] : field.value}
                                   options={sceneOptions}
                                   onChange={(value) => updateNodeConfig(id, field.name, value)}

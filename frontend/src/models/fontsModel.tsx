@@ -110,6 +110,44 @@ export const fontsModel = kea<fontsModelType>([
           })),
         ].sort((a, b) => a.label.localeCompare(b.label)),
     ],
+    fontsByName: [
+      (s) => [s.fonts],
+      (fonts: FontMetadata[]): Record<string, FontMetadata[]> =>
+        fonts.reduce((acc, font) => {
+          if (!acc[font.name]) {
+            acc[font.name] = []
+          }
+          acc[font.name].push(font)
+          return acc
+        }, {} as Record<string, FontMetadata[]>),
+    ],
+    fontsByNameOptions: [
+      (s) => [s.fontsByName],
+      (fontsByName): { label: string; value: string }[] => [
+        { label: '- Default -', value: '' },
+        ...Object.keys(fontsByName)
+          .map((name) => ({
+            label: name,
+            value: name,
+          }))
+          .sort((a, b) => a.label.localeCompare(b.label)),
+      ],
+    ],
+    weightsByNameOptions: [
+      (s) => [s.fontsByName],
+      (fontsByName): Record<string, { label: string; value: string }[]> =>
+        Object.fromEntries(
+          Object.entries(fontsByName).map(([name, fonts]) => [
+            name,
+            fonts
+              .toSorted((a, b) => a.weight + (a.italic ? 20 : 0) - (b.weight + (b.italic ? 20 : 0)))
+              .map((font) => ({
+                label: `${font.weight} ${font.weight_title} ${font.italic ? 'Italic' : ''}`.trim(),
+                value: font.file,
+              })),
+          ])
+        ),
+    ],
   }),
   afterMount(({ actions }) => {
     actions.loadFonts()

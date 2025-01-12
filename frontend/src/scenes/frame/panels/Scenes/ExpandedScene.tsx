@@ -8,6 +8,7 @@ import { TextInput } from '../../../../components/TextInput'
 import { Button } from '../../../../components/Button'
 import { controlLogic } from './controlLogic'
 import { panelsLogic } from '../panelsLogic'
+import { FontSelect } from '../../../../components/FontSelect'
 
 export interface ExpandedSceneProps {
   sceneId: string
@@ -52,7 +53,6 @@ export function ExpandedScene({ frameId, sceneId }: ExpandedSceneProps) {
                   <Field name={field.name}>
                     {({ value, onChange }) => (
                       <Select
-                        placeholder={field.placeholder}
                         value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
                         onChange={onChange}
                         options={(field.options ?? []).map((option) => ({ label: option, value: option }))}
@@ -63,7 +63,6 @@ export function ExpandedScene({ frameId, sceneId }: ExpandedSceneProps) {
                   <Field name={field.name}>
                     {({ value, onChange }) => (
                       <Select
-                        placeholder={field.placeholder}
                         value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
                         onChange={onChange}
                         options={['true', 'false'].map((option) => ({ label: option, value: option }))}
@@ -78,6 +77,15 @@ export function ExpandedScene({ frameId, sceneId }: ExpandedSceneProps) {
                         value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
                         onChange={onChange}
                         rows={3}
+                      />
+                    )}
+                  </Field>
+                ) : field.type === 'font' ? (
+                  <Field name={field.name}>
+                    {({ value, onChange }) => (
+                      <FontSelect
+                        value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
+                        onChange={onChange}
                       />
                     )}
                   </Field>
