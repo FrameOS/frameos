@@ -101,11 +101,7 @@ proc toTypeset*(self: App, text: string, fontSize: float, baseFontSize: float, c
                 currentFontStyle.underline = false
                 currentFontStyle.strikethrough = false
               elif part.endsWith(".ttf"):
-                if hasTypeface(part, self.frameConfig.assetsPath):
-                  currentFontStyle.typeface = getTypeface(part, self.frameConfig.assetsPath)
-                else:
-                  currentFontStyle.typeface = getDefaultTypeface()
-                  self.logError("Could not find font: " & part)
+                currentFontStyle.typeface = getTypeface(part, self.frameConfig.assetsPath)
               else:
                 self.logError("Invalid tag component: " & part)
             # Move past the closing ')'
