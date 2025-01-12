@@ -24,7 +24,6 @@ async def list_assets(
     """
     query = db.query(Assets)
     if path:
-        # Use ILIKE for case-insensitive substring match, or .like(...) for case-sensitive
         query = query.filter(Assets.path.ilike(f"%{path}%"))
     results = query.all()
 
@@ -83,7 +82,6 @@ async def create_asset(
       - `path` must be unique
       - `file` is the actual file data
     """
-    # Check if path is already in use
     existing = db.query(Assets).filter_by(path=path).first()
     if existing:
         raise HTTPException(

@@ -6,7 +6,7 @@ import tables
 import strutils
 import assets/fonts as fontAssets
 
-const defaultFont = "Ubuntu-Regular_1.ttf" # compiled into the binary by nimassets
+const defaultFont = "Ubuntu-Regular.ttf" # compiled into the binary by nimassets
 var typefaces: Table[string, Typeface] = initTable[string, Typeface]()
 
 var typefaceLock: Lock
