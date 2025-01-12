@@ -6,6 +6,7 @@ import { Button } from '../../components/Button'
 import { Header } from '../../components/Header'
 import { Panels } from './panels/Panels'
 import { DropdownMenu } from '../../components/DropdownMenu'
+import { panelsLogic } from './panels/panelsLogic'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -16,6 +17,7 @@ export function Frame(props: FrameSceneProps) {
   const frameLogicProps = { frameId }
   const { frame, frameChanged } = useValues(frameLogic(frameLogicProps))
   const { saveFrame, renderFrame, restartFrame, stopFrame, deployFrame } = useActions(frameLogic(frameLogicProps))
+  const { openLogs } = useActions(panelsLogic(frameLogicProps))
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -38,7 +40,14 @@ export function Frame(props: FrameSceneProps) {
                   <Button color={frameChanged ? 'primary' : 'secondary'} type="button" onClick={() => saveFrame()}>
                     Save
                   </Button>
-                  <Button color={'secondary'} type="button" onClick={() => deployFrame()}>
+                  <Button
+                    color={'secondary'}
+                    type="button"
+                    onClick={() => {
+                      deployFrame()
+                      openLogs()
+                    }}
+                  >
                     Redeploy
                   </Button>
                 </div>

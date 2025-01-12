@@ -21,7 +21,7 @@ from scenes/scenes import sceneOptions
 
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
-let indexHtml = webAssets.getAsset("assets/web/index.html")
+let indexHtml = webAssets.getAsset("assets/compiled/web/index.html")
 
 var connectionsLock: Lock
 var connections {.guard: connectionsLock.} = newSeq[WebSocket]()
@@ -178,7 +178,7 @@ router myrouter:
 
     fieldsHtml.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
     {.gcsafe.}: # We're only reading static assets. It's fine.
-      let controlHtml = webAssets.getAsset("assets/web/control.html").
+      let controlHtml = webAssets.getAsset("assets/compiled/web/control.html").
         replace("/*$$fieldsHtml$$*/", fieldsHtml).
         replace("/*$$fieldsSubmitHtml$$*/", fieldsSubmitHtml).
         replace("/*$$sceneOptionsHtml$$*/", sceneOptionsHtml).

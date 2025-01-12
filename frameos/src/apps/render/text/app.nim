@@ -13,6 +13,7 @@ type
     offsetX*: float
     offsetY*: float
     padding*: float
+    font*: string
     fontColor*: Color
     fontSize*: float
     borderColor*: Color
@@ -42,7 +43,10 @@ type
     renderResult*: Option[RenderResult]
 
 proc init*(self: App) =
-  self.typeface = getDefaultTypeface()
+  if self.appConfig.font != "":
+    self.typeface = getTypeface(self.appConfig.font, self.frameConfig.assetsPath)
+  else:
+    self.typeface = getDefaultTypeface()
 
 proc `==`(obj1, obj2: RenderData): bool =
   obj1.text == obj2.text and obj1.vAlign == obj2.vAlign and obj1.position == obj2.position and
@@ -103,7 +107,11 @@ proc toTypeset*(self: App, text: string, fontSize: float, baseFontSize: float, c
                 currentFontStyle.underline = false
                 currentFontStyle.strikethrough = false
               elif part.endsWith(".ttf"):
-                currentFontStyle.typeface = getTypeface(part)
+                if hasTypeface(part, self.frameConfig.assetsPath):
+                  currentFontStyle.typeface = getTypeface(part, self.frameConfig.assetsPath)
+                else:
+                  currentFontStyle.typeface = getDefaultTypeface()
+                  self.logError("Could not find font: " & part)
               else:
                 self.logError("Invalid tag component: " & part)
             # Move past the closing ')'

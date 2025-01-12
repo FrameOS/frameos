@@ -25,8 +25,8 @@ taskRequires "assets", "nimassets >= 0.2.4"
 
 task assets, "Create assets":
   exec "mkdir -p src/assets"
-  exec "~/.nimble/bin/nimassets -d=assets/copied/web -o=src/assets/web.nim"
-  exec "~/.nimble/bin/nimassets -d=assets/copied/fonts -o=src/assets/fonts.nim"
+  exec "~/.nimble/bin/nimassets -d=assets/compiled/web -o=src/assets/web.nim"
+  exec "~/.nimble/bin/nimassets -f=assets/compiled/fonts/Ubuntu-Regular_1.ttf -o=src/assets/fonts.nim"
 
 before build:
   exec "nimble assets"

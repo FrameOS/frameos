@@ -239,7 +239,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                                f"ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current")
 
             # Figure out the difference between /srv/assets and the local assets folder
-            sync_assets(db, redis, frame, ssh)
+            await sync_assets(db, redis, frame, ssh)
 
             # Clean old builds
             await exec_command(db, redis, frame, ssh,
