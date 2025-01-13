@@ -31,7 +31,7 @@
 #include "Debug.h"
 
 /************4 Gray******************************************************/
-unsigned char LUT_DATA_4Gray[] =
+unsigned char LUT_DATA_4Gray[] = 
 {
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -39,21 +39,21 @@ unsigned char LUT_DATA_4Gray[] =
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-
+ 
 0x01, 0x4A, 0x00, 0x00, 0x00, 0x01, 0x00,
 0x01, 0x82, 0x42, 0x00, 0x00, 0x10, 0x00,
 0x01, 0x8A, 0x00, 0x00, 0x00, 0x01, 0x00,
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-
+ 
 0x01, 0x41, 0x00, 0x00, 0x00, 0x01, 0x00,
 0x01, 0x82, 0x42, 0x00, 0x00, 0x10, 0x00,
 0x01, 0x81, 0x00, 0x00, 0x00, 0x01, 0x00,
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+ 
 0x01, 0x81, 0x00, 0x00, 0x00, 0x01, 0x00,
 0x01, 0x82, 0x42, 0x00, 0x00, 0x10, 0x00,
 0x01, 0x41, 0x00, 0x00, 0x00, 0x01, 0x00,
@@ -69,10 +69,10 @@ unsigned char LUT_DATA_4Gray[] =
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
 
 0x02, 0x00, 0x00,    //FR, XON
-0x22, 0x17, 0x41, 0xA8, 0x32, 0x40,
+0x22, 0x17, 0x41, 0xA8, 0x32, 0x40, 
 //EOPT  VGH   VSH1  VSH2  VSL   VCOM
 
 };
@@ -111,7 +111,7 @@ parameter:
 ******************************************************************************/
 static void EPD_5in79_SendData(UBYTE Data)
 {
-
+    
     DEV_Digital_Write(EPD_CS_PIN, 0);
     DEV_Digital_Write(EPD_DC_PIN, 1);
     DEV_SPI_WriteByte(Data);
@@ -129,10 +129,10 @@ void EPD_5in79_ReadBusy(void)
 	do
 	{
 		busy = DEV_Digital_Read(EPD_BUSY_PIN);
-        DEV_Delay_ms(10);
+        DEV_Delay_ms(10);   
 	}
-	while(busy);
-	DEV_Delay_ms(200);
+	while(busy);   
+	DEV_Delay_ms(200);     
     Debug("e-Paper busy release\r\n");
 }
 
@@ -144,8 +144,8 @@ static void EPD_5in79_TurnOnDisplay(void)
 {
     EPD_5in79_SendCommand(0x22);
     EPD_5in79_SendData(0xF7);
-	EPD_5in79_SendCommand(0x20);			//DISPLAY REFRESH
-	DEV_Delay_ms(100);	        //!!!The delay here is necessary, 200uS at least!!!
+	EPD_5in79_SendCommand(0x20);			//DISPLAY REFRESH 	
+	DEV_Delay_ms(100);	        //!!!The delay here is necessary, 200uS at least!!!     
 	EPD_5in79_ReadBusy();        //waiting for the electronic paper IC to release the idle signal
 }
 
@@ -153,8 +153,8 @@ static void EPD_5in79_TurnOnDisplay_Fast(void)
 {
     EPD_5in79_SendCommand(0x22);
     EPD_5in79_SendData(0xC7);
-	EPD_5in79_SendCommand(0x20);			//DISPLAY REFRESH
-	DEV_Delay_ms(100);	        //!!!The delay here is necessary, 200uS at least!!!
+	EPD_5in79_SendCommand(0x20);			//DISPLAY REFRESH 	
+	DEV_Delay_ms(100);	        //!!!The delay here is necessary, 200uS at least!!!     
 	EPD_5in79_ReadBusy();        //waiting for the electronic paper IC to release the idle signal
 }
 
@@ -162,8 +162,8 @@ static void EPD_5in79_TurnOnDisplay_Partial(void)
 {
     EPD_5in79_SendCommand(0x22);
     EPD_5in79_SendData(0xFF);
-	EPD_5in79_SendCommand(0x20);			//DISPLAY REFRESH
-	DEV_Delay_ms(100);	        //!!!The delay here is necessary, 200uS at least!!!
+	EPD_5in79_SendCommand(0x20);			//DISPLAY REFRESH 	
+	DEV_Delay_ms(100);	        //!!!The delay here is necessary, 200uS at least!!!     
 	EPD_5in79_ReadBusy();        //waiting for the electronic paper IC to release the idle signal
 }
 
@@ -171,8 +171,8 @@ static void EPD_5in79_TurnOnDisplay_4GRAY(void)
 {
     EPD_5in79_SendCommand(0x22);
     EPD_5in79_SendData(0xCF);
-	EPD_5in79_SendCommand(0x20);			//DISPLAY REFRESH
-	DEV_Delay_ms(100);	        //!!!The delay here is necessary, 200uS at least!!!
+	EPD_5in79_SendCommand(0x20);			//DISPLAY REFRESH 	
+	DEV_Delay_ms(100);	        //!!!The delay here is necessary, 200uS at least!!!     
 	EPD_5in79_ReadBusy();        //waiting for the electronic paper IC to release the idle signal
 }
 
@@ -187,19 +187,19 @@ static void EPD_5in79_Lut(void)
     for(count = 0; count < 227 ; count++) {
         EPD_5in79_SendData(LUT_DATA_4Gray[count]);
     }
-    EPD_5in79_SendCommand(0x3f);
+    EPD_5in79_SendCommand(0x3f); 
 	EPD_5in79_SendData(LUT_DATA_4Gray[227]);
 
-    EPD_5in79_SendCommand(0x03);
+    EPD_5in79_SendCommand(0x03);     
 	EPD_5in79_SendData(LUT_DATA_4Gray[228]);
 
-	EPD_5in79_SendCommand(0x04);
-	EPD_5in79_SendData(LUT_DATA_4Gray[229]);
-	EPD_5in79_SendData(LUT_DATA_4Gray[230]);
-	EPD_5in79_SendData(LUT_DATA_4Gray[231]);
+	EPD_5in79_SendCommand(0x04);   
+	EPD_5in79_SendData(LUT_DATA_4Gray[229]); 
+	EPD_5in79_SendData(LUT_DATA_4Gray[230]); 
+	EPD_5in79_SendData(LUT_DATA_4Gray[231]);   
 
-	EPD_5in79_SendCommand(0x2C);
-	EPD_5in79_SendData(LUT_DATA_4Gray[232]);
+	EPD_5in79_SendCommand(0x2C); 
+	EPD_5in79_SendData(LUT_DATA_4Gray[232]); 
 }
 
 
@@ -221,39 +221,39 @@ UBYTE EPD_5in79_Init(void)
     EPD_5in79_SendCommand(0x44);	 						 // Set Ram X- address Start / End position
 	EPD_5in79_SendData(0x00);     						 // XStart, POR = 00h
 	EPD_5in79_SendData(0x31); //400/8-1
-	EPD_5in79_SendCommand(0x45);	 									// Set Ram Y- address  Start / End position
-	EPD_5in79_SendData(0x0f);
-	EPD_5in79_SendData(0x01);  //300-1
+	EPD_5in79_SendCommand(0x45);	 									// Set Ram Y- address  Start / End position 
+	EPD_5in79_SendData(0x0f);  
+	EPD_5in79_SendData(0x01);  //300-1	
 	EPD_5in79_SendData(0x00);     									// YEnd L
-	EPD_5in79_SendData(0x00);											// YEnd H
+	EPD_5in79_SendData(0x00);											// YEnd H 
 
-    EPD_5in79_SendCommand(0x4e);
-	EPD_5in79_SendData(0x00);
-	EPD_5in79_SendCommand(0x4f);
-	EPD_5in79_SendData(0x0f);
-	EPD_5in79_SendData(0x01);
+    EPD_5in79_SendCommand(0x4e);	 						 
+	EPD_5in79_SendData(0x00);	
+	EPD_5in79_SendCommand(0x4f);	 
+	EPD_5in79_SendData(0x0f);  
+	EPD_5in79_SendData(0x01); 	
 
-    EPD_5in79_ReadBusy();
-
+    EPD_5in79_ReadBusy();   
+    
     EPD_5in79_SendCommand(0x91);
     EPD_5in79_SendData(0x00);
 
     EPD_5in79_SendCommand(0xC4);							 // Set Ram X- address Start / End position
 	EPD_5in79_SendData(0x31);     						 // XStart, POR = 00h
 	EPD_5in79_SendData(0x00); //400/8-1
-	EPD_5in79_SendCommand(0xC5);	 									// Set Ram Y- address  Start / End position
-	EPD_5in79_SendData(0x0f);
-	EPD_5in79_SendData(0x01);  //300-1
+	EPD_5in79_SendCommand(0xC5);	 									// Set Ram Y- address  Start / End position 
+	EPD_5in79_SendData(0x0f);  
+	EPD_5in79_SendData(0x01);  //300-1	
 	EPD_5in79_SendData(0x00);     									// YEnd L
-	EPD_5in79_SendData(0x00);											// YEnd H
+	EPD_5in79_SendData(0x00);											// YEnd H 
 
-    EPD_5in79_SendCommand(0xCE);
-	EPD_5in79_SendData(0x31);
-	EPD_5in79_SendCommand(0xCF);
-	EPD_5in79_SendData(0x0f);
+    EPD_5in79_SendCommand(0xCE);	 						 
+	EPD_5in79_SendData(0x31);	
+	EPD_5in79_SendCommand(0xCF);	 
+	EPD_5in79_SendData(0x0f);  
 	EPD_5in79_SendData(0x01);
 
-    EPD_5in79_ReadBusy();
+    EPD_5in79_ReadBusy();   
 
     return 0;
 }
@@ -265,64 +265,64 @@ UBYTE EPD_5in79_Init_Fast(void)
     EPD_5in79_ReadBusy();        //waiting for the electronic paper IC to release the idle signal
 	EPD_5in79_SendCommand(0x12); //POWER ON
 	EPD_5in79_ReadBusy();        //waiting for the electronic paper IC to release the idle signal
-
+    
     EPD_5in79_SendCommand(0x18); //Read built-in temperature sensor
-    EPD_5in79_SendData(0x80);
+    EPD_5in79_SendData(0x80);	
 
     EPD_5in79_SendCommand(0x22); // Load temperature value
-    EPD_5in79_SendData(0xB1);
-    EPD_5in79_SendCommand(0x20);
-    EPD_5in79_ReadBusy();
+    EPD_5in79_SendData(0xB1);		
+    EPD_5in79_SendCommand(0x20);	
+    EPD_5in79_ReadBusy();   
 
     EPD_5in79_SendCommand(0x1A); // Write to temperature register
-    EPD_5in79_SendData(0x64);
-    EPD_5in79_SendData(0x00);
-
+    EPD_5in79_SendData(0x64);		
+    EPD_5in79_SendData(0x00);	
+                
     EPD_5in79_SendCommand(0x22); // Load temperature value
-    EPD_5in79_SendData(0x91);
-    EPD_5in79_SendCommand(0x20);
-    EPD_5in79_ReadBusy();
+    EPD_5in79_SendData(0x91);		
+    EPD_5in79_SendCommand(0x20);	
+    EPD_5in79_ReadBusy();   
 
     EPD_5in79_SendCommand(0x11);
     EPD_5in79_SendData(0x01);
-
+    
     EPD_5in79_SendCommand(0x44);	 						 // Set Ram X- address Start / End position
 	EPD_5in79_SendData(0x00);     						 // XStart, POR = 00h
 	EPD_5in79_SendData(0x31); //400/8-1
-	EPD_5in79_SendCommand(0x45);	 									// Set Ram Y- address  Start / End position
-	EPD_5in79_SendData(0x0f);
-	EPD_5in79_SendData(0x01);  //300-1
+	EPD_5in79_SendCommand(0x45);	 									// Set Ram Y- address  Start / End position 
+	EPD_5in79_SendData(0x0f);  
+	EPD_5in79_SendData(0x01);  //300-1	
 	EPD_5in79_SendData(0x00);     									// YEnd L
-	EPD_5in79_SendData(0x00);											// YEnd H
+	EPD_5in79_SendData(0x00);											// YEnd H 
 
-    EPD_5in79_SendCommand(0x4e);
-	EPD_5in79_SendData(0x00);
-	EPD_5in79_SendCommand(0x4f);
-	EPD_5in79_SendData(0x0f);
-	EPD_5in79_SendData(0x01);
+    EPD_5in79_SendCommand(0x4e);	 						 
+	EPD_5in79_SendData(0x00);	
+	EPD_5in79_SendCommand(0x4f);	 
+	EPD_5in79_SendData(0x0f);  
+	EPD_5in79_SendData(0x01); 	
 
-    EPD_5in79_ReadBusy();
-
+    EPD_5in79_ReadBusy();   
+    
     EPD_5in79_SendCommand(0x91);
     EPD_5in79_SendData(0x00);
 
     EPD_5in79_SendCommand(0xC4);							 // Set Ram X- address Start / End position
 	EPD_5in79_SendData(0x31);     						 // XStart, POR = 00h
 	EPD_5in79_SendData(0x00); //400/8-1
-	EPD_5in79_SendCommand(0xC5);	 									// Set Ram Y- address  Start / End position
-	EPD_5in79_SendData(0x0f);
-	EPD_5in79_SendData(0x01);  //300-1
+	EPD_5in79_SendCommand(0xC5);	 									// Set Ram Y- address  Start / End position 
+	EPD_5in79_SendData(0x0f);  
+	EPD_5in79_SendData(0x01);  //300-1	
 	EPD_5in79_SendData(0x00);     									// YEnd L
-	EPD_5in79_SendData(0x00);											// YEnd H
+	EPD_5in79_SendData(0x00);											// YEnd H 
 
-    EPD_5in79_SendCommand(0xCe);
-	EPD_5in79_SendData(0x31);
-	EPD_5in79_SendCommand(0xCf);
-	EPD_5in79_SendData(0x0f);
+    EPD_5in79_SendCommand(0xCe);	 						 
+	EPD_5in79_SendData(0x31);	
+	EPD_5in79_SendCommand(0xCf);	 
+	EPD_5in79_SendData(0x0f);  
 	EPD_5in79_SendData(0x01);
 
-    EPD_5in79_ReadBusy();
-
+    EPD_5in79_ReadBusy();   
+    
 
     return 0;
 }
@@ -345,63 +345,63 @@ UBYTE EPD_5in79_Init_4Gray(void)
 {
     EPD_5in79_Reset();
 
-    EPD_5in79_ReadBusy();
-	EPD_5in79_SendCommand(0x12);
-	EPD_5in79_ReadBusy();
+    EPD_5in79_ReadBusy();   
+	EPD_5in79_SendCommand(0x12); 
+	EPD_5in79_ReadBusy(); 
 
-    EPD_5in79_SendCommand(0x0C);
-    EPD_5in79_SendData(0x8B);
-    EPD_5in79_SendData(0x9C);
-    EPD_5in79_SendData(0xA6);
+    EPD_5in79_SendCommand(0x0C);     
+    EPD_5in79_SendData(0x8B);    
+    EPD_5in79_SendData(0x9C);    
+    EPD_5in79_SendData(0xA6);    
     EPD_5in79_SendData(0x0F);
 
-    EPD_5in79_SendCommand(0x3C); //set border
+    EPD_5in79_SendCommand(0x3C); //set border 
     EPD_5in79_SendData(0x81);
 
-    EPD_5in79_ReadBusy();
+    EPD_5in79_ReadBusy();	
 
     EPD_5in79_SendCommand(0x11);
     EPD_5in79_SendData(0x01);
-
+    
     EPD_5in79_SendCommand(0x44);	 						 // Set Ram X- address Start / End position
 	EPD_5in79_SendData(0x00);     						 // XStart, POR = 00h
 	EPD_5in79_SendData(0x31); //400/8-1
-	EPD_5in79_SendCommand(0x45);	 									// Set Ram Y- address  Start / End position
-	EPD_5in79_SendData(0x0f);
-	EPD_5in79_SendData(0x01);  //300-1
+	EPD_5in79_SendCommand(0x45);	 									// Set Ram Y- address  Start / End position 
+	EPD_5in79_SendData(0x0f);  
+	EPD_5in79_SendData(0x01);  //300-1	
 	EPD_5in79_SendData(0x00);     									// YEnd L
-	EPD_5in79_SendData(0x00);											// YEnd H
+	EPD_5in79_SendData(0x00);											// YEnd H 
 
-    EPD_5in79_SendCommand(0x4e);
-	EPD_5in79_SendData(0x00);
-	EPD_5in79_SendCommand(0x4f);
-	EPD_5in79_SendData(0x0f);
-	EPD_5in79_SendData(0x01);
+    EPD_5in79_SendCommand(0x4e);	 						 
+	EPD_5in79_SendData(0x00);	
+	EPD_5in79_SendCommand(0x4f);	 
+	EPD_5in79_SendData(0x0f);  
+	EPD_5in79_SendData(0x01); 	
 
-    EPD_5in79_ReadBusy();
-
+    EPD_5in79_ReadBusy();   
+    
     EPD_5in79_SendCommand(0x91);
     EPD_5in79_SendData(0x00);
 
     EPD_5in79_SendCommand(0xC4);							 // Set Ram X- address Start / End position
 	EPD_5in79_SendData(0x31);     						 // XStart, POR = 00h
 	EPD_5in79_SendData(0x00); //400/8-1
-	EPD_5in79_SendCommand(0xC5);	 									// Set Ram Y- address  Start / End position
-	EPD_5in79_SendData(0x0f);
-	EPD_5in79_SendData(0x01);  //300-1
+	EPD_5in79_SendCommand(0xC5);	 									// Set Ram Y- address  Start / End position 
+	EPD_5in79_SendData(0x0f);  
+	EPD_5in79_SendData(0x01);  //300-1	
 	EPD_5in79_SendData(0x00);     									// YEnd L
-	EPD_5in79_SendData(0x00);											// YEnd H
+	EPD_5in79_SendData(0x00);											// YEnd H 
 
-    EPD_5in79_SendCommand(0xCe);
-	EPD_5in79_SendData(0x31);
-	EPD_5in79_SendCommand(0xCf);
-	EPD_5in79_SendData(0x0f);
+    EPD_5in79_SendCommand(0xCe);	 						 
+	EPD_5in79_SendData(0x31);	
+	EPD_5in79_SendCommand(0xCf);	 
+	EPD_5in79_SendData(0x0f);  
 	EPD_5in79_SendData(0x01);
 
     EPD_5in79_Lut();
 
     return 0;
-}
+}	
 
 /******************************************************************************
 function :	Clear screen
@@ -412,26 +412,26 @@ void EPD_5in79_Clear(void)
     UDOUBLE i;
     // M part 396*272
     EPD_5in79_SendCommand(0x24);
-    for(i=0; i<13600; i++)
+    for(i=0; i<13600; i++) 
     {
         EPD_5in79_SendData(0xff);
     }
 
     EPD_5in79_SendCommand(0X26);
-    for(i=0; i<13600; i++)
+    for(i=0; i<13600; i++)	
     {
         EPD_5in79_SendData(0x00);
     }
 
     // S part 396*272
     EPD_5in79_SendCommand(0xA4);
-    for(i=0; i<13600; i++)
+    for(i=0; i<13600; i++) 
     {
         EPD_5in79_SendData(0xff);
     }
 
     EPD_5in79_SendCommand(0xA6);
-    for(i=0; i<13600; i++)
+    for(i=0; i<13600; i++)	
     {
         EPD_5in79_SendData(0x00);
     }
@@ -444,26 +444,26 @@ void EPD_5in79_Clear_Black(void)
     UDOUBLE i;
     // M part 396*272
     EPD_5in79_SendCommand(0x24);
-    for(i=0; i<13600; i++)
+    for(i=0; i<13600; i++) 
     {
         EPD_5in79_SendData(0x00);
     }
 
     EPD_5in79_SendCommand(0X26);
-    for(i=0; i<13600; i++)
+    for(i=0; i<13600; i++)	
     {
         EPD_5in79_SendData(0x00);
     }
 
     // S part 396*272
     EPD_5in79_SendCommand(0xA4);
-    for(i=0; i<13600; i++)
+    for(i=0; i<13600; i++) 
     {
         EPD_5in79_SendData(0x00);
     }
 
     EPD_5in79_SendCommand(0xA6);
-    for(i=0; i<13600; i++)
+    for(i=0; i<13600; i++)	
     {
         EPD_5in79_SendData(0x00);
     }
@@ -622,7 +622,7 @@ void EPD_5in79_Display_Base_color(UBYTE color)
         }
     }
 
-
+    
 }
 
 /******************************************************************************
@@ -676,10 +676,10 @@ void EPD_5in79_Display_Partial(const UBYTE *Image, UWORD Xstart, UWORD Ystart, U
     Width =((Xend - Xstart) % 8 == 0)?((Xend - Xstart) / 8 ):((Xend - Xstart) / 8 + 1);
     Height = Yend - Ystart;
 
-    EPD_5in79_SendCommand(0x22);
-    EPD_5in79_SendData(0xc0);
-    EPD_5in79_SendCommand(0x20);
-    EPD_5in79_ReadBusy();
+    EPD_5in79_SendCommand(0x22); 
+    EPD_5in79_SendData(0xc0);   
+    EPD_5in79_SendCommand(0x20); 
+    EPD_5in79_ReadBusy(); 
 
     EPD_5in79_SendCommand(0x11);
     EPD_5in79_SendData(0x01);
@@ -695,17 +695,17 @@ void EPD_5in79_Display_Partial(const UBYTE *Image, UWORD Xstart, UWORD Ystart, U
         EPD_5in79_SendCommand(0xC4);							 // Set Ram X- address Start / End position
         EPD_5in79_SendData((792-Xstart)/8-1);     						 // XStart, POR = 00h
         EPD_5in79_SendData((792-Xend)/8); //400/8-1
-        EPD_5in79_SendCommand(0xC5);	 									// Set Ram Y- address  Start / End position
-        EPD_5in79_SendData((Yend-1)%256);
-        EPD_5in79_SendData((Yend-1)/256);  //300-1
+        EPD_5in79_SendCommand(0xC5);	 									// Set Ram Y- address  Start / End position 
+        EPD_5in79_SendData((Yend-1)%256);  
+        EPD_5in79_SendData((Yend-1)/256);  //300-1	
         EPD_5in79_SendData(Ystart%256);     									// YEnd L
-        EPD_5in79_SendData(Ystart/256);											// YEnd H
+        EPD_5in79_SendData(Ystart/256);											// YEnd H 
 
-        EPD_5in79_SendCommand(0xCE);
-        EPD_5in79_SendData((792-Xstart)/8-1);
-        EPD_5in79_SendCommand(0xCF);
-        EPD_5in79_SendData((Yend-1)%256);
-        EPD_5in79_SendData((Yend-1)/256);
+        EPD_5in79_SendCommand(0xCE);	 						 
+        EPD_5in79_SendData((792-Xstart)/8-1);	
+        EPD_5in79_SendCommand(0xCF);	 
+        EPD_5in79_SendData((Yend-1)%256);  
+        EPD_5in79_SendData((Yend-1)/256); 
 
         EPD_5in79_SendCommand(0xA4);
         for (UDOUBLE j = 0; j < Height; j++) {
@@ -720,19 +720,19 @@ void EPD_5in79_Display_Partial(const UBYTE *Image, UWORD Xstart, UWORD Ystart, U
         Width2 = 0;
 
         EPD_5in79_SendCommand(0x44);	 						 // Set Ram X- address Start / End position
-        EPD_5in79_SendData(Xstart/8);
-        EPD_5in79_SendData((Xstart/8+Width1)-1);
-        EPD_5in79_SendCommand(0x45);	 									// Set Ram Y- address  Start / End position
-        EPD_5in79_SendData((Yend-1)%256);
-        EPD_5in79_SendData((Yend-1)/256);
-        EPD_5in79_SendData(Ystart%256);
-        EPD_5in79_SendData(Ystart/256);
+        EPD_5in79_SendData(Xstart/8);     						
+        EPD_5in79_SendData((Xstart/8+Width1)-1); 
+        EPD_5in79_SendCommand(0x45);	 									// Set Ram Y- address  Start / End position 
+        EPD_5in79_SendData((Yend-1)%256);  
+        EPD_5in79_SendData((Yend-1)/256);  
+        EPD_5in79_SendData(Ystart%256);     									
+        EPD_5in79_SendData(Ystart/256);											
 
-        EPD_5in79_SendCommand(0x4e);
-        EPD_5in79_SendData(Xstart/8);
-        EPD_5in79_SendCommand(0x4f);
-        EPD_5in79_SendData((Yend-1)%256);
-        EPD_5in79_SendData((Yend-1)/256);
+        EPD_5in79_SendCommand(0x4e);	 						 
+        EPD_5in79_SendData(Xstart/8);	
+        EPD_5in79_SendCommand(0x4f);	 
+        EPD_5in79_SendData((Yend-1)%256);  
+        EPD_5in79_SendData((Yend-1)/256); 	
 
         EPD_5in79_SendCommand(0x24);
         for (UDOUBLE j = 0; j < Height; j++) {
@@ -748,18 +748,18 @@ void EPD_5in79_Display_Partial(const UBYTE *Image, UWORD Xstart, UWORD Ystart, U
         Width2 = ((Xend - 395) % 8 == 0)?((Xend - 395) / 8 ):((Xend - 395) / 8 + 1);
 
         EPD_5in79_SendCommand(0x44);	 						 // Set Ram X- address Start / End position
-        EPD_5in79_SendData(0x32-Width1);
-        EPD_5in79_SendData(0x31);
-        EPD_5in79_SendCommand(0x45);	 									// Set Ram Y- address  Start / End position
-        EPD_5in79_SendData((Yend-1)%256);
-        EPD_5in79_SendData((Yend-1)/256);
-        EPD_5in79_SendData(Ystart%256);
-        EPD_5in79_SendData(Ystart/256);
+        EPD_5in79_SendData(0x32-Width1);     						
+        EPD_5in79_SendData(0x31); 
+        EPD_5in79_SendCommand(0x45);	 									// Set Ram Y- address  Start / End position 
+        EPD_5in79_SendData((Yend-1)%256);  
+        EPD_5in79_SendData((Yend-1)/256);  
+        EPD_5in79_SendData(Ystart%256);     								
+        EPD_5in79_SendData(Ystart/256);										
 
-        EPD_5in79_SendCommand(0x4e);
-        EPD_5in79_SendData(0x32-Width1);
-        EPD_5in79_SendCommand(0x4f);
-        EPD_5in79_SendData((Yend-1)%256);
+        EPD_5in79_SendCommand(0x4e);	 						 
+        EPD_5in79_SendData(0x32-Width1);	
+        EPD_5in79_SendCommand(0x4f);	 
+        EPD_5in79_SendData((Yend-1)%256);  
         EPD_5in79_SendData((Yend-1)/256);
 
         EPD_5in79_SendCommand(0x24);
@@ -771,19 +771,19 @@ void EPD_5in79_Display_Partial(const UBYTE *Image, UWORD Xstart, UWORD Ystart, U
 
 
         EPD_5in79_SendCommand(0xC4);							 // Set Ram X- address Start / End position
-        EPD_5in79_SendData(0x31);
-        EPD_5in79_SendData(0x32-Width2);
-        EPD_5in79_SendCommand(0xC5);	 									// Set Ram Y- address  Start / End position
-        EPD_5in79_SendData((Yend-1)%256);
-        EPD_5in79_SendData((Yend-1)/256);
-        EPD_5in79_SendData(Ystart%256);
-        EPD_5in79_SendData(Ystart/256);
+        EPD_5in79_SendData(0x31);     						
+        EPD_5in79_SendData(0x32-Width2); 
+        EPD_5in79_SendCommand(0xC5);	 									// Set Ram Y- address  Start / End position 
+        EPD_5in79_SendData((Yend-1)%256);  
+        EPD_5in79_SendData((Yend-1)/256);  
+        EPD_5in79_SendData(Ystart%256);     									
+        EPD_5in79_SendData(Ystart/256);											
 
-        EPD_5in79_SendCommand(0xCE);
-        EPD_5in79_SendData(0x31);
-        EPD_5in79_SendCommand(0xCF);
-        EPD_5in79_SendData((Yend-1)%256);
-        EPD_5in79_SendData((Yend-1)/256);
+        EPD_5in79_SendCommand(0xCE);	 						 
+        EPD_5in79_SendData(0x31);	
+        EPD_5in79_SendCommand(0xCF);	 
+        EPD_5in79_SendData((Yend-1)%256);  
+        EPD_5in79_SendData((Yend-1)/256); 
 
         EPD_5in79_SendCommand(0xA4);
         for (UDOUBLE j = 0; j < Height; j++) {
@@ -819,9 +819,9 @@ void EPD_5in79_4GrayDisplay(UBYTE *Image)
                     else if(temp2 == 0x00)  //black
                         temp3 |= 0x00;
                     else if(temp2 == 0x80)  //gray1
-                        temp3 |= 0x00;
+                        temp3 |= 0x00; 
                     else //0x40             //gray2
-                        temp3 |= 0x01;
+                        temp3 |= 0x01; 
 
                     if(o!=1 || k!=3)
                         temp3 <<= 1;
@@ -845,11 +845,11 @@ void EPD_5in79_4GrayDisplay(UBYTE *Image)
                     if(temp2 == 0xC0)       //white
                         temp3 |= 0x01;
                     else if(temp2 == 0x00)  //black
-                        temp3 |= 0x00;
+                        temp3 |= 0x00; 
                     else if(temp2 == 0x80)  //gray1
-                        temp3 |= 0x01;
+                        temp3 |= 0x01; 
                     else //0x40             //gray2
-                        temp3 |= 0x00;
+                        temp3 |= 0x00; 
 
                     if(o!=1 || k!=3)
                         temp3 <<= 1;
@@ -874,11 +874,11 @@ void EPD_5in79_4GrayDisplay(UBYTE *Image)
                     if(temp2 == 0xC0)       //white
                         temp3 |= 0x01;
                     else if(temp2 == 0x00)  //black
-                        temp3 |= 0x00;
+                        temp3 |= 0x00; 
                     else if(temp2 == 0x80)  //gray1
-                        temp3 |= 0x00;
+                        temp3 |= 0x00; 
                     else //0x40             //gray2
-                        temp3 |= 0x01;
+                        temp3 |= 0x01; 
 
                     if(o!=1 || k!=3)
                         temp3 <<= 1;
@@ -902,11 +902,11 @@ void EPD_5in79_4GrayDisplay(UBYTE *Image)
                     if(temp2 == 0xC0)       //white
                         temp3 |= 0x01;
                     else if(temp2 == 0x00)  //black
-                        temp3 |= 0x00;
+                        temp3 |= 0x00; 
                     else if(temp2 == 0x80)  //gray1
-                        temp3 |= 0x01;
+                        temp3 |= 0x01; 
                     else //0x40             //gray2
-                        temp3 |= 0x00;
+                        temp3 |= 0x00; 
 
                     if(o!=1 || k!=3)
                         temp3 <<= 1;

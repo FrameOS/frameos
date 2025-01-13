@@ -1,12 +1,12 @@
-{.compile: "EPD_13in3k.c".}
+{.compile: "EPD_7in3e.c".}
 ## ***************************************************************************
-##  | File      	:   EPD_13in3K.h
+##  | File        :   EPD_7in3e.h
 ##  | Author      :   Waveshare team
-##  | Function    :   13.3inch e-paper (K)
+##  | Function    :   7.3inch e-Paper (F) Driver
 ##  | Info        :
 ## ----------------
-##  |	This version:   V1.0
-##  | Date        :   2023-07-18
+##  | This version:   V1.0
+##  | Date        :   2022-10-20
 ##  | Info        :
 ##  -----------------------------------------------------------------------------
 ## #
@@ -34,17 +34,25 @@ import
   DEV_Config
 
 const
-  EPD_13IN3K_WIDTH* = 960
-  EPD_13IN3K_HEIGHT* = 680
+  EPD_7IN3E_WIDTH* = 800
+  EPD_7IN3E_HEIGHT* = 480
 
-proc EPD_13IN3K_Init*() {.importc: "EPD_13IN3K_Init".}
-proc EPD_13IN3K_Init_Part*() {.importc: "EPD_13IN3K_Init_Part".}
-proc EPD_13IN3K_Init_4GRAY*() {.importc: "EPD_13IN3K_Init_4GRAY".}
-proc EPD_13IN3K_Clear*() {.importc: "EPD_13IN3K_Clear".}
-proc EPD_13IN3K_color_Base*(color: UBYTE) {.importc: "EPD_13IN3K_color_Base".}
-proc EPD_13IN3K_Display*(Image: ptr UBYTE) {.importc: "EPD_13IN3K_Display".}
-proc EPD_13IN3K_Display_Base*(Image: ptr UBYTE) {.importc: "EPD_13IN3K_Display_Base".}
-proc EPD_13IN3K_Display_Part*(Image: ptr UBYTE; x: UWORD; y: UWORD; w: UWORD; l: UWORD) {.
-    importc: "EPD_13IN3K_Display_Part".}
-proc EPD_13IN3K_4GrayDisplay*(Image: ptr UBYTE) {.importc: "EPD_13IN3K_4GrayDisplay".}
-proc EPD_13IN3K_Sleep*() {.importc: "EPD_13IN3K_Sleep".}
+## ********************************
+## Color Index
+## ********************************
+
+const
+  EPD_7IN3E_BLACK* = 0x0
+  EPD_7IN3E_WHITE* = 0x1
+  EPD_7IN3E_YELLOW* = 0x2
+  EPD_7IN3E_RED* = 0x3
+  EPD_7IN3E_BLUE* = 0x5
+  EPD_7IN3E_GREEN* = 0x6
+
+proc EPD_7IN3E_Init*() {.importc: "EPD_7IN3E_Init".}
+proc EPD_7IN3E_Init_Fast*() {.importc: "EPD_7IN3E_Init_Fast".}
+proc EPD_7IN3E_Clear*(color: UBYTE) {.importc: "EPD_7IN3E_Clear".}
+proc EPD_7IN3E_Show7Block*() {.importc: "EPD_7IN3E_Show7Block".}
+proc EPD_7IN3E_Show*() {.importc: "EPD_7IN3E_Show".}
+proc EPD_7IN3E_Display*(Image: ptr UBYTE) {.importc: "EPD_7IN3E_Display".}
+proc EPD_7IN3E_Sleep*() {.importc: "EPD_7IN3E_Sleep".}

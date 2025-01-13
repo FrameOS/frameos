@@ -1,14 +1,16 @@
-{.compile: "EPD_13in3k.c".}
+{.compile: "EPD_7in5b_V2_old.c".}
 ## ***************************************************************************
-##  | File      	:   EPD_13in3K.h
+##  | File      	:	EPD_7in5.h
 ##  | Author      :   Waveshare team
-##  | Function    :   13.3inch e-paper (K)
+##  | Function    :   Electronic paper driver
 ##  | Info        :
 ## ----------------
-##  |	This version:   V1.0
-##  | Date        :   2023-07-18
+##  |	This version:   V2.0
+##  | Date        :   2018-11-09
 ##  | Info        :
-##  -----------------------------------------------------------------------------
+##  1.Remove:ImageBuff[EPD_HEIGHT * EPD_WIDTH / 8]
+##  2.Change:EPD_Display(UBYTE *Image)
+##    Need to pass parameters: pointer to cached data
 ## #
 ## # Permission is hereby granted, free of charge, to any person obtaining a copy
 ## # of this software and associated documnetation files (the "Software"), to deal
@@ -34,17 +36,13 @@ import
   DEV_Config
 
 const
-  EPD_13IN3K_WIDTH* = 960
-  EPD_13IN3K_HEIGHT* = 680
+  EPD_7IN5B_V2_WIDTH* = 800
+  EPD_7IN5B_V2_HEIGHT* = 480
 
-proc EPD_13IN3K_Init*() {.importc: "EPD_13IN3K_Init".}
-proc EPD_13IN3K_Init_Part*() {.importc: "EPD_13IN3K_Init_Part".}
-proc EPD_13IN3K_Init_4GRAY*() {.importc: "EPD_13IN3K_Init_4GRAY".}
-proc EPD_13IN3K_Clear*() {.importc: "EPD_13IN3K_Clear".}
-proc EPD_13IN3K_color_Base*(color: UBYTE) {.importc: "EPD_13IN3K_color_Base".}
-proc EPD_13IN3K_Display*(Image: ptr UBYTE) {.importc: "EPD_13IN3K_Display".}
-proc EPD_13IN3K_Display_Base*(Image: ptr UBYTE) {.importc: "EPD_13IN3K_Display_Base".}
-proc EPD_13IN3K_Display_Part*(Image: ptr UBYTE; x: UWORD; y: UWORD; w: UWORD; l: UWORD) {.
-    importc: "EPD_13IN3K_Display_Part".}
-proc EPD_13IN3K_4GrayDisplay*(Image: ptr UBYTE) {.importc: "EPD_13IN3K_4GrayDisplay".}
-proc EPD_13IN3K_Sleep*() {.importc: "EPD_13IN3K_Sleep".}
+proc EPD_7IN5B_V2_Init*(): UBYTE {.importc: "EPD_7IN5B_V2_Init".}
+proc EPD_7IN5B_V2_Clear*() {.importc: "EPD_7IN5B_V2_Clear".}
+proc EPD_7IN5B_V2_ClearRed*() {.importc: "EPD_7IN5B_V2_ClearRed".}
+proc EPD_7IN5B_V2_ClearBlack*() {.importc: "EPD_7IN5B_V2_ClearBlack".}
+proc EPD_7IN5B_V2_Display*(blackimage: ptr UBYTE; ryimage: ptr UBYTE) {.
+    importc: "EPD_7IN5B_V2_Display".}
+proc EPD_7IN5B_V2_Sleep*() {.importc: "EPD_7IN5B_V2_Sleep".}

@@ -1,12 +1,12 @@
-{.compile: "EPD_13in3k.c".}
+{.compile: "EPD_3in52b.c".}
 ## ***************************************************************************
-##  | File      	:   EPD_13in3K.h
+##  | File      	:   EPD_3IN52B.h
 ##  | Author      :   Waveshare team
-##  | Function    :   13.3inch e-paper (K)
+##  | Function    :   3.52inch e-paper
 ##  | Info        :
 ## ----------------
 ##  |	This version:   V1.0
-##  | Date        :   2023-07-18
+##  | Date        :   2024-09-27
 ##  | Info        :
 ##  -----------------------------------------------------------------------------
 ## #
@@ -34,17 +34,32 @@ import
   DEV_Config
 
 const
-  EPD_13IN3K_WIDTH* = 960
-  EPD_13IN3K_HEIGHT* = 680
+  EPD_3IN52B_WIDTH* = 240
+  EPD_3IN52B_HEIGHT* = 360
+  LUTGC_TEST* = true
+  LUTDU_TEST* = true
+  EPD_3IN52B_WHITE* = 0xFF
+  EPD_3IN52B_BLACK* = 0x00
+  EPD_3IN52B_Source_Line* = 0xAA
+  EPD_3IN52B_Gate_Line* = 0x55
+  EPD_3IN52B_UP_BLACK_DOWN_WHITE* = 0xF0
+  EPD_3IN52B_LEFT_BLACK_RIGHT_WHITE* = 0x0F
+  EPD_3IN52B_Frame* = 0x01
+  EPD_3IN52B_Crosstalk* = 0x02
+  EPD_3IN52B_Chessboard* = 0x03
+  EPD_3IN52B_Image* = 0x04
 
-proc EPD_13IN3K_Init*() {.importc: "EPD_13IN3K_Init".}
-proc EPD_13IN3K_Init_Part*() {.importc: "EPD_13IN3K_Init_Part".}
-proc EPD_13IN3K_Init_4GRAY*() {.importc: "EPD_13IN3K_Init_4GRAY".}
-proc EPD_13IN3K_Clear*() {.importc: "EPD_13IN3K_Clear".}
-proc EPD_13IN3K_color_Base*(color: UBYTE) {.importc: "EPD_13IN3K_color_Base".}
-proc EPD_13IN3K_Display*(Image: ptr UBYTE) {.importc: "EPD_13IN3K_Display".}
-proc EPD_13IN3K_Display_Base*(Image: ptr UBYTE) {.importc: "EPD_13IN3K_Display_Base".}
-proc EPD_13IN3K_Display_Part*(Image: ptr UBYTE; x: UWORD; y: UWORD; w: UWORD; l: UWORD) {.
-    importc: "EPD_13IN3K_Display_Part".}
-proc EPD_13IN3K_4GrayDisplay*(Image: ptr UBYTE) {.importc: "EPD_13IN3K_4GrayDisplay".}
-proc EPD_13IN3K_Sleep*() {.importc: "EPD_13IN3K_Sleep".}
+var EPD_3IN52B_Flag*: cuchar
+
+proc EPD_3IN52B_SendCommand*(Reg: UBYTE) {.importc: "EPD_3IN52B_SendCommand".}
+proc EPD_3IN52B_SendData*(Data: UBYTE) {.importc: "EPD_3IN52B_SendData".}
+proc EPD_3IN52B_refresh*() {.importc: "EPD_3IN52B_refresh".}
+proc EPD_3IN52B_lut_GC*() {.importc: "EPD_3IN52B_lut_GC".}
+proc EPD_3IN52B_lut_DU*() {.importc: "EPD_3IN52B_lut_DU".}
+proc EPD_3IN52B_Init*() {.importc: "EPD_3IN52B_Init".}
+proc EPD_3IN52B_Display*(blackimage: ptr UBYTE; ryimage: ptr UBYTE) {.
+    importc: "EPD_3IN52B_Display".}
+proc EPD_3IN52B_display*(picData: ptr UBYTE) {.importc: "EPD_3IN52B_display".}
+proc EPD_3IN52B_display_NUM*(NUM: UBYTE) {.importc: "EPD_3IN52B_display_NUM".}
+proc EPD_3IN52B_Clear*() {.importc: "EPD_3IN52B_Clear".}
+proc EPD_3IN52B_sleep*() {.importc: "EPD_3IN52B_sleep".}

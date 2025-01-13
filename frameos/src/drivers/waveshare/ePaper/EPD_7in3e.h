@@ -1,11 +1,11 @@
 /*****************************************************************************
-* | File      	:   EPD_13in3K.h
+* | File        :   EPD_7in3e.h
 * | Author      :   Waveshare team
-* | Function    :   13.3inch e-paper (K)
+* | Function    :   7.3inch e-Paper (F) Driver
 * | Info        :
 *----------------
-* |	This version:   V1.0
-* | Date        :   2023-07-18
+* | This version:   V1.0
+* | Date        :   2022-10-20
 * | Info        :
 * -----------------------------------------------------------------------------
 #
@@ -28,24 +28,32 @@
 # THE SOFTWARE.
 #
 ******************************************************************************/
-#ifndef __EPD_13IN3K_H_
-#define __EPD_13IN3K_H_
+#ifndef __EPD_7IN3E_H_
+#define __EPD_7IN3E_H_
 
 #include "DEV_Config.h"
 
 
-#define EPD_13IN3K_WIDTH       960
-#define EPD_13IN3K_HEIGHT      680
+#define EPD_7IN3E_WIDTH       800
+#define EPD_7IN3E_HEIGHT      480
 
-void EPD_13IN3K_Init(void);
-void EPD_13IN3K_Init_Part(void);
-void EPD_13IN3K_Init_4GRAY(void);
-void EPD_13IN3K_Clear(void);
-void EPD_13IN3K_color_Base(UBYTE color);
-void EPD_13IN3K_Display(UBYTE *Image);
-void EPD_13IN3K_Display_Base(UBYTE *Image);
-void EPD_13IN3K_Display_Part(UBYTE *Image, UWORD x, UWORD y, UWORD w, UWORD l);
-void EPD_13IN3K_4GrayDisplay(UBYTE *Image);
-void EPD_13IN3K_Sleep(void);
+/**********************************
+Color Index
+**********************************/
+#define EPD_7IN3E_BLACK   0x0   
+#define EPD_7IN3E_WHITE   0x1   
+#define EPD_7IN3E_YELLOW  0x2   
+#define EPD_7IN3E_RED     0x3   
+
+#define EPD_7IN3E_BLUE    0x5   
+#define EPD_7IN3E_GREEN   0x6   
+
+void EPD_7IN3E_Init(void);
+void EPD_7IN3E_Init_Fast(void);
+void EPD_7IN3E_Clear(UBYTE color);
+void EPD_7IN3E_Show7Block(void);
+void EPD_7IN3E_Show(void);
+void EPD_7IN3E_Display(UBYTE *Image);
+void EPD_7IN3E_Sleep(void);
 
 #endif

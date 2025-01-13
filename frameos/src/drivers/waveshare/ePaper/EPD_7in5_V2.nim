@@ -42,10 +42,13 @@ const
 proc EPD_7IN5_V2_Init*(): UBYTE {.importc: "EPD_7IN5_V2_Init".}
 proc EPD_7IN5_V2_Init_Fast*(): UBYTE {.importc: "EPD_7IN5_V2_Init_Fast".}
 proc EPD_7IN5_V2_Init_Part*(): UBYTE {.importc: "EPD_7IN5_V2_Init_Part".}
+proc EPD_7IN5_V2_Init_4Gray*(): UBYTE {.importc: "EPD_7IN5_V2_Init_4Gray".}
 proc EPD_7IN5_V2_Clear*() {.importc: "EPD_7IN5_V2_Clear".}
 proc EPD_7IN5_V2_ClearBlack*() {.importc: "EPD_7IN5_V2_ClearBlack".}
 proc EPD_7IN5_V2_Display*(blackimage: ptr UBYTE) {.importc: "EPD_7IN5_V2_Display".}
 proc EPD_7IN5_V2_Display_Part*(blackimage: ptr UBYTE; x_start: UDOUBLE;
                               y_start: UDOUBLE; x_end: UDOUBLE; y_end: UDOUBLE) {.
     importc: "EPD_7IN5_V2_Display_Part".}
+proc EPD_7IN5_V2_Display_4Gray*(Image: ptr UBYTE) {.
+    importc: "EPD_7IN5_V2_Display_4Gray".}
 proc EPD_7IN5_V2_Sleep*() {.importc: "EPD_7IN5_V2_Sleep".}

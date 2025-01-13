@@ -1,12 +1,12 @@
 {.compile: "EPD_7in5b_V2.c".}
 ## ***************************************************************************
-##  | File      	:	EPD_7in5.h
+##  | File      	:	EPD_7in5_B.h
 ##  | Author      :   Waveshare team
 ##  | Function    :   Electronic paper driver
 ##  | Info        :
 ## ----------------
 ##  |	This version:   V2.0
-##  | Date        :   2018-11-09
+##  | Date        :   2024-08-07
 ##  | Info        :
 ##  1.Remove:ImageBuff[EPD_HEIGHT * EPD_WIDTH / 8]
 ##  2.Change:EPD_Display(UBYTE *Image)
@@ -40,9 +40,18 @@ const
   EPD_7IN5B_V2_HEIGHT* = 480
 
 proc EPD_7IN5B_V2_Init*(): UBYTE {.importc: "EPD_7IN5B_V2_Init".}
+proc EPD_7IN5B_V2_Init_Fast*(): UBYTE {.importc: "EPD_7IN5B_V2_Init_Fast".}
+proc EPD_7IN5B_V2_Init_Part*(): UBYTE {.importc: "EPD_7IN5B_V2_Init_Part".}
 proc EPD_7IN5B_V2_Clear*() {.importc: "EPD_7IN5B_V2_Clear".}
 proc EPD_7IN5B_V2_ClearRed*() {.importc: "EPD_7IN5B_V2_ClearRed".}
 proc EPD_7IN5B_V2_ClearBlack*() {.importc: "EPD_7IN5B_V2_ClearBlack".}
 proc EPD_7IN5B_V2_Display*(blackimage: ptr UBYTE; ryimage: ptr UBYTE) {.
     importc: "EPD_7IN5B_V2_Display".}
+proc EPD_7IN5B_V2_Display_Fast*(blackimage: ptr UBYTE) {.
+    importc: "EPD_7IN5B_V2_Display_Fast".}
+proc EPD_7IN5B_V2_Display_Base_color*(color: UBYTE) {.
+    importc: "EPD_7IN5B_V2_Display_Base_color".}
+proc EPD_7IN5B_V2_Display_Partial*(Image: ptr UBYTE; Xstart: UWORD; Ystart: UWORD;
+                                  Xend: UWORD; Yend: UWORD) {.
+    importc: "EPD_7IN5B_V2_Display_Partial".}
 proc EPD_7IN5B_V2_Sleep*() {.importc: "EPD_7IN5B_V2_Sleep".}

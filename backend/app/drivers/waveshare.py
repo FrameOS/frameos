@@ -25,11 +25,14 @@ class WaveshareVariant:
 # Colors if we can't autodetect
 VARIANT_COLORS = {
     "EPD_1in64g": "BlackWhiteYellowRed",
+    "EPD_2in13g": "BlackWhiteYellowRed",
+    "EPD_2in13g_V2": "BlackWhiteYellowRed",
+    "EPD_2in15g": "BlackWhiteYellowRed",
     "EPD_2in36g": "BlackWhiteYellowRed",
     "EPD_2in66g": "BlackWhiteYellowRed",
-    "EPD_2in13g": "BlackWhiteYellowRed",
     "EPD_3in0g": "BlackWhiteYellowRed",
     "EPD_4in37g": "BlackWhiteYellowRed",
+    "EPD_5in79g": "BlackWhiteYellowRed",
     "EPD_7in3g": "BlackWhiteYellowRed",
 
     "EPD_1in02d": "Black",

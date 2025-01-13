@@ -1,13 +1,15 @@
 /*****************************************************************************
-* | File      	:   EPD_13in3K.h
+* | File      	:	EPD_7in5.h
 * | Author      :   Waveshare team
-* | Function    :   13.3inch e-paper (K)
+* | Function    :   Electronic paper driver
 * | Info        :
 *----------------
-* |	This version:   V1.0
-* | Date        :   2023-07-18
-* | Info        :
-* -----------------------------------------------------------------------------
+* |	This version:   V2.0
+* | Date        :   2018-11-09
+* | Info        :   
+* 1.Remove:ImageBuff[EPD_HEIGHT * EPD_WIDTH / 8]
+* 2.Change:EPD_Display(UBYTE *Image)
+*   Need to pass parameters: pointer to cached data
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documnetation files (the "Software"), to deal
@@ -28,24 +30,21 @@
 # THE SOFTWARE.
 #
 ******************************************************************************/
-#ifndef __EPD_13IN3K_H_
-#define __EPD_13IN3K_H_
+#ifndef _EPD_7IN5B_V2_OLD_H_
+#define _EPD_7IN5B_V2_OLD_H_
 
 #include "DEV_Config.h"
 
 
-#define EPD_13IN3K_WIDTH       960
-#define EPD_13IN3K_HEIGHT      680
 
-void EPD_13IN3K_Init(void);
-void EPD_13IN3K_Init_Part(void);
-void EPD_13IN3K_Init_4GRAY(void);
-void EPD_13IN3K_Clear(void);
-void EPD_13IN3K_color_Base(UBYTE color);
-void EPD_13IN3K_Display(UBYTE *Image);
-void EPD_13IN3K_Display_Base(UBYTE *Image);
-void EPD_13IN3K_Display_Part(UBYTE *Image, UWORD x, UWORD y, UWORD w, UWORD l);
-void EPD_13IN3K_4GrayDisplay(UBYTE *Image);
-void EPD_13IN3K_Sleep(void);
+#define EPD_7IN5B_V2_WIDTH       800
+#define EPD_7IN5B_V2_HEIGHT      480
+
+UBYTE EPD_7IN5B_V2_Init(void);
+void EPD_7IN5B_V2_Clear(void);
+void EPD_7IN5B_V2_ClearRed(void);
+void EPD_7IN5B_V2_ClearBlack(void);
+void EPD_7IN5B_V2_Display(const UBYTE *blackimage, const UBYTE *ryimage);
+void EPD_7IN5B_V2_Sleep(void);
 
 #endif

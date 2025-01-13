@@ -1,11 +1,11 @@
 /*****************************************************************************
-* | File      	:   EPD_13in3K.h
+* | File      	:   EPD_13in3b.h
 * | Author      :   Waveshare team
-* | Function    :   13.3inch e-paper (K)
+* | Function    :   13.3inch e-paper (B)
 * | Info        :
 *----------------
 * |	This version:   V1.0
-* | Date        :   2023-07-18
+* | Date        :   2024-04-08
 * | Info        :
 * -----------------------------------------------------------------------------
 #
@@ -28,24 +28,23 @@
 # THE SOFTWARE.
 #
 ******************************************************************************/
-#ifndef __EPD_13IN3K_H_
-#define __EPD_13IN3K_H_
+#ifndef __EPD_13IN3B_B_H_
+#define __EPD_13IN3B_B_H_
 
 #include "DEV_Config.h"
 
 
-#define EPD_13IN3K_WIDTH       960
-#define EPD_13IN3K_HEIGHT      680
+#define EPD_13IN3B_WIDTH       960
+#define EPD_13IN3B_HEIGHT      680
 
-void EPD_13IN3K_Init(void);
-void EPD_13IN3K_Init_Part(void);
-void EPD_13IN3K_Init_4GRAY(void);
-void EPD_13IN3K_Clear(void);
-void EPD_13IN3K_color_Base(UBYTE color);
-void EPD_13IN3K_Display(UBYTE *Image);
-void EPD_13IN3K_Display_Base(UBYTE *Image);
-void EPD_13IN3K_Display_Part(UBYTE *Image, UWORD x, UWORD y, UWORD w, UWORD l);
-void EPD_13IN3K_4GrayDisplay(UBYTE *Image);
-void EPD_13IN3K_Sleep(void);
+void EPD_13IN3B_Init(void);
+void EPD_13IN3B_Clear(void);
+void EPD_13IN3B_Clear_Black(void);
+void EPD_13IN3B_Clear_Red(void);
+void EPD_13IN3B_Display(const UBYTE *blackimage, const UBYTE *ryimage);
+void EPD_13IN3B_Display_Base(const UBYTE *blackimage, const UBYTE *ryimage);
+void EPD_13IN3B_Display_Base_White(void);
+void EPD_13IN3B_Display_Partial(const UBYTE *Image, UWORD Xstart, UWORD Ystart, UWORD Xend, UWORD Yend);
+void EPD_13IN3B_Sleep(void);
 
 #endif

@@ -1,14 +1,13 @@
 /*****************************************************************************
-* | File      	:   EPD_13in3K.h
+* | File      	:   EPD_2in15b.h
 * | Author      :   Waveshare team
-* | Function    :   13.3inch e-paper (K)
+* | Function    :   2.15inch e-paper b
 * | Info        :
 *----------------
 * |	This version:   V1.0
-* | Date        :   2023-07-18
+* | Date        :   2024-08-07
 * | Info        :
 * -----------------------------------------------------------------------------
-#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documnetation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -26,26 +25,21 @@
 # LIABILITY WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-#
-******************************************************************************/
-#ifndef __EPD_13IN3K_H_
-#define __EPD_13IN3K_H_
+# z**/
+#ifndef __EPD_2IN15B_H_
+#define __EPD_2IN15B_H_
 
 #include "DEV_Config.h"
 
 
-#define EPD_13IN3K_WIDTH       960
-#define EPD_13IN3K_HEIGHT      680
+#define EPD_2IN15B_WIDTH       160
+#define EPD_2IN15B_HEIGHT      296
 
-void EPD_13IN3K_Init(void);
-void EPD_13IN3K_Init_Part(void);
-void EPD_13IN3K_Init_4GRAY(void);
-void EPD_13IN3K_Clear(void);
-void EPD_13IN3K_color_Base(UBYTE color);
-void EPD_13IN3K_Display(UBYTE *Image);
-void EPD_13IN3K_Display_Base(UBYTE *Image);
-void EPD_13IN3K_Display_Part(UBYTE *Image, UWORD x, UWORD y, UWORD w, UWORD l);
-void EPD_13IN3K_4GrayDisplay(UBYTE *Image);
-void EPD_13IN3K_Sleep(void);
 
+void EPD_2IN15B_Init(void);
+void EPD_2IN15B_Display(UBYTE *ImageBlack, UBYTE*ImageRed);
+void EPD_2IN15B_Clear(void);
+void EPD_2IN15B_Clear_Black(void);
+void EPD_2IN15B_Clear_Red(void);
+void EPD_2IN15B_Sleep(void);
 #endif
