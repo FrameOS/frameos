@@ -2,10 +2,11 @@ import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { assetsLogic } from './assetsLogic'
 import { panelsLogic } from '../panelsLogic'
-import { CloudArrowDownIcon } from '@heroicons/react/24/outline'
+import { CloudArrowDownIcon, DocumentArrowUpIcon } from '@heroicons/react/24/outline'
 import { useState } from 'react'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { Spinner } from '../../../../components/Spinner'
+import { DropdownMenu } from '../../../../components/DropdownMenu'
 
 function humaniseSize(size: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -99,11 +100,29 @@ function TreeNode({
 
 export function Assets(): JSX.Element {
   const { frame } = useValues(frameLogic)
+  const { openLogs } = useActions(panelsLogic)
   const { assetsLoading, assetTree } = useValues(assetsLogic({ frameId: frame.id }))
+  const { syncAssets } = useActions(assetsLogic({ frameId: frame.id }))
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
 
   return (
     <div className="space-y-2">
+      <div className="float-right mt-[-8px]">
+        <DropdownMenu
+          className="w-fit"
+          buttonColor="none"
+          items={[
+            {
+              label: 'Sync fonts',
+              onClick: () => {
+                syncAssets()
+                openLogs()
+              },
+              icon: <DocumentArrowUpIcon className="w-5 h-5" />,
+            },
+          ]}
+        />
+      </div>
       {assetsLoading ? (
         <div>Loading assets...</div>
       ) : (

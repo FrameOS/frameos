@@ -4,6 +4,8 @@ import { AppNodeData, Area, Panel, PanelWithMetadata } from '../../../types'
 
 import type { panelsLogicType } from './panelsLogicType'
 import { frameLogic } from '../frameLogic'
+import { actionToUrl, router, urlToAction } from 'kea-router'
+import { subscriptions } from 'kea-subscriptions'
 
 export interface PanelsLogicProps {
   frameId: number
@@ -22,12 +24,12 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
   [Area.BottomLeft]: [
     { panel: Panel.Logs, active: true, hidden: false },
     { panel: Panel.FrameDetails, active: false, hidden: false },
-    { panel: Panel.FrameSettings, active: false, hidden: false },
     { panel: Panel.Metrics, active: false, hidden: false },
     { panel: Panel.Terminal, active: false, hidden: false },
     { panel: Panel.Debug, active: false, hidden: false },
     { panel: Panel.Assets, active: false, hidden: false },
     { panel: Panel.SceneSource, active: false, hidden: false },
+    { panel: Panel.FrameSettings, active: false, hidden: false },
   ],
   [Area.BottomRight]: [{ panel: Panel.Image, active: true, hidden: false }],
 }
@@ -45,23 +47,27 @@ export const panelsLogic = kea<panelsLogicType>([
     actions: [frameLogic(props), ['closeScenePanels']],
   })),
   actions({
+    setPanels: (panels: Record<Area, PanelWithMetadata[]>) => ({ panels }),
     setPanel: (area: Area, panel: PanelWithMetadata) => ({ area, panel }),
     openPanel: (panel: PanelWithMetadata) => ({ panel }),
     closePanel: (panel: PanelWithMetadata) => ({ panel }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
     disableFullscreenPanel: true,
     openTemplates: true,
+    openLogs: true,
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
     editScene: (sceneId: string) => ({ sceneId }),
     editSceneJSON: (sceneId: string) => ({ sceneId }),
     editStateScene: (sceneId: string) => ({ sceneId }),
     openAsset: (path: string) => ({ path }),
     persistUntilClosed: (panel: PanelWithMetadata, logic: AnyBuiltLogic) => ({ panel, logic }),
+    updateUrl: true,
   }),
   reducers({
     panels: [
       DEFAULT_LAYOUT as Record<Area, PanelWithMetadata[]>,
       {
+        setPanels: (_, { panels }) => panels,
         setPanel: (state, { area, panel }) => {
           const newPanels = { ...state }
           newPanels[area] = newPanels[area].map((p) => ({
@@ -139,6 +145,12 @@ export const panelsLogic = kea<panelsLogicType>([
           ...state,
           [Area.TopRight]: state[Area.TopRight].map((a) =>
             a.panel === Panel.Templates ? { ...a, active: true } : a.active ? { ...a, active: false } : a
+          ),
+        }),
+        openLogs: (state, _) => ({
+          ...state,
+          [Area.BottomLeft]: state[Area.BottomLeft].map((a) =>
+            a.panel === Panel.Logs ? { ...a, active: true } : a.active ? { ...a, active: false } : a
           ),
         }),
         openAsset: (state, { path }) => ({
@@ -286,9 +298,40 @@ export const panelsLogic = kea<panelsLogicType>([
     },
   })),
   afterMount(({ values, actions }) => {
-    const scenesPanel = values.panels[Area.TopRight].find((p) => p.panel === Panel.Scenes)
-    if (scenesPanel) {
-      actions.setPanel(Area.TopRight, scenesPanel)
+    const routerPanels = router.values.hashParams?.p
+    if (routerPanels && !equal(values.panels, routerPanels)) {
+      actions.setPanels(routerPanels)
+    } else {
+      const scenesPanel = values.panels[Area.TopRight].find((p) => p.panel === Panel.Scenes)
+      if (scenesPanel) {
+        actions.setPanel(Area.TopRight, scenesPanel)
+      }
     }
   }),
+  subscriptions(({ actions }) => ({
+    panels: (panels) => {
+      const routerPanels = router.values.hashParams?.p
+      if (!routerPanels || !equal(panels, routerPanels)) {
+        actions.updateUrl()
+      }
+    },
+  })),
+  urlToAction(({ actions, props, values }) => ({
+    '/frames/:id': ({ id }, _search, hash) => {
+      if (id && props.frameId !== parseInt(id)) {
+        return
+      }
+      const panels = hash.p || null
+      if (panels && typeof panels === 'object' && !equal(panels, values.panels)) {
+        actions.setPanels(panels)
+      }
+    },
+  })),
+  actionToUrl(({ values }) => ({
+    updateUrl: () => [
+      router.values.location.pathname,
+      router.values.searchParams,
+      { ...router.values.hashParams, p: values.panels },
+    ],
+  })),
 ])

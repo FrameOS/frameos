@@ -13,6 +13,7 @@ type
     offsetX*: float
     offsetY*: float
     padding*: float
+    font*: string
     fontColor*: Color
     fontSize*: float
     borderColor*: Color
@@ -26,6 +27,7 @@ type
     width*: int
     height*: int
     padding*: float
+    font*: string
     fontColor*: Color
     fontSize*: float
     borderColor*: Color
@@ -38,18 +40,14 @@ type
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
-    typeface*: Typeface
     renderResult*: Option[RenderResult]
-
-proc init*(self: App) =
-  self.typeface = getDefaultTypeface()
 
 proc `==`(obj1, obj2: RenderData): bool =
   obj1.text == obj2.text and obj1.vAlign == obj2.vAlign and obj1.position == obj2.position and
       obj1.width == obj2.width and obj1.height == obj2.height and
-      obj1.padding == obj2.padding and obj1.fontColor == obj2.fontColor and
-      obj1.fontSize == obj2.fontSize and obj1.borderColor ==
-          obj2.borderColor and obj1.borderWidth == obj2.borderWidth
+      obj1.padding == obj2.padding and obj1.font == obj2.font and
+      obj1.fontColor == obj2.fontColor and obj1.fontSize == obj2.fontSize and
+      obj1.borderColor == obj2.borderColor and obj1.borderWidth == obj2.borderWidth
 
 proc isNumber(x: string): bool =
   try:
@@ -62,10 +60,9 @@ proc toTypeset*(self: App, text: string, fontSize: float, baseFontSize: float, c
                 bounds: Vec2, hAlign: HorizontalAlignment, vAlign: VerticalAlignment, border: bool): Arrangement =
   let factor = fontSize / baseFontSize
   var spans: seq[Span] = @[]
-  var currentColor = color
-  var currentSize = fontSize
-  var currentUnderline = false
-  var currentStrikethrough = false
+  var fontStyles: seq[FontStyle] = @[]
+  var currentFontStyle = FontStyle(typeface: typeface, name: "", size: fontSize, color: color, underline: false,
+      strikethrough: false, borderWidth: 0)
 
   if self.appConfig.richText == "basic-caret":
     var i = 0
@@ -82,24 +79,29 @@ proc toTypeset*(self: App, text: string, fontSize: float, baseFontSize: float, c
             let parts = tag.split(',')
             for p in parts:
               let part = strutils.strip(p)
-              if part.startsWith('#'):
+              if part == "/" and parts.len == 1:
+                discard pop(fontStyles)
+                break
+              elif part.startsWith('#'):
                 if not border:
-                  currentColor = parseHtmlColor(part)
+                  currentFontStyle.color = parseHtmlColor(part)
               elif part.isNumber():
-                currentSize = part.parseFloat() * factor
+                currentFontStyle.size = part.parseFloat() * factor
               elif part == "underline":
-                currentUnderline = true
+                currentFontStyle.underline = true
               elif part == "strikethrough":
-                currentStrikethrough = true
+                currentFontStyle.strikethrough = true
               elif part == "no-underline":
-                currentUnderline = false
+                currentFontStyle.underline = false
               elif part == "no-strikethrough":
-                currentStrikethrough = false
+                currentFontStyle.strikethrough = false
               elif part == "reset":
-                currentColor = color
-                currentSize = fontSize
-                currentUnderline = false
-                currentStrikethrough = false
+                currentFontStyle.color = color
+                currentFontStyle.size = fontSize
+                currentFontStyle.underline = false
+                currentFontStyle.strikethrough = false
+              elif part.endsWith(".ttf"):
+                currentFontStyle.typeface = getTypeface(part, self.frameConfig.assetsPath)
               else:
                 self.logError("Invalid tag component: " & part)
             # Move past the closing ')'
@@ -113,19 +115,19 @@ proc toTypeset*(self: App, text: string, fontSize: float, baseFontSize: float, c
       while i < text.len and text[i] != '^':
         i += 1
       if i > start:
-        let font = newFont(typeface, currentSize, currentColor)
-        if currentUnderline:
+        let font = newFont(currentFontStyle.typeface, currentFontStyle.size, currentFontStyle.color)
+        if currentFontStyle.underline:
           font.underline = true
-        if currentStrikethrough:
+        if currentFontStyle.strikethrough:
           font.strikethrough = true
         spans.add(newSpan(text[start ..< i], font))
   else:
-    spans.add(newSpan(text, newFont(typeface, currentSize, currentColor)))
+    spans.add(newSpan(text, newFont(currentFontStyle.typeface, currentFontStyle.size, currentFontStyle.color)))
 
   return typeset(spans, bounds, hAlign, vAlign)
 
 
-proc generateTypeset(self: App, typeface: Typeface, renderData: RenderData, border: bool): Arrangement =
+proc generateTypeset(self: App, renderData: RenderData, border: bool): Arrangement =
   let
     hAlign = case renderData.position:
       of "top-right", "center-right", "bottom-right", "right": RightAlign
@@ -140,6 +142,7 @@ proc generateTypeset(self: App, typeface: Typeface, renderData: RenderData, bord
     height = renderData.height.toFloat() - 2 * renderData.padding
     bounds = vec2(width, height)
     baseFontSize = renderData.fontSize
+    typeface = getTypeface(renderData.font, self.frameConfig.assetsPath)
 
   if self.appConfig.overflow == "visible":
     return self.toTypeset(renderData.text, renderData.fontSize, baseFontSize, color, typeface, bounds, hAlign, vAlign, border)
@@ -189,6 +192,7 @@ proc setRenderResult*(self: App, context: ExecutionContext, maxWidth, maxHeight:
     width: maxWidth,
     height: maxHeight,
     padding: self.appConfig.padding,
+    font: self.appConfig.font,
     fontColor: self.appConfig.fontColor,
     fontSize: self.appConfig.fontSize,
     borderColor: self.appConfig.borderColor,
@@ -197,9 +201,9 @@ proc setRenderResult*(self: App, context: ExecutionContext, maxWidth, maxHeight:
 
   let cacheMatch = self.renderResult.isSome and self.renderResult.get().renderData == renderData
   if not cacheMatch:
-    let textTypeset = self.generateTypeset(self.typeface, renderData, false)
+    let textTypeset = self.generateTypeset(renderData, false)
     let borderTypeset =
-      if renderData.borderWidth > 0: some(self.generateTypeset(self.typeface, renderData, true))
+      if renderData.borderWidth > 0: some(self.generateTypeset(renderData, true))
       else: none(Arrangement)
     self.renderResult = some(RenderResult(
       renderData: renderData,

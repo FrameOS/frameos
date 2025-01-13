@@ -57,10 +57,17 @@ export function getNewFieldName(codeArgs: CodeArg[]): string {
   return newFieldName
 }
 
+function simplifyType(type: string): FieldType {
+  if (type === 'select' || type === 'text') {
+    return 'string'
+  }
+  return type as FieldType
+}
+
 function getAppsForType(apps: Record<string, AppConfig>, returnType: string = 'image'): Record<string, AppConfig> {
   const imageApps: Record<string, AppConfig> = {}
   for (const [keyword, app] of Object.entries(apps)) {
-    if (app.output && app.output.length > 0 && app.output[0].type === returnType) {
+    if (app.output && app.output.length > 0 && simplifyType(app.output[0].type) === simplifyType(returnType)) {
       imageApps[keyword] = app
     }
   }

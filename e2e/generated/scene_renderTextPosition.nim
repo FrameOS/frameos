@@ -199,12 +199,12 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node4.init()
   scene.node5 = render_textApp.App(nodeName: "render/text", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     vAlign: "top",
     text: "bananas",
     fontSize: 24.0,
     borderWidth: 2,
+    font: "ComicRelief.ttf",
     inputImage: none(Image),
     richText: "disabled",
     position: "center",
@@ -215,7 +215,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node5.init()
   scene.node6 = render_textApp.App(nodeName: "render/text", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "right",
     vAlign: "top",
@@ -231,7 +230,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node6.init()
   scene.node7 = render_textApp.App(nodeName: "render/text", nodeId: 7.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "left",
     text: "bananas",
@@ -247,11 +245,11 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderWidth: 2,
     overflow: "fit-bounds",
   ))
-  scene.node7.init()
   scene.node8 = render_textApp.App(nodeName: "render/text", nodeId: 8.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     text: "ananas",
     fontSize: 24.0,
     borderWidth: 0,
+    font: "FiraGO-ExtraBold.ttf",
     inputImage: none(Image),
     richText: "disabled",
     position: "center",
@@ -263,7 +261,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node8.init()
   scene.node9 = render_textApp.App(nodeName: "render/text", nodeId: 9.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "right",
     text: "bananas",
@@ -279,7 +276,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderWidth: 2,
     overflow: "fit-bounds",
   ))
-  scene.node9.init()
   scene.node10 = render_textApp.App(nodeName: "render/text", nodeId: 10.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "left",
     vAlign: "bottom",
@@ -295,12 +291,12 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node10.init()
   scene.node11 = render_textApp.App(nodeName: "render/text", nodeId: 11.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     vAlign: "bottom",
     text: "bananas",
     fontSize: 24.0,
     borderWidth: 2,
+    font: "FiraGO-ExtraBold.ttf",
     inputImage: none(Image),
     richText: "disabled",
     position: "center",
@@ -311,7 +307,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node11.init()
   scene.node12 = render_textApp.App(nodeName: "render/text", nodeId: 12.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "right",
     vAlign: "bottom",
@@ -327,7 +322,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node12.init()
   runEvent(context)
   
 {.pop.}

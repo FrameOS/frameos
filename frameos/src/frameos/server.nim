@@ -15,13 +15,14 @@ import frameos/apps
 import frameos/types
 import frameos/channels
 import frameos/utils/image
+import frameos/utils/font
 from net import Port
 from frameos/runner import getLastImagePng, getLastPublicState, getAllPublicStates
 from scenes/scenes import sceneOptions
 
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
-let indexHtml = webAssets.getAsset("assets/web/index.html")
+let indexHtml = webAssets.getAsset("assets/compiled/web/index.html")
 
 var connectionsLock: Lock
 var connections {.guard: connectionsLock.} = newSeq[WebSocket]()
@@ -160,10 +161,12 @@ router myrouter:
       fieldsHtml.add(fmt"<label for='{h($key)}'>{h(label)}</label><br/>")
       if fieldType == "text":
         fieldsHtml.add(fmt"<textarea id='{h($key)}' placeholder='{h(placeholder)}' rows=5>{h(stringValue)}</textarea><br/><br/>")
-      elif fieldType == "select" or fieldType == "boolean":
+      elif fieldType == "select" or fieldType == "boolean" or fieldType == "font":
         fieldsHtml.add(fmt"<select id='{h($key)}' placeholder='{h(placeholder)}'>")
-        let options = if fieldType == "boolean": @["true", "false"]
-                      else: field.options
+        {.gcsafe.}: # We're reading an immutable global (assetsPath) via a lock.
+          let options = if fieldType == "boolean": @["true", "false"]
+                        elif fieldType == "font": getAvailableFonts(globalFrameConfig.assetsPath)
+                        else: field.options
         for option in options:
           let selected = if option == stringValue: " selected" else: ""
           fieldsHtml.add(fmt"<option value='{h($option)}'{selected}>{h($option)}</option>")
@@ -178,7 +181,7 @@ router myrouter:
 
     fieldsHtml.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
     {.gcsafe.}: # We're only reading static assets. It's fine.
-      let controlHtml = webAssets.getAsset("assets/web/control.html").
+      let controlHtml = webAssets.getAsset("assets/compiled/web/control.html").
         replace("/*$$fieldsHtml$$*/", fieldsHtml).
         replace("/*$$fieldsSubmitHtml$$*/", fieldsSubmitHtml).
         replace("/*$$sceneOptionsHtml$$*/", sceneOptionsHtml).

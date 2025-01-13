@@ -3,6 +3,7 @@ import { Tag, TagProps } from './Tag'
 
 export const typeColors: Record<FieldType, TagProps['color']> = {
   string: 'blue',
+  text: 'blue',
   float: 'teal',
   integer: 'teal',
   boolean: 'gray',
@@ -11,6 +12,7 @@ export const typeColors: Record<FieldType, TagProps['color']> = {
   node: 'secondary',
   scene: 'secondary',
   image: 'red',
+  font: 'secondary',
 }
 
 export interface FieldTypeTagProps {

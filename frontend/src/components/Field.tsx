@@ -44,9 +44,7 @@ export function Field({
             labelNode
           )}
           {secret ? (
-            <Reveal className="border rounded-lg w-full px-2.5 py-1.5 py-4 bg-gray-600 border-gray-500">
-              {kids as any}
-            </Reveal>
+            <Reveal className="border rounded-lg w-full px-2.5 py-3 bg-gray-600 border-gray-500">{kids as any}</Reveal>
           ) : (
             kids
           )}

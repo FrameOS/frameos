@@ -15,12 +15,14 @@ import { CheckIcon, NoSymbolIcon } from '@heroicons/react/24/solid'
 import clsx from 'clsx'
 import { Spinner } from '../../../../components/Spinner'
 import React from 'react'
+import { Label } from '../../../../components/Label'
 
 export function EditTemplateModal() {
   const { frameId, frameForm } = useValues(frameLogic)
   const { isTemplateFormSubmitting, showingModal, modalTarget, templateForm } = useValues(templatesLogic({ frameId }))
   const { hideModal, submitTemplateForm } = useActions(templatesLogic({ frameId }))
   const newTemplate = !templateForm.id
+
   return (
     <>
       {showingModal ? (
@@ -62,12 +64,28 @@ export function EditTemplateModal() {
               </Field>
               {newTemplate ? (
                 <>
-                  <Field
-                    name="exportScenes"
-                    label={`Scenes included in template (${templateForm.exportScenes?.length ?? 0} selected)`}
-                  >
+                  <Field name="exportScenes">
                     {({ value, onChange }) => (
                       <>
+                        <div className="flex gap-2">
+                          <Label>
+                            {`Scenes included in template (${templateForm.exportScenes?.length ?? 0} selected)`}
+                          </Label>
+                          {(templateForm.exportScenes?.length ?? 0) > 0 ? (
+                            <Button size="tiny" color="secondary" onClick={() => onChange([])}>
+                              clear
+                            </Button>
+                          ) : null}
+                          {(templateForm.exportScenes?.length ?? 0) < (frameForm.scenes || []).length ? (
+                            <Button
+                              size="tiny"
+                              color="secondary"
+                              onClick={() => onChange((frameForm.scenes || []).map((s) => s.id))}
+                            >
+                              select all
+                            </Button>
+                          ) : null}
+                        </div>
                         {(frameForm.scenes || []).map((scene, index) => {
                           const included = (value || []).includes(scene.id)
                           return (

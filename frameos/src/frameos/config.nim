@@ -1,4 +1,4 @@
-import json, pixie, os
+import json, pixie, os, strutils
 import frameos/types
 import lib/tz
 
@@ -40,4 +40,6 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     debug: data{"debug"}.getBool() or commandLineParams().contains("--debug"),
     timeZone: data{"timeZone"}.getStr(),
   )
+  if result.assetsPath.endswith("/"):
+    result.assetsPath = result.assetsPath.strip(leading = false, trailing = true, chars = {'/'})
   setConfigDefaults(result)

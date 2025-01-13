@@ -31,7 +31,7 @@
       "options": ["disabled", "basic-caret"],
       "value": "disabled",
       "required": false,
-      "hint": "Enable rich text editing\n\nThe \"basic-caret\" mode lets you change the size and color of each part of the text. Example syntax:\n- ^(16)font ^(32)size\n- ^(#FF00FF)color\n- ^(underline)lines ^(no-underline) not\n- ^(strikethrough)lines ^(no-strikethrough) not\n- ^(16,#FF0000) combine styles\n- Use ^(reset) to clean house"
+      "hint": "Enable rich text editing\n\nThe \"basic-caret\" mode lets you change the size and color of each part of the text. Example syntax:\n- ^(16)font ^(32)size\n- ^(#FF00FF)color\n- ^(PTSans-Bold.ttf)font\n- ^(underline)lines ^(no-underline) not\n- ^(strikethrough)lines ^(no-strikethrough) not\n- ^(16,#FF0000) combine styles\n- Use ^(reset) to clean house"
     },
     {
       "name": "position",
@@ -105,6 +105,12 @@
       "required": true,
       "label": "Padding",
       "placeholder": "10"
+    },
+    {
+      "name": "font",
+      "type": "font",
+      "required": false,
+      "label": "Font"
     },
     {
       "name": "fontColor",

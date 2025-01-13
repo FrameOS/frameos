@@ -81,7 +81,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
   scene.node1 = render_textApp.App(nodeName: "render/text", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
-    text: "^(64,#FFFF00)This is a great day\n^(32,#00FF00)\nBecause ^(underline)reasons^(no-underline)!",
+    text: "^(64,#FFFF00)This is a great day\n^(32,#00FF00)\n^(FiraGO-ExtraBold.ttf)Because ^(underline)reasons^(no-underline)!",
     richText: "basic-caret",
     borderColor: parseHtmlColor("#ffffff"),
     fontColor: parseHtmlColor("#8a0a0a"),
@@ -95,7 +95,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     fontSize: 32.0,
     overflow: "fit-bounds",
   ))
-  scene.node1.init()
   runEvent(context)
   
 {.pop.}

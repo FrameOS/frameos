@@ -52,6 +52,16 @@ type
     lastPublicStateUpdate*: float
     lastPersistedStateUpdate*: float
 
+  FontStyle* = ref object
+    typeface*: Typeface
+    name*: string
+    size*: float
+    color*: Color
+    underline*: bool
+    strikethrough*: bool
+    borderColor*: Color
+    borderWidth*: int
+
   AppRoot* = ref object of RootObj
     nodeId*: NodeId
     nodeName*: string # used mainly for logging and saving assets

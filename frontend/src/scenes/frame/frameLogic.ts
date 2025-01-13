@@ -38,6 +38,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'log_to_file',
   'assets_path',
   'save_assets',
+  'upload_fonts',
   'reboot',
   'control_code',
 ]

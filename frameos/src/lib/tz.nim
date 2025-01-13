@@ -5,7 +5,7 @@ import strutils
 
 proc initTimeZone*() =
   # TODO: allow users to only load the timezones and years that matter
-  const tzData = staticRead("../../assets/tz/tzdata.json")
+  const tzData = staticRead("../../assets/compiled/tz/tzdata.json")
   loadTzData(tzData)
 
 proc findSystemTimeZone*(): string =

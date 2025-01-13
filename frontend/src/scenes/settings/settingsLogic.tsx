@@ -1,8 +1,6 @@
-import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
-
+import { actions, afterMount, connect, defaults, kea, listeners, path, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../socketLogic'
-
 import type { settingsLogicType } from './settingsLogicType'
 import { forms } from 'kea-forms'
 import { FrameOSSettings } from '../../types'
@@ -22,7 +20,12 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
   }
 }
 
-// @ts-ignore
+export interface CustomFont {
+  id: string
+  path: string
+  size: number
+}
+
 export const settingsLogic = kea<settingsLogicType>([
   path(['src', 'scenes', 'settings', 'settingsLogic']),
   connect({ logic: [socketLogic] }),
@@ -49,6 +52,33 @@ export const settingsLogic = kea<settingsLogicType>([
         },
       },
     ],
+    customFonts: [
+      [] as CustomFont[],
+      {
+        loadCustomFonts: async () => {
+          try {
+            const response = await apiFetch(`/api/assets`)
+            if (!response.ok) {
+              throw new Error('Failed to fetch assets')
+            }
+            const data = await response.json()
+            return data.filter((asset: CustomFont) => asset.path.startsWith('fonts/') && asset.path.endsWith('.ttf'))
+          } catch (error) {
+            console.error(error)
+            return values.customFonts
+          }
+        },
+        deleteCustomFont: async (font: CustomFont) => {
+          const response = await apiFetch(`/api/assets/${font.id}`, {
+            method: 'DELETE',
+          })
+          if (!response.ok) {
+            throw new Error('Failed to delete font')
+          }
+          return values.customFonts.filter((f) => f.id !== font.id)
+        },
+      },
+    ],
   })),
   reducers({
     savedSettings: {
@@ -70,9 +100,30 @@ export const settingsLogic = kea<settingsLogicType>([
         actions.resetSettings(setDefaultSettings(await response.json()))
       },
     },
+    customFontsForm: {
+      defaults: { files: [] } as { files: File[] },
+      submit: async (formValues) => {
+        for (const file of formValues.files) {
+          const formData = new FormData()
+          formData.append('path', `fonts/${file.name}`)
+          formData.append('file', file)
+
+          const response = await apiFetch(`/api/assets`, {
+            method: 'POST',
+            body: formData,
+          })
+          if (!response.ok) {
+            throw new Error(`Failed to upload file: ${file.name}`)
+          }
+        }
+        actions.loadCustomFonts()
+        actions.resetCustomFontsForm()
+      },
+    },
   })),
   afterMount(({ actions }) => {
     actions.loadSettings()
+    actions.loadCustomFonts()
   }),
   listeners(({ values, actions }) => ({
     loadSettingsSuccess: ({ savedSettings }) => {

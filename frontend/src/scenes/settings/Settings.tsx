@@ -11,10 +11,18 @@ import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
 import { sceneLogic } from '../sceneLogic'
 import { Masonry } from '../../components/Masonry'
+import { TrashIcon } from '@heroicons/react/24/solid'
 
 export function Settings() {
-  const { savedSettings, savedSettingsLoading, settingsChanged } = useValues(settingsLogic)
-  const { submitSettings, newKey } = useActions(settingsLogic)
+  const {
+    savedSettings,
+    savedSettingsLoading,
+    settingsChanged,
+    customFontsLoading,
+    isCustomFontsFormSubmitting,
+    customFonts,
+  } = useValues(settingsLogic)
+  const { submitSettings, newKey, deleteCustomFont } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
 
@@ -41,8 +49,8 @@ export function Settings() {
           {savedSettingsLoading ? (
             <Spinner />
           ) : (
-            <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings}>
-              <Masonry id="frames" className="p-4">
+            <Masonry id="frames" className="p-4">
+              <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings}>
                 <Group name="frameOS">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>FrameOS Gallery</H6>
@@ -131,8 +139,48 @@ export function Settings() {
                     </Field>
                   </Box>
                 </Group>
-              </Masonry>
-            </Form>
+              </Form>
+              <Box className="p-2 mb-4 space-y-2">
+                <H6>Custom fonts</H6>
+                <p className="text-sm leading-loose">
+                  These fonts will be uploaded to all frames and can be used in the FrameOS editor.
+                </p>
+                <div className="space-y-1">
+                  {customFonts.map((font) => (
+                    <div key={font.id} className="flex items-center gap-2">
+                      <div className="flex-1">{font.path.substring(6)}</div>
+                      <Button size="tiny" color="secondary" onClick={() => deleteCustomFont(font)}>
+                        <TrashIcon className="w-5 h-5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+                {customFontsLoading || isCustomFontsFormSubmitting ? <Spinner /> : <div className="flex gap-2"></div>}
+                <Form logic={settingsLogic} formKey="customFontsForm" enableFormOnSubmit className="space-y-2">
+                  <Field label="" name="files">
+                    {({ onChange }) => (
+                      <input
+                        type="file"
+                        accept=".ttf"
+                        multiple
+                        className="w-full"
+                        onChange={(e: React.FormEvent<HTMLInputElement>) => {
+                          const target = e.target as HTMLInputElement & {
+                            files: FileList
+                          }
+                          onChange(target.files)
+                        }}
+                      />
+                    )}
+                  </Field>
+                  <div className="flex gap-2">
+                    <Button type="submit" size="small" color="primary">
+                      Upload fonts
+                    </Button>
+                  </div>
+                </Form>
+              </Box>
+            </Masonry>
           )}
         </div>
       </div>

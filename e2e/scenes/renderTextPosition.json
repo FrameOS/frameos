@@ -134,7 +134,8 @@
             "vAlign": "top",
             "text": "bananas",
             "fontSize": "24",
-            "borderWidth": "2"
+            "borderWidth": "2",
+            "font": "ComicRelief.ttf"
           }
         },
         "type": "app",
@@ -203,7 +204,8 @@
           "config": {
             "text": "ananas",
             "fontSize": "24",
-            "borderWidth": "0"
+            "borderWidth": "0",
+            "font": "FiraGO-ExtraBold.ttf"
           }
         },
         "type": "app",
@@ -263,7 +265,8 @@
             "vAlign": "bottom",
             "text": "bananas",
             "fontSize": "24",
-            "borderWidth": "2"
+            "borderWidth": "2",
+            "font": "FiraGO-ExtraBold.ttf"
           }
         },
         "type": "app",

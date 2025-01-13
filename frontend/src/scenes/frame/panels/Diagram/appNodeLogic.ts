@@ -330,6 +330,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
               : fieldName === '.meta.showNextPrev'
               ? showNextPrev
               : values[field]
+
           if (operator === 'eq') {
             if (actualValue === value) return true
           } else if (operator === 'ne') {
@@ -350,6 +351,8 @@ export const appNodeLogic = kea<appNodeLogicType>([
             if (!actualValue && !fieldInputFields.includes(field) && !nodeOutputFields.includes(field)) return true
           } else if (operator === 'notEmpty') {
             if (!!actualValue || fieldInputFields.includes(field) || nodeOutputFields.includes(field)) return true
+          } else if (operator === null && value === null && fieldName?.startsWith('.meta.')) {
+            if (actualValue) return true
           } else {
             if (
               value !== undefined
