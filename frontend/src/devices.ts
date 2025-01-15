@@ -76,7 +76,7 @@ export const devices: Option[] = [
   { value: 'waveshare.EPD_5in83_V2', label: 'Waveshare 5.83" (V2) 648x480 Black/White' },
   { value: 'waveshare.EPD_5in83b_V2', label: 'Waveshare 5.83" (B V2) 648x480 Black/White/Red' },
   { value: 'waveshare.EPD_5in84', label: 'Waveshare 5.84" 768x256 Black/White' },
-  // { value: 'waveshare.EPD_7in3e', label: 'Waveshare 7.3" (E) 800x480 Spectra 6 Color' },
+  { value: 'waveshare.EPD_7in3e', label: 'Waveshare 7.3" (E) 800x480 Spectra 6 Color' },
   { value: 'waveshare.EPD_7in3f', label: 'Waveshare 7.3" (F) 800x480 7 Color' },
   { value: 'waveshare.EPD_7in3g', label: 'Waveshare 7.3" (G) 800x480 Black/White/Yellow/Red' },
   { value: 'waveshare.EPD_7in5', label: 'Waveshare 7.5" 640x384 Black/White' },
