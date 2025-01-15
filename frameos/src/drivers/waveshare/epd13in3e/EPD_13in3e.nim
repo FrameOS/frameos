@@ -39,6 +39,7 @@ const
   EPD_13IN3E_WHITE* = 0x1
   EPD_13IN3E_YELLOW* = 0x2
   EPD_13IN3E_RED* = 0x3
+    # 0x4 ??
   EPD_13IN3E_BLUE* = 0x5
   EPD_13IN3E_GREEN* = 0x6
   PSR* = 0x00

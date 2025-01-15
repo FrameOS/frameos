@@ -3,10 +3,6 @@ import { Option } from './components/Select'
 // To generate a new version:
 // cd backend && python3 list_devices.py
 
-// Unknown color: EPD_7in3e - EPD_7IN3E_Display -- ['Unknown']
-// Unknown color: EPD_13in3e - EPD_13IN3E_Display -- ['Unknown']
-// Unknown color: EPD_4in0e - EPD_4IN0E_Display -- ['Unknown']
-
 export const devices: Option[] = [
   { value: 'web_only', label: 'Web only' },
   { value: 'framebuffer', label: 'HDMI / Framebuffer' },
@@ -57,7 +53,7 @@ export const devices: Option[] = [
   { value: 'waveshare.EPD_3in52', label: 'Waveshare 3.52" 360x240 Black/White' },
   { value: 'waveshare.EPD_3in52b', label: 'Waveshare 3.52" (B) 360x240 Black/White/Red' },
   { value: 'waveshare.EPD_3in7', label: 'Waveshare 3.7" 480x280 4 Grayscale' },
-  // { value: 'waveshare.EPD_4in0e', label: 'Waveshare 4.0" (E) 600x400 Unknown' },
+  // { value: 'waveshare.EPD_4in0e', label: 'Waveshare 4.0" (E) 600x400 Spectra 6 Color' },
   { value: 'waveshare.EPD_4in01f', label: 'Waveshare 4.01" (F) 640x400 7 Color' },
   { value: 'waveshare.EPD_4in2', label: 'Waveshare 4.2" 400x300 4 Grayscale' },
   { value: 'waveshare.EPD_4in2_V2', label: 'Waveshare 4.2" (V2) 400x300 4 Grayscale' },
@@ -80,15 +76,15 @@ export const devices: Option[] = [
   { value: 'waveshare.EPD_5in83_V2', label: 'Waveshare 5.83" (V2) 648x480 Black/White' },
   { value: 'waveshare.EPD_5in83b_V2', label: 'Waveshare 5.83" (B V2) 648x480 Black/White/Red' },
   { value: 'waveshare.EPD_5in84', label: 'Waveshare 5.84" 768x256 Black/White' },
-  // { value: 'waveshare.EPD_7in3e', label: 'Waveshare 7.3" (E) 800x480 Unknown' },
+  // { value: 'waveshare.EPD_7in3e', label: 'Waveshare 7.3" (E) 800x480 Spectra 6 Color' },
   { value: 'waveshare.EPD_7in3f', label: 'Waveshare 7.3" (F) 800x480 7 Color' },
   { value: 'waveshare.EPD_7in3g', label: 'Waveshare 7.3" (G) 800x480 Black/White/Yellow/Red' },
   { value: 'waveshare.EPD_7in5', label: 'Waveshare 7.5" 640x384 Black/White' },
   { value: 'waveshare.EPD_7in5b', label: 'Waveshare 7.5" (B) 640x384 Black/White/Red' },
   { value: 'waveshare.EPD_7in5bc', label: 'Waveshare 7.5" (BC) 640x384 Black/White/Yellow' },
   { value: 'waveshare.EPD_7in5c', label: 'Waveshare 7.5" (C) 640x384 Black/White/Yellow' },
-  { value: 'waveshare.EPD_7in5_V2', label: 'Waveshare 7.5" (V2) 800x480 4 Grayscale' },
-  { value: 'waveshare.EPD_7in5_V2_old', label: 'Waveshare 7.5" (V2 OLD) 800x480 Black/White' },
+  { value: 'waveshare.EPD_7in5_V2', label: 'Waveshare 7.5" (V2) 800x480 Black/White' },
+  { value: 'waveshare.EPD_7in5_V2_gray', label: 'Waveshare 7.5" (V2 GRAY) 800x480 4 Grayscale' },
   { value: 'waveshare.EPD_7in5b_V2', label: 'Waveshare 7.5" (B V2) 800x480 Black/White/Red' },
   { value: 'waveshare.EPD_7in5b_V2_old', label: 'Waveshare 7.5" (B V2 OLD) 800x480 Black/White/Red' },
   { value: 'waveshare.EPD_7in5_HD', label: 'Waveshare 7.5" (HD) 880x528 Black/White' },
@@ -99,5 +95,5 @@ export const devices: Option[] = [
   { value: 'waveshare.EPD_12in48b_V2', label: 'Waveshare 12.48" (B V2) 1304x984 Black/White/Red' },
   { value: 'waveshare.EPD_13in3b', label: 'Waveshare 13.3" (B) 960x680 Black/White/Red' },
   { value: 'waveshare.EPD_13in3k', label: 'Waveshare 13.3" (K) 960x680 Black/White' },
-  // { value: 'waveshare.EPD_13in3e', label: 'Waveshare 13.3" (E) 1600x1200 Unknown' },
+  { value: 'waveshare.EPD_13in3e', label: 'Waveshare 13.3" (E) 1600x1200 Spectra 6 Color' },
 ]

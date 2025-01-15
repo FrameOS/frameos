@@ -67,13 +67,6 @@ proc renderBlack*(self: Driver, image: Image) =
   image.toGrayscaleFloat(gray)
   gray.floydSteinberg(image.width, image.height)
 
-  # The 7.5" waveshare frame displays weird artifacts without this. White colors bleed from top to bottom if these lines are not blanked
-  # TODO: turn this into an option you can toggle on any frame
-  if image.width == 800 and image.height == 480:
-    for y in 0..<image.width:
-      gray[y] = 1
-      gray[y + image.width * (image.height - 1)] = 1
-
   setLastFloatImage(gray)
   self.notifyImageAvailable()
 
@@ -142,6 +135,12 @@ proc renderSevenColor*(self: Driver, image: Image) =
   self.notifyImageAvailable()
   waveshareDriver.renderImage(pixels)
 
+proc renderSpectraSixColor*(self: Driver, image: Image) =
+  let pixels = ditherPaletteIndexed(image, spectra6ColorPalette)
+  setLastPixels(pixels)
+  self.notifyImageAvailable()
+  waveshareDriver.renderImage(pixels)
+
 proc render*(self: Driver, image: Image) =
   # Refresh at least every 12h to preserve display
   # TODO: make this configurable
@@ -163,6 +162,8 @@ proc render*(self: Driver, image: Image) =
     self.renderBlackWhiteRed(image, false)
   of ColorOption.SevenColor:
     self.renderSevenColor(image)
+  of ColorOption.SpectraSixColor:
+    self.renderSpectraSixColor(image)
   of ColorOption.FourGray:
     self.renderFourGray(image)
   of ColorOption.BlackWhiteYellowRed:
@@ -246,6 +247,20 @@ proc toPng*(rotate: int = 0): string =
         outputImage.data[index].r = saturated7ColorPalette[pixel][0].uint8
         outputImage.data[index].g = saturated7ColorPalette[pixel][1].uint8
         outputImage.data[index].b = saturated7ColorPalette[pixel][2].uint8
+        outputImage.data[index].a = 255
+  of ColorOption.SpectraSixColor:
+    let pixels = getLastPixels()
+    if pixels.len == 0:
+      raise newException(Exception, "No render yet")
+    for y in 0 ..< height:
+      for x in 0 ..< width:
+        let index = y * width + x
+        let pixelIndex = index div 2
+        let pixelShift = (1 - (index mod 2)) * 4
+        let pixel = (pixels[pixelIndex] shr pixelShift) and 0x07
+        outputImage.data[index].r = spectra6ColorPalette[pixel][0].uint8
+        outputImage.data[index].g = spectra6ColorPalette[pixel][1].uint8
+        outputImage.data[index].b = spectra6ColorPalette[pixel][2].uint8
         outputImage.data[index].a = 255
 
   if rotate != 0:

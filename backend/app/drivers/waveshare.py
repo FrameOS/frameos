@@ -20,7 +20,7 @@ class WaveshareVariant:
     display_function: Optional[str] = None
     display_arguments: Optional[list[str]] = None
     init_returns_zero: bool = False
-    color_option: Literal["Unknown", "Black", "BlackWhiteRed", "BlackWhiteYellow", "FourGray", "SevenColor", "BlackWhiteYellowRed"] = "Unknown"
+    color_option: Literal["Unknown", "Black", "BlackWhiteRed", "BlackWhiteYellow", "FourGray", "SpectraSixColor", "SevenColor", "BlackWhiteYellowRed"] = "Unknown"
 
 # Colors if we can't autodetect
 VARIANT_COLORS = {
@@ -62,6 +62,10 @@ VARIANT_COLORS = {
     "EPD_4in01f": "SevenColor",
     "EPD_7in3f": "SevenColor",
     "EPD_5in65f": "SevenColor",
+
+    "EPD_4in0e": "SpectraSixColor",
+    "EPD_7in3e": "SpectraSixColor",
+    "EPD_13in3e": "SpectraSixColor",
 }
 
 def get_variant_keys_for(folder: str) -> list[str]:
@@ -73,10 +77,15 @@ def get_variant_keys_for(folder: str) -> list[str]:
     ]
 
 def get_variant_keys() -> list[str]:
-    return [*get_variant_keys_for("ePaper"), *get_variant_keys_for("epd12in48")]
+    return [*get_variant_keys_for("ePaper"), *get_variant_keys_for("epd12in48"), *get_variant_keys_for("epd13in3e")]
 
 def get_variant_folder(variant_key: str) -> str:
-    return "ePaper" if variant_key in get_variant_keys_for("ePaper") else "epd12in48"
+    if variant_key in get_variant_keys_for("ePaper") :
+        return "ePaper"
+    elif variant_key == "EPD_13in3e":
+        return "epd13in3e"
+    else:
+        return "epd12in48"
 
 def get_proc_arguments(line: str, variant_key: str) -> list[str]:
     unknown_color = "FourGray" if "4Gray" in line else "Unknown"
@@ -186,6 +195,8 @@ def convert_waveshare_source(variant_key: Optional[str]) -> WaveshareVariant:
             variant.color_option = "FourGray"
         elif variant.display_arguments == ["SevenColor"]:
             variant.color_option = "SevenColor"
+        elif variant.display_arguments == ["SpectraSixColor"]:
+            variant.color_option = "SpectraSixColor"
         else:
             print(f"Unknown color: {variant_key} - {variant.display_function} -- {variant.display_arguments}" )
 

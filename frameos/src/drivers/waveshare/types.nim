@@ -5,3 +5,4 @@ type ColorOption* = enum
   BlackWhiteYellowRed = "BlackWhiteYellowRed"
   FourGray = "FourGray"
   SevenColor = "SevenColor"
+  SpectraSixColor = "SpectraSixColor"

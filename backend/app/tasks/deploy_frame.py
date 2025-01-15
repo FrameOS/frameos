@@ -251,11 +251,15 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                                "ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" "
                                "| tail -n +11 | xargs rm -rf")
 
+        boot_config = "/boot/config.txt"
+        if await exec_command(db, redis, frame, ssh, "test -f /boot/firmware/config.txt", raise_on_error=False) == 0:
+            boot_config = "/boot/firmware/config.txt"
+
         # Additional device config
         if drivers.get("i2c"):
             await exec_command(db, redis, frame, ssh,
-                               'grep -q "^dtparam=i2c_vc=on$" /boot/config.txt '
-                               '|| echo "dtparam=i2c_vc=on" | sudo tee -a /boot/config.txt')
+                               'grep -q "^dtparam=i2c_vc=on$" ' + boot_config + ' '
+                               '|| echo "dtparam=i2c_vc=on" | sudo tee -a ' + boot_config)
             await exec_command(db, redis, frame, ssh,
                                'command -v raspi-config > /dev/null && '
                                'sudo raspi-config nonint get_i2c | grep -q "1" && { '
@@ -286,16 +290,29 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         else:
             await exec_command(db, redis, frame, ssh, "sudo rm -f /etc/cron.d/frameos-reboot")
 
-        # restart frame
+        if drivers.get("bootconfig"):
+            must_reboot = False
+            for line in drivers["bootconfig"].lines:
+                if await exec_command(db, redis, frame, ssh,
+                                      f'grep -q "^{line}" ' + boot_config, raise_on_error=False) != 0:
+                    await exec_command(db, redis, frame, ssh, command=f'echo "{line}" | sudo tee -a ' + boot_config, log_output=False)
+                    must_reboot = True
+
         await exec_command(db, redis, frame, ssh, "sudo systemctl daemon-reload")
         await exec_command(db, redis, frame, ssh, "sudo systemctl enable frameos.service")
-        await exec_command(db, redis, frame, ssh, "sudo systemctl restart frameos.service")
-        await exec_command(db, redis, frame, ssh, "sudo systemctl status frameos.service")
 
         frame.status = 'starting'
         frame.last_successful_deploy = frame_dict
         frame.last_successful_deploy_at = datetime.now(timezone.utc)
-        await update_frame(db, redis, frame)
+
+        if must_reboot:
+            await update_frame(db, redis, frame)
+            await log(db, redis, int(frame.id), "stdinfo", "Deployed! Rebooting device after boot config changes")
+            await exec_command(db, redis, frame, ssh, "sudo reboot")
+        else:
+            await exec_command(db, redis, frame, ssh, "sudo systemctl restart frameos.service")
+            await exec_command(db, redis, frame, ssh, "sudo systemctl status frameos.service")
+            await update_frame(db, redis, frame)
 
     except Exception as e:
         await log(db, redis, id, "stderr", str(e))
@@ -353,15 +370,24 @@ async def make_local_modifications(db: Session, redis: Redis,
             raise
 
     with open(os.path.join(source_dir, "src", "scenes", "scenes.nim"), "w") as f:
-        f.write(write_scenes_nim(frame))
+        source = write_scenes_nim(frame)
+        f.write(source)
+        if frame.debug:
+            await log(db, redis, int(frame.id), "stdout", f"Generated scenes.nim:\n{source}")
 
     drivers = drivers_for_device(frame.device)
     with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
-        f.write(write_drivers_nim(drivers))
+        source = write_drivers_nim(drivers)
+        f.write(source)
+        if frame.debug:
+            await log(db, redis, int(frame.id), "stdout", f"Generated drivers.nim:\n{source}")
 
     if drivers.get("waveshare"):
         with open(os.path.join(source_dir, "src", "drivers", "waveshare", "driver.nim"), "w") as wf:
-            wf.write(write_waveshare_driver_nim(drivers))
+            source = write_waveshare_driver_nim(drivers)
+            wf.write(source)
+            if frame.debug:
+                await log(db, redis, int(frame.id), "stdout", f"Generated waveshare driver:\n{source}")
 
 
 def compile_line_md5(input_str: str) -> str:

@@ -26,6 +26,7 @@ if __name__ == '__main__':
             "BlackWhiteYellowRed": "Black/White/Yellow/Red",
             "FourGray": "4 Grayscale",
             "SevenColor": "7 Color",
+            "SpectraSixColor": "Spectra 6 Color",
         }.get(v.color_option, v.color_option)
         code = "" if v.code == "" else f" ({v.code.upper()})"
         output = {

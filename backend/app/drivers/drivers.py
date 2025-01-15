@@ -10,6 +10,7 @@ class Driver:
     can_render: bool = False # add render(image)
     can_png: bool = False # add toPng(rotate)
     can_turn_on_off: bool = False # add turnOn() and turnOff()
+    lines: list[str] = None # extra config lines for drivers
 
 DRIVERS = {
     "inkyPython": Driver(
@@ -54,4 +55,8 @@ DRIVERS = {
     "i2c": Driver( # enables i2c on deploy
         name="i2c",
     ),
+    "bootConfig": Driver( # assures lines in /boot/firmware/config.txt
+        name="bootConfig",
+        lines=[],
+    )
 }
