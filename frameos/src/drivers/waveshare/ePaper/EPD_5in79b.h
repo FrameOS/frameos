@@ -6,7 +6,7 @@
 *----------------
 * |	This version:   V1.0
 * | Date        :   2024-03-05
-* | Info        :
+* | Info        :   
 ******************************************************************************
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy

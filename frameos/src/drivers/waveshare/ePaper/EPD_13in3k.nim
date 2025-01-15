@@ -38,6 +38,13 @@ const
   EPD_13IN3K_HEIGHT* = 680
 
 proc EPD_13IN3K_Init*() {.importc: "EPD_13IN3K_Init".}
+proc EPD_13IN3K_Init_Part*() {.importc: "EPD_13IN3K_Init_Part".}
+proc EPD_13IN3K_Init_4GRAY*() {.importc: "EPD_13IN3K_Init_4GRAY".}
 proc EPD_13IN3K_Clear*() {.importc: "EPD_13IN3K_Clear".}
+proc EPD_13IN3K_color_Base*(color: UBYTE) {.importc: "EPD_13IN3K_color_Base".}
 proc EPD_13IN3K_Display*(Image: ptr UBYTE) {.importc: "EPD_13IN3K_Display".}
+proc EPD_13IN3K_Display_Base*(Image: ptr UBYTE) {.importc: "EPD_13IN3K_Display_Base".}
+proc EPD_13IN3K_Display_Part*(Image: ptr UBYTE; x: UWORD; y: UWORD; w: UWORD; l: UWORD) {.
+    importc: "EPD_13IN3K_Display_Part".}
+proc EPD_13IN3K_4GrayDisplay*(Image: ptr UBYTE) {.importc: "EPD_13IN3K_4GrayDisplay".}
 proc EPD_13IN3K_Sleep*() {.importc: "EPD_13IN3K_Sleep".}
