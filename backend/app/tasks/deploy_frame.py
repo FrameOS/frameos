@@ -290,8 +290,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         else:
             await exec_command(db, redis, frame, ssh, "sudo rm -f /etc/cron.d/frameos-reboot")
 
+        must_reboot = False
         if drivers.get("bootconfig"):
-            must_reboot = False
             for line in drivers["bootconfig"].lines:
                 if await exec_command(db, redis, frame, ssh,
                                       f'grep -q "^{line}" ' + boot_config, raise_on_error=False) != 0:
