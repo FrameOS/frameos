@@ -16,8 +16,19 @@ const saturated4ColorPalette* = @[
   (156, 72, 75),
 ]
 
-# 6-color Spectra e-ink displays, as presented by the manufacturer
+# 6-color Spectra e-ink displays, as measured on a real display
 const spectra6ColorPalette* = @[
+  (50, 44, 52),    # 0x0 - black
+  (255, 255, 255), # 0x1 - white
+  (255, 248, 0),   # 0x2 - yellow
+  (223, 38, 27),   # 0x3 - red
+  (999, 999, 999), # skips an index!
+  (41, 112, 238),  # 0x5 - blue
+  (87, 161, 126),  # 0x6 - green
+]
+
+# 6-color Spectra e-ink displays, as presented by the manufacturer. These are not used.
+const spectra6ColorPaletteOriginal* = @[
   (0, 0, 0),       # 0x0 - black
   (255, 255, 255), # 0x1 - white
   (255, 255, 0),   # 0x2 - yellow
