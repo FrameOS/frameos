@@ -3,6 +3,8 @@ This folder is synced from https://github.com/waveshareteam/e-Paper/blob/master/
 To update:
 
 1. Copy new C sources (`EPD_*` files) to `frameos/src/drivers/waveshare/ePaper`
+   - Rename `EPD_7in5b_V2_old.*` as `EPD_7in5b_V2.*`
+   - Rename `EPD_7in5b_V2.*` to `EPD_7in5b_V2_gray.*`
 2. Run `cd frameos/src/drivers/waveshare/ePaper && make` to generate new `.nim` files
 3. Run `cd backend && python3 list_devices.py` and verify the driver is listed with the right resolution and color
 4. If not, you might need to edit the auto-detection routine in `convert_waveshare_source` in `backend/app/drivers/waveshare.py`.
