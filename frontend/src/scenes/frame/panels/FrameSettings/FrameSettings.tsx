@@ -11,6 +11,8 @@ import { Field } from '../../../../components/Field'
 import { devices } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 import { appsLogic } from '../Apps/appsLogic'
+import { frameSettingsLogic } from './frameSettingsLogic'
+import { Spinner } from '../../../../components/Spinner'
 
 export interface FrameSettingsProps {
   className?: string
@@ -21,6 +23,8 @@ export function FrameSettings({ className }: FrameSettingsProps) {
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic)
+  const { clearBuildCache } = useActions(frameSettingsLogic({ frameId }))
+  const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
 
   return (
     <div className={clsx('space-y-4', className)}>
@@ -30,6 +34,16 @@ export function FrameSettings({ className }: FrameSettingsProps) {
         <>
           <div className="flex space-x-2">
             <div className="flex-1"></div>
+            <Button
+              type="button"
+              size="small"
+              color="secondary"
+              className="flex gap-2 items-center"
+              onClick={() => clearBuildCache()}
+            >
+              {buildCacheLoading ? <Spinner color="white" className="w-4 h-4" /> : null}
+              Clear build cache
+            </Button>
             <Button
               type="button"
               size="small"
