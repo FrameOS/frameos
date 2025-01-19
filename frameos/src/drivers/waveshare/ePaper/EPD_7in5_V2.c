@@ -28,7 +28,7 @@
 # THE SOFTWARE.
 #
 ******************************************************************************/
-#include "EPD_7in5_V2_old.h"
+#include "EPD_7in5_V2.h"
 #include "Debug.h"
 #include <time.h>
 
