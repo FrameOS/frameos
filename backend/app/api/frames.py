@@ -377,6 +377,24 @@ async def api_frame_get_assets_upload_fonts(id: int, db: Session = Depends(get_d
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
+
+@api_with_auth.post("/frames/{id:int}/clear_build_cache")
+async def api_frame_clear_build_cache(id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)):
+    frame = db.get(Frame, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    try:
+        ssh = await get_ssh_connection(db, redis, frame)
+        try:
+            command = "rm -rf /srv/frameos/build/cache"
+            await exec_command(db, redis, frame, ssh, command)
+        finally:
+            await remove_ssh_connection(ssh)
+            await log(db, redis, id, "stdinfo", "SSH connection closed")
+        return {"message": "Build cache cleared successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
 @api_with_auth.post("/frames/{id:int}/reset")
 async def api_frame_reset_event(id: int, redis: Redis = Depends(get_redis)):
     try:
