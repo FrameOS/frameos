@@ -102,7 +102,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             )
 
             if low_memory:
-                await log(db, redis, id, "stdout", "- Low memory device, stopping FrameOS for compile")
+                await log(db, redis, id, "stdout", "- Low memory device, stopping FrameOS for compilation")
                 await exec_command(db, redis, frame, ssh, "sudo service frameos stop", raise_on_error=False)
 
             # 2. Remote steps
@@ -486,7 +486,12 @@ async def create_local_build_archive(
     if waveshare := drivers.get('waveshare'):
         if waveshare.variant:
             variant_folder = get_variant_folder(waveshare.variant)
-            util_files = ["Debug.h", "DEV_Config.c", "DEV_Config.h"]
+
+            if variant_folder == "it8951":
+                util_files = ["DEV_Config.c", "DEV_Config.h"]
+            else:
+                util_files = ["Debug.h", "DEV_Config.c", "DEV_Config.h"]
+
             for uf in util_files:
                 shutil.copy(
                     os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, uf),
@@ -501,6 +506,8 @@ async def create_local_build_archive(
             ]:
                 c_file = re.sub(r'[bc]', 'bc', waveshare.variant)
                 variant_files = [f"{waveshare.variant}.nim", f"{c_file}.c", f"{c_file}.h"]
+            elif waveshare.variant == "EPD_10in3":
+                variant_files = [f"{waveshare.variant}.nim", "IT8951.c", "IT8951.h", "IT8951.nim"]
             else:
                 variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
 
