@@ -25,6 +25,7 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
     closeField: (index: number) => ({ index }),
     removeField: (index: number) => ({ index }),
     addField: true,
+    createField: (stateField: StateField) => ({ stateField }),
   }),
   reducers({
     editingFields: [
@@ -82,6 +83,10 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
       const oldFields = values.scene?.fields ?? []
       actions.setFields([...oldFields, { name: '', label: '', type: 'string', persist: 'disk', access: 'public' }])
       actions.editField(oldFields.length)
+    },
+    createField: ({ stateField }) => {
+      const oldFields = values.scene?.fields ?? []
+      actions.setFields([...oldFields, stateField])
     },
   })),
 ])

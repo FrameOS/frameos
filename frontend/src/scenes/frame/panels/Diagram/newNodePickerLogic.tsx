@@ -21,6 +21,7 @@ import { Option } from '../../../../components/Select'
 import { diagramLogic } from './diagramLogic'
 import Fuse from 'fuse.js'
 import { Edge } from 'reactflow'
+import { sceneStateLogic } from '../SceneState/sceneStateLogic'
 
 export interface LocalFuse extends Fuse<OptionWithType> {}
 
@@ -103,6 +104,8 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       ['setFrameFormValues', 'applyTemplate'],
       diagramLogic({ frameId, sceneId }),
       ['setNodes', 'setEdges', 'addEdge'],
+      sceneStateLogic({ frameId, sceneId }),
+      ['createField'],
     ],
   })),
   actions({
@@ -235,6 +238,12 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         if (handleType === 'target' && (handleId.startsWith('fieldInput/') || handleId.startsWith('codeField/'))) {
           const key = handleId.split('/', 2)[1]
           options.push({ label: 'Code', value: 'code', type: newNodeHandleDataType ?? 'string', keyword: key })
+          options.push({
+            label: 'New state field',
+            value: 'state',
+            type: newNodeHandleDataType ?? 'string',
+            keyword: key,
+          })
           if (newNodeHandleDataType) {
             const appsForType = getAppsForType(apps, newNodeHandleDataType)
             for (const [keyword, app] of Object.entries(appsForType)) {
@@ -486,6 +495,13 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         newNode.data = {
           keyword: value.startsWith('state/') ? value.substring(6) : '',
         }
+      } else if (value === 'state') {
+        newNode.position.x -= 20
+        newNode.position.y -= 20
+        newNode.type = 'state'
+        newNode.data = {
+          keyword: keyword,
+        }
       } else if (value.startsWith('app/')) {
         const appKeyword = value.substring(4)
         newNode.type = 'app'
@@ -593,7 +609,33 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           }, 200)
         }, 200)
       }
+
       actions.setSearchValue('')
+
+      if (value === 'state') {
+        const node = values.nodesById[nodeId]
+        let label = keyword
+        let value = ''
+        if (node?.type === 'app') {
+          const app = values.apps[(node.data as AppNodeData).keyword]
+          const field: any = app.fields?.find((f) => 'name' in f && f.name === keyword && 'label' in f)
+          if (field?.label) {
+            label = field?.label
+          }
+          if (field?.value) {
+            value = field?.value
+          }
+        }
+
+        actions.createField({
+          name: keyword,
+          label,
+          type: type ?? 'string',
+          value,
+          persist: 'disk',
+          access: 'public',
+        })
+      }
     },
   })),
 ])
