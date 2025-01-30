@@ -140,7 +140,12 @@ export function SceneState(): JSX.Element {
                   <Field
                     name="persist"
                     label="Perist"
-                    tooltip={<>Persisting to disk reduces the lifetime of your SD card</>}
+                    tooltip={
+                      <>
+                        Do not persist to disk values that change rapidly, as this will noticably impact the lifetime of
+                        your SD card.
+                      </>
+                    }
                   >
                     <Select options={PERSIST_OPTIONS} />
                   </Field>
@@ -149,8 +154,9 @@ export function SceneState(): JSX.Element {
                     label="Access"
                     tooltip={
                       <>
-                        Whether this field is just usable within the scene (private), or if it can also be controlled
-                        externally, for example from the frame's settings page.
+                        Private: The field is only accessible within the scene.
+                        <br />
+                        Public: The field becomes part of the scene's options that can be controlled externally.
                       </>
                     }
                   >
