@@ -75,7 +75,7 @@ if serve_html:
 
     @app.exception_handler(StarletteHTTPException)
     async def custom_404_handler(request: Request, exc: StarletteHTTPException):
-        if os.environ.get("TEST") == "1" or exc.status_code != 404:
+        if os.environ.get("TEST") == "1" or exc.status_code != 404 or request.url.path.startswith("/api"):
             return JSONResponse(
                 status_code=exc.status_code,
                 content={"detail": exc.detail or f"Error {exc.status_code}"}
