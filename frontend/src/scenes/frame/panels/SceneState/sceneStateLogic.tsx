@@ -80,7 +80,7 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
     },
     addField: () => {
       const oldFields = values.scene?.fields ?? []
-      actions.setFields([...oldFields, { name: '', label: '', type: 'string', persist: 'memory', access: 'private' }])
+      actions.setFields([...oldFields, { name: '', label: '', type: 'string', persist: 'disk', access: 'public' }])
       actions.editField(oldFields.length)
     },
   })),
