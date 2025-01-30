@@ -2,36 +2,185 @@ import subprocess
 from arq import ArqRedis
 import asyncssh
 import asyncio
+import time
 from typing import Optional, List
 from sqlalchemy.orm import Session
+
 from app.models.log import new_log as log
 from app.models.frame import Frame
 from app.models.settings import Settings
 
-async def remove_ssh_connection(ssh):
-    """
-    Close the asyncssh connection.
-    """
-    if ssh:
-        ssh.close()
-        # Wait for the connection to be fully closed
-        try:
-            await ssh.wait_closed()
-        except asyncio.CancelledError:
-            pass
+# ---------------------------------------
+# GLOBAL POOL STORAGE
+# ---------------------------------------
+_pool_lock = asyncio.Lock()
 
-async def get_ssh_connection(db, redis, frame):
+# Keys in this dict: (host, port, username, 'password' or 'key'), e.g. ("192.168.1.1", 22, "ubuntu", "password")
+# Values: List of PooledConnection objects
+_ssh_pool: dict[str, "PooledConnection"] = {}
+
+# If a connection is idle more than this many seconds, it will be closed.
+IDLE_TIMEOUT_SECONDS = 30
+
+
+class PooledConnection:
     """
-    Create and return an asyncssh connection object to the frame.
+    Holds one actual asyncssh connection plus usage metadata.
+    """
+    def __init__(self, ssh: asyncssh.SSHClientConnection):
+        self.ssh = ssh
+        self.in_use = False
+        self.last_used = time.time()
+        self.closing_task = None
+
+    def expired(self):
+        return (time.time() - self.last_used) >= IDLE_TIMEOUT_SECONDS
+
+    def mark_in_use(self):
+        self.in_use = True
+        self.last_used = time.time()
+        # If there was a close scheduled, cancel it.
+        if self.closing_task and not self.closing_task.done():
+            self.closing_task.cancel()
+        self.closing_task = None
+
+    def mark_idle(self):
+        self.in_use = False
+        self.last_used = time.time()
+
+    async def schedule_close(self, pool_key, db, redis, frame_id):
+        """
+        Waits for IDLE_TIMEOUT_SECONDS. If still idle afterward, close the SSH connection.
+        """
+        try:
+            await asyncio.sleep(IDLE_TIMEOUT_SECONDS)
+        except asyncio.CancelledError:
+            # If the close was canceled, that means the connection was reused.
+            return
+
+        # Double-check: if still not in use, close it for real
+        if not self.in_use and self.expired():
+            # Actually close the underlying SSH connection
+            self.ssh.close()
+            await log(db, redis, frame_id, "stdinfo", f"SSH connection closed ({IDLE_TIMEOUT_SECONDS}s idle timeout)")
+            try:
+                await self.ssh.wait_closed()
+            except asyncio.CancelledError:
+                pass
+
+            # Remove it from the global pool list
+            async with _pool_lock:
+                if pool_key in _ssh_pool:
+                    if self in _ssh_pool[pool_key]:
+                        _ssh_pool[pool_key].remove(self)
+
+
+# ---------------------------------------
+# PUBLIC SSH UTILS
+# ---------------------------------------
+
+async def get_ssh_connection(db: Session, redis: ArqRedis, frame: Frame) -> asyncssh.SSHClientConnection:
+    """
+    Retrieve an SSH connection from the pool if available. Otherwise, open a new one.
+    If all existing connections for this frame's credentials are in use, create another one.
     """
     host = frame.frame_host
     port = frame.ssh_port or 22
     username = frame.ssh_user
     password = frame.ssh_pass
 
-    await log(db, redis, frame.id, "stdinfo",
-              f"Connecting via SSH to {username}@{host} "
-              f"({'password' if password else 'keypair'})")
+    # Build a pool key
+    if password:
+        auth_label = "password"
+    else:
+        auth_label = "key"
+
+    pool_key = (host, port, username, auth_label)
+
+    async with _pool_lock:
+        # 1) Clean up any connections that have been closed or that had errors:
+        to_remove = []
+        if pool_key in _ssh_pool:
+            for pc in _ssh_pool[pool_key]:
+                if not pc.in_use and pc.expired():
+                    to_remove.append(pc)
+            for pc in to_remove:
+                _ssh_pool[pool_key].remove(pc)
+
+        # 2) Look for an idle connection
+        if pool_key in _ssh_pool:
+            for pc in _ssh_pool[pool_key]:
+                if not pc.in_use:  # found an idle connection
+                    pc.mark_in_use()
+                    # await log(db, redis, frame.id, "stdinfo", "Reusing existing SSH connection")
+                    return pc.ssh
+
+        # No idle connections or no list at all -> create new one
+        new_ssh = await _create_new_connection(db, redis, frame)
+        pc = PooledConnection(new_ssh)
+        pc.mark_in_use()
+
+        _ssh_pool.setdefault(pool_key, []).append(pc)
+
+        return new_ssh
+
+
+async def remove_ssh_connection(db, redis, ssh: asyncssh.SSHClientConnection, frame: Frame):
+    """
+    Release the SSH connection back to the pool so it can be reused or closed after IDLE_TIMEOUT_SECONDS.
+    """
+    if not ssh:
+        return
+
+    # Find which pool entry this belongs to
+    host = frame.frame_host
+    port = frame.ssh_port or 22
+    username = frame.ssh_user
+    password = frame.ssh_pass
+    auth_label = "password" if password else "key"
+    pool_key = (host, port, username, auth_label)
+
+    async with _pool_lock:
+        # If we don't have this key at all, there's nothing to do
+        if pool_key not in _ssh_pool:
+            return
+
+        # Look for the matching PooledConnection
+        for pc in _ssh_pool[pool_key]:
+            if pc.ssh is ssh:
+                # await log(db, redis, frame.id, "stdinfo", "SSH connection scheduled for closure")
+                pc.mark_idle()
+                await schedule_close(pc, pool_key, db, redis, frame.id)
+                return
+
+
+async def schedule_close(pc: PooledConnection, pool_key, db, redis, frame_id):
+    """
+    Schedules a close task for the given PooledConnection.
+    """
+    # If there's already a scheduled close, don't duplicate.
+    if pc.closing_task and not pc.closing_task.done():
+        return
+
+    pc.closing_task = asyncio.create_task(pc.schedule_close(pool_key, db, redis, frame_id))
+
+
+# ---------------------------------------
+# LOW-LEVEL / INTERNAL
+# ---------------------------------------
+
+async def _create_new_connection(db, redis, frame) -> asyncssh.SSHClientConnection:
+    """Actually create a brand-new SSH connection."""
+    host = frame.frame_host
+    port = frame.ssh_port or 22
+    username = frame.ssh_user
+    password = frame.ssh_pass
+
+    await log(
+        db, redis, frame.id, "stdinfo",
+        f"Connecting via SSH to {username}@{host} "
+        f"({'password' if password else 'keypair'})"
+    )
 
     # 1) If password is set, just do password-based auth
     # 2) Otherwise, load the private key from DB
@@ -47,16 +196,12 @@ async def get_ssh_connection(db, redis, frame):
                     # asyncssh can parse the key directly:
                     private_key_obj = asyncssh.import_private_key(default_key)
                 except (asyncssh.KeyImportError, TypeError):
-                    # If that fails, see if there's any other fallback
-                    raise Exception("Could not parse the private key from DB. "
-                                    "Check that it’s in valid PEM format.")
-
+                    raise Exception("Could not parse the private key from DB. Check if it's valid PEM.")
                 client_keys = [private_key_obj]
             else:
-                raise Exception("Key-based auth chosen but no default key found in DB.")
+                raise Exception("No default key found in DB for SSH.")
         else:
-            raise Exception("No password set and no SSH keys found in settings. "
-                            "Either set a password or store a default key under 'ssh_keys'.")
+            raise Exception("No password set and no SSH keys found in DB (ssh_keys).")
 
     try:
         ssh = await asyncssh.connect(
@@ -65,69 +210,59 @@ async def get_ssh_connection(db, redis, frame):
             username=username,
             password=password if password else None,
             client_keys=client_keys if not password else None,
-            known_hosts=None  # disable known_hosts checking (or provide a file)
+            known_hosts=None
         )
-        await log(db, redis, frame.id, "stdinfo",
-                  f"SSH connection established to {username}@{host}")
+        await log(db, redis, frame.id, "stdinfo", f"SSH connection established to {username}@{host}")
         return ssh
     except (OSError, asyncssh.Error) as exc:
         raise Exception(f"Unable to connect to {host}:{port} via SSH: {exc}")
 
 
-async def exec_command(db, redis, frame, ssh, command: str,
-                       output: Optional[List[str]] = None,
-                       log_output: bool = True,
-                       raise_on_error: bool = True) -> int:
+async def exec_command(
+    db: Session,
+    redis: ArqRedis,
+    frame: Frame,
+    ssh: asyncssh.SSHClientConnection,
+    command: str,
+    output: Optional[List[str]] = None,
+    log_output: bool = True,
+    raise_on_error: bool = True
+) -> int:
     """
     Execute a command on the remote host using an existing SSH connection.
     Stream stdout and stderr lines as they arrive, optionally storing them
     into 'output' and logging them in the database.
     Returns the process exit status.
     """
-
     await log(db, redis, frame.id, "stdout", f"> {command}")
 
-    # We will capture output in these buffers if needed
     stdout_buffer = []
     stderr_buffer = []
 
     try:
-        # Start the remote process
         process = await ssh.create_process(command)
 
-        # Create tasks to read stdout and stderr lines in parallel
+        # parallel read
         stdout_task = asyncio.create_task(
-            _stream_lines(
-                db, redis, frame, process.stdout, "stdout",
-                log_output, stdout_buffer if output is not None else None
-            )
+            _stream_lines(db, redis, frame, process.stdout, "stdout", log_output, stdout_buffer if output is not None else None)
         )
         stderr_task = asyncio.create_task(
-            _stream_lines(
-                db, redis, frame, process.stderr, "stderr",
-                log_output, stderr_buffer if output is not None else None
-            )
+            _stream_lines(db, redis, frame, process.stderr, "stderr", log_output, stderr_buffer if output is not None else None)
         )
 
-        # Wait for both streaming tasks to complete
         await asyncio.gather(stdout_task, stderr_task)
 
-        # Wait for the process to exit
         respoonse = await process.wait()
         exit_status = respoonse.exit_status
 
-        # If the caller wants the entire stdout combined, put it into output
-        # (We only store stdout in `output`, but you can also append stderr if desired.)
+        # Capture combined stdout if needed
         if output is not None:
-            stdout_data = "".join(stdout_buffer)
-            output.extend(stdout_data.split("\n"))
+            joined_stdout = "".join(stdout_buffer)
+            output.extend(joined_stdout.split("\n"))
 
-        # Handle non-zero exit
         if exit_status != 0:
-            # Grab final aggregated output for the exception details
             stderr_data = "".join(stderr_buffer).strip()
             stdout_data = "".join(stdout_buffer).strip()
-
             if raise_on_error:
                 raise Exception(
                     f"Command '{command}' failed with code {exit_status}\n"
@@ -143,31 +278,34 @@ async def exec_command(db, redis, frame, ssh, command: str,
         return exit_status
 
     except asyncssh.ProcessError as e:
-        # If the remote command cannot even be started
         raise Exception(f"Error running command '{command}': {e}") from e
 
 
-async def _stream_lines(db, redis, frame, stream, log_type: str,
-                        log_output: bool, buffer_list: Optional[List[str]]):
+async def _stream_lines(
+    db: Session,
+    redis: ArqRedis,
+    frame: Frame,
+    stream,
+    log_type: str,
+    log_output: bool,
+    buffer_list: Optional[List[str]]
+):
     """
-    Helper coroutine that reads lines from `stream` (stdout or stderr)
-    and writes them to the DB log and/or appends them to buffer_list for
-    later use, as each line arrives.
+    Helper to read lines from `stream` (stdout or stderr) and:
+    - Optionally log each line
+    - Optionally store each line in buffer_list
     """
     while True:
         line = await stream.readline()
-        if not line:  # no more data
+        if not line:
             break
-
         if buffer_list is not None:
             buffer_list.append(line)
-
         if log_output:
-            # Optionally strip the trailing newline for cleaner logs
             await log(db, redis, frame.id, log_type, line.rstrip('\n'))
 
 
-async def exec_local_command(db: Session, redis: ArqRedis, frame: Frame, command: str, generate_log = True) -> tuple[int, Optional[str], Optional[str]]:
+async def exec_local_command(db: Session, redis: ArqRedis, frame: Frame, command: str, generate_log=True) -> tuple[int, Optional[str], Optional[str]]:
     if generate_log:
         await log(db, redis, int(frame.id), "stdout", f"$ {command}")
     process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -177,13 +315,21 @@ async def exec_local_command(db: Session, redis: ArqRedis, frame: Frame, command
 
     while True:
         if process.stdout:
-            while output := process.stdout.readline():
+            while True:
+                output = process.stdout.readline()
+                if not output:
+                    break
                 await log(db, redis, int(frame.id), "stdout", output)
                 outputs.append(output)
+
         if process.stderr:
-            while error := process.stderr.readline():
+            while True:
+                error = process.stderr.readline()
+                if not error:
+                    break
                 await log(db, redis, int(frame.id), "stderr", error)
                 errors.append(error)
+
         if break_next:
             break
         if process.poll() is not None:
@@ -191,8 +337,9 @@ async def exec_local_command(db: Session, redis: ArqRedis, frame: Frame, command
         await asyncio.sleep(0.1)
 
     exit_status = process.returncode
-
     if exit_status != 0:
         await log(db, redis, int(frame.id), "exit_status", f"The command exited with status {exit_status}")
 
-    return (exit_status, ''.join(outputs) if len(outputs) > 0 else None, ''.join(errors) if len(errors) > 0 else None)
+    return (exit_status,
+            ''.join(outputs) if len(outputs) > 0 else None,
+            ''.join(errors) if len(errors) > 0 else None)

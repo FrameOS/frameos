@@ -40,5 +40,4 @@ async def restart_frame_task(ctx: dict[str, Any], id: int):
             await update_frame(db, redis, frame)
     finally:
         if ssh is not None:
-            await remove_ssh_connection(ssh)
-            await log(db, redis, id, "stdinfo", "SSH connection closed")
+            await remove_ssh_connection(db, redis, ssh, frame)

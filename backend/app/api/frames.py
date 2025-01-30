@@ -239,8 +239,7 @@ async def api_frame_get_assets(id: int, db: Session = Depends(get_db), redis: Re
     command = f"find {assets_path} -type f -exec stat --format='%s %Y %n' {{}} +"
     output: list[str] = []
     await exec_command(db, redis, frame, ssh, command, output, log_output=False)
-    await remove_ssh_connection(ssh)
-    await log(db, redis, id, "stdinfo", "SSH connection closed")
+    await remove_ssh_connection(db, redis, ssh, frame)
 
     assets = []
     for line in output:
@@ -291,7 +290,6 @@ async def api_frame_get_asset(
             # 1) Generate an MD5 sum of the remote file
             escaped_path = shlex.quote(normalized_path)
             command = f"md5sum {escaped_path}"
-            await log(db, redis, frame.id, "stdinfo", f"> {command}")
 
             # We'll read the MD5 from the command output
             md5_output: list[str] = []
@@ -352,8 +350,7 @@ async def api_frame_get_asset(
             raise e
 
         finally:
-            await remove_ssh_connection(ssh)
-            await log(db, redis, id, "stdinfo", "SSH connection closed")
+            await remove_ssh_connection(db, redis, ssh, frame)
 
     except HTTPException:
         raise
@@ -371,8 +368,7 @@ async def api_frame_assets_sync(id: int, db: Session = Depends(get_db), redis: R
         try:
             await sync_assets(db, redis, frame, ssh)
         finally:
-            await remove_ssh_connection(ssh)
-            await log(db, redis, id, "stdinfo", "SSH connection closed")
+            await remove_ssh_connection(db, redis, ssh, frame)
         return {"message": "Assets synced successfully"}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -404,7 +400,7 @@ async def api_frame_assets_upload(
             contents = await file.read()
             with open(local_temp_path, "wb") as f:
                 f.write(contents)
-            await log(db, redis, id, "stdinfo", f"Uploading {combined_path}")
+            await log(db, redis, id, "stdout", f"Uploading: {combined_path}")
             scp_escaped_path = shlex.quote(combined_path)
             await asyncssh.scp(
                 local_temp_path,
@@ -415,8 +411,7 @@ async def api_frame_assets_upload(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
     finally:
-        await remove_ssh_connection(ssh)
-        await log(db, redis, id, "stdinfo", "SSH connection closed")
+        await remove_ssh_connection(db, redis, ssh, frame)
 
     path_without_combined = os.path.relpath(combined_path, assets_path)
 
@@ -433,8 +428,7 @@ async def api_frame_clear_build_cache(id: int, redis: Redis = Depends(get_redis)
             command = "rm -rf /srv/frameos/build/cache"
             await exec_command(db, redis, frame, ssh, command)
         finally:
-            await remove_ssh_connection(ssh)
-            await log(db, redis, id, "stdinfo", "SSH connection closed")
+            await remove_ssh_connection(db, redis, ssh, frame)
         return {"message": "Build cache cleared successfully"}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
