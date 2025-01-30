@@ -102,7 +102,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             )
 
             if low_memory:
-                await log(db, redis, id, "stdout", "- Low memory device, stopping FrameOS for compile")
+                await log(db, redis, id, "stdout", "- Low memory device, stopping FrameOS for compilation")
                 await exec_command(db, redis, frame, ssh, "sudo service frameos stop", raise_on_error=False)
 
             # 2. Remote steps
