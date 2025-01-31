@@ -97,6 +97,8 @@ function TreeNode({
         )}
         {node.size === -1 && node.mtime === -1 ? (
           <Spinner className="w-4 h-4" color="white" />
+        ) : node.size === -2 && node.mtime === -2 ? (
+          <span className="text-red-500">Upload error</span>
         ) : (
           <a
             className="text-gray-300 hover:text-white cursor-pointer"
