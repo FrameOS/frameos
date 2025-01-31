@@ -89,35 +89,38 @@ function TreeNode({
             {node.name}
           </span>
         </div>
-        {node.size != null && <span className="text-xs text-gray-400">{humaniseSize(node.size)}</span>}
-        {node.mtime && (
+        {node.size && node.size > 0 && <span className="text-xs text-gray-400">{humaniseSize(node.size)}</span>}
+        {node.mtime && node.mtime > 0 && (
           <span className="text-xs text-gray-500" title={new Date(node.mtime * 1000).toLocaleString()}>
             {new Date(node.mtime * 1000).toLocaleString()}
           </span>
         )}
-
-        <a
-          className="text-gray-300 hover:text-white cursor-pointer"
-          onClick={async (e) => {
-            e.preventDefault()
-            setIsDownloading(true)
-            const resource = await apiFetch(`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}`)
-            const blob = await resource.blob()
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = node.name
-            a.click()
-            URL.revokeObjectURL(url)
-            setIsDownloading(false)
-          }}
-        >
-          {isDownloading ? (
-            <Spinner className="w-4 h-4 inline-block" />
-          ) : (
-            <CloudArrowDownIcon className="w-4 h-4 inline-block" />
-          )}
-        </a>
+        {node.size === -1 && node.mtime === -1 ? (
+          <Spinner className="w-4 h-4" color="white" />
+        ) : (
+          <a
+            className="text-gray-300 hover:text-white cursor-pointer"
+            onClick={async (e) => {
+              e.preventDefault()
+              setIsDownloading(true)
+              const resource = await apiFetch(`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}`)
+              const blob = await resource.blob()
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement('a')
+              a.href = url
+              a.download = node.name
+              a.click()
+              URL.revokeObjectURL(url)
+              setIsDownloading(false)
+            }}
+          >
+            {isDownloading ? (
+              <Spinner className="w-4 h-4 inline-block" />
+            ) : (
+              <CloudArrowDownIcon className="w-4 h-4 inline-block" />
+            )}
+          </a>
+        )}
       </div>
     )
   }

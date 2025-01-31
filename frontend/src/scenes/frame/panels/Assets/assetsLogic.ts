@@ -66,6 +66,7 @@ export const assetsLogic = kea<assetsLogicType>([
   actions({
     uploadAssets: (path: string) => ({ path }),
     assetUploaded: (asset: AssetType) => ({ asset }),
+    filesToUpload: (files: string[]) => ({ files }),
     syncAssets: true,
   }),
   loaders(({ props }) => ({
@@ -134,6 +135,8 @@ export const assetsLogic = kea<assetsLogicType>([
       input.multiple = true
       input.onchange = async () => {
         const files = Array.from(input.files || [])
+        const uploadedFiles = files.map((file) => path + '/' + file.name)
+        actions.filesToUpload(uploadedFiles)
         for (const file of files) {
           const formData = new FormData()
           formData.append('file', file)
@@ -151,7 +154,26 @@ export const assetsLogic = kea<assetsLogicType>([
   })),
   reducers({
     assets: {
-      assetUploaded: (state, { asset }) => [...state, asset],
+      assetUploaded: (state, { asset }) =>
+        state.find((a) => a.path === asset.path)
+          ? state.map((a) => (a.path === asset.path ? asset : a))
+          : [...state, asset],
+      filesToUpload: (state, { files }) => {
+        const foundFiles: Set<string> = new Set()
+        const updatedFiles = state.map((asset) => {
+          if (files.includes(asset.path)) {
+            foundFiles.add(asset.path)
+            return { ...asset, size: -1, mtime: -1 }
+          }
+          return asset
+        })
+        for (const file of files) {
+          if (!foundFiles.has(file)) {
+            updatedFiles.push({ path: file, size: -1, mtime: -1 })
+          }
+        }
+        return updatedFiles
+      },
     },
   }),
   afterMount(({ actions }) => {
