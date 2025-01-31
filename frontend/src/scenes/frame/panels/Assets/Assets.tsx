@@ -33,10 +33,12 @@ function TreeNode({
   node,
   frameId,
   openAsset,
+  uploadAssets,
 }: {
   node: AssetNode
   frameId: number
   openAsset: (path: string) => void
+  uploadAssets: (path: string) => void
 }): JSX.Element {
   const [expanded, setExpanded] = useState(node.path === '')
   const [isDownloading, setIsDownloading] = useState(false)
@@ -45,13 +47,34 @@ function TreeNode({
   if (node.isFolder) {
     return (
       <div className="ml-1">
-        <div className="cursor-pointer" onClick={() => setExpanded(!expanded)}>
-          {expanded ? '📂' : '📁'} <span className="hover:underline text-blue-400">{node.name || '/'}</span>
+        <div className="flex items-center space-x-1">
+          <span className="cursor-pointer" onClick={() => setExpanded(!expanded)}>
+            {expanded ? '📂' : '📁'} <span className="hover:underline text-blue-400">{node.name || '/'}</span>
+          </span>
+          <span className="text-xs text-gray-400"> ({Object.keys(node.children).length} items)</span>
+          <DropdownMenu
+            horizontal
+            className="w-fit"
+            buttonColor="none"
+            items={[
+              {
+                label: 'Upload files',
+                icon: <DocumentArrowUpIcon className="w-5 h-5" />,
+                onClick: () => uploadAssets(node.path),
+              },
+            ]}
+          />
         </div>
         {expanded && (
           <div className="ml-2 border-l border-gray-600 pl-2">
             {Object.values(node.children).map((child) => (
-              <TreeNode key={child.path} node={child} frameId={frameId} openAsset={openAsset} />
+              <TreeNode
+                key={child.path}
+                node={child}
+                frameId={frameId}
+                openAsset={openAsset}
+                uploadAssets={uploadAssets}
+              />
             ))}
           </div>
         )}
@@ -61,38 +84,43 @@ function TreeNode({
     // This is a file
     return (
       <div className="ml-1 flex items-center space-x-2">
-        <div className="flex-1 cursor-pointer hover:underline text-white" onClick={() => openAsset(node.path)}>
-          {node.name}
+        <div className="flex-1">
+          <span className="cursor-pointer hover:underline text-white" onClick={() => openAsset(node.path)}>
+            {node.name}
+          </span>
         </div>
-        {node.size != null && <span className="text-xs text-gray-400">{humaniseSize(node.size)}</span>}
-        {node.mtime && (
+        {node.size && node.size > 0 && <span className="text-xs text-gray-400">{humaniseSize(node.size)}</span>}
+        {node.mtime && node.mtime > 0 && (
           <span className="text-xs text-gray-500" title={new Date(node.mtime * 1000).toLocaleString()}>
             {new Date(node.mtime * 1000).toLocaleString()}
           </span>
         )}
-
-        <a
-          className="text-gray-300 hover:text-white cursor-pointer"
-          onClick={async (e) => {
-            e.preventDefault()
-            setIsDownloading(true)
-            const resource = await apiFetch(`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}`)
-            const blob = await resource.blob()
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = node.name
-            a.click()
-            URL.revokeObjectURL(url)
-            setIsDownloading(false)
-          }}
-        >
-          {isDownloading ? (
-            <Spinner className="w-4 h-4 inline-block" />
-          ) : (
-            <CloudArrowDownIcon className="w-4 h-4 inline-block" />
-          )}
-        </a>
+        {node.size === -1 && node.mtime === -1 ? (
+          <Spinner className="w-4 h-4" color="white" />
+        ) : (
+          <a
+            className="text-gray-300 hover:text-white cursor-pointer"
+            onClick={async (e) => {
+              e.preventDefault()
+              setIsDownloading(true)
+              const resource = await apiFetch(`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}`)
+              const blob = await resource.blob()
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement('a')
+              a.href = url
+              a.download = node.name
+              a.click()
+              URL.revokeObjectURL(url)
+              setIsDownloading(false)
+            }}
+          >
+            {isDownloading ? (
+              <Spinner className="w-4 h-4 inline-block" />
+            ) : (
+              <CloudArrowDownIcon className="w-4 h-4 inline-block" />
+            )}
+          </a>
+        )}
       </div>
     )
   }
@@ -102,7 +130,7 @@ export function Assets(): JSX.Element {
   const { frame } = useValues(frameLogic)
   const { openLogs } = useActions(panelsLogic)
   const { assetsLoading, assetTree } = useValues(assetsLogic({ frameId: frame.id }))
-  const { syncAssets } = useActions(assetsLogic({ frameId: frame.id }))
+  const { syncAssets, uploadAssets } = useActions(assetsLogic({ frameId: frame.id }))
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
 
   return (
@@ -127,7 +155,7 @@ export function Assets(): JSX.Element {
         <div>Loading assets...</div>
       ) : (
         <div>
-          <TreeNode node={assetTree} frameId={frame.id} openAsset={openAsset} />
+          <TreeNode node={assetTree} frameId={frame.id} openAsset={openAsset} uploadAssets={uploadAssets} />
         </div>
       )}
     </div>

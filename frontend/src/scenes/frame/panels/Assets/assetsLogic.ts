@@ -1,4 +1,4 @@
-import { afterMount, connect, kea, key, path, props, selectors } from 'kea'
+import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
 import { AssetType } from '../../../../types'
 import { loaders } from 'kea-loaders'
@@ -63,6 +63,12 @@ export const assetsLogic = kea<assetsLogicType>([
   props({} as AssetsLogicProps),
   connect(({ frameId }: AssetsLogicProps) => ({ logic: [socketLogic], values: [frameLogic({ frameId }), ['frame']] })),
   key((props) => props.frameId),
+  actions({
+    uploadAssets: (path: string) => ({ path }),
+    assetUploaded: (asset: AssetType) => ({ asset }),
+    filesToUpload: (files: string[]) => ({ files }),
+    syncAssets: true,
+  }),
   loaders(({ props }) => ({
     assets: [
       [] as AssetType[],
@@ -122,7 +128,55 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     ],
   }),
-  afterMount(({ actions, cache }) => {
+  listeners(({ actions, props }) => ({
+    uploadAssets: async ({ path }) => {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.multiple = true
+      input.onchange = async () => {
+        const files = Array.from(input.files || [])
+        const uploadedFiles = files.map((file) => path + '/' + file.name)
+        actions.filesToUpload(uploadedFiles)
+        for (const file of files) {
+          const formData = new FormData()
+          formData.append('file', file)
+          formData.append('path', path)
+          const response = await apiFetch(`/api/frames/${props.frameId}/assets/upload`, {
+            method: 'POST',
+            body: formData,
+          })
+          const asset = await response.json()
+          actions.assetUploaded(asset)
+        }
+      }
+      input.click()
+    },
+  })),
+  reducers({
+    assets: {
+      assetUploaded: (state, { asset }) =>
+        state.find((a) => a.path === asset.path)
+          ? state.map((a) => (a.path === asset.path ? asset : a))
+          : [...state, asset],
+      filesToUpload: (state, { files }) => {
+        const foundFiles: Set<string> = new Set()
+        const updatedFiles = state.map((asset) => {
+          if (files.includes(asset.path)) {
+            foundFiles.add(asset.path)
+            return { ...asset, size: -1, mtime: -1 }
+          }
+          return asset
+        })
+        for (const file of files) {
+          if (!foundFiles.has(file)) {
+            updatedFiles.push({ path: file, size: -1, mtime: -1 })
+          }
+        }
+        return updatedFiles
+      },
+    },
+  }),
+  afterMount(({ actions }) => {
     actions.loadAssets()
   }),
 ])

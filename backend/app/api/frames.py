@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import asyncssh
 import io
 import json
 import os
@@ -8,7 +9,7 @@ from http import HTTPStatus
 from tempfile import NamedTemporaryFile
 
 import httpx
-from fastapi import Depends, Request, HTTPException
+from fastapi import Depends, File, Form, Request, HTTPException, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -238,8 +239,7 @@ async def api_frame_get_assets(id: int, db: Session = Depends(get_db), redis: Re
     command = f"find {assets_path} -type f -exec stat --format='%s %Y %n' {{}} +"
     output: list[str] = []
     await exec_command(db, redis, frame, ssh, command, output, log_output=False)
-    await remove_ssh_connection(ssh)
-    await log(db, redis, id, "stdinfo", "SSH connection closed")
+    await remove_ssh_connection(db, redis, ssh, frame)
 
     assets = []
     for line in output:
@@ -290,7 +290,6 @@ async def api_frame_get_asset(
             # 1) Generate an MD5 sum of the remote file
             escaped_path = shlex.quote(normalized_path)
             command = f"md5sum {escaped_path}"
-            await log(db, redis, frame.id, "stdinfo", f"> {command}")
 
             # We'll read the MD5 from the command output
             md5_output: list[str] = []
@@ -321,7 +320,6 @@ async def api_frame_get_asset(
 
             # scp from remote -> local
             #  Note: (ssh, normalized_path) means "download from 'normalized_path' on the remote `ssh` connection"
-            import asyncssh
             await asyncssh.scp(
                 (ssh, escaped_path),
                 local_temp_path,
@@ -352,8 +350,7 @@ async def api_frame_get_asset(
             raise e
 
         finally:
-            await remove_ssh_connection(ssh)
-            await log(db, redis, id, "stdinfo", "SSH connection closed")
+            await remove_ssh_connection(db, redis, ssh, frame)
 
     except HTTPException:
         raise
@@ -361,7 +358,7 @@ async def api_frame_get_asset(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 @api_with_auth.post("/frames/{id:int}/assets/sync")
-async def api_frame_get_assets_upload_fonts(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+async def api_frame_assets_sync(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
     frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
@@ -371,12 +368,54 @@ async def api_frame_get_assets_upload_fonts(id: int, db: Session = Depends(get_d
         try:
             await sync_assets(db, redis, frame, ssh)
         finally:
-            await remove_ssh_connection(ssh)
-            await log(db, redis, id, "stdinfo", "SSH connection closed")
+            await remove_ssh_connection(db, redis, ssh, frame)
         return {"message": "Assets synced successfully"}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
+@api_with_auth.post("/frames/{id:int}/assets/upload")
+async def api_frame_assets_upload(
+    id: int,
+    path: str = Form(..., description="Folder where to place this asset"),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+):
+    frame = db.get(Frame, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    if not path:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Path parameter is required")
+    if "*" in path:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid character * in path")
+    assets_path = frame.assets_path or "/srv/assets"
+    combined_path = os.path.normpath(os.path.join(assets_path, path, file.filename))
+    if not combined_path.startswith(os.path.normpath(assets_path) + '/'):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid asset path")
+
+    # TODO: stream and reuse connections
+    ssh = await get_ssh_connection(db, redis, frame)
+    try:
+        with NamedTemporaryFile(delete=True) as temp_file:
+            local_temp_path = temp_file.name
+            contents = await file.read()
+            with open(local_temp_path, "wb") as f:
+                f.write(contents)
+            await log(db, redis, id, "stdout", f"Uploading: {combined_path}")
+            scp_escaped_path = shlex.quote(combined_path)
+            await asyncssh.scp(
+                local_temp_path,
+                (ssh, scp_escaped_path),
+                recurse=False
+            )
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+    finally:
+        await remove_ssh_connection(db, redis, ssh, frame)
+
+    path_without_combined = os.path.relpath(combined_path, assets_path)
+
+    return {"path": path_without_combined, "size": len(contents), "mtime": int(datetime.now().timestamp())}
 
 @api_with_auth.post("/frames/{id:int}/clear_build_cache")
 async def api_frame_clear_build_cache(id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)):
@@ -389,8 +428,7 @@ async def api_frame_clear_build_cache(id: int, redis: Redis = Depends(get_redis)
             command = "rm -rf /srv/frameos/build/cache"
             await exec_command(db, redis, frame, ssh, command)
         finally:
-            await remove_ssh_connection(ssh)
-            await log(db, redis, id, "stdinfo", "SSH connection closed")
+            await remove_ssh_connection(db, redis, ssh, frame)
         return {"message": "Build cache cleared successfully"}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

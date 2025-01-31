@@ -13,6 +13,8 @@ from app.schemas.assets import (
 )
 from . import api_with_auth
 
+# This file handles assets uploaded under /settings. For assets on frames, see frame.py.
+
 @api_with_auth.get("/assets", response_model=list[AssetResponse])
 async def list_assets(
     path: Optional[str] = Query(None, description="Optional substring filter on the asset path"),
