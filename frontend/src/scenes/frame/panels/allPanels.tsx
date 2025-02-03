@@ -15,6 +15,7 @@ import { SceneJSON } from './SceneJSON/SceneJSON'
 import { Scenes } from './Scenes/Scenes'
 import { SceneSource } from './SceneSource/SceneSource'
 import { SceneState } from './SceneState/SceneState'
+import { Schedule } from './Schedule/Schedule'
 import { Templates } from './Templates/Templates'
 import { Terminal } from './Terminal/Terminal'
 
@@ -36,6 +37,7 @@ export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   Scenes,
   SceneSource,
   SceneState,
+  Schedule,
   Templates,
   Terminal,
 }

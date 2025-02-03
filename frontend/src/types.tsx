@@ -414,6 +414,7 @@ export enum Panel {
   Scenes = 'Scenes',
   SceneSource = 'SceneSource',
   SceneState = 'SceneState',
+  Schedule = 'Schedule',
   Templates = 'Templates',
   Terminal = 'Terminal',
 }
