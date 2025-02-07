@@ -58,44 +58,51 @@ function ViewRow({
   const showToggle = publicFields.length != modifiedFields.length
 
   return (
-    <div key={event.id} className="flex justify-between items-start">
-      <div className="space-y-2">
-        <div>
-          {weekDays[event.weekday ?? '']} at {parseInt(event.hour) < 10 ? '0' : ''}
-          {event.hour}:{parseInt(event.minute) < 10 ? '0' : ''}
-          {event.minute}
-        </div>
-
-        <div
-          className={showToggle ? 'font-bold cursor-pointer space-x-1' : 'font-bold space-x-2'}
-          onClick={() => toggleDescription(event.id)}
-        >
-          <span>
-            {scenesAsOptions.find((scene) => scene.value === event.payload.sceneId)?.label || 'Unspecified Scene'}
-          </span>
-          {showToggle ? (
-            <span className="text-xs font-normal text-gray-500">({expandedDescription ? 'hide' : 'expand'})</span>
-          ) : null}
-        </div>
-        {(expandedDescription ? publicFields : modifiedFields).map((field) => (
-          <div key={field.name}>
-            {field.label || field.name}: {event.payload.state[field.name] ?? field.value}
+    <>
+      <div className="flex justify-between items-start">
+        <div className="space-y-2 w-full">
+          <div>
+            {weekDays[event.weekday ?? '']} at {parseInt(event.hour) < 10 ? '0' : ''}
+            {event.hour}:{parseInt(event.minute) < 10 ? '0' : ''}
+            {event.minute}
           </div>
-        ))}
+          <div
+            className={showToggle ? 'font-bold cursor-pointer space-x-1' : 'font-bold space-x-2'}
+            onClick={() => toggleDescription(event.id)}
+          >
+            <span>
+              {scenesAsOptions.find((scene) => scene.value === event.payload.sceneId)?.label || 'Unspecified Scene'}
+            </span>
+            {showToggle ? (
+              <span className="text-xs font-normal text-gray-500">[{expandedDescription ? 'hide' : 'expand'}]</span>
+            ) : null}
+          </div>
+        </div>
+        <Button
+          size="small"
+          className="!px-1"
+          color="secondary"
+          onClick={(e) => {
+            e.stopPropagation()
+            editEvent(event.id)
+          }}
+          title="Edit"
+        >
+          <PencilSquareIcon className="w-5 h-5" />
+        </Button>
       </div>
-      <Button
-        size="small"
-        className="!px-1"
-        color="secondary"
-        onClick={(e) => {
-          e.stopPropagation()
-          editEvent(event.id)
-        }}
-        title="Edit"
-      >
-        <PencilSquareIcon className="w-5 h-5" />
-      </Button>
-    </div>
+      {(expandedDescription ? publicFields : modifiedFields).map((field) => (
+        <div
+          key={field.name}
+          className="flex gap-1 @container w-full flex-col items-start @md:items-center @md:flex-row"
+        >
+          <div className="@md:w-1/3 text-xs font-normal text-gray-500 mb-[-0.25rem] @md:mb-0">
+            {field.label || field.name}
+          </div>
+          <div className="@md:w-2/3">{event.payload.state[field.name] ?? field.value}</div>
+        </div>
+      ))}
+    </>
   )
 }
 
@@ -180,15 +187,30 @@ function EditRow({ event, scenesAsOptions, eventFields, closeEvent, deleteEvent 
 
 export function Schedule() {
   const { frameId } = useValues(frameLogic)
-  const { editingEvents, events, scenesAsOptions, fieldsForScene, expandedDescriptions } = useValues(
+  const { editingEvents, sortedEvents, scenesAsOptions, fieldsForScene, expandedDescriptions, sort } = useValues(
     scheduleLogic({ frameId })
   )
-  const { editEvent, addEvent, closeEvent, deleteEvent, toggleDescription } = useActions(scheduleLogic({ frameId }))
+  const { editEvent, addEvent, closeEvent, deleteEvent, toggleDescription, setSort } = useActions(
+    scheduleLogic({ frameId })
+  )
   return (
     <div className="space-y-2">
-      <H6>Schedule</H6>
+      <div className="flex w-full items-center justify-between">
+        <H6>Schedule</H6>
+        <div>
+          <Select
+            options={[
+              { label: 'Sory by day', value: 'day' },
+              { label: 'Sory by hour', value: 'hour' },
+              { label: 'Sory by scene', value: 'scene' },
+            ]}
+            value={sort}
+            onChange={setSort}
+          />
+        </div>
+      </div>
       <Form logic={frameLogic} formKey="frameForm" className=" space-y-2">
-        {events.map((event, index) => (
+        {sortedEvents.map((event, index) => (
           <div className="bg-gray-900 p-2 space-y-2 @container" key={event.id}>
             {editingEvents[event.id] ? (
               <Group name={['schedule', 'events', index]}>

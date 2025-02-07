@@ -25,6 +25,7 @@ export const scheduleLogic = kea<scheduleLogicType>([
     closeEvent: (id: string) => ({ id }),
     deleteEvent: (id: string) => ({ id }),
     toggleDescription: (id: string) => ({ id }),
+    setSort: (sort: string) => ({ sort }),
   }),
 
   reducers({
@@ -49,12 +50,26 @@ export const scheduleLogic = kea<scheduleLogicType>([
         toggleDescription: (state, { id }) => ({ ...state, [id]: !state[id] }),
       },
     ],
+    sort: [
+      'hour' as string,
+      {
+        setSort: (_, { sort }) => sort,
+      },
+    ],
   }),
 
   selectors({
     schedule: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm.schedule ?? frame.schedule],
     events: [(s) => [s.schedule], (schedule) => schedule?.events ?? []],
     scenes: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm.scenes ?? frame.scenes],
+    sceneNames: [
+      (s) => [s.scenes],
+      (scenes): Record<string, string> =>
+        (scenes ?? []).reduce((acc, scene) => {
+          acc[scene.id] = scene.name || 'Unnamed Scene'
+          return acc
+        }, {} as Record<string, string>),
+    ],
     scenesAsOptions: [
       (s) => [s.scenes],
       (scenes): { label: string; value: string }[] =>
@@ -72,6 +87,27 @@ export const scheduleLogic = kea<scheduleLogicType>([
           acc[scene.id] = scene.fields ?? []
           return acc
         }, {} as Record<string, StateField[]>),
+    ],
+    sortedEvents: [
+      (s) => [s.events, s.sort, s.sceneNames],
+      (events, sort, sceneNames) => {
+        if (sort === 'day') {
+          return events.sort((a, b) => a.weekday.localeCompare(b.weekday))
+        } else if (sort === 'hour') {
+          return events.sort((a, b) =>
+            parseInt(a.hour) === parseInt(b.hour)
+              ? parseInt(a.minute) - parseInt(b.minute)
+              : parseInt(a.hour) - parseInt(b.hour)
+          )
+        } else if (sort === 'scene') {
+          return events.sort((a, b) =>
+            (sceneNames[a.payload.sceneId ?? ''] || a.payload.sceneId).localeCompare(
+              sceneNames[b.payload.sceneId ?? ''] || b.payload.sceneId
+            )
+          )
+        }
+        return events
+      },
     ],
   }),
 
