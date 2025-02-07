@@ -46,6 +46,20 @@ export interface FrameType {
     qrCodeColor?: string
     backgroundColor?: string
   }
+  schedule?: FrameSchedule
+}
+
+export interface FrameSchedule {
+  events: ScheduledEvent[]
+}
+
+export interface ScheduledEvent {
+  id: string
+  minute: string
+  hour: string
+  weekday: string // 0-6 wdays, 7 for every weekday, 8 for every weekend, undefined/'' for every day
+  event: 'setCurrentScene'
+  payload: { sceneId: string; state: Record<string, any> }
 }
 
 export interface TemplateType {
