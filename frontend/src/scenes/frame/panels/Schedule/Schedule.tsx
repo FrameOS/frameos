@@ -117,7 +117,7 @@ interface EditRowProps {
 function EditRow({ event, scenesAsOptions, eventFields, closeEvent, deleteEvent }: EditRowProps) {
   return (
     <>
-      <Field name="weekday" label="The time">
+      <Field name="weekday" label="When">
         {({ value, onChange }) => (
           <div className="w-full space-y-2">
             <Select options={weekDayOptions} value={value} onChange={(v) => onChange(parseInt(v))} />
