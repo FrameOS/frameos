@@ -14,6 +14,9 @@ import { appsLogic } from '../Apps/appsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
 import { Spinner } from '../../../../components/Spinner'
 import { H6 } from '../../../../components/H6'
+import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { ArrowDownTrayIcon, ArrowPathIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline'
+import { TrashIcon } from '@heroicons/react/24/solid'
 
 export interface FrameSettingsProps {
   className?: string
@@ -28,92 +31,84 @@ export function FrameSettings({ className }: FrameSettingsProps) {
   const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
 
   return (
-    <div className={clsx('space-y-4', className)}>
+    <div className={className}>
       {!frame ? (
         `Loading frame ${frameId}...`
       ) : (
         <>
-          <div className="flex space-x-2">
-            <div className="flex-1"></div>
-            <Button
-              type="button"
-              size="small"
-              color="secondary"
-              className="flex gap-2 items-center"
-              onClick={() => clearBuildCache()}
-            >
-              {buildCacheLoading ? <Spinner color="white" className="w-4 h-4" /> : null}
-              Clear build cache
-            </Button>
-            <Button
-              type="button"
-              size="small"
-              color="secondary"
-              className="flex-0"
-              onClick={() => {
-                function handleFileSelect(event: Event): void {
-                  const inputElement = event.target as HTMLInputElement
-                  const file = inputElement.files?.[0]
+          <div className="float-right">
+            <DropdownMenu
+              className="w-fit"
+              buttonColor="secondary"
+              items={[
+                {
+                  label: 'Clear build cache',
+                  onClick: () => clearBuildCache(),
+                  icon: buildCacheLoading ? (
+                    <Spinner color="white" className="w-4 h-4" />
+                  ) : (
+                    <ArrowPathIcon className="w-5 h-5" />
+                  ),
+                },
+                {
+                  label: 'Import .json',
+                  onClick: () => {
+                    function handleFileSelect(event: Event): void {
+                      const inputElement = event.target as HTMLInputElement
+                      const file = inputElement.files?.[0]
 
-                  if (!file) {
-                    console.error('No file selected')
-                    return
-                  }
+                      if (!file) {
+                        console.error('No file selected')
+                        return
+                      }
 
-                  const reader = new FileReader()
+                      const reader = new FileReader()
 
-                  reader.onload = (loadEvent: ProgressEvent<FileReader>) => {
-                    try {
-                      const jsonData = JSON.parse(loadEvent.target?.result as string)
-                      const { id, ...rest } = jsonData
-                      setFrameFormValues(rest)
-                      console.log('Imported frame:', jsonData)
-                      console.log('Press SAVE now to save the imported frame')
-                    } catch (error) {
-                      console.error('Error parsing JSON:', error)
+                      reader.onload = (loadEvent: ProgressEvent<FileReader>) => {
+                        try {
+                          const jsonData = JSON.parse(loadEvent.target?.result as string)
+                          const { id, ...rest } = jsonData
+                          setFrameFormValues(rest)
+                          console.log('Imported frame:', jsonData)
+                          console.log('Press SAVE now to save the imported frame')
+                        } catch (error) {
+                          console.error('Error parsing JSON:', error)
+                        }
+                      }
+
+                      reader.onerror = () => {
+                        console.error('Error reading file:', reader.error)
+                      }
+
+                      reader.readAsText(file)
                     }
-                  }
 
-                  reader.onerror = () => {
-                    console.error('Error reading file:', reader.error)
-                  }
-
-                  reader.readAsText(file)
-                }
-
-                const fileInput = document.createElement('input')
-                fileInput.type = 'file'
-                fileInput.accept = '.json'
-                fileInput.addEventListener('change', handleFileSelect)
-                fileInput.click()
-              }}
-            >
-              Import .json
-            </Button>
-            <Button
-              type="button"
-              size="small"
-              color="secondary"
-              className="flex-0"
-              onClick={() => {
-                downloadJson(frame, `${frame.name || `frame-${frame.id}`}.json`)
-              }}
-            >
-              Export .json
-            </Button>
-            <Button
-              type="button"
-              size="small"
-              color="secondary"
-              className="flex-0"
-              onClick={() => {
-                if (confirm('Are you sure you want to DELETE this frame?')) {
-                  deleteFrame(frame.id)
-                }
-              }}
-            >
-              <span className="text-red-300">Delete frame</span>
-            </Button>
+                    const fileInput = document.createElement('input')
+                    fileInput.type = 'file'
+                    fileInput.accept = '.json'
+                    fileInput.addEventListener('change', handleFileSelect)
+                    fileInput.click()
+                  },
+                  icon: <ArrowDownTrayIcon className="w-5 h-5" />,
+                },
+                {
+                  label: 'Export .json',
+                  onClick: () => {
+                    downloadJson(frame, `${frame.name || `frame-${frame.id}`}.json`)
+                  },
+                  icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                },
+                {
+                  label: 'Delete frame',
+                  onClick: () => {
+                    if (confirm('Are you sure you want to DELETE this frame?')) {
+                      deleteFrame(frame.id)
+                    }
+                  },
+                  icon: <TrashIcon className="w-5 h-5" />,
+                },
+              ]}
+            />
           </div>
           <Form
             formKey="frameForm"
@@ -122,7 +117,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
             className="space-y-4 @container"
             enableFormOnSubmit
           >
-            <H6>Frame Settings</H6>
+            <H6 className="mt-2">Frame Settings</H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               <Field name="name" label="Name">
                 <TextInput name="name" placeholder="Hallway frame" required />

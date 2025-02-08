@@ -473,6 +473,16 @@ async def api_frame_deploy_event(id: int, redis: Redis = Depends(get_redis)):
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@api_with_auth.post("/frames/{id:int}/fast_deploy")
+async def api_frame_fast_deploy_event(id: int, redis: Redis = Depends(get_redis)):
+    try:
+        from app.tasks import fast_deploy_frame
+        await fast_deploy_frame(id, redis)
+        return "Success"
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 @api_with_auth.post("/frames/{id:int}")
 async def api_frame_update_endpoint(
     id: int,

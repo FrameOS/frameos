@@ -31,6 +31,8 @@ export interface FrameType {
   assets_path?: string
   save_assets?: boolean | Record<string, boolean>
   upload_fonts?: string
+  last_successful_deploy?: Record<string, any>
+  last_successful_deploy_at?: string
   reboot?: {
     enabled?: 'true' | 'false'
     crontab?: string

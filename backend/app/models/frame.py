@@ -95,6 +95,8 @@ class Frame(Base):
             'reboot': self.reboot,
             'control_code': self.control_code,
             'schedule': self.schedule,
+            'last_successful_deploy': self.last_successful_deploy,
+            'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
 
 async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:

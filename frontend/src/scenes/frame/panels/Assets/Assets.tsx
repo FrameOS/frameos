@@ -140,7 +140,7 @@ export function Assets(): JSX.Element {
       <div className="float-right mt-[-8px]">
         <DropdownMenu
           className="w-fit"
-          buttonColor="none"
+          buttonColor="secondary"
           items={[
             {
               label: 'Sync fonts',

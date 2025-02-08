@@ -68,9 +68,11 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
                       {({ active }) => (
                         <a
                           href="#"
-                          className={`${
-                            active && !!item.onClick ? 'bg-[#4a4b8c] text-white' : 'text-white'
-                          } px-4 py-2 text-sm flex gap-2`}
+                          className={clsx(
+                            `${
+                              active && !!item.onClick ? 'bg-[#4a4b8c] text-white' : 'text-white'
+                            } px-4 py-2 text-sm flex gap-2`
+                          )}
                           title={item.title}
                           onClick={
                             item.onClick

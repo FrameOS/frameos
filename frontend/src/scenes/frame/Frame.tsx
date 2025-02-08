@@ -15,7 +15,7 @@ interface FrameSceneProps {
 export function Frame(props: FrameSceneProps) {
   const frameId = parseInt(props.id)
   const frameLogicProps = { frameId }
-  const { frame, frameChanged } = useValues(frameLogic(frameLogicProps))
+  const { frame, unsavedChanges, undeployedChanges, requiresRecompilation } = useValues(frameLogic(frameLogicProps))
   const { saveFrame, renderFrame, restartFrame, stopFrame, deployFrame } = useActions(frameLogic(frameLogicProps))
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
 
@@ -34,21 +34,33 @@ export function Frame(props: FrameSceneProps) {
                     { label: 'Re-Render', onClick: () => renderFrame() },
                     { label: 'Restart', onClick: () => restartFrame() },
                     { label: 'Stop', onClick: () => stopFrame() },
+                    ...(!requiresRecompilation
+                      ? [
+                          {
+                            label: 'Full deploy',
+                            onClick: () => {
+                              deployFrame()
+                              openLogs()
+                            },
+                          },
+                        ]
+                      : []),
                   ]}
                 />
                 <div className="flex pl-2 space-x-2">
-                  <Button color={frameChanged ? 'primary' : 'secondary'} type="button" onClick={() => saveFrame()}>
+                  <Button color={unsavedChanges ? 'primary' : 'secondary'} type="button" onClick={() => saveFrame()}>
                     Save
                   </Button>
                   <Button
-                    color={'secondary'}
+                    color={undeployedChanges ? 'primary' : 'secondary'}
                     type="button"
                     onClick={() => {
                       deployFrame()
                       openLogs()
                     }}
                   >
-                    Redeploy
+                    {requiresRecompilation ? 'Full ' : 'Fast '}
+                    deploy
                   </Button>
                 </div>
               </div>
