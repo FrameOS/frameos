@@ -92,13 +92,9 @@ export const scheduleLogic = kea<scheduleLogicType>([
       (s) => [s.events, s.sort, s.sceneNames],
       (events, sort, sceneNames) => {
         if (sort === 'day') {
-          return events.sort((a, b) => a.weekday.localeCompare(b.weekday))
+          return events.sort((a, b) => a.weekday - b.weekday)
         } else if (sort === 'hour') {
-          return events.sort((a, b) =>
-            parseInt(a.hour) === parseInt(b.hour)
-              ? parseInt(a.minute) - parseInt(b.minute)
-              : parseInt(a.hour) - parseInt(b.hour)
-          )
+          return events.sort((a, b) => (a.hour === b.hour ? a.minute - b.minute : a.hour - b.hour))
         } else if (sort === 'scene') {
           return events.sort((a, b) =>
             (sceneNames[a.payload.sceneId ?? ''] || a.payload.sceneId).localeCompare(
@@ -127,9 +123,9 @@ export const scheduleLogic = kea<scheduleLogicType>([
 function newScheduledEvent(): ScheduledEvent {
   return {
     id: uuidv4(),
-    hour: '9',
-    minute: '0',
-    weekday: '',
+    hour: 9,
+    minute: 0,
+    weekday: 0,
     event: 'setCurrentScene',
     payload: { sceneId: '', state: {} },
   }

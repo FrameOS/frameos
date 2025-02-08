@@ -12,25 +12,25 @@ import { StateFieldEdit } from '../Scenes/StateFieldEdit'
 import { ScheduledEvent, StateField } from '../../../../types'
 
 const weekDayOptions = [
-  { value: '', label: 'Every day' },
-  { value: '7', label: 'Every weekday' },
-  { value: '8', label: 'Every weekend' },
-  { value: '1', label: 'Mondays' },
-  { value: '2', label: 'Tuesdays' },
-  { value: '3', label: 'Wednesdays' },
-  { value: '4', label: 'Thursdays' },
-  { value: '5', label: 'Fridays' },
-  { value: '6', label: 'Saturdays' },
-  { value: '0', label: 'Sundays' },
+  { value: 0, label: 'Every day' },
+  { value: 8, label: 'Every weekday' },
+  { value: 9, label: 'Every weekend' },
+  { value: 1, label: 'Mondays' },
+  { value: 2, label: 'Tuesdays' },
+  { value: 3, label: 'Wednesdays' },
+  { value: 4, label: 'Thursdays' },
+  { value: 5, label: 'Fridays' },
+  { value: 6, label: 'Saturdays' },
+  { value: 7, label: 'Sundays' },
 ]
 const weekDays = Object.fromEntries(weekDayOptions.map((option) => [option.value, option.label]))
 
 const hourOptions = [...Array(24).keys()].map((hour) => ({
-  value: hour.toString(),
+  value: hour,
   label: hour < 10 ? `0${hour}` : hour.toString(),
 }))
 const minuteOptions = [...Array(60).keys()].map((minute) => ({
-  value: minute.toString(),
+  value: minute,
   label: minute < 10 ? `0${minute}` : minute.toString(),
 }))
 
@@ -62,8 +62,8 @@ function ViewRow({
       <div className="flex justify-between items-start">
         <div className="space-y-2 w-full">
           <div>
-            {weekDays[event.weekday ?? '']} at {parseInt(event.hour) < 10 ? '0' : ''}
-            {event.hour}:{parseInt(event.minute) < 10 ? '0' : ''}
+            {weekDays[String(event.weekday || 0)]} at {event.hour < 10 ? '0' : ''}
+            {event.hour}:{event.minute < 10 ? '0' : ''}
             {event.minute}
           </div>
           <div
@@ -120,15 +120,19 @@ function EditRow({ event, scenesAsOptions, eventFields, closeEvent, deleteEvent 
       <Field name="weekday" label="The time">
         {({ value, onChange }) => (
           <div className="w-full space-y-2">
-            <Select options={weekDayOptions} value={value} onChange={onChange} />
+            <Select options={weekDayOptions} value={value} onChange={(v) => onChange(parseInt(v))} />
             <div className="flex gap-2 items-center">
               At
               <Field name="hour">
-                <Select options={hourOptions} />
+                {({ value, onChange }) => (
+                  <Select value={value} onChange={(v) => onChange(parseInt(v))} options={hourOptions} />
+                )}
               </Field>
               :
               <Field name="minute">
-                <Select options={minuteOptions} />
+                {({ value, onChange }) => (
+                  <Select value={value} onChange={(v) => onChange(parseInt(v))} options={minuteOptions} />
+                )}
               </Field>
             </div>
           </div>

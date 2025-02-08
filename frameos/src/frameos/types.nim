@@ -22,6 +22,18 @@ type
     logToFile*: string
     debug*: bool
     timeZone*: string
+    schedule*: FrameSchedule
+
+  FrameSchedule* = ref object
+    events*: seq[ScheduledEvent]
+
+  ScheduledEvent* = ref object
+    id*: string
+    minute*: int  # must be set 0-59
+    hour*: int    # must be set 0-23
+    weekday*: int # 0 for every day, 1-7 mon-sun, 8 for every weekday, 9 for every weekend
+    event*: string
+    payload*: JsonNode
 
   Logger* = ref object
     frameConfig*: FrameConfig
@@ -116,6 +128,11 @@ type
 
   FrameOSDriver* = ref object of RootObj
     name*: string
+
+  Scheduler* = ref object
+    frameConfig*: FrameConfig
+    logger*: Logger
+    schedule*: FrameSchedule
 
   FrameOS* = ref object
     frameConfig*: FrameConfig

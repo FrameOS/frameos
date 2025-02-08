@@ -55,9 +55,9 @@ export interface FrameSchedule {
 
 export interface ScheduledEvent {
   id: string
-  minute: string
-  hour: string
-  weekday: string // 0-6 wdays, 7 for every weekday, 8 for every weekend, undefined/'' for every day
+  minute: number
+  hour: number
+  weekday: number // undefined/null/''/0 for every day, 1-7 mon-sun, 8 for every weekday, 9 for every weekend
   event: 'setCurrentScene'
   payload: { sceneId: string; state: Record<string, any> }
 }

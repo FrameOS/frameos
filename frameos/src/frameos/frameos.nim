@@ -5,6 +5,7 @@ import frameos/logger
 import frameos/metrics
 import frameos/runner
 import frameos/server
+import frameos/scheduler
 import frameos/types
 import lib/tz
 
@@ -22,6 +23,7 @@ proc newFrameOS*(): FrameOS =
   drivers.init(result)
   result.runner = newRunner(frameConfig)
   result.server = newServer(result)
+  startScheduler(result)
 
 proc start*(self: FrameOS) {.async.} =
   var message = %*{"event": "bootup", "config": {
