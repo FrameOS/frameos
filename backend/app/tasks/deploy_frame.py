@@ -49,6 +49,10 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             raise Exception("Already deploying. Request again to force redeploy.")
 
         frame_dict = frame.to_dict() # persisted as frame.last_successful_deploy if successful
+        if "last_successful_deploy" in frame_dict:
+            del frame_dict["last_successful_deploy"]
+        if "last_successful_deploy_at" in frame_dict:
+            del frame_dict["last_successful_deploy_at"]
 
         frame.status = 'deploying'
         await update_frame(db, redis, frame)

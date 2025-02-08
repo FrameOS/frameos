@@ -44,6 +44,14 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'schedule',
 ]
 
+const FRAME_KEYS_REQUIRE_RECOMPILE: (keyof FrameType)[] = [
+  'device',
+  'background_color',
+  'scenes',
+  'control_code',
+  'reboot',
+]
+
 function cleanBackgroundColor(color: string): string {
   // convert the format "(r: 0, g: 0, b: 0)"
   if (color.startsWith('(r:')) {
@@ -189,10 +197,24 @@ export const frameLogic = kea<frameLogicType>([
   selectors(() => ({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
     frame: [(s) => [s.frames, s.frameId], (frames, frameId) => frames[frameId] || null],
-    frameChanged: [
+    unsavedChanges: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm) =>
         FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], frameForm?.[key as keyof FrameType])),
+    ],
+    lastDeploy: [(s) => [s.frame], (frame) => frame?.last_successful_deploy ?? null],
+    undeployedChanges: [
+      (s) => [s.frame, s.lastDeploy],
+      (frame, lastDeploy) =>
+        FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], lastDeploy?.[key as keyof FrameType])),
+    ],
+    requiresRecompilation: [
+      (s) => [s.frame, s.lastDeploy],
+      (frame, lastDeploy) =>
+        !lastDeploy ||
+        FRAME_KEYS_REQUIRE_RECOMPILE.some(
+          (key) => !equal(lastDeploy?.[key as keyof FrameType], frame?.[key as keyof FrameType])
+        ),
     ],
     defaultScene: [
       (s) => [s.frame, s.frameForm],
@@ -223,7 +245,7 @@ export const frameLogic = kea<frameLogicType>([
     renderFrame: () => framesModel.actions.renderFrame(props.frameId),
     restartFrame: () => framesModel.actions.restartFrame(props.frameId),
     stopFrame: () => framesModel.actions.stopFrame(props.frameId),
-    deployFrame: () => framesModel.actions.deployFrame(props.frameId),
+    deployFrame: () => framesModel.actions.deployFrame(props.frameId, !values.requiresRecompilation),
     updateScene: ({ sceneId, scene }) => {
       const { frameForm } = values
       const hasScene = frameForm.scenes?.some(({ id }) => id === sceneId)
