@@ -14,11 +14,10 @@ proc weekdayMonSun(dt: DateTime): int =
 
 # Checks if `ScheduledEvent`'s weekday matches today
 proc weekdayMatches(eventWeekday: int, dt: DateTime): bool =
-  ## eventWeekday:
-  ##    0 = every day
-  ##    1..7 = mon..sun
-  ##    8 = every weekday (Mon-Fri)
-  ##    9 = every weekend (Sat-Sun)
+  # 0 = every day
+  # 1..7 = mon..sun
+  # 8 = every weekday (Mon-Fri)
+  # 9 = every weekend (Sat-Sun)
   let today = weekdayMonSun(dt) # 1..7
   case eventWeekday
   of 0:
@@ -35,29 +34,32 @@ proc weekdayMatches(eventWeekday: int, dt: DateTime): bool =
     # If for some reason out of range, just ignore
     return false
 
+proc handleSchedule*(self: Scheduler, dt: DateTime) =
+  # do everything except sleeping or looping
+  let matched = self.schedule.events.filter(proc(ev: ScheduledEvent): bool =
+    ev.minute == dt.minute and ev.hour == dt.hour and weekdayMatches(ev.weekday, dt)
+  )
+
+  if self.frameConfig.debug:
+    log(%*{
+      "event": "scheduler:debug",
+      "hour": dt.hour,
+      "minute": dt.minute,
+      "weekday": ord(dt.weekday),
+      "matched": len(matched)
+    })
+
+  for ev in matched:
+    sendEvent(ev.event, ev.payload)
 
 proc start*(self: Scheduler) =
   while true:
     let dt = now()
-
-    if self.frameConfig.debug:
-      log(%*{"event": "scheduler:debug", "hour": dt.hour, "minute": dt.minute, "weekday": dt.weekday.ord})
-
-    # Filter events that match the current minute/hour/weekday
-    let matched = self.schedule.events.filter(proc(ev: ScheduledEvent): bool =
-      ev.minute == dt.minute and ev.hour == dt.hour and weekdayMatches(ev.weekday, dt)
-    )
-
-    # Trigger matched events
-    for ev in matched:
-      sendEvent(ev.event, ev.payload)
-
-    # When is the next minute
+    self.handleSchedule(dt)
+    # Sleep until next minute
     let now2 = now()
     if now2.minute == dt.minute:
       let secondsToSleep = 60 - now2.second
-      if self.frameConfig.debug:
-        sendEvent("scheduler:debug", %*{"secondsToSleep": secondsToSleep})
       sleep(secondsToSleep * 1000)
 
 proc createThreadRunner(frameOS: FrameOS) {.thread.} =
