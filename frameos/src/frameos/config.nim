@@ -16,6 +16,20 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.name == "": config.name = config.frameHost
   if config.timeZone == "": config.timeZone = findSystemTimeZone()
 
+proc loadSchedule*(data: JsonNode): FrameSchedule =
+  result = FrameSchedule(events: @[])
+  if data == nil or data["events"] == nil or data["events"].kind != JArray:
+    return result
+  for event in data["events"].items:
+    result.events.add(ScheduledEvent(
+      id: event{"id"}.getStr(),
+      minute: event{"minute"}.getInt(),
+      hour: event{"hour"}.getInt(),
+      weekday: event{"weekday"}.getInt(),
+      event: event{"event"}.getStr(),
+      payload: event{"payload"}
+    ))
+
 proc loadConfig*(filename: string = "frame.json"): FrameConfig =
   let data = parseFile(filename)
   result = FrameConfig(
@@ -38,7 +52,8 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     saveAssets: if data{"saveAssets"} == nil: %*(false) else: data{"saveAssets"},
     logToFile: data{"logToFile"}.getStr(),
     debug: data{"debug"}.getBool() or commandLineParams().contains("--debug"),
-    timeZone: data{"timeZone"}.getStr(),
+    timeZone: data{"timeZone"}.getStr("UTC"),
+    schedule: loadSchedule(data{"schedule"})
   )
   if result.assetsPath.endswith("/"):
     result.assetsPath = result.assetsPath.strip(leading = false, trailing = true, chars = {'/'})

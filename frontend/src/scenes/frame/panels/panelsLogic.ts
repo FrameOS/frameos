@@ -20,6 +20,7 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
     { panel: Panel.Apps, active: false, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
     { panel: Panel.Templates, active: false, hidden: false },
+    { panel: Panel.Schedule, active: false, hidden: false },
   ],
   [Area.BottomLeft]: [
     { panel: Panel.Logs, active: true, hidden: false },
@@ -225,7 +226,7 @@ export const panelsLogic = kea<panelsLogicType>([
             ...panels,
             [Area.TopRight]: panels[Area.TopRight].filter((p) =>
               scenesOpen
-                ? [Panel.Templates].includes(p.panel)
+                ? [Panel.Templates, Panel.Schedule].includes(p.panel)
                 : [Panel.Apps, Panel.Events, Panel.SceneState].includes(p.panel)
             ),
             [Area.BottomLeft]: panels[Area.BottomLeft].filter((p) =>

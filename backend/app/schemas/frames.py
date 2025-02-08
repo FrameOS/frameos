@@ -37,6 +37,7 @@ class FrameBase(BaseModel):
     reboot: Any
     control_code: Any
     scenes: Optional[List[Dict[str, Any]]]
+    schedule: Optional[Dict[str, Any]]
 
 class FrameResponse(BaseModel):
     frame: FrameBase
@@ -79,6 +80,7 @@ class FrameUpdateRequest(BaseModel):
     debug: Optional[bool] = None
     reboot: Any = None
     control_code: Any = None
+    schedule: Optional[Dict[str, Any]] = None
     next_action: Optional[str] = None
 
 class FrameLogsResponse(BaseModel):

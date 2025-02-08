@@ -6,9 +6,14 @@ export interface Option {
   label: string
 }
 
+export interface NumericOption {
+  value: number
+  label: string
+}
+
 export interface SelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'onChange'> {
   onChange?: (value: string) => void
-  options: Option[]
+  options: Option[] | NumericOption[]
   theme?: 'node' | 'full'
 }
 

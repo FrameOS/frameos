@@ -41,6 +41,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'upload_fonts',
   'reboot',
   'control_code',
+  'schedule',
 ]
 
 function cleanBackgroundColor(color: string): string {

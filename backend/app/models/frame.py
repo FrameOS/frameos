@@ -53,6 +53,7 @@ class Frame(Base):
     scenes = mapped_column(JSON, nullable=True, default=list)
     last_successful_deploy = mapped_column(JSON, nullable=True) # contains frame.to_dict() of last successful deploy
     last_successful_deploy_at = mapped_column(DateTime, nullable=True)
+    schedule = mapped_column(JSON, nullable=True)
 
     # not used
     apps = mapped_column(JSON, nullable=True)
@@ -93,6 +94,7 @@ class Frame(Base):
             'upload_fonts': self.upload_fonts,
             'reboot': self.reboot,
             'control_code': self.control_code,
+            'schedule': self.schedule,
         }
 
 async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:
@@ -143,6 +145,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         save_assets=True,
         upload_fonts='', # all
         control_code={"enabled": "true", "position": "top-right"},
+        schedule={"events": []},
         reboot={"enabled": "true", "crontab": "4 0 * * *"},
     )
     db.add(frame)
@@ -207,6 +210,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "logToFile": frame.log_to_file,
         "assetsPath": frame.assets_path,
         "saveAssets": frame.save_assets,
+        "schedule": frame.schedule,
     }
 
     setting_keys = set()
