@@ -126,15 +126,19 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                 <Select name="device" options={devices} />
               </Field>
               <Field name="rotate" label="Rotation">
-                <Select
-                  name="rotate"
-                  options={[
-                    { value: '0', label: '0 degrees' },
-                    { value: '90', label: '90 degrees' },
-                    { value: '180', label: '180 degrees' },
-                    { value: '270', label: '270 degrees' },
-                  ]}
-                />
+                {({ value, onChange }) => (
+                  <Select
+                    value={value || '0'}
+                    onChange={(v) => onChange(parseInt(v))}
+                    name="rotate"
+                    options={[
+                      { value: '0', label: '0 degrees' },
+                      { value: '90', label: '90 degrees' },
+                      { value: '180', label: '180 degrees' },
+                      { value: '270', label: '270 degrees' },
+                    ]}
+                  />
+                )}
               </Field>
             </div>
             <H6>Connection</H6>
