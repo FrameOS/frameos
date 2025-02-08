@@ -132,10 +132,10 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                     onChange={(v) => onChange(parseInt(v))}
                     name="rotate"
                     options={[
-                      { value: '0', label: '0 degrees' },
-                      { value: '90', label: '90 degrees' },
-                      { value: '180', label: '180 degrees' },
-                      { value: '270', label: '270 degrees' },
+                      { value: 0, label: '0 degrees' },
+                      { value: 90, label: '90 degrees' },
+                      { value: 180, label: '180 degrees' },
+                      { value: 270, label: '270 degrees' },
                     ]}
                   />
                 )}
