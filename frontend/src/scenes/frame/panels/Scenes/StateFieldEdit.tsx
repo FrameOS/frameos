@@ -1,4 +1,5 @@
 import { FontSelect } from '../../../../components/FontSelect'
+import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Select } from '../../../../components/Select'
 import { TextArea } from '../../../../components/TextArea'
 import { TextInput } from '../../../../components/TextInput'
@@ -7,7 +8,7 @@ import { StateField } from '../../../../types'
 interface StateFieldEditProps {
   field: StateField
   value: string
-  onChange: (value: string) => void
+  onChange: (value: any) => void
   currentState: Record<string, any>
   stateChanges: Record<string, any>
 }
@@ -40,6 +41,12 @@ export function StateFieldEdit({
     />
   ) : field.type === 'font' ? (
     <FontSelect
+      value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
+      onChange={onChange}
+    />
+  ) : field.type === 'integer' || field.type === 'float' ? (
+    <NumberTextInput
+      placeholder={field.placeholder}
       value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
       onChange={onChange}
     />

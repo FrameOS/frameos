@@ -147,6 +147,7 @@ export const frameLogic = kea<frameLogicType>([
       replaceScenes: replaceScenes ?? false,
     }),
     closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
+    sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
   }),
   forms(({ actions, values }) => ({
     frameForm: {
@@ -299,6 +300,13 @@ export const frameLogic = kea<frameLogicType>([
           })
         }
       }
+    },
+    sendEvent: async ({ event, payload }) => {
+      await apiFetch(`/api/frames/${props.frameId}/event/${event}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
     },
   })),
   afterMount(({ actions, values }) => {

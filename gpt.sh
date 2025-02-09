@@ -30,8 +30,8 @@ patterns=(
     "frameos/src/frameos.nim"
     "frameos/src/frameos/*.nim"
     "frameos/src/frameos/utils/*.nim"
+    "frameos/src/frameos/scenes/*.nim"
     "frameos/src/frameos/tests/*.nim"
-
 )
 
 for pattern in "${patterns[@]}"; do

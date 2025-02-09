@@ -7,7 +7,7 @@ import { Select } from '../../../../components/Select'
 import { useActions, useValues } from 'kea'
 import { scheduleLogic } from './scheduleLogic'
 import { PencilSquareIcon } from '@heroicons/react/24/outline'
-import { PlusIcon } from '@heroicons/react/24/solid'
+import { PlayIcon, PlusIcon } from '@heroicons/react/24/solid'
 import { StateFieldEdit } from '../Scenes/StateFieldEdit'
 import { ScheduledEvent, StateField } from '../../../../types'
 
@@ -41,6 +41,7 @@ interface ViewRowProps {
   expandedDescription: boolean
   toggleDescription: (id: string) => void
   editEvent: (id: string) => void
+  sendEvent: (event: string, payload: any) => void
 }
 
 function ViewRow({
@@ -50,6 +51,7 @@ function ViewRow({
   expandedDescription,
   editEvent,
   toggleDescription,
+  sendEvent,
 }: ViewRowProps) {
   const publicFields = eventFields.filter((field) => field.access === 'public')
   const modifiedFields = publicFields.filter(
@@ -60,36 +62,48 @@ function ViewRow({
   return (
     <>
       <div className="flex justify-between items-start">
-        <div className="space-y-2 w-full">
-          <div>
-            {weekDays[String(event.weekday || 0)]} at {event.hour < 10 ? '0' : ''}
-            {event.hour}:{event.minute < 10 ? '0' : ''}
-            {event.minute}
-          </div>
-          <div
-            className={showToggle ? 'font-bold cursor-pointer space-x-1' : 'font-bold space-x-2'}
-            onClick={() => toggleDescription(event.id)}
-          >
-            <span>
-              {scenesAsOptions.find((scene) => scene.value === event.payload.sceneId)?.label || 'Unspecified Scene'}
-            </span>
-            {showToggle ? (
-              <span className="text-xs font-normal text-gray-500">[{expandedDescription ? 'hide' : 'expand'}]</span>
-            ) : null}
-          </div>
+        <div className="w-full py-1">
+          {weekDays[String(event.weekday || 0)]} at {event.hour < 10 ? '0' : ''}
+          {event.hour}:{event.minute < 10 ? '0' : ''}
+          {event.minute}
         </div>
-        <Button
-          size="small"
-          className="!px-1"
-          color="secondary"
-          onClick={(e) => {
-            e.stopPropagation()
-            editEvent(event.id)
-          }}
-          title="Edit"
-        >
-          <PencilSquareIcon className="w-5 h-5" />
-        </Button>
+        <div className="flex gap-1">
+          <Button
+            size="small"
+            className="!px-1"
+            color="secondary"
+            onClick={(e) => {
+              e.stopPropagation()
+              sendEvent(event.event, event.payload)
+            }}
+            title="Activate"
+          >
+            <PlayIcon className="w-5 h-5" />
+          </Button>
+          <Button
+            size="small"
+            className="!px-1"
+            color="secondary"
+            onClick={(e) => {
+              e.stopPropagation()
+              editEvent(event.id)
+            }}
+            title="Edit"
+          >
+            <PencilSquareIcon className="w-5 h-5" />
+          </Button>
+        </div>
+      </div>
+      <div
+        className={showToggle ? 'font-bold cursor-pointer space-x-1' : 'font-bold space-x-2'}
+        onClick={() => toggleDescription(event.id)}
+      >
+        <span>
+          {scenesAsOptions.find((scene) => scene.value === event.payload.sceneId)?.label || 'Unspecified Scene'}
+        </span>
+        {showToggle ? (
+          <span className="text-xs font-normal text-gray-500">[{expandedDescription ? 'hide' : 'expand'}]</span>
+        ) : null}
       </div>
       {(expandedDescription ? publicFields : modifiedFields).map((field) => (
         <div
@@ -191,6 +205,7 @@ function EditRow({ event, scenesAsOptions, eventFields, closeEvent, deleteEvent 
 
 export function Schedule() {
   const { frameId } = useValues(frameLogic)
+  const { sendEvent } = useActions(frameLogic)
   const { editingEvents, sortedEvents, scenesAsOptions, fieldsForScene, expandedDescriptions, sort } = useValues(
     scheduleLogic({ frameId })
   )
@@ -236,6 +251,7 @@ export function Schedule() {
                 expandedDescription={expandedDescriptions[event.id] ?? false}
                 toggleDescription={toggleDescription}
                 editEvent={editEvent}
+                sendEvent={sendEvent}
               />
             )}
           </div>
