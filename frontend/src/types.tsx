@@ -248,7 +248,7 @@ export interface CacheConfig {
   expressionType?: FieldType
 }
 
-export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event' | 'state'
+export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event' | 'state' | 'scene'
 export type EdgeType = 'appNodeEdge' | 'codeNodeEdge'
 
 export interface AppNodeData {
@@ -284,7 +284,12 @@ export interface DispatchNodeData {
   config: Record<string, any>
 }
 
-export type NodeData = AppNodeData | CodeNodeData | EventNodeData | DispatchNodeData | StateNodeData
+export interface SceneNodeData {
+  keyword: string
+  config: Record<string, any>
+}
+
+export type NodeData = AppNodeData | CodeNodeData | EventNodeData | DispatchNodeData | StateNodeData | SceneNodeData
 
 export type DiagramNode = Node<NodeData, NodeType>
 export type DiagramEdge = Edge<any>
@@ -344,8 +349,8 @@ export interface EdgeConnectionType {
 export interface ConnectionAppNextPrev extends EdgeConnectionType {
   sourceHandle: NextNodeHandle
   targetHandle: PrevNodeHandle
-  sourceNodeType: 'app' | 'source' | 'event'
-  targetNodeType: 'app' | 'source'
+  sourceNodeType: 'app' | 'source' | 'scene' | 'event'
+  targetNodeType: 'app' | 'source' | 'scene'
 }
 
 export interface ConnectionAppNodeOutputPrev extends EdgeConnectionType {

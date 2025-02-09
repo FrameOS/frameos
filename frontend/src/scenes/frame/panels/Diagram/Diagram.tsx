@@ -42,6 +42,7 @@ const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
   source: AppNode,
   dispatch: AppNode,
+  scene: AppNode,
   code: CodeNode,
   event: EventNode,
   state: StateNode,

@@ -198,6 +198,10 @@ export const frameLogic = kea<frameLogicType>([
   selectors(() => ({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
     frame: [(s) => [s.frames, s.frameId], (frames, frameId) => frames[frameId] || null],
+    scenes: [
+      (s) => [s.frame, s.frameForm],
+      (frame, frameForm): FrameScene[] => frameForm?.scenes ?? frame.scenes ?? [],
+    ],
     unsavedChanges: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm) =>

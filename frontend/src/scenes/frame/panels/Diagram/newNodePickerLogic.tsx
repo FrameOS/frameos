@@ -14,6 +14,7 @@ import {
   FieldType,
   fieldTypes,
   toFieldType,
+  FrameScene,
 } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
@@ -93,7 +94,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
   connect(({ frameId, sceneId }: NewNodePickerLogicProps) => ({
     values: [
       frameLogic({ frameId }),
-      ['frame', 'frameForm'],
+      ['frame', 'frameForm', 'scenes'],
       diagramLogic({ frameId, sceneId }),
       ['nodesById', 'nodes', 'edges', 'scene'],
       appsModel,
@@ -226,15 +227,15 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       },
     ],
     allNewNodeOptions: [
-      (s) => [s.newNodePicker, s.apps, s.scene, s.newNodeHandleDataType, s.node],
-      (newNodePicker, apps, scene, newNodeHandleDataType, node): OptionWithType[] => {
+      (s) => [s.newNodePicker, s.apps, s.scene, s.scenes, s.newNodeHandleDataType, s.node],
+      (newNodePicker, apps, scene, scenes, newNodeHandleDataType, node): OptionWithType[] => {
         if (!newNodePicker || !node) {
           return []
         }
         const { handleId, handleType } = newNodePicker
         const options: OptionWithType[] = []
 
-        // Pulling out a field to the left of an app to specify a custom input
+        // Pulling out a field (e.g. "font size") to the left of an app to specify a custom input
         if (handleType === 'target' && (handleId.startsWith('fieldInput/') || handleId.startsWith('codeField/'))) {
           const key = handleId.split('/', 2)[1]
           options.push({ label: 'Code', value: 'code', type: newNodeHandleDataType ?? 'string', keyword: key })
@@ -295,6 +296,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             options.push({ label: 'Error: unable to determine data type', value: 'app', type: 'string', keyword: key })
           }
         } else if (
+          // Next/Prev App/Event node (e.g. "next" after the "render" event)
           (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) ||
           (handleType === 'target' && handleId === 'prev')
         ) {
@@ -307,6 +309,14 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
                 keyword,
               })
             }
+          }
+          for (const { id, name } of scenes) {
+            options.push({
+              label: `scene: ${name}`,
+              value: `scene/${id}`,
+              type: 'scene',
+              keyword: id,
+            })
           }
         } else if (handleType === 'source' && handleId === 'fieldOutput') {
           let keyword = 'output'
@@ -501,6 +511,17 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         newNode.type = 'state'
         newNode.data = {
           keyword: keyword,
+        }
+      } else if (value.startsWith('scene/')) {
+        const sceneId = value.substring(6)
+        newNode.type = 'scene'
+        newNode.data = { keyword: sceneId, config: {} }
+        if (newNodeOutputHandle === 'next') {
+          newNode.position.x -= 270
+          newNode.position.y -= 20
+        } else {
+          newNode.position.x -= 20
+          newNode.position.y -= 20
         }
       } else if (value.startsWith('app/')) {
         const appKeyword = value.substring(4)
