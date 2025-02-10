@@ -778,15 +778,13 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
     if DEBUG:
       self.logger.log(%*{{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
 
-
 proc runEventExternal*(self: Scene, context: var ExecutionContext) =
   case context.event:
   {(newline + "  ").join(self.run_event_lines)}
   else: discard
 
 proc runEvent*(context: var ExecutionContext) =
-  let self = Scene(context.scene)
-  runEventExternal(self, context)
+  runEventExternal(Scene(context.scene), context)
 
 proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
