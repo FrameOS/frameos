@@ -14,7 +14,7 @@ import {
   FieldType,
   fieldTypes,
   toFieldType,
-  FrameScene,
+  SceneNodeData,
 } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
@@ -178,8 +178,8 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       },
     ],
     newNodeHandleDataType: [
-      (s) => [s.newNodePicker, s.apps, s.node],
-      (newNodePicker, apps, node): FieldType | null => {
+      (s) => [s.newNodePicker, s.apps, s.node, s.scenes],
+      (newNodePicker, apps, node, scenes): FieldType | null => {
         if (!newNodePicker || !node) {
           return null
         }
@@ -199,6 +199,11 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           } else if (node.type === 'app' && node.data && 'keyword' in node.data && apps[node.data?.keyword]) {
             const app = apps[node.data.keyword]
             const field = app.fields?.find((f) => 'name' in f && f.name === key)
+            const type = field && 'type' in field ? field.type || null : null
+            return type ? toBaseType(type) : null
+          } else if (node.type === 'scene') {
+            const scene = scenes.find(({ id }) => id === (node.data as SceneNodeData).keyword)
+            const field = scene?.fields?.find((f) => 'name' in f && f.name === key)
             const type = field && 'type' in field ? field.type || null : null
             return type ? toBaseType(type) : null
           }
