@@ -196,7 +196,16 @@ class SceneWriter:
                     if code_node:
                         if not self.field_inputs.get(target):
                             self.field_inputs[target] = {}
-                        self.field_inputs[target][field] = code_node.get("data", {}).get("code", "")
+
+                        if code_node.get("type") == "state":
+                            keyword = code_node.get("data", {}).get("keyword", "")
+                            type = 'string'
+                            for scene_field in self.scene.get('fields', []):
+                                if scene_field.get('name') == keyword:
+                                    type = scene_field.get('type', 'string')
+                            self.field_inputs[target][field] = f"state{{\"{sanitize_nim_string(keyword)}\"}}{field_type_to_getter(type)}"
+                        else:
+                            self.field_inputs[target][field] = code_node.get("data", {}).get("code", "")
                         if not self.code_field_source_nodes.get(target):
                             self.code_field_source_nodes[target] = {}
                         self.code_field_source_nodes[target][field] = source
@@ -367,17 +376,17 @@ class SceneWriter:
 
             app_config_pairs.append(
                 [f"  {x}" for x in self.sanitize_nim_field(
-                    node_id,
-                    key,
-                    type,
-                    value,
-                    field_inputs_for_node,
-                    node_fields_for_node,
-                    source_field_inputs_for_node,
-                    seq_fields_for_node,
-                    code_fields_for_node,
-                    required_fields_for_node,
-                    False,
+                    node_id=node_id,
+                    key=key,
+                    type=type,
+                    value=value,
+                    field_inputs_for_node=field_inputs_for_node,
+                    node_fields_for_node=node_fields_for_node,
+                    source_field_inputs_for_node=source_field_inputs_for_node,
+                    seq_fields_for_node=seq_fields_for_node,
+                    code_fields_for_node=code_fields_for_node,
+                    required_fields=required_fields_for_node,
+                    key_with_quotes=False,
                 )]
             )
 
@@ -526,16 +535,17 @@ class SceneWriter:
 
                                 event_payload_pairs.append(
                                     [f"  {x}" for x in self.sanitize_nim_field(
-                                        node_id,
-                                        key,
-                                        type,
-                                        value,
-                                        field_inputs_for_node,
-                                        node_fields_for_node,
-                                        source_field_inputs_for_node,
-                                        {},
-                                        True,
-                                        required_fields,
+                                        node_id=node_id,
+                                        key=key,
+                                        type=type,
+                                        value=value,
+                                        field_inputs_for_node=field_inputs_for_node,
+                                        node_fields_for_node=node_fields_for_node,
+                                        source_field_inputs_for_node=source_field_inputs_for_node,
+                                        seq_fields_for_node={},
+                                        code_fields_for_node={},
+                                        required_fields=required_fields,
+                                        key_with_quotes=False
                                     )]
                                 )
 
@@ -591,17 +601,17 @@ class SceneWriter:
 
                         self.init_apps += [
                             f"  {x}" for x in self.sanitize_nim_field(
-                                node_id,
-                                key,
-                                type,
-                                value,
-                                field_inputs_for_node,
-                                node_fields_for_node,
-                                source_field_inputs_for_node,
-                                {},
-                                True,
-                                required_fields,
-                                True,
+                                node_id=node_id,
+                                key=key,
+                                type=type,
+                                value=value,
+                                field_inputs_for_node=field_inputs_for_node,
+                                node_fields_for_node=node_fields_for_node,
+                                source_field_inputs_for_node=source_field_inputs_for_node,
+                                seq_fields_for_node={},
+                                code_fields_for_node={},
+                                required_fields=required_fields,
+                                key_with_quotes=True,
                             )
                         ]
                         self.init_apps[-1] = self.init_apps[-1] + ","

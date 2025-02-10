@@ -653,14 +653,16 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           }
         }
 
-        actions.createField({
-          name: keyword,
-          label,
-          type: type ?? 'string',
-          value,
-          persist: 'disk',
-          access: 'public',
-        })
+        if (values.scene?.fields?.find((f) => f.name !== keyword)) {
+          actions.createField({
+            name: keyword,
+            label,
+            type: type ?? 'string',
+            value,
+            persist: 'disk',
+            access: 'public',
+          })
+        }
       }
     },
   })),
