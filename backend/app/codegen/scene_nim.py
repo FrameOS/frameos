@@ -547,6 +547,74 @@ class SceneWriter:
                             "})",
                             f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
                         ]
+            elif node.get("type") == "scene":
+                scene_id = node.get("data", {}).get("keyword", None)
+                scene = next((scene for scene in self.frame.scenes if scene.get("id") == scene_id), None) if scene_id else None
+
+                if not scene:
+                    message = f'- ERROR: When generating scene {self.scene_id}. Scene "{scene_id}" for node "{node_id}" not found'
+                    try:
+                        from app.models.log import new_log as log
+                        log(self.frame.id, "stderr", message)
+                        return
+                    except Exception:
+                        raise ValueError(message)
+
+                # only if a target node (plus legacy support for using 'event' as a target node)
+                if node_id not in self.prev_nodes:
+                    continue
+                scene_app_id = "scene_" +  re.sub(r'\W+', '', scene_id)
+                app_import = f"import scenes/{scene_app_id} as {scene_app_id}"
+                node_integer = self.node_id_to_integer(node_id)
+                app_id = f"node{node_integer}"
+                self.scene_object_fields += [f"{app_id}: {scene_app_id}.Scene"]
+                if app_import not in self.imports:
+                    self.imports += [app_import]
+                config = node.get("data", {}).get("config", {}).copy()
+                field_inputs_for_node = self.field_inputs.get(node_id, {})
+                source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
+                node_fields_for_node = self.node_fields.get(node_id, {})
+                required_fields = {}
+
+                self.init_apps += [
+                    f"scene.{app_id} = {scene_app_id}.Scene({scene_app_id}.init(\"{sanitize_nim_string(scene_id)}\".SceneId, frameConfig, logger, %*({{",
+                ]
+                if len(scene.get("fields", [])) > 0:
+                    for field in scene.get("fields", []):
+                        key = field.get("name", None)
+                        if key not in config:
+                            config[key] = field.get("value", None)
+                        type = field.get("type", "string")
+                        value = config.get(key, None)
+                        if field.get("required", False):
+                            required_fields[key] = True
+
+                        self.init_apps += [
+                            f"  {x}" for x in self.sanitize_nim_field(
+                                node_id,
+                                key,
+                                type,
+                                value,
+                                field_inputs_for_node,
+                                node_fields_for_node,
+                                source_field_inputs_for_node,
+                                {},
+                                True,
+                                required_fields,
+                                True,
+                            )
+                        ]
+                        self.init_apps[-1] = self.init_apps[-1] + ","
+                    self.init_apps += ['})))']
+                else:
+                    self.init_apps[-1] = self.init_apps[-1] + '})))'
+
+                next_node_id = self.next_nodes.get(node_id, None)
+                self.run_node_lines += [
+                    f"of {node_integer}.NodeId: # {event}",
+                    f"  {scene_app_id}.runEventExternal(self.{app_id}, context)",
+                    f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
+                ]
 
             elif node.get("type") == "app":
                 self.process_app_import(node)
@@ -710,11 +778,15 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
     if DEBUG:
       self.logger.log(%*{{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
 
-proc runEvent*(context: var ExecutionContext) =
-  let self = Scene(context.scene)
+
+proc runEventExternal*(self: Scene, context: var ExecutionContext) =
   case context.event:
   {(newline + "  ").join(self.run_event_lines)}
   else: discard
+
+proc runEvent*(context: var ExecutionContext) =
+  let self = Scene(context.scene)
+  runEventExternal(self, context)
 
 proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
