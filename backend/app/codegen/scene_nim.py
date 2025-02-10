@@ -622,7 +622,7 @@ class SceneWriter:
                 next_node_id = self.next_nodes.get(node_id, None)
                 self.run_node_lines += [
                     f"of {node_integer}.NodeId: # {event}",
-                    f"  {scene_app_id}.runEventExternal(self.{app_id}, context)",
+                    f"  {scene_app_id}.runEvent(self.{app_id}, context)",
                     f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
                 ]
 
@@ -732,7 +732,7 @@ class SceneWriter:
         open_event_in_init = ""
         if len(self.event_nodes.get("open", [])) > 0:
             open_event_in_init = """var openContext = ExecutionContext(scene: scene, event: "open", payload: %*{"sceneId": sceneId}, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
-      runEvent(openContext)
+      runEvent(scene, openContext)
     """
 
         refresh_interval = float(
@@ -788,18 +788,15 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
     if DEBUG:
       self.logger.log(%*{{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
 
-proc runEventExternal*(self: Scene, context: var ExecutionContext) =
+proc runEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:
   {(newline + "  ").join(self.run_event_lines)}
   else: discard
 
-proc runEvent*(context: var ExecutionContext) =
-  runEventExternal(Scene(context.scene), context)
-
 proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
   context.image.fill(self.backgroundColor)
-  runEvent(context)
+  runEvent(self, context)
   {(newline + "  ").join(self.after_render_lines)}
   return context.image
 
@@ -814,7 +811,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
   {(newline + "  ").join(self.init_apps)}
-  runEvent(context)
+  runEvent(self, context)
   {open_event_in_init}
 {{.pop.}}
 

@@ -285,7 +285,7 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
     loopKey: ".",
     nextSleep: -1
   )
-  exportedScene.runEvent(context)
+  exportedScene.runEvent(scene, context)
   if event == "setSceneState" or event == "setCurrentScene":
     scene.updateLastPublicState()
     scene.updateLastPersistedState()
