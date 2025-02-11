@@ -29,7 +29,7 @@ const ACCESS_OPTIONS = [
 
 export function SceneState(): JSX.Element {
   const { frameId } = useValues(frameLogic)
-  const { selectedStateSceneId: sceneId } = useValues(panelsLogic({ frameId }))
+  const { selectedSceneId: sceneId } = useValues(panelsLogic({ frameId }))
   const { sceneIndex, scene, editingFields, fieldsWithErrors } = useValues(sceneStateLogic({ frameId, sceneId }))
   const { setFields, addField, editField, closeField, removeField } = useActions(sceneStateLogic({ frameId, sceneId }))
 

@@ -1,6 +1,6 @@
 import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import type { scenesLogicType } from './scenesLogicType'
-import { FrameScene, Panel } from '../../../../types'
+import { FrameScene, Panel, SceneNodeData } from '../../../../types'
 import { frameLogic, sanitizeScene } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { forms } from 'kea-forms'
@@ -118,6 +118,36 @@ export const scenesLogic = kea<scenesLogicType>([
     frameId: [() => [(_, props: ScenesLogicProps) => props.frameId], (frameId) => frameId],
     editingFrame: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm || frame || null],
     scenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame.scenes ?? []],
+    sceneTitles: [(s) => [s.scenes], (scenes) => Object.fromEntries(scenes.map((scene) => [scene.id, scene.name]))],
+    linksToOtherScenes: [
+      (s) => [s.scenes],
+      (scenes): Record<string, Set<string>> => {
+        return Object.fromEntries(
+          scenes.map((scene) => [
+            scene.id,
+            new Set<string>(
+              scene.nodes
+                .filter((node) => node.type === 'scene')
+                .map((node) => (node.data as SceneNodeData)?.keyword)
+                .filter(Boolean)
+            ),
+          ])
+        )
+      },
+    ],
+    otherScenesLinkingToScene: [
+      (s) => [s.linksToOtherScenes],
+      (links): Record<string, Set<string>> => {
+        const result: Record<string, Set<string>> = {}
+        Object.entries(links).forEach(([sceneId, linkedScenes]) => {
+          linkedScenes.forEach((linkedScene) => {
+            result[linkedScene] ||= new Set()
+            result[linkedScene].add(sceneId)
+          })
+        })
+        return result
+      },
+    ],
   }),
   listeners(({ actions, props, values }) => ({
     setAsDefault: ({ sceneId }) => {

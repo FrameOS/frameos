@@ -18,7 +18,6 @@ import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { Tooltip } from '../../../../components/Tooltip'
-import { fontsModel } from '../../../../models/fontsModel'
 import { FontSelect } from '../../../../components/FontSelect'
 
 export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
@@ -30,6 +29,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     node,
     nodeEdges,
     isDispatch,
+    isScene,
     name,
     fields,
     isCustomApp,
@@ -45,31 +45,34 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
   } = useValues(appNodeLogic(appNodeLogicProps))
   const data: AppNodeData = (node?.data as AppNodeData) ?? ({ keyword: '', config: {} } satisfies AppNodeData)
   const { select } = useActions(appNodeLogic(appNodeLogicProps))
-  const { fontsOptions } = useValues(fontsModel)
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
 
   const backgroundClassName = clsx(
     'shadow-lg border-2',
     isSelected
-      ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
+      ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
       : isDispatch
       ? 'bg-black bg-opacity-70 border-orange-900 shadow-orange-700/50 '
       : isCustomApp
       ? 'bg-black bg-opacity-70 border-teal-900 shadow-teal-700/50 '
       : isDataApp
       ? 'bg-black bg-opacity-70 border-green-700 shadow-green-500/50 '
+      : isScene
+      ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50 '
       : 'bg-black bg-opacity-70 border-sky-900 shadow-sky-700/50 '
   )
 
   const titleBackground = isSelected
-    ? 'bg-indigo-900'
+    ? 'bg-fuchsia-900'
     : isDispatch
     ? 'bg-orange-900'
     : isCustomApp
     ? 'bg-teal-900'
     : isDataApp
     ? 'bg-green-700'
+    : isScene
+    ? 'bg-indigo-900'
     : 'bg-sky-900'
 
   const titleClassName = clsx(
@@ -124,7 +127,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
             buttonColor="none"
             horizontal
             items={[
-              ...(isDispatch
+              ...(isDispatch || isScene
                 ? []
                 : [
                     {

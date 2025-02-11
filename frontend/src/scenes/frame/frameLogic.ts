@@ -142,6 +142,7 @@ export const frameLogic = kea<frameLogicType>([
     restartFrame: true,
     stopFrame: true,
     deployFrame: true,
+    fullDeployFrame: true,
     applyTemplate: (template: Partial<TemplateType>, replaceScenes?: boolean) => ({
       template,
       replaceScenes: replaceScenes ?? false,
@@ -198,6 +199,10 @@ export const frameLogic = kea<frameLogicType>([
   selectors(() => ({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
     frame: [(s) => [s.frames, s.frameId], (frames, frameId) => frames[frameId] || null],
+    scenes: [
+      (s) => [s.frame, s.frameForm],
+      (frame, frameForm): FrameScene[] => frameForm?.scenes ?? frame.scenes ?? [],
+    ],
     unsavedChanges: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm) =>
@@ -247,6 +252,7 @@ export const frameLogic = kea<frameLogicType>([
     restartFrame: () => framesModel.actions.restartFrame(props.frameId),
     stopFrame: () => framesModel.actions.stopFrame(props.frameId),
     deployFrame: () => framesModel.actions.deployFrame(props.frameId, !values.requiresRecompilation),
+    fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
     updateScene: ({ sceneId, scene }) => {
       const { frameForm } = values
       const hasScene = frameForm.scenes?.some(({ id }) => id === sceneId)

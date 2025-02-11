@@ -16,11 +16,14 @@ import {
   StateNodeData,
   FieldType,
   toFieldType,
+  FrameScene,
+  SceneNodeData,
 } from '../../../../types'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 
 import _events from '../../../../../schema/events.json'
 import equal from 'fast-deep-equal'
+import { frameLogic } from '../../frameLogic'
 const events: FrameEvent[] = _events as any
 
 export interface AppNodeLogicProps extends DiagramLogicProps {
@@ -33,7 +36,14 @@ export const appNodeLogic = kea<appNodeLogicType>([
   props({} as AppNodeLogicProps),
   key((props) => `${props.frameId}/${props.sceneId}/${props.nodeId}`),
   connect(({ sceneId, frameId }: DiagramLogicProps) => ({
-    values: [appsModel, ['apps'], diagramLogic({ frameId, sceneId }), ['nodes', 'edges', 'selectedNodeId', 'scene']],
+    values: [
+      appsModel,
+      ['apps'],
+      diagramLogic({ frameId, sceneId }),
+      ['nodes', 'edges', 'selectedNodeId', 'scene as currentScene'],
+      frameLogic({ frameId }),
+      ['scenes'],
+    ],
     actions: [
       diagramLogic({ frameId, sceneId }),
       ['selectNode', 'updateNodeData', 'deleteApp', 'setNodes', 'setEdges'],
@@ -157,8 +167,16 @@ export const appNodeLogic = kea<appNodeLogicType>([
         return null
       },
     ],
+    scene: [
+      (s) => [s.node, s.scenes],
+      (node, scenes: FrameScene[]): FrameScene | null =>
+        node?.type === 'scene'
+          ? scenes.find((scene) => scene.id === (node.data as SceneNodeData).keyword) ?? null
+          : null,
+    ],
     isApp: [(s) => [s.node], (node) => node?.type === 'app'],
     isDispatch: [(s) => [s.node], (node) => node?.type === 'dispatch'],
+    isScene: [(s) => [s.node], (node) => node?.type === 'scene'],
     configJson: [
       (s) => [s.app, s.sourceConfigJson],
       (app, [config]): AppConfig | null => {
@@ -166,17 +184,17 @@ export const appNodeLogic = kea<appNodeLogicType>([
       },
     ],
     allFields: [
-      (s) => [s.app, s.event, s.scene, s.configJson, s.nodeConfig],
-      (app, event, scene, configJson, nodeConfig): (AppConfigField | MarkdownField)[] | null => {
+      (s) => [s.app, s.event, s.scene, s.currentScene, s.configJson, s.nodeConfig],
+      (app, event, scene, currentScene, configJson, nodeConfig): (AppConfigField | MarkdownField)[] | null => {
         let fields: (AppConfigField | MarkdownField)[] = []
         if (event) {
           if (event.name === 'setSceneState') {
-            fields = scene?.fields ?? []
+            fields = currentScene?.fields ?? []
           } else {
             fields = event?.fields ?? []
           }
         } else {
-          fields = app?.fields ?? configJson?.fields ?? []
+          fields = scene?.fields ?? app?.fields ?? configJson?.fields ?? []
         }
 
         let realFields: (AppConfigField | MarkdownField)[] = []
@@ -248,9 +266,15 @@ export const appNodeLogic = kea<appNodeLogicType>([
       },
     ],
     name: [
-      (s) => [s.app, s.event, s.configJson],
-      (app, event, configJson): string => {
-        return event ? `Dispatch: ${String(event?.name ?? 'Event')}` : String(app?.name ?? configJson?.name ?? 'App')
+      (s) => [s.app, s.event, s.configJson, s.scene],
+      (app, event, configJson, scene): string => {
+        return event
+          ? `Dispatch: ${String(event?.name ?? 'Event')}`
+          : app
+          ? String(app?.name ?? configJson?.name ?? 'App')
+          : scene
+          ? String(scene?.name ?? 'Scene')
+          : 'Node'
       },
     ],
     isCustomApp: [
@@ -382,17 +406,19 @@ export const appNodeLogic = kea<appNodeLogicType>([
       { resultEqualityCheck: equal },
     ],
     stateFieldType: [
-      (s) => [s.isStateNode, s.scene, s.node],
-      (isStateNode, scene, node): FieldType =>
+      (s) => [s.isStateNode, s.currentScene, s.node],
+      (isStateNode, currentScene, node): FieldType =>
         isStateNode && node && 'keyword' in node.data
-          ? toFieldType(scene?.fields?.find((f) => f.name === (node.data as StateNodeData).keyword)?.type ?? 'string')
+          ? toFieldType(
+              currentScene?.fields?.find((f) => f.name === (node.data as StateNodeData).keyword)?.type ?? 'string'
+            )
           : 'string',
     ],
     stateFieldTitle: [
-      (s) => [s.isStateNode, s.scene, s.node],
-      (isStateNode, scene, node): string | null => {
+      (s) => [s.isStateNode, s.currentScene, s.node],
+      (isStateNode, currentScene, node): string | null => {
         if (isStateNode && node && 'keyword' in node.data) {
-          const label = scene?.fields?.find((f) => f.name === (node.data as StateNodeData).keyword)?.label
+          const label = currentScene?.fields?.find((f) => f.name === (node.data as StateNodeData).keyword)?.label
           return label ?? node.data.keyword
         }
         return null

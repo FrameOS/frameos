@@ -16,7 +16,9 @@ export function Frame(props: FrameSceneProps) {
   const frameId = parseInt(props.id)
   const frameLogicProps = { frameId }
   const { frame, unsavedChanges, undeployedChanges, requiresRecompilation } = useValues(frameLogic(frameLogicProps))
-  const { saveFrame, renderFrame, restartFrame, stopFrame, deployFrame } = useActions(frameLogic(frameLogicProps))
+  const { saveFrame, renderFrame, restartFrame, stopFrame, deployFrame, fullDeployFrame } = useActions(
+    frameLogic(frameLogicProps)
+  )
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
 
   return (
@@ -39,7 +41,7 @@ export function Frame(props: FrameSceneProps) {
                           {
                             label: 'Full deploy',
                             onClick: () => {
-                              deployFrame()
+                              fullDeployFrame()
                               openLogs()
                             },
                           },

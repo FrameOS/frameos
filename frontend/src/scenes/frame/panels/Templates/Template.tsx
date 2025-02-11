@@ -59,7 +59,7 @@ export function Template({
               title="Install scene"
             >
               <FolderPlusIcon className="w-5 h-5" />
-              Install
+              Install{(template.scenes || []).length > 1 ? ` (${(template.scenes || []).length})` : ''}
             </Button>
           ) : null}
           <DropdownMenu
