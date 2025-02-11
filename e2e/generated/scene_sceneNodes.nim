@@ -8,23 +8,21 @@ import frameos/channels
 import frameos/utils/image
 import frameos/utils/url
 import apps/render/split/app as render_splitApp
-import scenes/scene_renderImage as scene_renderImage
-import scenes/scene_renderTextOverflow as scene_renderTextOverflow
+import scenes/scene_renderTextSplit as scene_renderTextSplit
 import scenes/scene_renderTextRich as scene_renderTextRich
-import scenes/scene_renderColorFlow as scene_renderColorFlow
+import scenes/scene_renderGradientSplit as scene_renderGradientSplit
+import scenes/scene_logicIfElse as scene_logicIfElse
 
 const DEBUG = false
-let PUBLIC_STATE_FIELDS*: seq[StateField] = @[
-  StateField(name: "text", label: "text", fieldType: "text", options: @[], placeholder: "", required: false, secret: false)
-]
-let PERSISTED_STATE_KEYS*: seq[string] = @["text"]
+let PUBLIC_STATE_FIELDS*: seq[StateField] = @[]
+let PERSISTED_STATE_KEYS*: seq[string] = @[]
 
 type Scene* = ref object of FrameScene
   node1: render_splitApp.App
-  node2: scene_renderImage.Scene
-  node3: scene_renderTextOverflow.Scene
-  node4: scene_renderTextRich.Scene
-  node5: scene_renderColorFlow.Scene
+  node2: scene_renderTextSplit.Scene
+  node3: scene_renderTextRich.Scene
+  node4: scene_renderGradientSplit.Scene
+  node5: scene_logicIfElse.Scene
 
 {.push hint[XDeclaredButNotUsed]: off.}
 
@@ -44,17 +42,16 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
       self.node1.run(context)
       nextNode = -1.NodeId
     of 2.NodeId: # render
-      scene_renderImage.runEvent(self.node2, context)
+      scene_renderTextSplit.runEvent(self.node2, context)
       nextNode = -1.NodeId
     of 3.NodeId: # render
-      scene.node3.state["text"] = %*(state{"text"}.getStr())
-      scene_renderTextOverflow.runEvent(self.node3, context)
+      scene_renderTextRich.runEvent(self.node3, context)
       nextNode = -1.NodeId
     of 4.NodeId: # render
-      scene_renderTextRich.runEvent(self.node4, context)
+      scene_renderGradientSplit.runEvent(self.node4, context)
       nextNode = -1.NodeId
     of 5.NodeId: # render
-      scene_renderColorFlow.runEvent(self.node5, context)
+      scene_logicIfElse.runEvent(self.node5, context)
       nextNode = -1.NodeId
     else:
       nextNode = -1.NodeId
@@ -96,7 +93,7 @@ proc render*(self: FrameScene, context: var ExecutionContext): Image =
   return context.image
 
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
-  var state = %*{"text": %*("")}
+  var state = %*{}
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
@@ -124,12 +121,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node2 = scene_renderImage.Scene(scene_renderImage.init("renderImage".SceneId, frameConfig, logger, %*({})))
-  scene.node3 = scene_renderTextOverflow.Scene(scene_renderTextOverflow.init("renderTextOverflow".SceneId, frameConfig, logger, %*({
-    "text": state{"text"}.getStr(),
-  })))
-  scene.node4 = scene_renderTextRich.Scene(scene_renderTextRich.init("renderTextRich".SceneId, frameConfig, logger, %*({})))
-  scene.node5 = scene_renderColorFlow.Scene(scene_renderColorFlow.init("renderColorFlow".SceneId, frameConfig, logger, %*({})))
+  scene.node2 = scene_renderTextSplit.Scene(scene_renderTextSplit.init("renderTextSplit".SceneId, frameConfig, logger, %*({})))
+  scene.node3 = scene_renderTextRich.Scene(scene_renderTextRich.init("renderTextRich".SceneId, frameConfig, logger, %*({})))
+  scene.node4 = scene_renderGradientSplit.Scene(scene_renderGradientSplit.init("renderGradientSplit".SceneId, frameConfig, logger, %*({})))
+  scene.node5 = scene_logicIfElse.Scene(scene_logicIfElse.init("logicIfElse".SceneId, frameConfig, logger, %*({})))
   runEvent(self, context)
   
 {.pop.}
