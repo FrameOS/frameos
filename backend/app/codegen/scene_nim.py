@@ -622,6 +622,43 @@ class SceneWriter:
                 next_node_id = self.next_nodes.get(node_id, None)
                 self.run_node_lines += [
                     f"of {node_integer}.NodeId: # {event}",
+                ]
+
+                if len(scene.get("fields", [])) > 0:
+                    for field in scene.get("fields", []):
+                        key = field.get("name", None)
+                        # only reset dynamically set state fields
+                        if key in field_inputs_for_node:
+                            if key not in config:
+                                config[key] = field.get("value", None)
+                            type = field.get("type", "string")
+                            value = config.get(key, None)
+                            if field.get("required", False):
+                                required_fields[key] = True
+
+                            field_lines = self.sanitize_nim_field(
+                                node_id=node_id,
+                                key=key,
+                                type=type,
+                                value=value,
+                                field_inputs_for_node=field_inputs_for_node,
+                                node_fields_for_node=node_fields_for_node,
+                                source_field_inputs_for_node=source_field_inputs_for_node,
+                                seq_fields_for_node={},
+                                code_fields_for_node={},
+                                required_fields=required_fields,
+                                no_key=True,
+                            )
+                            self.run_node_lines += [
+                                # TODO: this is very inefficient reserialization state["."] = %*(...getStr())
+                                f"  scene.{app_id}.state[\"{sanitize_nim_string(key)}\"] = %*({field_lines[0]})"
+                            ]
+                            for line in field_lines[1:]:
+                                self.run_node_lines += [
+                                    f"  {line}"
+                                ]
+
+                self.run_node_lines += [
                     f"  {scene_app_id}.runEvent(self.{app_id}, context)",
                     f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
                 ]
@@ -792,6 +829,9 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:
   {(newline + "  ").join(self.run_event_lines)}
   else: discard
+
+proc runEvent*(self: FrameScene, context: var ExecutionContext) =
+    runEvent(Scene(self), context)
 
 proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
@@ -971,12 +1011,13 @@ var exportedScene* = ExportedScene(
         seq_fields_for_node,
         code_fields_for_node,
         required_fields,
-        key_with_quotes: bool,
+        key_with_quotes: bool = False,
+        no_key: bool = False,
     ) -> list[str]:
-        key_str = (
-            f'"{sanitize_nim_string(str(key))}"'
+        key_str = "" if no_key else (
+            f'"{sanitize_nim_string(str(key))}": '
             if key_with_quotes
-            else sanitize_nim_string(str(key))
+            else f"{sanitize_nim_string(str(key))}: "
         )
         value_list = self.sanitize_nim_value(
             node_id,
@@ -995,11 +1036,11 @@ var exportedScene* = ExportedScene(
             return []
         if len(value_list) > 1:
             return [
-                f"{key_str}: {value_list[0]}",
+                f"{key_str}{value_list[0]}",
                 *[f"{x}" for x in value_list[1:]],
             ]
         return [
-            f"{key_str}: {value_list[0]}"
+            f"{key_str}{value_list[0]}"
         ]
 
     def get_code_field_value(self, node_id, depth = 0) -> list[str]:
