@@ -66,8 +66,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
     if DEBUG:
       self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
-proc runEvent*(context: var ExecutionContext) =
-  let self = Scene(context.scene)
+proc runEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:
   of "render":
     try: self.runNode(3.NodeId, context)
@@ -84,10 +83,13 @@ proc runEvent*(context: var ExecutionContext) =
       sendEvent("render", %*{})
   else: discard
 
+proc runEvent*(self: FrameScene, context: var ExecutionContext) =
+  runEvent(Scene(self), context)
+
 proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
   context.image.fill(self.backgroundColor)
-  runEvent(context)
+  runEvent(self, context)
 
   return context.image
 
@@ -148,7 +150,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     frameConfig: scene.frameConfig, appConfig: render_opacityApp.AppConfig(
     opacity: 0.5,
   ))
-  runEvent(context)
+  runEvent(self, context)
 
 {.pop.}
 
