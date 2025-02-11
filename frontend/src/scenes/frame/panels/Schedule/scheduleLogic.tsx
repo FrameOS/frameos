@@ -74,10 +74,12 @@ export const scheduleLogic = kea<scheduleLogicType>([
       (s) => [s.scenes],
       (scenes): { label: string; value: string }[] =>
         [{ label: '- Select Scene -', value: '' }].concat(
-          (scenes ?? []).map((scene) => ({
-            label: scene.name || 'Unnamed Scene',
-            value: scene.id || '',
-          }))
+          (scenes ?? [])
+            .map((scene) => ({
+              label: scene.name || 'Unnamed Scene',
+              value: scene.id || '',
+            }))
+            .toSorted((a, b) => a.label.localeCompare(b.label))
         ),
     ],
     fieldsForScene: [
