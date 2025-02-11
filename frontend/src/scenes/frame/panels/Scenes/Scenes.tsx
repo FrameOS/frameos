@@ -28,13 +28,21 @@ import { ChevronDownIcon, ChevronRightIcon, PlayIcon } from '@heroicons/react/24
 import { Spinner } from '../../../../components/Spinner'
 import { ExpandedScene } from './ExpandedScene'
 import { controlLogic } from './controlLogic'
+import { Tooltip } from '../../../../components/Tooltip'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
   const { editScene, openTemplates } = useActions(panelsLogic)
-  const { scenes, showNewSceneForm, isNewSceneSubmitting, showingSettings, expandedScenes } = useValues(
-    scenesLogic({ frameId })
-  )
+  const {
+    scenes,
+    showNewSceneForm,
+    isNewSceneSubmitting,
+    showingSettings,
+    expandedScenes,
+    otherScenesLinkingToScene,
+    linksToOtherScenes,
+    sceneTitles,
+  } = useValues(scenesLogic({ frameId }))
   const { toggleSettings, submitNewScene, toggleNewScene, createNewScene, closeNewScene, expandScene } = useActions(
     scenesLogic({ frameId })
   )
@@ -177,7 +185,58 @@ export function Scenes() {
                 </div>
               </div>
               <div className="flex items-center gap-2 w-full pl-7 justify-between">
-                <div className="text-xs text-gray-400">{scene.id}</div>
+                <div className="text-xs text-gray-400 flex gap-1 items-center">
+                  <div>{scene.id}</div>
+
+                  {linksToOtherScenes[scene.id]?.size ? (
+                    <Tooltip
+                      title={
+                        <div>
+                          <div className="mb-2">This scene uses the following scenes:</div>
+                          <ol>
+                            {Array.from(linksToOtherScenes[scene.id]).map((sceneId) => (
+                              <li
+                                key={sceneId}
+                                onClick={() => editScene(sceneId)}
+                                className="cursor-pointer hover:underline"
+                              >
+                                {sceneTitles[sceneId] || sceneId}
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      }
+                    >
+                      <Tag color="orange">+{linksToOtherScenes[scene.id].size} scenes</Tag>
+                    </Tooltip>
+                  ) : null}
+
+                  {otherScenesLinkingToScene[scene.id]?.size ? (
+                    <Tooltip
+                      title={
+                        <div>
+                          <div className="mb-2">This scene is used by the following scenes:</div>
+                          <ol>
+                            {Array.from(otherScenesLinkingToScene[scene.id]).map((sceneId) => (
+                              <li
+                                key={sceneId}
+                                onClick={() => editScene(sceneId)}
+                                className="cursor-pointer hover:underline"
+                              >
+                                {sceneTitles[sceneId] || sceneId}
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      }
+                    >
+                      <Tag color="blue">
+                        Used by {otherScenesLinkingToScene[scene.id].size} scene
+                        {otherScenesLinkingToScene[scene.id].size !== 1 ? 's' : ''}
+                      </Tag>
+                    </Tooltip>
+                  ) : null}
+                </div>
                 {scene?.settings?.refreshInterval && Number.isFinite(scene.settings.refreshInterval) ? (
                   <div className="text-xs ml-2 uppercase">{showAsFps(scene.settings.refreshInterval)}</div>
                 ) : null}
