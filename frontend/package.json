@@ -18,10 +18,11 @@
     "bundle:analyze": "npx vite-bundle-visualizer"
   },
   "dependencies": {
-    "@headlessui/react": "^1.7.17",
+    "@headlessui/react": "^1.7.19",
     "@heroicons/react": "^2.0.18",
     "@microlink/react-json-view": "^1.23.0",
     "@monaco-editor/react": "^4.5.2",
+    "@popperjs/core": "^2.0.0",
     "@tailwindcss/container-queries": "^0.1.1",
     "@visx/axis": "^3.5.0",
     "@visx/brush": "^3.6.1",

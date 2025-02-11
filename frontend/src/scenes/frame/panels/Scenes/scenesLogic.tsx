@@ -117,7 +117,8 @@ export const scenesLogic = kea<scenesLogicType>([
   selectors({
     frameId: [() => [(_, props: ScenesLogicProps) => props.frameId], (frameId) => frameId],
     editingFrame: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm || frame || null],
-    scenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame.scenes ?? []],
+    rawScenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame.scenes ?? []],
+    scenes: [(s) => [s.rawScenes], (rawScenes) => rawScenes.toSorted((a, b) => a.name.localeCompare(b.name))],
     sceneTitles: [(s) => [s.scenes], (scenes) => Object.fromEntries(scenes.map((scene) => [scene.id, scene.name]))],
     linksToOtherScenes: [
       (s) => [s.scenes],
