@@ -13,6 +13,14 @@ RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-s
     && apt-get update \
     && apt-get install -y nodejs
 
+# Add ARM64 architecture and install cross compiler and cross libraries
+RUN dpkg --add-architecture arm64 \
+    && apt-get update \
+    && apt-get install -y \
+    crossbuild-essential-arm64 \
+    libc6-dev:arm64 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Nim
 RUN apt-get update && \
   apt-get install -y curl xz-utils gcc openssl ca-certificates git # &&
