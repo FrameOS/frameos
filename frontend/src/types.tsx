@@ -53,6 +53,7 @@ export interface FrameType {
 
 export interface FrameSchedule {
   events: ScheduledEvent[]
+  disabled?: boolean
 }
 
 export interface ScheduledEvent {
@@ -62,6 +63,7 @@ export interface ScheduledEvent {
   weekday: number // undefined/null/''/0 for every day, 1-7 mon-sun, 8 for every weekday, 9 for every weekend
   event: 'setCurrentScene'
   payload: { sceneId: string; state: Record<string, any> }
+  disabled?: boolean
 }
 
 export interface TemplateType {

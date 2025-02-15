@@ -18,7 +18,7 @@ proc setConfigDefaults*(config: var FrameConfig) =
 
 proc loadSchedule*(data: JsonNode): FrameSchedule =
   result = FrameSchedule(events: @[])
-  if data == nil or data["events"] == nil or data["events"].kind != JArray:
+  if data == nil or data.kind != JObject or data["events"] == nil or data["events"].kind != JArray:
     return result
   for event in data["events"].items:
     result.events.add(ScheduledEvent(

@@ -10,6 +10,8 @@ import { PencilSquareIcon } from '@heroicons/react/24/outline'
 import { PlayIcon, PlusIcon } from '@heroicons/react/24/solid'
 import { StateFieldEdit } from '../Scenes/StateFieldEdit'
 import { ScheduledEvent, StateField } from '../../../../types'
+import { Switch } from '../../../../components/Switch'
+import clsx from 'clsx'
 
 const weekDayOptions = [
   { value: 0, label: 'Every day' },
@@ -36,6 +38,7 @@ const minuteOptions = [...Array(60).keys()].map((minute) => ({
 
 interface ViewRowProps {
   event: ScheduledEvent
+  disabled: boolean
   scenesAsOptions: { label: string; value: string }[]
   eventFields: StateField[]
   expandedDescription: boolean
@@ -46,6 +49,7 @@ interface ViewRowProps {
 
 function ViewRow({
   event,
+  disabled,
   scenesAsOptions,
   eventFields,
   expandedDescription,
@@ -61,7 +65,7 @@ function ViewRow({
 
   return (
     <>
-      <div className="flex justify-between items-start">
+      <div className={clsx('flex justify-between items-start', (event.disabled || disabled) && 'line-through')}>
         <div className="w-full py-1">
           {weekDays[String(event.weekday || 0)]} at {event.hour < 10 ? '0' : ''}
           {event.hour}:{event.minute < 10 ? '0' : ''}
@@ -176,6 +180,9 @@ function EditRow({ event, scenesAsOptions, eventFields, closeEvent, deleteEvent 
           </Group>
         ) : null}
       </Group>
+      <Field name="disabled">
+        {({ value, onChange }) => <Switch label="Enabled" checked={!value} onChange={(v) => onChange(!v)} />}
+      </Field>
       <div className="flex gap-2">
         <div className="@md:w-1/3 hidden @md:block" />
         <div className="flex gap-2 w-full">
@@ -206,9 +213,8 @@ function EditRow({ event, scenesAsOptions, eventFields, closeEvent, deleteEvent 
 export function Schedule() {
   const { frameId } = useValues(frameLogic)
   const { sendEvent } = useActions(frameLogic)
-  const { editingEvents, sortedEvents, scenesAsOptions, fieldsForScene, expandedDescriptions, sort } = useValues(
-    scheduleLogic({ frameId })
-  )
+  const { editingEvents, sortedEvents, scenesAsOptions, fieldsForScene, expandedDescriptions, sort, disabled } =
+    useValues(scheduleLogic({ frameId }))
   const { editEvent, addEvent, closeEvent, deleteEvent, toggleDescription, setSort } = useActions(
     scheduleLogic({ frameId })
   )
@@ -229,8 +235,21 @@ export function Schedule() {
         </div>
       </div>
       <Form logic={frameLogic} formKey="frameForm" className=" space-y-2">
+        <div>
+          <Field name={['schedule', 'disabled']}>
+            {({ value, onChange }) => (
+              <Switch label="Enable schedule" checked={!value} onChange={(v) => onChange(!v)} />
+            )}
+          </Field>
+        </div>
         {sortedEvents.map((event, index) => (
-          <div className="bg-gray-900 p-2 space-y-2 @container" key={event.id}>
+          <div
+            className={clsx(
+              'bg-gray-900 p-2 space-y-2 @container',
+              !editingEvents[event.id] && (event.disabled || disabled) ? 'opacity-50' : ''
+            )}
+            key={event.id}
+          >
             {editingEvents[event.id] ? (
               <Group name={['schedule', 'events', index]}>
                 <EditRow
@@ -245,6 +264,7 @@ export function Schedule() {
             ) : (
               <ViewRow
                 key={event.id}
+                disabled={disabled}
                 event={event}
                 scenesAsOptions={scenesAsOptions}
                 eventFields={fieldsForScene[event.payload.sceneId] ?? []}

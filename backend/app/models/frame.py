@@ -215,6 +215,19 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "schedule": frame.schedule,
     }
 
+    schedule = frame.schedule
+    if schedule is not None:
+        if schedule.get('disabled', None):
+            schedule = None
+        else:
+            events = []
+            for event in schedule.get('events', []):
+                if event.get('disabled', None):
+                    continue
+                events.append(event)
+            schedule['events'] = events
+    frame_json["schedule"] = schedule
+
     setting_keys = set()
     app_configs = get_app_configs()
     for scene in list(frame.scenes):

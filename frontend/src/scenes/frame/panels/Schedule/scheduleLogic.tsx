@@ -61,6 +61,7 @@ export const scheduleLogic = kea<scheduleLogicType>([
   selectors({
     schedule: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm.schedule ?? frame.schedule],
     events: [(s) => [s.schedule], (schedule) => schedule?.events ?? []],
+    disabled: [(s) => [s.schedule], (schedule) => schedule?.disabled ?? false],
     scenes: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm.scenes ?? frame.scenes],
     sceneNames: [
       (s) => [s.scenes],
