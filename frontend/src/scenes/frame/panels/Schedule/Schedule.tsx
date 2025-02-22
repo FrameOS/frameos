@@ -220,9 +220,13 @@ export function Schedule() {
   )
   return (
     <div className="space-y-2">
-      <div className="flex w-full items-center justify-between">
-        <H6>Schedule</H6>
-        <div>
+      <Form logic={frameLogic} formKey="frameForm" className="space-y-2">
+        <div className="flex w-full items-center justify-between">
+          <Field name={['schedule', 'disabled']}>
+            {({ value, onChange }) => (
+              <Switch label="Enable schedule" checked={!value} onChange={(v) => onChange(!v)} />
+            )}
+          </Field>
           <Select
             options={[
               { label: 'Sory by day', value: 'day' },
@@ -232,15 +236,6 @@ export function Schedule() {
             value={sort}
             onChange={setSort}
           />
-        </div>
-      </div>
-      <Form logic={frameLogic} formKey="frameForm" className=" space-y-2">
-        <div>
-          <Field name={['schedule', 'disabled']}>
-            {({ value, onChange }) => (
-              <Switch label="Enable schedule" checked={!value} onChange={(v) => onChange(!v)} />
-            )}
-          </Field>
         </div>
         {sortedEvents.map((event, index) => (
           <div
