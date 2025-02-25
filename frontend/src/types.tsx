@@ -49,6 +49,12 @@ export interface FrameType {
     backgroundColor?: string
   }
   schedule?: FrameSchedule
+  gpio_buttons?: GPIOButton[]
+}
+
+export interface GPIOButton {
+  pin: number
+  label: string
 }
 
 export interface FrameSchedule {

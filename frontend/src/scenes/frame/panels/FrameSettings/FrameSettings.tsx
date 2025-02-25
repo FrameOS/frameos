@@ -1,5 +1,4 @@
 import { useActions, useValues } from 'kea'
-import clsx from 'clsx'
 import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
@@ -16,7 +15,7 @@ import { Spinner } from '../../../../components/Spinner'
 import { H6 } from '../../../../components/H6'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ArrowDownTrayIcon, ArrowPathIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline'
-import { TrashIcon } from '@heroicons/react/24/solid'
+import { PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 
 export interface FrameSettingsProps {
   className?: string
@@ -437,6 +436,56 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                   ]}
                 />
               </Field>
+            </div>
+            <H6 className="flex items-center gap-2">
+              GPIO buttons
+              {frameForm.device !== 'pimoroni.inky_impression' ? (
+                <Button
+                  size="small"
+                  color="secondary"
+                  onClick={() => setFrameFormValues({ gpio_buttons: [...(frameForm.gpio_buttons || []), {}] })}
+                  className="flex items-center gap-1"
+                >
+                  <PlusIcon className="w-4 h-4" />
+                  Add button
+                </Button>
+              ) : null}
+            </H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              {frameForm.device === 'pimoroni.inky_impression' ? (
+                <div>Inky Impression boards automatically configure pins 5, 6, 16 and 24 as buttons A, B, C and D</div>
+              ) : (
+                frameForm.gpio_buttons?.map((_, index) => (
+                  <Group key={index} name={`gpio_buttons.${index}`}>
+                    <div>
+                      <Field
+                        name="pin"
+                        label="Pin"
+                        labelRight={
+                          <Button
+                            color="secondary"
+                            size="small"
+                            className="flex items-center gap-1"
+                            onClick={() =>
+                              setFrameFormValues({
+                                gpio_buttons: frameForm.gpio_buttons?.filter((_, i) => i !== index),
+                              })
+                            }
+                          >
+                            <TrashIcon className="w-4 h-4" />
+                            Remove
+                          </Button>
+                        }
+                      >
+                        <TextInput name="pin" placeholder="5" />
+                      </Field>
+                      <Field name="label" label="Label">
+                        <TextInput name="label" placeholder="A" />
+                      </Field>
+                    </div>
+                  </Group>
+                ))
+              )}
             </div>
             <H6>Logs</H6>
             <div className="pl-2 @md:pl-8 space-y-2">

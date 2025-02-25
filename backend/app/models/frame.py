@@ -54,6 +54,7 @@ class Frame(Base):
     last_successful_deploy = mapped_column(JSON, nullable=True) # contains frame.to_dict() of last successful deploy
     last_successful_deploy_at = mapped_column(DateTime, nullable=True)
     schedule = mapped_column(JSON, nullable=True)
+    gpio_buttons = mapped_column(JSON, nullable=True)
 
     # not used
     apps = mapped_column(JSON, nullable=True)
@@ -95,6 +96,7 @@ class Frame(Base):
             'reboot': self.reboot,
             'control_code': self.control_code,
             'schedule': self.schedule,
+            'gpio_buttons': self.gpio_buttons,
             'last_successful_deploy': self.last_successful_deploy,
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
@@ -213,7 +215,17 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "assetsPath": frame.assets_path,
         "saveAssets": frame.save_assets,
         "schedule": frame.schedule,
+        "gpioButtons": frame.gpio_buttons,
     }
+
+    frame_json["gpioButtons"] = [
+        {
+            "pin": int(button.get("pin", 0)),
+            "label": str(button.get("label", "Pin " + str(button.get("pin"))))
+        }
+        for button in (frame.gpio_buttons or [])
+        if int(button.get("pin", 0)) > 0
+    ]
 
     schedule = frame.schedule
     if schedule is not None:

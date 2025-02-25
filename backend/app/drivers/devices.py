@@ -1,7 +1,9 @@
+from app.models.frame import Frame
 from app.drivers.drivers import Driver, DRIVERS
 from app.drivers.waveshare import get_variant_keys
 
-def drivers_for_device(device: str) -> dict[str, Driver]:
+def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
+    device = frame.device
     device_drivers: dict[str, Driver] = {}
     if device == "pimoroni.inky_impression" or device == "pimoroni.inky_python":
         device_drivers = {
@@ -41,5 +43,16 @@ def drivers_for_device(device: str) -> dict[str, Driver]:
     # Always enable evdev if not eink
     if device != "pimoroni.inky_impression" and not device.startswith("waveshare."):
         device_drivers['evdev'] = DRIVERS['evdev']
+
+    if frame.device == "pimoroni.inky_impression":
+        frame.gpio_buttons = [
+            {"pin": 5, "label": "A"},
+            {"pin": 6, "label": "B"},
+            {"pin": 16, "label": "C"},
+            {"pin": 24, "label": "D"},
+        ]
+
+    if "gpioButton" not in device_drivers and len(frame.gpio_buttons or []) > 0:
+        device_drivers["gpioButton"] = DRIVERS["gpioButton"]
 
     return device_drivers

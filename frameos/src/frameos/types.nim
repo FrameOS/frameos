@@ -23,6 +23,11 @@ type
     debug*: bool
     timeZone*: string
     schedule*: FrameSchedule
+    gpioButtons*: seq[GPIOButton]
+
+  GPIOButton* = ref object
+    pin*: int
+    label*: string
 
   FrameSchedule* = ref object
     events*: seq[ScheduledEvent]

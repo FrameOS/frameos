@@ -42,6 +42,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'reboot',
   'control_code',
   'schedule',
+  'gpio_buttons',
 ]
 
 const FRAME_KEYS_REQUIRE_RECOMPILE: (keyof FrameType)[] = [
@@ -50,6 +51,7 @@ const FRAME_KEYS_REQUIRE_RECOMPILE: (keyof FrameType)[] = [
   'scenes',
   'control_code',
   'reboot',
+  'gpio_buttons',
 ]
 
 function cleanBackgroundColor(color: string): string {

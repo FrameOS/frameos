@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.codegen.drivers_nim import write_drivers_nim
 from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
-from app.drivers.devices import drivers_for_device
+from app.drivers.devices import drivers_for_frame
 from app.drivers.waveshare import write_waveshare_driver_nim, get_variant_folder
 from app.models import get_apps_from_scenes
 from app.models.assets import sync_assets
@@ -93,7 +93,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 await log(db, redis, id, "stderr", str(e))
             low_memory = total_memory < 512
 
-            drivers = drivers_for_device(frame.device)
+            drivers = drivers_for_frame(frame)
 
             # 1. Create build tar.gz locally
             await log(db, redis, id, "stdout", "- Copying build folders")
@@ -378,7 +378,7 @@ async def make_local_modifications(db: Session, redis: Redis,
         if frame.debug:
             await log(db, redis, int(frame.id), "stdout", f"Generated scenes.nim:\n{source}")
 
-    drivers = drivers_for_device(frame.device)
+    drivers = drivers_for_frame(frame)
     with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
         source = write_drivers_nim(drivers)
         f.write(source)
@@ -417,7 +417,7 @@ async def create_local_build_archive(
     temp_dir: str,
     cpu: str
 ):
-    drivers = drivers_for_device(frame.device)
+    drivers = drivers_for_frame(frame)
     if inkyPython := drivers.get('inkyPython'):
         vendor_folder = inkyPython.vendor_folder or ""
         os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)

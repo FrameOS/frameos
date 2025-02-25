@@ -30,6 +30,16 @@ proc loadSchedule*(data: JsonNode): FrameSchedule =
       payload: event{"payload"}
     ))
 
+proc loadGPIOButtons*(data: JsonNode): seq[GPIOButton] =
+  result = @[]
+  if data == nil or data.kind != JArray:
+    return result
+  for button in data.items:
+    result.add(GPIOButton(
+      pin: button{"pin"}.getInt(),
+      label: button{"label"}.getStr(),
+    ))
+
 proc loadConfig*(filename: string = "frame.json"): FrameConfig =
   let data = parseFile(filename)
   result = FrameConfig(
@@ -53,7 +63,8 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     logToFile: data{"logToFile"}.getStr(),
     debug: data{"debug"}.getBool() or commandLineParams().contains("--debug"),
     timeZone: data{"timeZone"}.getStr("UTC"),
-    schedule: loadSchedule(data{"schedule"})
+    schedule: loadSchedule(data{"schedule"}),
+    gpioButtons: loadGPIOButtons(data{"gpioButtons"}),
   )
   if result.assetsPath.endswith("/"):
     result.assetsPath = result.assetsPath.strip(leading = false, trailing = true, chars = {'/'})
