@@ -26,8 +26,8 @@ export function FrameSettings({ className }: FrameSettingsProps) {
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic)
-  const { clearBuildCache } = useActions(frameSettingsLogic({ frameId }))
-  const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
+  const { clearBuildCache, buildPiImage } = useActions(frameSettingsLogic({ frameId }))
+  const { buildCacheLoading, piImageBuildLoading } = useValues(frameSettingsLogic({ frameId }))
 
   return (
     <div className={className}>
@@ -44,6 +44,15 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                   label: 'Clear build cache',
                   onClick: () => clearBuildCache(),
                   icon: buildCacheLoading ? (
+                    <Spinner color="white" className="w-4 h-4" />
+                  ) : (
+                    <ArrowPathIcon className="w-5 h-5" />
+                  ),
+                },
+                {
+                  label: 'Build pi .img (slow!!)',
+                  onClick: () => buildPiImage(),
+                  icon: piImageBuildLoading ? (
                     <Spinner color="white" className="w-4 h-4" />
                   ) : (
                     <ArrowPathIcon className="w-5 h-5" />

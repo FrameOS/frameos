@@ -1,7 +1,11 @@
 from datetime import datetime, timedelta
+import subprocess
+import tempfile
+from uuid import uuid4
 import asyncssh
 import io
 import json
+import aiofiles
 import os
 import shlex
 from jose import JWTError, jwt
@@ -10,7 +14,7 @@ from tempfile import NamedTemporaryFile
 
 import httpx
 from fastapi import Depends, File, Form, Request, HTTPException, UploadFile
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -432,6 +436,87 @@ async def api_frame_clear_build_cache(id: int, redis: Redis = Depends(get_redis)
         return {"message": "Build cache cleared successfully"}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_with_auth.post("/frames/{id:int}/build_pi_image")
+async def api_frame_build_pi_image(id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)):
+    frame = db.get(Frame, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    ssid = "testtest"
+    wifi_password = "testtest"
+    ssh_public_key = "testtest"
+    download_url = "https://downloads.raspberrypi.org/raspios_lite_arm64/images/raspios_lite_arm64-2024-11-19/2024-11-19-raspios-bookworm-arm64-lite.img.xz"
+
+    async def run(cmd):
+        subprocess.run(cmd, check=True)
+
+    with tempfile.TemporaryDirectory(prefix=f"pi_img_{uuid4()}_") as tmpdir:
+        download_path = os.path.join(tmpdir, "raspios.img.xz")
+        image_path = os.path.join(tmpdir, "raspios.img")
+
+        # Download and decompress image
+        await run(["wget", "-O", download_path, download_url])
+        await run(["unxz", download_path])
+
+        img_files = [f for f in os.listdir(tmpdir) if f.endswith(".img")]
+        if not img_files:
+            raise HTTPException(status_code=500, detail="Image file not found after decompression")
+
+        os.rename(os.path.join(tmpdir, img_files[0]), image_path)
+
+        mount_boot = os.path.join(tmpdir, "boot")
+        mount_root = os.path.join(tmpdir, "root")
+        os.makedirs(mount_boot, exist_ok=True)
+        os.makedirs(mount_root, exist_ok=True)
+
+        # Mount partitions (macOS compatibility: assuming hdiutil)
+        if os.uname().sysname == "Darwin":
+            await run(["hdiutil", "attach", "-nomount", image_path])
+            boot_partition = "/dev/disk2s1"
+            root_partition = "/dev/disk2s2"
+        else:
+            loop_output = subprocess.check_output(["sudo", "kpartx", "-av", image_path]).decode()
+            loop_device = loop_output.split()[2].strip().replace("p1", "")
+            boot_partition = f"/dev/mapper/{loop_device}p1"
+            root_partition = f"/dev/mapper/{loop_device}p2"
+
+        try:
+            await run(["sudo", "mount", boot_partition, mount_boot])
+            await run(["sudo", "mount", root_partition, mount_root])
+
+            # Configure WiFi
+            wpa_conf = (
+                "country=US\n"
+                "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\n"
+                "update_config=1\n\n"
+                f"network={{\n    ssid=\"{ssid}\"\n    psk=\"{wifi_password}\"\n}}\n"
+            )
+
+            async with aiofiles.open(f"{mount_boot}/wpa_supplicant.conf", "w") as f:
+                await f.write(wpa_conf)
+
+            # Enable SSH
+            open(f"{mount_boot}/ssh", "w").close()
+
+            # Add SSH key
+            ssh_dir = f"{mount_root}/home/pi/.ssh"
+            os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
+            async with aiofiles.open(f"{ssh_dir}/authorized_keys", "w") as f:
+                await f.write(ssh_public_key + "\n")
+            await run(["sudo", "chown", "-R", "1000:1000", ssh_dir])
+            await run(["sudo", "chmod", "600", f"{ssh_dir}/authorized_keys"])
+
+        finally:
+            await run(["sudo", "umount", mount_boot])
+            await run(["sudo", "umount", mount_root])
+            if os.uname().sysname == "Darwin":
+                await run(["hdiutil", "detach", boot_partition.replace("s1", "")])
+            else:
+                await run(["sudo", "kpartx", "-dv", image_path])
+
+        return FileResponse(image_path, filename="custom_raspios.img", media_type="application/octet-stream")
 
 @api_with_auth.post("/frames/{id:int}/reset")
 async def api_frame_reset_event(id: int, redis: Redis = Depends(get_redis)):
