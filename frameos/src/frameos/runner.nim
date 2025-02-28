@@ -102,7 +102,7 @@ proc updateLastPersistedState*(self: FrameScene) =
 proc loadPersistedState*(sceneId: SceneId): JsonNode =
   try:
     return parseJson(readFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json"))
-  except IOError:
+  except JsonParsingError, IOError:
     return %*{}
 
 proc loadLastScene*(): Option[SceneId] =
@@ -111,7 +111,7 @@ proc loadLastScene*(): Option[SceneId] =
     if json.hasKey("sceneId"):
       result = some(SceneId(json["sceneId"].getStr()))
       lastPersistedSceneId = result
-  except IOError:
+  except JsonParsingError, IOError:
     return none(SceneId)
 
 proc getFirstSceneId*(): SceneId =
