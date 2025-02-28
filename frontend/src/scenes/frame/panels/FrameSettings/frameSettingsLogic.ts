@@ -24,5 +24,20 @@ export const frameSettingsLogic = kea<frameSettingsLogicType>([
         },
       },
     ],
+    piImageBuild: [
+      false,
+      {
+        buildPiImage: async () => {
+          if (confirm('Are you sure you want to build the Pi image?')) {
+            try {
+              await apiFetch(`/api/frames/${props.frameId}/build_pi_image`, { method: 'POST' })
+            } catch (error) {
+              console.error(error)
+            }
+          }
+          return false
+        },
+      },
+    ],
   })),
 ])
