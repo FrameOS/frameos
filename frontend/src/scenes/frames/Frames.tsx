@@ -3,18 +3,25 @@ import { router } from 'kea-router'
 import { NewFrame } from './NewFrame'
 import { Frame } from './Frame'
 import { framesModel } from '../../models/framesModel'
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { Header } from '../../components/Header'
 import { version } from '../../../../version.json'
 import { Button } from '../../components/Button'
 import { newFrameForm } from './newFrameForm'
 import { Masonry } from '../../components/Masonry'
 import { urls } from '../../urls'
+import { lazy, useEffect } from 'react'
 
 export function Frames() {
   const { framesList } = useValues(framesModel)
   const { formVisible } = useValues(newFrameForm)
   const { showForm } = useActions(newFrameForm)
+
+  useEffect(() => {
+    async function runAsync() {
+      await import('../frame/Frame')
+    }
+    window.setTimeout(runAsync, 1000)
+  }, [])
 
   return (
     <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">

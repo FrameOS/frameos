@@ -72,9 +72,14 @@ async def get_image_link(id: int):
     }
 
 @api_no_auth.get("/frames/{id:int}/image")
-async def api_frame_get_image(id: int, token: str, request: Request, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+async def api_frame_get_image(
+    id: int,
+    token: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
     if config.HASSIO_RUN_MODE != 'ingress':
-        # All modes except ingress require a token in the url
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             if payload.get("sub") != f"frame={id}":
@@ -88,17 +93,18 @@ async def api_frame_get_image(id: int, token: str, request: Request, db: Session
 
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
     url = f'http://{frame.frame_host}:{frame.frame_port}/image'
-    if frame.frame_access not in ["public", "protected"] and frame.frame_access_key is not None:
+    if frame.frame_access not in ["public", "protected"] and frame.frame_access_key:
         url += "?k=" + frame.frame_access_key
 
-    try:
-        if request.query_params.get('t') == '-1':
-            last_image = await redis.get(cache_key)
-            if last_image:
-                return Response(content=last_image, media_type='image/png')
+    if request.query_params.get('t') == '-1':
+        last_image = await redis.get(cache_key)
+        if last_image:
+            return Response(content=last_image, media_type='image/png')
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=15.0)
+    # Use shared semaphore and client
+    try:
+        async with request.app.state.http_semaphore:
+            response = await request.app.state.http_client.get(url, timeout=10.0)
 
         if response.status_code == 200:
             await redis.set(cache_key, response.content, ex=86400 * 30)

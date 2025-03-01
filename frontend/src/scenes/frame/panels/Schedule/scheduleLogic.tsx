@@ -126,8 +126,8 @@ export const scheduleLogic = kea<scheduleLogicType>([
 function newScheduledEvent(): ScheduledEvent {
   return {
     id: uuidv4(),
-    hour: 9,
-    minute: 0,
+    hour: 23,
+    minute: 59,
     weekday: 0,
     event: 'setCurrentScene',
     payload: { sceneId: '', state: {} },

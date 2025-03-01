@@ -229,9 +229,9 @@ export function Schedule() {
           </Field>
           <Select
             options={[
-              { label: 'Sory by day', value: 'day' },
-              { label: 'Sory by hour', value: 'hour' },
-              { label: 'Sory by scene', value: 'scene' },
+              { label: 'Sort by day', value: 'day' },
+              { label: 'Sort by hour', value: 'hour' },
+              { label: 'Sort by scene', value: 'scene' },
             ]}
             value={sort}
             onChange={setSort}

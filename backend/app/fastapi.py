@@ -1,7 +1,8 @@
 import asyncio
 import json
 import os
-import contextlib
+from contextlib import asynccontextmanager
+from httpx import AsyncClient, Limits
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.exceptions import RequestValidationError
@@ -16,12 +17,14 @@ from app.websockets import register_ws_routes, redis_listener
 from app.config import config
 from app.utils.sentry import initialize_sentry
 
-@contextlib.asynccontextmanager
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     initialize_sentry()
+    app.state.http_client = AsyncClient(limits=Limits(max_connections=20, max_keepalive_connections=10))
+    app.state.http_semaphore = asyncio.Semaphore(10)
     task = asyncio.create_task(redis_listener())
     yield
-    # optionally do cleanup here
+    await app.state.http_client.aclose()
     task.cancel()
 
 app = FastAPI(lifespan=lifespan)

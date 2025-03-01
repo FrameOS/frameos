@@ -16,6 +16,7 @@ import { H6 } from '../../../../components/H6'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ArrowDownTrayIcon, ArrowPathIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline'
 import { PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { panelsLogic } from '../panelsLogic'
 
 export interface FrameSettingsProps {
   className?: string
@@ -28,6 +29,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
   const { appsWithSaveAssets } = useValues(appsLogic)
   const { clearBuildCache } = useActions(frameSettingsLogic({ frameId }))
   const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
+  const { openLogs } = useActions(panelsLogic({ frameId }))
 
   return (
     <div className={className}>
@@ -42,7 +44,10 @@ export function FrameSettings({ className }: FrameSettingsProps) {
               items={[
                 {
                   label: 'Clear build cache',
-                  onClick: () => clearBuildCache(),
+                  onClick: () => {
+                    clearBuildCache()
+                    openLogs()
+                  },
                   icon: buildCacheLoading ? (
                     <Spinner color="white" className="w-4 h-4" />
                   ) : (
