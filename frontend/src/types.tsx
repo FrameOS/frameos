@@ -215,6 +215,8 @@ export interface AppConfig {
   version?: string
   /** List of top level settings exported for this app */
   settings?: string[]
+  /** List of packages to install */
+  apt?: string[]
   /** Fields for app in diagram editor */
   fields?: (AppConfigField | MarkdownField)[]
   /** Returned fields */

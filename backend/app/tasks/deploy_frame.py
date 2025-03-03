@@ -8,7 +8,7 @@ import shutil
 import string
 import subprocess
 import tempfile
-from typing import Any
+from typing import Any, Optional
 
 import asyncssh
 from packaging import version
@@ -26,6 +26,7 @@ from app.models.assets import sync_assets
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection, exec_local_command
+from app.models.apps import get_one_app_sources
 
 
 async def deploy_frame(id: int, redis: Redis):
@@ -141,6 +142,34 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                             "fi"
                         )
                         await exec_command(db, redis, frame, ssh, command)
+
+            # Any app dependencies
+            all_deps = set()
+            for scene in frame.scenes:
+                try:
+                    for node in scene.get('nodes', []):
+                        try:
+                            config: Optional[dict[str, str]] = None
+                            if node.get('type') == 'app':
+                                app = node.get('data', {}).get('keyword')
+                                if app:
+                                    json_config = get_one_app_sources(app).get('config.json')
+                                    if json_config:
+                                        config = json.loads(json_config)
+                            if node.get('type') == 'source':
+                                json_config = node.get('sources', {}).get('config.json')
+                                if json_config:
+                                    config = json.loads(json_config)
+                            if config:
+                                if config.get('apt'):
+                                    for dep in config['apt']:
+                                        all_deps.add(dep)
+                        except Exception as e:
+                            await log(db, redis, id, "stderr", f"Error parsing node: {e}")
+                except Exception as e:
+                    await log(db, redis, id, "stderr", f"Error parsing scene: {e}")
+            for dep in all_deps:
+                await install_if_necessary(dep)
 
             # Ensure /srv/frameos
             await exec_command(db, redis, frame, ssh,

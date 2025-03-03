@@ -1,0 +1,30 @@
+{
+    "name": "RSTP Snapshot",
+    "description": "Take a still image from a webcam feed with ffmpeg",
+    "category": "data",
+    "version": "1.0.0",
+    "apt": ["ffmpeg"],
+    "fields": [
+      {
+        "name": "url",
+        "type": "text",
+        "value": "",
+        "required": true,
+        "label": "RTSP URL",
+        "placeholder": "rstp://domain/cam"
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "900"
+    }
+  }
+  
