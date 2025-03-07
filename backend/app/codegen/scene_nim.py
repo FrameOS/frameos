@@ -550,13 +550,21 @@ class SceneWriter:
                                 )
 
                         next_node_id = self.next_nodes.get(node_id, None)
-                        self.run_node_lines += [
-                            f"of {node_integer}.NodeId: # {event}",
-                            f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{'}",
-                            *[f"    {('    ' + newline).join(x)}," for x in event_payload_pairs],
-                            "})",
-                            f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
-                        ]
+
+                        if event_payload_pairs:
+                            self.run_node_lines += [
+                                f"of {node_integer}.NodeId: # {event}",
+                                f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{'}",
+                                *[f"    {('    ' + newline).join(x)}," for x in event_payload_pairs],
+                                "  })",
+                                f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
+                            ]
+                        else:
+                            self.run_node_lines += [
+                                f"of {node_integer}.NodeId: # {event}",
+                                f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{}'})",
+                                f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
+                            ]
             elif node.get("type") == "scene":
                 scene_id = node.get("data", {}).get("keyword", None)
                 scene = next((scene for scene in self.frame.scenes if scene.get("id") == scene_id), None) if scene_id else None
