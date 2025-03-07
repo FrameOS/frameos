@@ -28,17 +28,21 @@ interface AssetNode {
   children: Record<string, AssetNode>
 }
 
+interface AssetUtils {
+  openAsset: (path: string) => void
+  uploadAssets: (path: string) => void
+  mkdir: (path: string) => void
+}
+
 /** A recursive component that renders a folder or a file */
 function TreeNode({
   node,
   frameId,
-  openAsset,
-  uploadAssets,
+  assetUtils,
 }: {
   node: AssetNode
   frameId: number
-  openAsset: (path: string) => void
-  uploadAssets: (path: string) => void
+  assetUtils: AssetUtils
 }): JSX.Element {
   const [expanded, setExpanded] = useState(node.path === '')
   const [isDownloading, setIsDownloading] = useState(false)
@@ -60,7 +64,17 @@ function TreeNode({
               {
                 label: 'Upload files',
                 icon: <DocumentArrowUpIcon className="w-5 h-5" />,
-                onClick: () => uploadAssets(node.path),
+                onClick: () => assetUtils.uploadAssets(node.path),
+              },
+              {
+                label: 'New folder',
+                icon: <DocumentArrowUpIcon className="w-5 h-5" />,
+                onClick: () => {
+                  const newFolder = prompt('Enter the name of the new folder')
+                  if (newFolder) {
+                    assetUtils.mkdir(node.path ? node.path + '/' + newFolder : newFolder)
+                  }
+                },
               },
             ]}
           />
@@ -68,13 +82,7 @@ function TreeNode({
         {expanded && (
           <div className="ml-2 border-l border-gray-600 pl-2">
             {Object.values(node.children).map((child) => (
-              <TreeNode
-                key={child.path}
-                node={child}
-                frameId={frameId}
-                openAsset={openAsset}
-                uploadAssets={uploadAssets}
-              />
+              <TreeNode key={child.path} node={child} frameId={frameId} assetUtils={assetUtils} />
             ))}
           </div>
         )}
@@ -85,7 +93,7 @@ function TreeNode({
     return (
       <div className="ml-1 flex items-center space-x-2">
         <div className="flex-1">
-          <span className="cursor-pointer hover:underline text-white" onClick={() => openAsset(node.path)}>
+          <span className="cursor-pointer hover:underline text-white" onClick={() => assetUtils.openAsset(node.path)}>
             {node.name}
           </span>
         </div>
@@ -132,7 +140,7 @@ export function Assets(): JSX.Element {
   const { frame } = useValues(frameLogic)
   const { openLogs } = useActions(panelsLogic)
   const { assetsLoading, assetTree } = useValues(assetsLogic({ frameId: frame.id }))
-  const { syncAssets, uploadAssets } = useActions(assetsLogic({ frameId: frame.id }))
+  const { syncAssets, uploadAssets, mkdir } = useActions(assetsLogic({ frameId: frame.id }))
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
 
   return (
@@ -157,7 +165,11 @@ export function Assets(): JSX.Element {
         <div>Loading assets...</div>
       ) : (
         <div>
-          <TreeNode node={assetTree} frameId={frame.id} openAsset={openAsset} uploadAssets={uploadAssets} />
+          <TreeNode
+            node={assetTree}
+            frameId={frame.id}
+            assetUtils={{ openAsset: openAsset, uploadAssets: uploadAssets, mkdir: mkdir }}
+          />
         </div>
       )}
     </div>
