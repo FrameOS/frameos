@@ -69,6 +69,9 @@ export const assetsLogic = kea<assetsLogicType>([
     filesToUpload: (files: string[]) => ({ files }),
     uploadFailure: (path: string) => ({ path }),
     syncAssets: true,
+    mkdir: (path: string) => ({ path }),
+    mkdirComplete: (path: string) => ({ path }),
+    mkdirFailure: (path: string) => ({ path }),
   }),
   loaders(({ props }) => ({
     assets: [
@@ -156,6 +159,20 @@ export const assetsLogic = kea<assetsLogicType>([
       }
       input.click()
     },
+    mkdir: async ({ path }) => {
+      try {
+        const formData = new FormData()
+        formData.append('path', path)
+        const response = await apiFetch(`/api/frames/${props.frameId}/assets/mkdir`, {
+          method: 'POST',
+          body: formData,
+        })
+        await response.json()
+        actions.mkdirComplete(path)
+      } catch (error) {
+        actions.mkdirFailure(path)
+      }
+    },
   })),
   reducers({
     assets: {
@@ -181,6 +198,9 @@ export const assetsLogic = kea<assetsLogicType>([
       },
       uploadFailure: (state, { path }) =>
         state.map((asset) => (asset.path === path ? { ...asset, size: -2, mtime: -2 } : asset)),
+      mkdirComplete: (state, { path }) => {
+        return [...state, { path: path + '/.', size: 0, mtime: Date.now() }]
+      },
     },
   }),
   afterMount(({ actions }) => {

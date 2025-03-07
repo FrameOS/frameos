@@ -423,6 +423,41 @@ async def api_frame_assets_upload(
 
     return {"path": path_without_combined, "size": len(contents), "mtime": int(datetime.now().timestamp())}
 
+@api_with_auth.post("/frames/{id:int}/assets/mkdir")
+async def api_frame_assets_mkdir(
+    id: int,
+    path: str = Form(..., description="Folder to make"),
+    db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+):
+    frame = db.get(Frame, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    if not path:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Path parameter is required")
+    if "*" in path:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid character * in path")
+    assets_path = frame.assets_path or "/srv/assets"
+    combined_path = os.path.normpath(os.path.join(assets_path, path))
+    if not combined_path.startswith(os.path.normpath(assets_path) + '/'):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid asset path")
+
+    # TODO: stream and reuse connections
+    ssh = await get_ssh_connection(db, redis, frame)
+    try:
+        await exec_command(
+            db, redis, frame, ssh,
+            f"mkdir -p {shlex.quote(combined_path)}",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+    finally:
+        await remove_ssh_connection(db, redis, ssh, frame)
+
+    path_without_combined = os.path.relpath(combined_path, assets_path)
+
+    return {"path": path_without_combined, "mtime": int(datetime.now().timestamp())}
+
 @api_with_auth.post("/frames/{id:int}/clear_build_cache")
 async def api_frame_clear_build_cache(id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)):
     frame = db.get(Frame, id)
