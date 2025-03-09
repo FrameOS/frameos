@@ -106,7 +106,26 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 db, redis, frame, build_dir, build_id, nim_path, source_dir, temp_dir, cpu
             )
 
-            if low_memory:
+            cross_compiling = False
+            if cpu == "arm64":
+                response_code, _, _ = await exec_local_command(db, redis, frame, "aarch64-linux-gnu-gcc --version", generate_log=False)
+                if response_code == 0:
+                    cross_compiling = True
+                    await log(db, redis, id, "stdout", "- Cross compiling for ARM64")
+
+                    await exec_local_command(
+                        db, redis, frame,
+                        f"cd {build_dir} && "
+                        f"make clean && "
+                        f"make CC=aarch64-linux-gnu-gcc -j$(nproc)"
+                    )
+                else:
+                    await log(db, redis, id, "stdout", f"- Cross compilation not available for {cpu}: aarch64-linux-gnu-gcc not installed.")
+            else:
+                await log(db, redis, id, "stdout", f"- Cross compilation not available for {cpu}. Compiling on device")
+
+
+            if low_memory and not cross_compiling:
                 await log(db, redis, id, "stdout", "- Low memory device, stopping FrameOS for compilation")
                 await exec_command(db, redis, frame, ssh, "sudo service frameos stop", raise_on_error=False)
 
@@ -469,8 +488,7 @@ async def create_local_build_archive(
         shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "env"), ignore_errors=True)
         shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
 
-    await log(db, redis, int(frame.id), "stdout",
-              "- No cross compilation. Generating source code for compilation on frame.")
+    await log(db, redis, int(frame.id), "stdout", "- Generating source code for compilation.")
 
     debug_options = "--lineTrace:on" if frame.debug else ""
     cmd = (
