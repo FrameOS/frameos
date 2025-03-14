@@ -23,7 +23,7 @@ INSTANCE_ID = str(uuid.uuid4())
 class Config:
     DEBUG = get_bool_env('DEBUG')
     TEST = get_bool_env('TEST')
-    SECRET_KEY = os.environ.get('SECRET_KEY')
+    SECRET_KEY = os.environ.get('SECRET_KEY').strip('"')
     DATABASE_URL = os.environ.get('DATABASE_URL') or 'sqlite:///../db/frameos.db'
     REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
     INSTANCE_ID = INSTANCE_ID
