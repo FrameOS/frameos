@@ -37,37 +37,54 @@ ENV PATH="/opt/nim/bin:${PATH}"
 RUN nim --version && nimble --version
 
 # ------------------------------------------------------------------
-# 3. Add ARM64 architecture & install cross-compiler + stdlib
+# 3. Add BOTH arm64 + armhf architectures & install cross toolchains
 # ------------------------------------------------------------------
 RUN dpkg --add-architecture arm64 \
+    && dpkg --add-architecture armhf \
     && apt-get update \
     && apt-get install -y \
        crossbuild-essential-arm64 \
+       crossbuild-essential-armhf \
        libc6-dev:arm64 \
-       pkg-config \
+       libc6-dev:armhf \
        libevdev-dev:arm64 \
+       libevdev-dev:armhf \
+       pkg-config \
        wget
 
 # ------------------------------------------------------------------
-# 4. Build + install liblgpio for ARM64 from source
-#    (so -llgpio can be found by the cross-compiler)
+# 4. Build + install liblgpio for ARM64 (aarch64) to DESTDIR
+#    so we don't overwrite the default /usr/local/lib
 # ------------------------------------------------------------------
-RUN mkdir -p /tmp/lgpio-install && \
-    cd /tmp/lgpio-install && \
+# Build + install liblgpio for ARM64
+RUN mkdir -p /tmp/lgpio-arm64 && cd /tmp/lgpio-arm64 && \
     wget -q -O v0.2.2.tar.gz https://github.com/joan2937/lg/archive/refs/tags/v0.2.2.tar.gz && \
-    tar -xzf v0.2.2.tar.gz && \
-    cd lg-0.2.2 && \
-    CC=aarch64-linux-gnu-gcc make && \
-    make install && \
-    # Copy compiled libs into multiarch paths
+    tar -xzf v0.2.2.tar.gz && cd lg-0.2.2 && \
+    make clean && make CROSS_PREFIX=aarch64-linux-gnu- && \
+    make DESTDIR=/tmp/install-arm64 install && \
+    # Remove any /usr/local/lib stuff (if placed) and move final libs
+    rm -f /usr/local/lib/liblg*.so* && \
     mkdir -p /usr/lib/aarch64-linux-gnu /usr/include/aarch64-linux-gnu && \
-    cp /usr/local/lib/liblg*.so* /usr/lib/aarch64-linux-gnu/ && \
-    cp /usr/local/include/lgpio.h /usr/include/aarch64-linux-gnu/ && \
-    ldconfig && \
-    cd / && rm -rf /tmp/lgpio-install
+    cp /tmp/install-arm64/usr/local/lib/liblg*.so* /usr/lib/aarch64-linux-gnu/ && \
+    cp /tmp/install-arm64/usr/local/include/lgpio.h /usr/include/aarch64-linux-gnu/ && \
+    ldconfig && cd / && rm -rf /tmp/lgpio-arm64 /tmp/install-arm64
 
 # ------------------------------------------------------------------
-# 5. Install Python dependencies
+# 5. Build + install liblgpio for ARMHF (arm-linux-gnueabihf) to DESTDIR
+# ------------------------------------------------------------------
+    RUN mkdir -p /tmp/lgpio-armhf && cd /tmp/lgpio-armhf && \
+    wget -q -O v0.2.2.tar.gz https://github.com/joan2937/lg/archive/refs/tags/v0.2.2.tar.gz && \
+    tar -xzf v0.2.2.tar.gz && cd lg-0.2.2 && \
+    make clean && make CROSS_PREFIX=arm-linux-gnueabihf- && \
+    make DESTDIR=/tmp/install-armhf install && \
+    rm -f /usr/local/lib/liblg*.so* && \
+    mkdir -p /usr/lib/arm-linux-gnueabihf /usr/include/arm-linux-gnueabihf && \
+    cp /tmp/install-armhf/usr/local/lib/liblg*.so* /usr/lib/arm-linux-gnueabihf/ && \
+    cp /tmp/install-armhf/usr/local/include/lgpio.h /usr/include/arm-linux-gnueabihf/ && \
+    ldconfig && cd / && rm -rf /tmp/lgpio-armhf /tmp/install-armhf
+
+# ------------------------------------------------------------------
+# 6. Install Python dependencies
 # ------------------------------------------------------------------
 WORKDIR /app/backend
 COPY backend/requirements.txt .
@@ -76,7 +93,7 @@ RUN pip3 install --upgrade uv \
     && uv pip install --no-cache-dir -r requirements.txt
 
 # ------------------------------------------------------------------
-# 6. Install and build frontend
+# 7. Install and build frontend
 # ------------------------------------------------------------------
 WORKDIR /tmp/frontend
 COPY frontend/package.json frontend/package-lock.json /tmp/frontend/
@@ -90,8 +107,8 @@ RUN npm run build
 RUN find . -maxdepth 1 ! -name 'dist' ! -name 'schema' ! -name '.' ! -name '..' -exec rm -rf {} \;
 
 # ------------------------------------------------------------------
-# 7. Clean up unneeded Nodejs & other packages
-#    (Keeping crossbuild-essential-arm64 + build-essential for cross-compiling)
+# 8. Clean up unneeded Nodejs & other packages
+#    (Keeping crossbuild-essential-* and build-essential)
 # ------------------------------------------------------------------
 RUN apt-get remove -y nodejs curl libffi-dev ca-certificates gnupg \
     && apt-get autoremove -y \
@@ -100,7 +117,7 @@ RUN apt-get remove -y nodejs curl libffi-dev ca-certificates gnupg \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 
 # ------------------------------------------------------------------
-# 8. Prepare Nim environment
+# 9. Prepare Nim environment
 # ------------------------------------------------------------------
 WORKDIR /app/frameos
 COPY frameos/frameos.nimble ./
@@ -111,7 +128,7 @@ COPY frameos/nim.cfg ./
 RUN nimble install -d -y && nimble setup
 
 # ------------------------------------------------------------------
-# 9. Move final built frontend into /app
+# 10. Move final built frontend into /app
 # ------------------------------------------------------------------
 WORKDIR /app
 COPY . .

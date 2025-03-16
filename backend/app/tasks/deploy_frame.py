@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 import json
-import hashlib
 import os
 import random
 import re
@@ -38,6 +37,12 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
     """
     Main deployment logic for building, packaging, and deploying
     the Nim (FrameOS) application onto a target device via SSH.
+    Changes made:
+    1) If cross-compiling, only the final `frameos` binary (and vendor if needed)
+       is uploaded, not the full C source code.
+    2) Download minimal `libevdev.so.*` and `liblgpio.so.*` plus relevant headers
+       from the Pi to local sysroot so we can link the same version that the Pi has.
+    3) If apt fails for `liblgpio-dev`, compile from source on the Pi.
     """
     db: Session = ctx['db']
     redis: Redis = ctx['redis']
@@ -68,185 +73,247 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         nim_path = find_nim_v2()
         ssh = await get_ssh_connection(db, redis, frame)
 
-        async def install_if_necessary(pkg: str, raise_on_error=True) -> int:
-            """
-            Installs package `pkg` on the remote device if it's not already installed.
-            """
-            cmd = f"dpkg -l | grep -q \"^ii  {pkg}\" || sudo apt-get install -y {pkg}"
-            return await exec_command(db, redis, frame, ssh, cmd, raise_on_error=raise_on_error)
-
-        # 1. Detect target architecture on the remote device.
+        # 1. Determine the remote CPU architecture
         await log(db, redis, id, "stdout", "- Getting target architecture")
         uname_output: list[str] = []
         await exec_command(db, redis, frame, ssh, "uname -m", uname_output)
         arch = "".join(uname_output).strip()
-
-        # Simplify arch -> "arm64", "arm", "amd64", "i386" ...
         cpu = get_target_cpu(arch)
 
-        # Check total memory (for Pi Zero, etc.) so we can stop the service during local (on-device) compile
+        # For ARM Pi: pass extra march flags for ARMv6 or ARMv7
+        pass_c_l_flags = ""
+        if arch == "armv6l":
+            pass_c_l_flags = "-march=armv6 -mfpu=vfp -mfloat-abi=hard -mtune=arm1176jzf-s -marm"
+        elif arch == "armv7l":
+            pass_c_l_flags = "-march=armv7-a -mfloat-abi=hard -mfpu=vfpv3 -mtune=cortex-a7 -marm"
+
+        # 2. We will install needed dependencies on the Pi:
+        #    build-essential is only needed if we end up *not* cross-compiling.
+        #    But let's ensure the Pi can also run code that uses evdev, lgpio, etc.
+        #    We'll also handle the possibility that `liblgpio-dev` is missing in apt.
+        await log(db, redis, id, "stdout", "- Installing required packages on the Pi (if available)")
+        # We'll do a helper function for apt installs:
+        pkgs = ["ntp", "libevdev-dev"]
+        # We do NOT add "build-essential" here by default. We'll do it conditionally if we need on-device build.
+        for pkg in pkgs:
+            await install_if_necessary(db, redis, frame, ssh, pkg, raise_on_error=False)
+
+        # 2B. Try installing `liblgpio-dev`, if not found -> compile from source
+        rc = await install_if_necessary(db, redis, frame, ssh, "liblgpio-dev", raise_on_error=False)
+        if rc != 0:
+            # We'll do the same approach we used for waveshare:
+            await log(db, redis, id, "stdout", "--> Could not find liblgpio-dev. Installing from source.")
+            command = (
+                "if [ ! -f /usr/local/include/lgpio.h ]; then "
+                "  rm -rf /tmp/lgpio-install && "
+                "  mkdir -p /tmp/lgpio-install && "
+                "  cd /tmp/lgpio-install && "
+                "  wget -q -O v0.2.2.tar.gz https://github.com/joan2937/lg/archive/refs/tags/v0.2.2.tar.gz && "
+                "  tar -xzf v0.2.2.tar.gz && "
+                "  cd lg-0.2.2 && "
+                "  make && "
+                "  sudo make install && "
+                "  sudo rm -rf /tmp/lgpio-install; "
+                "fi"
+            )
+            await exec_command(db, redis, frame, ssh, command)
+
+        # 2C. Scenes might require apt packages
+        all_deps = get_apt_dependencies_from_scenes(db, redis, frame)
+        for dep in all_deps:
+            await install_if_necessary(db, redis, frame, ssh, dep)
+
+        # 3. Check if we can cross-compile. Otherwise we’ll compile on the device.
+        cross_compiler = get_cross_compiler_for_cpu(cpu)
+        do_cross_compile = False
+        if cross_compiler:
+            rc, _, _ = await exec_local_command(db, redis, frame, f"{cross_compiler} --version", generate_log=False)
+            if rc == 0:
+                do_cross_compile = True
+
+        # 4. If do_cross_compile, fetch minimal libs+headers from Pi for local linking
+        #    (we only need libevdev & liblgpio plus their includes).
+        local_sysroot_dir = None
+        if do_cross_compile:
+            await log(db, redis, id, "stdout", f"- Found cross-compiler '{cross_compiler}' for {cpu}")
+            # TODO: delete this later? preserve it?
+            local_sysroot_dir = os.path.join(tempfile.gettempdir(), f"sysroot_{frame.id}_{build_id}")
+            # local_sysroot_dir = os.path.abspath(f"./sysroot_{frame.id}_{build_id}")
+            if not os.path.exists(local_sysroot_dir):
+                os.makedirs(local_sysroot_dir, exist_ok=True)
+
+            # 4A. Download the relevant .so libs from the Pi
+            #     We'll store them in e.g. sysroot/usr/lib/arm-linux-gnueabihf
+            remote_libs_tar = f"/tmp/libs_{build_id}.tar.gz"
+            cmd = (
+                f"sudo tar -czf {remote_libs_tar} "
+                f"/usr/lib/arm-linux-gnueabihf/libarmmem* "
+                f"/usr/lib/arm-linux-gnueabihf/libm.so* "
+                f"/usr/lib/arm-linux-gnueabihf/libd.so* "
+                f"/usr/lib/arm-linux-gnueabihf/libpthread.so* "
+                f"/usr/lib/arm-linux-gnueabihf/libc.so* "
+                f"/usr/lib/arm-linux-gnueabihf/liblgpio.so* "
+                "2>/dev/null || true"  # just in case some file is missing
+            )
+            await exec_command(db, redis, frame, ssh, cmd)
+            local_libs_tar = os.path.join(local_sysroot_dir, "libs.tar.gz")
+            await asyncssh.scp((ssh, remote_libs_tar), local_libs_tar)
+            # Clean up remote tar
+            await exec_command(db, redis, frame, ssh, f"sudo rm -f {remote_libs_tar}")
+
+            # Extract to sysroot/usr/lib/arm-linux-gnueabihf
+            sysroot_lib_dir = os.path.join(local_sysroot_dir, "usr", "lib", "arm-linux-gnueabihf")
+            os.makedirs(sysroot_lib_dir, exist_ok=True)
+            shutil.unpack_archive(local_libs_tar, local_sysroot_dir)
+            os.remove(local_libs_tar)
+
+            # 4B. Download relevant includes: often /usr/include/libevdev-1.0 & the lgpio.h
+            remote_inc_tar = f"/tmp/includes_{build_id}.tar.gz"
+            cmd = (
+                f"sudo tar -czf {remote_inc_tar} "
+                f"/usr/include/libevdev-1.0 "
+                f"/usr/include/arm-linux-gnueabihf/lgpio.h "
+                f"/usr/local/include/lgpio.h "
+                "2>/dev/null || true"
+            )
+            await exec_command(db, redis, frame, ssh, cmd)
+            local_inc_tar = os.path.join(local_sysroot_dir, "includes.tar.gz")
+            await asyncssh.scp((ssh, remote_inc_tar), local_inc_tar)
+            await exec_command(db, redis, frame, ssh, f"sudo rm -f {remote_inc_tar}")
+            # Extract them into local sysroot
+            shutil.unpack_archive(local_inc_tar, local_sysroot_dir)
+            os.remove(local_inc_tar)
+
+        # 5. Possibly handle low memory Pi if we are building on-device
         total_memory = 0
         try:
             mem_output: list[str] = []
             await exec_command(db, redis, frame, ssh, "free -m", mem_output)
-            # mem_output[0]: "              total        used        free      shared  buff/cache   available"
-            # mem_output[1]: "Mem:            991         223         ... etc."
-            # We'll parse line 1
             total_memory = int(mem_output[1].split()[1])
         except Exception as e:
             await log(db, redis, id, "stderr", str(e))
-        low_memory = total_memory < 512
+        low_memory = (total_memory < 512)
 
-        drivers = drivers_for_frame(frame)
-
-        # 2. Build or cross-compile locally, then package up the result
-        with tempfile.TemporaryDirectory() as temp_dir:
-            await log(db, redis, id, "stdout", "- Copying build folders")
-            build_dir, source_dir = create_build_folders(temp_dir, build_id)
-
-            await log(db, redis, id, "stdout", "- Applying local modifications")
-            await make_local_modifications(db, redis, frame, source_dir)
-
-            await log(db, redis, id, "stdout", "- Creating build archive")
-
-            # Decide if we can cross-compile for the target
-            do_cross_compile = False
-            cross_compiler = get_cross_compiler_for_cpu(cpu)
-            if cross_compiler:
-                response_code, _, _ = await exec_local_command(db, redis, frame, f"{cross_compiler} --version", generate_log=False)
-                if response_code == 0:
-                    do_cross_compile = True
-
-            # 2A. Generate Nim -> C code. This always happens locally (we need the C code).
-            archive_path = await create_local_build_archive(
-                db, redis, frame,
-                build_dir, build_id, nim_path, source_dir, temp_dir, cpu
-            )
-
-            # 2B. If cross-compiling is possible, actually produce final `frameos` locally.
-            if do_cross_compile:
-                await log(db, redis, id, "stdout", f"- Cross compiling for {cpu} using {cross_compiler}")
-                cmd = f"cd {build_dir} && make clean && make CC={cross_compiler} -j$(nproc)"
-                status, out, err = await exec_local_command(db, redis, frame, cmd)
-                if status != 0:
-                    raise Exception("Cross-compilation failed. See logs for details.")
-
-                # Re-create the tar AFTER the final binary is present
-                # We remove the old one, then tar again so it has `frameos` in it.
-                os.remove(archive_path)
-                archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")
-                zip_base = os.path.join(temp_dir, f"build_{build_id}")
-                shutil.make_archive(zip_base, 'gztar', temp_dir, f"build_{build_id}")
-
-            # 3. On low-memory devices, stop FrameOS if we must compile there
-            #    i.e. we do NOT have cross_compiled.
-            if not do_cross_compile and low_memory:
+        if not do_cross_compile:
+            # We may need to compile on the Pi
+            await install_if_necessary(db, redis, frame, ssh, "build-essential")
+            if low_memory:
                 await log(db, redis, id, "stdout", "- Low memory device, stopping FrameOS for compilation")
                 await exec_command(db, redis, frame, ssh, "sudo service frameos stop", raise_on_error=False)
 
-            # 4. Install build dependencies on device (only if we plan to compile on device)
-            if not do_cross_compile:
-                await install_if_necessary("build-essential")
+        # 6. Generate Nim -> C code locally and optionally cross-compile
+        drivers = drivers_for_frame(frame)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            await log(db, redis, id, "stdout", "- Creating local Nim build (C sources)")
 
-            await install_if_necessary("ntp")  # Keep time in sync
+            build_dir, source_dir = create_build_folders(temp_dir, build_id)
+            await make_local_modifications(db, redis, frame, source_dir)
 
-            if drivers.get("evdev"):
-                await install_if_necessary("libevdev-dev")
+            # Just produce C code + Makefile
+            c_archive_path = await create_local_build_archive(
+                db, redis, frame,
+                build_dir, build_id, nim_path, source_dir, temp_dir, cpu,
+                pass_c_l_flags,
+                do_cross_compile
+            )
 
-            # 4A. Install liblgpio if needed (for waveshare or gpioButton).
-            if drivers.get("waveshare") or drivers.get("gpioButton"):
-                check_lgpio = await exec_command(
-                    db, redis, frame, ssh,
-                    '[[ -f "/usr/local/include/lgpio.h" || -f "/usr/include/lgpio.h" ]] && exit 0 || exit 1',
-                    raise_on_error=False
+            frameos_binary_path = os.path.join(build_dir, "frameos")
+
+            if do_cross_compile and local_sysroot_dir:
+                # 6A. Actually compile locally with cross_compiler
+                await log(db, redis, id, "stdout", "- Cross compiling `frameos` with the Pi's libraries + headers")
+
+                # Provide CFLAGS with path to local sysroot
+                sysroot_flags = (
+                    f"--sysroot={local_sysroot_dir} "
+                    f"-I{local_sysroot_dir}/usr/include "
+                    f"-L{local_sysroot_dir}/usr/lib/arm-linux-gnueabihf "
                 )
-                if check_lgpio != 0:
-                    # Try installing liblgpio-dev
-                    if await install_if_necessary("liblgpio-dev", raise_on_error=False) != 0:
-                        await log(db, redis, id, "stdout", "--> Could not find liblgpio-dev. Installing from source.")
-                        command = (
-                            "if [ ! -f /usr/local/include/lgpio.h ]; then "
-                            "  rm -rf /tmp/lgpio-install && "
-                            "  mkdir -p /tmp/lgpio-install && "
-                            "  cd /tmp/lgpio-install && "
-                            "  wget -q -O v0.2.2.tar.gz https://github.com/joan2937/lg/archive/refs/tags/v0.2.2.tar.gz && "
-                            "  tar -xzf v0.2.2.tar.gz && "
-                            "  cd lg-0.2.2 && "
-                            "  make && "
-                            "  sudo make install && "
-                            "  sudo rm -rf /tmp/lgpio-install; "
-                            "fi"
-                        )
-                        await exec_command(db, redis, frame, ssh, command)
+                # We also apply our pass_c_l_flags (-march=...)
+                # plus the libraries Nim might link: -levdev -llgpio
+                make_cmd = (
+                    f"cd {build_dir} && make clean && "
+                    f"make -j$(nproc) CC={cross_compiler} "
+                    f"\"SYSROOT={sysroot_flags}\" "
+                )
+                status, _, _ = await exec_local_command(db, redis, frame, make_cmd)
+                if status != 0:
+                    raise Exception("Cross-compilation with sysroot failed.")
+            else:
+                # 6B. On-device compile approach
+                await exec_command(db, redis, frame, ssh, "mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
+                await log(db, redis, id, "stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
 
-            # 5. Check for app dependencies (APT packages declared in config.json)
-            all_deps = set()
-            for scene in frame.scenes:
-                try:
-                    for node in scene.get('nodes', []):
-                        try:
-                            config: Optional[dict[str, str]] = None
-                            if node.get('type') == 'app':
-                                app = node.get('data', {}).get('keyword')
-                                if app:
-                                    json_config = get_one_app_sources(app).get('config.json')
-                                    if json_config:
-                                        config = json.loads(json_config)
-                            elif node.get('type') == 'source':
-                                json_config = node.get('sources', {}).get('config.json')
-                                if json_config:
-                                    config = json.loads(json_config)
-                            if config and config.get('apt'):
-                                for dep in config['apt']:
-                                    all_deps.add(dep)
-                        except Exception as e:
-                            await log(db, redis, id, "stderr", f"Error parsing node: {e}")
-                except Exception as e:
-                    await log(db, redis, id, "stderr", f"Error parsing scene: {e}")
-
-            for dep in all_deps:
-                await install_if_necessary(dep)
-
-            # Ensure /srv/frameos on device
-            await exec_command(db, redis, frame, ssh,
-                               "if [ ! -d /srv/frameos/ ]; then "
-                               "  sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; "
-                               "fi")
-
-            await exec_command(db, redis, frame, ssh, "mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
-            await log(db, redis, id, "stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
-
-            # 6. Upload the local tarball to the device
-            await asyncssh.scp(
-                archive_path,
-                (ssh, f"/srv/frameos/build/build_{build_id}.tar.gz"),
-                recurse=False
-            )
-
-            # 7. If we haven't cross-compiled locally, compile on the device
-            await exec_command(
-                db, redis, frame, ssh,
-                f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz"
-            )
-
-            if not do_cross_compile:
-                # device-based compile
+                # Upload the entire C code tar to compile on Pi
+                await asyncssh.scp(
+                    c_archive_path,
+                    (ssh, f"/srv/frameos/build/build_{build_id}.tar.gz"),
+                    recurse=False
+                )
                 await exec_command(
                     db, redis, frame, ssh,
+                    f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz"
+                )
+                compile_cmd = (
                     f"cd /srv/frameos/build/build_{build_id} && "
                     "PARALLEL_MEM=$(awk '/MemTotal/{printf \"%.0f\\n\", $2/1024/250}' /proc/meminfo) && "
                     "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
                     "make -j$PARALLEL"
                 )
+                await exec_command(db, redis, frame, ssh, compile_cmd)
 
-            # 8. Move final binary into a release folder
-            await exec_command(db, redis, frame, ssh, f"mkdir -p /srv/frameos/releases/release_{build_id}")
-            await exec_command(
-                db, redis, frame, ssh,
-                f"cp /srv/frameos/build/build_{build_id}/frameos /srv/frameos/releases/release_{build_id}/frameos"
-            )
+            # 7. Upload final `frameos` executable (if cross-compiled), plus vendor if needed
+            release_path = f"/srv/frameos/releases/release_{build_id}"
+            if do_cross_compile:
+                # We skip uploading the entire build_{build_id} folder. Just upload the `frameos`.
+                await exec_command(db, redis, frame, ssh,
+                                   f"mkdir -p {release_path}")
+                # TODO: compress
+                await asyncssh.scp(
+                    frameos_binary_path,
+                    (ssh, f"{release_path}/frameos"),
+                    recurse=False
+                )
+                # If there's vendor code (e.g. inky) we still need to copy that to the Pi,
+                # because e.g. the Python environment is needed at runtime.
+                vendor_tar = None
+                if requires_vendor_upload(drivers):
+                    vendor_tar = os.path.join(temp_dir, f"vendor_{build_id}.tar.gz")
+                    vendor_folder_temp = os.path.join(temp_dir, "vendor")
+                    os.makedirs(vendor_folder_temp, exist_ok=True)
+                    copy_vendor_folders(drivers, vendor_folder_temp)
+                    shutil.make_archive(
+                        base_name=os.path.join(temp_dir, f"vendor_{build_id}"),
+                        format='gztar',
+                        root_dir=temp_dir,
+                        base_dir="vendor"
+                    )
+                    await exec_command(db, redis, frame, ssh, "mkdir -p /srv/frameos/build/vendor_temp")
+                    await asyncssh.scp(vendor_tar,
+                                       (ssh, f"/srv/frameos/build/vendor_temp/vendor_{build_id}.tar.gz"),
+                                       recurse=False)
+                    await exec_command(
+                        db, redis, frame, ssh,
+                        f"cd /srv/frameos/build/vendor_temp && "
+                        f"tar -xzf vendor_{build_id}.tar.gz && rm vendor_{build_id}.tar.gz"
+                    )
+                    # Then we can move that vendor code to the new release
+                    await exec_command(
+                        db, redis, frame, ssh,
+                        "mkdir -p /srv/frameos/vendor && "
+                        "cp -r /srv/frameos/build/vendor_temp/vendor/* /srv/frameos/vendor/"
+                    )
+                    await exec_command(db, redis, frame, ssh, "rm -rf /srv/frameos/build/vendor_temp")
 
-            # 9. Upload frame.json to the new release
+            else:
+                # We compiled on the Pi. The final binary is at /srv/frameos/build/build_{build_id}/frameos
+                await exec_command(db, redis, frame, ssh, f"mkdir -p {release_path}")
+                await exec_command(
+                    db, redis, frame, ssh,
+                    f"cp /srv/frameos/build/build_{build_id}/frameos {release_path}/frameos"
+                )
+
+            # 8. Upload frame.json
             frame_json_data = (json.dumps(get_frame_json(db, frame), indent=4) + "\n").encode('utf-8')
             with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmpf:
                 local_json_path = tmpf.name
@@ -254,147 +321,68 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             await asyncssh.scp(
                 local_json_path,
-                (ssh, f"/srv/frameos/releases/release_{build_id}/frame.json"),
+                (ssh, f"{release_path}/frame.json"),
                 recurse=False
             )
             os.remove(local_json_path)
-            await log(db, redis, id, "stdout", f"> add /srv/frameos/releases/release_{build_id}/frame.json")
+            await log(db, redis, id, "stdout", f"> add {release_path}/frame.json")
 
-            # 10. Vendor steps for certain drivers
-            if inkyPython := drivers.get("inkyPython"):
+            # 9. If inky vendor, set up Python venv on the Pi
+            await install_inky_vendors(db, redis, frame, ssh, build_id, drivers)
+
+            # Clean old builds if we did on-device compile
+            if not do_cross_compile:
                 await exec_command(db, redis, frame, ssh,
-                                   f"mkdir -p /srv/frameos/vendor && "
-                                   f"cp -r /srv/frameos/build/build_{build_id}/vendor/inkyPython /srv/frameos/vendor/")
-                await install_if_necessary("python3-pip")
-                await install_if_necessary("python3-venv")
+                                   "cd /srv/frameos/build && ls -dt1 build_* | tail -n +11 | xargs rm -rf")
                 await exec_command(db, redis, frame, ssh,
-                                   f"cd /srv/frameos/vendor/{inkyPython.vendor_folder} && "
-                                   "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
-                                   "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
-                                   "(echo '> env/bin/pip3 install -r requirements.txt' && "
-                                   "env/bin/pip3 install -r requirements.txt && "
-                                   "sha256sum requirements.txt > requirements.txt.sha256sum))")
+                                   "cd /srv/frameos/build/cache && "
+                                   "find . -type f \\( -atime +0 -a -mtime +0 \\) | xargs rm -rf")
 
-            if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
-                await exec_command(db, redis, frame, ssh,
-                                   f"mkdir -p /srv/frameos/vendor && "
-                                   f"cp -r /srv/frameos/build/build_{build_id}/vendor/inkyHyperPixel2r /srv/frameos/vendor/")
-                await install_if_necessary("python3-dev")
-                await install_if_necessary("python3-pip")
-                await install_if_necessary("python3-venv")
-                await exec_command(db, redis, frame, ssh,
-                                   f"cd /srv/frameos/vendor/{inkyHyperPixel2r.vendor_folder} && "
-                                   "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
-                                   "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
-                                   "(echo '> env/bin/pip3 install -r requirements.txt' && "
-                                   "env/bin/pip3 install -r requirements.txt && "
-                                   "sha256sum requirements.txt > requirements.txt.sha256sum))")
-
-            # 11. Upload and enable frameos.service
-            with open("../frameos/frameos.service", "r") as f:
-                service_contents = f.read().replace("%I", frame.ssh_user)
-            service_data = service_contents.encode('utf-8')
-            with tempfile.NamedTemporaryFile(suffix=".service", delete=False) as tmpservice:
-                local_service_path = tmpservice.name
-                tmpservice.write(service_data)
-            await asyncssh.scp(
-                local_service_path,
-                (ssh, f"/srv/frameos/releases/release_{build_id}/frameos.service"),
-                recurse=False
-            )
-            os.remove(local_service_path)
-
-            await exec_command(db, redis, frame, ssh,
-                               f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state "
-                               f"/srv/frameos/releases/release_{build_id}/state")
-            await exec_command(db, redis, frame, ssh,
-                               f"sudo cp /srv/frameos/releases/release_{build_id}/frameos.service "
-                               f"/etc/systemd/system/frameos.service")
-            await exec_command(db, redis, frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
-            await exec_command(db, redis, frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")
-
-            # 12. Link new release to /srv/frameos/current
-            await exec_command(db, redis, frame, ssh,
-                               f"rm -rf /srv/frameos/current && "
-                               f"ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current")
-
-            # 13. Sync assets (upload new or changed files in /assets)
-            await sync_assets(db, redis, frame, ssh)
-
-            # Clean old builds
-            await exec_command(db, redis, frame, ssh,
-                               "cd /srv/frameos/build && ls -dt1 build_* | tail -n +11 | xargs rm -rf")
-            await exec_command(db, redis, frame, ssh,
-                               "cd /srv/frameos/build/cache && find . -type f \\( -atime +0 -a -mtime +0 \\) | xargs rm -rf")
+            # We also remove old releases, except the current symlink
             await exec_command(db, redis, frame, ssh,
                                "cd /srv/frameos/releases && "
                                "ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" "
                                "| tail -n +11 | xargs rm -rf")
 
-        # 14. Additional device config if needed
-        boot_config = "/boot/config.txt"
-        if await exec_command(db, redis, frame, ssh, "test -f /boot/firmware/config.txt", raise_on_error=False) == 0:
-            boot_config = "/boot/firmware/config.txt"
+        # 10. systemd service, link new release
+        with open("../frameos/frameos.service", "r") as f:
+            service_contents = f.read().replace("%I", frame.ssh_user)
+        service_data = service_contents.encode('utf-8')
+        with tempfile.NamedTemporaryFile(suffix=".service", delete=False) as tmpservice:
+            local_service_path = tmpservice.name
+            tmpservice.write(service_data)
+        await asyncssh.scp(
+            local_service_path,
+            (ssh, f"{release_path}/frameos.service"),
+            recurse=False
+        )
+        os.remove(local_service_path)
 
-        if drivers.get("i2c"):
-            # Ensure i2c is enabled
-            await exec_command(db, redis, frame, ssh,
-                               f'grep -q "^dtparam=i2c_vc=on$" {boot_config} '
-                               f'|| echo "dtparam=i2c_vc=on" | sudo tee -a {boot_config}')
-            await exec_command(db, redis, frame, ssh,
-                               'command -v raspi-config > /dev/null && '
-                               'sudo raspi-config nonint get_i2c | grep -q "1" && { '
-                               '  sudo raspi-config nonint do_i2c 0; echo "I2C enabled"; '
-                               '} || echo "I2C already enabled"')
+        await exec_command(db, redis, frame, ssh,
+                           f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state {release_path}/state")
+        await exec_command(db, redis, frame, ssh,
+                           f"sudo cp {release_path}/frameos.service /etc/systemd/system/frameos.service")
+        await exec_command(db, redis, frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
+        await exec_command(db, redis, frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")
 
-        if drivers.get("spi"):
-            await exec_command(db, redis, frame, ssh, 'sudo raspi-config nonint do_spi 0')
-        elif drivers.get("noSpi"):
-            await exec_command(db, redis, frame, ssh, 'sudo raspi-config nonint do_spi 1')
+        await exec_command(db, redis, frame, ssh,
+                           f"rm -rf /srv/frameos/current && ln -s {release_path} /srv/frameos/current")
 
-        # On low memory devices, disable some apt timers
-        if low_memory:
-            await exec_command(
-                db, redis, frame, ssh,
-                "sudo systemctl mask apt-daily-upgrade && "
-                "sudo systemctl mask apt-daily && "
-                "sudo systemctl disable apt-daily.service apt-daily.timer apt-daily-upgrade.timer apt-daily-upgrade.service"
-            )
+        # 11. Sync assets
+        await sync_assets(db, redis, frame, ssh)
 
-        # Reboot or auto-restart logic
-        if frame.reboot and frame.reboot.get('enabled') == 'true':
-            cron_schedule = frame.reboot.get('crontab', '0 0 * * *')
-            if frame.reboot.get('type') == 'raspberry':
-                crontab = f"{cron_schedule} root /sbin/shutdown -r now"
-            else:
-                crontab = f"{cron_schedule} root systemctl restart frameos.service"
-            await exec_command(db, redis, frame, ssh, f"echo '{crontab}' | sudo tee /etc/cron.d/frameos-reboot")
-        else:
-            await exec_command(db, redis, frame, ssh, "sudo rm -f /etc/cron.d/frameos-reboot")
-
-        # Possibly append lines to the Pi boot config and require a reboot
-        must_reboot = False
-        if drivers.get("bootconfig"):
-            for line in drivers["bootconfig"].lines:
-                cmd = f'grep -q "^{line}" {boot_config}'
-                if await exec_command(db, redis, frame, ssh, cmd, raise_on_error=False) != 0:
-                    # not found in boot_config, so append
-                    await exec_command(
-                        db, redis, frame, ssh,
-                        f'echo "{line}" | sudo tee -a {boot_config}',
-                        log_output=False
-                    )
-                    must_reboot = True
-
-        # Enable & start the service
-        await exec_command(db, redis, frame, ssh, "sudo systemctl daemon-reload")
-        await exec_command(db, redis, frame, ssh, "sudo systemctl enable frameos.service")
+        # 12. Additional config (SPI, I2C, apt timers, etc.)
+        await handle_additional_device_config(db, redis, frame, ssh, arch, drivers)
 
         frame.status = 'starting'
         frame.last_successful_deploy = frame_dict
         frame.last_successful_deploy_at = datetime.now(timezone.utc)
 
-        # Reboot if boot config changed
+        # Possibly reboot if bootconfig lines changed
+        must_reboot = drivers.get("bootconfig") and drivers["bootconfig"].needs_reboot
+        await exec_command(db, redis, frame, ssh, "sudo systemctl daemon-reload")
+        await exec_command(db, redis, frame, ssh, "sudo systemctl enable frameos.service")
+
         if must_reboot:
             await update_frame(db, redis, frame)
             await log(db, redis, int(frame.id), "stdinfo", "Deployed! Rebooting device after boot config changes")
@@ -412,6 +400,50 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
     finally:
         if ssh is not None:
             await remove_ssh_connection(db, redis, ssh, frame)
+
+
+# ---------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------
+
+async def install_if_necessary(db: Session, redis: Redis, frame: Frame, ssh, pkg: str, raise_on_error=True) -> int:
+    """
+    Installs package `pkg` on the remote device if it's not already installed.
+    Return code is from `exec_command`.
+    """
+    cmd = f"dpkg -l | grep -q \"^ii  {pkg}\" || sudo apt-get install -y {pkg}"
+    return await exec_command(db, redis, frame, ssh, cmd, raise_on_error=raise_on_error)
+
+
+def get_apt_dependencies_from_scenes(db: Session, redis: Redis, frame: Frame) -> set[str]:
+    """
+    Examine each scene's config for 'apt' dependencies in config.json
+    and collect them all in a set.
+    """
+    all_deps = set()
+    for scene in frame.scenes:
+        try:
+            for node in scene.get('nodes', []):
+                try:
+                    config: Optional[dict[str, Any]] = None
+                    if node.get('type') == 'app':
+                        app = node.get('data', {}).get('keyword')
+                        if app:
+                            json_config = get_one_app_sources(app).get('config.json')
+                            if json_config:
+                                config = json.loads(json_config)
+                    elif node.get('type') == 'source':
+                        json_config = node.get('sources', {}).get('config.json')
+                        if json_config:
+                            config = json.loads(json_config)
+                    if config and config.get('apt'):
+                        for dep in config['apt']:
+                            all_deps.add(dep)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    return all_deps
 
 
 def get_target_cpu(arch: str) -> str:
@@ -433,6 +465,8 @@ def get_cross_compiler_for_cpu(cpu: str) -> Optional[str]:
     """
     Return the cross-compiler command for a given CPU,
     or None if there's no well-known cross-compiler for that CPU.
+    For Pi Zero/1 (ARMv6) or Pi 2/3 (ARMv7) we guess 'arm-linux-gnueabihf-gcc'.
+    For 64-bit Pi: 'aarch64-linux-gnu-gcc'.
     """
     if cpu == "arm64":
         return "aarch64-linux-gnu-gcc"
@@ -449,10 +483,60 @@ def find_nim_v2():
     nim_path = find_nim_executable()
     if not nim_path:
         raise Exception("Nim executable not found")
-    nim_version = get_nim_version(nim_path)
-    if not nim_version or nim_version < version.parse("2.0.0"):
+    nim_ver = get_nim_version(nim_path)
+    if not nim_ver or nim_ver < version.parse("2.0.0"):
         raise Exception("Nim 2.0.0 or higher is required")
     return nim_path
+
+
+def find_nim_executable():
+    common_paths = {
+        'Windows': [
+            'C:\\Program Files\\Nim\\bin\\nim.exe',
+            'C:\\Nim\\bin\\nim.exe'
+        ],
+        'Darwin': [
+            '/opt/homebrew/bin/nim',
+            '/usr/local/bin/nim'
+        ],
+        'Linux': [
+            '/usr/bin/nim',
+            '/usr/local/bin/nim',
+            '/opt/nim/bin/nim',
+        ]
+    }
+    # If nim is in the PATH
+    if is_executable_in_path('nim'):
+        return 'nim'
+    os_type = platform.system()
+    for path in common_paths.get(os_type, []):
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return None
+
+
+def is_executable_in_path(executable: str):
+    try:
+        subprocess.run([executable, '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def get_nim_version(executable_path: str):
+    try:
+        result = subprocess.run([executable_path, '--version'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True)
+        output = result.stdout.split('\n')[0]
+        parts = output.split()
+        for p in parts:
+            if re.match(r'^\d+(\.\d+){1,2}', p):
+                return version.parse(p)
+        return None
+    except Exception as e:
+        print(f"Error getting Nim version: {e}")
+        return None
 
 
 def create_build_folders(temp_dir, build_id):
@@ -485,7 +569,6 @@ async def make_local_modifications(db: Session, redis: Redis,
             with open(os.path.join(app_dir, filename), "w") as f:
                 f.write(code)
 
-    # Write out each scene as scene_{id}.nim
     for scene in frame.scenes:
         try:
             scene_source = write_scene_nim(frame, scene)
@@ -498,14 +581,12 @@ async def make_local_modifications(db: Session, redis: Redis,
                       f"({scene.get('id','default')}): {e}")
             raise
 
-    # scenes.nim aggregator
     with open(os.path.join(source_dir, "src", "scenes", "scenes.nim"), "w") as f:
         source = write_scenes_nim(frame)
         f.write(source)
         if frame.debug:
             await log(db, redis, int(frame.id), "stdout", f"Generated scenes.nim:\n{source}")
 
-    # drivers.nim
     drivers = drivers_for_frame(frame)
     with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
         source = write_drivers_nim(drivers)
@@ -513,30 +594,13 @@ async def make_local_modifications(db: Session, redis: Redis,
         if frame.debug:
             await log(db, redis, int(frame.id), "stdout", f"Generated drivers.nim:\n{source}")
 
-    # waveshare driver if needed
+    # Waveshare driver code (if needed)
     if drivers.get("waveshare"):
         with open(os.path.join(source_dir, "src", "drivers", "waveshare", "driver.nim"), "w") as wf:
             source = write_waveshare_driver_nim(drivers)
             wf.write(source)
             if frame.debug:
                 await log(db, redis, int(frame.id), "stdout", f"Generated waveshare driver:\n{source}")
-
-
-def compile_line_md5(input_str: str) -> str:
-    """
-    Hash of compile command line, ignoring certain flags
-    (used in caching logic).
-    """
-    words = []
-    ignore_next = False
-    for word in input_str.split(' '):
-        if word == '-I':
-            ignore_next = True
-        elif ignore_next or word.startswith("-I"):
-            pass
-        else:
-            words.append(word)
-    return hashlib.md5(" ".join(words).encode()).hexdigest()
 
 
 async def create_local_build_archive(
@@ -548,7 +612,9 @@ async def create_local_build_archive(
     nim_path: str,
     source_dir: str,
     temp_dir: str,
-    cpu: str
+    cpu: str,
+    pass_c_l_flags: str = "",
+    do_cross_compile: bool = False
 ) -> str:
     """
     Run Nim to generate the C files (and Makefile scaffolding),
@@ -556,42 +622,44 @@ async def create_local_build_archive(
     Returns path to the .tar.gz.
     """
     drivers = drivers_for_frame(frame)
-    # Copy vendor code if needed
+    # Copy vendor folder(s) if needed for e.g. Inky
     if inkyPython := drivers.get('inkyPython'):
         vendor_folder = inkyPython.vendor_folder or ""
         os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
-        shutil.copytree(
-            f"../frameos/vendor/{vendor_folder}/",
-            os.path.join(build_dir, "vendor", vendor_folder),
-            dirs_exist_ok=True
-        )
+        local_from = f"../frameos/vendor/{vendor_folder}/"
+        shutil.copytree(local_from,
+                        os.path.join(build_dir, "vendor", vendor_folder),
+                        dirs_exist_ok=True)
         shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "env"), ignore_errors=True)
         shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
 
     if inkyHyperPixel2r := drivers.get('inkyHyperPixel2r'):
         vendor_folder = inkyHyperPixel2r.vendor_folder or ""
         os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
-        shutil.copytree(
-            f"../frameos/vendor/{vendor_folder}/",
-            os.path.join(build_dir, "vendor", vendor_folder),
-            dirs_exist_ok=True
-        )
+        local_from = f"../frameos/vendor/{vendor_folder}/"
+        shutil.copytree(local_from,
+                        os.path.join(build_dir, "vendor", vendor_folder),
+                        dirs_exist_ok=True)
         shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "env"), ignore_errors=True)
         shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
 
-    await log(db, redis, int(frame.id), "stdout", "- Generating source code for compilation.")
+    await log(db, redis, int(frame.id), "stdout", "- Generating Nim => C code for compilation.")
 
     debug_options = "--lineTrace:on" if frame.debug else ""
+    extra_passes = ""
+    if pass_c_l_flags:
+        extra_passes = f'--passC:"{pass_c_l_flags}" --passL:"{pass_c_l_flags}"'
+
     cmd = (
         f"cd {source_dir} && nimble assets -y && nimble setup && "
         f"{nim_path} compile --os:linux --cpu:{cpu} "
         f"--compileOnly --genScript --nimcache:{build_dir} "
-        f"{debug_options} src/frameos.nim 2>&1"
+        f"{debug_options} {extra_passes} src/frameos.nim 2>&1"
     )
 
     status, out, err = await exec_local_command(db, redis, frame, cmd)
     if status != 0:
-        # Attempt to parse the last Nim error line for context
+        # Attempt to parse any relevant final line for error location
         lines = (out or "").split("\n")
         filtered = [ln for ln in lines if ln.strip()]
         if filtered:
@@ -625,7 +693,7 @@ async def create_local_build_archive(
         raise Exception("nimbase.h not found")
     shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
 
-    # If waveshare, copy the variant C/h files
+    # Waveshare variant?
     if waveshare := drivers.get('waveshare'):
         if waveshare.variant:
             variant_folder = get_variant_folder(waveshare.variant)
@@ -635,7 +703,6 @@ async def create_local_build_archive(
                     os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, uf),
                     os.path.join(build_dir, uf)
                 )
-
             # color e-paper variants need bc-based filenames
             # e.g. EPD_2in9b -> EPD_2in9bc.(c/h)
             if waveshare.variant in [
@@ -651,14 +718,13 @@ async def create_local_build_archive(
                     f"{waveshare.variant}.c",
                     f"{waveshare.variant}.h"
                 ]
-
             for vf in variant_files:
                 shutil.copy(
                     os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, vf),
                     os.path.join(build_dir, vf)
                 )
 
-    # Generate a Makefile from the Nim-generated compile_frameos.sh + nimc.Makefile template
+    # Generate the final Makefile
     with open(os.path.join(build_dir, "Makefile"), "w") as mk:
         script_path = os.path.join(build_dir, "compile_frameos.sh")
         linker_flags = ["-pthread", "-lm", "-lrt", "-ldl"]
@@ -681,101 +747,40 @@ async def create_local_build_archive(
                         and fl not in ['-o', '-c', '-D']
                     ]
 
+        if do_cross_compile:
+            if cpu == "arm":
+                linker_flags += ["-L/usr/lib/arm-linux-gnueabihf"]
+                compiler_flags += ["-I/usr/include/arm-linux-gnueabihf"]
+            elif cpu == "arm64":
+                linker_flags += ["-L/usr/lib/aarch64-linux-gnu"]
+                compiler_flags += ["-I/usr/include/aarch64-linux-gnu"]
+
         # Base Makefile template
         with open(os.path.join(source_dir, "tools", "nimc.Makefile"), "r") as mf_in:
             lines_make = mf_in.readlines()
-
         for ln in lines_make:
             if ln.startswith("LIBS = "):
-                ln = "LIBS = -L. " + " ".join(linker_flags) + "\n"
+                ln = ("LIBS = -L. " + " ".join(linker_flags) + "\n")
             if ln.startswith("CFLAGS = "):
-                # remove '-c' if present
                 cf = [f for f in compiler_flags if f != '-c']
                 ln = "CFLAGS = " + " ".join(cf) + "\n"
             mk.write(ln)
 
-    # Finally, tar up the build directory (which includes .c, .h, Makefile, etc.)
+    # Make a tar of the entire build_dir
     archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")
     zip_base = os.path.join(temp_dir, f"build_{build_id}")
     shutil.make_archive(zip_base, 'gztar', temp_dir, f"build_{build_id}")
     return archive_path
 
 
-def find_nim_executable():
-    """
-    Try 'nim' in PATH, else guess common install paths on each OS.
-    """
-    common_paths = {
-        'Windows': [
-            'C:\\Program Files\\Nim\\bin\\nim.exe',
-            'C:\\Nim\\bin\\nim.exe'
-        ],
-        'Darwin': [
-            '/opt/homebrew/bin/nim',
-            '/usr/local/bin/nim'
-        ],
-        'Linux': [
-            '/usr/bin/nim',
-            '/usr/local/bin/nim',
-            '/opt/nim/bin/nim',
-        ]
-    }
-    if is_executable_in_path('nim'):
-        return 'nim'
-    os_type = platform.system()
-    for path in common_paths.get(os_type, []):
-        if os.path.isfile(path) and os.access(path, os.X_OK):
-            return path
-    return None
-
-
-def is_executable_in_path(executable: str):
-    """
-    Check if `executable` is callable from PATH.
-    """
-    try:
-        subprocess.run([executable, '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        return True
-    except FileNotFoundError:
-        return False
-
-
-def get_nim_version(executable_path: str):
-    """
-    Return a parsed packaging.version.Version for nim --version.
-    """
-    try:
-        result = subprocess.run([executable_path, '--version'],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True)
-        # Typically: Nim Compiler Version 2.2.0 [MacOSX: arm64]
-        output = result.stdout.split('\n')[0]
-        # e.g. "Nim Compiler Version 2.2.0"
-        parts = output.split()
-        # The version is usually parts[3], but let's be defensive
-        for p in parts:
-            if re.match(r'^\d+(\.\d+){1,2}', p):
-                return version.parse(p)
-        return None
-    except Exception as e:
-        print(f"Error getting Nim version: {e}")
-        return None
-
-
 def find_nimbase_file(nim_executable: str):
-    """
-    Attempt to find nimbase.h in Nim's lib directory,
-    scanning possible locations on each OS.
-    """
     nimbase_paths: list[str] = []
-
-    # Nim 2.x 'nim dump' can yield Nim paths in stderr
     try:
+        # Attempt nim dump to see if it reveals the Nim lib location
         nim_dump_output = subprocess.run(
             [nim_executable, "dump"], text=True,
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
         ).stderr
-        # Collect lines that reference 'lib'
         nimbase_paths.extend(line for line in nim_dump_output.splitlines() if 'lib' in line)
     except subprocess.CalledProcessError as e:
         print(f"Error running 'nim dump': {e}")
@@ -789,7 +794,6 @@ def find_nimbase_file(nim_executable: str):
     elif os_type == 'Windows':
         nimbase_paths.append('C:\\Nim\\lib')
 
-    # Also check Homebrew Cellar for Nim
     if os_type == 'Darwin':
         base_dir = '/opt/homebrew/Cellar/nim/'
         if os.path.exists(base_dir):
@@ -798,10 +802,147 @@ def find_nimbase_file(nim_executable: str):
                 if os.path.isfile(nb_file):
                     return nb_file
 
-    # See if any path leads to nimbase.h
     for path in nimbase_paths:
         nb_file = os.path.join(path, 'nimbase.h')
         if os.path.isfile(nb_file):
             return nb_file
-
     return None
+
+
+def requires_vendor_upload(drivers: dict) -> bool:
+    """
+    Returns True if we have inky drivers that require uploading Python code to the Pi.
+    """
+    return any(k in drivers for k in ["inkyPython", "inkyHyperPixel2r"])
+
+
+def copy_vendor_folders(drivers: dict, vendor_folder_temp: str):
+    """
+    Copies Inky or other vendor folders into a temp area for tar/transfer.
+    """
+    if inkyPython := drivers.get('inkyPython'):
+        vf = inkyPython.vendor_folder or ""
+        local_from = f"../frameos/vendor/{vf}/"
+        dest = os.path.join(vendor_folder_temp, vf)
+        shutil.copytree(local_from, dest, dirs_exist_ok=True)
+        # remove venv, __pycache__ to reduce size
+        shutil.rmtree(os.path.join(dest, "env"), ignore_errors=True)
+        shutil.rmtree(os.path.join(dest, "__pycache__"), ignore_errors=True)
+
+    if inkyHyperPixel2r := drivers.get('inkyHyperPixel2r'):
+        vf = inkyHyperPixel2r.vendor_folder or ""
+        local_from = f"../frameos/vendor/{vf}/"
+        dest = os.path.join(vendor_folder_temp, vf)
+        shutil.copytree(local_from, dest, dirs_exist_ok=True)
+        shutil.rmtree(os.path.join(dest, "env"), ignore_errors=True)
+        shutil.rmtree(os.path.join(dest, "__pycache__"), ignore_errors=True)
+
+
+async def install_inky_vendors(db: Session, redis: Redis, frame: Frame, ssh, build_id: str, drivers: dict):
+    """
+    If the user wants inky/HyperPixel drivers, set up the Python venv on the Pi.
+    (We assume the vendor folder was either included in the on-device build tar
+     or scp'd separately if cross-compiled.)
+    """
+    if inkyPython := drivers.get("inkyPython"):
+        await install_if_necessary(db, redis, frame, ssh, "python3-pip")
+        await install_if_necessary(db, redis, frame, ssh, "python3-venv")
+        cmd = (
+            f"cd /srv/frameos/vendor/{inkyPython.vendor_folder} && "
+            "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
+            "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
+            "(echo '> env/bin/pip3 install -r requirements.txt' && "
+            "env/bin/pip3 install -r requirements.txt && "
+            "sha256sum requirements.txt > requirements.txt.sha256sum))"
+        )
+        await exec_command(db, redis, frame, ssh, cmd)
+
+    if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
+        await install_if_necessary(db, redis, frame, ssh, "python3-dev")
+        await install_if_necessary(db, redis, frame, ssh, "python3-pip")
+        await install_if_necessary(db, redis, frame, ssh, "python3-venv")
+        cmd = (
+            f"cd /srv/frameos/vendor/{inkyHyperPixel2r.vendor_folder} && "
+            "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
+            "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
+            "(echo '> env/bin/pip3 install -r requirements.txt' && "
+            "env/bin/pip3 install -r requirements.txt && "
+            "sha256sum requirements.txt > requirements.txt.sha256sum))"
+        )
+        await exec_command(db, redis, frame, ssh, cmd)
+
+
+async def handle_additional_device_config(db: Session, redis: Redis, frame: Frame, ssh, arch: str, drivers: dict):
+    """
+    E.g. enabling I2C, SPI, or messing with apt-daily timers for low memory devices,
+    plus appending lines to /boot/config.txt if needed.
+    """
+    mem_output: list[str] = []
+    await exec_command(db, redis, frame, ssh, "free -m", mem_output, raise_on_error=False)
+    total_memory = 0
+    try:
+        total_memory = int(mem_output[1].split()[1])
+    except:
+        pass
+    low_memory = (total_memory < 512)
+
+    boot_config = "/boot/config.txt"
+    if await exec_command(db, redis, frame, ssh, "test -f /boot/firmware/config.txt", raise_on_error=False) == 0:
+        boot_config = "/boot/firmware/config.txt"
+
+    # i2c
+    if drivers.get("i2c"):
+        await exec_command(db, redis, frame, ssh,
+                           f'grep -q "^dtparam=i2c_vc=on$" {boot_config} '
+                           f'|| echo "dtparam=i2c_vc=on" | sudo tee -a {boot_config}')
+        await exec_command(db, redis, frame, ssh,
+                           'command -v raspi-config > /dev/null && '
+                           'sudo raspi-config nonint get_i2c | grep -q "1" && { '
+                           '  sudo raspi-config nonint do_i2c 0; echo "I2C enabled"; '
+                           '} || echo "I2C already enabled"')
+
+    # spi
+    if drivers.get("spi"):
+        await exec_command(db, redis, frame, ssh, 'sudo raspi-config nonint do_spi 0')
+    elif drivers.get("noSpi"):
+        await exec_command(db, redis, frame, ssh, 'sudo raspi-config nonint do_spi 1')
+
+    # Possibly disable apt timers on low memory
+    if low_memory:
+        await exec_command(
+            db, redis, frame, ssh,
+            "systemctl is-enabled apt-daily-upgrade.timer 2>/dev/null | grep -q masked || "
+            "("
+            "  sudo systemctl mask apt-daily-upgrade && "
+            "  sudo systemctl mask apt-daily && "
+            "  sudo systemctl disable apt-daily.service apt-daily.timer apt-daily-upgrade.timer apt-daily-upgrade.service"
+            ")"
+        )
+
+    # Reboot or auto-restart logic from frame.reboot
+    if frame.reboot and frame.reboot.get('enabled') == 'true':
+        cron_schedule = frame.reboot.get('crontab', '0 0 * * *')
+        if frame.reboot.get('type') == 'raspberry':
+            crontab = f"{cron_schedule} root /sbin/shutdown -r now"
+        else:
+            crontab = f"{cron_schedule} root systemctl restart frameos.service"
+        await exec_command(db, redis, frame, ssh, f"echo '{crontab}' | sudo tee /etc/cron.d/frameos-reboot")
+    else:
+        await exec_command(db, redis, frame, ssh, "sudo rm -f /etc/cron.d/frameos-reboot")
+
+    # If we have lines to add to /boot/config.txt:
+    if drivers.get("bootconfig"):
+        lines = drivers["bootconfig"].lines
+        must_reboot = False
+        for line in lines:
+            cmd = f'grep -q "^{line}" {boot_config}'
+            if await exec_command(db, redis, frame, ssh, cmd, raise_on_error=False) != 0:
+                # not found in boot_config
+                await exec_command(
+                    db, redis, frame, ssh,
+                    f'echo "{line}" | sudo tee -a {boot_config}',
+                    log_output=False
+                )
+                must_reboot = True
+        # We store that in the driver dict so the main deploy logic can check:
+        drivers["bootconfig"].needs_reboot = must_reboot

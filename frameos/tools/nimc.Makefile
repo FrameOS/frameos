@@ -5,8 +5,8 @@ SOURCES := $(shell ls -S *.c)
 OBJECTS = $(SOURCES:.c=.o)
 TOTAL = $(words $(SOURCES))
 EXECUTABLE = frameos
-LIBS = -pthread -lm -lm -lrt -ldl
-CFLAGS = -w -fmax-errors=3 -pthread -O3 -fno-strict-aliasing -fno-ident -fno-math-errno
+LIBS = -pthread -lm -lm -lrt -ldl $SYSROOT
+CFLAGS = -w -fmax-errors=3 -pthread -O3 -fno-strict-aliasing -fno-ident -fno-math-errno -g
 
 all: $(EXECUTABLE)
 
@@ -19,7 +19,6 @@ clean:
 
 pre-build:
 	@mkdir -p ../cache
-	@echo "Compiling. This might take minutes on the first run."
 
 $(OBJECTS): pre-build
 
