@@ -114,7 +114,6 @@ class SceneWriter:
         self.run_node_lines = []
         self.after_node_lines = []
         self.run_event_lines = []
-        self.after_render_lines: list[str] = []
         self.event_nodes = {}
         self.next_nodes = {}
         self.prev_nodes = {}
@@ -137,45 +136,10 @@ class SceneWriter:
         return self.node_integer_map[node_id]
 
     def write_scene_nim(self) -> str:
-        self.apply_control_code()
         self.read_edges()
         self.read_nodes()
         return self.write_source()
 
-    def apply_control_code(self):
-        control_code = self.frame.control_code
-        if control_code and control_code.get("enabled") == "true":
-            self.scene_object_fields += ["controlCodeRender: render_imageApp.App"]
-            self.scene_object_fields += ["controlCodeData: data_qrApp.App"]
-            app_import = "import apps/render/image/app as render_imageApp"
-            if app_import not in self.imports:
-                self.imports += [app_import]
-            app_import = "import apps/data/qr/app as data_qrApp"
-            if app_import not in self.imports:
-                self.imports += [app_import]
-            self.init_apps += [
-                'scene.controlCodeRender = render_imageApp.App(nodeName: "render/image", nodeId: -1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(',
-                f'  offsetX: {int(control_code.get("offsetX", "0"))},',
-                f'  offsetY: {int(control_code.get("offsetY", "0"))},',
-                f'  placement: "{sanitize_nim_string(control_code.get("position", "top-right"))}",',
-                '))',
-                'scene.controlCodeData = data_qrApp.App(nodeName: "data/qr", nodeId: -1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_qrApp.AppConfig(',
-                f'  backgroundColor: parseHtmlColor("{sanitize_nim_string(control_code.get("backgroundColor", "#000000"))}"),',
-                f'  qrCodeColor: parseHtmlColor("{sanitize_nim_string(control_code.get("qrCodeColor", "#ffffff"))}"),',
-                f'  padding: {int(control_code.get("padding", "1"))},',
-                f'  size: {float(control_code.get("size", "2"))},',
-                '  codeType: "Frame Control URL",',
-                '  code: "",',
-                '  sizeUnit: "pixels per dot",',
-                '  alRad: 30.0,',
-                '  moRad: 0.0,',
-                '  moSep: 0.0',
-                '))',
-            ]
-            self.after_render_lines += [
-                "self.controlCodeRender.appConfig.image = self.controlCodeData.get(context)",
-                "self.controlCodeRender.run(context)"
-            ]
 
     def read_edges(self):
         for edge in self.edges:
@@ -845,7 +809,6 @@ proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
   context.image.fill(self.backgroundColor)
   runEvent(self, context)
-  {(newline + "  ").join(self.after_render_lines)}
   return context.image
 
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =

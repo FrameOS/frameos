@@ -215,17 +215,25 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "assetsPath": frame.assets_path,
         "saveAssets": frame.save_assets,
         "schedule": frame.schedule,
-        "gpioButtons": frame.gpio_buttons,
+        "gpioButtons": [
+            {
+                "pin": int(button.get("pin", 0)),
+                "label": str(button.get("label", "Pin " + str(button.get("pin"))))
+            }
+            for button in (frame.gpio_buttons or [])
+            if int(button.get("pin", 0)) > 0
+        ],
+        "controlCode": {
+            "enabled": frame.control_code.get('enabled', 'true') == 'true',
+            "position": frame.control_code.get('position', 'top-right'),
+            "size": float(frame.control_code.get('size', '2')),
+            "padding": int(frame.control_code.get('padding', '1')),
+            "offsetX": int(frame.control_code.get('offsetX', '0')),
+            "offsetY": int(frame.control_code.get('offsetY', '0')),
+            "qrCodeColor": frame.control_code.get('qrCodeColor', '#000000'),
+            "backgroundColor": frame.control_code.get('backgroundColor', '#ffffff'),
+        } if frame.control_code else {"enabled": False},
     }
-
-    frame_json["gpioButtons"] = [
-        {
-            "pin": int(button.get("pin", 0)),
-            "label": str(button.get("label", "Pin " + str(button.get("pin"))))
-        }
-        for button in (frame.gpio_buttons or [])
-        if int(button.get("pin", 0)) > 0
-    ]
 
     schedule = frame.schedule
     if schedule is not None:

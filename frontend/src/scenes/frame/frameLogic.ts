@@ -45,14 +45,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'gpio_buttons',
 ]
 
-const FRAME_KEYS_REQUIRE_RECOMPILE: (keyof FrameType)[] = [
-  'device',
-  'background_color',
-  'scenes',
-  'control_code',
-  'reboot',
-  'gpio_buttons',
-]
+const FRAME_KEYS_REQUIRE_RECOMPILE: (keyof FrameType)[] = ['device', 'scenes', 'reboot']
 
 function cleanBackgroundColor(color: string): string {
   // convert the format "(r: 0, g: 0, b: 0)"

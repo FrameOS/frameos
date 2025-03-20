@@ -1,6 +1,8 @@
 import json, pixie, times, options, asyncdispatch, strformat, strutils, locks, tables
 import pixie/fileformats/png
 import scenes/scenes
+import apps/render/image/app as render_imageApp
+import apps/data/qr/app as data_qrApp
 
 import frameos/apps
 import frameos/channels
@@ -145,7 +147,11 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   )
 
   try:
-    let image = exportedScene.render(scene, context)
+    discard exportedScene.render(scene, context)
+    if self.frameConfig.controlCode.enabled:
+      render_imageApp.App(self.controlCodeRender).appConfig.image = data_qrApp.App(self.controlCodeData).get(context)
+      render_imageApp.App(self.controlCodeRender).run(context)
+    let image = context.image
     if image.width != requiredWidth or image.height != requiredHeight:
       let resizedImage = newImage(requiredWidth, requiredHeight)
       resizedImage.fill(scene.backgroundColor)
@@ -358,6 +364,28 @@ proc createRunnerThread*(args: (FrameConfig, Logger)) =
       triggerRenderNext: false,
       logger: args[1]
     )
+    if args[0].controlCode.enabled:
+      let controlCode = args[0].controlCode
+      runnerThread.controlCodeRender = render_imageApp.App(nodeName: "render/image", nodeId: -1.NodeId,
+        frameConfig: args[0], appConfig: render_imageApp.AppConfig(
+        offsetX: controlCode.offsetX,
+        offsetY: controlCode.offsetY,
+        placement: controlCode.position,
+      ))
+      runnerThread.controlCodeData = data_qrApp.App(nodeName: "data/qr", nodeId: -1.NodeId,
+        frameConfig: args[0], appConfig: data_qrApp.AppConfig(
+        backgroundColor: controlCode.backgroundColor,
+        qrCodeColor: controlCode.qrCodeColor,
+        padding: controlCode.padding,
+        size: controlCode.size,
+        codeType: "Frame Control URL",
+        code: "",
+        sizeUnit: "pixels per dot",
+        alRad: 30.0,
+        moRad: 0.0,
+        moSep: 0.0
+      ))
+
     waitFor runnerThread.startRenderLoop() and runnerThread.startMessageLoop()
 
 proc newRunner*(frameConfig: FrameConfig): RunnerControl =

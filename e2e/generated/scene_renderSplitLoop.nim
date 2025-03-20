@@ -75,7 +75,6 @@ proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
   context.image.fill(self.backgroundColor)
   runEvent(self, context)
-  
   return context.image
 
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =

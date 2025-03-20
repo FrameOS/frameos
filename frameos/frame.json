@@ -63,5 +63,8 @@
                 }
             }
         ]
+    },
+    "controlCode": {
+        "enabled": true
     }
 }

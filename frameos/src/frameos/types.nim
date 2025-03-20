@@ -24,10 +24,21 @@ type
     timeZone*: string
     schedule*: FrameSchedule
     gpioButtons*: seq[GPIOButton]
+    controlCode*: ControlCode
 
   GPIOButton* = ref object
     pin*: int
     label*: string
+
+  ControlCode* = ref object
+    enabled*: bool
+    position*: string
+    size*: float
+    padding*: int
+    offsetX*: int
+    offsetY*: int
+    qrCodeColor*: Color
+    backgroundColor*: Color
 
   FrameSchedule* = ref object
     events*: seq[ScheduledEvent]
@@ -121,6 +132,8 @@ type
     sleepFuture*: Option[Future[void]]
     isRendering*: bool = false
     triggerRenderNext*: bool = false
+    controlCodeRender*: AppRoot
+    controlCodeData*: AppRoot
 
   RunnerControl* = ref object
     start*: proc()
