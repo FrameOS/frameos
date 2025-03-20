@@ -40,6 +40,21 @@ proc loadGPIOButtons*(data: JsonNode): seq[GPIOButton] =
       label: button{"label"}.getStr(),
     ))
 
+proc loadControlCode*(data: JsonNode): ControlCode =
+  if data == nil or data.kind != JObject:
+    result = ControlCode(enabled: false)
+  else:
+    result = ControlCode(
+      enabled: data{"enabled"}.getBool(),
+      position: data{"position"}.getStr("top-right"),
+      size: data{"size"}.getFloat(2),
+      padding: data{"padding"}.getInt(1),
+      offsetX: data{"offsetX"}.getInt(0),
+      offsetY: data{"offsetY"}.getInt(0),
+      qrCodeColor: try: parseHtmlColor(data{"qrCodeColor"}.getStr("#000000")) except: parseHtmlColor("#000000"),
+      backgroundColor: try: parseHtmlColor(data{"backgroundColor"}.getStr("#ffffff")) except: parseHtmlColor("#ffffff"),
+    )
+
 proc loadConfig*(filename: string = "frame.json"): FrameConfig =
   let data = parseFile(filename)
   result = FrameConfig(
@@ -65,6 +80,7 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     timeZone: data{"timeZone"}.getStr("UTC"),
     schedule: loadSchedule(data{"schedule"}),
     gpioButtons: loadGPIOButtons(data{"gpioButtons"}),
+    controlCode: loadControlCode(data{"controlCode"}),
   )
   if result.assetsPath.endswith("/"):
     result.assetsPath = result.assetsPath.strip(leading = false, trailing = true, chars = {'/'})
