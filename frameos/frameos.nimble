@@ -20,6 +20,7 @@ requires "linuxfb >= 0.1.0"
 requires "psutil >= 0.6.0"
 requires "ws >= 0.5.0"
 requires "qrgen >= 3.1.0"
+requires "nimassets >= 0.2.4"
 
 taskRequires "assets", "nimassets >= 0.2.4"
 

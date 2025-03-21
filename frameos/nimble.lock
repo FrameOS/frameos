@@ -139,6 +139,28 @@
         "sha1": "8e639fafa952f3e9d0315f181aa05e0694603bfc"
       }
     },
+    "zstd": {
+      "version": "0.9.0",
+      "vcsRevision": "f8f80a57ff782f176b16de0b3885600523d39d80",
+      "url": "https://github.com/wltsmrz/nim_zstd",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "20b23158e94f01ea0c4bf419a21b0feabe70bf31"
+      }
+    },
+    "nimassets": {
+      "version": "0.2.4",
+      "vcsRevision": "d06724dd7b80fb470542ab932f3a94af78fe2eb1",
+      "url": "https://github.com/xmonader/nimassets",
+      "downloadMethod": "git",
+      "dependencies": [
+        "zstd"
+      ],
+      "checksums": {
+        "sha1": "71d5510ad86a323fc0ad5dc6b774261e80fe0361"
+      }
+    },
     "zippy": {
       "version": "0.10.11",
       "vcsRevision": "9560f3d20479fb390c97f731ef8d100f1ed54e6c",
@@ -201,29 +223,6 @@
     }
   },
   "tasks": {
-    "assets": {
-      "zstd": {
-        "version": "0.9.0",
-        "vcsRevision": "f8f80a57ff782f176b16de0b3885600523d39d80",
-        "url": "https://github.com/wltsmrz/nim_zstd",
-        "downloadMethod": "git",
-        "dependencies": [],
-        "checksums": {
-          "sha1": "20b23158e94f01ea0c4bf419a21b0feabe70bf31"
-        }
-      },
-      "nimassets": {
-        "version": "0.2.4",
-        "vcsRevision": "d06724dd7b80fb470542ab932f3a94af78fe2eb1",
-        "url": "https://github.com/xmonader/nimassets",
-        "downloadMethod": "git",
-        "dependencies": [
-          "zstd"
-        ],
-        "checksums": {
-          "sha1": "71d5510ad86a323fc0ad5dc6b774261e80fe0361"
-        }
-      }
-    }
+    "assets": {}
   }
 }
