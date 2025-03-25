@@ -67,7 +67,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         async def install_if_necessary(pkg: str, raise_on_error=True) -> int:
             return await exec_command(
                 db, redis, frame, ssh,
-                f"dpkg -l | grep -q \"^ii  {pkg}\" || sudo apt-get install -y {pkg}",
+                f"dpkg -l | grep -q \"^ii  {pkg} \" || sudo apt-get install -y {pkg}",
                 raise_on_error=raise_on_error
             )
 
