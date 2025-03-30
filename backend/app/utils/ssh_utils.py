@@ -3,7 +3,7 @@ from arq import ArqRedis
 import asyncssh
 import asyncio
 import time
-from typing import Optional, List
+from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.models.log import new_log as log
@@ -224,7 +224,7 @@ async def exec_command(
     frame: Frame,
     ssh: asyncssh.SSHClientConnection,
     command: str,
-    output: Optional[List[str]] = None,
+    output: Optional[list[str]] = None,
     log_output: bool = True,
     raise_on_error: bool = True
 ) -> int:
@@ -238,16 +238,17 @@ async def exec_command(
 
     stdout_buffer = []
     stderr_buffer = []
+    combined_buffer = []
 
     try:
         process = await ssh.create_process(command)
 
         # parallel read
         stdout_task = asyncio.create_task(
-            _stream_lines(db, redis, frame, process.stdout, "stdout", log_output, stdout_buffer if output is not None else None)
+            _stream_lines(db, redis, frame, process.stdout, "stdout", log_output, stdout_buffer, combined_buffer)
         )
         stderr_task = asyncio.create_task(
-            _stream_lines(db, redis, frame, process.stderr, "stderr", log_output, stderr_buffer if output is not None else None)
+            _stream_lines(db, redis, frame, process.stderr, "stderr", log_output, stderr_buffer, combined_buffer)
         )
 
         await asyncio.gather(stdout_task, stderr_task)
@@ -257,8 +258,8 @@ async def exec_command(
 
         # Capture combined stdout if needed
         if output is not None:
-            joined_stdout = "".join(stdout_buffer)
-            output.extend(joined_stdout.split("\n"))
+            joined_output = "".join(combined_buffer)
+            output.extend(joined_output.split("\n"))
 
         if exit_status != 0:
             stderr_data = "".join(stderr_buffer).strip()
@@ -288,7 +289,8 @@ async def _stream_lines(
     stream,
     log_type: str,
     log_output: bool,
-    buffer_list: Optional[List[str]]
+    buffer_list: Optional[list[str]],
+    combined_buffer_list: Optional[list[str]]
 ):
     """
     Helper to read lines from `stream` (stdout or stderr) and:
@@ -301,6 +303,8 @@ async def _stream_lines(
             break
         if buffer_list is not None:
             buffer_list.append(line)
+        if combined_buffer_list is not None:
+            combined_buffer_list.append(line)
         if log_output:
             await log(db, redis, frame.id, log_type, line.rstrip('\n'))
 
