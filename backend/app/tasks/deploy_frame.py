@@ -65,11 +65,26 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         ssh = await get_ssh_connection(db, redis, frame)
 
         async def install_if_necessary(pkg: str, raise_on_error=True) -> int:
-            return await exec_command(
+            search_strings = ["run apt-get update", "404 Not Found", "failed to fetch", "Unable to fetch some archives"]
+            output: list[str] = []
+            response = await exec_command(
                 db, redis, frame, ssh,
                 f"dpkg -l | grep -q \"^ii  {pkg} \" || sudo apt-get install -y {pkg}",
-                raise_on_error=raise_on_error
+                raise_on_error=False,
+                output=output
             )
+            if response != 0:
+                combined_output = "".join(output)
+                if any(s in combined_output for s in search_strings):
+                    await log(db, redis, id, "stdout", f"- Installing {pkg} failed. Trying to update apt.")
+                    response = await exec_command(
+                        db, redis, frame, ssh,
+                        "sudo apt-get update && sudo apt-get install -y " + pkg,
+                        raise_on_error=raise_on_error
+                    )
+                    if response != 0: # we propably raised above
+                        await log(db, redis, id, "stdout", f"- Installing {pkg} failed again.")
+            return response
 
         with tempfile.TemporaryDirectory() as temp_dir:
             await log(db, redis, id, "stdout", "- Getting target architecture")
