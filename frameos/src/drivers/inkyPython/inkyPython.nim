@@ -1,4 +1,4 @@
-import osproc, os, streams, pixie, json, options
+import osproc, os, streams, pixie, json, options, strutils
 import frameos/types
 
 type ScreenInfo* = object
@@ -110,9 +110,12 @@ proc render*(self: Driver, image: Image) =
   pIn.flush
   pIn.close() # NOTE **Essential** - This prevents hanging/freezing when reading stdout below
 
+  let skipped_warning = "Busy Wait: Held high. Waiting for "
+
   while process.running:
     while pOut.readLine(line):
-      discard self.logger.safeLog(line)
+      if self.debug or not (skipped_warning in line):
+        discard self.logger.safeLog(line)
     sleep(100)
   while pOut.readLine(line):
     discard self.logger.safeLog(line)

@@ -51,6 +51,10 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
             {"pin": 16, "label": "C"},
             {"pin": 24, "label": "D"},
         ]
+        device_drivers["bootconfig"] = DRIVERS["bootConfig"]
+        device_drivers["bootconfig"].lines = [
+            "dtoverlay=spi0-0cs",
+        ]
 
     if "gpioButton" not in device_drivers and len(frame.gpio_buttons or []) > 0:
         device_drivers["gpioButton"] = DRIVERS["gpioButton"]
