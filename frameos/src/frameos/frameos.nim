@@ -1,4 +1,5 @@
-import json, asyncdispatch, pixie, strutils
+import json, asyncdispatch, pixie, strutils, times, os
+import httpclient
 import drivers/drivers as drivers
 import frameos/config
 import frameos/logger
@@ -44,6 +45,34 @@ proc start*(self: FrameOS) {.async.} =
     "gpioButtons": self.frameConfig.gpioButtons,
   }}
   self.logger.log(message)
+
+  # Check if there's an internet connection or until timeout
+  if self.frameConfig.network.networkCheck and self.frameConfig.network.networkCheckTimeoutSeconds > 0:
+    let url = self.frameConfig.network.networkCheckUrl
+    let timeout = self.frameConfig.network.networkCheckTimeoutSeconds
+    let timer = epochTime()
+    var attempt = 1
+    self.logger.log(%*{"event": "networkCheck", "url": url})
+    while true:
+      if epochTime() - timer >= timeout:
+        self.logger.log(%*{"event": "networkCheck", "status": "timeout", "seconds": timeout})
+        break
+      let client = newHttpClient(timeout = 5000)
+      try:
+        let response = client.get(url)
+        if response.status.startsWith("200"):
+          self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "success"})
+          break
+        else:
+          self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "failed",
+              "response": response.status})
+      except CatchableError as e:
+        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
+      finally:
+        client.close()
+      sleep(attempt * 1000)
+      attempt += 1
+
   self.runner.start()
   result = self.server.startServer()
 

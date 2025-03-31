@@ -50,6 +50,11 @@ export interface FrameType {
   }
   schedule?: FrameSchedule
   gpio_buttons?: GPIOButton[]
+  network?: {
+    networkCheck?: boolean
+    networkCheckTimeoutSeconds?: number
+    networkCheckUrl?: string
+  }
 }
 
 export interface GPIOButton {

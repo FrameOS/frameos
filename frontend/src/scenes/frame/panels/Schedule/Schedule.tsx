@@ -181,7 +181,7 @@ function EditRow({ event, scenesAsOptions, eventFields, closeEvent, deleteEvent 
         ) : null}
       </Group>
       <Field name="disabled">
-        {({ value, onChange }) => <Switch label="Enabled" checked={!value} onChange={(v) => onChange(!v)} />}
+        {({ value, onChange }) => <Switch label="Enabled" value={!value} onChange={(v) => onChange(!v)} />}
       </Field>
       <div className="flex gap-2">
         <div className="@md:w-1/3 hidden @md:block" />
@@ -223,9 +223,7 @@ export function Schedule() {
       <Form logic={frameLogic} formKey="frameForm" className="space-y-2">
         <div className="flex w-full items-center justify-between">
           <Field name={['schedule', 'disabled']}>
-            {({ value, onChange }) => (
-              <Switch label="Enable schedule" checked={!value} onChange={(v) => onChange(!v)} />
-            )}
+            {({ value, onChange }) => <Switch label="Enable schedule" value={!value} onChange={(v) => onChange(!v)} />}
           </Field>
           <Select
             options={[

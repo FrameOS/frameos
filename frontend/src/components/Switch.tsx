@@ -3,19 +3,19 @@ import { clsx } from 'clsx'
 import { Switch as HeadlessSwitch } from '@headlessui/react'
 import { Label } from './Label'
 
-export interface SwitchProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onChange'> {
+export interface SwitchProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onChange' | 'value'> {
   onChange?: (value: boolean) => void
-  checked?: boolean
+  value?: boolean
   label?: ReactNode
 }
 
 export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch(
-  { className, onChange, checked, disabled, label, ...props }: SwitchProps,
+  { className, onChange, value, disabled, label, ...props }: SwitchProps,
   ref
 ) {
   return (
     <HeadlessSwitch
-      checked={!!checked}
+      checked={!!value}
       onChange={onChange}
       as="div"
       className={clsx('inline-flex gap-1 items-center', className)}
@@ -24,16 +24,14 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch
       <button
         className={clsx(
           'group inline-flex h-6 w-11 items-center rounded-full',
-          checked ? 'bg-[#4a4b8c]' : 'bg-gray-600',
+          value ? 'bg-[#4a4b8c]' : 'bg-gray-600',
           disabled && 'cursor-not-allowed opacity-50'
         )}
         disabled={disabled}
         {...props}
       >
         <span className="sr-only">{label}</span>
-        <span
-          className={clsx('size-4 rounded-full bg-white transition', checked ? 'translate-x-6' : 'translate-x-1')}
-        />
+        <span className={clsx('size-4 rounded-full bg-white transition', value ? 'translate-x-6' : 'translate-x-1')} />
       </button>
       {label && <Label className="cursor-pointer">{label}</Label>}
     </HeadlessSwitch>
