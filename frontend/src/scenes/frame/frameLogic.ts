@@ -43,6 +43,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'control_code',
   'schedule',
   'gpio_buttons',
+  'network',
 ]
 
 const FRAME_KEYS_REQUIRE_RECOMPILE: (keyof FrameType)[] = ['device', 'scenes', 'reboot']
@@ -160,7 +161,7 @@ export const frameLogic = kea<frameLogicType>([
           })),
         })),
       }),
-      submit: async (frame, breakpoint) => {
+      submit: async (frame) => {
         const json: Record<string, any> = {}
         for (const key of FRAME_KEYS) {
           json[key] = frame[key as keyof typeof frame]

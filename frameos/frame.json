@@ -66,5 +66,10 @@
     },
     "controlCode": {
         "enabled": true
+    },
+    "network": {
+        "networkCheck": true,
+        "networkCheckSeconds": 60,
+        "networkCheckUrl": "https://networkcheck.frameos.net/"
     }
 }

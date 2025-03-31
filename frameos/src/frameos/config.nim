@@ -55,6 +55,16 @@ proc loadControlCode*(data: JsonNode): ControlCode =
       backgroundColor: try: parseHtmlColor(data{"backgroundColor"}.getStr("#ffffff")) except: parseHtmlColor("#ffffff"),
     )
 
+proc loadNetwork*(data: JsonNode): NetworkConfig =
+  if data == nil or data.kind != JObject:
+    result = NetworkConfig(networkCheck: false)
+  else:
+    result = NetworkConfig(
+      networkCheck: data{"networkCheck"}.getBool(),
+      networkCheckTimeoutSeconds: data{"networkCheckTimeoutSeconds"}.getFloat(60),
+      networkCheckUrl: data{"networkCheckUrl"}.getStr("https://networkcheck.frameos.net"),
+    )
+
 proc loadConfig*(filename: string = "frame.json"): FrameConfig =
   let data = parseFile(filename)
   result = FrameConfig(
@@ -81,6 +91,7 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     schedule: loadSchedule(data{"schedule"}),
     gpioButtons: loadGPIOButtons(data{"gpioButtons"}),
     controlCode: loadControlCode(data{"controlCode"}),
+    network: loadNetwork(data{"network"}),
   )
   if result.assetsPath.endswith("/"):
     result.assetsPath = result.assetsPath.strip(leading = false, trailing = true, chars = {'/'})

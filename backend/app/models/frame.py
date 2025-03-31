@@ -55,6 +55,7 @@ class Frame(Base):
     last_successful_deploy_at = mapped_column(DateTime, nullable=True)
     schedule = mapped_column(JSON, nullable=True)
     gpio_buttons = mapped_column(JSON, nullable=True)
+    network = mapped_column(JSON, nullable=True)
 
     # not used
     apps = mapped_column(JSON, nullable=True)
@@ -97,6 +98,7 @@ class Frame(Base):
             'control_code': self.control_code,
             'schedule': self.schedule,
             'gpio_buttons': self.gpio_buttons,
+            'network': self.network,
             'last_successful_deploy': self.last_successful_deploy,
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
@@ -148,6 +150,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         assets_path='/srv/assets',
         save_assets=True,
         upload_fonts='', # all
+        network={"networkCheck": True, "networkCheckTimeoutSeconds": 60, "networkCheckUrl": "https://networkcheck.frameos.net/"},
         control_code={"enabled": "true", "position": "top-right"},
         schedule={"events": []},
         reboot={"enabled": "true", "crontab": "4 0 * * *"},
@@ -233,6 +236,11 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "qrCodeColor": frame.control_code.get('qrCodeColor', '#000000'),
             "backgroundColor": frame.control_code.get('backgroundColor', '#ffffff'),
         } if frame.control_code else {"enabled": False},
+        "network": {
+            "networkCheck": frame.network.get('networkCheck', True),
+            "networkCheckTimeoutSeconds": int(frame.network.get('networkCheckTimeoutSeconds', 60)),
+            "networkCheckUrl": frame.network.get('networkCheckUrl', "https://networkcheck.frameos.net/"),
+        }
     }
 
     schedule = frame.schedule

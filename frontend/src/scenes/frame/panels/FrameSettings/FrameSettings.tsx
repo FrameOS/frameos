@@ -17,6 +17,8 @@ import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ArrowDownTrayIcon, ArrowPathIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline'
 import { PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
+import { Switch } from '../../../../components/Switch'
+import { NumberTextInput } from '../../../../components/NumberTextInput'
 
 export interface FrameSettingsProps {
   className?: string
@@ -255,6 +257,38 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                   required
                 />
               </Field>
+            </div>
+            <H6>Network</H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Group name="network">
+                <Field name="networkCheck" label="Wait for network before rendering">
+                  {({ value, onChange }) => <Switch name="networkCheck" value={value} onChange={onChange} />}
+                </Field>
+                {frameForm.network?.networkCheck && (
+                  <>
+                    <Field name="networkCheckUrl" label="Network check URL">
+                      {({ onChange, value }) => (
+                        <TextInput
+                          name="networkCheckUrl"
+                          placeholder="https://networkcheck.frameos.net/"
+                          onChange={onChange}
+                          value={value ?? 'https://networkcheck.frameos.net/'}
+                        />
+                      )}
+                    </Field>
+                    <Field name="networkCheckTimeoutSeconds" label="Network check timeout in seconds">
+                      {({ onChange, value }) => (
+                        <NumberTextInput
+                          name="networkCheckTimeoutSeconds"
+                          placeholder="60"
+                          onChange={onChange}
+                          value={value ?? 60}
+                        />
+                      )}
+                    </Field>
+                  </>
+                )}
+              </Group>
             </div>
             <H6>Defaults</H6>
             <div className="pl-2 @md:pl-8 space-y-2">

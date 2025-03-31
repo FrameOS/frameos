@@ -25,6 +25,7 @@ type
     schedule*: FrameSchedule
     gpioButtons*: seq[GPIOButton]
     controlCode*: ControlCode
+    network*: NetworkConfig
 
   GPIOButton* = ref object
     pin*: int
@@ -39,6 +40,11 @@ type
     offsetY*: int
     qrCodeColor*: Color
     backgroundColor*: Color
+
+  NetworkConfig* = ref object
+    networkCheck*: bool
+    networkCheckTimeoutSeconds*: float
+    networkCheckUrl*: string
 
   FrameSchedule* = ref object
     events*: seq[ScheduledEvent]
