@@ -1,0 +1,49 @@
+{
+    "name": "Browser screenshot",
+    "description": "Capture a snapshot of a website on device using headless chromium. Only works on 64-bit Raspberry Pis.",
+    "category": "data",
+    "version": "1.0.0",
+    "apt": ["chromium-browser", "xvfb", "chromium-chromedriver"],
+    "fields": [
+      {
+        "name": "url",
+        "type": "text",
+        "value": "https://frameos.net/",
+        "required": true,
+        "label": "URL to capture",
+        "placeholder": ""
+      },
+      {
+        "name": "width",
+        "type": "integer",
+        "value": "",
+        "label": "Width (0=full width)",
+        "placeholder": "0"
+      },
+      {
+        "name": "height",
+        "type": "integer",
+        "value": "",
+        "label": "Height (0=full height)",
+        "placeholder": "0"
+      },
+      {
+        "name": "scaling_factor",
+        "type": "float",
+        "value": "1",
+        "label": "Scaling factor"
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "900"
+    }
+  }
