@@ -3,7 +3,7 @@
     "description": "Capture a snapshot of a website on device using headless chromium. Only works on 64-bit Raspberry Pis.",
     "category": "data",
     "version": "1.0.0",
-    "apt": ["chromium-browser", "xvfb", "chromium-chromedriver"],
+    "apt": ["python3-pip", "python3-venv"],
     "fields": [
       {
         "name": "url",
@@ -11,6 +11,14 @@
         "value": "https://frameos.net/",
         "required": true,
         "label": "URL to capture",
+        "placeholder": ""
+      },
+      {
+        "name": "source",
+        "type": "text",
+        "value": "from playwright.sync_api import sync_playwright\n\np = sync_playwright()\nbrowser_type = p.chromium\nbrowser = browser_type.launch()\npage = browser.new_page()\npage.goto('http://playwright.dev')\npage.screenshot(path=SCREENSHOT_PATH)\nbrowser.close()\n",
+        "required": true,
+        "label": "Pupeteer Python code",
         "placeholder": ""
       },
       {
