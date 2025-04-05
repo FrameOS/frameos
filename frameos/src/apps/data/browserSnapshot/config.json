@@ -1,0 +1,52 @@
+{
+    "name": "Browser snapshot",
+    "description": "Capture a snapshot of a website with playwright and headless chromium. Needs a 64-bit system.",
+    "category": "data",
+    "version": "1.0.0",
+    "apt": ["python3-pip", "python3-venv"],
+    "fields": [
+      {
+        "name": "url",
+        "type": "text",
+        "value": "https://frameos.net/",
+        "required": true,
+        "label": "URL to capture",
+        "placeholder": ""
+      },
+      {
+        "name": "source",
+        "type": "text",
+        "rows": 6,
+        "value": "page.wait_for_load_state(\"networkidle\")",
+        "hint": "Python code to run before taking the screenshot. Use 'page' variable to access the page object.\n\nExamples:\npage.wait_for_load_state(\"networkidle\")\n# page.wait_for_selector(\"body\")\n# time.sleep(2)\n",
+        "required": true,
+        "label": "Playwright python code"
+      },
+      {
+        "name": "width",
+        "type": "integer",
+        "value": "",
+        "label": "Width (0=full width)",
+        "placeholder": "0"
+      },
+      {
+        "name": "height",
+        "type": "integer",
+        "value": "",
+        "label": "Height (0=full height)",
+        "placeholder": "0"
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "900"
+    }
+  }
