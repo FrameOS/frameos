@@ -3,12 +3,28 @@ import frameos/apps
 import frameos/types
 import frameos/utils/image
 
-import os, strformat, strutils, random, osproc
+import os, strformat, strutils, random, json
+
+const DEFAULT_PLAYWRIGHT_SCRIPT_START = """
+import time
+from playwright.sync_api import sync_playwright
+
+playwright = sync_playwright().start()
+browser = playwright.chromium.launch()
+page = browser.new_page()
+page.goto(URL_TO_CAPTURE)
+page.set_viewport_size({"width": WIDTH, "height": HEIGHT})
+"""
+
+const DEFAULT_PLAYWRIGHT_SCRIPT_END = """
+page.screenshot(path=SCREENSHOT_PATH)
+browser.close()
+playwright.stop()
+"""
 
 type
   AppConfig* = object
     url*: string
-    scaling_factor*: float
     width*: int
     height*: int
     source*: string
@@ -21,8 +37,9 @@ proc init*(self: App) =
   discard
 
 # Ensure the virtual environment exists and is set up
-proc ensureVenvExists(self: App) =
-  let venvPath = "/srv/frameos/venvs/browserScreenshot"
+proc ensureVenvExists(self: App): string =
+  let venvPath = "/srv/frameos/venvs/screenshot"
+  result = venvPath
   let venvPython = venvPath & "/bin/python"
   if not fileExists(venvPython):
     self.log "Virtual environment not found. Creating venv at " & venvPath
@@ -45,40 +62,42 @@ proc ensureVenvExists(self: App) =
       return
 
 proc get*(self: App, context: ExecutionContext): Image =
-  try:
-    let scalingFactor = self.appConfig.scaling_factor
-    let width = if self.appConfig.width != 0:
-                  self.appConfig.width
+  let width = if self.appConfig.width != 0:
+                self.appConfig.width
+              elif context.hasImage:
+                context.image.width
+              else:
+                self.frameConfig.renderWidth()
+  let height = if self.appConfig.height != 0:
+                  self.appConfig.height
+              elif context.hasImage:
+                context.image.height
                 else:
-                  self.frameConfig.renderWidth()
-    let height = if self.appConfig.height != 0:
-                   self.appConfig.height
-                 else:
-                   self.frameConfig.renderHeight()
+                  self.frameConfig.renderHeight()
 
-    self.log &"Capturing URL `{self.appConfig.url}` at {width}x{height} (factor: {scalingFactor}x)"
-
-    # Define temporary file for screens≥hot
+  try:
     let screenshotFile = fmt"/tmp/frameos_screenshot_{rand(1000000)}_{rand(1000000)}.png"
+    let scriptFile = fmt"/tmp/frameos_playwright_script_{rand(1000000)}.py"
+
+    self.log &"Capturing URL `{self.appConfig.url}` at {width}x{height} in {screenshotFile}"
+
     if fileExists(screenshotFile):
       try: removeFile(screenshotFile)
       except: discard
 
     # Ensure the Python venv for Playwright exists and is set up.
-    self.ensureVenvExists()
-    let venvPython = "/srv/frameos/venvs/browserScreenshot/bin/python"
+    let venvRoot = self.ensureVenvExists()
+    let venvPython = venvRoot & "/bin/python"
 
     # Write the playwright script to a temporary file
-    let scriptFile = fmt"/tmp/frameos_playwright_script_{rand(1000000)}.py"
-    # TODO: sanitize URL_TO_CAPTURE
-    writeFile(scriptFile, self.appConfig.source.replace("SCREENSHOT_PATH", &"\"{screenshotFile}\"").replace(
-        "URL_TO_CAPTURE", &"\"{self.appConfig.url}\""))
+    let scripHead = DEFAULT_PLAYWRIGHT_SCRIPT_START.replace("URL_TO_CAPTURE", $(%*(self.appConfig.url)))
+      .replace("WIDTH", $width).replace("HEIGHT", $height)
+    let scriptTail = DEFAULT_PLAYWRIGHT_SCRIPT_END.replace("SCREENSHOT_PATH", $(%*(screenshotFile)))
+    writeFile(scriptFile, scripHead & self.appConfig.source & "\n" & scriptTail)
 
-    # Build the command:
-    # We pass: url, screenshotFile, width, height, scalingFactor as arguments.
-    var cmd = &"{venvPython} {scriptFile} \"{self.appConfig.url}\" \"{screenshotFile}\" {width} {height} {scalingFactor}"
+    # Run the script
+    var cmd = &"{venvPython} {scriptFile}"
     self.log "Running command: " & cmd
-
     try:
       let response = execShellCmd(cmd)
       if response != 0:
@@ -114,6 +133,4 @@ proc get*(self: App, context: ExecutionContext): Image =
     if context.hasImage:
       return context.image
     else:
-      return renderError(self.frameConfig.renderWidth(),
-                         self.frameConfig.renderHeight(),
-                         "Error capturing screenshot")
+      return renderError(width, height, "Error capturing screenshot")
