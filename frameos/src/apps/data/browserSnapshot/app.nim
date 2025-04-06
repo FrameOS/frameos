@@ -3,7 +3,7 @@ import frameos/apps
 import frameos/types
 import frameos/utils/image
 
-import os, strformat, strutils, random, json
+import os, strformat, strutils, random, json, osproc
 
 const DEFAULT_PLAYWRIGHT_SCRIPT_START = """
 import time
@@ -99,9 +99,9 @@ proc get*(self: App, context: ExecutionContext): Image =
     var cmd = &"{venvPython} {scriptFile}"
     self.log "Running command: " & cmd
     try:
-      let response = execShellCmd(cmd)
+      let (output, response) = execCmdEx(cmd)
       if response != 0:
-        self.logError &"Playwright command failed with response: {response}"
+        self.logError &"Playwright command failed with response {response}: {output}"
         return renderError(width, height, "Playwright command failed")
     except OSError as e:
       self.logError &"Error running playwright command: {e.msg}"
