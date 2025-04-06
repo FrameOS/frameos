@@ -198,6 +198,7 @@ def get_templates_json() -> dict:
         return {}
 
 def get_frame_json(db: Session, frame: Frame) -> dict:
+    network = frame.network or {}
     frame_json: dict = {
         "name": frame.name,
         "frameHost": frame.frame_host or "localhost",
@@ -237,9 +238,9 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "backgroundColor": frame.control_code.get('backgroundColor', '#ffffff'),
         } if frame.control_code else {"enabled": False},
         "network": {
-            "networkCheck": frame.network.get('networkCheck', True),
-            "networkCheckTimeoutSeconds": int(frame.network.get('networkCheckTimeoutSeconds', 60)),
-            "networkCheckUrl": frame.network.get('networkCheckUrl', "https://networkcheck.frameos.net/"),
+            "networkCheck": network.get('networkCheck', True),
+            "networkCheckTimeoutSeconds": int(network.get('networkCheckTimeoutSeconds', 60)),
+            "networkCheckUrl": network.get('networkCheckUrl', "https://networkcheck.frameos.net/"),
         }
     }
 
