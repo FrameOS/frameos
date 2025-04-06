@@ -17,7 +17,7 @@ page.set_viewport_size({"width": WIDTH, "height": HEIGHT})
 """
 
 const DEFAULT_PLAYWRIGHT_SCRIPT_END = """
-page.screenshot(path=SCREENSHOT_PATH)
+page.screenshot(path=SCREENSHOT_PATH, timeout=120000)
 browser.close()
 playwright.stop()
 """
