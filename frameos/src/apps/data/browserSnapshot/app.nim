@@ -27,7 +27,6 @@ type
     url*: string
     width*: int
     height*: int
-    source*: string
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -92,8 +91,11 @@ proc get*(self: App, context: ExecutionContext): Image =
     # Write the playwright script to a temporary file
     let scripHead = DEFAULT_PLAYWRIGHT_SCRIPT_START.replace("URL_TO_CAPTURE", $(%*(self.appConfig.url)))
       .replace("WIDTH", $width).replace("HEIGHT", $height)
+    # TODO: make this configurable... but also compatible with a background browser process
+    let scriptBody = "page.wait_for_load_state(\"networkidle\")\n"
     let scriptTail = DEFAULT_PLAYWRIGHT_SCRIPT_END.replace("SCREENSHOT_PATH", $(%*(screenshotFile)))
-    writeFile(scriptFile, scripHead & self.appConfig.source & "\n" & scriptTail)
+
+    writeFile(scriptFile, scripHead & scriptBody & "\n" & scriptTail)
 
     # Run the script
     var cmd = &"{venvPython} {scriptFile}"

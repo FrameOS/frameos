@@ -14,15 +14,6 @@
         "placeholder": ""
       },
       {
-        "name": "source",
-        "type": "text",
-        "rows": 6,
-        "value": "page.wait_for_load_state(\"networkidle\")",
-        "hint": "Python code to run before taking the screenshot. Use 'page' variable to access the page object.\n\nExamples:\npage.wait_for_load_state(\"networkidle\")\n# page.wait_for_selector(\"body\")\n# time.sleep(2)\n",
-        "required": true,
-        "label": "Playwright python code"
-      },
-      {
         "name": "width",
         "type": "integer",
         "value": "",
