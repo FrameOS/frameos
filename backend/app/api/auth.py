@@ -3,7 +3,6 @@ from typing import Optional
 
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-import httpx
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
@@ -98,15 +97,15 @@ async def signup(data: UserSignup, db: Session = Depends(get_db)):
     if db.query(User).filter_by(email=data.email).first():
         raise HTTPException(status_code=400, detail="Email already in use.")
 
-    if data.newsletter:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://buttondown.email/api/emails/embed-subscribe/frameos",
-                data={ "email": data.email },
-                timeout=15.0
-            )
-            if response.status_code not in (200, 301, 302):
-                raise HTTPException(status_code=400, detail="Error signing up to newsletter.")
+    # if data.newsletter:
+    #     async with httpx.AsyncClient() as client:
+    #         response = await client.post(
+    #             "https://buttondown.email/api/emails/embed-subscribe/frameos",
+    #             data={ "email": data.email },
+    #             timeout=15.0
+    #         )
+    #         if response.status_code not in (200, 301, 302):
+    #             raise HTTPException(status_code=400, detail="Error signing up to newsletter.")
 
     user = User(email=data.email)
     user.password = generate_password_hash(data.password)
