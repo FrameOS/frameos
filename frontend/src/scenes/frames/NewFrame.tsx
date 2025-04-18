@@ -6,10 +6,15 @@ import { TextInput } from '../../components/TextInput'
 import { Field } from '../../components/Field'
 import { newFrameForm } from './newFrameForm'
 import { Select } from '../../components/Select'
-import { useActions, useValues } from 'kea'
+import { useActions } from 'kea'
 import { devices } from '../../devices'
 import { A } from 'kea-router'
 import { urls } from '../../urls'
+
+function isLocalServer(host?: string): boolean {
+  const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
+  return !!host && localHostRegex.test(host)
+}
 
 export function NewFrame(): JSX.Element {
   const { hideForm, resetNewFrame } = useActions(newFrameForm)
@@ -35,7 +40,17 @@ export function NewFrame(): JSX.Element {
             <TextInput name="frame_host" placeholder="user:pass@127.0.0.1" required />
           </Field>
           <Field name="server_host" label="Controller IP or hostname for reverse access">
-            <TextInput name="server_host" placeholder="127.0.0.1" required />
+            {({ value, onChange }) => (
+              <>
+                <TextInput name="server_host" placeholder="127.0.0.1" required value={value} onChange={onChange} />
+                {isLocalServer(value) ? (
+                  <p className="text-sm">
+                    <span className="text-orange-500">Warning!</span> Set this to the real IP of this computer, not to
+                    "localhost". It's used for log aggregation from the frame itself.
+                  </p>
+                ) : null}
+              </>
+            )}
           </Field>
           <Field name="device" label="Driver">
             <Select name="device" options={devices} />
