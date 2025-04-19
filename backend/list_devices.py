@@ -25,6 +25,7 @@ if __name__ == '__main__':
             "BlackWhiteYellow": "Black/White/Yellow",
             "BlackWhiteYellowRed": "Black/White/Yellow/Red",
             "FourGray": "4 Grayscale",
+            "SixteenGray": "16 Grayscale",
             "SevenColor": "7 Color",
             "SpectraSixColor": "Spectra 6 Color",
         }.get(v.color_option, v.color_option)

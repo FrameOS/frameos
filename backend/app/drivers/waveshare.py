@@ -66,6 +66,8 @@ VARIANT_COLORS = {
     "EPD_4in0e": "SpectraSixColor",
     "EPD_7in3e": "SpectraSixColor",
     "EPD_13in3e": "SpectraSixColor",
+
+    "EPD_10in3": "SixteenGray",
 }
 
 def get_variant_keys_for(folder: str) -> list[str]:
@@ -77,13 +79,20 @@ def get_variant_keys_for(folder: str) -> list[str]:
     ]
 
 def get_variant_keys() -> list[str]:
-    return [*get_variant_keys_for("ePaper"), *get_variant_keys_for("epd12in48"), *get_variant_keys_for("epd13in3e")]
+    return [
+        *get_variant_keys_for("ePaper"),
+        *get_variant_keys_for("it8951"),
+        *get_variant_keys_for("epd12in48"),
+        *get_variant_keys_for("epd13in3e"),
+    ]
 
 def get_variant_folder(variant_key: str) -> str:
     if variant_key in get_variant_keys_for("ePaper") :
         return "ePaper"
     elif variant_key == "EPD_13in3e":
         return "epd13in3e"
+    elif variant_key == "EPD_10in3":
+        return "it8951"
     else:
         return "epd12in48"
 
@@ -181,6 +190,9 @@ def convert_waveshare_source(variant_key: Optional[str]) -> WaveshareVariant:
                     variant.display_function = proc_name
                     variant.display_arguments = get_proc_arguments(line, variant_key)
                     # print("-> " + proc_name + "(" + (", ".join(variant.display_arguments)) + ") <-")
+                if (proc_name.lower() == f"{variant.prefix}_16Gray_Display".lower()):
+                    variant.display_function = proc_name
+                    variant.display_arguments = get_proc_arguments(line, variant_key)
 
         if variant.display_arguments == ["Black"]:
             variant.color_option = "Black"
@@ -197,6 +209,8 @@ def convert_waveshare_source(variant_key: Optional[str]) -> WaveshareVariant:
             variant.color_option = "SevenColor"
         elif variant.display_arguments == ["SpectraSixColor"]:
             variant.color_option = "SpectraSixColor"
+        elif variant_key == "EPD_10in3":
+            variant.color_option = "SixteenGray"
         else:
             print(f"Unknown color: {variant_key} - {variant.display_function} -- {variant.display_arguments}" )
 
