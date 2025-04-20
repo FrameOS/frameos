@@ -131,19 +131,26 @@ async def api_frame_get_image(
                       .filter_by(frame_id=id, scene_id=scene_id)
                       .first()
                 )
+                thumb, t_width, t_height = _generate_thumbnail(response.content)
                 if img_row:
-                    img_row.image     = response.content
-                    img_row.timestamp = now
-                    img_row.width     = width
-                    img_row.height    = height
+                    img_row.image      = response.content
+                    img_row.timestamp  = now
+                    img_row.width      = width
+                    img_row.height     = height
+                    img_row.thumb_image = thumb
+                    img_row.thumb_width = t_width
+                    img_row.thumb_height = t_height
                 else:
                     img_row = SceneImage(
-                        frame_id  = id,
-                        scene_id  = scene_id,
-                        image     = response.content,
-                        timestamp = now,
-                        width     = width,
-                        height    = height,
+                        frame_id    = id,
+                        scene_id    = scene_id,
+                        image       = response.content,
+                        timestamp   = now,
+                        width       = width,
+                        height      = height,
+                        thumb_image = thumb,
+                        thumb_width = t_width,
+                        thumb_height = t_height
                     )
                     db.add(img_row)
                 db.commit()
