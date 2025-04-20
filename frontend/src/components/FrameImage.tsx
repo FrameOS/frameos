@@ -25,7 +25,7 @@ export function FrameImage({ frameId, sceneId, thumb = false, className, refresh
   const frame = frames[frameId]
 
   const entityId = `frames/${frameId}`
-  const subEntityId = sceneId ? `scene_images/${sceneId}${thumb ? '_thumb' : ''}` : 'image'
+  const subEntityId = sceneId ? `scene_images/${sceneId}` : 'image'
 
   const { imageUrl, isLoading, setIsLoading } = useEntityImage(entityId, subEntityId)
 
