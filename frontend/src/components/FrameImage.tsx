@@ -9,6 +9,7 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
   className?: string
   /** If true, user can click on the image to request a refresh of the signed URL */
   refreshable?: boolean
+  thumb?: boolean
 }
 
 /**
@@ -18,13 +19,13 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
  * - Shows loading states based on image load or frame readiness
  * - Optionally allows clicking the image container to refresh the image link if `refreshable` is true
  */
-export function FrameImage({ frameId, sceneId, className, refreshable = true, ...props }: FrameImageProps) {
+export function FrameImage({ frameId, sceneId, thumb = false, className, refreshable = true, ...props }: FrameImageProps) {
   const { frames } = useValues(framesModel)
   const { updateEntityImage } = useActions(entityImagesModel)
   const frame = frames[frameId]
 
   const entityId = `frames/${frameId}`
-  const subEntityId = sceneId ? `scene_images/${sceneId}` : 'image'
+  const subEntityId = sceneId ? `scene_images/${sceneId}${thumb ? '_thumb' : ''}` : 'image'
 
   const { imageUrl, isLoading, setIsLoading } = useEntityImage(entityId, subEntityId)
 

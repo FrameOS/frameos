@@ -124,7 +124,7 @@ export function Scenes() {
             >
               <div className="flex items-start justify-between gap-1">
                 <div className="max-w-[120px]">
-                  <FrameImage frameId={frameId} sceneId={scene.id} />
+                  <FrameImage frameId={frameId} sceneId={scene.id} thumb />
                 </div>
                 <div className="break-inside-avoid space-y-1 w-full">
                   <div className="flex items-start justify-between gap-1">
