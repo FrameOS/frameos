@@ -244,7 +244,7 @@ export function Scenes() {
                 ) : null}
               </div>
 
-              <div className="pl-7">
+              <div className="pl-7 max-w-[400px]">
                 <FrameImage frameId={frameId} sceneId={scene.id} />
               </div>
 
