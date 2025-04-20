@@ -39,6 +39,24 @@ def _generate_placeholder(width: Optional[int], height: Optional[int]) -> bytes:
     return buf.read()
 
 
+def _generate_thumbnail(image_bytes: bytes) -> tuple[bytes, int, int]:
+    """
+    Generate a JPEG thumbnail with max width 320px preserving aspect ratio.
+    """
+    with Image.open(io.BytesIO(image_bytes)) as img:
+        # Convert image to RGB if not already in that mode.
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        orig_width, orig_height = img.size
+        new_width = min(orig_width, 320)
+        new_height = int((new_width / orig_width) * orig_height)
+        img = img.resize((new_width, new_height), Image.ANTIALIAS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        buf.seek(0)
+        return buf.read(), new_width, new_height
+
+
 @api_no_auth.get("/frames/{frame_id}/scene_images/{scene_id}")
 async def get_scene_image(
     frame_id: int,
@@ -69,7 +87,15 @@ async def get_scene_image(
     )
 
     if img_row:
-        # fresh snapshot found
+        # fresh snapshot found, generate and save thumbnail if not present
+        if not getattr(img_row, 'thumb_image', None):
+            thumb, t_width, t_height = _generate_thumbnail(img_row.image)
+            img_row.thumb_image = thumb
+            img_row.thumb_width = t_width
+            img_row.thumb_height = t_height
+            db.add(img_row)
+            db.commit()
+            db.refresh(img_row)
         return StreamingResponse(
             io.BytesIO(img_row.image),
             media_type="image/png",
