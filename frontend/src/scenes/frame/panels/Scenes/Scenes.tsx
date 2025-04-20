@@ -177,13 +177,14 @@ export function Scenes() {
                       e.stopPropagation()
                       editScene(scene.id)
                     }}
-                    title="Activate"
+                    title="Edit"
                   >
                     <PencilSquareIcon className="w-5 h-5" />
                   </Button>
                   <SceneDropDown context="scenes" sceneId={scene.id} />
                 </div>
               </div>
+
               <div className="flex items-center gap-2 w-full pl-7 justify-between">
                 <div className="text-xs text-gray-400 flex gap-1 items-center">
                   <div>{scene.id}</div>
@@ -241,12 +242,23 @@ export function Scenes() {
                   <div className="text-xs ml-2 uppercase">{showAsFps(scene.settings.refreshInterval)}</div>
                 ) : null}
               </div>
+
+              <div className="pl-7">
+                <img
+                  src={`/api/frames/${frameId}/scene_images/${scene.id}`}
+                  alt={`${scene.name || scene.id} snapshot`}
+                  className="w-full rounded-md bg-black/40 object-contain"
+                  loading="lazy"
+                />
+              </div>
+
               {expandedScenes[scene.id] ? (
                 <div className="pl-7">
                   <ExpandedScene sceneId={scene.id} frameId={frameId} />
                 </div>
               ) : null}
             </div>
+
             {showingSettings[scene.id] ? (
               <Box className="p-2 pl-4 pr-3 space-y-2 bg-gray-900 flex items-start justify-between gap-1 ml-4">
                 <SceneSettings sceneId={scene.id} onClose={() => toggleSettings(scene.id)} />
@@ -254,6 +266,7 @@ export function Scenes() {
             ) : null}
           </React.Fragment>
         ))}
+
         {showNewSceneForm ? (
           <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">
             <Box className="p-4 space-y-4 bg-gray-900">

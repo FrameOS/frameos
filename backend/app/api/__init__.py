@@ -21,6 +21,7 @@ from .frames import *  # noqa: E402, F403
 from .fonts import *  # noqa: E402, F403
 from .log import *  # noqa: E402, F403
 from .repositories import *  # noqa: E402, F403
+from .scene_images import *  # noqa: E402, F403
 from .settings import *  # noqa: E402, F403
 from .ssh import *  # noqa: E402, F403
 from .templates import *  # noqa: E402, F403

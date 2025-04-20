@@ -108,6 +108,44 @@ async def api_frame_get_image(
 
         if response.status_code == 200:
             await redis.set(cache_key, response.content, ex=86400 * 30)
+
+            scene_id = await redis.get(f"frame:{id}:active_scene")
+            if scene_id:
+                scene_id = scene_id.decode('utf-8')
+                # dimensions (best‑effort – don’t crash if Pillow missing)
+                width = height = None
+                try:
+                    from PIL import Image
+                    import io
+                    img = Image.open(io.BytesIO(response.content))
+                    width, height = img.width, img.height
+                except Exception:
+                    pass
+
+                # upsert into SceneImage
+                from app.models.scene_image import SceneImage
+                now = datetime.utcnow()
+                img_row = (
+                    db.query(SceneImage)
+                      .filter_by(frame_id=id, scene_id=scene_id)
+                      .first()
+                )
+                if img_row:
+                    img_row.image     = response.content
+                    img_row.timestamp = now
+                    img_row.width     = width
+                    img_row.height    = height
+                else:
+                    img_row = SceneImage(
+                        frame_id  = id,
+                        scene_id  = scene_id,
+                        image     = response.content,
+                        timestamp = now,
+                        width     = width,
+                        height    = height,
+                    )
+                    db.add(img_row)
+                db.commit()
             return Response(content=response.content, media_type='image/png')
         else:
             raise HTTPException(status_code=response.status_code, detail="Unable to fetch image")

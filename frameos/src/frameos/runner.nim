@@ -131,7 +131,8 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   let sceneTimer = epochTime()
   let requiredWidth = self.frameConfig.renderWidth()
   let requiredHeight = self.frameConfig.renderHeight()
-  self.logger.log(%*{"event": "render:scene", "width": requiredWidth, "height": requiredHeight})
+  self.logger.log(%*{"event": "render:scene", "width": requiredWidth, "height": requiredHeight,
+      "sceneId": scene.id.string})
 
   var context = ExecutionContext(
     scene: scene,
