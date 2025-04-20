@@ -7,11 +7,14 @@ import { inHassioIngress } from '../utils/inHassioIngress'
 import { getBasePath } from '../utils/getBasePath'
 
 export interface EntityImageInfo {
-  url: string
+  token: string
   expiresAt: number
 }
 
-export function useEntityImage(entity: string): {
+export function useEntityImage(
+  entity: string,
+  subentity: string
+): {
   imageUrl: string | null
   isLoading: boolean
   setIsLoading: (loading: boolean) => void
@@ -21,10 +24,10 @@ export function useEntityImage(entity: string): {
 
   const [isLoading, setIsLoading] = useState(true)
 
-  const imageUrl = getEntityImage(entity)
+  const imageUrl = getEntityImage(entity, subentity)
 
   useEffect(() => {
-    updateEntityImage(entity, false)
+    updateEntityImage(entity, subentity, false)
   }, [!!imageUrl])
 
   useEffect(() => {
@@ -42,9 +45,9 @@ export const entityImagesModel = kea<entityImagesModelType>([
   connect({ logic: [socketLogic] }),
   path(['src', 'models', 'entityImages']),
   actions({
-    updateEntityImage: (entity: string, force = true) => ({ entity, force }),
+    updateEntityImage: (entity: string, subentity: string, force = true) => ({ entity, subentity, force }),
     setEntityImageInfo: (entity: string, imageInfo: EntityImageInfo) => ({ entity, imageInfo }),
-    updateEntityImageTimestamp: (entity: string) => ({ entity }),
+    updateEntityImageTimestamp: (entity: string, subentity: string) => ({ entity, subentity }),
   }),
   reducers(({ values }) => ({
     entityImageInfos: [
@@ -56,10 +59,12 @@ export const entityImagesModel = kea<entityImagesModelType>([
     entityImageTimestamps: [
       {} as Record<string, number>,
       {
-        updateEntityImageTimestamp: (state, { entity }) => {
+        updateEntityImageTimestamp: (state, { entity, subentity }) => {
           const nowSeconds = Math.floor(Date.now() / 1000)
           // Only update if it's different, to ensure a re-render
-          return state[entity] === nowSeconds ? state : { ...state, [entity]: nowSeconds }
+          return state[entity + '/' + subentity] === nowSeconds
+            ? state
+            : { ...state, [entity + '/' + subentity]: nowSeconds }
         },
       },
     ],
@@ -68,49 +73,49 @@ export const entityImagesModel = kea<entityImagesModelType>([
     getEntityImage: [
       (s) => [s.entityImageInfos, s.entityImageTimestamps],
       (entityImageInfos, entityImageTimestamps) => {
-        return (entity: string) => {
+        return (entity: string, subentity: string) => {
           if (inHassioIngress()) {
-            const timestamp = entityImageTimestamps[entity] ?? -1
-            return `${getBasePath()}/api/${entity}/image?token&t=${timestamp}`
+            const timestamp = entityImageTimestamps[entity + '/' + subentity] ?? -1
+            return `${getBasePath()}/api/${entity}/${subentity}?token&t=${timestamp}`
           }
 
           const info = entityImageInfos[entity]
           const now = Math.floor(Date.now() / 1000)
-          if (!info || !info.expiresAt || !info.url || now >= info.expiresAt) {
+          if (!info || !info.expiresAt || !info.token || now >= info.expiresAt) {
             return null
           }
-          const timestamp = entityImageTimestamps[entity] ?? -1
-          return `${info.url}${info.url.includes('?') ? '&' : '?'}t=${timestamp}`
+          const timestamp = entityImageTimestamps[entity + '/' + subentity] ?? -1
+          return `${getBasePath()}/api/${entity}/${subentity}?token=${encodeURIComponent(info.token)}&t=${timestamp}`
         }
       },
     ],
   }),
   listeners(({ actions, values }) => ({
-    updateEntityImage: async ({ entity, force }) => {
+    updateEntityImage: async ({ entity, subentity, force }) => {
       // Check if we have a valid URL
-      const imageUrl = values.getEntityImage(entity)
+      const imageUrl = values.getEntityImage(entity, subentity)
       if (imageUrl) {
         // The URL is still valid, no need to refetch new signed URL
         // Just update timestamp to refresh (force reload)
         if (force) {
-          actions.updateEntityImageTimestamp(entity)
+          actions.updateEntityImageTimestamp(entity, subentity)
         }
         return
       }
 
       // Need a new signed URL
-      const resp = await apiFetch(`/api/${entity}/image_link`)
+      const resp = await apiFetch(`/api/${entity}/image_token`)
       if (resp.ok) {
         const data = await resp.json()
         const expiresAt = Math.floor(Date.now() / 1000) + data.expires_in
-        const imageInfo: EntityImageInfo = { url: data.url, expiresAt }
+        const imageInfo: EntityImageInfo = { token: data.token, expiresAt }
         actions.setEntityImageInfo(entity, imageInfo)
         // Update timestamp to ensure a new request even if the URL is same
         if (force) {
-          actions.updateEntityImageTimestamp(entity)
+          actions.updateEntityImageTimestamp(entity, subentity)
         }
       } else {
-        console.error('Failed to get image link for', entity)
+        console.error('Failed to get image link for', entity, subentity)
       }
     },
   })),

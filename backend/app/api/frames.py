@@ -56,8 +56,8 @@ async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
     return {"logs": logs}
 
 
-@api_with_auth.get("/frames/{id:int}/image_link", response_model=FrameImageLinkResponse)
-async def get_image_link(id: int):
+@api_with_auth.get("/frames/{id:int}/image_token", response_model=FrameImageLinkResponse)
+async def get_image_token(id: int):
     expire_minutes = 5
     now = datetime.utcnow()
     expire = now + timedelta(minutes=expire_minutes)
@@ -67,7 +67,7 @@ async def get_image_link(id: int):
     expires_in = int((expire - now).total_seconds())
 
     return {
-        "url": config.ingress_path + f"/api/frames/{id}/image?token={token}",
+        "token": token,
         "expires_in": expires_in
     }
 

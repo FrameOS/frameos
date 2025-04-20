@@ -29,6 +29,7 @@ import { Spinner } from '../../../../components/Spinner'
 import { ExpandedScene } from './ExpandedScene'
 import { controlLogic } from './controlLogic'
 import { Tooltip } from '../../../../components/Tooltip'
+import { FrameImage } from '../../../../components/FrameImage'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
@@ -244,12 +245,7 @@ export function Scenes() {
               </div>
 
               <div className="pl-7">
-                <img
-                  src={`/api/frames/${frameId}/scene_images/${scene.id}`}
-                  alt={`${scene.name || scene.id} snapshot`}
-                  className="w-full rounded-md bg-black/40 object-contain"
-                  loading="lazy"
-                />
+                <FrameImage frameId={frameId} sceneId={scene.id} />
               </div>
 
               {expandedScenes[scene.id] ? (

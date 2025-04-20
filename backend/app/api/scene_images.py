@@ -1,16 +1,19 @@
 # backend/app/api/scene_images.py
 import io
 from typing import Optional
+from jose import JWTError, jwt
 
 from fastapi import Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy.orm import Session
+from app.api.auth import ALGORITHM, SECRET_KEY
 
+from app.config import config
 from app.database import get_db
 from app.models.scene_image import SceneImage            # created earlier
 from app.models.frame import Frame
-from . import api_with_auth
+from . import api_no_auth
 
 
 def _generate_placeholder(width: Optional[int], height: Optional[int]) -> bytes:
@@ -36,10 +39,11 @@ def _generate_placeholder(width: Optional[int], height: Optional[int]) -> bytes:
     return buf.read()
 
 
-@api_with_auth.get("/frames/{frame_id}/scene_images/{scene_id}")
+@api_no_auth.get("/frames/{frame_id}/scene_images/{scene_id}")
 async def get_scene_image(
     frame_id: int,
     scene_id: str,
+    token: str,
     db: Session = Depends(get_db),
 ):
     """
@@ -47,6 +51,16 @@ async def get_scene_image(
     If none exists, return a placeholder that matches the frame’s native
     width/height so the UI keeps its layout.
     """
+
+    if config.HASSIO_RUN_MODE != 'ingress':
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            if payload.get("sub") != f"frame={frame_id}":
+                raise HTTPException(status_code=401, detail="Unauthorized")
+        except JWTError:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+
     img_row: SceneImage | None = (
         db.query(SceneImage)
         .filter_by(frame_id=frame_id, scene_id=scene_id)
@@ -62,7 +76,6 @@ async def get_scene_image(
             headers={"Cache-Control": "no-cache"},
         )
 
-    # ───── No snapshot: create placeholder ─────
     frame: Frame | None = db.get(Frame, frame_id)
     if frame is None:
         raise HTTPException(status_code=404, detail="Frame not found")

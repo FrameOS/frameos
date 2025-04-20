@@ -5,6 +5,7 @@ import { entityImagesModel, useEntityImage } from '../models/entityImagesModel'
 
 export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
   frameId: number
+  sceneId: string
   className?: string
   /** If true, user can click on the image to request a refresh of the signed URL */
   refreshable?: boolean
@@ -17,19 +18,22 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
  * - Shows loading states based on image load or frame readiness
  * - Optionally allows clicking the image container to refresh the image link if `refreshable` is true
  */
-export function FrameImage({ frameId, className, refreshable = true, ...props }: FrameImageProps) {
+export function FrameImage({ frameId, sceneId, className, refreshable = true, ...props }: FrameImageProps) {
   const { frames } = useValues(framesModel)
   const { updateEntityImage } = useActions(entityImagesModel)
   const frame = frames[frameId]
 
-  const { imageUrl, isLoading, setIsLoading } = useEntityImage(`frames/${frameId}`)
+  const entityId = `frames/${frameId}`
+  const subEntityId = sceneId ? `scene_images/${sceneId}` : 'image'
+
+  const { imageUrl, isLoading, setIsLoading } = useEntityImage(entityId, subEntityId)
 
   // Determine if we should show the fade-in-out or loading cursor
   const visiblyLoading = (isLoading || frame?.status !== 'ready') && frame?.interval > 5
 
   const handleRefreshClick = () => {
     if (refreshable) {
-      updateEntityImage(`frames/${frameId}`)
+      updateEntityImage(entityId, subEntityId)
     }
   }
 

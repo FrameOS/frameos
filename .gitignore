@@ -37,3 +37,4 @@ e2e/tmp/
 
 gpt.txt
 .env
+.aider*
