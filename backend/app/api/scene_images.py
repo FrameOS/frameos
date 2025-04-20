@@ -3,7 +3,7 @@ import io
 from typing import Optional
 from jose import JWTError, jwt
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy.orm import Session
@@ -62,6 +62,7 @@ async def get_scene_image(
     frame_id: int,
     scene_id: str,
     token: str,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -96,11 +97,18 @@ async def get_scene_image(
             db.add(img_row)
             db.commit()
             db.refresh(img_row)
-        return StreamingResponse(
-            io.BytesIO(img_row.image),
-            media_type="image/png",
-            headers={"Cache-Control": "no-cache"},
-        )
+        if request.query_params.get("thumb") == "1":
+            return StreamingResponse(
+                io.BytesIO(img_row.thumb_image),
+                media_type="image/jpeg",
+                headers={"Cache-Control": "no-cache"},
+            )
+        else:
+            return StreamingResponse(
+                io.BytesIO(img_row.image),
+                media_type="image/png",
+                headers={"Cache-Control": "no-cache"},
+            )
 
     frame: Frame | None = db.get(Frame, frame_id)
     if frame is None:

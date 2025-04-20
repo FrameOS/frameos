@@ -53,7 +53,7 @@ export function FrameImage({ frameId, sceneId, thumb = false, className, refresh
       {frame && (
         <img
           className={clsx('rounded-lg', refreshable ? 'rounded-tl-none max-w-full max-h-full' : 'w-full')}
-          src={imageUrl ?? undefined}
+          src={imageUrl ? imageUrl + (thumb ? "?thumb=1" : "") : undefined}
           onLoad={() => setIsLoading(false)}
           onError={() => setIsLoading(false)}
           style={{
