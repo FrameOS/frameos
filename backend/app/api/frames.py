@@ -124,6 +124,7 @@ async def api_frame_get_image(
 
                 # upsert into SceneImage
                 from app.models.scene_image import SceneImage
+                from app.api.scene_images import _generate_thumbnail
                 now = datetime.utcnow()
                 img_row = (
                     db.query(SceneImage)
