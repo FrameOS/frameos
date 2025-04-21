@@ -41,16 +41,24 @@ def _generate_placeholder(width: Optional[int], height: Optional[int]) -> bytes:
 
 def _generate_thumbnail(image_bytes: bytes) -> tuple[bytes, int, int]:
     """
-    Generate a JPEG thumbnail with max width 320px preserving aspect ratio.
+    Generate a JPEG thumbnail whose width and height never exceed 320px,
+    while preserving aspect ratio.
+    Returns (jpeg_bytes, new_width, new_height).
     """
     with Image.open(io.BytesIO(image_bytes)) as img:
-        # Convert image to RGB if not already in that mode.
+        # ensure RGB
         if img.mode != "RGB":
             img = img.convert("RGB")
+
         orig_width, orig_height = img.size
-        new_width = min(orig_width, 320)
-        new_height = int((new_width / orig_width) * orig_height)
+
+        # scale factor that keeps both sides ≤ 320
+        scale = min(320 / orig_width, 320 / orig_height, 1.0)
+        new_width  = int(round(orig_width  * scale))
+        new_height = int(round(orig_height * scale))
+
         img = img.resize((new_width, new_height), Image.ANTIALIAS)
+
         buf = io.BytesIO()
         img.save(buf, format="JPEG")
         buf.seek(0)
