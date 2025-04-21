@@ -53,7 +53,8 @@ export function FrameImage({
   return (
     <div
       className={clsx(
-        'max-w-full max-h-full w-full h-full flex items-center justify-center',
+        className?.includes('max-w-') || className?.includes('max-h-') ? '' : 'max-w-full max-h-full w-full h-full',
+        'flex items-center justify-center',
         visiblyLoading ? 'continuous-fade-in-out' : null,
         visiblyLoading ? 'cursor-wait' : refreshable ? 'cursor-pointer' : 'cursor-default',
         className
@@ -75,8 +76,8 @@ export function FrameImage({
                     frame.rotate === 90 || frame.rotate === 270
                       ? `${frame.height} / ${frame.width}`
                       : `${frame.width} / ${frame.height}`,
-                  maxWidth: '100%',
-                  maxHeight: '100%',
+                  maxWidth: 'inherit',
+                  maxHeight: 'inherit',
                 }
               : {}),
           }}

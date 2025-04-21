@@ -123,11 +123,11 @@ export function Scenes() {
               )}
             >
               <div className="flex items-start justify-between gap-1">
-                <div className="max-w-[120px]">
+                <div className="overflow-hidden">
                   <FrameImage
                     frameId={frameId}
                     sceneId={scene.id}
-                    className="cursor-pointer"
+                    className="cursor-pointer max-w-[120px] max-h-[120px]"
                     onClick={() => expandScene(scene.id)}
                     refreshable={false}
                     thumb
