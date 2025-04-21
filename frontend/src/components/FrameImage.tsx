@@ -19,18 +19,26 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
  * - Shows loading states based on image load or frame readiness
  * - Optionally allows clicking the image container to refresh the image link if `refreshable` is true
  */
-export function FrameImage({ frameId, sceneId, thumb = false, className, refreshable = true, ...props }: FrameImageProps) {
+export function FrameImage({
+  frameId,
+  sceneId,
+  thumb = false,
+  className,
+  refreshable = true,
+  ...props
+}: FrameImageProps) {
   const { frames } = useValues(framesModel)
   const { updateEntityImage } = useActions(entityImagesModel)
   const frame = frames[frameId]
 
   const entityId = `frames/${frameId}`
-  const subEntityId = sceneId ? `scene_images/${sceneId}` : 'image'
+  const isScene = sceneId && sceneId !== 'image'
+  const subEntityId = isScene ? `scene_images/${sceneId}` : 'image'
 
   const { imageUrl, isLoading, setIsLoading } = useEntityImage(entityId, subEntityId)
 
   // Determine if we should show the fade-in-out or loading cursor
-  const visiblyLoading = (isLoading || frame?.status !== 'ready') && frame?.interval > 5
+  const visiblyLoading = !isScene && (isLoading || frame?.status !== 'ready') && frame?.interval > 5
 
   const handleRefreshClick = () => {
     if (refreshable) {
@@ -53,7 +61,7 @@ export function FrameImage({ frameId, sceneId, thumb = false, className, refresh
       {frame && (
         <img
           className={clsx('rounded-lg', refreshable ? 'rounded-tl-none max-w-full max-h-full' : 'w-full')}
-          src={imageUrl ? imageUrl + (thumb ? "?thumb=1" : "") : undefined}
+          src={imageUrl ? imageUrl + (thumb ? (imageUrl.includes('?') ? '&thumb=1' : '?thumb=1') : '') : undefined}
           onLoad={() => setIsLoading(false)}
           onError={() => setIsLoading(false)}
           style={{

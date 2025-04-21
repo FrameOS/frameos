@@ -97,17 +97,24 @@ router myrouter:
       resp Http401, "Unauthorized"
     log(%*{"event": "http", "get": request.pathInfo})
     {.gcsafe.}: # We're reading immutable globals and png data via a lock. It's fine.
+      let (sceneId, _, _) = getLastPublicState()
+      let headers = {
+        "Content-Type": "image/png",
+        "Content-Disposition": &"inline; filename=\"{sceneId}.png\"",
+        "X-Scene-Id": $sceneId,
+        "Access-Control-Expose-Headers": "X-Scene-Id"
+      }
       try:
         let image = drivers.toPng(360 - globalFrameConfig.rotate)
         if image != "":
-          resp Http200, {"Content-Type": "image/png"}, image
+          resp Http200, headers, image
         else:
           raise newException(Exception, "No image available")
       except Exception:
         try:
-          resp Http200, {"Content-Type": "image/png"}, getLastImagePng()
+          resp Http200, headers, getLastImagePng()
         except Exception as e:
-          resp Http200, {"Content-Type": "image/png"}, renderError(globalFrameConfig.renderWidth(),
+          resp Http200, headers, renderError(globalFrameConfig.renderWidth(),
             globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
   post "/event/@name":
     if not hasAccess(request, Write):

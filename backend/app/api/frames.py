@@ -108,10 +108,12 @@ async def api_frame_get_image(
 
         if response.status_code == 200:
             await redis.set(cache_key, response.content, ex=86400 * 30)
-
-            scene_id = await redis.get(f"frame:{id}:active_scene")
+            scene_id = response.headers.get('x-scene-id')
+            if not scene_id:
+                scene_id = await redis.get(f"frame:{id}:active_scene")
+                if scene_id:
+                    scene_id = scene_id.decode('utf-8')
             if scene_id:
-                scene_id = scene_id.decode('utf-8')
                 # dimensions (best‑effort – don’t crash if Pillow missing)
                 width = height = None
                 try:
@@ -188,7 +190,10 @@ async def api_frame_get_state(id: int, db: Session = Depends(get_db), redis: Red
 
         if response.status_code == 200:
             await redis.set(cache_key, response.content, ex=1)
-            return response.json()
+            state = response.json()
+            if state.get('sceneId'):
+                await redis.set(f"frame:{frame.id}:active_scene", state.get('sceneId'))
+            return state
         else:
             last_state = await redis.get(cache_key)
             if last_state:
@@ -224,7 +229,10 @@ async def api_frame_get_states(id: int, db: Session = Depends(get_db), redis: Re
 
         if response.status_code == 200:
             await redis.set(cache_key, response.content, ex=1)
-            return response.json()
+            states = response.json()
+            if states.get('sceneId'):
+                await redis.set(f"frame:{frame.id}:active_scene", states.get('sceneId'))
+            return states
         else:
             last_states = await redis.get(cache_key)
             if last_states:

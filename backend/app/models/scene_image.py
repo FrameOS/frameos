@@ -20,6 +20,10 @@ class SceneImage(Base):
     width     = mapped_column(Integer)
     height    = mapped_column(Integer)
 
+    thumb_image     = mapped_column(LargeBinary, nullable=True)
+    thumb_width     = mapped_column(Integer)
+    thumb_height    = mapped_column(Integer)
+
     # handy backref – Frame.scene_images
     frame     = relationship("Frame", backref=backref("scene_images", lazy=True))
 
