@@ -52,7 +52,7 @@ async def test_api_frame_get_image_cached(async_client, db, redis):
 
     # Append t=-1 to force returning the cached data
     image_url += "&t=-1"
-    response = await async_client.get(f'/api/frames/{frame.id}/image')
+    response = await async_client.get(image_url)
     assert response.status_code == 200
     assert response.content == b'cached_image_data'
 
