@@ -10,6 +10,12 @@ export const socketLogic = kea<socketLogicType>([
   actions({
     newLog: (log: LogType) => ({ log }),
     newFrame: (frame: FrameType) => ({ frame }),
+    newSceneImage: (frameId: number, sceneId: string, width: number, height: number) => ({
+      frameId,
+      sceneId,
+      width,
+      height,
+    }),
     updateFrame: (frame: FrameType) => ({ frame }),
     deleteFrame: ({ id }: { id: number }) => ({ id }),
     updateSettings: (settings: Record<string, any>) => ({ settings }),
@@ -37,6 +43,9 @@ export const socketLogic = kea<socketLogicType>([
               break
             case 'new_frame':
               actions.newFrame(data.data)
+              break
+            case 'new_scene_image':
+              actions.newSceneImage(data.data.frameId, data.data.sceneId, data.data.width, data.data.height)
               break
             case 'update_frame':
               actions.updateFrame(data.data)

@@ -7,6 +7,7 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
   frameId: number
   sceneId: string
   className?: string
+  onClick?: (event: React.MouseEvent<HTMLDivElement>) => void
   /** If true, user can click on the image to request a refresh of the signed URL */
   refreshable?: boolean
   thumb?: boolean
@@ -25,6 +26,7 @@ export function FrameImage({
   thumb = false,
   className,
   refreshable = true,
+  onClick,
   ...props
 }: FrameImageProps) {
   const { frames } = useValues(framesModel)
@@ -40,11 +42,13 @@ export function FrameImage({
   // Determine if we should show the fade-in-out or loading cursor
   const visiblyLoading = !isScene && (isLoading || frame?.status !== 'ready') && frame?.interval > 5
 
-  const handleRefreshClick = () => {
-    if (refreshable) {
-      updateEntityImage(entityId, subEntityId)
-    }
-  }
+  const handleRefreshClick =
+    onClick ||
+    (() => {
+      if (refreshable) {
+        updateEntityImage(entityId, subEntityId)
+      }
+    })
 
   return (
     <div

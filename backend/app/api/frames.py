@@ -29,7 +29,7 @@ from app.api.auth import ALGORITHM, SECRET_KEY
 from app.config import config
 from app.utils.network import is_safe_host
 from app.redis import get_redis
-from backend.app.websockets import publish_message
+from app.websockets import publish_message
 from . import api_with_auth, api_no_auth
 
 
@@ -158,7 +158,7 @@ async def api_frame_get_image(
                     db.add(img_row)
                 db.commit()
 
-            await publish_message(redis, "new_scene_image", {"data": {"frameId": id, "sceneId": scene_id, "timestamp": now.isoformat(), "width": width, "height": height}})
+            await publish_message(redis, "new_scene_image", {"frameId": id, "sceneId": scene_id, "timestamp": now.isoformat(), "width": width, "height": height})
 
             return Response(content=response.content, media_type='image/png')
         else:

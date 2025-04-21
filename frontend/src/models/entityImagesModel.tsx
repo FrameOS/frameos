@@ -118,5 +118,8 @@ export const entityImagesModel = kea<entityImagesModelType>([
         console.error('Failed to get image link for', entity, subentity)
       }
     },
+    [socketLogic.actionTypes.newSceneImage]: ({ frameId, sceneId }) => {
+      actions.updateEntityImage(`frames/${frameId}`, `scene_images/${sceneId}`)
+    },
   })),
 ])
