@@ -44,10 +44,11 @@ async def test_api_frame_get_image_cached(async_client, db, redis):
     await redis.set(cache_key, b'cached_image_data')
 
     # First, get the image link (which gives us the token)
-    image_link_resp = await async_client.get(f'/api/frames/{frame.id}/image_link')
-    assert image_link_resp.status_code == 200
-    link_info = image_link_resp.json()
-    image_url = link_info['url']
+    image_token_resp = await async_client.get(f'/api/frames/{frame.id}/image_token')
+    assert image_token_resp.status_code == 200
+    link_info = image_token_resp.json()
+    token = link_info['token']
+    image_url = f'/api/frames/{frame.id}/image?token={token}'
 
     # Append t=-1 to force returning the cached data
     image_url += "&t=-1"

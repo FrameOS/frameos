@@ -96,7 +96,7 @@ class FrameMetricsResponse(BaseModel):
     metrics: List[Dict[str, Any]]
 
 class FrameImageLinkResponse(BaseModel):
-    url: str
+    token: str
     expires_in: int
 
 class FrameStateResponse(RootModel):

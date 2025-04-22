@@ -25,7 +25,7 @@ export function Template({
   saveRemoteAsLocal,
 }: TemplateProps): JSX.Element {
   // I know the order of hooks is weird here, but the "if" should never change for this component
-  const imageUrl = template.id ? useEntityImage(`templates/${template.id}`).imageUrl : template.image
+  const imageUrl = template.id ? useEntityImage(`templates/${template.id}`, 'image').imageUrl : template.image
 
   return (
     <div

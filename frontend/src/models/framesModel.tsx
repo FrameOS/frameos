@@ -128,7 +128,7 @@ export const framesModel = kea<framesModelType>([
       if (log.type === 'webhook') {
         const parsed = JSON.parse(log.line)
         if (parsed.event == 'render:dither' || parsed.event == 'render:done' || parsed.event == 'server:start') {
-          entityImagesModel.actions.updateEntityImage(`frames/${log.frame_id}`)
+          entityImagesModel.actions.updateEntityImage(`frames/${log.frame_id}`, 'image')
         }
       }
     },

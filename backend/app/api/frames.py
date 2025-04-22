@@ -29,6 +29,7 @@ from app.api.auth import ALGORITHM, SECRET_KEY
 from app.config import config
 from app.utils.network import is_safe_host
 from app.redis import get_redis
+from app.websockets import publish_message
 from . import api_with_auth, api_no_auth
 
 
@@ -56,8 +57,8 @@ async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
     return {"logs": logs}
 
 
-@api_with_auth.get("/frames/{id:int}/image_link", response_model=FrameImageLinkResponse)
-async def get_image_link(id: int):
+@api_with_auth.get("/frames/{id:int}/image_token", response_model=FrameImageLinkResponse)
+async def get_image_token(id: int):
     expire_minutes = 5
     now = datetime.utcnow()
     expire = now + timedelta(minutes=expire_minutes)
@@ -67,7 +68,7 @@ async def get_image_link(id: int):
     expires_in = int((expire - now).total_seconds())
 
     return {
-        "url": config.ingress_path + f"/api/frames/{id}/image?token={token}",
+        "token": token,
         "expires_in": expires_in
     }
 
@@ -108,6 +109,57 @@ async def api_frame_get_image(
 
         if response.status_code == 200:
             await redis.set(cache_key, response.content, ex=86400 * 30)
+            scene_id = response.headers.get('x-scene-id')
+            if not scene_id:
+                scene_id = await redis.get(f"frame:{id}:active_scene")
+                if scene_id:
+                    scene_id = scene_id.decode('utf-8')
+            if scene_id:
+                # dimensions (best‑effort – don’t crash if Pillow missing)
+                width = height = None
+                try:
+                    from PIL import Image
+                    import io
+                    img = Image.open(io.BytesIO(response.content))
+                    width, height = img.width, img.height
+                except Exception:
+                    pass
+
+                # upsert into SceneImage
+                from app.models.scene_image import SceneImage
+                from app.api.scene_images import _generate_thumbnail
+                now = datetime.utcnow()
+                img_row = (
+                    db.query(SceneImage)
+                      .filter_by(frame_id=id, scene_id=scene_id)
+                      .first()
+                )
+                thumb, t_width, t_height = _generate_thumbnail(response.content)
+                if img_row:
+                    img_row.image      = response.content
+                    img_row.timestamp  = now
+                    img_row.width      = width
+                    img_row.height     = height
+                    img_row.thumb_image = thumb
+                    img_row.thumb_width = t_width
+                    img_row.thumb_height = t_height
+                else:
+                    img_row = SceneImage(
+                        frame_id    = id,
+                        scene_id    = scene_id,
+                        image       = response.content,
+                        timestamp   = now,
+                        width       = width,
+                        height      = height,
+                        thumb_image = thumb,
+                        thumb_width = t_width,
+                        thumb_height = t_height
+                    )
+                    db.add(img_row)
+                db.commit()
+
+            await publish_message(redis, "new_scene_image", {"frameId": id, "sceneId": scene_id, "timestamp": now.isoformat(), "width": width, "height": height})
+
             return Response(content=response.content, media_type='image/png')
         else:
             raise HTTPException(status_code=response.status_code, detail="Unable to fetch image")
@@ -142,7 +194,10 @@ async def api_frame_get_state(id: int, db: Session = Depends(get_db), redis: Red
 
         if response.status_code == 200:
             await redis.set(cache_key, response.content, ex=1)
-            return response.json()
+            state = response.json()
+            if state.get('sceneId'):
+                await redis.set(f"frame:{frame.id}:active_scene", state.get('sceneId'))
+            return state
         else:
             last_state = await redis.get(cache_key)
             if last_state:
@@ -178,7 +233,10 @@ async def api_frame_get_states(id: int, db: Session = Depends(get_db), redis: Re
 
         if response.status_code == 200:
             await redis.set(cache_key, response.content, ex=1)
-            return response.json()
+            states = response.json()
+            if states.get('sceneId'):
+                await redis.set(f"frame:{frame.id}:active_scene", states.get('sceneId'))
+            return states
         else:
             last_states = await redis.get(cache_key)
             if last_states:

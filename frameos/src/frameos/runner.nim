@@ -131,7 +131,8 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   let sceneTimer = epochTime()
   let requiredWidth = self.frameConfig.renderWidth()
   let requiredHeight = self.frameConfig.renderHeight()
-  self.logger.log(%*{"event": "render:scene", "width": requiredWidth, "height": requiredHeight})
+  self.logger.log(%*{"event": "render:scene", "width": requiredWidth, "height": requiredHeight,
+      "sceneId": scene.id.string})
 
   var context = ExecutionContext(
     scene: scene,
@@ -165,7 +166,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     result = (renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}"), context.nextSleep)
     self.logger.log(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
   self.lastRenderAt = epochTime()
-  self.logger.log(%*{"event": "render:done", "ms": round((epochTime() - sceneTimer) * 1000, 3)})
+  self.logger.log(%*{"event": "render:done", "sceneId": scene.id.string, "ms": round((epochTime() - sceneTimer) * 1000, 3)})
 
 proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   self.logger.log(%*{"event": "render:startLoop"})
