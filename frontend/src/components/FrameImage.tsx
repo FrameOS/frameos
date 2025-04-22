@@ -66,7 +66,8 @@ export function FrameImage({
         <img
           className={clsx(
             thumb ? 'rounded-sm' : 'rounded-lg',
-            refreshable ? 'rounded-tl-none max-w-full max-h-full' : 'w-full'
+            refreshable ? 'rounded-tl-none max-w-full max-h-full' : 'w-full',
+            className /* duplicated for inner image */
           )}
           src={imageUrl ? imageUrl + (thumb ? (imageUrl.includes('?') ? '&thumb=1' : '?thumb=1') : '') : undefined}
           onLoad={() => setIsLoading(false)}
