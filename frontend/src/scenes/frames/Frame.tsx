@@ -32,7 +32,7 @@ export function Frame({ frame }: FrameProps): JSX.Element {
         />
       </div>
       <A href={urls.frame(frame.id)}>
-        <FrameImage frameId={frame.id} sceneId="image" className="p-2 m-auto" refreshable={false} />
+        <FrameImage frameId={frame.id} className="p-2 m-auto" refreshable={false} />
       </A>
       <div className="flex justify-between px-4 pt-2 mb-2">
         <H5 className="text-ellipsis overflow-hidden">

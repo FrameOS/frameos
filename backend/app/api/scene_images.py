@@ -1,6 +1,5 @@
 # backend/app/api/scene_images.py
 import io
-from typing import Optional
 from jose import JWTError, jwt
 
 from fastapi import Depends, HTTPException, Request
@@ -16,28 +15,47 @@ from app.models.frame import Frame
 from . import api_no_auth
 
 
-def _generate_placeholder(width: Optional[int], height: Optional[int]) -> bytes:
+def _generate_placeholder(
+    width: int | None = 320,
+    height: int | None = 240,
+    *,
+    font_path: str = "../frameos/assets/compiled/fonts/Ubuntu-Regular.ttf",  # path to .ttf/.otf; None ⇒ fallback
+    font_size: int = 32,                  # point size for the TTF/OTF file
+    message: str = "No snapshot",
+) -> bytes:
     """
-    Produce a PNG with given width/height (defaults applied) that shows
-    a black background and centred 'No snapshot taken' white text.
-    """
-    width = int(width or 400)
-    height = int(height or 300)
+    Return a PNG (bytes) that shows a black rectangle with centred white text.
 
-    img = Image.new("RGB", (width, height), "black")
+    Parameters
+    ----------
+    width, height  :  Dimensions in pixels; defaults are 400×300.
+    font_path      :  Path to a scalable font file (TTF/OTF).  If omitted,
+                      Pillow’s 8‑pixel bitmap font is used.
+    font_size      :  Point size for the scalable font.
+    message        :  The text to write.
+    """
+    # Ensure we have concrete ints, even if None was passed
+    width, height = int(width or 320), int(height or 240)
+
+    img = Image.new("RGB", (width, height), "#1f2937")
     draw = ImageDraw.Draw(img)
+    font = ImageFont.truetype(font_path, font_size)
 
-    # Pillow’s built‑in bitmap font keeps things dependency‑free
-    font = ImageFont.load_default()
-    text = "No snapshot taken"
-    tw, th = draw.textsize(text, font=font)
-    draw.text(((width - tw) / 2, (height - th) / 2), text, fill="white", font=font)
+    # Pillow ≥9.2: use textbbox for more accurate metrics
+    left, top, right, bottom = draw.textbbox((0, 0), message, font=font)
+    text_w, text_h = right - left, bottom - top
+
+    draw.text(
+        ((width - text_w) / 2, (height - text_h) / 2),
+        message,
+        fill="white",
+        font=font,
+    )
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
     return buf.read()
-
 
 def _generate_thumbnail(image_bytes: bytes) -> tuple[bytes, int, int]:
     """
@@ -122,6 +140,13 @@ async def get_scene_image(
     if frame is None:
         raise HTTPException(status_code=404, detail="Frame not found")
 
-    png = _generate_placeholder(frame.width, frame.height)
-    # NB: we do *not* persist this placeholder – it’s cheaper to regenerate.
+    if request.query_params.get("thumb") == "1":
+        scale = min(320 / frame.width, 320 / frame.height, 1.0)
+        new_width  = int(round(frame.width  * scale))
+        new_height = int(round(frame.height * scale))
+    else:
+        new_width  = frame.width
+        new_height = frame.height
+
+    png = _generate_placeholder(new_width, new_height)
     return StreamingResponse(io.BytesIO(png), media_type="image/png")

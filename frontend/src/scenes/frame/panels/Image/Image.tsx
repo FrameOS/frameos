@@ -8,5 +8,5 @@ export interface ImageProps extends React.HTMLAttributes<HTMLDivElement> {
 
 export function Image(props: ImageProps) {
   const { frameId } = useValues(frameLogic)
-  return <FrameImage frameId={frameId} sceneId="image" {...props} />
+  return <FrameImage frameId={frameId} {...props} />
 }

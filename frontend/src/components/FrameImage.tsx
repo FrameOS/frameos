@@ -5,7 +5,7 @@ import { entityImagesModel, useEntityImage } from '../models/entityImagesModel'
 
 export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
   frameId: number
-  sceneId: string
+  sceneId?: string
   className?: string
   onClick?: (event: React.MouseEvent<HTMLDivElement>) => void
   /** If true, user can click on the image to request a refresh of the signed URL */
@@ -34,13 +34,12 @@ export function FrameImage({
   const frame = frames[frameId]
 
   const entityId = `frames/${frameId}`
-  const isScene = sceneId && sceneId !== 'image'
-  const subEntityId = isScene ? `scene_images/${sceneId}` : 'image'
+  const subEntityId = sceneId ? `scene_images/${sceneId}` : 'image'
 
   const { imageUrl, isLoading, setIsLoading } = useEntityImage(entityId, subEntityId)
 
   // Determine if we should show the fade-in-out or loading cursor
-  const visiblyLoading = !isScene && (isLoading || frame?.status !== 'ready') && frame?.interval > 5
+  const visiblyLoading = !sceneId && (isLoading || frame?.status !== 'ready') && frame?.interval > 5
 
   const handleRefreshClick =
     onClick ||
@@ -65,12 +64,15 @@ export function FrameImage({
     >
       {frame && (
         <img
-          className={clsx('rounded-lg', refreshable ? 'rounded-tl-none max-w-full max-h-full' : 'w-full')}
+          className={clsx(
+            thumb ? 'rounded-sm' : 'rounded-lg',
+            refreshable ? 'rounded-tl-none max-w-full max-h-full' : 'w-full'
+          )}
           src={imageUrl ? imageUrl + (thumb ? (imageUrl.includes('?') ? '&thumb=1' : '?thumb=1') : '') : undefined}
           onLoad={() => setIsLoading(false)}
           onError={() => setIsLoading(false)}
           style={{
-            ...(frame.width && frame.height
+            ...(frame.width && frame.height && !imageUrl
               ? {
                   aspectRatio:
                     frame.rotate === 90 || frame.rotate === 270
