@@ -19,8 +19,8 @@ def _generate_placeholder(
     width: int | None = 320,
     height: int | None = 240,
     *,
-    font_path: str = "../frameos/assets/compiled/fonts/Ubuntu-Regular.ttf",  # path to .ttf/.otf; None ⇒ fallback
-    font_size: int = 32,                  # point size for the TTF/OTF file
+    font_path: str = "../frameos/assets/compiled/fonts/Ubuntu-Regular.ttf",
+    font_size: int = 32,
     message: str = "No snapshot",
 ) -> bytes:
     """
@@ -34,14 +34,12 @@ def _generate_placeholder(
     font_size      :  Point size for the scalable font.
     message        :  The text to write.
     """
-    # Ensure we have concrete ints, even if None was passed
     width, height = int(width or 320), int(height or 240)
 
     img = Image.new("RGB", (width, height), "#1f2937")
     draw = ImageDraw.Draw(img)
     font = ImageFont.truetype(font_path, font_size)
 
-    # Pillow ≥9.2: use textbbox for more accurate metrics
     left, top, right, bottom = draw.textbbox((0, 0), message, font=font)
     text_w, text_h = right - left, bottom - top
 
