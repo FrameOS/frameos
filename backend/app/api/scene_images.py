@@ -146,5 +146,8 @@ async def get_scene_image(
         new_width  = frame.width
         new_height = frame.height
 
+    if frame.rotate == 90 or frame.rotate == 270:
+        new_width, new_height = new_height, new_width
+
     png = _generate_placeholder(new_width, new_height)
     return StreamingResponse(io.BytesIO(png), media_type="image/png")
