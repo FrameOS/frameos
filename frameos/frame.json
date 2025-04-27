@@ -69,7 +69,7 @@
     },
     "network": {
         "networkCheck": true,
-        "networkCheckSeconds": 60,
+        "networkCheckTimeoutSeconds": 60,
         "networkCheckUrl": "https://networkcheck.frameos.net/"
     }
 }

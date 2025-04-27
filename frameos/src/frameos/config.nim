@@ -61,7 +61,7 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
   else:
     result = NetworkConfig(
       networkCheck: data{"networkCheck"}.getBool(),
-      networkCheckTimeoutSeconds: data{"networkCheckTimeoutSeconds"}.getFloat(60),
+      networkCheckTimeoutSeconds: data{"networkCheckTimeoutSeconds"}.getFloat(30),
       networkCheckUrl: data{"networkCheckUrl"}.getStr("https://networkcheck.frameos.net"),
     )
 

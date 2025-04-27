@@ -16,6 +16,7 @@ import frameos/types
 import frameos/channels
 import frameos/utils/image
 import frameos/utils/font
+import frameos/portal as netportal
 from net import Port
 from frameos/runner import getLastImagePng, getLastPublicState, getAllPublicStates
 from scenes/scenes import sceneOptions
@@ -62,17 +63,42 @@ router myrouter:
         let paramsTable = request.params()
         return contains(paramsTable, "k") and paramsTable["k"] == accessKey
   get "/":
-    if not hasAccess(request, Read):
+    if netportal.active:
+      resp Http200, netportal.setupHtml()
+    elif not hasAccess(request, Read):
       resp Http401, "Unauthorized"
-    {.gcsafe.}: # We're only reading static assets. It's fine.
-      let scalingMode = case globalFrameConfig.scalingMode:
-        of "cover", "center":
-          globalFrameConfig.scalingMode
-        of "stretch":
-          "100% 100%"
-        else:
-          "contain"
-      resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
+    else:
+      {.gcsafe.}: # We're only printing a static variable.
+        let scalingMode = case globalFrameConfig.scalingMode:
+          of "cover", "center": globalFrameConfig.scalingMode
+          of "stretch": "100% 100%"
+          else: "contain"
+        resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
+  get "/generate_204":
+    resp Http302, {"Location": "/"}, ""
+  get "/gen_204":
+    resp Http302, {"Location": "/"}, ""
+  get "/hotspot-detect.html":
+    resp Http302, {"Location": "/"}, ""
+  get "/hotspot-detect":
+    resp Http302, {"Location": "/"}, ""
+  get "/ncsi.txt":
+    resp Http302, {"Location": "/"}, ""
+  get "/connecttest.txt":
+    resp Http302, {"Location": "/"}, ""
+  get "/library/test/success.html":
+    resp Http302, {"Location": "/"}, ""
+  post "/setup":
+    if not netportal.active:
+      resp Http400, "Not in setup mode"
+    let params = request.params()
+    let creds = %*{
+      "ssid": params["ssid"],
+      "password": params.getOrDefault("password", ""),
+      "server": params.getOrDefault("server", "")
+    }
+    writeFile(netportal.credentialsFile, $creds)
+    resp Http200, "<html><body><h1>Saved!</h1><p>The frame is now attempting to connect to Wi-Fi. You may close this tab.</p></body></html>"
   get "/ws":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"

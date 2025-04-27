@@ -9,6 +9,7 @@ import frameos/channels
 import frameos/logger
 import frameos/types
 import frameos/utils/image
+import frameos/portal as portal
 
 import drivers/drivers as drivers
 
@@ -153,15 +154,22 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
       render_imageApp.App(self.controlCodeRender).appConfig.image = data_qrApp.App(self.controlCodeData).get(context)
       render_imageApp.App(self.controlCodeRender).run(context)
     let image = context.image
+
+    var outImage: Image
     if image.width != requiredWidth or image.height != requiredHeight:
-      let resizedImage = newImage(requiredWidth, requiredHeight)
-      resizedImage.fill(scene.backgroundColor)
-      scaleAndDrawImage(resizedImage, image, self.frameConfig.scalingMode)
-      setLastImage(resizedImage)
-      result = (resizedImage.rotateDegrees(self.frameConfig.rotate), context.nextSleep)
+      outImage = newImage(requiredWidth, requiredHeight)
+      outImage.fill(scene.backgroundColor)
+      scaleAndDrawImage(outImage, image, self.frameConfig.scalingMode)
     else:
-      setLastImage(image)
-      result = (image.rotateDegrees(self.frameConfig.rotate), context.nextSleep)
+      outImage = image
+
+    # status bar (if we are in captive-portal mode)
+    let statusMsg = portal.getStatusMessage()
+    if statusMsg.len > 0:
+      drawStatusBar(outImage, statusMsg)
+
+    setLastImage(outImage)
+    result = (outImage.rotateDegrees(self.frameConfig.rotate), context.nextSleep)
   except Exception as e:
     result = (renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}"), context.nextSleep)
     self.logger.log(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})

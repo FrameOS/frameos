@@ -1,5 +1,4 @@
-import json, asyncdispatch, pixie, strutils, times, os
-import httpclient
+import json, asyncdispatch, pixie, strutils, times, os, threadpool
 import drivers/drivers as drivers
 import frameos/config
 import frameos/logger
@@ -8,6 +7,7 @@ import frameos/runner
 import frameos/server
 import frameos/scheduler
 import frameos/types
+import frameos/portal as netportal
 import lib/tz
 
 proc newFrameOS*(): FrameOS =
@@ -25,6 +25,13 @@ proc newFrameOS*(): FrameOS =
   result.runner = newRunner(frameConfig)
   result.server = newServer(result)
   startScheduler(result)
+
+proc checkNetwork(frameConfig: FrameConfig) {.gcsafe.} =
+  ## Run continuously so that plugging in / unplugging cables is handled.
+  let timeout = min(frameConfig.network.networkCheckTimeoutSeconds, 30.0)
+  while true:
+    discard netportal.ensureConnection(frameConfig.network.networkCheckUrl, timeout)
+    sleep(timeout.int * 1000) # every ~30 s (or user-set shorter value)
 
 proc start*(self: FrameOS) {.async.} =
   var message = %*{"event": "bootup", "config": {
@@ -46,35 +53,27 @@ proc start*(self: FrameOS) {.async.} =
   }}
   self.logger.log(message)
 
-  # Check if there's an internet connection or until timeout
-  if self.frameConfig.network.networkCheck and self.frameConfig.network.networkCheckTimeoutSeconds > 0:
-    let url = self.frameConfig.network.networkCheckUrl
-    let timeout = self.frameConfig.network.networkCheckTimeoutSeconds
-    let timer = epochTime()
-    var attempt = 1
-    self.logger.log(%*{"event": "networkCheck", "url": url})
-    while true:
-      if epochTime() - timer >= timeout:
-        self.logger.log(%*{"event": "networkCheck", "status": "timeout", "seconds": timeout})
-        break
-      let client = newHttpClient(timeout = 5000)
-      try:
-        let response = client.get(url)
-        if response.status.startsWith("200"):
-          self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "success"})
-          break
-        else:
-          self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "failed",
-              "response": response.status})
-      except CatchableError as e:
-        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
-      finally:
-        client.close()
-      sleep(attempt * 1000)
-      attempt += 1
+  netportal.setLogger(self.logger)
 
+  # ----- launch runner right away (it just draws the “booting” frame) -------
   self.runner.start()
-  result = self.server.startServer()
+
+  # ----- 1️⃣ kick off the *blocking* network-check on a helper thread -------
+  if self.frameConfig.network.networkCheck:
+    spawn checkNetwork(self.frameConfig)
+
+  ## give `startAp()` (possibly triggered by checkNetwork) up to 1 s to
+  ## become active.  If the hotspot *is* active we wait an extra 10 s so that
+  ## clients can associate before the HTTP server comes up.
+  var apActive = false
+  for _ in 0 .. 9:
+    if netportal.active: apActive = true; break
+    await sleepAsync(100) # 100 ms
+  if apActive:
+    await sleepAsync(10_000)
+
+  ## This call never returns, keeping the main future—and the process—alive.
+  await self.server.startServer()
 
 proc startFrameOS*() {.async.} =
   var frameOS = newFrameOS()

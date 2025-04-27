@@ -153,3 +153,21 @@ proc scaleAndDrawImage*(targetImage: Image, srcImage: Image, scalingMode: string
       let xOffset = (targetImage.width - srcImage.width) div 2
       let yOffset = (targetImage.height - srcImage.height) div 2
       targetImage.draw(srcImage, translate(vec2(xOffset.float32 + offsetX.float32, yOffset.float32 + offsetY.float32)))
+
+# Status-bar overlay (bottom-of-screen)
+proc drawStatusBar*(img: Image, message: string) =
+  if message.len == 0: return
+  let barH = 32
+  let fg = parseHtmlColor("#ffffff")
+  let ctx = newContext(img)
+  ctx.fillStyle = parseHtmlColor("#000000")
+  ctx.fillRect(rect(vec2(0, img.height.float - barH.float), vec2(img.width.float, barH.float)))
+
+  let typeface = getDefaultTypeface()
+  let font = newFont(typeface, 18, fg)
+  let pad = 5.0
+  let ts = typeset(
+      spans = [newSpan(message, font)],
+      bounds = vec2(img.width.float - 2*pad, barH.float - 2*pad),
+      hAlign = CenterAlign, vAlign = MiddleAlign)
+  img.fillText(ts, translate(vec2(pad, img.height.float - barH.float + pad)))
