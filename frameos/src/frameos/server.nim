@@ -88,20 +88,20 @@ router myrouter:
       spawn netportal.connectToWifi(ssid, pwd, networkcheckUrl)
     resp Http200, netportal.confirmHtml()
   # Captive portal URLs...
-  # get "/generate_204":
-  #   resp Http302, {"Location": "/"}, ""
-  # get "/gen_204":
-  #   resp Http302, {"Location": "/"}, ""
-  # get "/hotspot-detect.html":
-  #   resp Http302, {"Location": "/"}, ""
-  # get "/hotspot-detect":
-  #   resp Http302, {"Location": "/"}, ""
-  # get "/ncsi.txt":
-  #   resp Http302, {"Location": "/"}, ""
-  # get "/connecttest.txt":
-  #   resp Http302, {"Location": "/"}, ""
-  # get "/library/test/success.html":
-  #   resp Http302, {"Location": "/"}, ""
+  get "/generate_204":
+    resp Http302, {"Location": "/"}, ""
+  get "/gen_204":
+    resp Http302, {"Location": "/"}, ""
+  get "/hotspot-detect.html":
+    resp Http302, {"Location": "/"}, ""
+  get "/hotspot-detect":
+    resp Http302, {"Location": "/"}, ""
+  get "/ncsi.txt":
+    resp Http302, {"Location": "/"}, ""
+  get "/connecttest.txt":
+    resp Http302, {"Location": "/"}, ""
+  get "/library/test/success.html":
+    resp Http302, {"Location": "/"}, ""
   get "/ws":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"

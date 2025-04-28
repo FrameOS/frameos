@@ -10,7 +10,8 @@ const
   setupPassword* = "frame1234"
   nmHotspotName = "frameos-hotspot" ## NetworkManager connection ID
   redirectPort = 8787               ## where we run the local web UI
-  redirectPorts = ["80", "443"]     ## TCP ports we hijack for captive‑portal
+  tcpRedirectPorts = ["80", "443"]  ## TCP ports we hijack for captive‑portal
+  dnsProtocols = ["tcp", "udp"]     ## we hijack both for :53
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  Globals / helpers
@@ -55,15 +56,19 @@ proc stopAp*() =
   discard run("sudo nmcli connection down " & shQuote(nmHotspotName) & " || true")
   discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " || true")
 
-  for port in redirectPorts:
+  for port in tcpRedirectPorts:
     discard run(fmt"sudo iptables -t nat -D PREROUTING -i wlan0 -p tcp --dport {port} -j REDIRECT --to-ports {redirectPort} || true")
+
+  # NEW: release DNS hijack for both UDP/TCP :53
+  for proto in dnsProtocols:
+    discard run(fmt"sudo iptables -t nat -D PREROUTING -i wlan0 -p {proto} --dport 53 -j REDIRECT --to-ports 53 || true")
 
   active = false
   pLog("portal:stopAp:done")
-  sendEvent("render", %*{})
+  sendEvent("render", %*{}) # instant re-render (status bar gone)
 
 proc startAp*() =
-  ## Bring up Wi‑Fi AP with hard‑coded SSID/pw and HTTP(S) redirect → 8787
+  ## Bring up Wi-Fi AP with hard-coded SSID/pw and HTTP(S) redirect → 8787
   if hotspotRunning():
     pLog("portal:startAp:alreadyRunning"); return
   pLog("portal:startAp")
@@ -78,20 +83,24 @@ proc startAp*() =
   discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " ipv4.method shared")
 
   # Hijack :80/:443 while keeping DHCP/DNS/other UDP untouched.
-  for port in redirectPorts:
+  for port in tcpRedirectPorts:
     discard run(fmt"sudo iptables -t nat -D PREROUTING -i wlan0 -p tcp --dport {port} -j REDIRECT --to-ports {redirectPort} || true")
     discard run(fmt"sudo iptables -t nat -A PREROUTING -i wlan0 -p tcp --dport {port} -j REDIRECT --to-ports {redirectPort}")
+
+  for proto in dnsProtocols:
+    discard run(fmt"sudo iptables -t nat -D PREROUTING -i wlan0 -p {proto} --dport 53 -j REDIRECT --to-ports 53 || true")
+    discard run(fmt"sudo iptables -t nat -A PREROUTING -i wlan0 -p {proto} --dport 53 -j REDIRECT --to-ports 53")
 
   active = true
   hotspotStartedAt = epochTime()
   pLog("portal:startAp:done")
+  sendEvent("render", %*{}) # show the banner immediately
 
   proc watcher () =
     while true:
       sleep(1000)
-      if not active:
-        return
-      if active and epochTime() - hotspotStartedAt >= 600:
+      if not active: return
+      if epochTime() - hotspotStartedAt >= 600:
         pLog("portal:stopAp:autoTimeout")
         stopAp()
   spawn watcher()
@@ -136,9 +145,9 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;m
 h1{margin:0 0 1rem;font-size:1.5rem;font-weight:600;line-height:1.2}
 p,li{font-size:.875rem;color:#d1d5db;margin:0 0 1rem}
 label{display:block;font-weight:500;font-size:.875rem;margin-bottom:.25rem}
-input{width:100%;padding:.5rem .75rem;font-size:.875rem;color:#f9fafb;background-color:#111827;border:1px solid #374151;border-radius:.375rem;margin-bottom:1.25rem}
+input{box-sizing:border-box;width:100%;padding:.5rem .75rem;font-size:.875rem;color:#f9fafb;background-color:#111827;border:1px solid #374151;border-radius:.375rem;margin-bottom:1rem;margin-top:0.5rem;}
 input:focus{outline:none;border-color:#4a4b8c;box-shadow:0 0 0 1px #4a4b8c}
-button{display:block;width:100%;padding:.25rem .5rem;font-size:.875rem;font-weight:500;color:#fff;background-color:#4a4b8c;border:none;border-radius:.375rem;cursor:pointer;text-align:center}
+button{display:block;width:100%;padding:.5rem;font-size:.875rem;font-weight:500;color:#fff;background-color:#4a4b8c;border:none;border-radius:.375rem;cursor:pointer;text-align:center}
 button:hover{background-color:#484984}
 button:focus{outline:none;box-shadow:0 0 0 1px #484984}
 </style>"""
