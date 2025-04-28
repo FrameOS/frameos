@@ -69,7 +69,7 @@ proc wifiProfilesPresent(): bool =
   let (output, _) = run("sudo nmcli -f NAME,TYPE connection show | grep wifi | grep -v '" & nmHotspotName & "' || true")
   return output.strip().len > 0
 
-proc networkUp(url: string, timeout = 3000): bool =
+proc networkUp*(url: string, timeout = 3000): bool =
   let c = newHttpClient(timeout = timeout)
   try: result = c.get(url).status.startsWith("200")
   except: result = false

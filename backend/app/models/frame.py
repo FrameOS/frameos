@@ -150,7 +150,12 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         assets_path='/srv/assets',
         save_assets=True,
         upload_fonts='', # all
-        network={"networkCheck": True, "networkCheckTimeoutSeconds": 60, "networkCheckUrl": "https://networkcheck.frameos.net/"},
+        network={
+            "networkCheck": True,
+            "networkCheckTimeoutSeconds": 30,
+            "networkCheckUrl": "https://networkcheck.frameos.net/",
+            "wifiHotspot": "disabled"
+        },
         control_code={"enabled": "true", "position": "top-right"},
         schedule={"events": []},
         reboot={"enabled": "true", "crontab": "4 0 * * *"},
@@ -239,8 +244,9 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         } if frame.control_code else {"enabled": False},
         "network": {
             "networkCheck": network.get('networkCheck', True),
-            "networkCheckTimeoutSeconds": int(network.get('networkCheckTimeoutSeconds', 60)),
+            "networkCheckTimeoutSeconds": int(network.get('networkCheckTimeoutSeconds', 30)),
             "networkCheckUrl": network.get('networkCheckUrl', "https://networkcheck.frameos.net/"),
+            "wifiHotspot": network.get('wifiHotspot', "disabled"),
         }
     }
 

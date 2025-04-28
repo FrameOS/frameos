@@ -63,6 +63,7 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
       networkCheck: data{"networkCheck"}.getBool(),
       networkCheckTimeoutSeconds: data{"networkCheckTimeoutSeconds"}.getFloat(30),
       networkCheckUrl: data{"networkCheckUrl"}.getStr("https://networkcheck.frameos.net"),
+      wifiHotspot: data{"wifiHotspot"}.getStr("disabled"),
     )
 
 proc loadConfig*(filename: string = "frame.json"): FrameConfig =

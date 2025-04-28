@@ -286,6 +286,14 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                         />
                       )}
                     </Field>
+                    <Field name="wifiHotspot" label="Wifi Hotspot Setup">
+                      <Select
+                        options={[
+                          { value: 'disabled', label: 'Disabled' },
+                          { value: 'bootOnly', label: 'Enabled on boot for 10min if no network connection' },
+                        ]}
+                      />
+                    </Field>
                   </>
                 )}
               </Group>

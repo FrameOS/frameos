@@ -27,11 +27,22 @@ proc newFrameOS*(): FrameOS =
   startScheduler(result)
 
 proc checkNetwork(frameConfig: FrameConfig) {.gcsafe.} =
-  ## Run continuously so that plugging in / unplugging cables is handled.
+  ## Runs in its own thread.  Respect the new captive-portal mode.
   let timeout = min(frameConfig.network.networkCheckTimeoutSeconds, 30.0)
+  let mode = frameConfig.network.wifiHotspot
+  var firstRun = true
+
   while true:
-    discard netportal.ensureConnection(frameConfig.network.networkCheckUrl, timeout)
-    sleep(timeout.int * 1000) # every ~30 s (or user-set shorter value)
+    case mode
+    of "bootOnly":
+      ## Only the very first attempt may start the hotspot.
+      if firstRun:
+        discard netportal.ensureConnection(frameConfig.network.networkCheckUrl, timeout)
+        firstRun = false
+      else:
+        ## After boot we merely ping the URL; no hotspot logic.
+        discard netportal.networkUp(frameConfig.network.networkCheckUrl, int(timeout * 1000))
+      sleep(timeout.int * 1000)
 
 proc start*(self: FrameOS) {.async.} =
   var message = %*{"event": "bootup", "config": {

@@ -69,7 +69,8 @@
     },
     "network": {
         "networkCheck": true,
-        "networkCheckTimeoutSeconds": 60,
-        "networkCheckUrl": "https://networkcheck.frameos.net/"
+        "networkCheckTimeoutSeconds": 30,
+        "networkCheckUrl": "https://networkcheck.frameos.net/",
+        "wifiHotspot": "bootOnly"
     }
 }
