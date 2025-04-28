@@ -130,15 +130,24 @@ proc getStatusMessage*(): string =
     fmt"Not connected — join “{setupSsid}” (pw “{setupPassword}”) and open http://10.42.0.1/" else: ""
 
 proc setupHtml*(): string = fmt"""
-<!doctype html><html><head><meta charset="utf-8"><title>FrameOS Setup</title></head>
-<body style="font-family:sans-serif;max-width:640px;margin:2rem auto;">
- <h1>Connect your Frame to Wi‑Fi</h1>
- <p>Join “<b>{setupSsid}</b>” (password <code>{setupPassword}</code>) and enter your Wi‑Fi below.</p>
- <form method="post" action="/setup">
-   <label>Wi‑Fi SSID<br><input name="ssid" required style="width:100%"></label><br><br>
-   <label>Password<br><input type="password" name="password" style="width:100%"></label><br><br>
-   <button type="submit">Save &amp; Connect</button>
- </form></body></html>"""
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>FrameOS Setup</title><style>
+body{{font-family:system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background-color:#111827;color:#f9fafb}}
+.card{{background:color-mix(in oklch,#1f2937 70%,oklch(27.8% 0.033 256.848) 30%);padding:2rem 2.5rem;border-radius:.5rem;width:100%;max-width:28rem;box-shadow:0 2px 6px rgba(0,0,0,.35)}}
+h1{{margin:0 0 1rem;font-size:1.5rem;font-weight:600;line-height:1.2}}
+p{{margin:0 0 1.5rem;font-size:.875rem;color:#d1d5db}}
+label{{display:block;font-weight:500;font-size:.875rem;margin-bottom:.25rem}}
+input{{box-sizing: border-box;width:100%;padding:.5rem .75rem;font-size:.875rem;color:#f9fafb;background-color:#111827;border:1px solid #374151;border-radius:.375rem;margin-bottom:1rem;margin-top:0.5rem;}}
+input:focus{{outline:none;border-color:#4a4b8c;box-shadow:0 0 0 1px #4a4b8c}}
+button{{display:block;width:100%;padding:.5rem .5rem;font-size:.875rem;font-weight:500;color:#fff;background-color:#4a4b8c;border:none;border-radius:.375rem;cursor:pointer;text-align:center}}
+button:hover{{background-color:#484984}}
+button:focus{{outline:none;box-shadow:0 0 0 1px #484984}}
+</style></head>
+<body>
+<div class="card"><h1>Connect your Frame to Wi-Fi</h1><p>If the connection fails, reconnect to this access point and try again.</p>
+<form method="post" action="/setup"><label>Wi-Fi SSID<input name="ssid" required></label>
+<label>Password<input type="password" name="password"></label>
+<button type="submit">Save &amp; Connect</button></form></div>
+</body></html>"""
 
 proc connectToWifi*(ssid, pwd, networkCheckUrl: string) =
   stopAp() # close hotspot before connecting
