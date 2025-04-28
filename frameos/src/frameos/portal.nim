@@ -1,4 +1,4 @@
-import os, osproc, httpclient, json, strformat, strutils
+import os, osproc, httpclient, json, strformat, strutils, streams, times, threadpool
 import frameos/types
 import frameos/channels
 
@@ -17,6 +17,7 @@ const
 # ──────────────────────────────────────────────────────────────────────────────
 var active* = false ## true while our hotspot is up
 var logger: Logger ## injected from FrameOS once logging exists
+var hotspotStartedAt = 0.0
 
 proc setLogger*(l: Logger) = logger = l
 
@@ -45,6 +46,22 @@ proc hotspotRunning(): bool =
   active = output.strip().len > 0
   return active
 
+proc stopAp*() =
+  ## Tear down the hotspot and NAT rules (idempotent)
+  if not hotspotRunning():
+    pLog("portal:stopAp:notRunning"); return
+  pLog("portal:stopAp")
+
+  discard run("sudo nmcli connection down " & shQuote(nmHotspotName) & " || true")
+  discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " || true")
+
+  for port in redirectPorts:
+    discard run(fmt"sudo iptables -t nat -D PREROUTING -i wlan0 -p tcp --dport {port} -j REDIRECT --to-ports {redirectPort} || true")
+
+  active = false
+  pLog("portal:stopAp:done")
+  sendEvent("render", %*{})
+
 proc startAp*() =
   ## Bring up Wi‑Fi AP with hard‑coded SSID/pw and HTTP(S) redirect → 8787
   if hotspotRunning():
@@ -66,30 +83,44 @@ proc startAp*() =
     discard run(fmt"sudo iptables -t nat -A PREROUTING -i wlan0 -p tcp --dport {port} -j REDIRECT --to-ports {redirectPort}")
 
   active = true
+  hotspotStartedAt = epochTime()
   pLog("portal:startAp:done")
 
-proc stopAp*() =
-  ## Tear down the hotspot and NAT rules (idempotent)
-  if not hotspotRunning():
-    pLog("portal:stopAp:notRunning"); return
-  pLog("portal:stopAp")
-
-  discard run("sudo nmcli connection down " & shQuote(nmHotspotName) & " || true")
-  discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " || true")
-
-  for port in redirectPorts:
-    discard run(fmt"sudo iptables -t nat -D PREROUTING -i wlan0 -p tcp --dport {port} -j REDIRECT --to-ports {redirectPort} || true")
-
-  active = false
-  pLog("portal:stopAp:done")
+  proc watcher () =
+    while true:
+      sleep(1000)
+      if not active:
+        return
+      if active and epochTime() - hotspotStartedAt >= 600:
+        pLog("portal:stopAp:autoTimeout")
+        stopAp()
+  spawn watcher()
 
 proc attemptConnect*(ssid, pwd: string): bool =
-  ## Connect wlan0 to given network. Returns true if nmcli succeeds.
-  discard run("sudo nmcli connection delete 'frameos-wifi' 2>/dev/null || true")
-  let cmd = "sudo nmcli device wifi connect " & shQuote(ssid) &
-            " password " & shQuote(pwd) &
-            " ifname wlan0 name 'frameos-wifi'"
-  run(cmd)[1] == 0
+  discard run("sudo -n nmcli connection delete 'frameos-wifi' 2>/dev/null || true")
+
+  let nmcliArgs = @[
+    "--wait", "15", # abort if not connected in 15 s
+    "device", "wifi", "connect", ssid,
+    "password", pwd,
+    "ifname", "wlan0", "name", "frameos-wifi"
+  ]
+  let sudoArgs = @["-n", "nmcli"] & nmcliArgs # -n = never prompt for pwd
+
+  let p = startProcess("sudo",
+                       args = sudoArgs,
+                       options = {poUsePath, poStdErrToStdOut})
+
+  let rc = waitForExit(p) # we know it will finish in ≤ 15 s
+  let output = p.outputStream.readAll()
+
+  pLog("portal:exec",
+       %*{"cmd": "sudo " & $sudoArgs,
+           "rc": rc, "output": output.strip()})
+
+  result = (rc == 0)
+
+  sendEvent("render", %*{})
 
 proc masked*(s: string; keep: int = 2): string =
   if s.len <= keep: "*".repeat(s.len) else: s[0..keep-1] & "*".repeat(s.len - keep)
