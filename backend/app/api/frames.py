@@ -489,7 +489,7 @@ async def api_frame_clear_build_cache(id: int, redis: Redis = Depends(get_redis)
     try:
         ssh = await get_ssh_connection(db, redis, frame)
         try:
-            command = "rm -rf /srv/frameos/build/cache"
+            command = "rm -rf /srv/frameos/build/cache && echo 'Build cache cleared'"
             await exec_command(db, redis, frame, ssh, command)
         finally:
             await remove_ssh_connection(db, redis, ssh, frame)

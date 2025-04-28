@@ -162,17 +162,17 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
       scaleAndDrawImage(outImage, image, self.frameConfig.scalingMode)
     else:
       outImage = image
-
-    # status bar (if we are in captive-portal mode)
-    let statusMsg = portal.getStatusMessage()
-    if statusMsg.len > 0:
-      drawStatusBar(outImage, statusMsg)
-
     setLastImage(outImage)
     result = (outImage.rotateDegrees(self.frameConfig.rotate), context.nextSleep)
   except Exception as e:
     result = (renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}"), context.nextSleep)
     self.logger.log(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
+
+  # status bar (if we are in captive-portal mode)
+  let statusMsg = portal.getStatusMessage()
+  if statusMsg.len > 0:
+    drawStatusBar(result[0], statusMsg)
+
   self.lastRenderAt = epochTime()
   self.logger.log(%*{"event": "render:done", "sceneId": scene.id.string, "ms": round((epochTime() - sceneTimer) * 1000, 3)})
 

@@ -65,6 +65,8 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
       networkCheckUrl: data{"networkCheckUrl"}.getStr("https://networkcheck.frameos.net"),
       wifiHotspot: data{"wifiHotspot"}.getStr("disabled"),
     )
+    if result.wifiHotspot == "bootOnly":
+      result.networkCheck = true
 
 proc loadConfig*(filename: string = "frame.json"): FrameConfig =
   let data = parseFile(filename)

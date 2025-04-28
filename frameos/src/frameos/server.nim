@@ -4,6 +4,9 @@ import json
 import pixie
 import assets/web as webAssets
 import asyncdispatch
+import httpclient
+import threadpool
+import os
 import jester
 import locks
 import ws, ws/jester_extra
@@ -91,14 +94,17 @@ router myrouter:
   post "/setup":
     if not netportal.active:
       resp Http400, "Not in setup mode"
-    let params = request.params()
-    let creds = %*{
-      "ssid": params["ssid"],
-      "password": params.getOrDefault("password", ""),
-      "server": params.getOrDefault("server", "")
-    }
-    writeFile(netportal.credentialsFile, $creds)
-    resp Http200, "<html><body><h1>Saved!</h1><p>The frame is now attempting to connect to Wi-Fi. You may close this tab.</p></body></html>"
+
+    {.gcsafe.}:
+      let params = request.params()
+      let ssid = params["ssid"]
+      let pwd = params.getOrDefault("password", "")
+      let networkCheckUrl = globalFrameConfig.network.networkCheckUrl
+      spawn netportal.connectToWifi(ssid, pwd, networkcheckUrl)
+
+    resp Http200,
+         "<html><body><h1>Saved!</h1><p>The frame is now attempting to connect to Wi-Fi. You may close this tab.</p></body></html>"
+
   get "/ws":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"

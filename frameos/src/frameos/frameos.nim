@@ -77,12 +77,15 @@ proc start*(self: FrameOS) {.async.} =
   self.logger.log(message)
   netportal.setLogger(self.logger)
 
-  if self.frameConfig.network.networkCheck or self.frameConfig.network.wifiHotspot == "bootOnly":
+  if self.frameConfig.network.networkCheck:
     let connected = checkNetwork(self)
-    if not connected and self.frameConfig.network.wifiHotspot == "bootOnly":
-      netportal.startAp()
-    else:
-      netportal.stopAp() # just in case it was left hanging
+    if self.frameConfig.network.wifiHotspot == "bootOnly":
+      if connected:
+        netportal.stopAp()
+      else:
+        netportal.startAp()
+  else:
+    self.logger.log(%*{"event": "networkCheck", "status": "skipped"})
 
   self.runner.start()
 
