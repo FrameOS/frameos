@@ -77,34 +77,31 @@ router myrouter:
           of "stretch": "100% 100%"
           else: "contain"
         resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
-  get "/generate_204":
-    resp Http302, {"Location": "/"}, ""
-  get "/gen_204":
-    resp Http302, {"Location": "/"}, ""
-  get "/hotspot-detect.html":
-    resp Http302, {"Location": "/"}, ""
-  get "/hotspot-detect":
-    resp Http302, {"Location": "/"}, ""
-  get "/ncsi.txt":
-    resp Http302, {"Location": "/"}, ""
-  get "/connecttest.txt":
-    resp Http302, {"Location": "/"}, ""
-  get "/library/test/success.html":
-    resp Http302, {"Location": "/"}, ""
   post "/setup":
     if not netportal.active:
       resp Http400, "Not in setup mode"
-
     {.gcsafe.}:
       let params = request.params()
       let ssid = params["ssid"]
       let pwd = params.getOrDefault("password", "")
       let networkCheckUrl = globalFrameConfig.network.networkCheckUrl
       spawn netportal.connectToWifi(ssid, pwd, networkcheckUrl)
-
-    resp Http200,
-         "<html><body><h1>Saved!</h1><p>The frame is now attempting to connect to Wi-Fi. You may close this tab.</p></body></html>"
-
+    resp Http200, netportal.confirmHtml()
+  # Captive portal URLs...
+  # get "/generate_204":
+  #   resp Http302, {"Location": "/"}, ""
+  # get "/gen_204":
+  #   resp Http302, {"Location": "/"}, ""
+  # get "/hotspot-detect.html":
+  #   resp Http302, {"Location": "/"}, ""
+  # get "/hotspot-detect":
+  #   resp Http302, {"Location": "/"}, ""
+  # get "/ncsi.txt":
+  #   resp Http302, {"Location": "/"}, ""
+  # get "/connecttest.txt":
+  #   resp Http302, {"Location": "/"}, ""
+  # get "/library/test/success.html":
+  #   resp Http302, {"Location": "/"}, ""
   get "/ws":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"
