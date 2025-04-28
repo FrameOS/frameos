@@ -71,6 +71,6 @@
         "networkCheck": true,
         "networkCheckTimeoutSeconds": 30,
         "networkCheckUrl": "https://networkcheck.frameos.net/",
-        "wifiHotspot": "bootOnly"
+        "wifiHotspot": "disabled"
     }
 }

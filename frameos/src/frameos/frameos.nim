@@ -1,4 +1,4 @@
-import json, asyncdispatch, pixie, strutils, times, os, threadpool
+import json, asyncdispatch, pixie, strutils, times, os, httpclient
 import drivers/drivers as drivers
 import frameos/config
 import frameos/logger
@@ -26,23 +26,35 @@ proc newFrameOS*(): FrameOS =
   result.server = newServer(result)
   startScheduler(result)
 
-proc checkNetwork(frameConfig: FrameConfig) {.gcsafe.} =
-  ## Runs in its own thread.  Respect the new captive-portal mode.
-  let timeout = min(frameConfig.network.networkCheckTimeoutSeconds, 30.0)
-  let mode = frameConfig.network.wifiHotspot
-  var firstRun = true
+proc checkNetwork(self: FrameOS): bool =
+  if not self.frameConfig.network.networkCheck or self.frameConfig.network.networkCheckTimeoutSeconds <= 0:
+    return false
 
+  let url = self.frameConfig.network.networkCheckUrl
+  let timeout = self.frameConfig.network.networkCheckTimeoutSeconds
+  let timer = epochTime()
+  var attempt = 1
+  self.logger.log(%*{"event": "networkCheck", "url": url})
   while true:
-    case mode
-    of "bootOnly":
-      ## Only the very first attempt may start the hotspot.
-      if firstRun:
-        discard netportal.ensureConnection(frameConfig.network.networkCheckUrl, timeout)
-        firstRun = false
+    if epochTime() - timer >= timeout:
+      self.logger.log(%*{"event": "networkCheck", "status": "timeout", "seconds": timeout})
+      return false
+    let client = newHttpClient(timeout = 5000)
+    try:
+      let response = client.get(url)
+      if response.status.startsWith("200"):
+        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "success"})
+        return true
       else:
-        ## After boot we merely ping the URL; no hotspot logic.
-        discard netportal.networkUp(frameConfig.network.networkCheckUrl, int(timeout * 1000))
-      sleep(timeout.int * 1000)
+        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "failed",
+            "response": response.status})
+    except CatchableError as e:
+      self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
+    finally:
+      client.close()
+    sleep(attempt * 1000)
+    attempt += 1
+  return false
 
 proc start*(self: FrameOS) {.async.} =
   var message = %*{"event": "bootup", "config": {
@@ -63,25 +75,16 @@ proc start*(self: FrameOS) {.async.} =
     "gpioButtons": self.frameConfig.gpioButtons,
   }}
   self.logger.log(message)
-
   netportal.setLogger(self.logger)
 
-  # ----- launch runner right away (it just draws the “booting” frame) -------
+  if self.frameConfig.network.networkCheck or self.frameConfig.network.wifiHotspot == "bootOnly":
+    let connected = checkNetwork(self)
+    if not connected and self.frameConfig.network.wifiHotspot == "bootOnly":
+      netportal.startAp()
+    else:
+      netportal.stopAp() # just in case it was left hanging
+
   self.runner.start()
-
-  # ----- 1️⃣ kick off the *blocking* network-check on a helper thread -------
-  if self.frameConfig.network.networkCheck:
-    spawn checkNetwork(self.frameConfig)
-
-  ## give `startAp()` (possibly triggered by checkNetwork) up to 1 s to
-  ## become active.  If the hotspot *is* active we wait an extra 10 s so that
-  ## clients can associate before the HTTP server comes up.
-  var apActive = false
-  for _ in 0 .. 9:
-    if netportal.active: apActive = true; break
-    await sleepAsync(100) # 100 ms
-  if apActive:
-    await sleepAsync(10_000)
 
   ## This call never returns, keeping the main future—and the process—alive.
   await self.server.startServer()
