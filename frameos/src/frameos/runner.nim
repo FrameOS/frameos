@@ -169,7 +169,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     self.logger.log(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
   # status bar (if we are in captive-portal mode)
-  let statusMsg = portal.getStatusMessage()
+  let statusMsg = portal.getStatusMessage(self.frameConfig)
   if statusMsg.len > 0:
     drawStatusBar(result[0], statusMsg)
 

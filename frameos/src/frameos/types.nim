@@ -46,6 +46,9 @@ type
     networkCheckTimeoutSeconds*: float
     networkCheckUrl*: string
     wifiHotspot*: string
+    wifiHotspotSsid*: string
+    wifiHotspotPassword*: string
+    wifiHostpotTimeoutSeconds*: float
 
   FrameSchedule* = ref object
     events*: seq[ScheduledEvent]

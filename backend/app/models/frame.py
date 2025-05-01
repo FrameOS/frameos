@@ -154,7 +154,10 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
             "networkCheck": True,
             "networkCheckTimeoutSeconds": 30,
             "networkCheckUrl": "https://networkcheck.frameos.net/",
-            "wifiHotspot": "disabled"
+            "wifiHotspot": "disabled",
+            "wifiHotspotSsid": "FrameOS-Setup",
+            "wifiHotspotPassword": "frame1234",
+            "wifiHotspotTimeoutSeconds": 600,
         },
         control_code={"enabled": "true", "position": "top-right"},
         schedule={"events": []},
@@ -247,6 +250,9 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "networkCheckTimeoutSeconds": int(network.get('networkCheckTimeoutSeconds', 30)),
             "networkCheckUrl": network.get('networkCheckUrl', "https://networkcheck.frameos.net/"),
             "wifiHotspot": network.get('wifiHotspot', "disabled"),
+            "wifiHotspotSsid": network.get('wifiHotspotSsid', "FrameOS-Setup"),
+            "wifiHotspotPassword": network.get('wifiHotspotPassword', "frame1234"),
+            "wifiHotspotTimeoutSeconds": int(network.get('wifiHotspotTimeoutSeconds', 600)),
         }
     }
 

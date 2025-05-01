@@ -54,6 +54,10 @@ export interface FrameType {
     networkCheck?: boolean
     networkCheckTimeoutSeconds?: number
     networkCheckUrl?: string
+    wifiHotspot?: string
+    wifiHotspotSsid?: string
+    wifiHotspotPassword?: string
+    wifiHotspotTimeoutSeconds?: number
   }
 }
 

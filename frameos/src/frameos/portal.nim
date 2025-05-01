@@ -6,11 +6,9 @@ import frameos/channels
 #  Constants
 # ──────────────────────────────────────────────────────────────────────────────
 const
-  setupSsid* = "FrameOS-Setup"
-  setupPassword* = "frame1234"
   nmHotspotName = "frameos-hotspot" ## NetworkManager connection ID
-  redirectPort = 8787               ## where we run the local web UI
-  tcpRedirectPorts = ["80", "443"]  ## TCP ports we hijack for captive‑portal
+  nmConnectionName = "frameos-wifi" ## NetworkManager connection ID
+  tcpRedirectPorts = ["80"]         ## TCP ports we hijack for captive‑portal
   dnsProtocols = ["tcp", "udp"]     ## we hijack both for :53
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -47,7 +45,7 @@ proc hotspotRunning(): bool =
   active = output.strip().len > 0
   return active
 
-proc stopAp*() =
+proc stopAp*(frameConfig: FrameConfig) =
   ## Tear down the hotspot and NAT rules (idempotent)
   if not hotspotRunning():
     pLog("portal:stopAp:notRunning"); return
@@ -56,6 +54,7 @@ proc stopAp*() =
   discard run("sudo nmcli connection down " & shQuote(nmHotspotName) & " || true")
   discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " || true")
 
+  let redirectPort = frameConfig.framePort
   for port in tcpRedirectPorts:
     discard run(fmt"sudo iptables -t nat -D PREROUTING -i wlan0 -p tcp --dport {port} -j REDIRECT --to-ports {redirectPort} || true")
 
@@ -67,7 +66,7 @@ proc stopAp*() =
   pLog("portal:stopAp:done")
   sendEvent("render", %*{}) # instant re-render (status bar gone)
 
-proc startAp*() =
+proc startAp*(frameConfig: FrameConfig) =
   ## Bring up Wi-Fi AP with hard-coded SSID/pw and HTTP(S) redirect → 8787
   if hotspotRunning():
     pLog("portal:startAp:alreadyRunning"); return
@@ -75,14 +74,17 @@ proc startAp*() =
 
   discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " 2>/dev/null || true")
 
+  let wifiHotspotSsid = frameConfig.network.wifiHotspotSsid
+  let wifiHotspotPassword = frameConfig.network.wifiHotspotPassword
   let rc = run(fmt"sudo nmcli device wifi hotspot ifname wlan0 con-name {shQuote(nmHotspotName)} " &
-               fmt"ssid {shQuote(setupSsid)} password {shQuote(setupPassword)}")[1]
+               fmt"ssid {shQuote(wifiHotspotSsid)} password {shQuote(wifiHotspotPassword)}")[1]
   if rc != 0:
     pLog("portal:startAp:error"); return
 
   discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " ipv4.method shared")
 
-  # Hijack :80/:443 while keeping DHCP/DNS/other UDP untouched.
+  # Hijack :80 while keeping DHCP/DNS/other UDP untouched.
+  let redirectPort = frameConfig.framePort
   for port in tcpRedirectPorts:
     discard run(fmt"sudo iptables -t nat -D PREROUTING -i wlan0 -p tcp --dport {port} -j REDIRECT --to-ports {redirectPort} || true")
     discard run(fmt"sudo iptables -t nat -A PREROUTING -i wlan0 -p tcp --dport {port} -j REDIRECT --to-ports {redirectPort}")
@@ -96,23 +98,23 @@ proc startAp*() =
   pLog("portal:startAp:done")
   sendEvent("render", %*{}) # show the banner immediately
 
-  proc watcher () =
+  proc watcher (frameConfig: FrameConfig) =
     while true:
       sleep(1000)
       if not active: return
-      if epochTime() - hotspotStartedAt >= 600:
+      if epochTime() - hotspotStartedAt >= frameConfig.network.wifiHostpotTimeoutSeconds:
         pLog("portal:stopAp:autoTimeout")
-        stopAp()
-  spawn watcher()
+        stopAp(frameConfig)
+  spawn watcher(frameConfig)
 
-proc attemptConnect*(ssid, pwd: string): bool =
-  discard run("sudo -n nmcli connection delete 'frameos-wifi' 2>/dev/null || true")
+proc attemptConnect*(ssid, password: string): bool =
+  discard run(fmt"sudo -n nmcli connection delete '{nmConnectionName}' 2>/dev/null || true")
 
   let nmcliArgs = @[
     "--wait", "15", # abort if not connected in 15 s
     "device", "wifi", "connect", ssid,
-    "password", pwd,
-    "ifname", "wlan0", "name", "frameos-wifi"
+    "password", password,
+    "ifname", "wlan0", "name", nmConnectionName
   ]
   let sudoArgs = @["-n", "nmcli"] & nmcliArgs # -n = never prompt for pwd
 
@@ -134,9 +136,9 @@ proc attemptConnect*(ssid, pwd: string): bool =
 proc masked*(s: string; keep: int = 2): string =
   if s.len <= keep: "*".repeat(s.len) else: s[0..keep-1] & "*".repeat(s.len - keep)
 
-proc getStatusMessage*(): string =
+proc getStatusMessage*(frameConfig: FrameConfig): string =
   if active:
-    fmt"Not connected — join “{setupSsid}” (pw “{setupPassword}”) and open http://10.42.0.1/" else: ""
+    fmt"Not connected — join “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”) and open http://10.42.0.1:{frameConfig.framePort}/" else: ""
 
 const styleBlock* = """
 <style>
@@ -178,15 +180,15 @@ proc confirmHtml*(): string =
   <li>Reconnect to the access-point and run the setup again, double-checking SSID and password.</li>
 </ul>""")
 
-proc connectToWifi*(ssid, pwd, networkCheckUrl: string) =
-  stopAp() # close hotspot before connecting
-  if attemptConnect(ssid, pwd):
+proc connectToWifi*(ssid, password: string, frameConfig: FrameConfig) =
+  stopAp(frameConfig) # close hotspot before connecting
+  if attemptConnect(ssid, password):
     sleep(5000) # give DHCP etc a moment
 
     var connected = false
     let client = newHttpClient(timeout = 5000)
     try:
-      let response = client.get(networkCheckUrl)
+      let response = client.get(frameConfig.network.networkCheckUrl)
       if response.status.startsWith("200"):
         log(%*{"event": "networkCheck", "status": "success"})
         return
@@ -199,7 +201,7 @@ proc connectToWifi*(ssid, pwd, networkCheckUrl: string) =
 
     if not connected:
       log(%*{"event": "portal:connect:netCheckFailed"})
-      startAp() # fall back to AP
+      startAp(frameConfig) # fall back to AP
   else:
     log(%*{"event": "portal:connectFailed"})
-    startAp()
+    startAp(frameConfig)

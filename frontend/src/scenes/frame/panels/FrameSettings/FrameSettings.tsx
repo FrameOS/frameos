@@ -305,10 +305,48 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                       <Select
                         options={[
                           { value: 'disabled', label: 'Disabled' },
-                          { value: 'bootOnly', label: 'Enabled on boot for 10min if no network connection' },
+                          { value: 'bootOnly', label: 'Enabled on boot if no network connection' },
                         ]}
                       />
                     </Field>
+                    {frameForm.network?.wifiHotspot === 'bootOnly' && (
+                      <>
+                        <Field name="wifiHotspotSsid" label="Wifi Hotspot SSID">
+                          {({ onChange, value }) => (
+                            <TextInput
+                              name="wifiHotspotSsid"
+                              placeholder="FrameOS-Setup"
+                              onChange={onChange}
+                              value={value ?? 'FrameOS-Setup'}
+                            />
+                          )}
+                        </Field>
+                        <Field name="wifiHotspotPassword" label="Wifi Hotspot Password">
+                          {({ onChange, value }) => (
+                            <TextInput
+                              name="wifiHotspotPassword"
+                              placeholder="frame1234"
+                              onChange={onChange}
+                              value={value ?? 'frame1234'}
+                            />
+                          )}
+                        </Field>
+                        <Field
+                          name="wifiHotspotTimeout"
+                          label="Wifi Hotspot Timeout in seconds"
+                          tooltip="How long to keep the hotspot active after boot. After this timeout it won't turn on again without a reboot."
+                        >
+                          {({ onChange, value }) => (
+                            <NumberTextInput
+                              name="wifiHotspotTimeout"
+                              placeholder="600"
+                              onChange={onChange}
+                              value={value ?? 600}
+                            />
+                          )}
+                        </Field>
+                      </>
+                    )}
                   </>
                 )}
               </Group>

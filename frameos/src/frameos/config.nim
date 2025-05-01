@@ -64,6 +64,9 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
       networkCheckTimeoutSeconds: data{"networkCheckTimeoutSeconds"}.getFloat(30),
       networkCheckUrl: data{"networkCheckUrl"}.getStr("https://networkcheck.frameos.net"),
       wifiHotspot: if data{"networkCheck"}.getBool(): data{"wifiHotspot"}.getStr("disabled") else: "disabled",
+      wifiHotspotSsid: data{"wifiHotspotSsid"}.getStr("FrameOS-Setup"),
+      wifiHotspotPassword: data{"wifiHotspotPassword"}.getStr("frame1234"),
+      wifiHostpotTimeoutSeconds: data{"wifiHotspotTimeoutSeconds"}.getFloat(600),
     )
 
 proc loadConfig*(filename: string = "frame.json"): FrameConfig =

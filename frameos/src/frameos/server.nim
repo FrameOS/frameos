@@ -82,10 +82,11 @@ router myrouter:
       resp Http400, "Not in setup mode"
     {.gcsafe.}:
       let params = request.params()
-      let ssid = params["ssid"]
-      let pwd = params.getOrDefault("password", "")
-      let networkCheckUrl = globalFrameConfig.network.networkCheckUrl
-      spawn netportal.connectToWifi(ssid, pwd, networkcheckUrl)
+      spawn netportal.connectToWifi(
+        params["ssid"],
+        params.getOrDefault("password", ""),
+        globalFrameConfig
+      )
     resp Http200, netportal.confirmHtml()
   # Captive portal URLs...
   get "/generate_204":
