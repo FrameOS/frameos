@@ -1,6 +1,4 @@
-import json, pixie, times, options, asyncdispatch, strformat, strutils, locks, tables
-import pixie/fileformats/png
-import scenes/scenes
+import json, pixie, times, options, asyncdispatch, strformat, strutils, tables
 import apps/render/image/app as render_imageApp
 import apps/data/qr/app as data_qrApp
 
@@ -9,7 +7,7 @@ import frameos/channels
 import frameos/logger
 import frameos/types
 import frameos/utils/image
-import frameos/portal as portal
+import frameos/scenes
 
 import drivers/drivers as drivers
 
@@ -19,114 +17,7 @@ const FAST_SCENE_CUTOFF_SECONDS = 0.5
 # How frequently we announce a new render via websockets
 const SERVER_RENDER_DELAY_SECONDS = 1.0
 
-# Where to store the persisted states
-const SCENE_STATE_JSON_FOLDER = "./state"
-
-# All scenes that are compiled into the FrameOS binary
-let exportedScenes*: Table[SceneId, ExportedScene] = getExportedScenes()
-
-var
-  thread: Thread[(FrameConfig, Logger)]
-  lastImageLock: Lock
-  lastImage {.guard: lastImageLock.} = newImage(1, 1)
-  lastImagePresent = false
-  lastPublicStatesLock: Lock
-  lastPublicStates {.guard: lastPublicStatesLock.} = %*{}
-  lastPublicSceneId {.guard: lastPublicStatesLock.} = "".SceneId
-  lastPersistedStates = %*{}
-  lastPersistedSceneId: Option[SceneId] = none(SceneId)
-
-proc setLastImage(image: Image) =
-  withLock lastImageLock:
-    lastImage = copy(image)
-    lastImagePresent = true
-
-proc getLastImagePng*(): string =
-  if not lastImagePresent:
-    raise newException(Exception, "No image rendered yet")
-  var copy: seq[ColorRGBX]
-  var width, height: int
-  withLock lastImageLock:
-    copy = lastImage.data
-    width = lastImage.width
-    height = lastImage.height
-  return encodePng(width, height, 4, copy[0].addr, copy.len * 4)
-
-proc getLastPublicState*(): (SceneId, JsonNode, seq[StateField]) =
-  {.gcsafe.}: # It's fine: state is copied and .publicStateFields don't change
-    var state = %*{}
-    withLock lastPublicStatesLock:
-      if lastPublicStates.hasKey(lastPublicSceneId.string):
-        state = lastPublicStates[lastPublicSceneId.string].copy()
-      return (lastPublicSceneId, state, exportedScenes[lastPublicSceneId].publicStateFields)
-
-proc getAllPublicStates*(): (SceneId, JsonNode) =
-  {.gcsafe.}: # It's fine: state is copied and .publicStateFields don't change
-    withLock lastPublicStatesLock:
-      return (lastPublicSceneId, lastPublicStates.copy())
-
-proc updateLastPublicState*(self: FrameScene) =
-  if not exportedScenes.hasKey(self.id):
-    return
-  let sceneExport = exportedScenes[self.id]
-  withLock lastPublicStatesLock:
-    if not lastPublicStates.hasKey(self.id.string):
-      lastPublicStates[self.id.string] = %*{}
-    let lastSceneState = lastPublicStates[self.id.string]
-    for field in sceneExport.publicStateFields:
-      let key = field.name
-      if self.state.hasKey(key) and self.state[key] != lastSceneState{key}:
-        lastSceneState[key] = copy(self.state[key])
-  self.lastPublicStateUpdate = epochTime()
-
-proc sanitizePathString*(s: string): string =
-  return s.multiReplace(("/", "_"), ("\\", "_"), (":", "_"), ("*", "_"), ("?", "_"), ("\"", "_"), ("<", "_"), (">",
-      "_"), ("|", "_"))
-
-proc updateLastPersistedState*(self: FrameScene) =
-  if not exportedScenes.hasKey(self.id):
-    return
-  let sceneExport = exportedScenes[self.id]
-  var hasChanges = false
-  if not lastPersistedStates.hasKey(self.id.string):
-    lastPersistedStates[self.id.string] = %*{}
-  let persistedState = lastPersistedStates[self.id.string]
-  for key in sceneExport.persistedStateKeys:
-    if self.state.hasKey(key) and self.state[key] != persistedState{key}:
-      persistedState[key] = copy(self.state[key])
-      hasChanges = true
-  if hasChanges:
-    writeFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(self.id.string)}.json", $persistedState)
-  self.lastPersistedStateUpdate = epochTime()
-  if lastPersistedSceneId.isNone() or lastPersistedSceneId.get() != self.id:
-    writeFile(&"{SCENE_STATE_JSON_FOLDER}/scene.json", $(%*{"sceneId": self.id.string}))
-    lastPersistedSceneId = some(self.id)
-
-proc loadPersistedState*(sceneId: SceneId): JsonNode =
-  try:
-    return parseJson(readFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json"))
-  except JsonParsingError, IOError:
-    return %*{}
-
-proc loadLastScene*(): Option[SceneId] =
-  try:
-    let json = parseJson(readFile(&"{SCENE_STATE_JSON_FOLDER}/scene.json"))
-    if json.hasKey("sceneId"):
-      result = some(SceneId(json["sceneId"].getStr()))
-      lastPersistedSceneId = result
-  except JsonParsingError, IOError:
-    return none(SceneId)
-
-proc getFirstSceneId*(): SceneId =
-  if defaultSceneId.isSome():
-    return defaultSceneId.get()
-  let lastSceneId = loadLastScene()
-  if lastSceneId.isSome() and exportedScenes.hasKey(lastSceneId.get()):
-    return lastSceneId.get()
-  if len(exportedScenes) > 0:
-    for key in keys(exportedScenes):
-      return key
-  return "".SceneId
+var thread: Thread[(FrameConfig, Logger, Option[SceneId])]
 
 proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene): (Image, float) =
   let sceneTimer = epochTime()
@@ -168,11 +59,6 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     result = (renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}"), context.nextSleep)
     self.logger.log(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
-  # status bar (if we are in captive-portal mode)
-  let statusMsg = portal.getStatusMessage(self.frameConfig)
-  if statusMsg.len > 0:
-    drawStatusBar(result[0], statusMsg)
-
   self.lastRenderAt = epochTime()
   self.logger.log(%*{"event": "render:done", "sceneId": scene.id.string, "ms": round((epochTime() - sceneTimer) * 1000, 3)})
 
@@ -205,8 +91,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
           self.logger.log(%*{"event": "render:error:scene:init", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
       lastSceneId = sceneId
-      withLock lastPublicStatesLock:
-        lastPublicSceneId = sceneId
+      setLastPublicSceneId(sceneId)
 
     currentScene.isRendering = true
     self.triggerRenderNext = false # used to debounce render events received while rendering
@@ -329,14 +214,17 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
               payload["y"] = %*((self.frameConfig.height.float * payload["y"].getInt().float / 32767.0).int)
           of "setCurrentScene":
             let sceneId = SceneId(payload["sceneId"].getStr())
-            if not exportedScenes.hasKey(sceneId):
+            if not exportedScenes.hasKey(sceneId) and not systemScenes.hasKey(sceneId):
               self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
                   "event": event, "payload": payload})
               continue
             if sceneId != self.currentSceneId:
               self.dispatchSceneEvent(some(self.currentSceneId), "close", payload)
               if not self.scenes.hasKey(sceneId):
-                let scene = exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+                let scene = if exportedScenes.hasKey(sceneId):
+                  exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+                else:
+                  systemScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
                 self.scenes[sceneId] = scene
                 scene.updateLastPublicState()
               self.currentSceneId = sceneId
@@ -361,12 +249,12 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
         if waitTime < 200:
           waitTime += 5
 
-proc createRunnerThread*(args: (FrameConfig, Logger)) =
+proc createRunnerThread*(args: (FrameConfig, Logger, Option[SceneId])) =
   {.cast(gcsafe).}:
     var runnerThread = RunnerThread(
       frameConfig: args[0],
       scenes: initTable[SceneId, FrameScene](),
-      currentSceneId: getFirstSceneId(),
+      currentSceneId: if args[2].isSome: args[2].get() else: getFirstSceneId(),
       lastRenderAt: 0,
       sleepFuture: none(Future[void]),
       isRendering: false,
@@ -401,6 +289,7 @@ proc newRunner*(frameConfig: FrameConfig): RunnerControl =
   # create a separate logger, so we can pause it when rendering fast
   var logger = newLogger(frameConfig)
   result = RunnerControl(
-    start: proc () = createThread(thread, createRunnerThread, (frameConfig, logger)),
+    start: proc (firstSceneId: Option[SceneId]) = createThread(thread, createRunnerThread, (frameConfig, logger,
+        firstSceneId)),
   )
   setLastImage(renderError(frameConfig.renderWidth(), frameConfig.renderHeight(), "FrameOS booting..."))

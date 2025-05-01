@@ -1,4 +1,4 @@
-import json, asyncdispatch, pixie, strutils, times, os, httpclient
+import json, asyncdispatch, pixie, strutils, times, os, httpclient, options
 import drivers/drivers as drivers
 import frameos/config
 import frameos/logger
@@ -77,6 +77,7 @@ proc start*(self: FrameOS) {.async.} =
   self.logger.log(message)
   netportal.setLogger(self.logger)
 
+  var firstSceneId: Option[SceneId] = none(SceneId)
   if self.frameConfig.network.networkCheck:
     let connected = checkNetwork(self)
     if self.frameConfig.network.wifiHotspot == "bootOnly":
@@ -84,10 +85,11 @@ proc start*(self: FrameOS) {.async.} =
         netportal.stopAp(self.frameConfig)
       else:
         netportal.startAp(self.frameConfig)
+        firstSceneId = some("system/wifiHotspot".SceneId)
   else:
     self.logger.log(%*{"event": "networkCheck", "status": "skipped"})
 
-  self.runner.start()
+  self.runner.start(firstSceneId)
 
   ## This call never returns, keeping the main future—and the process—alive.
   await self.server.startServer()

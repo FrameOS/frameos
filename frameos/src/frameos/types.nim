@@ -146,7 +146,7 @@ type
     controlCodeData*: AppRoot
 
   RunnerControl* = ref object
-    start*: proc()
+    start*: proc(firstSceneId: Option[SceneId])
 
   Server* = ref object
     frameConfig*: FrameConfig

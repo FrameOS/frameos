@@ -21,7 +21,7 @@ import frameos/utils/image
 import frameos/utils/font
 import frameos/portal as netportal
 from net import Port
-from frameos/runner import getLastImagePng, getLastPublicState, getAllPublicStates
+from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates
 from scenes/scenes import sceneOptions
 
 var globalFrameConfig: FrameConfig

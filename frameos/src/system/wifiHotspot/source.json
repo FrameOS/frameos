@@ -1,0 +1,237 @@
+{
+    "id": "a68ecb60-fe38-4ef8-9f82-b09c3946546d",
+    "name": "Wifi Captive Portal",
+    "settings": {
+      "refreshInterval": 3600,
+      "backgroundColor": "#000000"
+    },
+    "fields": [],
+    "nodes": [
+      {
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "type": "event",
+        "position": {
+          "x": 121,
+          "y": 113
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 212,
+        "height": 161
+      },
+      {
+        "id": "c41f0a1a-df19-45e6-9fca-cfee28d984e8",
+        "position": {
+          "x": 477.82328784775405,
+          "y": 69.99142198308448
+        },
+        "data": {
+          "keyword": "render/split",
+          "config": {
+            "rows": "2"
+          }
+        },
+        "type": "app",
+        "width": 307,
+        "height": 359,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 477.82328784775405,
+          "y": 69.99142198308448
+        },
+        "dragging": false
+      },
+      {
+        "id": "95e0d032-8c2d-4fb6-82af-d9b273571043",
+        "position": {
+          "x": 880.8345315376423,
+          "y": 329.59859063367514
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "bottom-center"
+          }
+        },
+        "type": "app",
+        "width": 324,
+        "height": 190,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 880.8345315376423,
+          "y": 329.59859063367514
+        },
+        "dragging": false
+      },
+      {
+        "id": "81f4ab21-6a71-45d1-8c8a-7dc3b5d7a389",
+        "position": {
+          "x": 847.5909767081639,
+          "y": -128.50223800705407
+        },
+        "data": {
+          "keyword": "data/qr",
+          "config": {
+            "codeType": "Custom",
+            "code": "",
+            "size": "4"
+          },
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true,
+            "durationEnabled": false,
+            "duration": null,
+            "expressionEnabled": false,
+            "expression": null,
+            "expressionType": null
+          }
+        },
+        "type": "app",
+        "width": 459,
+        "height": 370,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 847.5909767081639,
+          "y": -128.50223800705407
+        },
+        "dragging": false
+      },
+      {
+        "id": "490777a5-27ed-4fcb-8ca1-2015282934b8",
+        "position": {
+          "x": 1538.3534628877562,
+          "y": 294.7550046389773
+        },
+        "data": {
+          "keyword": "render/text",
+          "config": {
+            "vAlign": "top",
+            "text": "",
+            "richText": "basic-caret"
+          }
+        },
+        "type": "app",
+        "width": 424,
+        "height": 420,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1538.3534628877562,
+          "y": 294.7550046389773
+        },
+        "dragging": false
+      },
+      {
+        "id": "ae602f2d-a88d-40d7-8f2e-7358c565ebd2",
+        "position": {
+          "x": 1480.1687636738989,
+          "y": 40.69453313028947
+        },
+        "data": {
+          "code": "fmt\"Welcome to FrameOS! Scan the QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”) and open http://10.42.0.1:{frameConfig.framePort}/ to setup.\"",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "text",
+              "type": "text"
+            }
+          ]
+        },
+        "type": "code",
+        "style": {
+          "width": 545,
+          "height": 175
+        },
+        "width": 545,
+        "height": 175,
+        "selected": false,
+        "resizing": false,
+        "positionAbsolute": {
+          "x": 1480.1687636738989,
+          "y": 40.69453313028947
+        },
+        "dragging": false
+      },
+      {
+        "id": "a61a180d-fccf-4286-baad-4bad6ea6b5a5",
+        "position": {
+          "x": 773.4917001735444,
+          "y": -383.4268129239116
+        },
+        "data": {
+          "code": "fmt\"WIFI:T:WPA;S:\" & frameConfig.network.wifiHotspotSsid.multiReplace(@[(\";\", \"\\\\;\"), (\",\", \"\\\\,\"), (\"\\\\\", \"\\\\\\\\\"), (\"\\\"\", \"\\\\\\\"\"), (\":\", \"\\\\:\")]) & \";P:\" & frameConfig.network.wifiHotspotPassword.multiReplace(@[(\";\", \"\\\\;\"), (\",\", \"\\\\,\"), (\"\\\\\", \"\\\\\\\\\"), (\"\\\"\", \"\\\\\\\"\"), (\":\", \"\\\\:\")]) & \";;\"",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "code",
+              "type": "string"
+            }
+          ]
+        },
+        "type": "code",
+        "style": {
+          "width": 715,
+          "height": 220
+        },
+        "width": 715,
+        "height": 220,
+        "selected": false,
+        "resizing": false,
+        "positionAbsolute": {
+          "x": 773.4917001735444,
+          "y": -383.4268129239116
+        },
+        "dragging": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "3d7be198-95f4-45f2-8d84-5ccf44c5ea37",
+        "target": "c41f0a1a-df19-45e6-9fca-cfee28d984e8",
+        "targetHandle": "prev",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "1df36ddd-3977-495f-9ed6-c0f12e5ce21c",
+        "target": "95e0d032-8c2d-4fb6-82af-d9b273571043",
+        "targetHandle": "prev",
+        "source": "c41f0a1a-df19-45e6-9fca-cfee28d984e8",
+        "sourceHandle": "field/render_functions[1][1]",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "4b85a8f1-9544-4b54-a95b-c88fe1adc147",
+        "source": "81f4ab21-6a71-45d1-8c8a-7dc3b5d7a389",
+        "sourceHandle": "fieldOutput",
+        "target": "95e0d032-8c2d-4fb6-82af-d9b273571043",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "359b06e7-8f9b-411d-b779-162527afb272",
+        "target": "490777a5-27ed-4fcb-8ca1-2015282934b8",
+        "targetHandle": "prev",
+        "source": "c41f0a1a-df19-45e6-9fca-cfee28d984e8",
+        "sourceHandle": "field/render_functions[2][1]",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "a42a3f6d-c2ed-4b32-bc74-b6377f3245c7",
+        "source": "ae602f2d-a88d-40d7-8f2e-7358c565ebd2",
+        "sourceHandle": "fieldOutput",
+        "target": "490777a5-27ed-4fcb-8ca1-2015282934b8",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "53a508fe-b3e7-4dbd-a9cd-37c07d529842",
+        "source": "a61a180d-fccf-4286-baad-4bad6ea6b5a5",
+        "sourceHandle": "fieldOutput",
+        "target": "81f4ab21-6a71-45d1-8c8a-7dc3b5d7a389",
+        "targetHandle": "fieldInput/code",
+        "type": "codeNodeEdge"
+      }
+    ]
+  }

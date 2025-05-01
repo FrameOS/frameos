@@ -1,5 +1,6 @@
 import os, osproc, httpclient, json, strformat, strutils, streams, times, threadpool
 import frameos/types
+import frameos/scenes
 import frameos/channels
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -17,6 +18,9 @@ const
 var active* = false ## true while our hotspot is up
 var logger: Logger ## injected from FrameOS once logging exists
 var hotspotStartedAt = 0.0
+
+proc isPortalActive*(): bool =
+  result = active
 
 proc setLogger*(l: Logger) = logger = l
 
@@ -64,7 +68,7 @@ proc stopAp*(frameConfig: FrameConfig) =
 
   active = false
   pLog("portal:stopAp:done")
-  sendEvent("render", %*{}) # instant re-render (status bar gone)
+  sendEvent("setCurrentScene", %*{"scene": getFirstSceneId()})
 
 proc startAp*(frameConfig: FrameConfig) =
   ## Bring up Wi-Fi AP with hard-coded SSID/pw and HTTP(S) redirect → 8787
@@ -96,7 +100,7 @@ proc startAp*(frameConfig: FrameConfig) =
   active = true
   hotspotStartedAt = epochTime()
   pLog("portal:startAp:done")
-  sendEvent("render", %*{}) # show the banner immediately
+  sendEvent("setCurrentScene", %*{"scene": "system/wifiHotspot".SceneId})
 
   proc watcher (frameConfig: FrameConfig) =
     while true:
@@ -135,10 +139,6 @@ proc attemptConnect*(ssid, password: string): bool =
 
 proc masked*(s: string; keep: int = 2): string =
   if s.len <= keep: "*".repeat(s.len) else: s[0..keep-1] & "*".repeat(s.len - keep)
-
-proc getStatusMessage*(frameConfig: FrameConfig): string =
-  if active:
-    fmt"Not connected — join “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”) and open http://10.42.0.1:{frameConfig.framePort}/" else: ""
 
 const styleBlock* = """
 <style>
@@ -180,7 +180,7 @@ proc confirmHtml*(): string =
   <li>Reconnect to the access-point and run the setup again, double-checking SSID and password.</li>
 </ul>""")
 
-proc connectToWifi*(ssid, password: string, frameConfig: FrameConfig) =
+proc connectToWifi*(ssid, password: string, frameConfig: FrameConfig) {.gcsafe.} =
   stopAp(frameConfig) # close hotspot before connecting
   if attemptConnect(ssid, password):
     sleep(5000) # give DHCP etc a moment
@@ -191,6 +191,7 @@ proc connectToWifi*(ssid, password: string, frameConfig: FrameConfig) =
       let response = client.get(frameConfig.network.networkCheckUrl)
       if response.status.startsWith("200"):
         log(%*{"event": "networkCheck", "status": "success"})
+        sendEvent("setCurrentScene", %*{"scene": getFirstSceneId()})
         return
       else:
         log(%*{"event": "networkCheck", "status": "failed", "response": response.status})
