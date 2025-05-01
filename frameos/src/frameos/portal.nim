@@ -68,7 +68,7 @@ proc stopAp*(frameConfig: FrameConfig) =
 
   active = false
   pLog("portal:stopAp:done")
-  sendEvent("setCurrentScene", %*{"scene": getFirstSceneId()})
+  sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
 
 proc startAp*(frameConfig: FrameConfig) =
   ## Bring up Wi-Fi AP with hard-coded SSID/pw and HTTP(S) redirect → 8787
@@ -100,7 +100,7 @@ proc startAp*(frameConfig: FrameConfig) =
   active = true
   hotspotStartedAt = epochTime()
   pLog("portal:startAp:done")
-  sendEvent("setCurrentScene", %*{"scene": "system/wifiHotspot".SceneId})
+  sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId})
 
   proc watcher (frameConfig: FrameConfig) =
     while true:
@@ -156,7 +156,8 @@ button:focus{outline:none;box-shadow:0 0 0 1px #484984}
 
 
 proc layout*(inner: string): string =
-  fmt"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>FrameOS Setup</title>{styleBlock}</head>
+  fmt"""<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta charset="utf-8"><title>FrameOS Setup</title>{styleBlock}</head>
 <body><div class="card">{inner}</div></body></html>"""
 
 proc setupHtml*(): string =
@@ -191,7 +192,7 @@ proc connectToWifi*(ssid, password: string, frameConfig: FrameConfig) {.gcsafe.}
       let response = client.get(frameConfig.network.networkCheckUrl)
       if response.status.startsWith("200"):
         log(%*{"event": "networkCheck", "status": "success"})
-        sendEvent("setCurrentScene", %*{"scene": getFirstSceneId()})
+        sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
         return
       else:
         log(%*{"event": "networkCheck", "status": "failed", "response": response.status})
