@@ -9,7 +9,7 @@ import frameos/channels
 const
   nmHotspotName = "frameos-hotspot" ## NetworkManager connection ID
   nmConnectionName = "frameos-wifi" ## NetworkManager connection ID
-  tcpRedirectPorts = ["80"]         ## TCP ports we hijack for captive‑portal
+  tcpRedirectPorts = ["80", "443"]  ## TCP ports we hijack for captive‑portal
   dnsProtocols = ["tcp", "udp"]     ## we hijack both for :53
 
 # ──────────────────────────────────────────────────────────────────────────────

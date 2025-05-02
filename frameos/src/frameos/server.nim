@@ -86,21 +86,20 @@ router myrouter:
         globalFrameConfig
       )
     resp Http200, netportal.confirmHtml()
-  # Captive portal URLs...
+  # Android
   get "/generate_204":
-    resp Http302, {"Location": "/"}, ""
+    resp Http204, "", "" # No body
   get "/gen_204":
-    resp Http302, {"Location": "/"}, ""
+    resp Http204, "", ""
+  # iOS
   get "/hotspot-detect.html":
-    resp Http302, {"Location": "/"}, ""
-  get "/hotspot-detect":
-    resp Http302, {"Location": "/"}, ""
-  get "/ncsi.txt":
-    resp Http302, {"Location": "/"}, ""
-  get "/connecttest.txt":
-    resp Http302, {"Location": "/"}, ""
+    resp Http200, "text/html", "<html><body>Captive Portal</body></html>"
   get "/library/test/success.html":
-    resp Http302, {"Location": "/"}, ""
+    resp Http200, "text/html", "<html><body>Not the real success page</body></html>"
+  # Windows
+  get "/connecttest.txt":
+    resp Http200, "text/plain", "Captive Portal"
+
   get "/ws":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"
