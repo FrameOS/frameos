@@ -199,6 +199,10 @@ export const frameLogic = kea<frameLogicType>([
       (s) => [s.frame, s.frameForm],
       (frame, frameForm): FrameScene[] => frameForm?.scenes ?? frame.scenes ?? [],
     ],
+    sortedScenes: [
+      (s) => [s.scenes],
+      (scenes): FrameScene[] => scenes.toSorted((a, b) => a.name.localeCompare(b.name)),
+    ],
     unsavedChanges: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm) =>

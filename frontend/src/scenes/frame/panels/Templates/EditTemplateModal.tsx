@@ -16,9 +16,10 @@ import clsx from 'clsx'
 import { Spinner } from '../../../../components/Spinner'
 import React from 'react'
 import { Label } from '../../../../components/Label'
+import { FrameImage } from '../../../../components/FrameImage'
 
 export function EditTemplateModal() {
-  const { frameId, frameForm } = useValues(frameLogic)
+  const { frameId, sortedScenes } = useValues(frameLogic)
   const { isTemplateFormSubmitting, showingModal, modalTarget, templateForm } = useValues(templatesLogic({ frameId }))
   const { hideModal, submitTemplateForm } = useActions(templatesLogic({ frameId }))
   const newTemplate = !templateForm.id
@@ -76,17 +77,17 @@ export function EditTemplateModal() {
                               clear
                             </Button>
                           ) : null}
-                          {(templateForm.exportScenes?.length ?? 0) < (frameForm.scenes || []).length ? (
+                          {(templateForm.exportScenes?.length ?? 0) < sortedScenes.length ? (
                             <Button
                               size="tiny"
                               color="secondary"
-                              onClick={() => onChange((frameForm.scenes || []).map((s) => s.id))}
+                              onClick={() => onChange(sortedScenes.map((s) => s.id))}
                             >
                               select all
                             </Button>
                           ) : null}
                         </div>
-                        {(frameForm.scenes || []).map((scene, index) => {
+                        {sortedScenes.map((scene) => {
                           const included = (value || []).includes(scene.id)
                           return (
                             <Box
@@ -104,8 +105,14 @@ export function EditTemplateModal() {
                                 )
                               }}
                             >
-                              {included ? <CheckIcon className="w-5 h-5" /> : <NoSymbolIcon className="w-5 h-5" />}
-                              <div className="flex items-start justify-between gap-1">
+                              <FrameImage
+                                frameId={frameId}
+                                sceneId={scene.id}
+                                className="cursor-pointer max-w-[120px] max-h-[120px]"
+                                refreshable={false}
+                                thumb
+                              />
+                              <div className="flex flex-1 items-start justify-between gap-1">
                                 <div>
                                   <H6>
                                     {scene.name || scene.id}
@@ -118,6 +125,7 @@ export function EditTemplateModal() {
                                   <div className="text-xs text-gray-400">id: {scene.id}</div>
                                 </div>
                               </div>
+                              {included ? <CheckIcon className="w-5 h-5" /> : null}
                             </Box>
                           )
                         })}
