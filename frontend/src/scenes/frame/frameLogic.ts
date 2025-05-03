@@ -135,6 +135,7 @@ export const frameLogic = kea<frameLogicType>([
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Record<string, any>) => ({ sceneId, nodeId, nodeData }),
     saveFrame: true,
     renderFrame: true,
+    rebootFrame: true,
     restartFrame: true,
     stopFrame: true,
     deployFrame: true,
@@ -182,11 +183,12 @@ export const frameLogic = kea<frameLogicType>([
   })),
   reducers({
     nextAction: [
-      null as 'render' | 'restart' | 'stop' | 'deploy' | null,
+      null as 'render' | 'restart' | 'reboot' | 'stop' | 'deploy' | null,
       {
         saveFrame: () => null,
         renderFrame: () => 'render',
         restartFrame: () => 'restart',
+        rebootFrame: () => 'reboot',
         stopFrame: () => 'stop',
         deployFrame: () => 'deploy',
       },
@@ -250,6 +252,7 @@ export const frameLogic = kea<frameLogicType>([
     saveFrame: () => actions.submitFrameForm(),
     renderFrame: () => framesModel.actions.renderFrame(props.frameId),
     restartFrame: () => framesModel.actions.restartFrame(props.frameId),
+    rebootFrame: () => framesModel.actions.rebootFrame(props.frameId),
     stopFrame: () => framesModel.actions.stopFrame(props.frameId),
     deployFrame: () => framesModel.actions.deployFrame(props.frameId, !values.requiresRecompilation),
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),

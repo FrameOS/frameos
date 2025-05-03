@@ -41,3 +41,32 @@ async def restart_frame_task(ctx: dict[str, Any], id: int):
     finally:
         if ssh is not None:
             await remove_ssh_connection(db, redis, ssh, frame)
+
+async def reboot_frame(id: int, redis: Redis):
+    await redis.enqueue_job("reboot_frame", id=id)
+
+async def reboot_frame_task(ctx: dict[str, Any], id: int):
+    db: Session = ctx['db']
+    redis: Redis = ctx['redis']
+
+    ssh = None
+    frame = None
+    try:
+        frame = db.get(Frame, id)
+        if not frame:
+            await log(db, redis, id, "stderr", "Frame not found")
+            return
+
+        frame.status = 'rebooting'
+        await update_frame(db, redis, frame)
+        ssh = await get_ssh_connection(db, redis, frame)
+        await exec_command(db, redis, frame, ssh, "sudo reboot")
+
+    except Exception as e:
+        await log(db, redis, id, "stderr", str(e))
+        if frame:
+            frame.status = 'uninitialized'
+            await update_frame(db, redis, frame)
+    finally:
+        if ssh is not None:
+            await remove_ssh_connection(db, redis, ssh, frame)

@@ -12,7 +12,7 @@ from arq.worker import func
 from app.tasks.deploy_frame import deploy_frame_task
 from app.tasks.fast_deploy_frame import fast_deploy_frame_task
 from app.tasks.reset_frame import reset_frame_task
-from app.tasks.restart_frame import restart_frame_task
+from app.tasks.restart_frame import restart_frame_task, reboot_frame_task
 from app.tasks.stop_frame import stop_frame_task
 from app.config import config
 from app.redis import create_redis_connection
@@ -49,6 +49,7 @@ class WorkerSettings:
         func(fast_deploy_frame_task, name="fast_deploy_frame"),
         func(reset_frame_task,       name="reset_frame"),
         func(restart_frame_task,     name="restart_frame"),
+        func(reboot_frame_task,      name="reboot_frame"),
         func(stop_frame_task,        name="stop_frame"),
     ]
     on_startup = startup

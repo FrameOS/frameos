@@ -516,6 +516,15 @@ async def api_frame_restart_event(id: int, redis: Redis = Depends(get_redis)):
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
+@api_with_auth.post("/frames/{id:int}/reboot")
+async def api_frame_reboot_event(id: int, redis: Redis = Depends(get_redis)):
+    try:
+        from app.tasks import reboot_frame
+        await reboot_frame(id, redis)
+        return "Success"
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
 
 @api_with_auth.post("/frames/{id:int}/stop")
 async def api_frame_stop_event(id: int, redis: Redis = Depends(get_redis)):
@@ -574,6 +583,9 @@ async def api_frame_update_endpoint(
     if data.next_action == 'restart':
         from app.tasks import restart_frame
         await restart_frame(id, redis)
+    elif data.next_action == 'reboot':
+        from app.tasks import reboot_frame
+        await reboot_frame(id, redis)
     elif data.next_action == 'stop':
         from app.tasks import stop_frame
         await stop_frame(id, redis)

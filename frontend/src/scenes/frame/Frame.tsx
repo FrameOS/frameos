@@ -16,7 +16,7 @@ export function Frame(props: FrameSceneProps) {
   const frameId = parseInt(props.id)
   const frameLogicProps = { frameId }
   const { frame, unsavedChanges, undeployedChanges, requiresRecompilation } = useValues(frameLogic(frameLogicProps))
-  const { saveFrame, renderFrame, restartFrame, stopFrame, deployFrame, fullDeployFrame } = useActions(
+  const { saveFrame, renderFrame, rebootFrame, restartFrame, stopFrame, deployFrame, fullDeployFrame } = useActions(
     frameLogic(frameLogicProps)
   )
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
@@ -34,8 +34,9 @@ export function Frame(props: FrameSceneProps) {
                   className="items-center"
                   items={[
                     { label: 'Re-Render', onClick: () => renderFrame() },
-                    { label: 'Restart', onClick: () => restartFrame() },
-                    { label: 'Stop', onClick: () => stopFrame() },
+                    { label: 'Restart FrameOS', onClick: () => restartFrame() },
+                    { label: 'Stop FrameOS', onClick: () => stopFrame() },
+                    { label: 'Reboot device', onClick: () => rebootFrame() },
                     ...(!requiresRecompilation
                       ? [
                           {
