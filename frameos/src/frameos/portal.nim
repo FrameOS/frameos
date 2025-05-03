@@ -30,9 +30,6 @@ proc run(cmd: string): (string, int) =
   pLog("portal:exec", %*{"cmd": cmd, "rc": rc, "output": output.strip()})
   (output, rc)
 
-# ──────────────────────────────────────────────────────────────────────────────
-#  Hot‑spot helpers
-# ──────────────────────────────────────────────────────────────────────────────
 proc hotspotRunning(frameOS: FrameOS): bool =
   let (output, _) = run("sudo nmcli --colors no -t -f NAME connection show --active | grep '^" &
                      nmHotspotName & "$' || true")
@@ -40,7 +37,7 @@ proc hotspotRunning(frameOS: FrameOS): bool =
   frameOS.network.hotspotStatus = if result: HotspotStatus.enabled else: HotspotStatus.disabled
 
 proc stopAp*(frameOS: FrameOS) =
-  ## Tear down the hotspot and NAT rules (idempotent)
+  ## Tear down the hotspot
   if not hotspotRunning(frameOS):
     pLog("portal:stopAp:notRunning")
     return
@@ -55,7 +52,7 @@ proc stopAp*(frameOS: FrameOS) =
   pLog("portal:stopAp:done")
 
 proc startAp*(frameOS: FrameOS) =
-  ## Bring up Wi-Fi AP with hard-coded SSID/pw and HTTP(S) redirect → 8787
+  ## Bring up Wi-Fi AP with hard-coded SSID/pw
   if hotspotRunning(frameOS):
     pLog("portal:startAp:alreadyRunning")
     return
@@ -136,7 +133,6 @@ button{display:block;width:100%;padding:.5rem;font-size:.875rem;font-weight:500;
 button:hover{background-color:#484984}
 button:focus{outline:none;box-shadow:0 0 0 1px #484984}
 </style>"""
-
 
 proc layout*(inner: string): string =
   fmt"""<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1" />

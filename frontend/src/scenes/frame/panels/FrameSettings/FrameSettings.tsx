@@ -292,12 +292,12 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                       tooltip={
                         <div className="space-y-2">
                           <p>
-                            When your frame can't connect to the internet on boot, it can spin up its own hotspot that
-                            you can connect to. This is useful for setting up a frame in a new location.
+                            When your frame can't connect to the internet on boot, it can spin up its own wifi access
+                            point that you can connect to. This is useful for setting up a frame in a new location.
                           </p>
                           <p>
                             Just connect to 'FrameOS-Setup' with the password 'frame1234', open http://10.42.0.1/ and
-                            enter your wifi credentials. The hotspot will only be active for 10 minutes after boot.
+                            enter your wifi credentials. The hotspot will only be active for 10 minutes by default.
                           </p>
                         </div>
                       }
