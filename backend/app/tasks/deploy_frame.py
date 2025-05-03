@@ -128,6 +128,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             # 2. Remote steps
             await install_if_necessary("ntp")
             await install_if_necessary("build-essential")
+            await install_if_necessary("hostapd")
 
             if drivers.get("evdev"):
                 await install_if_necessary("libevdev-dev")

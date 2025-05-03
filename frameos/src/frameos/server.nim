@@ -1,9 +1,9 @@
-# This is just an example to get you started. A typical binary package
-# uses this file as the main entry point of the application.
 import json
 import pixie
 import assets/web as webAssets
 import asyncdispatch
+import httpclient
+import threadpool
 import jester
 import locks
 import ws, ws/jester_extra
@@ -16,10 +16,12 @@ import frameos/types
 import frameos/channels
 import frameos/utils/image
 import frameos/utils/font
+import frameos/portal as netportal
 from net import Port
-from frameos/runner import getLastImagePng, getLastPublicState, getAllPublicStates
+from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates
 from scenes/scenes import sceneOptions
 
+var globalFrameOS: FrameOS
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
 let indexHtml = webAssets.getAsset("assets/compiled/web/index.html")
@@ -62,17 +64,30 @@ router myrouter:
         let paramsTable = request.params()
         return contains(paramsTable, "k") and paramsTable["k"] == accessKey
   get "/":
-    if not hasAccess(request, Read):
-      resp Http401, "Unauthorized"
-    {.gcsafe.}: # We're only reading static assets. It's fine.
-      let scalingMode = case globalFrameConfig.scalingMode:
-        of "cover", "center":
-          globalFrameConfig.scalingMode
-        of "stretch":
-          "100% 100%"
-        else:
-          "contain"
-      resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
+    {.gcsafe.}:
+      if netportal.isHotspotActive(globalFrameOS):
+        log(%*{"event": "portal:http", "get": request.pathInfo})
+        resp Http200, netportal.setupHtml()
+      elif not hasAccess(request, Read):
+        resp Http401, "Unauthorized"
+      else:
+        let scalingMode = case globalFrameConfig.scalingMode:
+          of "cover", "center": globalFrameConfig.scalingMode
+          of "stretch": "100% 100%"
+          else: "contain"
+        resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
+  post "/setup":
+    {.gcsafe.}:
+      if not netportal.isHotspotActive(globalFrameOS):
+        resp Http400, "Not in setup mode"
+      let params = request.params()
+      log(%*{"event": "portal:http", "post": request.pathInfo, "params": params})
+      spawn netportal.connectToWifi(
+        globalFrameOS,
+        params["ssid"],
+        params.getOrDefault("password", ""),
+      )
+    resp Http200, netportal.confirmHtml()
   get "/ws":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"
@@ -214,6 +229,7 @@ proc listenForRender*() {.async.} =
       await sleepAsync(100)
 
 proc newServer*(frameOS: FrameOS): Server =
+  globalFrameOS = frameOS
   globalFrameConfig = frameOS.frameConfig
   globalRunner = frameOS.runner
 

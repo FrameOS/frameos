@@ -59,10 +59,8 @@ proc processQueue(self: LoggerThread): int =
       self.lastSendAt = epochTime()
       if response.code != Http200:
         echo "Error sending logs: HTTP " & $response.status
-        logToFile(self.frameConfig.logToFile, %*{"error": "Error sending logs", "status": response.status})
     except CatchableError as e:
       echo "Error sending logs: " & $e.msg
-      logToFile(self.frameConfig.logToFile, %*{"error": "Error sending logs", "message": e.msg})
     finally:
       client.close()
 

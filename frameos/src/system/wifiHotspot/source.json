@@ -1,0 +1,384 @@
+{
+  "id": "a68ecb60-fe38-4ef8-9f82-b09c3946546d",
+  "name": "Wifi Captive Portal",
+  "settings": {
+    "refreshInterval": 3600,
+    "backgroundColor": "#000000"
+  },
+  "fields": [],
+  "nodes": [
+    {
+      "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "type": "event",
+      "position": {
+        "x": -103.23666222456585,
+        "y": -101.03884832446352
+      },
+      "data": {
+        "keyword": "render"
+      },
+      "width": 212,
+      "height": 161,
+      "selected": false,
+      "positionAbsolute": {
+        "x": -103.23666222456585,
+        "y": -101.03884832446352
+      },
+      "dragging": false
+    },
+    {
+      "id": "c41f0a1a-df19-45e6-9fca-cfee28d984e8",
+      "position": {
+        "x": 205.37419913175376,
+        "y": -117.20184687281841
+      },
+      "data": {
+        "keyword": "render/split",
+        "config": {
+          "rows": "2",
+          "gap": "10",
+          "height_ratios": "45 55"
+        }
+      },
+      "type": "app",
+      "width": 307,
+      "height": 359,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 205.37419913175376,
+        "y": -117.20184687281841
+      },
+      "dragging": false
+    },
+    {
+      "id": "95e0d032-8c2d-4fb6-82af-d9b273571043",
+      "position": {
+        "x": 1306.5454188877916,
+        "y": 460.83391751539205
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "bottom-right"
+        }
+      },
+      "type": "app",
+      "width": 324,
+      "height": 190,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 1306.5454188877916,
+        "y": 460.83391751539205
+      },
+      "dragging": false
+    },
+    {
+      "id": "81f4ab21-6a71-45d1-8c8a-7dc3b5d7a389",
+      "position": {
+        "x": 1196.5576413709114,
+        "y": -9.19739538731136
+      },
+      "data": {
+        "keyword": "data/qr",
+        "config": {
+          "codeType": "Custom",
+          "code": "",
+          "size": "4"
+        },
+        "cache": {
+          "enabled": true,
+          "inputEnabled": true,
+          "durationEnabled": false,
+          "duration": null,
+          "expressionEnabled": false,
+          "expression": null,
+          "expressionType": null
+        }
+      },
+      "type": "app",
+      "width": 459,
+      "height": 370,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 1196.5576413709114,
+        "y": -9.19739538731136
+      },
+      "dragging": false
+    },
+    {
+      "id": "490777a5-27ed-4fcb-8ca1-2015282934b8",
+      "position": {
+        "x": 697.936518560198,
+        "y": 440.1457332907105
+      },
+      "data": {
+        "keyword": "render/text",
+        "config": {
+          "vAlign": "top",
+          "text": "",
+          "richText": "basic-caret"
+        }
+      },
+      "type": "app",
+      "width": 424,
+      "height": 420,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 697.936518560198,
+        "y": 440.1457332907105
+      },
+      "dragging": false
+    },
+    {
+      "id": "ae602f2d-a88d-40d7-8f2e-7358c565ebd2",
+      "position": {
+        "x": 752.8934636549243,
+        "y": 907.8704525210367
+      },
+      "data": {
+        "code": "fmt(\"^(48)Welcome to FrameOS!^(28)\\n\\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{frameConfig.framePort}/^(no-underline) to continue.\")",
+        "codeArgs": [],
+        "codeOutputs": [
+          {
+            "name": "text",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "code",
+      "style": {
+        "width": 675,
+        "height": 283
+      },
+      "width": 675,
+      "height": 283,
+      "selected": false,
+      "resizing": false,
+      "positionAbsolute": {
+        "x": 752.8934636549243,
+        "y": 907.8704525210367
+      },
+      "dragging": false
+    },
+    {
+      "id": "a61a180d-fccf-4286-baad-4bad6ea6b5a5",
+      "position": {
+        "x": 1149.301954425734,
+        "y": -277.2455029923407
+      },
+      "data": {
+        "code": "fmt\"WIFI:T:WPA;S:\" & frameConfig.network.wifiHotspotSsid.multiReplace(@[(\";\", \"\\\\;\"), (\",\", \"\\\\,\"), (\"\\\\\", \"\\\\\\\\\"), (\"\\\"\", \"\\\\\\\"\"), (\":\", \"\\\\:\")]) & \";P:\" & frameConfig.network.wifiHotspotPassword.multiReplace(@[(\";\", \"\\\\;\"), (\",\", \"\\\\,\"), (\"\\\\\", \"\\\\\\\\\"), (\"\\\"\", \"\\\\\\\"\"), (\":\", \"\\\\:\")]) & \";;\"",
+        "codeArgs": [],
+        "codeOutputs": [
+          {
+            "name": "code",
+            "type": "string"
+          }
+        ]
+      },
+      "type": "code",
+      "style": {
+        "width": 715,
+        "height": 220
+      },
+      "width": 715,
+      "height": 220,
+      "selected": false,
+      "resizing": false,
+      "positionAbsolute": {
+        "x": 1149.301954425734,
+        "y": -277.2455029923407
+      },
+      "dragging": false
+    },
+    {
+      "id": "e85b2318-232e-4e72-a98e-f02cde081c72",
+      "position": {
+        "x": 749.6302577713122,
+        "y": 25.61120781947301
+      },
+      "data": {
+        "keyword": "render/split",
+        "config": {
+          "columns": "2",
+          "gap": "20"
+        }
+      },
+      "type": "app",
+      "width": 308,
+      "height": 359,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 749.6302577713122,
+        "y": 25.61120781947301
+      },
+      "dragging": false
+    },
+    {
+      "id": "baf1fbf0-fc5a-42bb-8734-61d52c96930f",
+      "position": {
+        "x": 1784.133669155967,
+        "y": 637.456133080485
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "bottom-left"
+        }
+      },
+      "type": "app",
+      "width": 324,
+      "height": 190,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 1784.133669155967,
+        "y": 637.456133080485
+      },
+      "dragging": false
+    },
+    {
+      "id": "04e2b4d8-0851-4bf3-8533-380d96daca51",
+      "position": {
+        "x": 1753.3954565197794,
+        "y": 196.91863222854965
+      },
+      "data": {
+        "keyword": "data/qr",
+        "config": {
+          "size": "4",
+          "codeType": "Custom"
+        },
+        "cache": {
+          "enabled": true,
+          "inputEnabled": true,
+          "durationEnabled": false,
+          "duration": null,
+          "expressionEnabled": false,
+          "expression": null,
+          "expressionType": null
+        }
+      },
+      "type": "app",
+      "width": 459,
+      "height": 370,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 1753.3954565197794,
+        "y": 196.91863222854965
+      },
+      "dragging": false
+    },
+    {
+      "id": "d7e98f08-cb59-4206-b358-6f88745d0b8e",
+      "position": {
+        "x": 1718.4262703163574,
+        "y": 25.498228511649245
+      },
+      "data": {
+        "code": "fmt\"http://10.42.0.1:{frameConfig.framePort}/\"",
+        "codeArgs": [],
+        "codeOutputs": [
+          {
+            "name": "code",
+            "type": "string"
+          }
+        ]
+      },
+      "type": "code",
+      "style": {
+        "width": 300,
+        "height": 119
+      },
+      "width": 300,
+      "height": 119,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 1718.4262703163574,
+        "y": 25.498228511649245
+      },
+      "dragging": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "3d7be198-95f4-45f2-8d84-5ccf44c5ea37",
+      "target": "c41f0a1a-df19-45e6-9fca-cfee28d984e8",
+      "targetHandle": "prev",
+      "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "sourceHandle": "next",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "4b85a8f1-9544-4b54-a95b-c88fe1adc147",
+      "source": "81f4ab21-6a71-45d1-8c8a-7dc3b5d7a389",
+      "sourceHandle": "fieldOutput",
+      "target": "95e0d032-8c2d-4fb6-82af-d9b273571043",
+      "targetHandle": "fieldInput/image",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "359b06e7-8f9b-411d-b779-162527afb272",
+      "target": "490777a5-27ed-4fcb-8ca1-2015282934b8",
+      "targetHandle": "prev",
+      "source": "c41f0a1a-df19-45e6-9fca-cfee28d984e8",
+      "sourceHandle": "field/render_functions[2][1]",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "a42a3f6d-c2ed-4b32-bc74-b6377f3245c7",
+      "source": "ae602f2d-a88d-40d7-8f2e-7358c565ebd2",
+      "sourceHandle": "fieldOutput",
+      "target": "490777a5-27ed-4fcb-8ca1-2015282934b8",
+      "targetHandle": "fieldInput/text",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "53a508fe-b3e7-4dbd-a9cd-37c07d529842",
+      "source": "a61a180d-fccf-4286-baad-4bad6ea6b5a5",
+      "sourceHandle": "fieldOutput",
+      "target": "81f4ab21-6a71-45d1-8c8a-7dc3b5d7a389",
+      "targetHandle": "fieldInput/code",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "8b180c82-7a69-483a-8a09-039bf718baaf",
+      "target": "e85b2318-232e-4e72-a98e-f02cde081c72",
+      "targetHandle": "prev",
+      "source": "c41f0a1a-df19-45e6-9fca-cfee28d984e8",
+      "sourceHandle": "field/render_functions[1][1]",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "ce77088e-9820-4a0a-afa8-cc7eaf768d96",
+      "source": "e85b2318-232e-4e72-a98e-f02cde081c72",
+      "sourceHandle": "field/render_functions[1][1]",
+      "target": "95e0d032-8c2d-4fb6-82af-d9b273571043",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "b5c825fc-5914-48f6-b31a-f2790aa9c8be",
+      "target": "baf1fbf0-fc5a-42bb-8734-61d52c96930f",
+      "targetHandle": "prev",
+      "source": "e85b2318-232e-4e72-a98e-f02cde081c72",
+      "sourceHandle": "field/render_functions[1][2]",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "006d0ea0-a730-42c7-9606-8c798e93b939",
+      "source": "04e2b4d8-0851-4bf3-8533-380d96daca51",
+      "sourceHandle": "fieldOutput",
+      "target": "baf1fbf0-fc5a-42bb-8734-61d52c96930f",
+      "targetHandle": "fieldInput/image",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "073cfdf7-84c4-42ae-baa6-ec0b9a52f96e",
+      "source": "d7e98f08-cb59-4206-b358-6f88745d0b8e",
+      "sourceHandle": "fieldOutput",
+      "target": "04e2b4d8-0851-4bf3-8533-380d96daca51",
+      "targetHandle": "fieldInput/code",
+      "type": "codeNodeEdge"
+    }
+  ]
+}

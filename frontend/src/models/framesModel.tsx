@@ -23,6 +23,7 @@ export const framesModel = kea<framesModelType>([
     deployFrame: (id: number, fastDeploy?: boolean) => ({ id, fastDeploy: fastDeploy || false }),
     stopFrame: (id: number) => ({ id }),
     restartFrame: (id: number) => ({ id }),
+    rebootFrame: (id: number) => ({ id }),
     renderFrame: (id: number) => ({ id }),
     deleteFrame: (id: number) => ({ id }),
   }),
@@ -117,6 +118,9 @@ export const framesModel = kea<framesModelType>([
     },
     restartFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
+    },
+    rebootFrame: async ({ id }) => {
+      await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
     },
     deleteFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })

@@ -27,11 +27,15 @@ patterns=(
     # "frontend/src/scenes/scenes.tsx"
     # "frontend/src/scenes/sceneLogic.tsx"
     # "frameos/src/apps/*/*/config.json"
+    "frameos/frame.json"
+    "frameos/frameos.nimble"
+    "frameos/frameos.service"
     "frameos/src/frameos.nim"
     "frameos/src/frameos/*.nim"
     "frameos/src/frameos/utils/*.nim"
-    "frameos/src/frameos/scenes/*.nim"
-    "frameos/src/frameos/tests/*.nim"
+    "frameos/src/scenes/*.nim"
+    "frameos/src/drivers/drivers.nim"
+    # "frameos/src/apps/*/*/*"
 )
 
 for pattern in "${patterns[@]}"; do

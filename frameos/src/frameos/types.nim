@@ -45,6 +45,10 @@ type
     networkCheck*: bool
     networkCheckTimeoutSeconds*: float
     networkCheckUrl*: string
+    wifiHotspot*: string
+    wifiHotspotSsid*: string
+    wifiHotspotPassword*: string
+    wifiHostpotTimeoutSeconds*: float
 
   FrameSchedule* = ref object
     events*: seq[ScheduledEvent]
@@ -142,7 +146,7 @@ type
     controlCodeData*: AppRoot
 
   RunnerControl* = ref object
-    start*: proc()
+    start*: proc(firstSceneId: Option[SceneId])
 
   Server* = ref object
     frameConfig*: FrameConfig
@@ -158,12 +162,24 @@ type
     logger*: Logger
     schedule*: FrameSchedule
 
+  NetworkStatus* = enum
+    idle, connecting, connected, timeout, error
+
+  HotspotStatus* = enum
+    disabled, enabled, starting, stopping, error
+
+  Network* = ref object
+    status*: NetworkStatus
+    hotspotStatus*: HotspotStatus
+    hotspotStartedAt*: float
+
   FrameOS* = ref object
     frameConfig*: FrameConfig
     logger*: Logger
     metricsLogger*: MetricsLogger
     server*: Server
     runner*: RunnerControl
+    network*: Network
 
 proc `==`*(x, y: NodeId): bool = x.int == y.int
 proc `==`*(x: int, y: NodeId): bool = x == y.int

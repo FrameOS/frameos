@@ -280,12 +280,73 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                       {({ onChange, value }) => (
                         <NumberTextInput
                           name="networkCheckTimeoutSeconds"
-                          placeholder="60"
+                          placeholder="30"
                           onChange={onChange}
-                          value={value ?? 60}
+                          value={value ?? 30}
                         />
                       )}
                     </Field>
+                    <Field
+                      name="wifiHotspot"
+                      label="Wifi Hotspot Setup"
+                      tooltip={
+                        <div className="space-y-2">
+                          <p>
+                            When your frame can't connect to the internet on boot, it can spin up its own wifi access
+                            point that you can connect to. This is useful for setting up a frame in a new location.
+                          </p>
+                          <p>
+                            Just connect to 'FrameOS-Setup' with the password 'frame1234', open http://10.42.0.1/ and
+                            enter your wifi credentials. The hotspot will only be active for 10 minutes by default.
+                          </p>
+                        </div>
+                      }
+                    >
+                      <Select
+                        options={[
+                          { value: 'disabled', label: 'Disabled' },
+                          { value: 'bootOnly', label: 'Enabled on boot if no network connection' },
+                        ]}
+                      />
+                    </Field>
+                    {frameForm.network?.wifiHotspot === 'bootOnly' && (
+                      <>
+                        <Field name="wifiHotspotSsid" label="Wifi Hotspot SSID">
+                          {({ onChange, value }) => (
+                            <TextInput
+                              name="wifiHotspotSsid"
+                              placeholder="FrameOS-Setup"
+                              onChange={onChange}
+                              value={value ?? 'FrameOS-Setup'}
+                            />
+                          )}
+                        </Field>
+                        <Field name="wifiHotspotPassword" label="Wifi Hotspot Password">
+                          {({ onChange, value }) => (
+                            <TextInput
+                              name="wifiHotspotPassword"
+                              placeholder="frame1234"
+                              onChange={onChange}
+                              value={value ?? 'frame1234'}
+                            />
+                          )}
+                        </Field>
+                        <Field
+                          name="wifiHotspotTimeout"
+                          label="Wifi Hotspot Timeout in seconds"
+                          tooltip="How long to keep the hotspot active after boot. After this timeout it won't turn on again without a reboot."
+                        >
+                          {({ onChange, value }) => (
+                            <NumberTextInput
+                              name="wifiHotspotTimeout"
+                              placeholder="600"
+                              onChange={onChange}
+                              value={value ?? 600}
+                            />
+                          )}
+                        </Field>
+                      </>
+                    )}
                   </>
                 )}
               </Group>

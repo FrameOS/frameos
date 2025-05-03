@@ -39,13 +39,11 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
     <DropdownMenu
       buttonColor="secondary"
       items={[
-        context === 'scenes'
-          ? {
-              label: 'Activate',
-              onClick: () => setCurrentScene(scene.id),
-              icon: <PlayIcon className="w-5 h-5" />,
-            }
-          : null,
+        {
+          label: 'Activate',
+          onClick: () => setCurrentScene(scene.id),
+          icon: <PlayIcon className="w-5 h-5" />,
+        },
         context === 'scenes'
           ? {
               label: 'Edit scene',

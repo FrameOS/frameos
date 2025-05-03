@@ -69,7 +69,11 @@
     },
     "network": {
         "networkCheck": true,
-        "networkCheckSeconds": 60,
-        "networkCheckUrl": "https://networkcheck.frameos.net/"
+        "networkCheckTimeoutSeconds": 30,
+        "networkCheckUrl": "https://networkcheck.frameos.net/",
+        "wifiHotspot": "disabled",
+        "wifiHotspotSsid": "FrameOS",
+        "wifiHotspotPassword": "frame1234",
+        "wifiHotspotTimeoutSeconds": 600
     }
 }

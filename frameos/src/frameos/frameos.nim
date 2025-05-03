@@ -1,5 +1,4 @@
-import json, asyncdispatch, pixie, strutils, times, os
-import httpclient
+import json, asyncdispatch, pixie, strutils, times, os, httpclient, options
 import drivers/drivers as drivers
 import frameos/config
 import frameos/logger
@@ -8,6 +7,7 @@ import frameos/runner
 import frameos/server
 import frameos/scheduler
 import frameos/types
+import frameos/portal as netportal
 import lib/tz
 
 proc newFrameOS*(): FrameOS =
@@ -19,7 +19,11 @@ proc newFrameOS*(): FrameOS =
   result = FrameOS(
     frameConfig: frameConfig,
     logger: logger,
-    metricsLogger: metricsLogger
+    metricsLogger: metricsLogger,
+    network: Network(
+      status: NetworkStatus.idle,
+      hotspotStatus: HotspotStatus.disabled,
+    ),
   )
   drivers.init(result)
   result.runner = newRunner(frameConfig)
@@ -45,36 +49,24 @@ proc start*(self: FrameOS) {.async.} =
     "gpioButtons": self.frameConfig.gpioButtons,
   }}
   self.logger.log(message)
+  netportal.setLogger(self.logger)
 
-  # Check if there's an internet connection or until timeout
-  if self.frameConfig.network.networkCheck and self.frameConfig.network.networkCheckTimeoutSeconds > 0:
-    let url = self.frameConfig.network.networkCheckUrl
-    let timeout = self.frameConfig.network.networkCheckTimeoutSeconds
-    let timer = epochTime()
-    var attempt = 1
-    self.logger.log(%*{"event": "networkCheck", "url": url})
-    while true:
-      if epochTime() - timer >= timeout:
-        self.logger.log(%*{"event": "networkCheck", "status": "timeout", "seconds": timeout})
-        break
-      let client = newHttpClient(timeout = 5000)
-      try:
-        let response = client.get(url)
-        if response.status.startsWith("200"):
-          self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "success"})
-          break
-        else:
-          self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "failed",
-              "response": response.status})
-      except CatchableError as e:
-        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
-      finally:
-        client.close()
-      sleep(attempt * 1000)
-      attempt += 1
+  var firstSceneId: Option[SceneId] = none(SceneId)
+  if self.frameConfig.network.networkCheck:
+    let connected = checkNetwork(self)
+    if self.frameConfig.network.wifiHotspot == "bootOnly":
+      if connected:
+        netportal.stopAp(self)
+      else:
+        netportal.startAp(self)
+        firstSceneId = some("system/wifiHotspot".SceneId)
+  else:
+    self.logger.log(%*{"event": "networkCheck", "status": "skipped"})
 
-  self.runner.start()
-  result = self.server.startServer()
+  self.runner.start(firstSceneId)
+
+  ## This call never returns
+  await self.server.startServer()
 
 proc startFrameOS*() {.async.} =
   var frameOS = newFrameOS()
