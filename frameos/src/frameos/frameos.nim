@@ -19,7 +19,11 @@ proc newFrameOS*(): FrameOS =
   result = FrameOS(
     frameConfig: frameConfig,
     logger: logger,
-    metricsLogger: metricsLogger
+    metricsLogger: metricsLogger,
+    network: Network(
+      status: NetworkStatus.idle,
+      hotspotStartedAt: 0.0
+    ),
   )
   drivers.init(result)
   result.runner = newRunner(frameConfig)
@@ -34,21 +38,26 @@ proc checkNetwork(self: FrameOS): bool =
   let timeout = self.frameConfig.network.networkCheckTimeoutSeconds
   let timer = epochTime()
   var attempt = 1
+  self.network.status = NetworkStatus.connecting
   self.logger.log(%*{"event": "networkCheck", "url": url})
   while true:
     if epochTime() - timer >= timeout:
+      self.network.status = NetworkStatus.timeout
       self.logger.log(%*{"event": "networkCheck", "status": "timeout", "seconds": timeout})
       return false
     let client = newHttpClient(timeout = 5000)
     try:
       let response = client.get(url)
       if response.status.startsWith("200"):
+        self.network.status = NetworkStatus.connected
         self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "success"})
         return true
       else:
+        self.network.status = NetworkStatus.error
         self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "failed",
             "response": response.status})
     except CatchableError as e:
+      self.network.status = NetworkStatus.error
       self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
     finally:
       client.close()
@@ -82,9 +91,9 @@ proc start*(self: FrameOS) {.async.} =
     let connected = checkNetwork(self)
     if self.frameConfig.network.wifiHotspot == "bootOnly":
       if connected:
-        netportal.stopAp(self.frameConfig)
+        netportal.stopAp(self)
       else:
-        netportal.startAp(self.frameConfig)
+        netportal.startAp(self)
         firstSceneId = some("system/wifiHotspot".SceneId)
   else:
     self.logger.log(%*{"event": "networkCheck", "status": "skipped"})

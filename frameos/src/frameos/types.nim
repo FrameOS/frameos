@@ -162,12 +162,20 @@ type
     logger*: Logger
     schedule*: FrameSchedule
 
+  NetworkStatus* = enum
+    idle, connecting, connected, hotspot, timeout, error
+
+  Network* = ref object
+    status*: NetworkStatus
+    hotspotStartedAt*: float
+
   FrameOS* = ref object
     frameConfig*: FrameConfig
     logger*: Logger
     metricsLogger*: MetricsLogger
     server*: Server
     runner*: RunnerControl
+    network*: Network
 
 proc `==`*(x, y: NodeId): bool = x.int == y.int
 proc `==`*(x: int, y: NodeId): bool = x == y.int

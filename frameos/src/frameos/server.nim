@@ -22,6 +22,7 @@ from net import Port
 from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates
 from scenes/scenes import sceneOptions
 
+var globalFrameOS: FrameOS
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
 let indexHtml = webAssets.getAsset("assets/compiled/web/index.html")
@@ -83,7 +84,7 @@ router myrouter:
       spawn netportal.connectToWifi(
         params["ssid"],
         params.getOrDefault("password", ""),
-        globalFrameConfig
+        globalFrameOS
       )
     resp Http200, netportal.confirmHtml()
   # Android
@@ -241,6 +242,7 @@ proc listenForRender*() {.async.} =
       await sleepAsync(100)
 
 proc newServer*(frameOS: FrameOS): Server =
+  globalFrameOS = frameOS
   globalFrameConfig = frameOS.frameConfig
   globalRunner = frameOS.runner
 

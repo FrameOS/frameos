@@ -49,8 +49,9 @@ proc hotspotRunning(): bool =
   active = output.strip().len > 0
   return active
 
-proc stopAp*(frameConfig: FrameConfig) =
+proc stopAp*(frameOS: FrameOS) =
   ## Tear down the hotspot and NAT rules (idempotent)
+  let frameConfig = frameOS.frameConfig
   if not hotspotRunning():
     pLog("portal:stopAp:notRunning"); return
   pLog("portal:stopAp")
@@ -70,8 +71,9 @@ proc stopAp*(frameConfig: FrameConfig) =
   pLog("portal:stopAp:done")
   sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
 
-proc startAp*(frameConfig: FrameConfig) =
+proc startAp*(frameOS: FrameOS) =
   ## Bring up Wi-Fi AP with hard-coded SSID/pw and HTTP(S) redirect → 8787
+  let frameConfig = frameOS.frameConfig
   if hotspotRunning():
     pLog("portal:startAp:alreadyRunning"); return
   pLog("portal:startAp")
@@ -102,14 +104,14 @@ proc startAp*(frameConfig: FrameConfig) =
   pLog("portal:startAp:done")
   sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId})
 
-  proc watcher (frameConfig: FrameConfig) =
+  proc watcher (frameOS: FrameOS) =
     while true:
       sleep(1000)
       if not active: return
-      if epochTime() - hotspotStartedAt >= frameConfig.network.wifiHostpotTimeoutSeconds:
+      if epochTime() - hotspotStartedAt >= frameOS.frameConfig.network.wifiHostpotTimeoutSeconds:
         pLog("portal:stopAp:autoTimeout")
-        stopAp(frameConfig)
-  spawn watcher(frameConfig)
+        stopAp(frameOS)
+  spawn watcher(frameOS)
 
 proc attemptConnect*(ssid, password: string): bool =
   discard run(fmt"sudo -n nmcli connection delete '{nmConnectionName}' 2>/dev/null || true")
@@ -181,8 +183,9 @@ proc confirmHtml*(): string =
   <li>Reconnect to the access-point and run the setup again, double-checking SSID and password.</li>
 </ul>""")
 
-proc connectToWifi*(ssid, password: string, frameConfig: FrameConfig) {.gcsafe.} =
-  stopAp(frameConfig) # close hotspot before connecting
+proc connectToWifi*(ssid, password: string, frameOS: FrameOS) {.gcsafe.} =
+  let frameConfig = frameOS.frameConfig
+  stopAp(frameOS) # close hotspot before connecting
   if attemptConnect(ssid, password):
     sleep(5000) # give DHCP etc a moment
 
@@ -203,7 +206,7 @@ proc connectToWifi*(ssid, password: string, frameConfig: FrameConfig) {.gcsafe.}
 
     if not connected:
       log(%*{"event": "portal:connect:netCheckFailed"})
-      startAp(frameConfig) # fall back to AP
+      startAp(frameOS) # fall back to AP
   else:
     log(%*{"event": "portal:connectFailed"})
-    startAp(frameConfig)
+    startAp(frameOS)
