@@ -60,7 +60,6 @@ proc stopAp*(frameOS: FrameOS) =
   active = false
   frameOS.network.hotspotStatus = HotspotStatus.disabled
   pLog("portal:stopAp:done")
-  sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
 
 proc startAp*(frameOS: FrameOS) =
   ## Bring up Wi-Fi AP with hard-coded SSID/pw and HTTP(S) redirect → 8787
@@ -172,7 +171,7 @@ proc confirmHtml*(): string =
   <li>Reconnect to the access-point and run the setup again, double-checking SSID and password.</li>
 </ul>""")
 
-proc connectToWifi*(ssid, password: string, frameOS: FrameOS) {.gcsafe.} =
+proc connectToWifi*(frameOS: FrameOS, ssid, password: string) {.gcsafe.} =
   let frameConfig = frameOS.frameConfig
   stopAp(frameOS) # close hotspot before connecting
   if attemptConnect(frameOS, ssid, password):

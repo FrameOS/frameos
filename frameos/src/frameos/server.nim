@@ -66,6 +66,7 @@ router myrouter:
         return contains(paramsTable, "k") and paramsTable["k"] == accessKey
   get "/":
     if netportal.active:
+      log(%*{"event": "portal:http", "get": request.pathInfo})
       resp Http200, netportal.setupHtml()
     elif not hasAccess(request, Read):
       resp Http401, "Unauthorized"
@@ -81,10 +82,11 @@ router myrouter:
       resp Http400, "Not in setup mode"
     {.gcsafe.}:
       let params = request.params()
+      log(%*{"event": "portal:http", "post": request.pathInfo, "params": params})
       spawn netportal.connectToWifi(
+        globalFrameOS,
         params["ssid"],
         params.getOrDefault("password", ""),
-        globalFrameOS
       )
     resp Http200, netportal.confirmHtml()
   # Android
