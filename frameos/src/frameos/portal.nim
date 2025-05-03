@@ -97,6 +97,7 @@ proc startAp*(frameOS: FrameOS) =
       if epochTime() - hotspotStartedAt >= frameOS.frameConfig.network.wifiHostpotTimeoutSeconds:
         pLog("portal:stopAp:autoTimeout")
         stopAp(frameOS)
+        sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
   spawn watcher(frameOS)
 
 proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool =
@@ -125,7 +126,7 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool =
   result = (rc == 0)
   frameOS.network.status = if result: NetworkStatus.connected else: NetworkStatus.error
 
-  sendEvent("render", %*{})
+  sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
 
 proc masked*(s: string; keep: int = 2): string =
   if s.len <= keep: "*".repeat(s.len) else: s[0..keep-1] & "*".repeat(s.len - keep)
