@@ -3,22 +3,14 @@ import frameos/types
 import frameos/scenes
 import frameos/channels
 
-# ──────────────────────────────────────────────────────────────────────────────
-#  Constants
-# ──────────────────────────────────────────────────────────────────────────────
 const
-  nmHotspotName = "frameos-hotspot" ## NetworkManager connection ID
-  nmConnectionName = "frameos-wifi" ## NetworkManager connection ID
+  nmHotspotName = "frameos-hotspot"
+  nmConnectionName = "frameos-wifi"
 
-# ──────────────────────────────────────────────────────────────────────────────
-#  Globals / helpers
-# ──────────────────────────────────────────────────────────────────────────────
-var active* = false ## true while our hotspot is up
-var logger: Logger ## injected from FrameOS once logging exists
-var hotspotStartedAt = 0.0
-
-proc isPortalActive*(): bool =
-  result = active
+var
+  active* = false
+  logger: Logger
+  hotspotStartedAt = 0.0
 
 proc setLogger*(l: Logger) = logger = l
 
@@ -41,16 +33,17 @@ proc run(cmd: string): (string, int) =
 # ──────────────────────────────────────────────────────────────────────────────
 #  Hot‑spot helpers
 # ──────────────────────────────────────────────────────────────────────────────
-proc hotspotRunning(): bool =
+proc hotspotRunning(frameOS: FrameOS): bool =
   let (output, _) = run("sudo nmcli --colors no -t -f NAME connection show --active | grep '^" &
                      nmHotspotName & "$' || true")
-  active = output.strip().len > 0
-  return active
+  result = output.strip().len > 0
+  frameOS.network.hotspotStatus = if result: HotspotStatus.enabled else: HotspotStatus.disabled
 
 proc stopAp*(frameOS: FrameOS) =
   ## Tear down the hotspot and NAT rules (idempotent)
-  if not hotspotRunning():
-    pLog("portal:stopAp:notRunning"); return
+  if not hotspotRunning(frameOS):
+    pLog("portal:stopAp:notRunning")
+    return
   pLog("portal:stopAp")
 
   frameOS.network.hotspotStatus = HotspotStatus.stopping
@@ -63,7 +56,7 @@ proc stopAp*(frameOS: FrameOS) =
 
 proc startAp*(frameOS: FrameOS) =
   ## Bring up Wi-Fi AP with hard-coded SSID/pw and HTTP(S) redirect → 8787
-  if hotspotRunning():
+  if hotspotRunning(frameOS):
     pLog("portal:startAp:alreadyRunning")
     return
   pLog("portal:startAp")

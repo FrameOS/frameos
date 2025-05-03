@@ -65,7 +65,7 @@ proc start*(self: FrameOS) {.async.} =
 
   self.runner.start(firstSceneId)
 
-  ## This call never returns, keeping the main future—and the process—alive.
+  ## This call never returns
   await self.server.startServer()
 
 proc startFrameOS*() {.async.} =
