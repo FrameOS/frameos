@@ -7,14 +7,20 @@
 --index-url https://piwheels.org/simple
 --extra-index-url https://pypi.org/simple
 
-inky==2.0.0
+gpiod==2.3.0
+    # via gpiodevice
+gpiodevice==0.0.5
+    # via inky
+inky==2.1.0
     # via -r requirements.in
 numpy==1.26.1
     # via
     #   -r requirements.in
     #   inky
 pillow==9.5.0
-    # via -r requirements.in
+    # via
+    #   -r requirements.in
+    #   inky
 rpi-gpio==0.7.1
     # via -r requirements.in
 smbus2==0.4.3
