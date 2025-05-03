@@ -163,7 +163,7 @@ type
     schedule*: FrameSchedule
 
   NetworkStatus* = enum
-    idle, connecting, connected, hotspot, timeout, error
+    idle, connecting, connected, timeout, error
 
   HotspotStatus* = enum
     disabled, enabled, starting, stopping, error
