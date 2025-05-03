@@ -88,20 +88,6 @@ router myrouter:
         params.getOrDefault("password", ""),
       )
     resp Http200, netportal.confirmHtml()
-  # Android
-  get "/generate_204":
-    resp Http204, "", "" # No body
-  get "/gen_204":
-    resp Http204, "", ""
-  # iOS
-  get "/hotspot-detect.html":
-    resp Http200, "text/html", "<html><body>Captive Portal</body></html>"
-  get "/library/test/success.html":
-    resp Http200, "text/html", "<html><body>Not the real success page</body></html>"
-  # Windows
-  get "/connecttest.txt":
-    resp Http200, "text/plain", "Captive Portal"
-
   get "/ws":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"
