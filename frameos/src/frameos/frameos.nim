@@ -22,48 +22,13 @@ proc newFrameOS*(): FrameOS =
     metricsLogger: metricsLogger,
     network: Network(
       status: NetworkStatus.idle,
-      hotspotStartedAt: 0.0
+      hotspotStatus: HotspotStatus.disabled,
     ),
   )
   drivers.init(result)
   result.runner = newRunner(frameConfig)
   result.server = newServer(result)
   startScheduler(result)
-
-proc checkNetwork(self: FrameOS): bool =
-  if not self.frameConfig.network.networkCheck or self.frameConfig.network.networkCheckTimeoutSeconds <= 0:
-    return false
-
-  let url = self.frameConfig.network.networkCheckUrl
-  let timeout = self.frameConfig.network.networkCheckTimeoutSeconds
-  let timer = epochTime()
-  var attempt = 1
-  self.network.status = NetworkStatus.connecting
-  self.logger.log(%*{"event": "networkCheck", "url": url})
-  while true:
-    if epochTime() - timer >= timeout:
-      self.network.status = NetworkStatus.timeout
-      self.logger.log(%*{"event": "networkCheck", "status": "timeout", "seconds": timeout})
-      return false
-    let client = newHttpClient(timeout = 5000)
-    try:
-      let response = client.get(url)
-      if response.status.startsWith("200"):
-        self.network.status = NetworkStatus.connected
-        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "success"})
-        return true
-      else:
-        self.network.status = NetworkStatus.error
-        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "failed",
-            "response": response.status})
-    except CatchableError as e:
-      self.network.status = NetworkStatus.error
-      self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
-    finally:
-      client.close()
-    sleep(attempt * 1000)
-    attempt += 1
-  return false
 
 proc start*(self: FrameOS) {.async.} =
   var message = %*{"event": "bootup", "config": {

@@ -9,8 +9,6 @@ import frameos/channels
 const
   nmHotspotName = "frameos-hotspot" ## NetworkManager connection ID
   nmConnectionName = "frameos-wifi" ## NetworkManager connection ID
-  tcpRedirectPorts = ["80", "443"]  ## TCP ports we hijack for captive‑portal
-  dnsProtocols = ["tcp", "udp"]     ## we hijack both for :53
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  Globals / helpers
@@ -51,56 +49,44 @@ proc hotspotRunning(): bool =
 
 proc stopAp*(frameOS: FrameOS) =
   ## Tear down the hotspot and NAT rules (idempotent)
-  let frameConfig = frameOS.frameConfig
   if not hotspotRunning():
     pLog("portal:stopAp:notRunning"); return
   pLog("portal:stopAp")
 
+  frameOS.network.hotspotStatus = HotspotStatus.stopping
   discard run("sudo nmcli connection down " & shQuote(nmHotspotName) & " || true")
   discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " || true")
 
-  let redirectPort = frameConfig.framePort
-  for port in tcpRedirectPorts:
-    discard run(fmt"sudo iptables -t nat -D PREROUTING -i wlan0 -p tcp --dport {port} -j REDIRECT --to-ports {redirectPort} || true")
-
-  # NEW: release DNS hijack for both UDP/TCP :53
-  for proto in dnsProtocols:
-    discard run(fmt"sudo iptables -t nat -D PREROUTING -i wlan0 -p {proto} --dport 53 -j REDIRECT --to-ports 53 || true")
-
   active = false
+  frameOS.network.hotspotStatus = HotspotStatus.disabled
   pLog("portal:stopAp:done")
   sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
 
 proc startAp*(frameOS: FrameOS) =
   ## Bring up Wi-Fi AP with hard-coded SSID/pw and HTTP(S) redirect → 8787
-  let frameConfig = frameOS.frameConfig
   if hotspotRunning():
-    pLog("portal:startAp:alreadyRunning"); return
+    pLog("portal:startAp:alreadyRunning")
+    return
   pLog("portal:startAp")
+  frameOS.network.hotspotStatus = HotspotStatus.starting
 
   discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " 2>/dev/null || true")
 
-  let wifiHotspotSsid = frameConfig.network.wifiHotspotSsid
-  let wifiHotspotPassword = frameConfig.network.wifiHotspotPassword
+  let wifiHotspotSsid = frameOS.frameConfig.network.wifiHotspotSsid
+  let wifiHotspotPassword = frameOS.frameConfig.network.wifiHotspotPassword
   let rc = run(fmt"sudo nmcli device wifi hotspot ifname wlan0 con-name {shQuote(nmHotspotName)} " &
                fmt"ssid {shQuote(wifiHotspotSsid)} password {shQuote(wifiHotspotPassword)}")[1]
   if rc != 0:
-    pLog("portal:startAp:error"); return
+    frameOS.network.hotspotStatus = HotspotStatus.error
+    pLog("portal:startAp:error")
+    return
 
   discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " ipv4.method shared")
 
-  # Hijack :80 while keeping DHCP/DNS/other UDP untouched.
-  let redirectPort = frameConfig.framePort
-  for port in tcpRedirectPorts:
-    discard run(fmt"sudo iptables -t nat -D PREROUTING -i wlan0 -p tcp --dport {port} -j REDIRECT --to-ports {redirectPort} || true")
-    discard run(fmt"sudo iptables -t nat -A PREROUTING -i wlan0 -p tcp --dport {port} -j REDIRECT --to-ports {redirectPort}")
-
-  for proto in dnsProtocols:
-    discard run(fmt"sudo iptables -t nat -D PREROUTING -i wlan0 -p {proto} --dport 53 -j REDIRECT --to-ports 53 || true")
-    discard run(fmt"sudo iptables -t nat -A PREROUTING -i wlan0 -p {proto} --dport 53 -j REDIRECT --to-ports 53")
-
   active = true
   hotspotStartedAt = epochTime()
+  frameOS.network.hotspotStatus = HotspotStatus.enabled
+  frameOS.network.hotspotStartedAt = hotspotStartedAt
   pLog("portal:startAp:done")
   sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId})
 
@@ -113,7 +99,8 @@ proc startAp*(frameOS: FrameOS) =
         stopAp(frameOS)
   spawn watcher(frameOS)
 
-proc attemptConnect*(ssid, password: string): bool =
+proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool =
+  frameOS.network.status = NetworkStatus.connecting
   discard run(fmt"sudo -n nmcli connection delete '{nmConnectionName}' 2>/dev/null || true")
 
   let nmcliArgs = @[
@@ -136,6 +123,7 @@ proc attemptConnect*(ssid, password: string): bool =
            "rc": rc, "output": output.strip()})
 
   result = (rc == 0)
+  frameOS.network.status = if result: NetworkStatus.connected else: NetworkStatus.error
 
   sendEvent("render", %*{})
 
@@ -186,7 +174,7 @@ proc confirmHtml*(): string =
 proc connectToWifi*(ssid, password: string, frameOS: FrameOS) {.gcsafe.} =
   let frameConfig = frameOS.frameConfig
   stopAp(frameOS) # close hotspot before connecting
-  if attemptConnect(ssid, password):
+  if attemptConnect(frameOS, ssid, password):
     sleep(5000) # give DHCP etc a moment
 
     var connected = false
@@ -210,3 +198,38 @@ proc connectToWifi*(ssid, password: string, frameOS: FrameOS) {.gcsafe.} =
   else:
     log(%*{"event": "portal:connectFailed"})
     startAp(frameOS)
+
+proc checkNetwork*(self: FrameOS): bool =
+  if not self.frameConfig.network.networkCheck or self.frameConfig.network.networkCheckTimeoutSeconds <= 0:
+    return false
+
+  let url = self.frameConfig.network.networkCheckUrl
+  let timeout = self.frameConfig.network.networkCheckTimeoutSeconds
+  let timer = epochTime()
+  var attempt = 1
+  self.network.status = NetworkStatus.connecting
+  self.logger.log(%*{"event": "networkCheck", "url": url})
+  while true:
+    if epochTime() - timer >= timeout:
+      self.network.status = NetworkStatus.timeout
+      self.logger.log(%*{"event": "networkCheck", "status": "timeout", "seconds": timeout})
+      return false
+    let client = newHttpClient(timeout = 5000)
+    try:
+      let response = client.get(url)
+      if response.status.startsWith("200"):
+        self.network.status = NetworkStatus.connected
+        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "success"})
+        return true
+      else:
+        self.network.status = NetworkStatus.error
+        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "failed",
+            "response": response.status})
+    except CatchableError as e:
+      self.network.status = NetworkStatus.error
+      self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
+    finally:
+      client.close()
+    sleep(attempt * 1000)
+    attempt += 1
+  return false

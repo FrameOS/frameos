@@ -165,8 +165,12 @@ type
   NetworkStatus* = enum
     idle, connecting, connected, hotspot, timeout, error
 
+  HotspotStatus* = enum
+    disabled, enabled, starting, stopping, error
+
   Network* = ref object
     status*: NetworkStatus
+    hotspotStatus*: HotspotStatus
     hotspotStartedAt*: float
 
   FrameOS* = ref object
