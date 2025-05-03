@@ -4,7 +4,6 @@ import assets/web as webAssets
 import asyncdispatch
 import httpclient
 import threadpool
-import os
 import jester
 import locks
 import ws, ws/jester_extra
@@ -65,22 +64,22 @@ router myrouter:
         let paramsTable = request.params()
         return contains(paramsTable, "k") and paramsTable["k"] == accessKey
   get "/":
-    if netportal.active:
-      log(%*{"event": "portal:http", "get": request.pathInfo})
-      resp Http200, netportal.setupHtml()
-    elif not hasAccess(request, Read):
-      resp Http401, "Unauthorized"
-    else:
-      {.gcsafe.}: # We're only printing a static variable.
+    {.gcsafe.}:
+      if netportal.isHotspotActive(globalFrameOS):
+        log(%*{"event": "portal:http", "get": request.pathInfo})
+        resp Http200, netportal.setupHtml()
+      elif not hasAccess(request, Read):
+        resp Http401, "Unauthorized"
+      else:
         let scalingMode = case globalFrameConfig.scalingMode:
           of "cover", "center": globalFrameConfig.scalingMode
           of "stretch": "100% 100%"
           else: "contain"
         resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
   post "/setup":
-    if not netportal.active:
-      resp Http400, "Not in setup mode"
     {.gcsafe.}:
+      if not netportal.isHotspotActive(globalFrameOS):
+        resp Http400, "Not in setup mode"
       let params = request.params()
       log(%*{"event": "portal:http", "post": request.pathInfo, "params": params})
       spawn netportal.connectToWifi(

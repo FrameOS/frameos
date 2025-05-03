@@ -7,10 +7,10 @@ const
   nmHotspotName = "frameos-hotspot"
   nmConnectionName = "frameos-wifi"
 
-var
-  active* = false
-  logger: Logger
-  hotspotStartedAt = 0.0
+var logger: Logger
+
+proc isHotspotActive*(frameOS: FrameOS): bool =
+  frameOS.network.hotspotStatus == HotspotStatus.enabled
 
 proc setLogger*(l: Logger) = logger = l
 
@@ -42,12 +42,9 @@ proc stopAp*(frameOS: FrameOS) =
     pLog("portal:stopAp:notRunning")
     return
   pLog("portal:stopAp")
-
   frameOS.network.hotspotStatus = HotspotStatus.stopping
   discard run("sudo nmcli connection down " & shQuote(nmHotspotName) & " || true")
   discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " || true")
-
-  active = false
   frameOS.network.hotspotStatus = HotspotStatus.disabled
   pLog("portal:stopAp:done")
 
@@ -72,18 +69,17 @@ proc startAp*(frameOS: FrameOS) =
 
   discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " ipv4.method shared")
 
-  active = true
-  hotspotStartedAt = epochTime()
   frameOS.network.hotspotStatus = HotspotStatus.enabled
-  frameOS.network.hotspotStartedAt = hotspotStartedAt
+  frameOS.network.hotspotStartedAt = epochTime()
   pLog("portal:startAp:done")
   sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId})
 
   proc watcher (frameOS: FrameOS) =
     while true:
       sleep(1000)
-      if not active: return
-      if epochTime() - hotspotStartedAt >= frameOS.frameConfig.network.wifiHostpotTimeoutSeconds:
+      if frameOS.network.hotspotStatus != HotspotStatus.enabled or frameOS.network.hotspotStartedAt == 0:
+        return
+      if epochTime() - frameOS.network.hotspotStartedAt >= frameOS.frameConfig.network.wifiHostpotTimeoutSeconds:
         pLog("portal:stopAp:autoTimeout")
         stopAp(frameOS)
         sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
@@ -119,46 +115,6 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool =
 
 proc masked*(s: string; keep: int = 2): string =
   if s.len <= keep: "*".repeat(s.len) else: s[0..keep-1] & "*".repeat(s.len - keep)
-
-const styleBlock* = """
-<style>
-body{font-family:system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background-color:#111827;color:#f9fafb}
-.card{background:color-mix(in oklch,#1f2937 70%,oklch(27.8% 0.033 256.848) 30%);padding:2rem 2.5rem;border-radius:.5rem;width:100%;max-width:28rem;box-shadow:0 2px 6px rgba(0,0,0,.35)}
-h1{margin:0 0 1rem;font-size:1.5rem;font-weight:600;line-height:1.2}
-p,li{font-size:.875rem;color:#d1d5db;margin:0 0 1rem}
-label{display:block;font-weight:500;font-size:.875rem;margin-bottom:.25rem}
-input{box-sizing:border-box;width:100%;padding:.5rem .75rem;font-size:.875rem;color:#f9fafb;background-color:#111827;border:1px solid #374151;border-radius:.375rem;margin-bottom:1rem;margin-top:0.5rem;}
-input:focus{outline:none;border-color:#4a4b8c;box-shadow:0 0 0 1px #4a4b8c}
-button{display:block;width:100%;padding:.5rem;font-size:.875rem;font-weight:500;color:#fff;background-color:#4a4b8c;border:none;border-radius:.375rem;cursor:pointer;text-align:center}
-button:hover{background-color:#484984}
-button:focus{outline:none;box-shadow:0 0 0 1px #484984}
-</style>"""
-
-proc layout*(inner: string): string =
-  fmt"""<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta charset="utf-8"><title>FrameOS Setup</title>{styleBlock}</head>
-<body><div class="card">{inner}</div></body></html>"""
-
-proc setupHtml*(): string =
-  layout("""
-<h1>Connect your Frame to Wi-Fi</h1>
-<p>If the connection fails, reconnect to this access point and try again.</p>
-<form method="post" action="/setup">
-  <label>Wi-Fi SSID<input name="ssid" required></label>
-  <label>Password<input type="password" name="password"></label>
-  <button type="submit">Save &amp; Connect</button>
-</form>""")
-
-proc confirmHtml*(): string =
-  layout("""
-<h1>Saved!</h1>
-<p>The frame is now attempting to connect to Wi-Fi. You may close this tab.</p>
-<h2>Troubleshooting</h2>
-<ul>
-  <li>Wait about 60 seconds—your device can stay “stuck” on the frame’s network for a short time.</li>
-  <li>Manually disconnect from that network. If the “FrameOS-Setup” access-point reappears, the Wi-Fi credentials were likely wrong.</li>
-  <li>Reconnect to the access-point and run the setup again, double-checking SSID and password.</li>
-</ul>""")
 
 proc connectToWifi*(frameOS: FrameOS, ssid, password: string) {.gcsafe.} =
   let frameConfig = frameOS.frameConfig
@@ -222,3 +178,43 @@ proc checkNetwork*(self: FrameOS): bool =
     sleep(attempt * 1000)
     attempt += 1
   return false
+
+const styleBlock* = """
+<style>
+body{font-family:system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background-color:#111827;color:#f9fafb}
+.card{background:color-mix(in oklch,#1f2937 70%,oklch(27.8% 0.033 256.848) 30%);padding:2rem 2.5rem;border-radius:.5rem;width:100%;max-width:28rem;box-shadow:0 2px 6px rgba(0,0,0,.35)}
+h1{margin:0 0 1rem;font-size:1.5rem;font-weight:600;line-height:1.2}
+p,li{font-size:.875rem;color:#d1d5db;margin:0 0 1rem}
+label{display:block;font-weight:500;font-size:.875rem;margin-bottom:.25rem}
+input{box-sizing:border-box;width:100%;padding:.5rem .75rem;font-size:.875rem;color:#f9fafb;background-color:#111827;border:1px solid #374151;border-radius:.375rem;margin-bottom:1rem;margin-top:0.5rem;}
+input:focus{outline:none;border-color:#4a4b8c;box-shadow:0 0 0 1px #4a4b8c}
+button{display:block;width:100%;padding:.5rem;font-size:.875rem;font-weight:500;color:#fff;background-color:#4a4b8c;border:none;border-radius:.375rem;cursor:pointer;text-align:center}
+button:hover{background-color:#484984}
+button:focus{outline:none;box-shadow:0 0 0 1px #484984}
+</style>"""
+
+proc layout*(inner: string): string =
+  fmt"""<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta charset="utf-8"><title>FrameOS Setup</title>{styleBlock}</head>
+<body><div class="card">{inner}</div></body></html>"""
+
+proc setupHtml*(): string =
+  layout("""
+<h1>Connect your Frame to Wi-Fi</h1>
+<p>If the connection fails, reconnect to this access point and try again.</p>
+<form method="post" action="/setup">
+  <label>Wi-Fi SSID<input name="ssid" required></label>
+  <label>Password<input type="password" name="password"></label>
+  <button type="submit">Save &amp; Connect</button>
+</form>""")
+
+proc confirmHtml*(): string =
+  layout("""
+<h1>Saved!</h1>
+<p>The frame is now attempting to connect to Wi-Fi. You may close this tab.</p>
+<h2>Troubleshooting</h2>
+<ul>
+  <li>Wait about 60 seconds—your device can stay “stuck” on the frame’s network for a short time.</li>
+  <li>Manually disconnect from that network. If the “FrameOS-Setup” access-point reappears, the Wi-Fi credentials were likely wrong.</li>
+  <li>Reconnect to the access-point and run the setup again, double-checking SSID and password.</li>
+</ul>""")
