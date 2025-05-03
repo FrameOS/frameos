@@ -18,5 +18,13 @@ def init():
 
 if __name__ == "__main__":
     inky = init()
-    log({ "inky": True, "width": inky.resolution[0], "height": inky.resolution[1], "color": inky.colour })
+    log({
+        "inky": True,
+        "width": inky.resolution[0],
+        "height": inky.resolution[1],
+        "color": inky.colour,
+        "model": inky.eeprom.get_variant(),
+        "variant": inky.eeprom.display_variant,
+        "pcb": inky.eeprom.pcb_variant,
+    })
     sys.exit(0)
