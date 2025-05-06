@@ -168,6 +168,8 @@ class SceneWriter:
                                 if scene_field.get('name') == keyword:
                                     type = scene_field.get('type', 'string')
                             self.field_inputs[target][field] = f"state{{\"{sanitize_nim_string(keyword)}\"}}{field_type_to_getter(type)}"
+                            if type == 'color':
+                                self.field_inputs[target][field] = f"parseHtmlColor({self.field_inputs[target][field]})"
                         else:
                             self.field_inputs[target][field] = code_node.get("data", {}).get("code", "")
                         if not self.code_field_source_nodes.get(target):
@@ -1041,6 +1043,8 @@ var exportedScene* = ExportedScene(
                     if field.get('name') == keyword:
                         type = field.get('type', 'string')
                 result = [f"state{{\"{sanitize_nim_string(keyword)}\"}}{field_type_to_getter(type)}"]
+                if type == 'color':
+                    result[0] = f"parseHtmlColor({result[0]})"
             elif node.get("type") == "code":
                 code = [node.get("data", {}).get("code", "")]
                 code_args = node.get("data", {}).get("codeArgs", [])

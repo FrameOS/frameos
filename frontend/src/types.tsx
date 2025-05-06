@@ -153,6 +153,9 @@ export const fieldTypes = [
 ] as const
 
 export type AppConfigFieldType = FieldType | 'select' | 'font'
+
+export const appConfigFieldTypes = [...fieldTypes, 'select'] as const
+
 export const toFieldType: (value: string | AppConfigFieldType) => FieldType = (value) =>
   fieldTypes.includes(value as any) ? (value as FieldType) : 'string'
 
