@@ -11,6 +11,16 @@
         "sha1": "6aeb83e7481ca8686396a568096054bc668294df"
       }
     },
+    "nimcrypto": {
+      "version": "0.6.3",
+      "vcsRevision": "19c41d6be4c00b4a2c8000583bd30cf8ceb5f4b1",
+      "url": "https://github.com/cheatfate/nimcrypto",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "51f62171a7e80abdde8d6912eb425011bbedcb13"
+      }
+    },
     "ws": {
       "version": "0.5.0",
       "vcsRevision": "9536bf99ddf5948db221ccb7bb3663aa238a8e21",
