@@ -77,8 +77,8 @@ proc loadConfig(path = DefaultConfigPath): FrameConfig =
   result = raw.fromJson(FrameConfig)
 
 proc saveConfig(cfg: FrameConfig; path = DefaultConfigPath) =
-  createDir(parentDir(path))
-  writeFile(path, cfg.toJson())
+  createDir parentDir(path)
+  writeFile(path, (%cfg).pretty(2) & '\n')
   setFilePermissions(path, {fpUserRead, fpUserWrite}) # 0600
 
 # ----------------------------------------------------------------------------
@@ -145,6 +145,20 @@ proc fatal(msg: string; code = 1) =
   stderr.writeLine msg
   quit(code)
 
+proc recvText(ws: WebSocket): Future[string] {.async.} =
+  ## Wait for the next *text* frame, replying to pings automatically.
+  while true:
+    let (opcode, payload) = await ws.receivePacket()
+    case opcode
+    of Opcode.Text:
+      return cast[string](payload)
+    of Opcode.Ping:
+      await ws.send(payload, OpCode.Pong) # keep-alive
+    of Opcode.Close:
+      raise newException(Exception, "connection closed by peer")
+    else:
+      discard # ignore binary, pong …
+
 # ----------------------------------------------------------------------------
 # Challenge‑response handshake (server‑initiated)
 # ----------------------------------------------------------------------------
@@ -156,7 +170,9 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
   ##   3) server → {action:"handshake/ok" | "rotate" | close(1008)}
 
   # --- Step 1: wait for challenge -------------------------------------------
-  let challengeMsg = await ws.receiveStrPacket()
+  let challengeMsg = await ws.recvText()
+  echo &"🔑 challenge: {challengeMsg}"
+
   let challengeJson = parseJson(challengeMsg)
   if challengeJson["action"].getStr != "challenge":
     raise newException(Exception, "Expected challenge, got: " & challengeMsg)

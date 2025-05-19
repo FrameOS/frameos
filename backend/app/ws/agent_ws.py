@@ -54,7 +54,7 @@ async def ws_agent_endpoint(ws: WebSocket, db: Session = Depends(get_db)):
         await ws.close(code=status.WS_1013_TRY_AGAIN_LATER, reason="server busy")
         return
 
-    await ws.accept("websocket")  # handshake OK – we start protocol below
+    await ws.accept()  # handshake OK – we start protocol below
 
     # ------------------------------------------------------------------
     # STEP 1 – send random challenge
