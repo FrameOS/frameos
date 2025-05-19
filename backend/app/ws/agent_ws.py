@@ -1,3 +1,4 @@
+# backend/app/ws/agent_ws.py
 from __future__ import annotations
 
 import asyncio
@@ -6,13 +7,16 @@ import json
 import hmac
 import hashlib
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict, Optional, TypedDict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status, Depends
 from starlette.websockets import WebSocketState
+from sqlalchemy.orm import Session
+from arq import ArqRedis as Redis
 
 from app.database import get_db
-from sqlalchemy.orm import Session
+from app.redis import get_redis
+from app.websockets import publish_message
 from app.models.agent import Agent
 
 router = APIRouter()
@@ -25,7 +29,7 @@ active_sockets: Dict[str, WebSocket] = {}
 
 
 # ---------------------------------------------------------------------------
-# HMAC helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
 def hmac_sha256(key: str, data: str) -> str:
@@ -33,13 +37,35 @@ def hmac_sha256(key: str, data: str) -> str:
     return hmac.new(key.encode(), data.encode(), hashlib.sha256).hexdigest()
 
 
-# ---------------------------------------------------------------------------
-# Canonical JSON (same rules as Nim’s canonical() helper)
-# ---------------------------------------------------------------------------
-
 def canonical_dumps(obj) -> str:
-    """Dump JSON with sorted keys & no spaces – deterministic."""
+    """Dump JSON with sorted keys & no spaces – deterministic (like Nim)."""
     return json.dumps(obj, separators=(",", ":"), sort_keys=True)
+
+
+class AgentPayload(TypedDict):
+    id: str
+    org_id: str
+    batch_id: str
+    device_id: str
+    server_key_version: int
+    last_seen: Optional[str]
+    connected: bool
+    frame_id: Optional[int]
+
+
+def _agent_to_dict(agent: Agent) -> AgentPayload:
+    """Convert an Agent SQLAlchemy row into a broadcast-friendly dict."""
+    return AgentPayload(
+        id                = agent.id,
+        org_id            = agent.org_id,
+        batch_id          = agent.batch_id,
+        device_id         = agent.device_id,
+        server_key_version= agent.server_key_version,
+        last_seen         = agent.last_seen.replace(tzinfo=timezone.utc).isoformat()
+                            if agent.last_seen else None,
+        connected         = agent.device_id in active_sockets,
+        frame_id          = agent.frame_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +73,11 @@ def canonical_dumps(obj) -> str:
 # ---------------------------------------------------------------------------
 
 @router.websocket("/ws/agent")
-async def ws_agent_endpoint(ws: WebSocket, db: Session = Depends(get_db)):
+async def ws_agent_endpoint(
+    ws: WebSocket,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
     # ────────────────────────────────────────────────────────────────────────
     # Optional origin check
     # ────────────────────────────────────────────────────────────────────────
@@ -61,7 +91,7 @@ async def ws_agent_endpoint(ws: WebSocket, db: Session = Depends(get_db)):
         await ws.close(code=status.WS_1013_TRY_AGAIN_LATER, reason="server busy")
         return
 
-    await ws.accept()  # handshake OK – start protocol below
+    await ws.accept()  # TCP ↔ WS handshake OK – start protocol below
 
     # ----------------------------------------------------------------------
     # STEP 1 – server → challenge
@@ -82,10 +112,10 @@ async def ws_agent_endpoint(ws: WebSocket, db: Session = Depends(get_db)):
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad action")
         return
 
-    org_id: str = msg.get("orgId", "")
-    batch_id: str = msg.get("batchId", "")
+    org_id   : str = msg.get("orgId", "")
+    batch_id : str = msg.get("batchId", "")
     device_id: str = msg.get("deviceId", "")
-    mac: str = str(msg.get("mac", ""))
+    mac      : str = str(msg.get("mac", ""))
 
     print(
         f"Handshake from org={org_id!r} batch={batch_id!r} "
@@ -104,6 +134,7 @@ async def ws_agent_endpoint(ws: WebSocket, db: Session = Depends(get_db)):
     # Look up / create Agent
     # ----------------------------------------------------------------------
     ack_expected: Optional[str] = None  # "register/ack" | "rotate/ack" | None
+    is_new_agent = False
 
     agent: Agent | None = db.query(Agent).filter_by(
         device_id=device_id,
@@ -118,6 +149,7 @@ async def ws_agent_endpoint(ws: WebSocket, db: Session = Depends(get_db)):
             await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac, none expected")
             return
 
+        is_new_agent = True
         agent = Agent(device_id=device_id, org_id=org_id, batch_id=batch_id)
         agent.rotate_key()
         db.add(agent)  # NO COMMIT YET – wait for /ack
@@ -133,12 +165,14 @@ async def ws_agent_endpoint(ws: WebSocket, db: Session = Depends(get_db)):
         if not hmac.compare_digest(expected, mac):
             print(f"Invalid MAC from {device_id}: expected {expected}, got {mac}")
             await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad key")
+            agent_dict = _agent_to_dict(agent)
+            await publish_message(redis, "update_agent", agent_dict)
             return
 
         # Rotate key if required
         if agent.must_rotate_key():
             agent.rotate_key()       # updates key in-memory
-            db.add(agent)            # NO COMMIT YET
+            db.add(agent)            # NO COMMIT YET – wait for /ack
             ack_expected = "rotate/ack"
 
             print(f"Rotating key for {device_id}, awaiting ack…")
@@ -155,21 +189,31 @@ async def ws_agent_endpoint(ws: WebSocket, db: Session = Depends(get_db)):
         except (asyncio.TimeoutError, WebSocketDisconnect):
             db.rollback()
             await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="ack timeout")
+            agent_dict = _agent_to_dict(agent)
+            await publish_message(redis, "update_agent", agent_dict)
             return
 
         if ack_msg.get("action") != ack_expected:
             db.rollback()
             await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad ack")
+            agent_dict = _agent_to_dict(agent)
+            await publish_message(redis, "update_agent", agent_dict)
             return
 
         # Ack OK → persist new key
         db.commit()
+        if is_new_agent:
+            await publish_message(redis, "new_agent", _agent_to_dict(agent))
+        else:
+            await publish_message(redis, "update_agent", _agent_to_dict(agent))
+
         print(f"{ack_expected} received – key persisted for {device_id}")
 
     # ----------------------------------------------------------------------
-    # Fully authenticated – store socket and proceed
+    # Fully authenticated – store socket and broadcast “connected”
     # ----------------------------------------------------------------------
     active_sockets[device_id] = ws
+    await publish_message(redis, "update_agent", _agent_to_dict(agent))
 
     # ----------------------------------------------------------------------
     # STEP 3 – main receive loop (enveloped messages)
@@ -202,4 +246,10 @@ async def ws_agent_endpoint(ws: WebSocket, db: Session = Depends(get_db)):
         # Clean up
         active_sockets.pop(device_id, None)
         if ws.application_state != WebSocketState.DISCONNECTED:
-            await ws.close()
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
+        # Broadcast “disconnected” state
+        await publish_message(redis, "update_agent", _agent_to_dict(agent))

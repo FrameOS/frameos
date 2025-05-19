@@ -61,6 +61,17 @@ export interface FrameType {
   }
 }
 
+export interface AgentType {
+  id: number
+  org_id: string
+  batch_id: string
+  device_id: string
+  frame_id: number
+  server_key_version: number
+  last_seen: string
+  connected: boolean
+}
+
 export interface GPIOButton {
   pin: number
   label: string

@@ -1,5 +1,5 @@
 import { actions, afterMount, beforeUnmount, kea, path } from 'kea'
-import { FrameType, LogType } from '../types'
+import { AgentType, FrameType, LogType } from '../types'
 
 import type { socketLogicType } from './socketLogicType'
 import { inHassioIngress } from '../utils/inHassioIngress'
@@ -18,6 +18,9 @@ export const socketLogic = kea<socketLogicType>([
     }),
     updateFrame: (frame: FrameType) => ({ frame }),
     deleteFrame: ({ id }: { id: number }) => ({ id }),
+    newAgent: (agent: AgentType) => ({ agent }),
+    updateAgent: (agent: AgentType) => ({ agent }),
+    deleteAgent: ({ id }: { id: number }) => ({ id }),
     updateSettings: (settings: Record<string, any>) => ({ settings }),
     newMetrics: (metrics: Record<string, any>) => ({ metrics }),
   }),
@@ -37,6 +40,7 @@ export const socketLogic = kea<socketLogicType>([
       cache.ws.onmessage = function (event: any) {
         try {
           const data = JSON.parse(event.data)
+          console.info('🟢 WebSocket message received:', data)
           switch (data.event) {
             case 'new_log':
               actions.newLog(data.data)
@@ -44,14 +48,23 @@ export const socketLogic = kea<socketLogicType>([
             case 'new_frame':
               actions.newFrame(data.data)
               break
-            case 'new_scene_image':
-              actions.newSceneImage(data.data.frameId, data.data.sceneId, data.data.width, data.data.height)
-              break
             case 'update_frame':
               actions.updateFrame(data.data)
               break
             case 'delete_frame':
               actions.deleteFrame(data.data)
+              break
+            case 'new_agent':
+              actions.newAgent(data.data)
+              break
+            case 'update_agent':
+              actions.updateAgent(data.data)
+              break
+            case 'delete_agent':
+              actions.deleteAgent(data.data)
+              break
+            case 'new_scene_image':
+              actions.newSceneImage(data.data.frameId, data.data.sceneId, data.data.width, data.data.height)
               break
             case 'update_settings':
               actions.updateSettings(data.data)
@@ -86,5 +99,4 @@ export const socketLogic = kea<socketLogicType>([
 
     openConnection()
   }),
-  beforeUnmount(({ cache }) => {}),
 ])

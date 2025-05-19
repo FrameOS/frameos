@@ -16,7 +16,7 @@ patterns=(
     # "backend/app/*.py"
     # "backend/app/schemas/*.py"
     "backend/app/api/agent.py"
-    "backend/app/api/frame.py"
+    "backend/app/api/frames.py"
     "backend/app/ws/*"
     # "backend/app/api/tests/*.py"
     # "backend/app/api/tests/test_frames.py"

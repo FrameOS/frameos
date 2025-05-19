@@ -9,9 +9,12 @@ import { Button } from '../../components/Button'
 import { newFrameForm } from './newFrameForm'
 import { Masonry } from '../../components/Masonry'
 import { urls } from '../../urls'
-import { lazy, useEffect } from 'react'
+import { useEffect } from 'react'
+import { agentsModel } from '../../models/agentsModel'
+import { Agent } from './Agent'
 
 export function Frames() {
+  const { agentsList } = useValues(agentsModel)
   const { framesList } = useValues(framesModel)
   const { formVisible } = useValues(newFrameForm)
   const { showForm } = useActions(newFrameForm)
@@ -40,8 +43,13 @@ export function Frames() {
         <div className="overflow-auto h-full">
           <Masonry id="frames" className="p-4">
             {framesList.map((frame) => (
-              <div key={frame.id} className="mb-4">
+              <div key={`frame-${frame.id}`} className="mb-4">
                 <Frame frame={frame} />
+              </div>
+            ))}
+            {agentsList.map((agent) => (
+              <div key={`agent-${agent.id}`} className="mb-4">
+                <Agent agent={agent} />
               </div>
             ))}
           </Masonry>
