@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import secrets
-from sqlalchemy import String, DateTime, Integer, ForeignKey, func
+from sqlalchemy import String, DateTime, Integer, ForeignKey, func, text
 from sqlalchemy.orm import relationship, backref, mapped_column
 from app.database import Base
 
@@ -13,9 +13,9 @@ class Agent(Base):
     server_key = mapped_column(String(64), nullable=False,
                                default=lambda: secrets.token_hex(32))
 
-    server_key_created_at = mapped_column(DateTime, nullable=False, default=func.now())
+    server_key_created_at = mapped_column(DateTime, nullable=True, default=func.now())
     server_key_revoked_at = mapped_column(DateTime, nullable=True)
-    server_key_version    = mapped_column(Integer,  nullable=False, default=1)
+    server_key_version = mapped_column(Integer, nullable=False, server_default=text("1"))
 
     last_seen  = mapped_column(DateTime,     nullable=False,
                                default=func.now(), onupdate=func.now())

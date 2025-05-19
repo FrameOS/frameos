@@ -15,7 +15,7 @@ import nimcrypto/hmac
 
 
 const
-  DefaultConfigPath* = "frameos.json" # secure location
+  DefaultConfigPath* = "../frameos/frame.json" # secure location
 
 # const TrustedOrigin* = "https://your.backend.fqdn"     # pin origin (not implemented)
 
@@ -209,7 +209,11 @@ proc main() {.async.} =
        (not cfg.deviceId.allCharsInSet(PrintableChars)):
     raise newException(ValueError, "Invalid deviceId in config → regenerate it.")
 
-  let url = &"wss://{cfg.serverHost}/ws/agent" # always TLS via reverse-proxy
+  var port = if cfg.serverPort <= 0: 443 else: cfg.serverPort
+  let useTls = port mod 1000 == 443
+  let scheme = if useTls: "wss" else: "ws"
+
+  let url = &"{scheme}://{cfg.serverHost}:{$port}/ws/agent"
   echo &"🔗 Connecting → {url} …"
 
   var ws = await newWebSocket(url)

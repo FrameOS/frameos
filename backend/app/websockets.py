@@ -140,6 +140,7 @@ def register_ws_routes(app):
         Afterwards we keep the socket open for future commands.
         """
         await websocket.accept()
+        dev_id = None
         try:
             hello_raw = await websocket.receive_text()
             hello     = json.loads(hello_raw)
@@ -182,4 +183,5 @@ def register_ws_routes(app):
         except WebSocketDisconnect:
             pass
         finally:
-            await agent_manager.disconnect(dev_id)
+            if dev_id:
+                await agent_manager.disconnect(dev_id)
