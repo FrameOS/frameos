@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import json
 import hmac
 import hashlib
 from datetime import datetime, timezone
@@ -27,6 +28,14 @@ active_sockets: Dict[str, WebSocket] = {}
 
 def hmac_sha256(key: str, data: str) -> str:
     return hmac.new(key.encode(), data.encode(), hashlib.sha256).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Canonical JSON  (same rules as Nim’s toOrderedJson())
+# ---------------------------------------------------------------------------
+
+def canonical_dumps(obj) -> str:
+    return json.dumps(obj, separators=(",", ":"), sort_keys=True)
 
 # ---------------------------------------------------------------------------
 # Main WS endpoint
@@ -108,7 +117,7 @@ async def ws_agent_endpoint(ws: WebSocket, db: Session = Depends(get_db)):
             if not {"nonce", "payload", "mac"} <= msg.keys():
                 await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad envelope")
                 break
-            data_to_check = f"{msg['nonce']}{msg['payload']}"
+            data_to_check = f"{msg['nonce']}{canonical_dumps(msg['payload'])}"
             expected = hmac_sha256(agent.server_key, data_to_check)
             if not hmac.compare_digest(expected, msg["mac"]):
                 await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")

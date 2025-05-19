@@ -7,8 +7,7 @@
 # * Config stored under /etc/frameos.d (0600)                                 #
 ################################################################################
 
-import std/[segfaults, strformat, strutils, asyncdispatch, terminal, times, os, sysrand]
-import std/[jsonutils, tables]
+import std/[algorithm, segfaults, strformat, strutils, asyncdispatch, terminal, times, os, sysrand]
 import json, jsony
 import ws
 import nimcrypto
@@ -16,7 +15,7 @@ import nimcrypto/hmac
 
 
 const
-  DefaultConfigPath* = "/etc/frameos.d/creds.json" # secure location
+  DefaultConfigPath* = "frameos.json" # secure location
 
 # const TrustedOrigin* = "https://your.backend.fqdn"     # pin origin (not implemented)
 
@@ -95,17 +94,43 @@ proc hmacSha256Hex(key, data: string): string =
 # ----------------------------------------------------------------------------
 # Secure frame wrapper
 # ----------------------------------------------------------------------------
+proc escapeString(s: string): string =
+  ## JSON-escape and wrap in quotes.
+  result = "\"" & s.escapeJson() & "\""
 
-template makeSecureEnvelope(payload: JsonNode; cfg: FrameConfig): JsonNode =
-  let nonce = getTime().toUnix() # int64 epoch seconds – monotonic enough
-  let body = $payload
+proc canonical(node: JsonNode): string =
+  ## Deterministic, key-sorted, minified JSON.
+  case node.kind
+  of JObject:
+    var keys = newSeq[string]()
+    for k, _ in node: keys.add k
+    keys.sort(cmp)
+    result.add('{')
+    for i, k in keys:
+      if i > 0: result.add(',')
+      result.add(escapeString(k))
+      result.add(':')
+      result.add(canonical(node[k]))
+    result.add('}')
+  of JArray:
+    result.add('[')
+    for i in 0 ..< node.len:
+      if i > 0: result.add(',')
+      result.add(canonical(node[i]))
+    result.add(']')
+  of JString: result = escapeString(node.getStr)
+  of JInt, JFloat, JBool, JNull: result = $node
+
+proc makeSecureEnvelope(payload: JsonNode; cfg: FrameConfig): JsonNode =
+  let nonce = getTime().toUnix()
+  let body = canonical(payload)
   result = %*{
     "nonce": nonce,
     "payload": payload,
     "mac": hmacSha256Hex(cfg.serverApiKey, $nonce & body)
   }
 
-template verifyEnvelope(node: JsonNode; cfg: FrameConfig): bool =
+proc verifyEnvelope(node: JsonNode; cfg: FrameConfig): bool =
   node.hasKey("nonce") and node.hasKey("payload") and node.hasKey("mac") and
   node["mac"].getStr.toLowerAscii() ==
     hmacSha256Hex(cfg.serverApiKey, $node["nonce"].getInt & $node["payload"])
@@ -191,6 +216,15 @@ proc main() {.async.} =
 
   try:
     await doHandshake(ws, cfg)
+
+    # Spawn a heartbeat loop so the server doesn’t time out
+    asyncCheck (proc () {.async.} =
+      while true:
+        await sleepAsync(int(cfg.metricsInterval * 1000))
+        let pingPayload = %*{"type": "heartbeat"}
+        let envelope = makeSecureEnvelope(pingPayload, cfg)
+        await ws.send($envelope)
+    )()
 
     # ────────────────────────────────────────────────────────────────────────
     # Main receive loop – verify envelope, then act on payload  -------------
