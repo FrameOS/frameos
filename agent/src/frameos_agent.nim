@@ -154,7 +154,14 @@ proc recvText(ws: WebSocket): Future[string] {.async.} =
     of Opcode.Ping:
       await ws.send(payload, OpCode.Pong) # keep-alive
     of Opcode.Close:
-      raise newException(Exception, "connection closed by peer")
+      # payload = 2-byte status code (BE)  + optional UTF-8 reason
+      if payload.len >= 2:
+        let code = (uint16(payload[0]) shl 8) or uint16(payload[1])
+        let reason = if payload.len > 2: cast[string](payload[2 .. ^1]) else: ""
+        raise newException(Exception,
+          &"connection closed by server (code {code}): {reason}")
+      else:
+        raise newException(Exception, "connection closed by server")
     else:
       discard # ignore binary, pong …
 
@@ -189,7 +196,7 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
   await ws.send($reply)
 
   # --- Step 3: await OK / rotate -------------------------------------------
-  let ackMsg = await ws.receiveStrPacket()
+  let ackMsg = await ws.recvText()
   let ack = parseJson(ackMsg)
   let act = ack["action"].getStr
   case act
@@ -257,7 +264,7 @@ proc main() {.async.} =
     # Main receive loop – verify envelope, then act on payload  -------------
     # ────────────────────────────────────────────────────────────────────────
     while true:
-      let raw = await ws.receiveStrPacket()
+      let raw = await ws.recvText()
       let node = parseJson(raw)
       if not verifyEnvelope(node, cfg):
         echo "⚠️  bad MAC – dropping packet"
@@ -270,4 +277,7 @@ proc main() {.async.} =
     ws.close()
 
 when isMainModule:
-  waitFor main()
+  try:
+    waitFor main()
+  except Exception as e:
+    fatal(e.msg) # pretty red ❌ + reason
