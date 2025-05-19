@@ -1,1 +1,31 @@
-{"name":"","serverHost":"localhost","serverPort":8989,"serverApiKey":"test-api-key","frameHost":"localhost","framePort":8787,"frameAccessKey":"","frameAccess":"public","width":800,"height":480,"deviceId":"93C0B3000B866DE851F7D2585DD645E6","metricsInterval":60.0,"rotate":0,"scalingMode":"cover","assetsPath":"./tmp","logToFile":"./tmp/frameos.log","debug":true,"timeZone":"","network":{"networkCheck":true,"networkCheckTimeoutSeconds":30.0,"networkCheckUrl":"https://networkcheck.frameos.net/","wifiHotspot":"disabled","wifiHotspotSsid":"FrameOS","wifiHotspotPassword":"frame1234","wifiHotspotTimeoutSeconds":600.0}}
+{
+  "name": "",
+  "serverHost": "localhost",
+  "serverPort": 8989,
+  "serverApiKey": "f214b79ba90f4e66b39f123acf2a20d282177df752a34f37c3a1433a9e6ff9ad",
+  "frameHost": "localhost",
+  "framePort": 8787,
+  "frameAccessKey": "",
+  "frameAccess": "public",
+  "orgId": "bla",
+  "batchId": "",
+  "deviceId": "6F3DBA8602198C7BF8C1AD402D7F7835",
+  "width": 800,
+  "height": 480,
+  "metricsInterval": 60.0,
+  "rotate": 0,
+  "scalingMode": "cover",
+  "assetsPath": "./tmp",
+  "logToFile": "./tmp/frameos.log",
+  "debug": true,
+  "timeZone": "Europe/Brussels",
+  "network": {
+    "networkCheck": true,
+    "networkCheckTimeoutSeconds": 30.0,
+    "networkCheckUrl": "https://networkcheck.frameos.net/",
+    "wifiHotspot": "disabled",
+    "wifiHotspotSsid": "FrameOS",
+    "wifiHotspotPassword": "frame1234",
+    "wifiHotspotTimeoutSeconds": 600.0
+  }
+}
