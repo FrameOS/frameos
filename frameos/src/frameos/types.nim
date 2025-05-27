@@ -49,6 +49,7 @@ type
     wifiHotspotSsid*: string
     wifiHotspotPassword*: string
     wifiHostpotTimeoutSeconds*: float
+    agentConnection*: bool
 
   FrameSchedule* = ref object
     events*: seq[ScheduledEvent]

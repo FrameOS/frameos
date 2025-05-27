@@ -5,7 +5,7 @@ After=network.target
 [Service]
 User=%I
 WorkingDirectory=/srv/frameos/current
-ExecStart=/srv/frameos/current/agent
+ExecStart=/srv/frameos/current/frameos_agent
 Restart=always
 
 [Install]

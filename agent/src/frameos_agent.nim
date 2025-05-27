@@ -15,7 +15,7 @@ import nimcrypto/hmac
 
 
 const
-  DefaultConfigPath* = "../frameos/frame.json" # secure location
+  DefaultConfigPath* = "./frame.json" # secure location
 
 # const TrustedOrigin* = "https://your.backend.fqdn"     # pin origin (not implemented)
 
@@ -32,6 +32,7 @@ type
     wifiHotspotSsid*: string
     wifiHotspotPassword*: string
     wifiHotspotTimeoutSeconds*: float
+    agentConnection*: bool
 
   FrameConfig* = ref object
     name*: string

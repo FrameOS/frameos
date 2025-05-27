@@ -28,6 +28,18 @@ from app.models.frame import Frame, update_frame, get_frame_json
 from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection, exec_local_command
 from app.models.apps import get_one_app_sources
 
+class FrameDeployer:
+    ## This entire file is a big refactor in progress.
+    def __init__(self, db: Session, redis: Redis, frame: Frame, nim_path: str, temp_dir: str, ssh: asyncssh.SSHClientConnection):
+        self.db = db
+        self.redis = redis
+        self.frame = frame
+        self.nim_path = nim_path
+        self.temp_dir = temp_dir
+        self.ssh = ssh
+        self.build_id = ''.join(random.choice(string.ascii_lowercase) for _ in range(12))
+        self.has_agent_connection = self.frame.network.get('agentConnection', False) if self.frame.network else False
+
 
 async def deploy_frame(id: int, redis: Redis):
     await redis.enqueue_job("deploy_frame", id=id)
@@ -58,9 +70,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         frame.status = 'deploying'
         await update_frame(db, redis, frame)
 
-        build_id = ''.join(random.choice(string.ascii_lowercase) for _ in range(12))
-        await log(db, redis, id, "stdout", f"Deploying frame {frame.name} with build id {build_id}")
-
         nim_path = find_nim_v2()
         ssh = await get_ssh_connection(db, redis, frame)
 
@@ -87,6 +96,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             return response
 
         with tempfile.TemporaryDirectory() as temp_dir:
+            self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path=nim_path, temp_dir=temp_dir, ssh=ssh)
+            build_id = self.build_id
+            await log(db, redis, id, "stdout", f"Deploying frame {frame.name} with build id {self.build_id}")
             await log(db, redis, id, "stdout", "- Getting target architecture")
             uname_output: list[str] = []
             await exec_command(db, redis, frame, ssh, "uname -m", uname_output)
@@ -110,6 +122,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             low_memory = total_memory < 512
 
             drivers = drivers_for_frame(frame)
+
+            if self.has_agent_connection:
+                await deploy_agent(self, cpu)
 
             # 1. Create build tar.gz locally
             await log(db, redis, id, "stdout", "- Copying build folders")
@@ -282,6 +297,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await exec_command(db, redis, frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
             await exec_command(db, redis, frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")
 
+            if self.has_agent_connection:
+                await setup_agent_service(self)
+
             # 6. Link new release
             await exec_command(db, redis, frame, ssh,
                                f"rm -rf /srv/frameos/current && "
@@ -349,6 +367,12 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
         await exec_command(db, redis, frame, ssh, "sudo systemctl daemon-reload")
         await exec_command(db, redis, frame, ssh, "sudo systemctl enable frameos.service")
+        if self.has_agent_connection:
+            await exec_command(db, redis, frame, ssh, "sudo systemctl enable frameos_agent.service")
+        else:
+            if self.frame.last_successful_deploy and self.frame.last_successful_deploy.get('network').get('agentConnection', False):
+                await exec_command(db, redis, frame, ssh, "sudo systemctl disable frameos_agent.service", raise_on_error=False)
+                await exec_command(db, redis, frame, ssh, "sudo systemctl stop frameos_agent.service", raise_on_error=False)
 
         frame.status = 'starting'
         frame.last_successful_deploy = frame_dict
@@ -359,6 +383,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await log(db, redis, int(frame.id), "stdinfo", "Deployed! Rebooting device after boot config changes")
             await exec_command(db, redis, frame, ssh, "sudo reboot")
         else:
+            if self.has_agent_connection:
+                await exec_command(db, redis, frame, ssh, "sudo systemctl restart frameos_agent.service")
+                await exec_command(db, redis, frame, ssh, "sudo systemctl status frameos_agent.service")
             await exec_command(db, redis, frame, ssh, "sudo systemctl restart frameos.service")
             await exec_command(db, redis, frame, ssh, "sudo systemctl status frameos.service")
             await update_frame(db, redis, frame)
@@ -390,6 +417,86 @@ def create_build_folders(temp_dir, build_id):
     shutil.copytree("../frameos", source_dir, dirs_exist_ok=True)
     os.makedirs(build_dir, exist_ok=True)
     return build_dir, source_dir
+
+
+def create_agent_build_folders(self: FrameDeployer):
+    build_dir = os.path.join(self.temp_dir, f"agent_{self.build_id}")
+    source_dir = os.path.join(self.temp_dir, "agent")
+    os.makedirs(source_dir, exist_ok=True)
+    shutil.copytree("../agent", source_dir, dirs_exist_ok=True)
+    os.makedirs(build_dir, exist_ok=True)
+    return build_dir, source_dir
+
+async def create_agent_local_build_archive(
+    self: FrameDeployer,
+    build_dir: str,
+    source_dir: str,
+    cpu: str
+):
+    debug_options = "--lineTrace:on" if self.frame.debug else ""
+    cmd = (
+        f"cd {source_dir} && nimble setup && "
+        f"{self.nim_path} compile --os:linux --cpu:{cpu} "
+        f"--compileOnly --genScript --nimcache:{build_dir} "
+        f"{debug_options} src/frameos_agent.nim 2>&1"
+    )
+
+    status, out, err = await exec_local_command(self.db, self.redis, self.frame, cmd)
+    if status != 0:
+        raise Exception("Failed to generate agent sources")
+
+    nimbase_path = find_nimbase_file(self.nim_path)
+    if not nimbase_path:
+        raise Exception("nimbase.h not found")
+
+    shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
+
+    archive_path = os.path.join(self.temp_dir, f"agent_{self.build_id}.tar.gz")
+    zip_base = os.path.join(self.temp_dir, f"agent_{self.build_id}")
+    shutil.make_archive(zip_base, 'gztar', self.temp_dir, f"agent_{self.build_id}")
+    return archive_path
+
+
+async def deploy_agent(self: FrameDeployer, cpu: str):
+    # 1 Build the agent
+    agent_build_dir, agent_source_dir = create_agent_build_folders(self)
+    agent_archive_path = await create_agent_local_build_archive(self, agent_build_dir, agent_source_dir, cpu)
+
+    # 2 Upload the local tarball
+    await asyncssh.scp(
+        agent_archive_path,
+        (self.ssh, f"/srv/frameos/build/agent_{self.build_id}.tar.gz"),
+        recurse=False
+    )
+    # 3 Unpack & compile on device
+    await exec_command(self.db, self.redis, self.frame, self.ssh,
+                        f"cd /srv/frameos/build && tar -xzf agent_{self.build_id}.tar.gz && rm agent_{self.build_id}.tar.gz")
+    await exec_command(self.db, self.redis, self.frame, self.ssh,
+                        f"cd /srv/frameos/build/agent_{self.build_id} && sh compile_frameos_agent.sh")
+    await exec_command(self.db, self.redis, self.frame, self.ssh, f"mkdir -p /srv/frameos/releases/release_{self.build_id}")
+    await exec_command(self.db, self.redis, self.frame, self.ssh,
+                        f"cp /srv/frameos/build/agent_{self.build_id}/frameos_agent "
+                        f"/srv/frameos/releases/release_{self.build_id}/frameos_agent")
+
+async def setup_agent_service(self: FrameDeployer):
+    # 5b. Upload frameos_agent.service with a TEMP FILE approach
+    with open("../agent/frameos_agent.service", "r") as f:
+        service_contents = f.read().replace("%I", self.frame.ssh_user)
+    service_data = service_contents.encode('utf-8')
+    with tempfile.NamedTemporaryFile(suffix=".service", delete=False) as tmpservice:
+        local_service_path = tmpservice.name
+        tmpservice.write(service_data)
+    await asyncssh.scp(
+        local_service_path,
+        (self.ssh, f"/srv/frameos/releases/release_{self.build_id}/frameos_agent.service"),
+        recurse=False
+    )
+    os.remove(local_service_path)
+    await exec_command(self.db, self.redis, self.frame, self.ssh,
+                        f"sudo cp /srv/frameos/releases/release_{self.build_id}/frameos_agent.service "
+                        f"/etc/systemd/system/frameos_agent.service")
+    await exec_command(self.db, self.redis, self.frame, self.ssh, "sudo chown root:root /etc/systemd/system/frameos_agent.service")
+    await exec_command(self.db, self.redis, self.frame, self.ssh, "sudo chmod 644 /etc/systemd/system/frameos_agent.service")
 
 
 async def make_local_modifications(db: Session, redis: Redis,

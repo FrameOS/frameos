@@ -349,6 +349,9 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                     )}
                   </>
                 )}
+                <Field name="agentConnection" label="Enable FrameOS Agent reverse connection (EXPERIMENTAL)">
+                  {({ value, onChange }) => <Switch name="agentConnection" value={value} onChange={onChange} />}
+                </Field>
               </Group>
             </div>
             <H6>Defaults</H6>
