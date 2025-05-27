@@ -38,7 +38,9 @@ class FrameDeployer:
         self.temp_dir = temp_dir
         self.ssh = ssh
         self.build_id = ''.join(random.choice(string.ascii_lowercase) for _ in range(12))
-        self.has_agent_connection = self.frame.network.get('agentConnection', False) if self.frame.network else False
+
+    def has_agent_connection(self) -> bool:
+        return self.frame.network and self.frame.network.get('agentConnection', False) and len(str(self.frame.network.get('agentSharedSecret', ''))) > 0
 
 
 async def deploy_frame(id: int, redis: Redis):
@@ -123,7 +125,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             drivers = drivers_for_frame(frame)
 
-            if self.has_agent_connection:
+            if self.has_agent_connection():
                 await deploy_agent(self, cpu)
 
             # 1. Create build tar.gz locally
@@ -297,7 +299,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await exec_command(db, redis, frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
             await exec_command(db, redis, frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")
 
-            if self.has_agent_connection:
+            if self.has_agent_connection():
                 await setup_agent_service(self)
 
             # 6. Link new release
@@ -367,7 +369,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
         await exec_command(db, redis, frame, ssh, "sudo systemctl daemon-reload")
         await exec_command(db, redis, frame, ssh, "sudo systemctl enable frameos.service")
-        if self.has_agent_connection:
+        if self.has_agent_connection():
             await exec_command(db, redis, frame, ssh, "sudo systemctl enable frameos_agent.service")
         else:
             if self.frame.last_successful_deploy and self.frame.last_successful_deploy.get('network').get('agentConnection', False):
@@ -383,7 +385,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await log(db, redis, int(frame.id), "stdinfo", "Deployed! Rebooting device after boot config changes")
             await exec_command(db, redis, frame, ssh, "sudo reboot")
         else:
-            if self.has_agent_connection:
+            if self.has_agent_connection():
                 await exec_command(db, redis, frame, ssh, "sudo systemctl restart frameos_agent.service")
                 await exec_command(db, redis, frame, ssh, "sudo systemctl status frameos_agent.service")
             await exec_command(db, redis, frame, ssh, "sudo systemctl restart frameos.service")

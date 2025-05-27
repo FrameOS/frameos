@@ -18,6 +18,8 @@ from app.database import get_db
 from app.redis import get_redis
 from app.websockets import publish_message
 from app.models.agent import Agent
+from app.models.frame import Frame
+from app.models.log import new_log as log
 
 router = APIRouter()
 
@@ -35,6 +37,14 @@ active_sockets: Dict[str, WebSocket] = {}
 def hmac_sha256(key: str, data: str) -> str:
     """Return lowercase HMAC-SHA256(key, data)."""
     return hmac.new(key.encode(), data.encode(), hashlib.sha256).hexdigest()
+
+
+def sign(data: str, api_key: str, shared_secret: str) -> str:
+    """
+    Compute HMAC-SHA256(shared_secret, api_key || data) – the new unified signature
+    used by the agent and expected by the backend.
+    """
+    return hmac_sha256(shared_secret, f"{api_key}{data}")
 
 
 def canonical_dumps(obj) -> str:
@@ -94,33 +104,41 @@ async def ws_agent_endpoint(
     await ws.accept()  # TCP ↔ WS handshake OK – start protocol below
 
     # ----------------------------------------------------------------------
-    # STEP 1 – server → challenge
-    # ----------------------------------------------------------------------
-    challenge = secrets.token_hex(16)
-    await ws.send_json({"action": "challenge", "c": challenge})
-
-    # ----------------------------------------------------------------------
-    # STEP 2 – client → handshake
+    # STEP 0 – agent → {action:"hello", orgId, batchId, deviceId, serverApiKey}
     # ----------------------------------------------------------------------
     try:
-        msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
+        hello_msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
     except (asyncio.TimeoutError, WebSocketDisconnect):
-        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="timeout")
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="hello timeout")
         return
 
-    if msg.get("action") != "handshake":
-        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad action")
+    if hello_msg.get("action") != "hello":
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="expected hello")
         return
 
-    org_id   : str = msg.get("orgId", "")
-    batch_id : str = msg.get("batchId", "")
-    device_id: str = msg.get("deviceId", "")
-    mac      : str = str(msg.get("mac", ""))
+    org_id        : str = hello_msg.get("orgId", "")
+    batch_id      : str = hello_msg.get("batchId", "")
+    device_id     : str = hello_msg.get("deviceId", "")
+    server_api_key: str = str(hello_msg.get("serverApiKey", ""))
 
-    print(
-        f"Handshake from org={org_id!r} batch={batch_id!r} "
-        f"device={device_id!r} mac={mac!r}"
-    )
+    # ----------------------------------------------------------------------
+    # Look up the **Frame** that owns this server-side key.
+    # If no such frame exists we abort – we never register “orphan” agents.
+    # ----------------------------------------------------------------------
+    if not server_api_key:
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="missing server key")
+        return
+
+    frame = db.query(Frame).filter_by(server_api_key=server_api_key).first()
+    if frame is None:
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="unknown frame")
+        return
+
+    # Each frame has an associated *shared secret* used for HMAC
+    shared_secret: str = frame.network.get("agentSharedSecret", "") if frame.network else ""
+    if not shared_secret:
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="frame missing secret")
+        return
 
     # ----------------------------------------------------------------------
     # Validate identifiers
@@ -131,9 +149,8 @@ async def ws_agent_endpoint(
             return
 
     # ----------------------------------------------------------------------
-    # Look up / create Agent
+    # Look up / create Agent – ONLY if its frame is known
     # ----------------------------------------------------------------------
-    ack_expected: Optional[str] = None  # "register/ack" | "rotate/ack" | None
     is_new_agent = False
 
     agent: Agent | None = db.query(Agent).filter_by(
@@ -144,70 +161,65 @@ async def ws_agent_endpoint(
 
     # === New agent ========================================================
     if agent is None:
-        if mac:
-            # New devices must not send a MAC yet
-            await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac, none expected")
-            return
-
         is_new_agent = True
-        agent = Agent(device_id=device_id, org_id=org_id, batch_id=batch_id)
-        agent.rotate_key()
-        db.add(agent)  # NO COMMIT YET – wait for /ack
-        ack_expected = "register/ack"
+        agent = Agent(
+            device_id=device_id,
+            org_id=org_id,
+            batch_id=batch_id,
+            server_key=server_api_key,
+            frame_id=frame.id
+        )
 
-        print(f"New agent {device_id} created (pending ack)")
-        await ws.send_json({"action": "register", "serverKey": agent.server_key})
+        db.add(agent)  # commit after successful handshake
+
+        print(f"New agent {device_id} created (awaiting handshake)")
 
     # === Existing agent ===================================================
     else:
-        # Verify MAC with current key
-        expected = hmac_sha256(agent.server_key, challenge)
-        if not hmac.compare_digest(expected, mac):
-            print(f"Invalid MAC from {device_id}: expected {expected}, got {mac}")
-            await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad key")
-            agent_dict = _agent_to_dict(agent)
-            await publish_message(redis, "update_agent", agent_dict)
+        # Existing agent must belong to the same frame and use the same key
+        if agent.frame_id != frame.id or server_api_key != agent.server_key:
+            await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="frame/key mismatch")
             return
-
-        # Rotate key if required
-        if agent.must_rotate_key():
-            agent.rotate_key()       # updates key in-memory
-            db.add(agent)            # NO COMMIT YET – wait for /ack
-            ack_expected = "rotate/ack"
-
-            print(f"Rotating key for {device_id}, awaiting ack…")
-            await ws.send_json({"action": "rotate", "newKey": agent.server_key})
-        else:
-            await ws.send_json({"action": "handshake/ok"})
 
     # ----------------------------------------------------------------------
-    # STEP 2b – wait for /ack when a new key was issued
+    # STEP 1 – server → challenge
     # ----------------------------------------------------------------------
-    if ack_expected is not None:
-        try:
-            ack_msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
-        except (asyncio.TimeoutError, WebSocketDisconnect):
-            db.rollback()
-            await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="ack timeout")
-            agent_dict = _agent_to_dict(agent)
-            await publish_message(redis, "update_agent", agent_dict)
-            return
+    challenge = secrets.token_hex(32)
+    await ws.send_json({"action": "challenge", "c": challenge})
 
-        if ack_msg.get("action") != ack_expected:
-            db.rollback()
-            await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad ack")
-            agent_dict = _agent_to_dict(agent)
-            await publish_message(redis, "update_agent", agent_dict)
-            return
+    # ----------------------------------------------------------------------
+    # STEP 2 – agent → {action:"handshake", mac:...}
+    # ----------------------------------------------------------------------
+    try:
+        hs_msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
+    except (asyncio.TimeoutError, WebSocketDisconnect):
+        db.rollback()
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="handshake timeout")
+        return
 
-        # Ack OK → persist new key
-        db.commit()
-        if is_new_agent:
-            await publish_message(redis, "new_agent", _agent_to_dict(agent))
-        else:
-            await publish_message(redis, "update_agent", _agent_to_dict(agent))
+    if hs_msg.get("action") != "handshake":
+        db.rollback()
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad action")
+        return
 
-        print(f"{ack_expected} received – key persisted for {device_id}")
+    mac = str(hs_msg.get("mac", ""))
+
+    expected_mac = sign(challenge, server_api_key, shared_secret)
+    if not hmac.compare_digest(expected_mac, mac):
+        print(f"Invalid MAC from {device_id}: expected {expected_mac}, got {mac}")
+        db.rollback()
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")
+        return
+
+    # ----------------------------------------------------------------------
+    # STEP 3 – server → handshake/ok
+    # ----------------------------------------------------------------------
+    await ws.send_json({"action": "handshake/ok"})
+
+    # Commit any pending DB changes (e.g. new agent) after successful auth
+    db.commit()
+    if is_new_agent:
+        await publish_message(redis, "new_agent", _agent_to_dict(agent))
 
     # ----------------------------------------------------------------------
     # Fully authenticated – store socket and broadcast “connected”
@@ -215,8 +227,10 @@ async def ws_agent_endpoint(
     active_sockets[device_id] = ws
     await publish_message(redis, "update_agent", _agent_to_dict(agent))
 
+    await log(db, redis, frame.id, "stdout", "New agent connected")
+
     # ----------------------------------------------------------------------
-    # STEP 3 – main receive loop (enveloped messages)
+    # Main receive loop (enveloped messages)
     # ----------------------------------------------------------------------
     try:
         while True:
@@ -227,7 +241,11 @@ async def ws_agent_endpoint(
                 await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad envelope")
                 break
 
-            data_to_check = f"{msg['nonce']}{canonical_dumps(msg['payload'])}"
+            data_to_check = (
+                f"{server_api_key}"
+                f"{msg['nonce']}"
+                f"{canonical_dumps(msg['payload'])}"
+            )
             expected = hmac_sha256(agent.server_key, data_to_check)
             if not hmac.compare_digest(expected, msg["mac"]):
                 await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")
@@ -253,3 +271,4 @@ async def ws_agent_endpoint(
 
         # Broadcast “disconnected” state
         await publish_message(redis, "update_agent", _agent_to_dict(agent))
+        await log(db, redis, frame.id, "stdout", "Agent disconnected")

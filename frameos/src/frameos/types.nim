@@ -50,6 +50,7 @@ type
     wifiHotspotPassword*: string
     wifiHostpotTimeoutSeconds*: float
     agentConnection*: bool
+    agentSharedSecret*: string
 
   FrameSchedule* = ref object
     events*: seq[ScheduledEvent]

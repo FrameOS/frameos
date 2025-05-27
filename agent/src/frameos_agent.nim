@@ -1,13 +1,13 @@
 ################################################################################
 # FrameOS Agent – hardened version                                             #
 # * WSS transport only                                                        #
-# * Challenge‑response handshake using HMAC‑SHA256                            #
+# * Challenge-response handshake using HMAC-SHA256                            #
 # * All subsequent frames wrapped with {nonce,payload,mac}                    #
-# * Secure 128‑bit random deviceId (hex)                                      #
-# * Config stored under /etc/frameos.d (0600)                                 #
+# * Secure 128-bit random deviceId (hex)                                      #
 ################################################################################
 
-import std/[algorithm, segfaults, strformat, strutils, asyncdispatch, terminal, times, os, sysrand]
+import std/[algorithm, segfaults, strformat, strutils, asyncdispatch, terminal,
+            times, os, sysrand]
 import json, jsony
 import ws
 import nimcrypto
@@ -33,6 +33,7 @@ type
     wifiHotspotPassword*: string
     wifiHotspotTimeoutSeconds*: float
     agentConnection*: bool
+    agentSharedSecret*: string
 
   FrameConfig* = ref object
     name*: string
@@ -87,10 +88,23 @@ proc saveConfig(cfg: FrameConfig; path = DefaultConfigPath) =
 # ----------------------------------------------------------------------------
 
 proc hmacSha256Hex(key, data: string): string =
-  ## Return lowercase hex of HMAC-SHA256(key, data) using nimcrypto ≥0.6.
+  ## Return lowercase hex of HMAC-SHA256(key, data).
   let digest = sha256.hmac(key, data) # MDigest[256]
   result = $digest # `$` gives uppercase hex
-  result = result.toLowerAscii() # make it lowercase (toHex & co. are upper)
+  result = result.toLowerAscii() # make it lowercase
+
+# ----------------------------------------------------------------------------
+# Signing helper – HMAC(secret, data) where `data` is prefixed with api-key
+# ----------------------------------------------------------------------------
+proc sign(data: string; cfg: FrameConfig): string =
+  ## data   = the “open” string we want to protect
+  ## secret = cfg.network.agentSharedSecret   (never leaves the device)
+  ## apiKey = cfg.serverApiKey                (public “username”)
+  ##
+  ## The server re-creates exactly the same byte-sequence:
+  ##   apiKey || data   (no separators, keep order)
+  result = hmacSha256Hex(cfg.network.agentSharedSecret,
+                         cfg.serverApiKey & data)
 
 # ----------------------------------------------------------------------------
 # Secure frame wrapper
@@ -122,20 +136,24 @@ proc canonical(node: JsonNode): string =
 proc makeSecureEnvelope(payload: JsonNode; cfg: FrameConfig): JsonNode =
   let nonce = getTime().toUnix()
   let body = canonical(payload)
+  let mac = sign($nonce & body, cfg) # api-key is injected in sign()
   result = %*{
     "nonce": nonce,
+    "serverApiKey": cfg.serverApiKey, # visible “username”
     "payload": payload,
-    "mac": if cfg.serverApiKey.len > 0: hmacSha256Hex(cfg.serverApiKey, $nonce & body) else: ""
+    "mac": mac
   }
 
 proc verifyEnvelope(node: JsonNode; cfg: FrameConfig): bool =
   node.hasKey("nonce") and node.hasKey("payload") and node.hasKey("mac") and
+  node.hasKey("serverApiKey") and
+  node["serverApiKey"].getStr == cfg.serverApiKey and
   node["mac"].getStr.toLowerAscii() ==
-    hmacSha256Hex(cfg.serverApiKey, $node["nonce"].getInt & $node["payload"])
+    sign($node["nonce"].getInt & $node["payload"], cfg)
 
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
 # utils – tiny print-and-quit helper
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
 proc fatal(msg: string; code = 1) =
   ## Print a red "❌" + message to stderr and quit with the given exit code.
   styledWrite(stderr, fgRed, "❌ ")
@@ -152,10 +170,12 @@ proc recvText(ws: WebSocket): Future[string] {.async.} =
     of Opcode.Ping:
       await ws.send(payload, OpCode.Pong) # keep-alive
     of Opcode.Close:
-      # payload = 2-byte status code (BE)  + optional UTF-8 reason
+      # payload = 2-byte status code (BE) + optional UTF-8 reason
       if payload.len >= 2:
         let code = (uint16(payload[0]) shl 8) or uint16(payload[1])
-        let reason = if payload.len > 2: cast[string](payload[2 .. ^1]) else: ""
+        let reason = if payload.len > 2:
+                       cast[string](payload[2 .. ^1])
+                     else: ""
         raise newException(Exception,
           &"connection closed by server (code {code}): {reason}")
       else:
@@ -164,36 +184,47 @@ proc recvText(ws: WebSocket): Future[string] {.async.} =
       discard # ignore binary, pong …
 
 # ----------------------------------------------------------------------------
-# Challenge‑response handshake (server‑initiated)
+# Challenge-response handshake (server-initiated)
 # ----------------------------------------------------------------------------
 
 proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
   ## Implements the protocol:
-  ##   1) server → {action:"challenge", c:<hex‑rand>}
-  ##   2) agent  → {action:"handshake", orgId, batchId, deviceId, mac:HMAC(key,c)}
-  ##   3) server → {action:"handshake/ok" | "rotate" | close(1008)}
+  ##   0) agent  → {action:"hello", orgId, batchId, deviceId, serverApiKey}
+  ##   1) server → {action:"challenge", c:<hex-rand>}
+  ##   2) agent  → {action:"handshake", mac:<hmac-sha256(serverApiKey || c, sharedSecret)>}
+  ##   3) server → {action:"handshake/ok"}
 
-  # --- Step 1: wait for challenge -------------------------------------------
+  # --- Step 0: say hello ----------------------------------------------------
+  var hello = %*{
+    "action": "hello",
+    "orgId": cfg.orgId,
+    "batchId": cfg.batchId,
+    "deviceId": cfg.deviceId,
+    "serverApiKey": cfg.serverApiKey
+  }
+  await ws.send($hello)
+
+  # --- Step 1: wait for challenge -------------------------------------------
   let challengeMsg = await ws.recvText()
   echo &"🔑 challenge: {challengeMsg}"
 
   let challengeJson = parseJson(challengeMsg)
   if challengeJson["action"].getStr != "challenge":
-    raise newException(Exception, "Expected challenge, got: " & challengeMsg)
+    raise newException(Exception,
+      "Expected challenge, got: " & challengeMsg)
   let challenge = challengeJson["c"].getStr
 
-  # --- Step 2: answer -------------------------------------------------------
-  let mac = if cfg.serverApiKey.len > 0: hmacSha256Hex(cfg.serverApiKey, challenge) else: ""
-  var reply = %*{
+  # --- Step 2: answer -------------------------------------------------------
+  let mac = if cfg.network.agentSharedSecret.len > 0:
+              sign(challenge, cfg)
+            else: ""
+  let reply = %*{
     "action": "handshake",
-    "orgId": cfg.orgId,
-    "batchId": cfg.batchId,
-    "deviceId": cfg.deviceId,
     "mac": mac
   }
   await ws.send($reply)
 
-  # --- Step 3: await OK / rotate -------------------------------------------
+  # --- Step 3: await OK / register / rotate ---------------------------------
   let ackMsg = await ws.recvText()
   let ack = parseJson(ackMsg)
   let act = ack["action"].getStr
@@ -207,7 +238,7 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
     cfg.saveConfig()
     await ws.send($(%*{"action": "register/ack"}))
   of "rotate":
-    echo "🔑 key rotated - persisting"
+    echo "🔑 key rotated – persisting"
     cfg.serverApiKey = ack["newKey"].getStr
     cfg.saveConfig()
     await ws.send($(%*{"action": "rotate/ack"}))
@@ -217,7 +248,6 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
 # ----------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------
-
 
 proc main() {.async.} =
   echo "→ FrameOS agent starting…"
@@ -235,7 +265,8 @@ proc main() {.async.} =
     cfg.saveConfig()
   elif cfg.deviceId.len > 64 or
        (not cfg.deviceId.allCharsInSet(PrintableChars)):
-    raise newException(ValueError, "Invalid deviceId in config → regenerate it.")
+    raise newException(ValueError,
+      "Invalid deviceId in config → regenerate it.")
 
   var port = if cfg.serverPort <= 0: 443 else: cfg.serverPort
   let useTls = port mod 1000 == 443
