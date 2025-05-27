@@ -16,9 +16,8 @@ export function Frame(props: FrameSceneProps) {
   const frameId = parseInt(props.id)
   const frameLogicProps = { frameId }
   const { frame, unsavedChanges, undeployedChanges, requiresRecompilation } = useValues(frameLogic(frameLogicProps))
-  const { saveFrame, renderFrame, rebootFrame, restartFrame, stopFrame, deployFrame, fullDeployFrame } = useActions(
-    frameLogic(frameLogicProps)
-  )
+  const { saveFrame, renderFrame, rebootFrame, restartFrame, stopFrame, deployFrame, fullDeployFrame, redeployAgent } =
+    useActions(frameLogic(frameLogicProps))
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
 
   return (
@@ -48,6 +47,7 @@ export function Frame(props: FrameSceneProps) {
                           },
                         ]
                       : []),
+                    { label: 'Redeploy agent', onClick: () => redeployAgent() },
                   ]}
                 />
                 <div className="flex pl-2 space-x-2">

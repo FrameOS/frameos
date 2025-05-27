@@ -525,6 +525,15 @@ async def api_frame_reboot_event(id: int, redis: Redis = Depends(get_redis)):
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
+@api_with_auth.post("/frames/{id:int}/redeploy_agent")
+async def api_frame_redeploy_agent_event(id: int, redis: Redis = Depends(get_redis)):
+    try:
+        from app.tasks import redeploy_agent
+        await redeploy_agent(id, redis)
+        return "Success"
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
 
 @api_with_auth.post("/frames/{id:int}/stop")
 async def api_frame_stop_event(id: int, redis: Redis = Depends(get_redis)):
