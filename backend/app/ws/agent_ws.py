@@ -246,7 +246,7 @@ async def ws_agent_endpoint(
                 f"{msg['nonce']}"
                 f"{canonical_dumps(msg['payload'])}"
             )
-            expected = hmac_sha256(agent.server_key, data_to_check)
+            expected = hmac_sha256(shared_secret, data_to_check)
             if not hmac.compare_digest(expected, msg["mac"]):
                 await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")
                 break
