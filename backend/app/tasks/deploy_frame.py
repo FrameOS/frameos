@@ -99,8 +99,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                         await log(db, redis, id, "stdout", f"- Installing {pkg} failed again.")
             return response
 
-        should_deploy_agent = False
-
         with tempfile.TemporaryDirectory() as temp_dir:
             self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path=nim_path, temp_dir=temp_dir, ssh=ssh)
             build_id = self.build_id
@@ -130,32 +128,16 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             drivers = drivers_for_frame(frame)
 
-            should_deploy_agent = False
             if self.has_agent_connection():
-                current_agent_hash = compute_agent_hash()
-                out: list[str] = []
-                await exec_command(
-                    db, redis, frame, ssh,
-                    f"cat {AGENT_HASH_PATH} 2>/dev/null || true",
-                    out, raise_on_error=False, log_output=False
-                )
-                prev_agent_hash = "".join(out or []).strip()
-                if prev_agent_hash != current_agent_hash:
-                    await log(db, redis, id, "stdout",
-                            f"- Agent changed (old={prev_agent_hash or 'None'} "
-                            f"→ new={current_agent_hash[:8]}) – deploying")
-                    should_deploy_agent = True
-                    await exec_command(
-                        db, redis, frame, ssh,
-                        f"echo '{current_agent_hash}' | tee {AGENT_HASH_PATH}"
-                    )
-                else:
-                    await log(db, redis, id, "stdout", "- Agent unchanged – skipping deploy")
-            else:
-                await log(db, redis, id, "stdout", "- No agent connection configured. Skipping agent deployment.")
-
-            if should_deploy_agent:
+                await log(db, redis, id, "stdout", "- Deploying agent")
                 await deploy_agent(self, cpu)
+                await setup_agent_service(self)
+                await exec_command(db, redis, frame, ssh, "sudo systemctl enable frameos_agent.service")
+                await exec_command(db, redis, frame, ssh, "sudo systemctl restart frameos_agent.service")
+                await exec_command(db, redis, frame, ssh, "sudo systemctl status frameos_agent.service")
+            elif self.frame.last_successful_deploy and self.frame.last_successful_deploy.get('network').get('agentConnection', False):
+                await exec_command(db, redis, frame, ssh, "sudo systemctl disable frameos_agent.service", raise_on_error=False)
+                await exec_command(db, redis, frame, ssh, "sudo systemctl stop frameos_agent.service", raise_on_error=False)
 
             # 1. Create build tar.gz locally
             await log(db, redis, id, "stdout", "- Copying build folders")
@@ -328,9 +310,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await exec_command(db, redis, frame, ssh, "sudo chown root:root /etc/systemd/system/frameos.service")
             await exec_command(db, redis, frame, ssh, "sudo chmod 644 /etc/systemd/system/frameos.service")
 
-            if should_deploy_agent:
-                await setup_agent_service(self)
-
             # 6. Link new release
             await exec_command(db, redis, frame, ssh,
                                f"rm -rf /srv/frameos/current && "
@@ -398,13 +377,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
         await exec_command(db, redis, frame, ssh, "sudo systemctl daemon-reload")
         await exec_command(db, redis, frame, ssh, "sudo systemctl enable frameos.service")
-        if should_deploy_agent:
-            await exec_command(db, redis, frame, ssh, "sudo systemctl enable frameos_agent.service")
-        else:
-            if self.frame.last_successful_deploy and self.frame.last_successful_deploy.get('network').get('agentConnection', False):
-                await exec_command(db, redis, frame, ssh, "sudo systemctl disable frameos_agent.service", raise_on_error=False)
-                await exec_command(db, redis, frame, ssh, "sudo systemctl stop frameos_agent.service", raise_on_error=False)
-
         frame.status = 'starting'
         frame.last_successful_deploy = frame_dict
         frame.last_successful_deploy_at = datetime.now(timezone.utc)
@@ -414,9 +386,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await log(db, redis, int(frame.id), "stdinfo", "Deployed! Rebooting device after boot config changes")
             await exec_command(db, redis, frame, ssh, "sudo reboot")
         else:
-            if should_deploy_agent:
-                await exec_command(db, redis, frame, ssh, "sudo systemctl restart frameos_agent.service")
-                await exec_command(db, redis, frame, ssh, "sudo systemctl status frameos_agent.service")
             await exec_command(db, redis, frame, ssh, "sudo systemctl restart frameos.service")
             await exec_command(db, redis, frame, ssh, "sudo systemctl status frameos.service")
             await update_frame(db, redis, frame)
@@ -755,40 +724,6 @@ def find_nim_executable():
         if os.path.isfile(path) and os.access(path, os.X_OK):
             return path
     return None
-
-def compute_agent_hash() -> str:
-    """
-    Return a SHA-256 hex digest of all files in
-    ../agent/  (top-level files only)   and
-    ../agent/src/**  (recursively).
-
-    Any other sub-folders (e.g. ../agent/tests, ../agent/docs …) are ignored.
-    """
-    base = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agent"))
-    sha  = hashlib.sha256()
-
-    # --- helper that decides whether we should include a file ----
-    def _include(full_path: str) -> bool:
-        rel = os.path.relpath(full_path, base).replace(os.sep, "/")
-        if rel.startswith("src/") or "/" not in rel:  # top-level file *or* inside src/
-            return True
-        return False
-
-    paths: list[str] = []
-    for root, _, files in os.walk(base):
-        for fname in files:
-            full = os.path.join(root, fname)
-            if _include(full):
-                paths.append(os.path.relpath(full, base))
-
-    for rel_path in sorted(paths):
-        full_path = os.path.join(base, rel_path)
-        sha.update(rel_path.encode())        # path influences the hash
-        with open(full_path, "rb") as fp:
-            while chunk := fp.read(8192):
-                sha.update(chunk)
-
-    return sha.hexdigest()
 
 def is_executable_in_path(executable: str):
     try:

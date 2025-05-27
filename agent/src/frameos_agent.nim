@@ -1,9 +1,10 @@
 ################################################################################
-# FrameOS Agent – hardened version                                             #
-# * WSS transport only                                                        #
-# * Challenge-response handshake using HMAC-SHA256                            #
-# * All subsequent frames wrapped with {nonce,payload,mac}                    #
-# * Secure 128-bit random deviceId (hex)                                      #
+# FrameOS Agent – hardened + auto-reconnect                                    #
+# * WSS transport only                                                         #
+# * Challenge-response handshake using HMAC-SHA256                             #
+# * All subsequent frames wrapped with {nonce,payload,mac}                     #
+# * Secure 128-bit random deviceId (hex)                                       #
+# * Bullet-proof connection loop with exponential back-off (max 60 s)          #
 ################################################################################
 
 import std/[algorithm, segfaults, strformat, strutils, asyncdispatch, terminal,
@@ -13,11 +14,10 @@ import ws
 import nimcrypto
 import nimcrypto/hmac
 
-
 const
   DefaultConfigPath* = "./frame.json" # secure location
-
-# const TrustedOrigin* = "https://your.backend.fqdn"     # pin origin (not implemented)
+  MaxBackoffSeconds* = 60             # don’t wait longer than this
+  InitialBackoffSeconds = 1           # first retry
 
 # ----------------------------------------------------------------------------
 # Types
@@ -94,7 +94,7 @@ proc hmacSha256Hex(key, data: string): string =
   result = result.toLowerAscii() # make it lowercase
 
 # ----------------------------------------------------------------------------
-# Signing helper – HMAC(secret, data) where `data` is prefixed with api-key
+# Signing helper – HMAC(secret, apiKey||data)
 # ----------------------------------------------------------------------------
 proc sign(data: string; cfg: FrameConfig): string =
   ## data   = the “open” string we want to protect
@@ -246,67 +246,72 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
     raise newException(Exception, "Handshake failed: " & ackMsg)
 
 # ----------------------------------------------------------------------------
-# Main
+# Heartbeat helper
+# ----------------------------------------------------------------------------
+proc startHeartbeat(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
+  ## Keeps server-side idle-timeout at bay.
+  try:
+    while true:
+      await sleepAsync(20_000)
+      let env = makeSecureEnvelope(%*{"type": "heartbeat"}, cfg)
+      await ws.send($env)
+  except Exception: discard # will quit when ws closes / errors out
+
+# ----------------------------------------------------------------------------
+# Run-forever loop with exponential back-off
 # ----------------------------------------------------------------------------
 
-proc main() {.async.} =
-  echo "→ FrameOS agent starting…"
+proc runAgent(cfg: FrameConfig) {.async.} =
+  var backoff = InitialBackoffSeconds
+  while true:
+    try:
+      # --- Connect ----------------------------------------------------------
+      let port = (if cfg.serverPort <= 0: 443 else: cfg.serverPort)
+      let scheme = (if port mod 1000 == 443: "wss" else: "ws")
+      let url = &"{scheme}://{cfg.serverHost}:{port}/ws/agent"
+      echo &"🔗 Connecting → {url} …"
 
-  # Fail-fast: we expect an existing, fully-populated creds file
-  var cfg: FrameConfig
-  try:
-    cfg = loadConfig()
-  except IOError as e:
-    fatal(e.msg)
+      var ws = await newWebSocket(url)
+      try:
+        await doHandshake(ws, cfg) # throws on failure
+        backoff = InitialBackoffSeconds # reset back-off
 
-  # Sanity – ensure deviceId printable & ≤64 chars
-  if cfg.deviceId.len == 0:
-    cfg.deviceId = generateSecureId()
-    cfg.saveConfig()
-  elif cfg.deviceId.len > 64 or
-       (not cfg.deviceId.allCharsInSet(PrintableChars)):
-    raise newException(ValueError,
-      "Invalid deviceId in config → regenerate it.")
+        asyncCheck startHeartbeat(ws, cfg) # fire-and-forget
 
-  var port = if cfg.serverPort <= 0: 443 else: cfg.serverPort
-  let useTls = port mod 1000 == 443
-  let scheme = if useTls: "wss" else: "ws"
+        # ── Main receive loop ───────────────────────────────────────────────
+        while true:
+          let raw = await ws.recvText()
+          let node = parseJson(raw)
+          if not verifyEnvelope(node, cfg):
+            echo "⚠️  bad MAC – dropping packet"; continue
+          let payload = node["payload"]
+          echo &"📥 {payload}"
+          # TODO: handle backend commands …
 
-  let url = &"{scheme}://{cfg.serverHost}:{$port}/ws/agent"
-  echo &"🔗 Connecting → {url} …"
+      finally:
+        if not ws.isNil:
+          ws.close()
 
-  var ws = await newWebSocket(url)
+    except Exception as e:
+      echo &"⚠️  connection error: {e.msg}"
 
-  try:
-    await doHandshake(ws, cfg)
+    # --- Back-off & retry ----------------------------------------------------
+    echo &"⏳ reconnecting in {backoff}s …"
+    await sleepAsync(backoff * 1_000)
+    backoff = min(backoff * 2, MaxBackoffSeconds)
 
-    # Spawn a heartbeat loop so the server doesn’t time out
-    asyncCheck (proc () {.async.} =
-      while true:
-        await sleepAsync(int(20000))
-        let pingPayload = %*{"type": "heartbeat"}
-        let envelope = makeSecureEnvelope(pingPayload, cfg)
-        await ws.send($envelope)
-    )()
-
-    # ────────────────────────────────────────────────────────────────────────
-    # Main receive loop – verify envelope, then act on payload  -------------
-    # ────────────────────────────────────────────────────────────────────────
-    while true:
-      let raw = await ws.recvText()
-      let node = parseJson(raw)
-      if not verifyEnvelope(node, cfg):
-        echo "⚠️  bad MAC – dropping packet"
-        continue
-      let payload = node["payload"]
-      echo &"📥 {payload}"
-      # TODO: handle backend commands…
-
-  finally:
-    ws.close()
+# ----------------------------------------------------------------------------
+# Program entry
+# ----------------------------------------------------------------------------
 
 when isMainModule:
   try:
-    waitFor main()
+    var cfg = loadConfig()
+    if cfg.deviceId.len == 0:
+      cfg.deviceId = generateSecureId(); cfg.saveConfig()
+    elif cfg.deviceId.len > 64 or
+         (not cfg.deviceId.allCharsInSet(PrintableChars)):
+      fatal "Invalid deviceId in config → regenerate it."
+    waitFor runAgent(cfg)
   except Exception as e:
-    fatal(e.msg) # pretty red ❌ + reason
+    fatal(e.msg)

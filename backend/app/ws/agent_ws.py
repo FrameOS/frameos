@@ -227,7 +227,7 @@ async def ws_agent_endpoint(
     active_sockets[device_id] = ws
     await publish_message(redis, "update_agent", _agent_to_dict(agent))
 
-    await log(db, redis, frame.id, "stdout", "New agent connected")
+    await log(db, redis, frame.id, "stdout", "☎️ agent connected ☎️")
 
     # ----------------------------------------------------------------------
     # Main receive loop (enveloped messages)
@@ -271,4 +271,4 @@ async def ws_agent_endpoint(
 
         # Broadcast “disconnected” state
         await publish_message(redis, "update_agent", _agent_to_dict(agent))
-        await log(db, redis, frame.id, "stdout", "Agent disconnected")
+        await log(db, redis, frame.id, "stdout", "👋 agent disconnected 👋")

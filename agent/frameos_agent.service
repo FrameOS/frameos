@@ -1,12 +1,20 @@
+# /etc/systemd/system/frameos-agent.service
 [Unit]
-Description=FrameOS Agent Service
-After=network.target
+Description=FrameOS Agent (auto-reconnect, hardened)
+After=network-online.target
+Wants=network-online.target
 
 [Service]
+Type=simple
 User=%I
 WorkingDirectory=/srv/frameos/current
 ExecStart=/srv/frameos/current/frameos_agent
 Restart=always
+RestartSec=5
+LimitNOFILE=65536
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
 
 [Install]
 WantedBy=multi-user.target
