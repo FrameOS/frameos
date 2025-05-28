@@ -13,7 +13,7 @@ from arq import ArqRedis as Redis
 
 from app.database import get_db
 from app.redis import get_redis
-# from app.websockets import publish_message
+from app.websockets import publish_message
 from app.models.frame import Frame
 from app.models.log import new_log as log
 
@@ -22,7 +22,7 @@ router = APIRouter()
 MAX_AGENTS = 1000             # DoS safeguard
 
 # frame_id → list[websocket]
-active_sockets_by_frame: dict[str, list[WebSocket]] = {}
+active_sockets_by_frame: dict[int, list[WebSocket]] = {}
 active_sockets: set[WebSocket] = set()
 
 # ---------------------------------------------------------------------------
@@ -46,6 +46,12 @@ def canonical_dumps(obj) -> str:
     """Dump JSON with sorted keys & no spaces – deterministic (like Nim)."""
     return json.dumps(obj, separators=(",", ":"), sort_keys=True)
 
+def number_of_connections_for_frame(frame_id: int) -> int:
+    """
+    Return the number of active WebSocket connections for a given frame ID.
+    """
+    count = len(active_sockets_by_frame.get(frame_id, []))
+    return count
 
 
 
@@ -136,8 +142,8 @@ async def ws_agent_endpoint(
     # Fully authenticated – store socket and broadcast “connected”
     # ----------------------------------------------------------------------
     active_sockets.add(ws)
-    # TODO:
-    # await publish_message(redis, "update_agent", _agent_to_dict(agent))
+    active_sockets_by_frame.setdefault(frame.id, []).append(ws)
+    await publish_message(redis, "update_frame", {"active_connections": number_of_connections_for_frame(frame.id), "id": frame.id})
 
     await log(db, redis, frame.id, "agent", f"☎️ Frame \"{frame.name}\" connected ☎️")
 
@@ -176,6 +182,8 @@ async def ws_agent_endpoint(
         # Clean up
         if ws in active_sockets:
             active_sockets.remove(ws)
+        if ws in active_sockets_by_frame.get(frame.id, []):
+            active_sockets_by_frame[frame.id].remove(ws)
         if ws.application_state != WebSocketState.DISCONNECTED:
             try:
                 await ws.close()
@@ -183,5 +191,5 @@ async def ws_agent_endpoint(
                 pass
 
         # Broadcast “disconnected” state
-        # await publish_message(redis, "update_agent", _agent_to_dict(agent))
+        await publish_message(redis, "update_frame", {"active_connections": number_of_connections_for_frame(frame.id), "id": frame.id})
         await log(db, redis, frame.id, "agent", f"👋 Frame \"{frame.name}\" disconnected 👋")

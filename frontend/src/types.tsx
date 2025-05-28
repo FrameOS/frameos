@@ -61,6 +61,7 @@ export interface FrameType {
     agentConnection?: boolean
     agentSharedSecret?: string
   }
+  active_connections?: number
 }
 
 export interface GPIOButton {

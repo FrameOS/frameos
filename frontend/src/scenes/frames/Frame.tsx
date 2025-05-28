@@ -40,7 +40,10 @@ export function Frame({ frame }: FrameProps): JSX.Element {
         </H5>
       </div>
       <div className="px-4 pb-4">
-        <div className="flex sm:text-lg text-gray-400 items-center">{frameStatus(frame)}</div>
+        <div className="flex sm:text-lg text-gray-400 items-center gap-1">
+          {(frame?.active_connections ?? 0) > 0 ? <span>🟢</span> : null}
+          <span>{frameStatus(frame)}</span>
+        </div>
       </div>
     </Box>
   )

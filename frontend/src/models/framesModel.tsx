@@ -83,7 +83,10 @@ export const framesModel = kea<framesModelType>([
       {} as Record<number, FrameType>,
       {
         [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
-        [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
+        [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({
+          ...state,
+          [frame.id]: { ...(state[frame.id] ?? {}), ...frame },
+        }),
         [socketLogic.actionTypes.deleteFrame]: (state, { id }) => {
           const newState = { ...state }
           delete newState[id]
