@@ -27,6 +27,7 @@ export const framesModel = kea<framesModelType>([
     renderFrame: (id: number) => ({ id }),
     deleteFrame: (id: number) => ({ id }),
     deployAgent: (id: number) => ({ id }),
+    restartAgent: (id: number) => ({ id }),
   }),
   loaders(({ values }) => ({
     frames: [
@@ -125,6 +126,9 @@ export const framesModel = kea<framesModelType>([
     },
     deployAgent: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/deploy_agent`, { method: 'POST' })
+    },
+    restartAgent: async ({ id }) => {
+      await apiFetch(`/api/frames/${id}/restart_agent`, { method: 'POST' })
     },
     deleteFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
