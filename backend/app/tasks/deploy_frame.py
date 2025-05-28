@@ -140,9 +140,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await self.log("stdout", "- Copying build folders")
             build_dir, source_dir = create_build_folders(temp_dir, build_id)
             await self.log("stdout", "- Applying local modifications")
-            await make_local_modifications(source_dir)
+            await make_local_modifications(self, source_dir)
             await self.log("stdout", "- Creating build archive")
-            archive_path = await create_local_build_archive(build_dir, source_dir, cpu)
+            archive_path = await create_local_build_archive(self, build_dir, source_dir, cpu)
 
             if low_memory:
                 await self.log("stdout", "- Low memory device, stopping FrameOS for compilation")

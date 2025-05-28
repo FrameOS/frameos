@@ -16,9 +16,10 @@ export function Frame(props: FrameSceneProps) {
   const frameId = parseInt(props.id)
   const frameLogicProps = { frameId }
   const { frame, unsavedChanges, undeployedChanges, requiresRecompilation } = useValues(frameLogic(frameLogicProps))
-  const { saveFrame, renderFrame, rebootFrame, restartFrame, stopFrame, deployFrame, fullDeployFrame, redeployAgent } =
+  const { saveFrame, renderFrame, rebootFrame, restartFrame, stopFrame, deployFrame, fullDeployFrame, deployAgent } =
     useActions(frameLogic(frameLogicProps))
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
+  const canDeployAgent = !!(frame.network && frame.network.agentConnection && frame.network.agentSharedSecret)
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -47,7 +48,7 @@ export function Frame(props: FrameSceneProps) {
                           },
                         ]
                       : []),
-                    { label: 'Redeploy agent', onClick: () => redeployAgent() },
+                    ...(canDeployAgent ? [{ label: 'Deploy agent', onClick: () => deployAgent() }] : []),
                   ]}
                 />
                 <div className="flex pl-2 space-x-2">
