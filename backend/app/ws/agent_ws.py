@@ -221,13 +221,24 @@ async def ws_agent_endpoint(
     if is_new_agent:
         await publish_message(redis, "new_agent", _agent_to_dict(agent))
 
+    old_ws = active_sockets.pop(device_id, None)
+    if old_ws and old_ws.application_state != WebSocketState.DISCONNECTED:
+        try:
+            await old_ws.close(code=status.WS_1012_SERVICE_RESTART,
+                            reason="superseded by new connection")
+        except Exception:
+            pass
+        # tell the rest of the system that the agent went offline
+        await publish_message(redis, "update_agent",
+                            {**_agent_to_dict(agent), "connected": False})
+
     # ----------------------------------------------------------------------
     # Fully authenticated – store socket and broadcast “connected”
     # ----------------------------------------------------------------------
     active_sockets[device_id] = ws
     await publish_message(redis, "update_agent", _agent_to_dict(agent))
 
-    await log(db, redis, frame.id, "stdout", "☎️ agent connected ☎️")
+    await log(db, redis, frame.id, "stdout", f"☎️ Frame \"{frame.name}\" connected ☎️")
 
     # ----------------------------------------------------------------------
     # Main receive loop (enveloped messages)
@@ -262,7 +273,8 @@ async def ws_agent_endpoint(
         pass
     finally:
         # Clean up
-        active_sockets.pop(device_id, None)
+        if active_sockets.get(device_id) is ws:
+            active_sockets.pop(device_id, None)
         if ws.application_state != WebSocketState.DISCONNECTED:
             try:
                 await ws.close()
@@ -271,4 +283,4 @@ async def ws_agent_endpoint(
 
         # Broadcast “disconnected” state
         await publish_message(redis, "update_agent", _agent_to_dict(agent))
-        await log(db, redis, frame.id, "stdout", "👋 agent disconnected 👋")
+        await log(db, redis, frame.id, "stdout", f"👋 Frame \"{frame.name}\" disconnected 👋")
