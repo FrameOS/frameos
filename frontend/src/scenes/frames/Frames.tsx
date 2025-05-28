@@ -10,11 +10,8 @@ import { newFrameForm } from './newFrameForm'
 import { Masonry } from '../../components/Masonry'
 import { urls } from '../../urls'
 import { useEffect } from 'react'
-import { agentsModel } from '../../models/agentsModel'
-import { Agent } from './Agent'
 
 export function Frames() {
-  const { agentsList } = useValues(agentsModel)
   const { framesList } = useValues(framesModel)
   const { formVisible } = useValues(newFrameForm)
   const { showForm } = useActions(newFrameForm)
@@ -45,11 +42,6 @@ export function Frames() {
             {framesList.map((frame) => (
               <div key={`frame-${frame.id}`} className="mb-4">
                 <Frame frame={frame} />
-              </div>
-            ))}
-            {agentsList.map((agent) => (
-              <div key={`agent-${agent.id}`} className="mb-4">
-                <Agent agent={agent} />
               </div>
             ))}
           </Masonry>

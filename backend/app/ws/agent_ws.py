@@ -1,4 +1,3 @@
-# backend/app/ws/agent_ws.py
 from __future__ import annotations
 
 import asyncio
@@ -6,8 +5,6 @@ import secrets
 import json
 import hmac
 import hashlib
-from datetime import datetime, timezone
-from typing import Dict, Optional, TypedDict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status, Depends
 from starlette.websockets import WebSocketState
@@ -16,19 +13,17 @@ from arq import ArqRedis as Redis
 
 from app.database import get_db
 from app.redis import get_redis
-from app.websockets import publish_message
-from app.models.agent import Agent
+# from app.websockets import publish_message
 from app.models.frame import Frame
 from app.models.log import new_log as log
 
 router = APIRouter()
 
 MAX_AGENTS = 1000             # DoS safeguard
-# TRUSTED_ORIGINS = {"https://your.frontend.fqdn"}
 
-# device_id → websocket
-active_sockets: Dict[str, WebSocket] = {}
-
+# frame_id → list[websocket]
+active_sockets_by_frame: dict[str, list[WebSocket]] = {}
+active_sockets: set[WebSocket] = set()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -52,30 +47,6 @@ def canonical_dumps(obj) -> str:
     return json.dumps(obj, separators=(",", ":"), sort_keys=True)
 
 
-class AgentPayload(TypedDict):
-    id: str
-    org_id: str
-    batch_id: str
-    device_id: str
-    server_key_version: int
-    last_seen: Optional[str]
-    connected: bool
-    frame_id: Optional[int]
-
-
-def _agent_to_dict(agent: Agent) -> AgentPayload:
-    """Convert an Agent SQLAlchemy row into a broadcast-friendly dict."""
-    return AgentPayload(
-        id                = agent.id,
-        org_id            = agent.org_id,
-        batch_id          = agent.batch_id,
-        device_id         = agent.device_id,
-        server_key_version= agent.server_key_version,
-        last_seen         = agent.last_seen.replace(tzinfo=timezone.utc).isoformat()
-                            if agent.last_seen else None,
-        connected         = agent.device_id in active_sockets,
-        frame_id          = agent.frame_id,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -88,14 +59,6 @@ async def ws_agent_endpoint(
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    # ────────────────────────────────────────────────────────────────────────
-    # Optional origin check
-    # ────────────────────────────────────────────────────────────────────────
-    # origin = ws.headers.get("origin")
-    # if origin not in TRUSTED_ORIGINS:
-    #     await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad origin")
-    #     return
-
     # Basic DoS protection
     if len(active_sockets) >= MAX_AGENTS:
         await ws.close(code=status.WS_1013_TRY_AGAIN_LATER, reason="server busy")
@@ -116,9 +79,6 @@ async def ws_agent_endpoint(
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="expected hello")
         return
 
-    org_id        : str = hello_msg.get("orgId", "")
-    batch_id      : str = hello_msg.get("batchId", "")
-    device_id     : str = hello_msg.get("deviceId", "")
     server_api_key: str = str(hello_msg.get("serverApiKey", ""))
 
     # ----------------------------------------------------------------------
@@ -141,47 +101,6 @@ async def ws_agent_endpoint(
         return
 
     # ----------------------------------------------------------------------
-    # Validate identifiers
-    # ----------------------------------------------------------------------
-    for ident, name in [(org_id, "org"), (batch_id, "batch"), (device_id, "device")]:
-        if len(ident) > 64 or not ident.isprintable():
-            await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason=f"invalid {name} id")
-            return
-
-    # ----------------------------------------------------------------------
-    # Look up / create Agent – ONLY if its frame is known
-    # ----------------------------------------------------------------------
-    is_new_agent = False
-
-    agent: Agent | None = db.query(Agent).filter_by(
-        device_id=device_id,
-        org_id=org_id,
-        batch_id=batch_id,
-    ).first()
-
-    # === New agent ========================================================
-    if agent is None:
-        is_new_agent = True
-        agent = Agent(
-            device_id=device_id,
-            org_id=org_id,
-            batch_id=batch_id,
-            server_key=server_api_key,
-            frame_id=frame.id
-        )
-
-        db.add(agent)  # commit after successful handshake
-
-        print(f"New agent {device_id} created (awaiting handshake)")
-
-    # === Existing agent ===================================================
-    else:
-        # Existing agent must belong to the same frame and use the same key
-        if agent.frame_id != frame.id or server_api_key != agent.server_key:
-            await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="frame/key mismatch")
-            return
-
-    # ----------------------------------------------------------------------
     # STEP 1 – server → challenge
     # ----------------------------------------------------------------------
     challenge = secrets.token_hex(32)
@@ -193,12 +112,10 @@ async def ws_agent_endpoint(
     try:
         hs_msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
     except (asyncio.TimeoutError, WebSocketDisconnect):
-        db.rollback()
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="handshake timeout")
         return
 
     if hs_msg.get("action") != "handshake":
-        db.rollback()
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad action")
         return
 
@@ -206,8 +123,7 @@ async def ws_agent_endpoint(
 
     expected_mac = sign(challenge, server_api_key, shared_secret)
     if not hmac.compare_digest(expected_mac, mac):
-        print(f"Invalid MAC from {device_id}: expected {expected_mac}, got {mac}")
-        db.rollback()
+        print(f"Invalid MAC for frame {frame.id} \"{frame.name}\": expected {expected_mac}, got {mac}")
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")
         return
 
@@ -216,29 +132,26 @@ async def ws_agent_endpoint(
     # ----------------------------------------------------------------------
     await ws.send_json({"action": "handshake/ok"})
 
-    # Commit any pending DB changes (e.g. new agent) after successful auth
-    db.commit()
-    if is_new_agent:
-        await publish_message(redis, "new_agent", _agent_to_dict(agent))
+    # await publish_message(redis, "new_agent", _agent_to_dict(agent))
 
-    old_ws = active_sockets.pop(device_id, None)
-    if old_ws and old_ws.application_state != WebSocketState.DISCONNECTED:
-        try:
-            await old_ws.close(code=status.WS_1012_SERVICE_RESTART,
-                            reason="superseded by new connection")
-        except Exception:
-            pass
-        # tell the rest of the system that the agent went offline
-        await publish_message(redis, "update_agent",
-                            {**_agent_to_dict(agent), "connected": False})
+    # old_ws = active_sockets.pop(device_id, None)
+    # if old_ws and old_ws.application_state != WebSocketState.DISCONNECTED:
+    #     try:
+    #         await old_ws.close(code=status.WS_1012_SERVICE_RESTART,
+    #                         reason="superseded by new connection")
+    #     except Exception:
+    #         pass
+    #     # tell the rest of the system that the agent went offline
+    #     await publish_message(redis, "update_agent",
+    #                         {**_agent_to_dict(agent), "connected": False})
 
     # ----------------------------------------------------------------------
     # Fully authenticated – store socket and broadcast “connected”
     # ----------------------------------------------------------------------
-    active_sockets[device_id] = ws
-    await publish_message(redis, "update_agent", _agent_to_dict(agent))
+    active_sockets.add(ws)
+    # await publish_message(redis, "update_agent", _agent_to_dict(agent))
 
-    await log(db, redis, frame.id, "stdout", f"☎️ Frame \"{frame.name}\" connected ☎️")
+    await log(db, redis, frame.id, "agent", f"☎️ Frame \"{frame.name}\" connected ☎️")
 
     # ----------------------------------------------------------------------
     # Main receive loop (enveloped messages)
@@ -264,17 +177,17 @@ async def ws_agent_endpoint(
 
             # TODO: dispatch payload …
 
-            # Update last-seen timestamp
-            agent.last_seen = datetime.now(timezone.utc)
-            db.add(agent)
-            db.commit()
+            # # Update last-seen timestamp
+            # frame.last_seen = datetime.now(timezone.utc)
+            # db.add(frame)
+            # db.commit()
 
     except WebSocketDisconnect:
         pass
     finally:
         # Clean up
-        if active_sockets.get(device_id) is ws:
-            active_sockets.pop(device_id, None)
+        if ws in active_sockets:
+            active_sockets.remove(ws)
         if ws.application_state != WebSocketState.DISCONNECTED:
             try:
                 await ws.close()
@@ -282,5 +195,5 @@ async def ws_agent_endpoint(
                 pass
 
         # Broadcast “disconnected” state
-        await publish_message(redis, "update_agent", _agent_to_dict(agent))
-        await log(db, redis, frame.id, "stdout", f"👋 Frame \"{frame.name}\" disconnected 👋")
+        # await publish_message(redis, "update_agent", _agent_to_dict(agent))
+        await log(db, redis, frame.id, "agent", f"👋 Frame \"{frame.name}\" disconnected 👋")

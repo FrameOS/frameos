@@ -1,4 +1,3 @@
-from .agent import *        #  ← add this import
 from .apps import *  # noqa: F403
 from .assets import *  # noqa: F403
 from .frame import *  # noqa: F403
