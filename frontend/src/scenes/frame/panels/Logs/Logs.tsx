@@ -52,6 +52,12 @@ export function Logs() {
                 </>
               )
             } catch (e) {}
+          } else if (log.type === 'agent') {
+            logLine = (
+              <>
+                <span className="text-blue-600">{'[AGENT]'}</span> {logLine}
+              </>
+            )
           }
 
           return (
@@ -60,6 +66,7 @@ export function Logs() {
               className={clsx('flex sm:flex-row flex-col', {
                 'text-yellow-300': log.type === 'stdinfo',
                 'text-red-300': log.type === 'stderr',
+                'text-blue-300': log.type === 'agent',
               })}
             >
               <div className="flex-0 mr-2 text-yellow-900 whitespace-nowrap">{formatTimestamp(log.timestamp)}</div>
