@@ -41,29 +41,6 @@ class ConnectionManager:
 
 manager = ConnectionManager() # Local clients
 
-class AgentConnectionManager:
-    def __init__(self):
-        self._sockets: dict[str, WebSocket] = {}   # device_id → WebSocket
-        self._lock = asyncio.Lock()
-
-    async def connect(self, device_id: str, websocket: WebSocket):
-        async with self._lock:
-            self._sockets[device_id] = websocket
-        print(f"▶️  agent {device_id} connected from {websocket.client}")
-
-    async def disconnect(self, device_id: str):
-        async with self._lock:
-            self._sockets.pop(device_id, None)
-        print(f"❌ agent {device_id} disconnected")
-
-    async def send(self, device_id: str, msg: str):
-        async with self._lock:
-            ws = self._sockets.get(device_id)
-        if ws:
-            await ws.send_text(msg)
-
-agent_manager = AgentConnectionManager()
-
 async def redis_listener():
     redis_sub = create_redis(config.REDIS_URL, decode_responses=True)
     try:

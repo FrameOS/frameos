@@ -67,7 +67,7 @@ async def ws_agent_endpoint(
     await ws.accept()  # TCP ↔ WS handshake OK – start protocol below
 
     # ----------------------------------------------------------------------
-    # STEP 0 – agent → {action:"hello", orgId, batchId, deviceId, serverApiKey}
+    # STEP 0 – agent → {action:"hello", serverApiKey}
     # ----------------------------------------------------------------------
     try:
         hello_msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
@@ -132,23 +132,11 @@ async def ws_agent_endpoint(
     # ----------------------------------------------------------------------
     await ws.send_json({"action": "handshake/ok"})
 
-    # await publish_message(redis, "new_agent", _agent_to_dict(agent))
-
-    # old_ws = active_sockets.pop(device_id, None)
-    # if old_ws and old_ws.application_state != WebSocketState.DISCONNECTED:
-    #     try:
-    #         await old_ws.close(code=status.WS_1012_SERVICE_RESTART,
-    #                         reason="superseded by new connection")
-    #     except Exception:
-    #         pass
-    #     # tell the rest of the system that the agent went offline
-    #     await publish_message(redis, "update_agent",
-    #                         {**_agent_to_dict(agent), "connected": False})
-
     # ----------------------------------------------------------------------
     # Fully authenticated – store socket and broadcast “connected”
     # ----------------------------------------------------------------------
     active_sockets.add(ws)
+    # TODO:
     # await publish_message(redis, "update_agent", _agent_to_dict(agent))
 
     await log(db, redis, frame.id, "agent", f"☎️ Frame \"{frame.name}\" connected ☎️")
