@@ -47,16 +47,6 @@ type
     network*: NetworkConfig
 
 # ----------------------------------------------------------------------------
-# Helper – secure random hex id
-# ----------------------------------------------------------------------------
-
-proc generateSecureId(): string =
-  ## Generate a 128-bit random ID encoded as lowercase hex (32 chars).
-  var buf: array[16, byte] # 16 bytes = 128 bits of storage
-  discard randomBytes(buf) # fill it with CSPRNG data
-  result = toHex(buf) # nimcrypto helper
-
-# ----------------------------------------------------------------------------
 # Config IO (fails hard if unreadable)
 # ----------------------------------------------------------------------------
 
@@ -65,11 +55,6 @@ proc loadConfig(path = DefaultConfigPath): FrameConfig =
     raise newException(IOError, "⚠️  config file not found: " & path)
   let raw = readFile(path)
   result = raw.fromJson(FrameConfig)
-
-proc saveConfig(cfg: FrameConfig; path = DefaultConfigPath) =
-  createDir parentDir(path)
-  writeFile(path, (%cfg).pretty(2) & '\n')
-  setFilePermissions(path, {fpUserRead, fpUserWrite}) # 0600
 
 # ----------------------------------------------------------------------------
 # HMAC helpers

@@ -100,3 +100,5 @@ def register_ws_routes(app):
                 await manager.send_personal_message(json.dumps({'event': "pong", 'payload': data}), websocket)
         except WebSocketDisconnect:
             await manager.disconnect(websocket)
+
+    return manager
