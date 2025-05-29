@@ -167,6 +167,14 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
   ##   2) agent  → {action:"handshake", mac:<hmac-sha256(serverApiKey || c, sharedSecret)>}
   ##   3) server → {action:"handshake/ok"}
 
+  if len(cfg.serverApiKey) == 0:
+    echo "⚠️  serverApiKey is empty, cannot connect"
+    raise newException(Exception, "⚠️  serverApiKey is empty, cannot connect")
+
+  if len(cfg.network.agentSharedSecret) == 0:
+    echo "⚠️  agentSharedSecret is empty, cannot connect"
+    raise newException(Exception, "⚠️  network.agentSharedSecret is empty, cannot connect")
+
   # --- Step 0: say hello ----------------------------------------------------
   var hello = %*{
     "action": "hello",
@@ -192,6 +200,7 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
     "action": "handshake",
     "mac": mac
   }
+  echo &"🔐 reply: {reply}"
   await ws.send($reply)
 
   # --- Step 3: await OK ---------------------------------
@@ -202,6 +211,7 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
   of "handshake/ok":
     echo "✅ handshake done"
   else:
+    echo &"⚠️ handshake failed, unexpected action: {act} in {ackMsg}"
     raise newException(Exception, "Handshake failed: " & ackMsg)
 
 # ----------------------------------------------------------------------------

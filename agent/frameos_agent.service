@@ -7,8 +7,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=%I
-# Run in the frameos/current folder to have access to "./frame.json"
-WorkingDirectory=/srv/frameos/current
+WorkingDirectory=/srv/frameos/agent/current
 ExecStart=/srv/frameos/agent/current/frameos_agent
 Restart=always
 RestartSec=5
