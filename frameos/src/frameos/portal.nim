@@ -39,7 +39,7 @@ proc hotspotRunning(frameOS: FrameOS): bool =
 proc stopAp*(frameOS: FrameOS) =
   ## Tear down the hotspot
   if not hotspotRunning(frameOS):
-    pLog("portal:stopAp:notRunning")
+    pLog("portal:stopAp:notStarted")
     return
   pLog("portal:stopAp")
   frameOS.network.hotspotStatus = HotspotStatus.stopping

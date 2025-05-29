@@ -62,6 +62,10 @@ class Frame(Base):
     image_url = mapped_column(String(256), nullable=True)
     background_color = mapped_column(String(64), nullable=True) # still used as fallback in frontend
 
+    def get_active_connections(self) -> int:
+        from app.ws.agent_ws import number_of_connections_for_frame
+        return number_of_connections_for_frame(self.id)
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -101,6 +105,7 @@ class Frame(Base):
             'network': self.network,
             'last_successful_deploy': self.last_successful_deploy,
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
+            'active_connections': self.get_active_connections(),
         }
 
 async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:
@@ -158,6 +163,8 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
             "wifiHotspotSsid": "FrameOS-Setup",
             "wifiHotspotPassword": "frame1234",
             "wifiHotspotTimeoutSeconds": 600,
+            "agentConnection": False,
+            "agentSharedSecret": secure_token(32)
         },
         control_code={"enabled": "true", "position": "top-right"},
         schedule={"events": []},
@@ -253,6 +260,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "wifiHotspotSsid": network.get('wifiHotspotSsid', "FrameOS-Setup"),
             "wifiHotspotPassword": network.get('wifiHotspotPassword', "frame1234"),
             "wifiHotspotTimeoutSeconds": int(network.get('wifiHotspotTimeoutSeconds', 600)),
+            "agentConnection": bool(network.get('agentConnection', False)),
+            "agentSharedSecret": network.get('agentSharedSecret', secure_token(32)),
         }
     }
 

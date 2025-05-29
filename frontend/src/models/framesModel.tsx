@@ -26,6 +26,8 @@ export const framesModel = kea<framesModelType>([
     rebootFrame: (id: number) => ({ id }),
     renderFrame: (id: number) => ({ id }),
     deleteFrame: (id: number) => ({ id }),
+    deployAgent: (id: number) => ({ id }),
+    restartAgent: (id: number) => ({ id }),
   }),
   loaders(({ values }) => ({
     frames: [
@@ -81,7 +83,10 @@ export const framesModel = kea<framesModelType>([
       {} as Record<number, FrameType>,
       {
         [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
-        [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
+        [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({
+          ...state,
+          [frame.id]: { ...(state[frame.id] ?? {}), ...frame },
+        }),
         [socketLogic.actionTypes.deleteFrame]: (state, { id }) => {
           const newState = { ...state }
           delete newState[id]
@@ -121,6 +126,12 @@ export const framesModel = kea<framesModelType>([
     },
     rebootFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
+    },
+    deployAgent: async ({ id }) => {
+      await apiFetch(`/api/frames/${id}/deploy_agent`, { method: 'POST' })
+    },
+    restartAgent: async ({ id }) => {
+      await apiFetch(`/api/frames/${id}/restart_agent`, { method: 'POST' })
     },
     deleteFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })

@@ -12,7 +12,7 @@ from app.api.auth import get_current_user
 from app.api import api_no_auth, api_with_auth, api_public
 from fastapi.middleware.gzip import GZipMiddleware
 from app.middleware import GzipRequestMiddleware
-
+from app.ws.agent_ws import router as agent_ws_router
 from app.websockets import register_ws_routes, redis_listener
 from app.config import config
 from app.utils.sentry import initialize_sentry
@@ -32,6 +32,7 @@ app.add_middleware(GZipMiddleware)
 app.add_middleware(GzipRequestMiddleware)
 
 register_ws_routes(app)
+app.include_router(agent_ws_router)
 
 if config.HASSIO_RUN_MODE:
     if config.HASSIO_RUN_MODE == "public":

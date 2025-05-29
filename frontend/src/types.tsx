@@ -58,7 +58,10 @@ export interface FrameType {
     wifiHotspotSsid?: string
     wifiHotspotPassword?: string
     wifiHotspotTimeoutSeconds?: number
+    agentConnection?: boolean
+    agentSharedSecret?: string
   }
+  active_connections?: number
 }
 
 export interface GPIOButton {

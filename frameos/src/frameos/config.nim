@@ -67,6 +67,8 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
       wifiHotspotSsid: data{"wifiHotspotSsid"}.getStr("FrameOS-Setup"),
       wifiHotspotPassword: data{"wifiHotspotPassword"}.getStr("frame1234"),
       wifiHostpotTimeoutSeconds: data{"wifiHotspotTimeoutSeconds"}.getFloat(600),
+      agentConnection: data{"agentConnection"}.getBool(),
+      agentSharedSecret: data{"agentSharedSecret"}.getStr(""),
     )
 
 proc loadConfig*(filename: string = "frame.json"): FrameConfig =

@@ -14,6 +14,8 @@ from app.tasks.fast_deploy_frame import fast_deploy_frame_task
 from app.tasks.reset_frame import reset_frame_task
 from app.tasks.restart_frame import restart_frame_task, reboot_frame_task
 from app.tasks.stop_frame import stop_frame_task
+from app.tasks.deploy_agent import deploy_agent_task
+from app.tasks.restart_agent import restart_agent_task
 from app.config import config
 from app.redis import create_redis_connection
 from app.database import SessionLocal
@@ -51,6 +53,8 @@ class WorkerSettings:
         func(restart_frame_task,     name="restart_frame"),
         func(reboot_frame_task,      name="reboot_frame"),
         func(stop_frame_task,        name="stop_frame"),
+        func(deploy_agent_task,      name="deploy_agent"),
+        func(restart_agent_task,     name="restart_agent"),
     ]
     on_startup = startup
     on_shutdown = shutdown

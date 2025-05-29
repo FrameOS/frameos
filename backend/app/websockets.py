@@ -101,5 +101,4 @@ def register_ws_routes(app):
         except WebSocketDisconnect:
             await manager.disconnect(websocket)
 
-
     return manager

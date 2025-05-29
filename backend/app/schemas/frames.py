@@ -42,6 +42,7 @@ class FrameBase(BaseModel):
     network: Optional[Dict[str, Any]]
     last_successful_deploy: Optional[Dict[str, Any]]
     last_successful_deploy_at: Optional[datetime]
+    active_connections: Optional[int] = None
 
 class FrameResponse(BaseModel):
     frame: FrameBase

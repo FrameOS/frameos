@@ -349,6 +349,36 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                     )}
                   </>
                 )}
+                <Field name="agentConnection" label="Enable FrameOS Agent reverse connection (EXPERIMENTAL)">
+                  {({ value, onChange }) => <Switch name="agentConnection" value={value} onChange={onChange} />}
+                </Field>
+                <Field
+                  name="agentSharedSecret"
+                  label={<div>Agent shared secret</div>}
+                  labelRight={
+                    <Button
+                      color="secondary"
+                      size="small"
+                      onClick={() => {
+                        setFrameFormValues({
+                          network: { ...(frameForm.network ?? {}), agentSharedSecret: secureToken(20) },
+                        })
+                        touchFrameFormField('network.agentSharedSecret')
+                      }}
+                    >
+                      Regenerate
+                    </Button>
+                  }
+                  tooltip="This key is used when communicating with the frame over secure websockets."
+                >
+                  <TextInput
+                    name="agentSharedSecret"
+                    onClick={() => touchFrameFormField('network.agentSharedSecret')}
+                    type={frameFormTouches['network.agentSharedSecret'] ? 'text' : 'password'}
+                    placeholder=""
+                    required
+                  />
+                </Field>
               </Group>
             </div>
             <H6>Defaults</H6>
