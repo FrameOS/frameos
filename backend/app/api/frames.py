@@ -30,22 +30,38 @@ from app.config import config
 from app.utils.network import is_safe_host
 from app.redis import get_redis
 from app.websockets import publish_message
+from app.ws.agent_ws import number_of_connections_for_frame
 from . import api_with_auth, api_no_auth
 
 
+
 @api_with_auth.get("/frames", response_model=FramesListResponse)
-async def api_frames_list(db: Session = Depends(get_db)):
+async def api_frames_list(
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
     frames = db.query(Frame).all()
-    frames_list = [frame.to_dict() for frame in frames]
+    frames_list = []
+    for frame in frames:
+        data = frame.to_dict()
+        data["active_connections"] = await number_of_connections_for_frame(redis, frame.id)
+        frames_list.append(data)
     return {"frames": frames_list}
 
-
 @api_with_auth.get("/frames/{id:int}", response_model=FrameResponse)
-async def api_frame_get(id: int, db: Session = Depends(get_db)):
+async def api_frame_get(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
     frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-    return {"frame": frame.to_dict()}
+
+    data = frame.to_dict()
+    active = await redis.get(f"frame:{frame.id}:active_connections")
+    data["active_connections"] = int(active or 0)
+    return {"frame": data}
 
 
 @api_with_auth.get("/frames/{id:int}/logs", response_model=FrameLogsResponse)
@@ -305,7 +321,7 @@ async def api_frame_get_assets(id: int, db: Session = Depends(get_db), redis: Re
     await exec_command(db, redis, frame, ssh, command, output, log_output=False)
     await remove_ssh_connection(db, redis, ssh, frame)
 
-    assets = []
+    assets: list[dict] = []
     for line in output:
         if line.strip():
             parts = line.split(' ', 2)
@@ -452,7 +468,7 @@ async def api_frame_assets_upload(
     if "*" in path:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid character * in path")
     assets_path = frame.assets_path or "/srv/assets"
-    combined_path = os.path.normpath(os.path.join(assets_path, path, file.filename))
+    combined_path = os.path.normpath(os.path.join(assets_path, path, file.filename or "uploaded_file"))
     if not combined_path.startswith(os.path.normpath(assets_path) + '/'):
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid asset path")
 

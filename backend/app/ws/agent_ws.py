@@ -19,7 +19,8 @@ from app.models.log import new_log as log
 
 router = APIRouter()
 
-MAX_AGENTS = 1000             # DoS safeguard
+MAX_AGENTS = 1000       # DoS safeguard
+CONN_TTL   = 60         # seconds - how long one WS key lives in Redis
 
 # frame_id → list[websocket]
 active_sockets_by_frame: dict[int, list[WebSocket]] = {}
@@ -36,23 +37,26 @@ def hmac_sha256(key: str, data: str) -> str:
 
 def sign(data: str, api_key: str, shared_secret: str) -> str:
     """
-    Compute HMAC-SHA256(shared_secret, api_key || data) – the new unified signature
+    Compute HMAC-SHA256(shared_secret, api_key || data) - the new unified signature
     used by the agent and expected by the backend.
     """
     return hmac_sha256(shared_secret, f"{api_key}{data}")
 
 
 def canonical_dumps(obj) -> str:
-    """Dump JSON with sorted keys & no spaces – deterministic (like Nim)."""
+    """Dump JSON with sorted keys & no spaces - deterministic (like Nim)."""
     return json.dumps(obj, separators=(",", ":"), sort_keys=True)
 
-def number_of_connections_for_frame(frame_id: int) -> int:
-    """
-    Return the number of active WebSocket connections for a given frame ID.
-    """
-    count = len(active_sockets_by_frame.get(frame_id, []))
-    return count
 
+async def number_of_connections_for_frame(redis: Redis, frame_id: int) -> int:
+    """
+    Count keys “frame:{id}:conn:*” - each represents one active socket.
+    The keys self-expire, so the count is always fresh even after a crash.
+    """
+    cnt = 0
+    async for _ in redis.scan_iter(match=f"frame:{frame_id}:conn:*"):
+        cnt += 1
+    return cnt
 
 
 # ---------------------------------------------------------------------------
@@ -65,15 +69,15 @@ async def ws_agent_endpoint(
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    # Basic DoS protection
+    # Basic DoS protection (per-worker)
     if len(active_sockets) >= MAX_AGENTS:
         await ws.close(code=status.WS_1013_TRY_AGAIN_LATER, reason="server busy")
         return
 
-    await ws.accept()  # TCP ↔ WS handshake OK – start protocol below
+    await ws.accept()  # TCP ↔ WS handshake OK - start protocol below
 
     # ----------------------------------------------------------------------
-    # STEP 0 – agent → {action:"hello", serverApiKey}
+    # STEP 0 - agent → {action:"hello", serverApiKey}
     # ----------------------------------------------------------------------
     try:
         hello_msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
@@ -89,7 +93,6 @@ async def ws_agent_endpoint(
 
     # ----------------------------------------------------------------------
     # Look up the **Frame** that owns this server-side key.
-    # If no such frame exists we abort – we never register “orphan” agents.
     # ----------------------------------------------------------------------
     if not server_api_key:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="missing server key")
@@ -107,13 +110,13 @@ async def ws_agent_endpoint(
         return
 
     # ----------------------------------------------------------------------
-    # STEP 1 – server → challenge
+    # STEP 1 - server → challenge
     # ----------------------------------------------------------------------
     challenge = secrets.token_hex(32)
     await ws.send_json({"action": "challenge", "c": challenge})
 
     # ----------------------------------------------------------------------
-    # STEP 2 – agent → {action:"handshake", mac:...}
+    # STEP 2 - agent → {action:"handshake", mac:...}
     # ----------------------------------------------------------------------
     try:
         hs_msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
@@ -134,16 +137,26 @@ async def ws_agent_endpoint(
         return
 
     # ----------------------------------------------------------------------
-    # STEP 3 – server → handshake/ok
+    # STEP 3 - server → handshake/ok
     # ----------------------------------------------------------------------
     await ws.send_json({"action": "handshake/ok"})
 
     # ----------------------------------------------------------------------
-    # Fully authenticated – store socket and broadcast “connected”
+    # Fully authenticated - register this socket
     # ----------------------------------------------------------------------
     active_sockets.add(ws)
     active_sockets_by_frame.setdefault(frame.id, []).append(ws)
-    await publish_message(redis, "update_frame", {"active_connections": number_of_connections_for_frame(frame.id), "id": frame.id})
+
+    # Each connection gets its own Redis key that self-expires.
+    conn_id  = secrets.token_hex(16)
+    conn_key = f"frame:{frame.id}:conn:{conn_id}"
+    await redis.set(conn_key, "1", ex=CONN_TTL)
+
+    await publish_message(
+        redis,
+        "update_frame",
+        {"active_connections": await number_of_connections_for_frame(redis, frame.id), "id": frame.id},
+    )
 
     await log(db, redis, frame.id, "agent", f"☎️ Frame \"{frame.name}\" connected ☎️")
 
@@ -153,6 +166,9 @@ async def ws_agent_endpoint(
     try:
         while True:
             msg = await asyncio.wait_for(ws.receive_json(), timeout=60)
+
+            # keep the connection key alive
+            await redis.expire(conn_key, CONN_TTL)
 
             # Basic schema check
             if not {"nonce", "payload", "mac"} <= msg.keys():
@@ -171,11 +187,6 @@ async def ws_agent_endpoint(
 
             # TODO: dispatch payload …
 
-            # # Update last-seen timestamp
-            # frame.last_seen = datetime.now(timezone.utc)
-            # db.add(frame)
-            # db.commit()
-
     except WebSocketDisconnect:
         pass
     finally:
@@ -184,6 +195,13 @@ async def ws_agent_endpoint(
             active_sockets.remove(ws)
         if ws in active_sockets_by_frame.get(frame.id, []):
             active_sockets_by_frame[frame.id].remove(ws)
+
+        # Remove this connection’s Redis key (if we still can)
+        try:
+            await redis.delete(conn_key)
+        except Exception:
+            pass
+
         if ws.application_state != WebSocketState.DISCONNECTED:
             try:
                 await ws.close()
@@ -191,5 +209,9 @@ async def ws_agent_endpoint(
                 pass
 
         # Broadcast “disconnected” state
-        await publish_message(redis, "update_frame", {"active_connections": number_of_connections_for_frame(frame.id), "id": frame.id})
+        await publish_message(
+            redis,
+            "update_frame",
+            {"active_connections": await number_of_connections_for_frame(redis, frame.id), "id": frame.id},
+        )
         await log(db, redis, frame.id, "agent", f"👋 Frame \"{frame.name}\" disconnected 👋")
