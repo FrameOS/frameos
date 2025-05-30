@@ -600,6 +600,7 @@ async def api_frame_clear_build_cache(id: int, redis: Redis = Depends(get_redis)
 
     if await _use_agent(frame, redis):
         try:
+            await log(db, redis, id, "stdout", "> rm -rf /srv/frameos/build/cache && echo DONE")
             await exec_shell_on_frame(
                 frame.id,
                 "rm -rf /srv/frameos/build/cache && echo DONE"
