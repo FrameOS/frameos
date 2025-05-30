@@ -1,5 +1,5 @@
 import std/[algorithm, segfaults, strformat, strutils, asyncdispatch, terminal,
-            times, os, sysrand]
+            times, os, sysrand, httpclient, osproc, streams]
 import json, jsony
 import ws
 import nimcrypto
@@ -122,7 +122,21 @@ proc verifyEnvelope(node: JsonNode; cfg: FrameConfig): bool =
   node.hasKey("serverApiKey") and
   node["serverApiKey"].getStr == cfg.serverApiKey and
   node["mac"].getStr.toLowerAscii() ==
-    sign($node["nonce"].getInt & $node["payload"], cfg)
+    sign($node["nonce"].getInt & canonical(node["payload"]), cfg)
+
+proc sendResp(ws: WebSocket; cfg: FrameConfig;
+              id: string; ok: bool; res: JsonNode) {.async.} =
+  let env = makeSecureEnvelope(%*{
+    "type": "cmd/resp", "id": id, "ok": ok, "result": res
+  }, cfg)
+  await ws.send($env)
+
+proc streamChunk(ws: WebSocket; cfg: FrameConfig;
+                 id: string; which: string; data: string) {.async.} =
+  let env = makeSecureEnvelope(%*{
+    "type": "cmd/stream", "id": id, "stream": which, "data": data
+  }, cfg)
+  await ws.send($env)
 
 # ----------------------------------------------------------------------------
 # utils – tiny print-and-quit helper
@@ -159,6 +173,70 @@ proc recvText(ws: WebSocket): Future[string] {.async.} =
 # ----------------------------------------------------------------------------
 # Challenge-response handshake (server-initiated)
 # ----------------------------------------------------------------------------
+proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
+  let id = cmd{"id"}.getStr()
+  let name = cmd{"name"}.getStr()
+  let args = cmd{"args"}
+
+  echo &"📥 cmd: {name}({args})"
+
+  try:
+    case name
+    of "version":
+      await sendResp(ws, cfg, id, true, %*{"version": "0.0.0"})
+
+    of "http":
+      let methodArg = args{"method"}.getStr("GET")
+      let path = args{"path"}.getStr("/")
+      let body = args{"body"}.getStr("")
+
+      var client = newAsyncHttpClient()
+      let url = &"http://127.0.0.1:{cfg.framePort}{path}"
+      let resp = await (if methodArg == "POST":
+        client.post(url, body)
+      else:
+        client.get(url))
+
+      let bodyText = await resp.body # <- await here!
+
+      let result = %*{
+        "status": resp.code.int,
+        "body": bodyText # now a plain string
+      }
+      await sendResp(ws, cfg, id, true, result)
+
+    of "shell":
+      if not args.hasKey("cmd"):
+        await sendResp(ws, cfg, id, false,
+                      %*{"error": "`cmd` missing"})
+        return
+
+      let cmdStr = args["cmd"].getStr
+
+      var p = startProcess(
+        "/bin/sh",             # command
+        args = ["-c", cmdStr], # argv
+        options = {poUsePath, poStdErrToStdOut}
+      )
+
+      let bufSize = 4096
+      var buf = newString(bufSize)
+
+      while true:
+        let n = p.outputStream.readData(addr buf[0], buf.len)
+        if n == 0:
+          if p.running: await sleepAsync(100) # no data yet – yield
+          else: break # process finished – exit loop
+        else:
+          await streamChunk(ws, cfg, id, "stdout", buf[0 ..< n])
+
+      let rc = p.waitForExit()
+      await sendResp(ws, cfg, id, rc == 0, %*{"exit": rc})
+    else:
+      await sendResp(ws, cfg, id, false,
+                     %*{"error": "unknown command: " & name})
+  except CatchableError as e:
+    await sendResp(ws, cfg, id, false, %*{"error": e.msg})
 
 proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
   ## Implements the protocol:
@@ -254,8 +332,11 @@ proc runAgent(cfg: FrameConfig) {.async.} =
           if not verifyEnvelope(node, cfg):
             echo "⚠️  bad MAC – dropping packet"; continue
           let payload = node["payload"]
-          echo &"📥 {payload}"
-          # TODO: handle backend commands …
+          case payload{"type"}.getStr("")
+          of "cmd":
+            await handleCmd(payload, ws, cfg)
+          else:
+            echo &"📥 {payload}"
 
       finally:
         if not ws.isNil:

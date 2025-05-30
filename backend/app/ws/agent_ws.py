@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import contextlib
 import asyncio
 import secrets
 import json
 import hmac
 import hashlib
+import time
+import uuid
+from collections import defaultdict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status, Depends
 from starlette.websockets import WebSocketState
@@ -26,9 +30,65 @@ CONN_TTL   = 60         # seconds - how long one WS key lives in Redis
 active_sockets_by_frame: dict[int, list[WebSocket]] = {}
 active_sockets: set[WebSocket] = set()
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+_frame_queues: dict[int, asyncio.Queue] = defaultdict(asyncio.Queue)
+_pending: dict[str, asyncio.Future] = {}   # cmd-id → Future
+
+def queue_command(frame_id: int, payload: dict) -> asyncio.Future:
+    """
+    Add a command payload to the per-frame queue, return a Future that
+    resolves when the agent answers.
+    """
+    cmd_id = str(uuid.uuid4())
+    payload["id"] = cmd_id
+    fut = _pending[cmd_id] = asyncio.get_event_loop().create_future()
+    _frame_queues[frame_id].put_nowait(payload)
+    return fut                       # caller will await it
+
+async def next_command(frame_id: int) -> dict | None:
+    """Wait until there is a command for this frame (or None if queue empty)."""
+    try:
+        return await _frame_queues[frame_id].get()
+    except asyncio.CancelledError:
+        return None
+
+def resolve_command(cmd_id: str, ok: bool, result):
+    fut = _pending.pop(cmd_id, None)
+    if fut and not fut.done():
+        if ok:
+            fut.set_result(result)
+        else:
+            fut.set_exception(RuntimeError(result))
+
+async def pump_commands(ws: WebSocket,
+                        frame_id: int,
+                        api_key: str,
+                        shared_secret: str):
+    try:
+        while True:
+            cmd = await next_command(frame_id)
+            if cmd is None:
+                return
+            env = make_envelope(cmd, api_key, shared_secret)
+
+            try:
+                await ws.send_json(env)
+            except RuntimeError:
+                # re-queue so another connection can pick it up
+                _frame_queues[frame_id].put_nowait(cmd)
+                break                            # exit the loop
+    finally:
+        # make sure no zombie task hangs around
+        await ws.close(code=1000)
+
+async def http_get_on_frame(frame_id: int, path: str,
+                            method="GET", body=None, timeout=30):
+    payload = {
+        "type": "cmd",
+        "name": "http",
+        "args": {"method": method, "path": path, "body": body},
+    }
+    fut = queue_command(frame_id, payload)
+    return await asyncio.wait_for(fut, timeout=timeout)
 
 def hmac_sha256(key: str, data: str) -> str:
     """Return lowercase HMAC-SHA256(key, data)."""
@@ -58,6 +118,17 @@ async def number_of_connections_for_frame(redis: Redis, frame_id: int) -> int:
         cnt += 1
     return cnt
 
+
+def make_envelope(payload: dict, api_key: str, shared_secret: str) -> dict:
+    nonce = int(time.time())
+    body  = canonical_dumps(payload)
+    mac   = hmac_sha256(shared_secret, f"{api_key}{nonce}{body}")
+    return {
+        "nonce":        nonce,
+        "serverApiKey": api_key,
+        "payload":      payload,
+        "mac":          mac,
+    }
 
 # ---------------------------------------------------------------------------
 # Main WS endpoint
@@ -140,6 +211,9 @@ async def ws_agent_endpoint(
     # STEP 3 - server → handshake/ok
     # ----------------------------------------------------------------------
     await ws.send_json({"action": "handshake/ok"})
+    send_task = asyncio.create_task(
+        pump_commands(ws, frame.id, server_api_key, shared_secret)
+    )
 
     # ----------------------------------------------------------------------
     # Fully authenticated - register this socket
@@ -185,7 +259,14 @@ async def ws_agent_endpoint(
                 await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")
                 break
 
-            # TODO: dispatch payload …
+            pl = msg["payload"]
+            if pl.get("type") == "cmd/resp":
+                resolve_command(pl["id"], pl.get("ok", False), pl.get("result"))
+                continue
+            elif pl.get("type") == "cmd/stream":
+                # resolve_command  # or broadcast partial logs, up to you
+                continue
+
 
     except WebSocketDisconnect:
         pass
@@ -195,6 +276,8 @@ async def ws_agent_endpoint(
             active_sockets.remove(ws)
         if ws in active_sockets_by_frame.get(frame.id, []):
             active_sockets_by_frame[frame.id].remove(ws)
+
+        send_task.cancel()
 
         # Remove this connection’s Redis key (if we still can)
         try:
@@ -215,3 +298,6 @@ async def ws_agent_endpoint(
             {"active_connections": await number_of_connections_for_frame(redis, frame.id), "id": frame.id},
         )
         await log(db, redis, frame.id, "agent", f"👋 Frame \"{frame.name}\" disconnected 👋")
+
+        with contextlib.suppress(Exception):
+            await send_task

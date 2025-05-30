@@ -30,7 +30,7 @@ from app.config import config
 from app.utils.network import is_safe_host
 from app.redis import get_redis
 from app.websockets import publish_message
-from app.ws.agent_ws import number_of_connections_for_frame
+from app.ws.agent_ws import number_of_connections_for_frame, http_get_on_frame
 from . import api_with_auth, api_no_auth
 
 
@@ -196,29 +196,35 @@ async def api_frame_get_state(id: int, db: Session = Depends(get_db), redis: Red
         raise HTTPException(status_code=400, detail="Unsafe frame host")
 
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:state'
-    url = f'http://{frame.frame_host}:{frame.frame_port}/state'
+    path = '/state'
     if frame.frame_access != "public" and frame.frame_access_key is not None:
-        url += "?k=" + frame.frame_access_key
+        path += "?k=" + frame.frame_access_key
+    url = f'http://{frame.frame_host}:{frame.frame_port}{path}'
 
     try:
         last_state = await redis.get(cache_key)
         if last_state:
             return json.loads(last_state)
 
+        # Try a direct connection
+        if (await number_of_connections_for_frame(redis, frame.id)) > 0:
+            response_json = await http_get_on_frame(frame.id, path)
+            return response_json
+
+        # Fallback to making a HTTP request
         async with httpx.AsyncClient() as client:
             response = await client.get(url, timeout=15.0)
+            if response.status_code == 200:
+                await redis.set(cache_key, response.content, ex=1)
+                state = response.json()
+                if state.get('sceneId'):
+                    await redis.set(f"frame:{frame.id}:active_scene", state.get('sceneId'))
+                return state
 
-        if response.status_code == 200:
-            await redis.set(cache_key, response.content, ex=1)
-            state = response.json()
-            if state.get('sceneId'):
-                await redis.set(f"frame:{frame.id}:active_scene", state.get('sceneId'))
-            return state
-        else:
-            last_state = await redis.get(cache_key)
-            if last_state:
-                return json.loads(last_state)
-            raise HTTPException(status_code=response.status_code, detail="Unable to fetch state")
+        last_state = await redis.get(cache_key)
+        if last_state:
+            return json.loads(last_state)
+        raise HTTPException(status_code=response.status_code, detail="Unable to fetch state")
     except httpx.ReadTimeout:
         raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Request Timeout to {url}")
     except Exception as e:
@@ -235,14 +241,25 @@ async def api_frame_get_states(id: int, db: Session = Depends(get_db), redis: Re
         raise HTTPException(status_code=400, detail="Unsafe frame host")
 
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:states'
-    url = f'http://{frame.frame_host}:{frame.frame_port}/states'
+    path = '/states'
     if frame.frame_access != "public" and frame.frame_access_key is not None:
-        url += "?k=" + frame.frame_access_key
+        path += "?k=" + frame.frame_access_key
+    url = f'http://{frame.frame_host}:{frame.frame_port}{path}'
 
     try:
         last_states = await redis.get(cache_key)
         if last_states:
             return json.loads(last_states)
+
+        # Try a direct connection
+        if (await number_of_connections_for_frame(redis, frame.id)) > 0:
+            response_json = await http_get_on_frame(frame.id, path)
+            if response_json and response_json.get('status', 0) == 200:
+                return json.loads(response_json['body'])
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail="Failed to fetch states from frame via direct connection"
+            )
 
         async with httpx.AsyncClient() as client:
             response = await client.get(url, timeout=15.0)
