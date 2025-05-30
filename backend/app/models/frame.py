@@ -1,4 +1,5 @@
 import json
+import copy
 import os
 from datetime import timezone
 from arq import ArqRedis as Redis
@@ -262,6 +263,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
 
     schedule = frame.schedule
     if schedule is not None:
+        schedule = copy.deepcopy(schedule)
         if schedule.get('disabled', None):
             schedule = None
         else:
