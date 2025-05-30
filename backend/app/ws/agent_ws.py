@@ -327,17 +327,27 @@ async def ws_agent_endpoint(
             )
             expected = hmac_sha256(shared_secret, data_to_check)
             if not hmac.compare_digest(expected, msg["mac"]):
-                await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")
-                break
+                print("[agent-bad-mac]", msg)
+                continue
+                # await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")
+                # break
 
             pl = msg["payload"]
             if pl.get("type") == "cmd/resp":
                 resolve_command(pl["id"], pl.get("ok", False), pl.get("result"))
                 continue
             elif pl.get("type") == "cmd/stream":
-                # resolve_command  # or broadcast partial logs, up to you
-                continue
+                # Stream chunks arrive while a shell command runs on the frame.
+                stream = pl.get("stream", "stdout")
+                data   = pl.get("data", "")
 
+                for line in data.splitlines():
+                    if line:  # skip blanks to match exec_command
+                        await log(db, redis, frame.id, stream, line)
+
+                # NB: resolve_command is NOT called here – it is done on the final
+                #     “cmd/resp” message which arrives after exit status is known.
+                continue
 
     except WebSocketDisconnect:
         pass
