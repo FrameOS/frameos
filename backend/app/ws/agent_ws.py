@@ -91,6 +91,40 @@ async def http_get_on_frame(frame_id: int, path: str,
     fut = queue_command(frame_id, payload)
     return await asyncio.wait_for(fut, timeout=timeout)
 
+async def assets_list_on_frame(frame_id: int, path: str,
+                               timeout: int = 60):
+    """
+    Ask the agent to enumerate every asset (JSON list).
+    """
+    payload = {
+        "type": "cmd",
+        "name": "assets_list",
+        "args": {"path": path},
+    }
+    fut = queue_command(frame_id, payload)
+    resp = await asyncio.wait_for(fut, timeout=timeout)
+    if isinstance(resp, dict) and "assets" in resp:
+        return resp["assets"]
+    raise RuntimeError("bad response from agent assets_list")
+
+
+async def exec_shell_on_frame(frame_id: int, cmd: str,
+                              timeout: int = 120):
+    """
+    Fire-and-forget shell helper. Raises if exit != 0.
+    """
+    payload = {
+        "type": "cmd",
+        "name": "shell",
+        "args": {"cmd": cmd},
+    }
+    fut   = queue_command(frame_id, payload)
+    reply = await asyncio.wait_for(fut, timeout=timeout)
+    if isinstance(reply, dict) and reply.get("exit", 1) == 0:
+        return
+    raise RuntimeError(f"shell failed: {reply}")
+
+
 def hmac_sha256(key: str, data: str) -> str:
     """Return lowercase HMAC-SHA256(key, data)."""
     return hmac.new(key.encode(), data.encode(), hashlib.sha256).hexdigest()

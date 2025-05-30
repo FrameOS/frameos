@@ -270,6 +270,24 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
         except CatchableError as e:
           await sendResp(ws, cfg, id, false, %*{"error": e.msg})
 
+    of "assets_list":
+      let root = args{"path"}.getStr("")
+      if root.len == 0:
+        await sendResp(ws, cfg, id, false,
+                       %*{"error": "`path` missing"})
+      elif not dirExists(root):
+        await sendResp(ws, cfg, id, false,
+                       %*{"error": "dir not found"})
+      else:
+        var items = newSeq[JsonNode]()
+        for path in walkDirRec(root):
+          let fi = getFileInfo(path)
+          items.add %*{
+            "path": path,
+            "size": fi.size,
+            "mtime": fi.lastWriteTime.toUnix()
+          }
+        await sendResp(ws, cfg, id, true, %*{"assets": items})
     else:
       await sendResp(ws, cfg, id, false,
                      %*{"error": "unknown command: " & name})
