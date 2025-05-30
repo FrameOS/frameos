@@ -1,5 +1,6 @@
 import std/[algorithm, segfaults, strformat, strutils, asyncdispatch, terminal,
-            times, os, sysrand, httpclient, osproc, streams]
+            times, os, sysrand, httpclient, osproc, streams, base64]
+import checksums/md5
 import json, jsony
 import ws
 import nimcrypto
@@ -232,6 +233,43 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
 
       let rc = p.waitForExit()
       await sendResp(ws, cfg, id, rc == 0, %*{"exit": rc})
+
+    of "file_md5":
+      let path = args{"path"}.getStr("")
+      if path.len == 0:
+        await sendResp(ws, cfg, id, false, %*{"error": "`path` missing"})
+      elif not fileExists(path):
+        await sendResp(ws, cfg, id, true, %*{"exists": false, "md5": ""})
+      else:
+        let contents = readFile(path)
+        let digest = getMD5(contents)
+        await sendResp(ws, cfg, id, true,
+                       %*{"exists": true, "md5": $digest.toLowerAscii()})
+
+    of "file_read":
+      let path = args{"path"}.getStr("")
+      if path.len == 0:
+        await sendResp(ws, cfg, id, false, %*{"error": "`path` missing"})
+      elif not fileExists(path):
+        await sendResp(ws, cfg, id, false, %*{"error": "file not found"})
+      else:
+        let raw = readFile(path) # binary safe
+        let b64 = encode(raw) # std/base64
+        await sendResp(ws, cfg, id, true, %*{"data": b64})
+
+    of "file_write":
+      let path = args{"path"}.getStr("")
+      let data64 = args{"data"}.getStr("")
+      if path.len == 0 or data64.len == 0:
+        await sendResp(ws, cfg, id, false, %*{"error": "`path`/`data` missing"})
+      else:
+        try:
+          let bytes = decode(data64) # base64 → string
+          writeFile(path, bytes)
+          await sendResp(ws, cfg, id, true, %*{"written": bytes.len})
+        except CatchableError as e:
+          await sendResp(ws, cfg, id, false, %*{"error": e.msg})
+
     else:
       await sendResp(ws, cfg, id, false,
                      %*{"error": "unknown command: " & name})

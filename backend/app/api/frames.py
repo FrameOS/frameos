@@ -1,6 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
 import asyncssh
+import base64
 import io
 import json
 import os
@@ -41,6 +42,9 @@ from app.websockets import publish_message
 from app.ws.agent_ws import (
     http_get_on_frame,
     number_of_connections_for_frame,
+    file_md5_on_frame,
+    file_read_on_frame,
+    file_write_on_frame,
 )
 from . import api_with_auth, api_no_auth
 
@@ -52,15 +56,23 @@ def _bad_request(msg: str):
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=msg)
 
 
-def _build_frame_url(frame: Frame, path: str) -> str:
-    """Return full http://host:port/path (+k=key when needed)."""
+def _build_frame_path(frame: Frame, path: str) -> str:
+    """Return full /path (?k=key when needed)."""
     if not is_safe_host(frame.frame_host):
         raise HTTPException(status_code=400, detail="Unsafe frame host")
 
-    url = f"http://{frame.frame_host}:{frame.frame_port}{path}"
     if frame.frame_access not in ("public", "protected") and frame.frame_access_key:
-        sep = "&" if "?" in url else "?"
-        url = f"{url}{sep}k={frame.frame_access_key}"
+        sep = "&" if "?" in path else "?"
+        path = f"{path}{sep}k={frame.frame_access_key}"
+    return path
+
+
+def _build_frame_url(frame: Frame, path: str) -> str:
+    """Return full http://host:port/path (?k=key when needed)."""
+    if not is_safe_host(frame.frame_host):
+        raise HTTPException(status_code=400, detail="Unsafe frame host")
+
+    url = f"http://{frame.frame_host}:{frame.frame_port}{_build_frame_path(frame, path)}"
     return url
 
 
@@ -84,6 +96,12 @@ def _normalise_agent_response(resp: Any) -> tuple[int, Any]:
     # fall‑back – assume OK JSON already
     return 200, resp
 
+async def _use_agent(frame: Frame, redis: Redis) -> bool:
+    """
+    Check if the agent is available for the given frame.
+    Returns True if the agent is available, False otherwise.
+    """
+    return (await number_of_connections_for_frame(redis, frame.id)) > 0
 
 async def _forward_frame_request(
     frame: Frame,
@@ -109,22 +127,18 @@ async def _forward_frame_request(
         body_for_agent = json.dumps(json_body)
 
     # 1) try the live agent connection first -------------------------------
-    try:
-        if (await number_of_connections_for_frame(redis, frame.id)) > 0:
-            agent_resp = await http_get_on_frame(
-                frame.id, path, method=method.upper(), body=body_for_agent
-            )
-            status, payload = _normalise_agent_response(agent_resp)
-            if status == 200:
-                if cache_key:
-                    await redis.set(cache_key, json.dumps(payload).encode(), ex=cache_ttl)
-                return payload
-            # propagate error if agent answered but not 200
-            raise HTTPException(status_code=status, detail="Frame error")
-    except Exception:
-        # fall through to HTTP – we keep the original exception quiet so that
-        # the HTTP attempt can still succeed.
-        pass
+    if (await _use_agent(frame, redis)):
+        agent_resp = await http_get_on_frame(
+            frame.id, _build_frame_path(frame, path), method=method.upper(), body=body_for_agent
+        )
+        status, payload = _normalise_agent_response(agent_resp)
+        if status == 200:
+            if cache_key:
+                await redis.set(cache_key, json.dumps(payload).encode(), ex=cache_ttl)
+            return payload
+
+        # propagate error if agent answered but not 200
+        raise HTTPException(status_code=400, detail=f"Agent error: {status} {payload}")
 
     # 2) plain HTTP fallback -----------------------------------------------
     url = _build_frame_url(frame, path)
@@ -152,7 +166,17 @@ async def _forward_frame_request(
 async def _ssh_exec_file_md5(
     db: Session, redis: Redis, frame: Frame, remote_path: str
 ) -> Tuple[str, bool]:
-    """Return (md5, exists).  Uses shared connection pool."""
+    """
+    Return (md5, exists).
+
+    Tries the agent first (file_md5). Falls back to SSH if no agent.
+    """
+    # ---------- 1) try agent ----------------------------------------------
+    if (await _use_agent(frame, redis)):
+        resp = await file_md5_on_frame(frame.id, remote_path)
+        return resp.get("md5", ""), bool(resp.get("exists", False))
+
+    # ---------- 2) SSH fallback -------------------------------------------
     ssh = await get_ssh_connection(db, redis, frame)
     try:
         md5_out: list[str] = []
@@ -176,7 +200,14 @@ async def _ssh_exec_file_md5(
 async def _ssh_download_file(
     db: Session, redis: Redis, frame: Frame, remote_path: str
 ) -> bytes:
-    """Securely SCP *remote_path* → bytes, re‑using SSH pool."""
+    """
+    Download remote file → bytes. Prefers agent, falls back to SSH.
+    """
+    # ---------- 1) try agent ----------------------------------------------
+    if (await _use_agent(frame, redis)):
+        return await file_read_on_frame(frame.id, remote_path)
+
+    # ---------- 2) SSH fallback -------------------------------------------
     ssh = await get_ssh_connection(db, redis, frame)
     try:
         with NamedTemporaryFile(delete=False) as tmp:
@@ -480,42 +511,45 @@ async def api_frame_assets_upload(
     file: UploadFile = File(...),
     db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
 ):
-    frame = db.get(Frame, id)
-    if frame is None:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    frame = db.get(Frame, id) or _not_found()
     if not path:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Path parameter is required")
+        _bad_request("Path parameter is required")
     if "*" in path:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid character * in path")
+        _bad_request("Invalid character * in path")
+
     assets_path = frame.assets_path or "/srv/assets"
     combined_path = os.path.normpath(os.path.join(assets_path, path, file.filename or "uploaded_file"))
     if not combined_path.startswith(os.path.normpath(assets_path) + '/'):
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid asset path")
+        _bad_request("Invalid asset path")
 
-    # TODO: stream and reuse connections
+    contents = await file.read()
+
+    # ---------- 1) try agent upload ---------------------------------------
+    if (await _use_agent(frame, redis)):
+        await log(db, redis, id, "stdout", f"Agent upload: {combined_path}")
+        await file_write_on_frame(frame.id, combined_path, base64.b64encode(contents).decode())
+        path_relative = os.path.relpath(combined_path, assets_path)
+        return {"path": path_relative, "size": len(contents), "mtime": int(datetime.now().timestamp())}
+
+    # ---------- 2) SSH fallback -------------------------------------------
     ssh = await get_ssh_connection(db, redis, frame)
     try:
         with NamedTemporaryFile(delete=True) as temp_file:
             local_temp_path = temp_file.name
-            contents = await file.read()
             with open(local_temp_path, "wb") as f:
                 f.write(contents)
-            await log(db, redis, id, "stdout", f"Uploading: {combined_path}")
+            await log(db, redis, id, "stdout", f"SCP upload: {combined_path}")
             scp_escaped_path = shlex.quote(combined_path)
             await asyncssh.scp(
                 local_temp_path,
                 (ssh, scp_escaped_path),
                 recurse=False
             )
-    except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
     finally:
         await remove_ssh_connection(db, redis, ssh, frame)
 
-    path_without_combined = os.path.relpath(combined_path, assets_path)
-
-    return {"path": path_without_combined, "size": len(contents), "mtime": int(datetime.now().timestamp())}
+    path_relative = os.path.relpath(combined_path, assets_path)
+    return {"path": path_relative, "size": len(contents), "mtime": int(datetime.now().timestamp())}
 
 @api_with_auth.post("/frames/{id:int}/clear_build_cache")
 async def api_frame_clear_build_cache(id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)):

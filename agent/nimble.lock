@@ -1,6 +1,16 @@
 {
   "version": 2,
   "packages": {
+    "checksums": {
+      "version": "0.2.1",
+      "vcsRevision": "f8f6bd34bfa3fe12c64b919059ad856a96efcba0",
+      "url": "https://github.com/nim-lang/checksums",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "d3c7a1d0c0dee8fa089bd7f4d474e005877b608a"
+      }
+    },
     "jsony": {
       "version": "1.1.5",
       "vcsRevision": "ea811bec7fa50f5abd3088ba94cda74285e93f18",

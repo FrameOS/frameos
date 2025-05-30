@@ -8,6 +8,7 @@ import hmac
 import hashlib
 import time
 import uuid
+import base64
 from collections import defaultdict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status, Depends
@@ -129,6 +130,42 @@ def make_envelope(payload: dict, api_key: str, shared_secret: str) -> dict:
         "payload":      payload,
         "mac":          mac,
     }
+
+
+async def file_md5_on_frame(frame_id: int, path: str, timeout: int = 30):
+    """Ask agent to calculate MD5 of *path*."""
+    payload = {
+        "type": "cmd",
+        "name": "file_md5",
+        "args": {"path": path},
+    }
+    fut = queue_command(frame_id, payload)
+    return await asyncio.wait_for(fut, timeout=timeout)
+
+
+async def file_read_on_frame(frame_id: int, path: str, timeout: int = 60) -> bytes:
+    """Download *path* from agent – returns raw bytes."""
+    payload = {
+        "type": "cmd",
+        "name": "file_read",
+        "args": {"path": path},
+    }
+    fut = queue_command(frame_id, payload)
+    resp = await asyncio.wait_for(fut, timeout=timeout)
+    if isinstance(resp, dict) and "data" in resp:
+        return base64.b64decode(resp["data"])
+    raise RuntimeError("bad response from agent file_read")
+
+
+async def file_write_on_frame(frame_id: int, path: str, data_b64: str, timeout: int = 60):
+    """Upload a file to the frame via agent."""
+    payload = {
+        "type": "cmd",
+        "name": "file_write",
+        "args": {"path": path, "data": data_b64},
+    }
+    fut = queue_command(frame_id, payload)
+    return await asyncio.wait_for(fut, timeout=timeout)
 
 # ---------------------------------------------------------------------------
 # Main WS endpoint
