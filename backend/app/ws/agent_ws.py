@@ -45,7 +45,7 @@ def queue_command(frame_id: int, payload: dict, blob: bytes | None = None) -> tu
     payload["id"] = cmd_id
     fut = _pending[cmd_id] = asyncio.get_event_loop().create_future()
     _frame_queues[frame_id].put_nowait((payload, blob))
-    return fut, cmd_id                       # caller will await it
+    return fut, cmd_id # caller will await it
 
 async def next_command(frame_id: int) -> tuple[dict, bytes | None] | None:
     """Wait until there is a command for this frame (or None if queue empty)."""
@@ -57,7 +57,7 @@ async def next_command(frame_id: int) -> tuple[dict, bytes | None] | None:
 def resolve_command(cmd_id: str, ok: bool, result):
     fut = _pending.pop(cmd_id, None)
     if fut and not fut.done():
-        # ───────────── attach streamed binary, if any ─────────────
+        # attach streamed binary, if any
         if cmd_id in _binary_buffers and _binary_buffers[cmd_id]:
             raw = bytes(_binary_buffers.pop(cmd_id))
 
@@ -65,7 +65,7 @@ def resolve_command(cmd_id: str, ok: bool, result):
             try:
                 raw_decompressed = gzip.decompress(raw)
             except Exception:
-                raw_decompressed = raw                # not gzipped
+                raw_decompressed = raw # not gzipped
 
             if isinstance(result, dict) and "status" in result:
                 # ← http command: return dictbody
@@ -107,7 +107,7 @@ async def pump_commands(ws: WebSocket,
                 if cmd.get("name") == "file_read":
                     _pending_bin_by_ws.pop(ws, None)
                 _frame_queues[frame_id].put_nowait(item)
-                break                            # exit the loop
+                break # exit the loop
     finally:
         # make sure no zombie task hangs around and clear any buffers
         if ws in _pending_bin_by_ws:
@@ -268,9 +268,7 @@ async def ws_agent_endpoint(
 
     await ws.accept()  # TCP ↔ WS handshake OK - start protocol below
 
-    # ----------------------------------------------------------------------
     # STEP 0 - agent → {action:"hello", serverApiKey}
-    # ----------------------------------------------------------------------
     try:
         hello_msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
     except (asyncio.TimeoutError, WebSocketDisconnect):
@@ -283,9 +281,7 @@ async def ws_agent_endpoint(
 
     server_api_key: str = str(hello_msg.get("serverApiKey", ""))
 
-    # ----------------------------------------------------------------------
     # Look up the **Frame** that owns this server-side key.
-    # ----------------------------------------------------------------------
     if not server_api_key:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="missing server key")
         return
@@ -301,15 +297,11 @@ async def ws_agent_endpoint(
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="frame missing secret")
         return
 
-    # ----------------------------------------------------------------------
     # STEP 1 - server → challenge
-    # ----------------------------------------------------------------------
     challenge = secrets.token_hex(32)
     await ws.send_json({"action": "challenge", "c": challenge})
 
-    # ----------------------------------------------------------------------
     # STEP 2 - agent → {action:"handshake", mac:...}
-    # ----------------------------------------------------------------------
     try:
         hs_msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
     except (asyncio.TimeoutError, WebSocketDisconnect):
@@ -328,17 +320,13 @@ async def ws_agent_endpoint(
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")
         return
 
-    # ----------------------------------------------------------------------
     # STEP 3 - server → handshake/ok
-    # ----------------------------------------------------------------------
     await ws.send_json({"action": "handshake/ok"})
     send_task = asyncio.create_task(
         pump_commands(ws, frame.id, server_api_key, shared_secret)
     )
 
-    # ----------------------------------------------------------------------
     # Fully authenticated - register this socket
-    # ----------------------------------------------------------------------
     active_sockets.add(ws)
     active_sockets_by_frame.setdefault(frame.id, []).append(ws)
 
@@ -355,9 +343,7 @@ async def ws_agent_endpoint(
 
     await log(db, redis, frame.id, "agent", f"☎️ Frame \"{frame.name}\" connected ☎️")
 
-    # ----------------------------------------------------------------------
     # Main receive loop (enveloped messages)
-    # ----------------------------------------------------------------------
     try:
         while True:
             packet = await asyncio.wait_for(ws.receive(), timeout=60)
@@ -390,10 +376,8 @@ async def ws_agent_endpoint(
             )
             expected = hmac_sha256(shared_secret, data_to_check)
             if not hmac.compare_digest(expected, msg["mac"]):
-                print("[agent-bad-mac]", msg)
-                continue
-                # await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")
-                # break
+                await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")
+                break
 
             pl = msg["payload"]
             if pl.get("type") == "cmd/resp":
