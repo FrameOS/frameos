@@ -77,7 +77,7 @@ proc hmacSha256Hex(key, data: string): string =
 # ----------------------------------------------------------------------------
 proc sign(data: string; cfg: FrameConfig): string =
   ## data   = the “open” string we want to protect
-  ## secret = cfg.network.agentSharedSecret   (never leaves the device)
+  ## secret = cfg.agent.agentSharedSecret   (never leaves the device)
   ## apiKey = cfg.serverApiKey                (public “username”)
   ##
   ## The server re-creates exactly the same byte-sequence:
@@ -207,6 +207,12 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
   let args = cmd{"args"}
 
   echo &"📥 cmd: {name}({args})"
+
+  # No remote execution available
+  if not cfg.agent.agentConnection:
+    if name != "version":
+      await sendResp(ws, cfg, id, false, %*{"error": "agentConnection disabled in config"})
+      return
 
   try:
     case name
@@ -370,7 +376,7 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
 
   if len(cfg.agent.agentSharedSecret) == 0:
     echo "⚠️  agentSharedSecret is empty, cannot connect"
-    raise newException(Exception, "⚠️  network.agentSharedSecret is empty, cannot connect")
+    raise newException(Exception, "⚠️  agent.agentSharedSecret is empty, cannot connect")
 
   # --- Step 0: say hello ----------------------------------------------------
   var hello = %*{
@@ -476,6 +482,11 @@ proc runAgent(cfg: FrameConfig) {.async.} =
 when isMainModule:
   try:
     var cfg = loadConfig()
+    if not cfg.agent.agentEnabled:
+      echo "ℹ️  agentEnabled = false  →  no websocket connection started. Exiting in 10s."
+      waitFor sleepAsync(10_000)
+      quit(0) # graceful, zero-exit
+
     waitFor runAgent(cfg)
   except Exception as e:
     fatal(e.msg)

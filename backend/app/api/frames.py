@@ -396,8 +396,15 @@ async def api_frame_event(id: int, event: str, request: Request, db: Session = D
     body = await (
         request.json() if request.headers.get("content-type") == "application/json" else request.body()
     )
-    await _forward_frame_request(frame, redis, path=f"/event/{event}", method="POST", json_body=body)
-    return "OK"
+    try:
+        await _forward_frame_request(frame, redis, path=f"/event/{event}", method="POST", json_body=body)
+        return "OK"
+    except HTTPException as exc:
+        await log(db, redis, id, "stderr", f"Error on frame event {event}: {exc.detail}")
+        raise exc
+    except RuntimeError as exc:
+        await log(db, redis, id, "stderr", f"Error on frame event {event}: {str(exc)}")
+        raise exc
 
 
 
@@ -518,6 +525,8 @@ async def api_frame_get_image(
             return Response(content=last_image, media_type='image/png')
 
     # Use shared semaphore and client
+    status = 0
+    body = b""
     try:
         status, body, headers = await _fetch_frame_http_bytes(frame, redis, path=path)
 
@@ -576,11 +585,14 @@ async def api_frame_get_image(
 
             return Response(content=body, media_type='image/png')
         else:
+            await log(db, redis, id, "stderr", f"Error fetching image from frame {id}: {status} {body.decode(errors='ignore')}")
             raise HTTPException(status_code=status, detail="Unable to fetch image")
 
     except httpx.ReadTimeout:
+        await log(db, redis, id, "stderr", f"Error fetching image from frame {id}: request timeout")
         raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout")
     except Exception as e:
+        await log(db, redis, id, "stderr", f"Error fetching image from frame {id}: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 

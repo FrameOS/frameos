@@ -296,7 +296,7 @@ async def ws_agent_endpoint(
         return
 
     # Each frame has an associated *shared secret* used for HMAC
-    shared_secret: str = frame.network.get("agentSharedSecret", "") if frame.network else ""
+    shared_secret: str = frame.agent.get("agentSharedSecret", "") if frame.agent else ""
     if not shared_secret:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="frame missing secret")
         return
