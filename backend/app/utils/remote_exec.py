@@ -28,9 +28,18 @@ __all__ = ["run_commands", "upload_file"]  # what the tasks import
 # internal helpers                                                           #
 # ---------------------------------------------------------------------------#
 
-async def _use_agent(redis: Redis, frame: Frame) -> bool:
-    """Return *True* when at least one agent websocket is alive for *frame*."""
-    return (await number_of_connections_for_frame(redis, frame.id)) > 0
+
+async def _use_agent(frame: Frame, redis: Redis) -> bool:
+    """
+    Returns True when at least one websocket agent connection is live.
+    """
+    if frame.network.get('agentConnection'):
+        if (await number_of_connections_for_frame(redis, frame.id)) <= 0:
+            raise RuntimeError(
+                f"Frame {frame.id} has agent connections enabled, but no live WebSocket agent."
+            )
+        return True
+    return False
 
 async def _exec_via_agent(
     redis: Redis,
@@ -128,7 +137,7 @@ async def run_commands(
     """
 
     # ── 1) Agent path (mandatory when present) ────────────────────────────
-    if await _use_agent(redis, frame):
+    if await _use_agent(frame, redis):
         for cmd in commands:
             await log(db, redis, frame.id, "stdout", f"> {cmd}")
             try:
@@ -170,7 +179,7 @@ async def upload_file(
     """
 
     # ── agent first ───────────────────────────────────────────────────────
-    if await _use_agent(redis, frame):
+    if await _use_agent(frame, redis):
         try:
             await log(db, redis, frame.id, "stdout", f"> write {remote_path} (agent)")
             await _file_write_via_agent(redis, frame, remote_path, data, timeout)

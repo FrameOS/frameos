@@ -47,7 +47,7 @@ from app.schemas.frames import (
 from app.api.auth import ALGORITHM, SECRET_KEY
 from app.config import config
 from app.utils.network import is_safe_host
-from app.utils.remote_exec import upload_file
+from app.utils.remote_exec import upload_file, _use_agent
 from app.redis import get_redis
 from app.websockets import publish_message
 from app.ws.agent_ws import (
@@ -145,12 +145,6 @@ def _bytes_or_json(blob: bytes | str):
         except Exception:
             return blob                        # truly binary
     return blob
-
-async def _use_agent(frame: Frame, redis: Redis) -> bool:
-    """
-    Returns True when at least one websocket agent connection is live.
-    """
-    return (await number_of_connections_for_frame(redis, frame.id)) > 0
 
 async def _forward_frame_request(
     frame: Frame,
