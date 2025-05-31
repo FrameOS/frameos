@@ -27,7 +27,8 @@ async def create_repository(data: RepositoryCreateRequest, db: Session = Depends
     if not url:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Missing URL")
 
-    if not is_safe_host(urlparse(url).hostname):
+    hostname = urlparse(url).hostname
+    if not hostname or not is_safe_host(hostname):
         raise HTTPException(status_code=400, detail="URL not allowed")
 
     try:
