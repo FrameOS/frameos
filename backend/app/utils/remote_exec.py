@@ -27,6 +27,7 @@ __all__ = [
     "upload_file",
     "delete_path",
     "rename_path",
+    "make_dir",
 ]  # what the tasks import
 
 # ---------------------------------------------------------------------------#
@@ -272,6 +273,37 @@ async def rename_path(
     ssh = await get_ssh_connection(db, redis, frame)
     try:
         cmd = f"mv {shlex.quote(src)} {shlex.quote(dst)}"
+        await exec_command(db, redis, frame, ssh, cmd)
+    finally:
+        await remove_ssh_connection(db, redis, ssh, frame)
+
+
+async def make_dir(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    remote_path: str,
+    *,
+    timeout: int = 120,
+) -> None:
+    """Create a directory on the device."""
+
+    if await _use_agent(frame, redis):
+        from app.ws.agent_ws import file_mkdir_on_frame
+
+        try:
+            await log(
+                db, redis, frame.id, "stdout", f"> mkdir -p {remote_path} (agent)"
+            )
+            await file_mkdir_on_frame(frame.id, remote_path, timeout)
+            return
+        except Exception as e:  # noqa: BLE001
+            await log(db, redis, frame.id, "stderr", f"Agent mkdir error ({e})")
+            raise
+
+    ssh = await get_ssh_connection(db, redis, frame)
+    try:
+        cmd = f"mkdir -p {shlex.quote(remote_path)}"
         await exec_command(db, redis, frame, ssh, cmd)
     finally:
         await remove_ssh_connection(db, redis, ssh, frame)

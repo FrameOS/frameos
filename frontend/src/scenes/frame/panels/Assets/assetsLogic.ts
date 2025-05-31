@@ -73,6 +73,7 @@ export const assetsLogic = kea<assetsLogicType>([
     assetDeleted: (path: string) => ({ path }),
     renameAsset: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
     assetRenamed: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
+    createFolder: (path: string) => ({ path }),
   }),
   loaders(({ props }) => ({
     assets: [
@@ -180,6 +181,17 @@ export const assetsLogic = kea<assetsLogicType>([
         })
         const assetsPath = values.frame.assets_path ?? '/srv/assets'
         actions.assetRenamed(assetsPath + '/' + oldPath, assetsPath + '/' + newPath)
+      } catch (error) {
+        console.error(error)
+      }
+    },
+    createFolder: async ({ path }) => {
+      try {
+        await apiFetch(`/api/frames/${props.frameId}/assets/mkdir`, {
+          method: 'POST',
+          body: new URLSearchParams({ path }),
+        })
+        actions.loadAssets()
       } catch (error) {
         console.error(error)
       }

@@ -2,7 +2,13 @@ import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { assetsLogic } from './assetsLogic'
 import { panelsLogic } from '../panelsLogic'
-import { CloudArrowDownIcon, DocumentArrowUpIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
+import {
+  CloudArrowDownIcon,
+  DocumentArrowUpIcon,
+  PencilSquareIcon,
+  TrashIcon,
+  FolderPlusIcon,
+} from '@heroicons/react/24/solid'
 import { useState } from 'react'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { Spinner } from '../../../../components/Spinner'
@@ -36,6 +42,7 @@ function TreeNode({
   uploadAssets,
   deleteAsset,
   renameAsset,
+  createFolder,
 }: {
   node: AssetNode
   frameId: number
@@ -43,6 +50,7 @@ function TreeNode({
   uploadAssets: (path: string) => void
   deleteAsset: (path: string) => void
   renameAsset: (oldPath: string, newPath: string) => void
+  createFolder: (path: string) => void
 }): JSX.Element {
   const [expanded, setExpanded] = useState(node.path === '')
   const [isDownloading, setIsDownloading] = useState(false)
@@ -66,6 +74,17 @@ function TreeNode({
                   label: 'Upload files',
                   icon: <DocumentArrowUpIcon className="w-5 h-5" />,
                   onClick: () => uploadAssets(node.path),
+                },
+                {
+                  label: 'New folder',
+                  icon: <FolderPlusIcon className="w-5 h-5" />,
+                  onClick: () => {
+                    const name = window.prompt('Folder name')
+                    if (name) {
+                      const newPath = (node.path ? node.path + '/' : '') + name
+                      createFolder(newPath)
+                    }
+                  },
                 },
                 node.path
                   ? {
@@ -104,6 +123,7 @@ function TreeNode({
                 uploadAssets={uploadAssets}
                 deleteAsset={deleteAsset}
                 renameAsset={renameAsset}
+                createFolder={createFolder}
               />
             ))}
           </div>
@@ -184,7 +204,9 @@ export function Assets(): JSX.Element {
   const { frame } = useValues(frameLogic)
   const { openLogs } = useActions(panelsLogic)
   const { assetsLoading, assetTree } = useValues(assetsLogic({ frameId: frame.id }))
-  const { syncAssets, uploadAssets, deleteAsset, renameAsset } = useActions(assetsLogic({ frameId: frame.id }))
+  const { syncAssets, uploadAssets, deleteAsset, renameAsset, createFolder } = useActions(
+    assetsLogic({ frameId: frame.id })
+  )
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
 
   return (
@@ -216,6 +238,7 @@ export function Assets(): JSX.Element {
             uploadAssets={uploadAssets}
             deleteAsset={deleteAsset}
             renameAsset={renameAsset}
+            createFolder={createFolder}
           />
         </div>
       )}

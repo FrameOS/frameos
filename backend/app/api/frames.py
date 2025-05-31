@@ -51,6 +51,7 @@ from app.utils.remote_exec import (
     upload_file,
     delete_path,
     rename_path,
+    make_dir,
     _use_agent,
 )
 from app.redis import get_redis
@@ -779,6 +780,28 @@ async def api_frame_assets_upload(
         "size": len(data),
         "mtime": int(datetime.now().timestamp()),
     }
+
+
+@api_with_auth.post("/frames/{id:int}/assets/mkdir")
+async def api_frame_assets_mkdir(
+    id: int,
+    path: str = Form(...),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    rel_path = path.lstrip("/")
+    if ".." in rel_path or "*" in rel_path or os.path.isabs(rel_path):
+        _bad_request("Invalid asset path")
+
+    assets_path = frame.assets_path or "/srv/assets"
+    full_path = os.path.normpath(os.path.join(assets_path, rel_path))
+    if not full_path.startswith(os.path.normpath(assets_path)):
+        _bad_request("Invalid asset path")
+
+    await make_dir(db, redis, frame, full_path)
+    return {"message": "Created"}
 
 
 @api_with_auth.post("/frames/{id:int}/assets/delete")

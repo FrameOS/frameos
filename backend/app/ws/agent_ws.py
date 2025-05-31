@@ -269,6 +269,17 @@ async def file_delete_on_frame(frame_id: int, path: str, timeout: int = 60):
     return await asyncio.wait_for(fut, timeout=timeout)
 
 
+async def file_mkdir_on_frame(frame_id: int, path: str, timeout: int = 60):
+    """Create a directory on the frame via agent."""
+    payload = {
+        "type": "cmd",
+        "name": "file_mkdir",
+        "args": {"path": path},
+    }
+    fut, _ = queue_command(frame_id, payload)
+    return await asyncio.wait_for(fut, timeout=timeout)
+
+
 async def file_rename_on_frame(frame_id: int, src: str, dst: str, timeout: int = 60):
     """Rename a file or directory on the frame via agent."""
     payload = {

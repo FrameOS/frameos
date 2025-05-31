@@ -350,6 +350,17 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
         except CatchableError as e:
           await sendResp(ws, cfg, id, false, %*{"error": e.msg})
 
+    of "file_mkdir":
+      let path = args{"path"}.getStr("")
+      if path.len == 0:
+        await sendResp(ws, cfg, id, false, %*{"error": "`path` missing"})
+      else:
+        try:
+          let rc = execShellCmd("mkdir -p " & quoteShell(path))
+          await sendResp(ws, cfg, id, rc == 0, %*{"exit": rc})
+        except CatchableError as e:
+          await sendResp(ws, cfg, id, false, %*{"error": e.msg})
+
     of "file_rename":
       let src = args{"src"}.getStr("")
       let dst = args{"dst"}.getStr("")
