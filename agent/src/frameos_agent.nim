@@ -25,6 +25,8 @@ type
     wifiHotspotSsid*: string
     wifiHotspotPassword*: string
     wifiHotspotTimeoutSeconds*: float
+
+  AgentConfig* = ref object
     agentEnabled*: bool
     agentConnection*: bool
     agentSharedSecret*: string
@@ -48,6 +50,7 @@ type
     debug*: bool
     timeZone*: string
     network*: NetworkConfig
+    agent*: AgentConfig
 
 # ----------------------------------------------------------------------------
 # Config IO (fails hard if unreadable)
@@ -79,7 +82,7 @@ proc sign(data: string; cfg: FrameConfig): string =
   ##
   ## The server re-creates exactly the same byte-sequence:
   ##   apiKey || data   (no separators, keep order)
-  result = hmacSha256Hex(cfg.network.agentSharedSecret,
+  result = hmacSha256Hex(cfg.agent.agentSharedSecret,
                          cfg.serverApiKey & data)
 
 # ----------------------------------------------------------------------------
@@ -365,7 +368,7 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
     echo "⚠️  serverApiKey is empty, cannot connect"
     raise newException(Exception, "⚠️  serverApiKey is empty, cannot connect")
 
-  if len(cfg.network.agentSharedSecret) == 0:
+  if len(cfg.agent.agentSharedSecret) == 0:
     echo "⚠️  agentSharedSecret is empty, cannot connect"
     raise newException(Exception, "⚠️  network.agentSharedSecret is empty, cannot connect")
 
@@ -387,7 +390,7 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
   let challenge = challengeJson["c"].getStr
 
   # --- Step 2: answer -------------------------------------------------------
-  let mac = if cfg.network.agentSharedSecret.len > 0:
+  let mac = if cfg.agent.agentSharedSecret.len > 0:
               sign(challenge, cfg)
             else: ""
   let reply = %*{

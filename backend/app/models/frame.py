@@ -57,6 +57,7 @@ class Frame(Base):
     schedule = mapped_column(JSON, nullable=True)
     gpio_buttons = mapped_column(JSON, nullable=True)
     network = mapped_column(JSON, nullable=True)
+    agent = mapped_column(JSON, nullable=True)
 
     # not used
     apps = mapped_column(JSON, nullable=True)
@@ -100,6 +101,7 @@ class Frame(Base):
             'schedule': self.schedule,
             'gpio_buttons': self.gpio_buttons,
             'network': self.network,
+            'agent': self.agent,
             'last_successful_deploy': self.last_successful_deploy,
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
@@ -159,6 +161,8 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
             "wifiHotspotSsid": "FrameOS-Setup",
             "wifiHotspotPassword": "frame1234",
             "wifiHotspotTimeoutSeconds": 600,
+        },
+        agent={
             "agentEnabled": False,
             "agentConnection": False,
             "agentSharedSecret": secure_token(32)
@@ -211,6 +215,7 @@ def get_templates_json() -> dict:
 
 def get_frame_json(db: Session, frame: Frame) -> dict:
     network = frame.network or {}
+    agent = frame.agent or {}
     frame_json: dict = {
         "name": frame.name,
         "frameHost": frame.frame_host or "localhost",
@@ -257,9 +262,11 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "wifiHotspotSsid": network.get('wifiHotspotSsid', "FrameOS-Setup"),
             "wifiHotspotPassword": network.get('wifiHotspotPassword', "frame1234"),
             "wifiHotspotTimeoutSeconds": int(network.get('wifiHotspotTimeoutSeconds', 600)),
-            "agentEnabled": bool(network.get('agentEnabled', False)),
-            "agentConnection": bool(network.get('agentConnection', False)),
-            "agentSharedSecret": network.get('agentSharedSecret', secure_token(32)),
+        },
+        "agent": {
+            "agentEnabled": bool(agent.get('agentEnabled', False)),
+            "agentConnection": bool(agent.get('agentConnection', False)),
+            "agentSharedSecret": agent.get('agentSharedSecret', secure_token(32)),
         }
     }
 

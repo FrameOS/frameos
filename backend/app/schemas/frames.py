@@ -40,6 +40,7 @@ class FrameBase(BaseModel):
     schedule: Optional[Dict[str, Any]]
     gpio_buttons: Optional[List[Dict[str, Any]]]
     network: Optional[Dict[str, Any]]
+    agent: Optional[Dict[str, Any]]
     last_successful_deploy: Optional[Dict[str, Any]]
     last_successful_deploy_at: Optional[datetime]
     active_connections: Optional[int] = None
@@ -88,6 +89,7 @@ class FrameUpdateRequest(BaseModel):
     schedule: Optional[Dict[str, Any]] = None
     gpio_buttons: Optional[List[Dict[str, Any]]] = None
     network: Optional[Dict[str, Any]] = None
+    agent: Optional[Dict[str, Any]] = None
     next_action: Optional[str] = None
 
 class FrameLogsResponse(BaseModel):

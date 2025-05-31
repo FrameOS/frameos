@@ -353,11 +353,11 @@ export function FrameSettings({ className }: FrameSettingsProps) {
             </div>
             <H6>Agent</H6>
             <div className="pl-2 @md:pl-8 space-y-2">
-              <Group name="network">
+              <Group name="agent">
                 <Field name="agentEnabled" label="Enable FrameOS Agent (EXPERIMENTAL)">
                   {({ value, onChange }) => <Switch name="agentEnabled" value={value} onChange={onChange} />}
                 </Field>
-                {frameForm.network?.agentEnabled && (
+                {frameForm.agent?.agentEnabled && (
                   <>
                     <Field name="agentConnection" label="Enable Agent reverse tunnel (EXPERIMENTAL)">
                       {({ value, onChange }) => <Switch name="agentConnection" value={value} onChange={onChange} />}
@@ -371,9 +371,9 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                           size="small"
                           onClick={() => {
                             setFrameFormValues({
-                              network: { ...(frameForm.network ?? {}), agentSharedSecret: secureToken(20) },
+                              agent: { ...(frameForm.agent ?? {}), agentSharedSecret: secureToken(20) },
                             })
-                            touchFrameFormField('network.agentSharedSecret')
+                            touchFrameFormField('agent.agentSharedSecret')
                           }}
                         >
                           Regenerate
@@ -383,8 +383,8 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                     >
                       <TextInput
                         name="agentSharedSecret"
-                        onClick={() => touchFrameFormField('network.agentSharedSecret')}
-                        type={frameFormTouches['network.agentSharedSecret'] ? 'text' : 'password'}
+                        onClick={() => touchFrameFormField('agent.agentSharedSecret')}
+                        type={frameFormTouches['agent.agentSharedSecret'] ? 'text' : 'password'}
                         placeholder=""
                         required
                       />
