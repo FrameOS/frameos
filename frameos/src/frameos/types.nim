@@ -26,6 +26,7 @@ type
     gpioButtons*: seq[GPIOButton]
     controlCode*: ControlCode
     network*: NetworkConfig
+    agent*: AgentConfig
 
   GPIOButton* = ref object
     pin*: int
@@ -49,7 +50,10 @@ type
     wifiHotspotSsid*: string
     wifiHotspotPassword*: string
     wifiHostpotTimeoutSeconds*: float
-    agentConnection*: bool
+
+  AgentConfig* = ref object
+    agentEnabled*: bool
+    agentRunCommands*: bool
     agentSharedSecret*: string
 
   FrameSchedule* = ref object

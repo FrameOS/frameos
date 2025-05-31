@@ -12,7 +12,6 @@ ExecStart=/srv/frameos/agent/current/frameos_agent
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
-NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=full
 

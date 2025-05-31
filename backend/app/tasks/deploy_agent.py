@@ -72,7 +72,7 @@ class AgentDeployer:
                 cpu = await self._detect_remote_cpu()
 
                 # 2. Build & deploy the agent (if needed)
-                if self._has_agent_connection():
+                if self._can_deploy_agent():
                     await self.log("stdout", "- Deploying agent")
                     await self._deploy_agent(cpu)
                     await self._setup_agent_service()
@@ -92,6 +92,10 @@ class AgentDeployer:
                     await self.exec_command("sudo systemctl restart frameos_agent.service")
                     await self.exec_command("sudo systemctl status frameos_agent.service")
                 else:
+                    await self.log(
+                        "stdout",
+                        f"- Skipping agent deployment for {self.frame.name} (no agent connection configured)"
+                    )
                     # If the frame has no agent connection configured, disable service
                     await self.exec_command(
                         "sudo systemctl disable frameos_agent.service", raise_on_error=False
@@ -101,6 +105,10 @@ class AgentDeployer:
                     )
 
                 await self._cleanup_old_builds()
+                await self.log(
+                    "stdout",
+                    f"Agent deployment completed for {self.frame.name} (build id: {self.build_id})",
+                )
 
         except Exception as exc:  # keep logging parity with legacy code
             await self.log("stderr", str(exc))
@@ -138,10 +146,10 @@ class AgentDeployer:
     ) -> None:
         await log(self.db, self.redis, int(self.frame.id), type=type, line=line, timestamp=timestamp)
 
-    def _has_agent_connection(self) -> bool:
+    def _can_deploy_agent(self) -> bool:
         """Whether ``frame.network`` declares an agent link + shared secret."""
-        net = self.frame.network or {}
-        return bool(net.get("agentConnection") and len(str(net.get("agentSharedSecret", ""))) > 0)
+        agent = self.frame.agent or {}
+        return bool(agent.get("agentEnabled") and len(str(agent.get("agentSharedSecret", ""))) > 0)
 
     async def _detect_remote_cpu(self) -> str:
         """SSH into the device and map `uname -m` to Nim's `--cpu:` flag."""

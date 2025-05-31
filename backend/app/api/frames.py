@@ -1,52 +1,456 @@
+from __future__ import annotations
+
+# stdlib ---------------------------------------------------------------------
 from datetime import datetime, timedelta
+from http import HTTPStatus
 import asyncssh
+import hashlib
 import io
 import json
 import os
+import re
 import shlex
-from jose import JWTError, jwt
-from http import HTTPStatus
 from tempfile import NamedTemporaryFile
+from typing import Any, Optional, Tuple
+from urllib.parse import quote
 
+# third-party ---------------------------------------------------------------
 import httpx
+from jose import JWTError, jwt
 from fastapi import Depends, File, Form, Request, HTTPException, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
+# local ---------------------------------------------------------------------
 from app.database import get_db
 from arq import ArqRedis as Redis
 from app.models.frame import Frame, new_frame, delete_frame, update_frame
 from app.models.log import new_log as log
 from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
-from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection
+from app.utils.ssh_utils import (
+    get_ssh_connection,
+    exec_command,
+    remove_ssh_connection,
+)
 from app.schemas.frames import (
-    FramesListResponse, FrameResponse, FrameLogsResponse,
-    FrameMetricsResponse, FrameImageLinkResponse, FrameStateResponse,
-    FrameAssetsResponse, FrameCreateRequest, FrameUpdateRequest
+    FramesListResponse,
+    FrameResponse,
+    FrameLogsResponse,
+    FrameMetricsResponse,
+    FrameImageLinkResponse,
+    FrameStateResponse,
+    FrameAssetsResponse,
+    FrameCreateRequest,
+    FrameUpdateRequest,
 )
 from app.api.auth import ALGORITHM, SECRET_KEY
 from app.config import config
 from app.utils.network import is_safe_host
+from app.utils.remote_exec import upload_file, _use_agent
 from app.redis import get_redis
 from app.websockets import publish_message
-from app.ws.agent_ws import number_of_connections_for_frame
+from app.ws.agent_ws import (
+    http_get_on_frame,
+    number_of_connections_for_frame,
+    file_md5_on_frame,
+    file_read_on_frame,
+    assets_list_on_frame,
+    exec_shell_on_frame,
+)
 from . import api_with_auth, api_no_auth
 
+def _not_found():
+    raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
+
+def _bad_request(msg: str):
+    raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=msg)
+
+_ascii_re = re.compile(r'[^A-Za-z0-9._-]')
+
+def _ascii_safe(name: str) -> str:
+    """Return a stripped ASCII fallback (for very old clients)."""
+    return _ascii_re.sub('_', name)[:150] or 'download'
+
+def _build_frame_path(
+    frame: Frame,
+    path: str,
+    method: str = "GET",
+) -> str:
+    """
+    Build the relative path used when talking to the device.
+
+    * For **GET** we keep the historical `?k=` query parameter so the
+      WebSocket agent (which cannot add headers) can authenticate.
+    * For **POST** and every other verb we **omit** the query parameter
+      – the plain-HTTP fallback is able to use the `Authorization`
+      header instead.
+    """
+    if not is_safe_host(frame.frame_host):
+        raise HTTPException(status_code=400, detail="Unsafe frame host")
+
+    if method == 'GET' and frame.frame_access not in ("public", "protected") and frame.frame_access_key:
+        sep = "&" if "?" in path else "?"
+        path = f"{path}{sep}k={frame.frame_access_key}"
+    return path
+
+
+def _build_frame_url(frame: Frame, path: str, method: str) -> str:
+    """Return full http://host:port/… URL (adds access key when required)."""
+    if not is_safe_host(frame.frame_host):
+        raise HTTPException(status_code=400, detail="Unsafe frame host")
+
+    scheme = "https" if frame.frame_port % 1000 == 443 else "http"
+    url = f"{scheme}://{frame.frame_host}:{frame.frame_port}{_build_frame_path(frame, path, method)}"
+    return url
+
+
+def _auth_headers(frame: Frame, hdrs: Optional[dict[str, str]] = None) -> dict[str, str]:
+    """
+    Inject HTTP Authorization header when the frame is not public.
+    """
+    hdrs = dict(hdrs or {})
+    if frame.frame_access != "public" and frame.frame_access_key:
+        hdrs.setdefault("Authorization", f"Bearer {frame.frame_access_key}")
+    return hdrs
+
+
+def _normalise_agent_response(resp: Any) -> tuple[int, Any]:
+    """
+    Agent “http” command returns {"status": int, "body": str}.
+    Convert that (or a normal HTTPX Response) into (status-code, payload).
+    """
+    if isinstance(resp, dict) and {"status", "body"} <= resp.keys():
+        status = int(resp.get("status", 0))
+        body_raw = resp.get("body", "")
+        try:
+            payload = json.loads(body_raw)
+        except (TypeError, json.JSONDecodeError):
+            payload = body_raw
+        return status, payload
+
+    # already a JSON-payload (e.g. other agent commands)
+    return 200, resp
+
+def _bytes_or_json(blob: bytes | str):
+    """
+    • If *blob* is str → return it as-is (already JSON-decoded upstream).
+    • If bytes → try UTF-8 → json.loads() → dict.
+      - valid JSON  → dict/list/…           (good for /state, /states)
+      - invalid JSON → leave as raw bytes   (needed for /image etc.)
+    """
+    if isinstance(blob, (bytes, bytearray)):
+        try:
+            return json.loads(blob.decode())   # UTF-8 is the JSON default
+        except Exception:
+            return blob                        # truly binary
+    return blob
+
+async def _forward_frame_request(
+    frame: Frame,
+    redis: Redis,
+    *,
+    path: str,
+    method: str = "GET",
+    json_body: Any | None = None,
+    cache_key: str | None = None,
+    cache_ttl: int = 1,
+) -> Any:
+    if cache_key and (cached := await redis.get(cache_key)):
+        return _bytes_or_json(cached)
+
+    # The agent HTTP command wants a *string* while httpx needs either
+    #   • json=<obj>   for real JSON payloads
+    #   • content=<bytes> for arbitrary binary bodies.
+    body_for_agent: str | None = None
+    if json_body is not None:
+        if isinstance(json_body, (bytes, bytearray)):
+            # keep the bytes unchanged – use latin-1 for a 1-to-1 mapping
+            body_for_agent = json_body.decode("latin1")
+        else:
+            body_for_agent = json.dumps(json_body)
+
+    if await _use_agent(frame, redis):
+        agent_resp = await http_get_on_frame(
+            frame.id,
+            _build_frame_path(frame, path, method),
+            method=method.upper(),
+            body=body_for_agent,
+            headers=_auth_headers(frame),
+        )
+        status, payload = _normalise_agent_response(agent_resp)
+        if status == 200:
+            if cache_key:
+                if isinstance(payload, (bytes, bytearray)):
+                    await redis.set(cache_key, payload, ex=cache_ttl)
+                else:
+                    try:
+                        await redis.set(cache_key, json.dumps(payload).encode(), ex=cache_ttl)
+                    except TypeError:
+                        pass
+            return payload
+
+        raise HTTPException(status_code=400, detail=f"Agent error: {status} {payload}")
+
+    url  = _build_frame_url(frame, path, method)
+    hdrs = _auth_headers(frame)
+    async with httpx.AsyncClient() as client:
+        try:
+            if isinstance(json_body, (bytes, bytearray)):
+                # binary/event bodies
+                response = await client.request(
+                    method,
+                    url,
+                    content=json_body,
+                    headers=hdrs,
+                    timeout=60.0,
+                )
+            elif json_body is not None:
+                # normal JSON payload
+                response = await client.request(
+                    method,
+                    url,
+                    json=json_body,
+                    headers=hdrs,
+                    timeout=60.0,
+                )
+            else:
+                # no body at all
+                response = await client.request(
+                    method,
+                    url,
+                    headers=hdrs,
+                    timeout=60.0,
+                )
+        except httpx.ReadTimeout:
+            raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Timeout to {url}")
+        except Exception as exc:
+            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc))
+
+    if response.status_code == 200:
+        if cache_key:
+            await redis.set(cache_key, response.content, ex=cache_ttl)
+        if response.headers.get("content-type", "").startswith("application/json"):
+            return response.json()
+        return response.text
+
+    # last-ditch: serve stale cache (JSON or bytes) ------------------------
+    if cache_key and (cached := await redis.get(cache_key)):
+        return _bytes_or_json(cached)
+
+    raise HTTPException(status_code=response.status_code, detail="Unable to reach frame")
+
+
+async def _remote_file_md5(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    remote_path: str,
+) -> Tuple[str, bool]:
+    """
+    Return (md5, exists). Prefer the websocket agent, fall back to SSH.
+    """
+    if await _use_agent(frame, redis):
+        resp = await file_md5_on_frame(frame.id, remote_path)
+        return resp.get("md5", ""), bool(resp.get("exists", False))
+
+    ssh = await get_ssh_connection(db, redis, frame)
+    try:
+        md5_out: list[str] = []
+        await exec_command(
+            db,
+            redis,
+            frame,
+            ssh,
+            f"md5sum {shlex.quote(remote_path)}",
+            output=md5_out,
+            log_output=False,
+        )
+        txt = "".join(md5_out).strip()
+        if not txt:
+            return "", False
+        return txt.split()[0], True
+    finally:
+        await remove_ssh_connection(db, redis, ssh, frame)
+
+
+async def _remote_download_file(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    remote_path: str,
+) -> bytes:
+    """
+    Download *remote_path* – agent first, SSH SCP otherwise.
+    """
+    if await _use_agent(frame, redis):
+        return await file_read_on_frame(frame.id, remote_path)
+
+    ssh = await get_ssh_connection(db, redis, frame)
+    try:
+        with NamedTemporaryFile(delete=False) as tmp:
+            tmp_name = tmp.name
+        await asyncssh.scp((ssh, shlex.quote(remote_path)), tmp_name, recurse=False)
+        with open(tmp_name, "rb") as fh:
+            data = fh.read()
+        os.remove(tmp_name)
+        return data
+    finally:
+        await remove_ssh_connection(db, redis, ssh, frame)
+
+
+async def _fetch_frame_http_bytes(
+    frame: Frame,
+    redis: Redis,
+    *,
+    path: str,
+    method: str = "GET",
+) -> tuple[int, bytes, dict[str, str]]:
+    """Fetch *path* from the frame returning (status, body-bytes, headers)."""
+
+    if await _use_agent(frame, redis):
+        resp = await http_get_on_frame(frame.id, _build_frame_path(frame, path, method))
+        if isinstance(resp, dict):
+            status = int(resp.get("status", 0))
+            if resp.get("binary"):
+                body = resp.get("body", b"")            # already bytes
+            else:
+                raw = resp.get("body", "")
+                body = raw.encode("latin1") if isinstance(raw, str) else raw
+            hdrs = {str(k).lower(): str(v) for k, v in (resp.get("headers") or {}).items()}
+            return status, body, hdrs
+        else:
+            raise HTTPException(status_code=500, detail="Bad agent response")
+
+    url = _build_frame_url(frame, path, method)
+    hdrs = _auth_headers(frame)
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, headers=hdrs, timeout=60.0)
+        except httpx.ReadTimeout:
+            raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Timeout to {url}")
+        except Exception as exc:
+            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc))
+
+    return response.status_code, response.content, dict(response.headers)
+
+# ---------------------------------------------------------------------------
+#   📡  Endpoints
+# ---------------------------------------------------------------------------
 
 @api_with_auth.get("/frames", response_model=FramesListResponse)
-async def api_frames_list(
+async def api_frames_list(db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+    frames = db.query(Frame).all()
+    return {
+        "frames": [
+            {
+                **f.to_dict(),
+                "active_connections": await number_of_connections_for_frame(redis, f.id),
+            }
+            for f in frames
+        ]
+    }
+
+
+@api_with_auth.get("/frames/{id:int}/state", response_model=FrameStateResponse)
+async def api_frame_get_state(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+    frame = db.get(Frame, id) or _not_found()
+    state = await _forward_frame_request(
+        frame,
+        redis,
+        path="/state",
+        cache_key=f"frame:{frame.frame_host}:{frame.frame_port}:state",
+    )
+    if isinstance(state, dict) and state.get("sceneId"):
+        await redis.set(f"frame:{frame.id}:active_scene", state["sceneId"])
+    return state
+
+
+@api_with_auth.get("/frames/{id:int}/states", response_model=FrameStateResponse)
+async def api_frame_get_states(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+    frame = db.get(Frame, id) or _not_found()
+    states = await _forward_frame_request(
+        frame,
+        redis,
+        path="/states",
+        cache_key=f"frame:{frame.frame_host}:{frame.frame_port}:states",
+    )
+    if isinstance(states, dict) and states.get("sceneId"):
+        await redis.set(f"frame:{frame.id}:active_scene", states["sceneId"])
+    return states
+
+
+@api_with_auth.post("/frames/{id:int}/event/{event}")
+async def api_frame_event(id: int, event: str, request: Request, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+    frame = db.get(Frame, id) or _not_found()
+    body = await (
+        request.json() if request.headers.get("content-type") == "application/json" else request.body()
+    )
+    try:
+        await _forward_frame_request(frame, redis, path=f"/event/{event}", method="POST", json_body=body)
+        return "OK"
+    except HTTPException as exc:
+        await log(db, redis, id, "stderr", f"Error on frame event {event}: {exc.detail}")
+        raise exc
+    except RuntimeError as exc:
+        await log(db, redis, id, "stderr", f"Error on frame event {event}: {str(exc)}")
+        raise exc
+
+
+
+@api_with_auth.get("/frames/{id:int}/asset")
+async def api_frame_get_asset(
+    id: int,
+    request: Request,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    frames = db.query(Frame).all()
-    frames_list = []
-    for frame in frames:
-        data = frame.to_dict()
-        data["active_connections"] = await number_of_connections_for_frame(redis, frame.id)
-        frames_list.append(data)
-    return {"frames": frames_list}
+    frame = db.get(Frame, id) or _not_found()
+
+    assets_path = frame.assets_path or "/srv/assets"
+    rel_path    = request.query_params.get("path") or _bad_request("Path parameter is required")
+    mode        = request.query_params.get("mode", "download")
+    filename    = request.query_params.get("filename", os.path.basename(rel_path))
+
+    full_path = os.path.normpath(os.path.join(assets_path, rel_path))
+    if not full_path.startswith(os.path.normpath(assets_path)):
+        _bad_request("Invalid asset path")
+
+    if await _use_agent(frame, redis):
+        try:
+            data = await file_read_on_frame(frame.id, full_path)
+        except Exception:  # file_read returns RuntimeError on missing file
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Asset not found")
+
+        md5 = hashlib.md5(data).hexdigest()
+        cache_key = f"asset:{md5}"
+        await redis.set(cache_key, data, ex=86400 * 30)
+
+    else:
+        md5, exists = await _remote_file_md5(db, redis, frame, full_path)
+        if not exists:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Asset not found")
+
+        cache_key = f"asset:{md5}"
+        if cached := await redis.get(cache_key):
+            data = cached
+        else:
+            data = await _remote_download_file(db, redis, frame, full_path)
+            await redis.set(cache_key, data, ex=86400 * 30)
+
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="image/png" if mode == "image" else "application/octet-stream",
+        headers={
+            "Content-Disposition": (
+                f"{'attachment' if mode == 'download' else 'inline'}; "
+                f'filename="{_ascii_safe(filename)}"; '
+                f"filename*=UTF-8''{quote(filename, safe='')}"
+            ),
+        },
+    )
+
 
 @api_with_auth.get("/frames/{id:int}", response_model=FrameResponse)
 async def api_frame_get(
@@ -76,17 +480,12 @@ async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
 @api_with_auth.get("/frames/{id:int}/image_token", response_model=FrameImageLinkResponse)
 async def get_image_token(id: int):
     expire_minutes = 5
-    now = datetime.utcnow()
+    now    = datetime.utcnow()
     expire = now + timedelta(minutes=expire_minutes)
     to_encode = {"sub": f"frame={id}", "exp": expire}
-    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    token     = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return {"token": token, "expires_in": int((expire - now).total_seconds())}
 
-    expires_in = int((expire - now).total_seconds())
-
-    return {
-        "token": token,
-        "expires_in": expires_in
-    }
 
 @api_no_auth.get("/frames/{id:int}/image")
 async def api_frame_get_image(
@@ -109,9 +508,7 @@ async def api_frame_get_image(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
-    url = f'http://{frame.frame_host}:{frame.frame_port}/image'
-    if frame.frame_access not in ["public", "protected"] and frame.frame_access_key:
-        url += "?k=" + frame.frame_access_key
+    path = "/image"
 
     if request.query_params.get('t') == '-1':
         last_image = await redis.get(cache_key)
@@ -119,24 +516,25 @@ async def api_frame_get_image(
             return Response(content=last_image, media_type='image/png')
 
     # Use shared semaphore and client
+    status = 0
+    body = b""
     try:
-        async with request.app.state.http_semaphore:
-            response = await request.app.state.http_client.get(url, timeout=10.0)
+        status, body, headers = await _fetch_frame_http_bytes(frame, redis, path=path)
 
-        if response.status_code == 200:
-            await redis.set(cache_key, response.content, ex=86400 * 30)
-            scene_id = response.headers.get('x-scene-id')
+        if status == 200:
+            await redis.set(cache_key, body, ex=86400 * 30)
+            scene_id = headers.get('x-scene-id')
             if not scene_id:
-                scene_id = await redis.get(f"frame:{id}:active_scene")
-                if scene_id:
-                    scene_id = scene_id.decode('utf-8')
+                encoded_scene_id = await redis.get(f"frame:{id}:active_scene")
+                if encoded_scene_id:
+                    scene_id = encoded_scene_id.decode('utf-8')
             if scene_id:
                 # dimensions (best‑effort – don’t crash if Pillow missing)
                 width = height = None
                 try:
                     from PIL import Image
                     import io
-                    img = Image.open(io.BytesIO(response.content))
+                    img = Image.open(io.BytesIO(body))
                     width, height = img.width, img.height
                 except Exception:
                     pass
@@ -150,9 +548,9 @@ async def api_frame_get_image(
                       .filter_by(frame_id=id, scene_id=scene_id)
                       .first()
                 )
-                thumb, t_width, t_height = _generate_thumbnail(response.content)
+                thumb, t_width, t_height = _generate_thumbnail(body)
                 if img_row:
-                    img_row.image      = response.content
+                    img_row.image      = body
                     img_row.timestamp  = now
                     img_row.width      = width
                     img_row.height     = height
@@ -163,7 +561,7 @@ async def api_frame_get_image(
                     img_row = SceneImage(
                         frame_id    = id,
                         scene_id    = scene_id,
-                        image       = response.content,
+                        image       = body,
                         timestamp   = now,
                         width       = width,
                         height      = height,
@@ -176,123 +574,16 @@ async def api_frame_get_image(
 
             await publish_message(redis, "new_scene_image", {"frameId": id, "sceneId": scene_id, "timestamp": now.isoformat(), "width": width, "height": height})
 
-            return Response(content=response.content, media_type='image/png')
+            return Response(content=body, media_type='image/png')
         else:
-            raise HTTPException(status_code=response.status_code, detail="Unable to fetch image")
+            await log(db, redis, id, "stderr", f"Error fetching image from frame {id}: {status} {body.decode(errors='ignore')}")
+            raise HTTPException(status_code=status, detail="Unable to fetch image")
 
     except httpx.ReadTimeout:
-        raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Request Timeout to {url}")
+        await log(db, redis, id, "stderr", f"Error fetching image from frame {id}: request timeout")
+        raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout")
     except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
-
-@api_with_auth.get("/frames/{id:int}/state", response_model=FrameStateResponse)
-async def api_frame_get_state(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
-    frame = db.get(Frame, id)
-    if frame is None:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-
-    if not is_safe_host(frame.frame_host):
-        raise HTTPException(status_code=400, detail="Unsafe frame host")
-
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:state'
-    url = f'http://{frame.frame_host}:{frame.frame_port}/state'
-    if frame.frame_access != "public" and frame.frame_access_key is not None:
-        url += "?k=" + frame.frame_access_key
-
-    try:
-        last_state = await redis.get(cache_key)
-        if last_state:
-            return json.loads(last_state)
-
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=15.0)
-
-        if response.status_code == 200:
-            await redis.set(cache_key, response.content, ex=1)
-            state = response.json()
-            if state.get('sceneId'):
-                await redis.set(f"frame:{frame.id}:active_scene", state.get('sceneId'))
-            return state
-        else:
-            last_state = await redis.get(cache_key)
-            if last_state:
-                return json.loads(last_state)
-            raise HTTPException(status_code=response.status_code, detail="Unable to fetch state")
-    except httpx.ReadTimeout:
-        raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Request Timeout to {url}")
-    except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
-
-@api_with_auth.get("/frames/{id:int}/states", response_model=FrameStateResponse)
-async def api_frame_get_states(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
-    frame = db.get(Frame, id)
-    if frame is None:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-
-    if not is_safe_host(frame.frame_host):
-        raise HTTPException(status_code=400, detail="Unsafe frame host")
-
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:states'
-    url = f'http://{frame.frame_host}:{frame.frame_port}/states'
-    if frame.frame_access != "public" and frame.frame_access_key is not None:
-        url += "?k=" + frame.frame_access_key
-
-    try:
-        last_states = await redis.get(cache_key)
-        if last_states:
-            return json.loads(last_states)
-
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=15.0)
-
-        if response.status_code == 200:
-            await redis.set(cache_key, response.content, ex=1)
-            states = response.json()
-            if states.get('sceneId'):
-                await redis.set(f"frame:{frame.id}:active_scene", states.get('sceneId'))
-            return states
-        else:
-            last_states = await redis.get(cache_key)
-            if last_states:
-                return json.loads(last_states)
-            raise HTTPException(status_code=response.status_code, detail="Unable to fetch state")
-    except httpx.ReadTimeout:
-        raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Request Timeout to {url}")
-    except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
-
-@api_with_auth.post("/frames/{id:int}/event/{event}")
-async def api_frame_event(id: int, event: str, request: Request, db: Session = Depends(get_db)):
-    frame = db.get(Frame, id)
-    if frame is None:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-
-    try:
-        headers = {}
-        if frame.frame_access != "public" and frame.frame_access_key is not None:
-            headers["Authorization"] = f'Bearer {frame.frame_access_key}'
-
-        async with httpx.AsyncClient() as client:
-            if request.headers.get('content-type') == 'application/json':
-                body = await request.json()
-                response = await client.post(
-                    f'http://{frame.frame_host}:{frame.frame_port}/event/{event}',
-                    json=body, headers=headers, timeout=15.0
-                )
-            else:
-                response = await client.post(
-                    f'http://{frame.frame_host}:{frame.frame_port}/event/{event}',
-                    headers=headers, timeout=15.0
-                )
-
-        if response.status_code == 200:
-            return "OK"
-        else:
-            raise HTTPException(status_code=response.status_code, detail="Unable to reach frame")
-    except Exception as e:
+        await log(db, redis, id, "stderr", f"Error fetching image from frame {id}: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
@@ -315,127 +606,27 @@ async def api_frame_get_assets(id: int, db: Session = Depends(get_db), redis: Re
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     assets_path = frame.assets_path or "/srv/assets"
+
+    if await _use_agent(frame, redis):
+        assets = await assets_list_on_frame(frame.id, assets_path)
+        assets.sort(key=lambda a: a["path"])
+        return {"assets": assets}
+
     ssh = await get_ssh_connection(db, redis, frame)
-    command = f"find {assets_path} -type f -exec stat --format='%s %Y %n' {{}} +"
-    output: list[str] = []
-    await exec_command(db, redis, frame, ssh, command, output, log_output=False)
-    await remove_ssh_connection(db, redis, ssh, frame)
-
-    assets: list[dict] = []
-    for line in output:
-        if line.strip():
-            parts = line.split(' ', 2)
-            size, mtime, path = parts
-            assets.append({
-                'path': path.strip(),
-                'size': int(size.strip()),
-                'mtime': int(mtime.strip()),
-            })
-
-    assets.sort(key=lambda x: x['path'])
-    return {"assets": assets}
-
-
-@api_with_auth.get("/frames/{id:int}/asset")
-async def api_frame_get_asset(
-    id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-    redis: Redis = Depends(get_redis)
-):
-    """
-    Download or stream an asset from the remote frame's filesystem using async SSH.
-    Uses an MD5 of the remote file to cache the content in Redis.
-    """
-    frame = db.get(Frame, id)
-    if frame is None:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-
-    assets_path = frame.assets_path or "/srv/assets"
-    path = request.query_params.get('path')
-    mode = request.query_params.get('mode', 'download')
-    filename = request.query_params.get('filename', os.path.basename(path or "."))
-
-    if not path:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Path parameter is required")
-
-    normalized_path = os.path.normpath(os.path.join(assets_path, path))
-    # Ensure the requested asset is inside the assets_path directory
-    if not normalized_path.startswith(os.path.normpath(assets_path)):
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid asset path")
-
     try:
-        ssh = await get_ssh_connection(db, redis, frame)
-        try:
-            # 1) Generate an MD5 sum of the remote file
-            escaped_path = shlex.quote(normalized_path)
-            command = f"md5sum {escaped_path}"
+        cmd = f"find {assets_path} -type f -exec stat --format='%s %Y %n' {{}} +"
+        output: list[str] = []
+        await exec_command(db, redis, frame, ssh, cmd, output, log_output=False)
+    finally:
+        await remove_ssh_connection(db, redis, ssh, frame)
 
-            # We'll read the MD5 from the command output
-            md5_output: list[str] = []
-            await exec_command(db, redis, frame, ssh, command, output=md5_output, log_output=False)
-            md5sum_output = "".join(md5_output).strip()
-            if not md5sum_output:
-                raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Asset not found")
-
-            md5sum = md5sum_output.split()[0]
-            cache_key = f'asset:{md5sum}'
-
-            # 2) Check if we already have this asset cached in Redis
-            cached_asset = await redis.get(cache_key)
-            if cached_asset:
-                return StreamingResponse(
-                    io.BytesIO(cached_asset),
-                    media_type='image/png' if mode == 'image' else 'application/octet-stream',
-                    headers={
-                        "Content-Disposition": (
-                            f'{"attachment" if mode == "download" else "inline"}; filename={filename}'
-                        )
-                    }
-                )
-
-            # 3) No cache found. Use asyncssh.scp to copy the remote file into a local temp file.
-            with NamedTemporaryFile(delete=False) as temp_file:
-                local_temp_path = temp_file.name
-
-            # scp from remote -> local
-            #  Note: (ssh, normalized_path) means "download from 'normalized_path' on the remote `ssh` connection"
-            await asyncssh.scp(
-                (ssh, escaped_path),
-                local_temp_path,
-                recurse=False
-            )
-
-            # 4) Read file contents and store in Redis
-            with open(local_temp_path, "rb") as f:
-                asset_content = f.read()
-
-            await redis.set(cache_key, asset_content, ex=86400 * 30)
-
-            # Cleanup temp file
-            os.remove(local_temp_path)
-
-            # 5) Return the file to the user
-            return StreamingResponse(
-                io.BytesIO(asset_content),
-                media_type='image/png' if mode == 'image' else 'application/octet-stream',
-                headers={
-                    "Content-Disposition": (
-                        f'{"attachment" if mode == "download" else "inline"}; filename={filename}'
-                    )
-                }
-            )
-        except Exception as e:
-            print(e)
-            raise e
-
-        finally:
-            await remove_ssh_connection(db, redis, ssh, frame)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+    assets = [
+        {"path": p.strip(), "size": int(s), "mtime": int(m)}
+        for line in output if (parts := line.split(" ", 2)) and len(parts) == 3
+        for s, m, p in [parts]
+    ]
+    assets.sort(key=lambda a: a["path"])
+    return {"assets": assets}
 
 @api_with_auth.post("/frames/{id:int}/assets/sync")
 async def api_frame_assets_sync(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
@@ -444,11 +635,14 @@ async def api_frame_assets_sync(id: int, db: Session = Depends(get_db), redis: R
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
     try:
         from app.models.assets import sync_assets
-        ssh = await get_ssh_connection(db, redis, frame)
-        try:
-            await sync_assets(db, redis, frame, ssh)
-        finally:
-            await remove_ssh_connection(db, redis, ssh, frame)
+        if await _use_agent(frame, redis):
+            await sync_assets(db, redis, frame, None)
+        else:
+            ssh = await get_ssh_connection(db, redis, frame)
+            try:
+                await sync_assets(db, redis, frame, ssh)
+            finally:
+                await remove_ssh_connection(db, redis, ssh, frame)
         return {"message": "Assets synced successfully"}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -456,52 +650,54 @@ async def api_frame_assets_sync(id: int, db: Session = Depends(get_db), redis: R
 @api_with_auth.post("/frames/{id:int}/assets/upload")
 async def api_frame_assets_upload(
     id: int,
-    path: str = Form(..., description="Folder where to place this asset"),
+    path: Optional[str] = Form(
+        None,
+        description="Sub-folder inside the frame's assets directory (optional)",
+    ),
     file: UploadFile = File(...),
     db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
 ):
-    frame = db.get(Frame, id)
-    if frame is None:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-    if not path:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Path parameter is required")
-    if "*" in path:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid character * in path")
-    assets_path = frame.assets_path or "/srv/assets"
-    combined_path = os.path.normpath(os.path.join(assets_path, path, file.filename or "uploaded_file"))
-    if not combined_path.startswith(os.path.normpath(assets_path) + '/'):
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid asset path")
+    frame = db.get(Frame, id) or _not_found()
 
-    # TODO: stream and reuse connections
-    ssh = await get_ssh_connection(db, redis, frame)
-    try:
-        with NamedTemporaryFile(delete=True) as temp_file:
-            local_temp_path = temp_file.name
-            contents = await file.read()
-            with open(local_temp_path, "wb") as f:
-                f.write(contents)
-            await log(db, redis, id, "stdout", f"Uploading: {combined_path}")
-            scp_escaped_path = shlex.quote(combined_path)
-            await asyncssh.scp(
-                local_temp_path,
-                (ssh, scp_escaped_path),
-                recurse=False
-            )
-    except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+    subdir = (path or "").lstrip("/")
+    if "*" in subdir or ".." in subdir or os.path.isabs(subdir):
+        _bad_request("Invalid character * in path")
 
-    finally:
-        await remove_ssh_connection(db, redis, ssh, frame)
+    assets_path   = frame.assets_path or "/srv/assets"
+    combined_path = os.path.normpath(
+        os.path.join(assets_path, subdir, file.filename or "uploaded_file")
+    )
+    if not combined_path.startswith(os.path.normpath(assets_path) + os.sep):
+        _bad_request("Invalid asset path")
 
-    path_without_combined = os.path.relpath(combined_path, assets_path)
+    data = await file.read()
 
-    return {"path": path_without_combined, "size": len(contents), "mtime": int(datetime.now().timestamp())}
+    await upload_file(db, redis, frame, combined_path, data)
+
+    rel = os.path.relpath(combined_path, assets_path)
+    return {
+        "path":  rel,
+        "size":  len(data),
+        "mtime": int(datetime.now().timestamp()),
+    }
 
 @api_with_auth.post("/frames/{id:int}/clear_build_cache")
 async def api_frame_clear_build_cache(id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)):
     frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    if await _use_agent(frame, redis):
+        try:
+            await log(db, redis, id, "stdout", "> rm -rf /srv/frameos/build/cache && echo DONE")
+            await exec_shell_on_frame(
+                frame.id,
+                "rm -rf /srv/frameos/build/cache && echo DONE"
+            )
+            return {"message": "Build cache cleared successfully"}
+        except Exception as e:
+            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
     try:
         ssh = await get_ssh_connection(db, redis, frame)
         try:

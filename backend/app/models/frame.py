@@ -1,4 +1,5 @@
 import json
+import copy
 import os
 from datetime import timezone
 from arq import ArqRedis as Redis
@@ -56,6 +57,7 @@ class Frame(Base):
     schedule = mapped_column(JSON, nullable=True)
     gpio_buttons = mapped_column(JSON, nullable=True)
     network = mapped_column(JSON, nullable=True)
+    agent = mapped_column(JSON, nullable=True)
 
     # not used
     apps = mapped_column(JSON, nullable=True)
@@ -99,6 +101,7 @@ class Frame(Base):
             'schedule': self.schedule,
             'gpio_buttons': self.gpio_buttons,
             'network': self.network,
+            'agent': self.agent,
             'last_successful_deploy': self.last_successful_deploy,
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
@@ -158,7 +161,10 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
             "wifiHotspotSsid": "FrameOS-Setup",
             "wifiHotspotPassword": "frame1234",
             "wifiHotspotTimeoutSeconds": 600,
-            "agentConnection": False,
+        },
+        agent={
+            "agentEnabled": False,
+            "agentRunCommands": False,
             "agentSharedSecret": secure_token(32)
         },
         control_code={"enabled": "true", "position": "top-right"},
@@ -209,6 +215,7 @@ def get_templates_json() -> dict:
 
 def get_frame_json(db: Session, frame: Frame) -> dict:
     network = frame.network or {}
+    agent = frame.agent or {}
     frame_json: dict = {
         "name": frame.name,
         "frameHost": frame.frame_host or "localhost",
@@ -255,13 +262,17 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "wifiHotspotSsid": network.get('wifiHotspotSsid', "FrameOS-Setup"),
             "wifiHotspotPassword": network.get('wifiHotspotPassword', "frame1234"),
             "wifiHotspotTimeoutSeconds": int(network.get('wifiHotspotTimeoutSeconds', 600)),
-            "agentConnection": bool(network.get('agentConnection', False)),
-            "agentSharedSecret": network.get('agentSharedSecret', secure_token(32)),
+        },
+        "agent": {
+            "agentEnabled": bool(agent.get('agentEnabled', False)),
+            "agentRunCommands": bool(agent.get('agentRunCommands', False)),
+            "agentSharedSecret": agent.get('agentSharedSecret', secure_token(32)),
         }
     }
 
     schedule = frame.schedule
     if schedule is not None:
+        schedule = copy.deepcopy(schedule)
         if schedule.get('disabled', None):
             schedule = None
         else:

@@ -28,7 +28,8 @@ export function Frame(props: FrameSceneProps) {
     restartAgent,
   } = useActions(frameLogic(frameLogicProps))
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
-  const canDeployAgent = !!(frame.network && frame.network.agentConnection && frame.network.agentSharedSecret)
+  const canDeployAgent = !!(frame.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret)
+  const agentExtra = canDeployAgent && frame.agent?.agentRunCommands ? ' (via agent)' : ' (via ssh)'
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -42,10 +43,10 @@ export function Frame(props: FrameSceneProps) {
                   buttonColor="secondary"
                   className="items-center"
                   items={[
-                    { label: 'Re-Render', onClick: () => renderFrame() },
-                    { label: 'Restart FrameOS', onClick: () => restartFrame() },
-                    { label: 'Stop FrameOS', onClick: () => stopFrame() },
-                    { label: 'Reboot device', onClick: () => rebootFrame() },
+                    { label: 'Re-Render' + agentExtra, onClick: () => renderFrame() },
+                    { label: 'Restart FrameOS' + agentExtra, onClick: () => restartFrame() },
+                    { label: 'Stop FrameOS' + agentExtra, onClick: () => stopFrame() },
+                    { label: 'Reboot device' + agentExtra, onClick: () => rebootFrame() },
                     ...(!requiresRecompilation
                       ? [
                           {
@@ -59,8 +60,14 @@ export function Frame(props: FrameSceneProps) {
                       : []),
                     ...(canDeployAgent
                       ? [
-                          { label: 'Deploy agent', onClick: () => deployAgent() },
-                          { label: 'Restart agent', onClick: () => restartAgent() },
+                          {
+                            label: 'Deploy agent (via ssh)',
+                            onClick: () => {
+                              deployAgent()
+                              openLogs()
+                            },
+                          },
+                          { label: 'Restart agent (via ssh)', onClick: () => restartAgent() },
                         ]
                       : []),
                   ]}
