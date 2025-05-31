@@ -28,7 +28,7 @@ export function Frame(props: FrameSceneProps) {
     restartAgent,
   } = useActions(frameLogic(frameLogicProps))
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
-  const canDeployAgent = !!(frame.network && frame.network.agentConnection && frame.network.agentSharedSecret)
+  const canDeployAgent = !!(frame.network && frame.network.agentEnabled && frame.network.agentSharedSecret)
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>

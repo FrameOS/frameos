@@ -354,11 +354,14 @@ export function FrameSettings({ className }: FrameSettingsProps) {
             <H6>Agent</H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               <Group name="network">
-                <Field name="agentConnection" label="Enable FrameOS Agent reverse connection (EXPERIMENTAL)">
-                  {({ value, onChange }) => <Switch name="agentConnection" value={value} onChange={onChange} />}
+                <Field name="agentEnabled" label="Enable FrameOS Agent (EXPERIMENTAL)">
+                  {({ value, onChange }) => <Switch name="agentEnabled" value={value} onChange={onChange} />}
                 </Field>
-                {frameForm.network?.agentConnection && (
+                {frameForm.network?.agentEnabled && (
                   <>
+                    <Field name="agentConnection" label="Enable Agent reverse tunnel (EXPERIMENTAL)">
+                      {({ value, onChange }) => <Switch name="agentConnection" value={value} onChange={onChange} />}
+                    </Field>
                     <Field
                       name="agentSharedSecret"
                       label={<div>Agent shared secret</div>}

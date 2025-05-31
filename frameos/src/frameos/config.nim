@@ -67,6 +67,7 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
       wifiHotspotSsid: data{"wifiHotspotSsid"}.getStr("FrameOS-Setup"),
       wifiHotspotPassword: data{"wifiHotspotPassword"}.getStr("frame1234"),
       wifiHostpotTimeoutSeconds: data{"wifiHotspotTimeoutSeconds"}.getFloat(600),
+      agentEnabled: data{"agentEnabled"}.getBool(),
       agentConnection: data{"agentConnection"}.getBool(),
       agentSharedSecret: data{"agentSharedSecret"}.getStr(""),
     )

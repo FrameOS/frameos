@@ -159,6 +159,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
             "wifiHotspotSsid": "FrameOS-Setup",
             "wifiHotspotPassword": "frame1234",
             "wifiHotspotTimeoutSeconds": 600,
+            "agentEnabled": False,
             "agentConnection": False,
             "agentSharedSecret": secure_token(32)
         },
@@ -256,6 +257,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "wifiHotspotSsid": network.get('wifiHotspotSsid', "FrameOS-Setup"),
             "wifiHotspotPassword": network.get('wifiHotspotPassword', "frame1234"),
             "wifiHotspotTimeoutSeconds": int(network.get('wifiHotspotTimeoutSeconds', 600)),
+            "agentEnabled": bool(network.get('agentEnabled', False)),
             "agentConnection": bool(network.get('agentConnection', False)),
             "agentSharedSecret": network.get('agentSharedSecret', secure_token(32)),
         }

@@ -57,7 +57,6 @@ async def reboot_frame_task(ctx: dict[str, Any], id: int):
     try:
         frame.status = "rebooting"
         await update_frame(db, redis, frame)
-
         await run_commands(
             db,
             redis,
@@ -66,9 +65,6 @@ async def reboot_frame_task(ctx: dict[str, Any], id: int):
                 "sudo reboot",
             ],
         )
-
-        frame.status = "starting"
-        await update_frame(db, redis, frame)
 
     except Exception as e:
         await log(db, redis, id, "stderr", str(e))

@@ -49,6 +49,7 @@ type
     wifiHotspotSsid*: string
     wifiHotspotPassword*: string
     wifiHostpotTimeoutSeconds*: float
+    agentEnabled*: bool
     agentConnection*: bool
     agentSharedSecret*: string
 

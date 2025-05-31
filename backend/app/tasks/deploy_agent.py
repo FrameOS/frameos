@@ -72,7 +72,7 @@ class AgentDeployer:
                 cpu = await self._detect_remote_cpu()
 
                 # 2. Build & deploy the agent (if needed)
-                if self._has_agent_connection():
+                if self._can_deploy_agent():
                     await self.log("stdout", "- Deploying agent")
                     await self._deploy_agent(cpu)
                     await self._setup_agent_service()
@@ -138,10 +138,13 @@ class AgentDeployer:
     ) -> None:
         await log(self.db, self.redis, int(self.frame.id), type=type, line=line, timestamp=timestamp)
 
-    def _has_agent_connection(self) -> bool:
+    def _can_deploy_agent(self) -> bool:
         """Whether ``frame.network`` declares an agent link + shared secret."""
         net = self.frame.network or {}
-        return bool(net.get("agentConnection") and len(str(net.get("agentSharedSecret", ""))) > 0)
+        return bool(
+            net.get("agentEnabled") and
+            len(str(net.get("agentSharedSecret", ""))) > 0
+        )
 
     async def _detect_remote_cpu(self) -> str:
         """SSH into the device and map `uname -m` to Nim's `--cpu:` flag."""

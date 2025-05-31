@@ -58,6 +58,7 @@ export interface FrameType {
     wifiHotspotSsid?: string
     wifiHotspotPassword?: string
     wifiHotspotTimeoutSeconds?: number
+    agentEnabled?: boolean
     agentConnection?: boolean
     agentSharedSecret?: string
   }

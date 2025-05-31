@@ -7,8 +7,7 @@ from arq import ArqRedis as Redis
 
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json
-from app.utils.remote_exec import run_commands
-from app.utils.remote_exec import upload_file
+from app.utils.remote_exec import run_commands, upload_file
 
 async def fast_deploy_frame(id: int, redis: Redis):
     await redis.enqueue_job("fast_deploy_frame", id=id)

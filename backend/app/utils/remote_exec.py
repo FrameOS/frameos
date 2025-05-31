@@ -31,9 +31,9 @@ __all__ = ["run_commands", "upload_file"]  # what the tasks import
 
 async def _use_agent(frame: Frame, redis: Redis) -> bool:
     """
-    Returns True when at least one websocket agent connection is live.
+    Returns True if we can use the WebSocket agent for this frame.
     """
-    if frame.network.get('agentConnection'):
+    if frame.network.get('agentEnabled') and frame.network.get('agentConnection'):
         if (await number_of_connections_for_frame(redis, frame.id)) <= 0:
             raise RuntimeError(
                 f"Frame {frame.id} has agent connections enabled, but no live WebSocket agent."
@@ -96,7 +96,7 @@ async def _file_write_via_agent(
         "frame_id": frame.id,
         "payload":  payload,
         "timeout":  timeout,
-        "blob":     base64.b64encode(zipped).decode(),   # <-- here
+        "blob":     base64.b64encode(zipped).decode(),
     }
 
     await redis.rpush("agent:cmd:queue", json.dumps(message).encode())
@@ -129,14 +129,9 @@ async def run_commands(
     timeout: int = 120,
 ) -> None:
     """
-    Execute *commands* (in order) on the frame.
-
-    1. Prefer direct agent --> ``exec_shell_on_frame``.
-    2. If no agent (or it fails), fall back to SSH transparently.
-    3. Emit logs exactly like the legacy SSH path so the UI stays identical.
+    Execute *commands* (in order) on the frame. Either via the WebSocket agent or via SSH.
     """
 
-    # ── 1) Agent path (mandatory when present) ────────────────────────────
     if await _use_agent(frame, redis):
         for cmd in commands:
             await log(db, redis, frame.id, "stdout", f"> {cmd}")
@@ -154,7 +149,6 @@ async def run_commands(
 
         return
 
-    # ── 2) SSH fallback (only when **no** agent is connected) ─────────────
     ssh = await get_ssh_connection(db, redis, frame)
     try:
         for cmd in commands:
@@ -173,17 +167,14 @@ async def upload_file(
 ) -> None:
     """
     Write *data* to *remote_path* on the device:
-
-    1. Try the WebSocket agent (`file_write_on_frame`).
-    2. If no live agent or it errors, fall back to SCP over the pooled SSH connection
     """
 
-    # ── agent first ───────────────────────────────────────────────────────
     if await _use_agent(frame, redis):
         try:
             await log(db, redis, frame.id, "stdout", f"> write {remote_path} (agent)")
             await _file_write_via_agent(redis, frame, remote_path, data, timeout)
             await log(db, redis, frame.id, "stdout", f"> file written to {remote_path} (agent)")
+            return
         except Exception as e:  # noqa: BLE001
             await log(
                 db,
@@ -193,9 +184,7 @@ async def upload_file(
                 f"Agent file_write error ({e})",
             )
             raise
-        return
 
-    # ── ssh fallback ──────────────────────────────────────────────────────
     ssh = await get_ssh_connection(db, redis, frame)
     try:
         with tempfile.NamedTemporaryFile(delete=False) as tmp:

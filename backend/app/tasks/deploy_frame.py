@@ -40,9 +40,6 @@ class FrameDeployer:
         self.ssh = ssh
         self.build_id = ''.join(random.choice(string.ascii_lowercase) for _ in range(12))
 
-    def has_agent_connection(self) -> bool:
-        return self.frame.network and self.frame.network.get('agentConnection', False) and len(str(self.frame.network.get('agentSharedSecret', ''))) > 0
-
     async def exec_command(
         self,
         command: str,
