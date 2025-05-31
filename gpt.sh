@@ -23,6 +23,7 @@ patterns=(
     # "backend/app/api/tests/test_settings.py"
     "backend/app/models/agent.py"
     "backend/app/models/frame.py"
+    "backend/app/models/assets.py"
     "backend/app/utils/ssh_utils.py"
     "backend/app/utils/remote_exec.py"
     "backend/app/tasks/*.py"

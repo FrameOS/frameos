@@ -157,13 +157,6 @@ async def _forward_frame_request(
     cache_key: str | None = None,
     cache_ttl: int = 1,
 ) -> Any:
-    """
-    Send HTTP-like request to the frame – first via the agent websocket (“http”
-    command), otherwise plain HTTP. A small Redis cache (1 s default) is used
-    for very chatty endpoints like /state.
-    """
-
-    # 0) maybe serve from cache
     if cache_key and (cached := await redis.get(cache_key)):
         return _bytes_or_json(cached)
 
@@ -178,7 +171,6 @@ async def _forward_frame_request(
         else:
             body_for_agent = json.dumps(json_body)
 
-    # 1) agent first --------------------------------------------------------
     if await _use_agent(frame, redis):
         agent_resp = await http_get_on_frame(
             frame.id,
@@ -189,7 +181,6 @@ async def _forward_frame_request(
         )
         status, payload = _normalise_agent_response(agent_resp)
         if status == 200:
-            # 2a) store in cache  ───────────────────────────────────────────
             if cache_key:
                 if isinstance(payload, (bytes, bytearray)):
                     await redis.set(cache_key, payload, ex=cache_ttl)
@@ -202,7 +193,6 @@ async def _forward_frame_request(
 
         raise HTTPException(status_code=400, detail=f"Agent error: {status} {payload}")
 
-    # 2) plain HTTP fallback -------------------------------------------------
     url  = _build_frame_url(frame, path, method)
     hdrs = _auth_headers(frame)
     async with httpx.AsyncClient() as client:
@@ -616,13 +606,12 @@ async def api_frame_get_assets(id: int, db: Session = Depends(get_db), redis: Re
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     assets_path = frame.assets_path or "/srv/assets"
-    # 1) prefer the WebSocket agent
+
     if await _use_agent(frame, redis):
         assets = await assets_list_on_frame(frame.id, assets_path)
         assets.sort(key=lambda a: a["path"])
         return {"assets": assets}
 
-    # 2) legacy SSH fall-back (unchanged)
     ssh = await get_ssh_connection(db, redis, frame)
     try:
         cmd = f"find {assets_path} -type f -exec stat --format='%s %Y %n' {{}} +"
@@ -667,7 +656,6 @@ async def api_frame_assets_upload(
 ):
     frame = db.get(Frame, id) or _not_found()
 
-    # normalise and validate optional sub-directory
     subdir = (path or "").lstrip("/")
     if "*" in subdir or ".." in subdir or os.path.isabs(subdir):
         _bad_request("Invalid character * in path")
@@ -681,7 +669,6 @@ async def api_frame_assets_upload(
 
     data = await file.read()
 
-    # one-liner: let remote_exec decide (agent → SSH) and log appropriately
     await upload_file(db, redis, frame, combined_path, data)
 
     rel = os.path.relpath(combined_path, assets_path)
