@@ -53,7 +53,7 @@ type
 
   AgentConfig* = ref object
     agentEnabled*: bool
-    agentConnection*: bool
+    agentRunCommands*: bool
     agentSharedSecret*: string
 
   FrameSchedule* = ref object

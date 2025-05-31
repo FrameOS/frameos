@@ -164,7 +164,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         },
         agent={
             "agentEnabled": False,
-            "agentConnection": False,
+            "agentRunCommands": False,
             "agentSharedSecret": secure_token(32)
         },
         control_code={"enabled": "true", "position": "top-right"},
@@ -265,7 +265,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         },
         "agent": {
             "agentEnabled": bool(agent.get('agentEnabled', False)),
-            "agentConnection": bool(agent.get('agentConnection', False)),
+            "agentRunCommands": bool(agent.get('agentRunCommands', False)),
             "agentSharedSecret": agent.get('agentSharedSecret', secure_token(32)),
         }
     }

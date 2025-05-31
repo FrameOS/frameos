@@ -75,7 +75,7 @@ proc loadAgent*(data: JsonNode): AgentConfig =
   else:
     result = AgentConfig(
       agentEnabled: data{"agentEnabled"}.getBool(),
-      agentConnection: data{"agentConnection"}.getBool(),
+      agentRunCommands: data{"agentRunCommands"}.getBool(),
       agentSharedSecret: data{"agentSharedSecret"}.getStr(""),
     )
 

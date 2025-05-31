@@ -28,7 +28,7 @@ type
 
   AgentConfig* = ref object
     agentEnabled*: bool
-    agentConnection*: bool
+    agentRunCommands*: bool
     agentSharedSecret*: string
 
   FrameConfig* = ref object
@@ -209,9 +209,9 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
   echo &"📥 cmd: {name}({args})"
 
   # No remote execution available
-  if not cfg.agent.agentConnection:
+  if not cfg.agent.agentRunCommands:
     if name != "version":
-      await sendResp(ws, cfg, id, false, %*{"error": "agentConnection disabled in config"})
+      await sendResp(ws, cfg, id, false, %*{"error": "agentRunCommands disabled in config"})
       return
 
   try:

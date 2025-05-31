@@ -34,7 +34,7 @@ async def _use_agent(frame: Frame, redis: Redis) -> bool:
     Returns True if we can use the WebSocket agent for this frame.
     """
     agent = frame.agent or {}
-    if agent.get('agentEnabled') and agent.get('agentConnection'):
+    if agent.get('agentEnabled') and agent.get('agentRunCommands'):
         if (await number_of_connections_for_frame(redis, frame.id)) <= 0:
             raise RuntimeError(
                 f"Frame {frame.id} agent enabled, but offline. Can't connect."

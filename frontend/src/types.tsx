@@ -61,7 +61,7 @@ export interface FrameType {
   }
   agent?: {
     agentEnabled?: boolean
-    agentConnection?: boolean
+    agentRunCommands?: boolean
     agentSharedSecret?: string
   }
   active_connections?: number

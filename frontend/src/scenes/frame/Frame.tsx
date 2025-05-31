@@ -29,7 +29,7 @@ export function Frame(props: FrameSceneProps) {
   } = useActions(frameLogic(frameLogicProps))
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
   const canDeployAgent = !!(frame.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret)
-  const agentExtra = canDeployAgent && frame.agent?.agentConnection ? ' (via agent)' : ' (via ssh)'
+  const agentExtra = canDeployAgent && frame.agent?.agentRunCommands ? ' (via agent)' : ' (via ssh)'
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
