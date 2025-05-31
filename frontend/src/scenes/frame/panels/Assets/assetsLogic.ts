@@ -48,8 +48,10 @@ function buildAssetTree(assets: AssetType[]): AssetNode {
       currentNode = currentNode.children[part]
     })
 
-    if (Object.keys(currentNode.children).length === 0) {
+    if (!asset.is_dir && Object.keys(currentNode.children).length === 0) {
       currentNode.isFolder = false
+    } else {
+      currentNode.isFolder = true
     }
 
     currentNode.size = asset.size
@@ -69,6 +71,11 @@ export const assetsLogic = kea<assetsLogicType>([
     filesToUpload: (files: string[]) => ({ files }),
     uploadFailure: (path: string) => ({ path }),
     syncAssets: true,
+    deleteAsset: (path: string) => ({ path }),
+    assetDeleted: (path: string) => ({ path }),
+    renameAsset: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
+    assetRenamed: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
+    createFolder: (path: string) => ({ path }),
   }),
   loaders(({ props }) => ({
     assets: [
@@ -129,7 +136,7 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     ],
   }),
-  listeners(({ actions, props }) => ({
+  listeners(({ actions, props, values }) => ({
     uploadAssets: async ({ path }) => {
       const input = document.createElement('input')
       input.type = 'file'
@@ -156,6 +163,41 @@ export const assetsLogic = kea<assetsLogicType>([
       }
       input.click()
     },
+    deleteAsset: async ({ path }) => {
+      try {
+        await apiFetch(`/api/frames/${props.frameId}/assets/delete`, {
+          method: 'POST',
+          body: new URLSearchParams({ path }),
+        })
+        const assetsPath = values.frame.assets_path ?? '/srv/assets'
+        actions.assetDeleted(assetsPath + '/' + path)
+      } catch (error) {
+        console.error(error)
+      }
+    },
+    renameAsset: async ({ oldPath, newPath }) => {
+      try {
+        await apiFetch(`/api/frames/${props.frameId}/assets/rename`, {
+          method: 'POST',
+          body: new URLSearchParams({ src: oldPath, dst: newPath }),
+        })
+        const assetsPath = values.frame.assets_path ?? '/srv/assets'
+        actions.assetRenamed(assetsPath + '/' + oldPath, assetsPath + '/' + newPath)
+      } catch (error) {
+        console.error(error)
+      }
+    },
+    createFolder: async ({ path }) => {
+      try {
+        await apiFetch(`/api/frames/${props.frameId}/assets/mkdir`, {
+          method: 'POST',
+          body: new URLSearchParams({ path }),
+        })
+        actions.loadAssets()
+      } catch (error) {
+        console.error(error)
+      }
+    },
   })),
   reducers({
     assets: {
@@ -181,6 +223,10 @@ export const assetsLogic = kea<assetsLogicType>([
       },
       uploadFailure: (state, { path }) =>
         state.map((asset) => (asset.path === path ? { ...asset, size: -2, mtime: -2 } : asset)),
+      assetDeleted: (state, { path }) => state.filter((a) => a.path !== path),
+      assetRenamed: (state, { oldPath, newPath }) => {
+        return state.map((a) => (a.path === oldPath ? { ...a, path: newPath } : a))
+      },
     },
   }),
   afterMount(({ actions }) => {

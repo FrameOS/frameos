@@ -41,7 +41,9 @@ export function Frame({ frame }: FrameProps): JSX.Element {
       </div>
       <div className="px-4 pb-4">
         <div className="flex sm:text-lg text-gray-400 items-center gap-1">
-          {(frame?.active_connections ?? 0) > 0 ? <span title="FrameOS Agent connected">🟢</span> : null}
+          {(frame?.active_connections ?? 0) > 0 ? (
+            <span title="FrameOS Agent connected">{frame?.agent?.agentRunCommands ? '🟢' : '🟠'}</span>
+          ) : null}
           <span>{frameStatus(frame)}</span>
         </div>
       </div>

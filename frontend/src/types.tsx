@@ -122,6 +122,7 @@ export interface AssetType {
   path: string
   size: number
   mtime: number
+  is_dir?: boolean
 }
 
 export interface MetricsType {

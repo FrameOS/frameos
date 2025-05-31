@@ -339,6 +339,40 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
         except CatchableError as e:
           await sendResp(ws, cfg, id, false, %*{"error": e.msg})
 
+    of "file_delete":
+      let path = args{"path"}.getStr("")
+      if path.len == 0:
+        await sendResp(ws, cfg, id, false, %*{"error": "`path` missing"})
+      else:
+        try:
+          let rc = execShellCmd("rm -rf " & quoteShell(path))
+          await sendResp(ws, cfg, id, rc == 0, %*{"exit": rc})
+        except CatchableError as e:
+          await sendResp(ws, cfg, id, false, %*{"error": e.msg})
+
+    of "file_mkdir":
+      let path = args{"path"}.getStr("")
+      if path.len == 0:
+        await sendResp(ws, cfg, id, false, %*{"error": "`path` missing"})
+      else:
+        try:
+          let rc = execShellCmd("mkdir -p " & quoteShell(path))
+          await sendResp(ws, cfg, id, rc == 0, %*{"exit": rc})
+        except CatchableError as e:
+          await sendResp(ws, cfg, id, false, %*{"error": e.msg})
+
+    of "file_rename":
+      let src = args{"src"}.getStr("")
+      let dst = args{"dst"}.getStr("")
+      if src.len == 0 or dst.len == 0:
+        await sendResp(ws, cfg, id, false, %*{"error": "`src`/`dst` missing"})
+      else:
+        try:
+          let rc = execShellCmd("mv " & quoteShell(src) & " " & quoteShell(dst))
+          await sendResp(ws, cfg, id, rc == 0, %*{"exit": rc})
+        except CatchableError as e:
+          await sendResp(ws, cfg, id, false, %*{"error": e.msg})
+
     of "assets_list":
       let root = args{"path"}.getStr("")
       if root.len == 0:
@@ -349,12 +383,13 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
                        %*{"error": "dir not found"})
       else:
         var items = newSeq[JsonNode]()
-        for path in walkDirRec(root):
+        for path in walkDirRec(root, yieldFilter = {pcFile, pcDir}):
           let fi = getFileInfo(path)
           items.add %*{
             "path": path,
             "size": fi.size,
-            "mtime": fi.lastWriteTime.toUnix()
+            "mtime": fi.lastWriteTime.toUnix(),
+            "is_dir": dirExists(path)
           }
         await sendResp(ws, cfg, id, true, %*{"assets": items})
     else:
