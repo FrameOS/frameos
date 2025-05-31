@@ -57,16 +57,23 @@ async def next_command(frame_id: int) -> tuple[dict, bytes | None] | None:
 def resolve_command(cmd_id: str, ok: bool, result):
     fut = _pending.pop(cmd_id, None)
     if fut and not fut.done():
-        if cmd_id in _binary_buffers:
-            data = bytes(_binary_buffers.pop(cmd_id))
+        # ───────────── attach streamed binary, if any ─────────────
+        if cmd_id in _binary_buffers:                  # we saw Binary frames
+            raw = bytes(_binary_buffers.pop(cmd_id))
+
+            # file_read → gzip,  http → plain
             try:
-                data = gzip.decompress(data)
+                raw_decompressed = gzip.decompress(raw)
             except Exception:
-                data = b""
-            if ok:
-                fut.set_result(data)
+                raw_decompressed = raw                # not gzipped
+
+            if isinstance(result, dict) and "status" in result:
+                # ← http command: return dictbody
+                result["body"] = raw_decompressed
+                fut.set_result(result if ok else RuntimeError(result))
             else:
-                fut.set_exception(RuntimeError(result))
+                # ← file_read: return raw bytes
+                fut.set_result(raw_decompressed if ok else RuntimeError(result))
         else:
             if ok:
                 fut.set_result(result)
@@ -87,7 +94,7 @@ async def pump_commands(ws: WebSocket,
 
             try:
                 await ws.send_json(env)
-                if cmd.get("name") == "file_read":
+                if cmd.get("name") in ("file_read", "http"):
                     _pending_bin_by_ws[ws] = cmd["id"]
                 if blob:
                     for i in range(0, len(blob), 4096):
@@ -115,7 +122,10 @@ async def http_get_on_frame(frame_id: int, path: str,
         "name": "http",
         "args": {"method": method, "path": path, "body": body},
     }
-    fut, _ = queue_command(frame_id, payload)
+    fut, cmd_id = queue_command(frame_id, payload)
+
+    # this allocates the buffer which Binary frames will fill
+    _binary_buffers[cmd_id] = bytearray()
     return await asyncio.wait_for(fut, timeout=timeout)
 
 async def assets_list_on_frame(frame_id: int, path: str,

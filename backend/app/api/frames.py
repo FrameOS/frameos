@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from http import HTTPStatus
 import asyncssh
-import base64
 import hashlib
 import io
 import json
@@ -248,6 +247,41 @@ async def _remote_download_file(
     finally:
         await remove_ssh_connection(db, redis, ssh, frame)
 
+
+async def _fetch_frame_http_bytes(
+    frame: Frame,
+    redis: Redis,
+    *,
+    path: str,
+) -> tuple[int, bytes, dict[str, str]]:
+    """Fetch *path* from the frame returning (status, body-bytes, headers)."""
+
+    if await _use_agent(frame, redis):
+        resp = await http_get_on_frame(frame.id, _build_frame_path(frame, path))
+        if isinstance(resp, dict):
+            status = int(resp.get("status", 0))
+            if resp.get("binary"):
+                body = resp.get("body", b"")            # already bytes
+            else:
+                raw = resp.get("body", "")
+                body = raw.encode("latin1") if isinstance(raw, str) else raw
+            hdrs = {str(k).lower(): str(v) for k, v in (resp.get("headers") or {}).items()}
+            return status, body, hdrs
+        else:
+            raise HTTPException(status_code=500, detail="Bad agent response")
+
+    url = _build_frame_url(frame, path)
+    hdrs = _auth_headers(frame)
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, headers=hdrs, timeout=15.0)
+        except httpx.ReadTimeout:
+            raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Timeout to {url}")
+        except Exception as exc:
+            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc))
+
+    return response.status_code, response.content, dict(response.headers)
+
 # ---------------------------------------------------------------------------
 #   📡  Endpoints
 # ---------------------------------------------------------------------------
@@ -410,9 +444,9 @@ async def api_frame_get_image(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
-    url = f'http://{frame.frame_host}:{frame.frame_port}/image'
+    path = "/image"
     if frame.frame_access not in ["public", "protected"] and frame.frame_access_key:
-        url += "?k=" + frame.frame_access_key
+        path += "?k=" + frame.frame_access_key
 
     if request.query_params.get('t') == '-1':
         last_image = await redis.get(cache_key)
@@ -421,23 +455,22 @@ async def api_frame_get_image(
 
     # Use shared semaphore and client
     try:
-        async with request.app.state.http_semaphore:
-            response = await request.app.state.http_client.get(url, timeout=10.0)
+        status, body, headers = await _fetch_frame_http_bytes(frame, redis, path=path)
 
-        if response.status_code == 200:
-            await redis.set(cache_key, response.content, ex=86400 * 30)
-            scene_id = response.headers.get('x-scene-id')
+        if status == 200:
+            await redis.set(cache_key, body, ex=86400 * 30)
+            scene_id = headers.get('x-scene-id')
             if not scene_id:
-                scene_id = await redis.get(f"frame:{id}:active_scene")
-                if scene_id:
-                    scene_id = scene_id.decode('utf-8')
+                encoded_scene_id = await redis.get(f"frame:{id}:active_scene")
+                if encoded_scene_id:
+                    scene_id = encoded_scene_id.decode('utf-8')
             if scene_id:
                 # dimensions (best‑effort – don’t crash if Pillow missing)
                 width = height = None
                 try:
                     from PIL import Image
                     import io
-                    img = Image.open(io.BytesIO(response.content))
+                    img = Image.open(io.BytesIO(body))
                     width, height = img.width, img.height
                 except Exception:
                     pass
@@ -451,9 +484,9 @@ async def api_frame_get_image(
                       .filter_by(frame_id=id, scene_id=scene_id)
                       .first()
                 )
-                thumb, t_width, t_height = _generate_thumbnail(response.content)
+                thumb, t_width, t_height = _generate_thumbnail(body)
                 if img_row:
-                    img_row.image      = response.content
+                    img_row.image      = body
                     img_row.timestamp  = now
                     img_row.width      = width
                     img_row.height     = height
@@ -464,7 +497,7 @@ async def api_frame_get_image(
                     img_row = SceneImage(
                         frame_id    = id,
                         scene_id    = scene_id,
-                        image       = response.content,
+                        image       = body,
                         timestamp   = now,
                         width       = width,
                         height      = height,
@@ -477,12 +510,12 @@ async def api_frame_get_image(
 
             await publish_message(redis, "new_scene_image", {"frameId": id, "sceneId": scene_id, "timestamp": now.isoformat(), "width": width, "height": height})
 
-            return Response(content=response.content, media_type='image/png')
+            return Response(content=body, media_type='image/png')
         else:
-            raise HTTPException(status_code=response.status_code, detail="Unable to fetch image")
+            raise HTTPException(status_code=status, detail="Unable to fetch image")
 
     except httpx.ReadTimeout:
-        raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Request Timeout to {url}")
+        raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout")
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -568,7 +601,7 @@ async def api_frame_assets_upload(
     # ---------- 1) try agent upload ---------------------------------------
     if (await _use_agent(frame, redis)):
         await log(db, redis, id, "stdout", f"Agent upload: {combined_path}")
-        await file_write_on_frame(frame.id, combined_path, base64.b64encode(contents).decode())
+        await file_write_on_frame(frame.id, combined_path, contents)
         path_relative = os.path.relpath(combined_path, assets_path)
         return {"path": path_relative, "size": len(contents), "mtime": int(datetime.now().timestamp())}
 

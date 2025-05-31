@@ -1,5 +1,5 @@
 import std/[algorithm, segfaults, strformat, strutils, asyncdispatch, terminal,
-            times, os, sysrand, httpclient, osproc, streams, base64]
+            times, os, sysrand, httpclient, osproc, streams, unicode]
 import checksums/md5
 import json, jsony
 import ws
@@ -212,23 +212,41 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
     of "http":
       let methodArg = args{"method"}.getStr("GET")
       let path = args{"path"}.getStr("/")
-      let body = args{"body"}.getStr("")
+      let bodyArg = args{"body"}.getStr("")
 
       var client = newAsyncHttpClient()
       let url = &"http://127.0.0.1:{cfg.framePort}{path}"
-      let resp = await (if methodArg == "POST":
-        client.post(url, body)
+      let resp = await (if methodArg == "POST": client.post(url, bodyArg) else: client.get(url))
+
+      let bodyBytes = await resp.body # raw bytes
+      var hdrs = %*{}
+      for k, v in resp.headers: hdrs[k.toLowerAscii()] = %*v
+
+      # ---------- send binary when body is not UTF-8 ---------- #
+      let isBinary = bodyBytes.validateUtf8() >= 0
+      if isBinary:
+        # ── 1. stream the bytes FIRST ───────────────────────────────
+        var sent = 0
+        const chunk = 65536
+        while sent < bodyBytes.len:
+          let endPos = min(sent + chunk, bodyBytes.len)
+          await ws.send(bodyBytes[sent ..< endPos], OpCode.Binary)
+          sent = endPos
+
+        # ── 2. JSON reply AFTER all chunks ──────────────────────────
+        await sendResp(ws, cfg, id, true, %*{
+          "status": resp.code.int,
+          "size": bodyBytes.len,
+          "headers": hdrs,
+          "binary": true # flag for backend
+        })
       else:
-        client.get(url))
-
-      let bodyText = await resp.body # <- await here!
-
-      let result = %*{
-        "status": resp.code.int,
-        "body": bodyText # now a plain string
-      }
-      await sendResp(ws, cfg, id, true, result)
-
+        await sendResp(
+          ws, cfg, id, true,
+          %*{"status": resp.code.int,
+              "body": cast[string](bodyBytes),
+              "headers": hdrs,
+              "binary": false})
     of "shell":
       if not args.hasKey("cmd"):
         await sendResp(ws, cfg, id, false,
