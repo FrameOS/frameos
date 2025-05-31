@@ -73,25 +73,35 @@ def _ascii_safe(name: str) -> str:
     """Return a stripped ASCII fallback (for very old clients)."""
     return _ascii_re.sub('_', name)[:150] or 'download'
 
-def _build_frame_path(frame: Frame, path: str) -> str:
+def _build_frame_path(
+    frame: Frame,
+    path: str,
+    method: str = "GET",
+) -> str:
     """
-    Return a fully-qualified /path (adds ?k=… when the frame is not public).
+    Build the relative path used when talking to the device.
+
+    * For **GET** we keep the historical `?k=` query parameter so the
+      WebSocket agent (which cannot add headers) can authenticate.
+    * For **POST** and every other verb we **omit** the query parameter
+      – the plain-HTTP fallback is able to use the `Authorization`
+      header instead.
     """
     if not is_safe_host(frame.frame_host):
         raise HTTPException(status_code=400, detail="Unsafe frame host")
 
-    if frame.frame_access not in ("public", "protected") and frame.frame_access_key:
+    if method == 'GET' and frame.frame_access not in ("public", "protected") and frame.frame_access_key:
         sep = "&" if "?" in path else "?"
         path = f"{path}{sep}k={frame.frame_access_key}"
     return path
 
 
-def _build_frame_url(frame: Frame, path: str) -> str:
+def _build_frame_url(frame: Frame, path: str, method: str) -> str:
     """Return full http://host:port/… URL (adds access key when required)."""
     if not is_safe_host(frame.frame_host):
         raise HTTPException(status_code=400, detail="Unsafe frame host")
 
-    url = f"http://{frame.frame_host}:{frame.frame_port}{_build_frame_path(frame, path)}"
+    url = f"http://{frame.frame_host}:{frame.frame_port}{_build_frame_path(frame, path, method)}"
     return url
 
 
@@ -162,18 +172,25 @@ async def _forward_frame_request(
     if cache_key and (cached := await redis.get(cache_key)):
         return _bytes_or_json(cached)
 
-    # JSON body must be encoded as *string* when travelling through the agent
+    # The agent HTTP command wants a *string* while httpx needs either
+    #   • json=<obj>   for real JSON payloads
+    #   • content=<bytes> for arbitrary binary bodies.
     body_for_agent: str | None = None
     if json_body is not None:
-        body_for_agent = json.dumps(json_body)
+        if isinstance(json_body, (bytes, bytearray)):
+            # keep the bytes unchanged – use latin-1 for a 1-to-1 mapping
+            body_for_agent = json_body.decode("latin1")
+        else:
+            body_for_agent = json.dumps(json_body)
 
     # 1) agent first --------------------------------------------------------
     if await _use_agent(frame, redis):
         agent_resp = await http_get_on_frame(
             frame.id,
-            _build_frame_path(frame, path),
+            _build_frame_path(frame, path, method),
             method=method.upper(),
             body=body_for_agent,
+            headers=_auth_headers(frame),
         )
         status, payload = _normalise_agent_response(agent_resp)
         if status == 200:
@@ -191,13 +208,36 @@ async def _forward_frame_request(
         raise HTTPException(status_code=400, detail=f"Agent error: {status} {payload}")
 
     # 2) plain HTTP fallback -------------------------------------------------
-    url  = _build_frame_url(frame, path)
+    url  = _build_frame_url(frame, path, method)
     hdrs = _auth_headers(frame)
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.request(
-                method, url, json=json_body, headers=hdrs, timeout=15.0
-            )
+            if isinstance(json_body, (bytes, bytearray)):
+                # binary/event bodies
+                response = await client.request(
+                    method,
+                    url,
+                    content=json_body,
+                    headers=hdrs,
+                    timeout=60.0,
+                )
+            elif json_body is not None:
+                # normal JSON payload
+                response = await client.request(
+                    method,
+                    url,
+                    json=json_body,
+                    headers=hdrs,
+                    timeout=60.0,
+                )
+            else:
+                # no body at all
+                response = await client.request(
+                    method,
+                    url,
+                    headers=hdrs,
+                    timeout=60.0,
+                )
         except httpx.ReadTimeout:
             raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Timeout to {url}")
         except Exception as exc:
@@ -280,11 +320,12 @@ async def _fetch_frame_http_bytes(
     redis: Redis,
     *,
     path: str,
+    method: str = "GET",
 ) -> tuple[int, bytes, dict[str, str]]:
     """Fetch *path* from the frame returning (status, body-bytes, headers)."""
 
     if await _use_agent(frame, redis):
-        resp = await http_get_on_frame(frame.id, _build_frame_path(frame, path))
+        resp = await http_get_on_frame(frame.id, _build_frame_path(frame, path, method))
         if isinstance(resp, dict):
             status = int(resp.get("status", 0))
             if resp.get("binary"):
@@ -297,11 +338,11 @@ async def _fetch_frame_http_bytes(
         else:
             raise HTTPException(status_code=500, detail="Bad agent response")
 
-    url = _build_frame_url(frame, path)
+    url = _build_frame_url(frame, path, method)
     hdrs = _auth_headers(frame)
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(url, headers=hdrs, timeout=15.0)
+            response = await client.get(url, headers=hdrs, timeout=60.0)
         except httpx.ReadTimeout:
             raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Timeout to {url}")
         except Exception as exc:

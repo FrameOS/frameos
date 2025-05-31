@@ -119,11 +119,19 @@ async def pump_commands(ws: WebSocket,
         await ws.close(code=1000)
 
 async def http_get_on_frame(frame_id: int, path: str,
-                            method="GET", body=None, timeout=30):
+                            method: str = "GET",
+                            body = None,
+                            headers: dict[str, str] | None = None,
+                            timeout: int = 30):
     payload = {
         "type": "cmd",
         "name": "http",
-        "args": {"method": method, "path": path, "body": body},
+        "args": {
+            "method":  method,
+            "path":    path,
+            "body":    body,
+            "headers": headers or {},
+        },
     }
     fut, cmd_id = queue_command(frame_id, payload)
 

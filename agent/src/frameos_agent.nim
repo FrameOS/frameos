@@ -215,6 +215,12 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
       let bodyArg = args{"body"}.getStr("")
 
       var client = newAsyncHttpClient()
+      if args.hasKey("headers"):
+        for k, v in args["headers"].pairs:
+          try:
+            client.headers.add(k, v.getStr())
+          except Exception:
+            discard # ignore malformed header values
       let url = &"http://127.0.0.1:{cfg.framePort}{path}"
       let resp = await (if methodArg == "POST": client.post(url, bodyArg) else: client.get(url))
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import base64
 
 from arq import ArqRedis as Redis
 
@@ -24,9 +25,24 @@ async def _handle_one(redis: Redis, raw: bytes) -> None:
     frame_id = job["frame_id"]
     payload  = job["payload"]
     timeout  = job.get("timeout", 120)
+    blob_b64 = job.get("blob")
+
+    blob: bytes | None = None
+    if blob_b64 is not None:
+        try:
+            blob = base64.b64decode(blob_b64)
+        except Exception:
+            # malformed data – fail fast so caller sees the error
+            resp_key = f"{RESP_PREFIX}{cmd_id}"
+            await redis.rpush(
+                resp_key,
+                json.dumps({"ok": False, "error": "cannot decode blob"}).encode(),
+            )
+            await redis.expire(resp_key, 60)
+            return
 
     try:
-        fut, _ = queue_command(frame_id, payload)
+        fut, _ = queue_command(frame_id, payload, blob)
         result = await asyncio.wait_for(fut, timeout=timeout)
         reply  = {"ok": True, "result": result}
     except Exception as e:  # noqa: BLE001

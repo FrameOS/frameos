@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import base64
 import json
 import uuid
 import asyncssh
+import gzip
 import tempfile
 import os
 import shlex
@@ -52,12 +54,57 @@ async def _exec_via_agent(
     await redis.rpush("agent:cmd:queue", json.dumps(message).encode())
 
     resp_key = f"agent:resp:{cmd_id}"
-    _key, raw = await redis.blpop(resp_key, timeout=timeout)
+    res = await redis.blpop(resp_key, timeout=timeout)
+    if res is None:                                  # ⬅︎ handle timeout
+        raise TimeoutError(
+            f"_exec_via_agent via agent timed-out after {timeout}s "
+            f"(frame {frame.id}, command: {cmd})"
+        )
+
+    _key, raw = res
     reply = json.loads(raw)
 
     if not reply.get("ok"):
         raise RuntimeError(reply.get("error", "agent error"))
 
+async def _file_write_via_agent(
+    redis: Redis,
+    frame: Frame,
+    remote_path: str,
+    data: bytes,
+    timeout: int,
+) -> None:
+    cmd_id  = str(uuid.uuid4())
+    zipped  = gzip.compress(data)
+    payload = {
+        "type": "cmd",
+        "name": "file_write",
+        "args": {"path": remote_path, "size": len(zipped)},
+    }
+
+    message = {
+        "id":       cmd_id,
+        "frame_id": frame.id,
+        "payload":  payload,
+        "timeout":  timeout,
+        "blob":     base64.b64encode(zipped).decode(),   # <-- here
+    }
+
+    await redis.rpush("agent:cmd:queue", json.dumps(message).encode())
+
+    resp_key = f"agent:resp:{cmd_id}"
+    res = await redis.blpop(resp_key, timeout=timeout)
+    if res is None:                                  # ⬅︎ handle timeout
+        raise TimeoutError(
+            f"file_write via agent timed-out after {timeout}s "
+            f"(frame {frame.id}, path {remote_path})"
+        )
+
+    _key, raw = res
+    reply = json.loads(raw)
+
+    if not reply.get("ok"):
+        raise RuntimeError(reply.get("error", "agent error"))
 
 # ---------------------------------------------------------------------------#
 # public facade                                                              #
@@ -80,31 +127,31 @@ async def run_commands(
     3. Emit logs exactly like the legacy SSH path so the UI stays identical.
     """
 
-    # ── 1) Try agent ──────────────────────────────────────────────────────
+    # ── 1) Agent path (mandatory when present) ────────────────────────────
     if await _use_agent(redis, frame):
         for cmd in commands:
             await log(db, redis, frame.id, "stdout", f"> {cmd}")
             try:
                 await _exec_via_agent(redis, frame, cmd, timeout)
-                continue
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 await log(
                     db,
                     redis,
                     frame.id,
                     "stderr",
-                    f"Agent exec error ({e}); falling back to SSH",
+                    f"Agent exec error: {e}",
                 )
-                break  # drop to SSH path below
+                raise
 
-    # ── 2) SSH fallback ───────────────────────────────────────────────────
+        return
+
+    # ── 2) SSH fallback (only when **no** agent is connected) ─────────────
     ssh = await get_ssh_connection(db, redis, frame)
     try:
         for cmd in commands:
             await exec_command(db, redis, frame, ssh, cmd)
     finally:
         await remove_ssh_connection(db, redis, ssh, frame)
-
 
 async def upload_file(
     db: Session,
@@ -121,13 +168,13 @@ async def upload_file(
     1. Try the WebSocket agent (`file_write_on_frame`).
     2. If no live agent or it errors, fall back to SCP over the pooled SSH connection
     """
-    from app.ws.agent_ws import file_write_on_frame  # local import to avoid cycles
 
     # ── agent first ───────────────────────────────────────────────────────
     if await _use_agent(redis, frame):
         try:
             await log(db, redis, frame.id, "stdout", f"> write {remote_path} (agent)")
-            await file_write_on_frame(frame.id, remote_path, data, timeout=timeout)
+            await _file_write_via_agent(redis, frame, remote_path, data, timeout)
+            await log(db, redis, frame.id, "stdout", f"> file written to {remote_path} (agent)")
         except Exception as e:  # noqa: BLE001
             await log(
                 db,
@@ -136,6 +183,7 @@ async def upload_file(
                 "stderr",
                 f"Agent file_write error ({e})",
             )
+            raise
         return
 
     # ── ssh fallback ──────────────────────────────────────────────────────
