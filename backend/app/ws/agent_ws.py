@@ -58,7 +58,7 @@ def resolve_command(cmd_id: str, ok: bool, result):
     fut = _pending.pop(cmd_id, None)
     if fut and not fut.done():
         # ───────────── attach streamed binary, if any ─────────────
-        if cmd_id in _binary_buffers:                  # we saw Binary frames
+        if cmd_id in _binary_buffers and _binary_buffers[cmd_id]:
             raw = bytes(_binary_buffers.pop(cmd_id))
 
             # file_read → gzip,  http → plain
@@ -75,6 +75,9 @@ def resolve_command(cmd_id: str, ok: bool, result):
                 # ← file_read: return raw bytes
                 fut.set_result(raw_decompressed if ok else RuntimeError(result))
         else:
+            # no binary frames at all – keep the original reply untouched
+            if cmd_id in _binary_buffers:
+                _binary_buffers.pop(cmd_id, None)
             if ok:
                 fut.set_result(result)
             else:

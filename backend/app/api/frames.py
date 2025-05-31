@@ -122,6 +122,19 @@ def _normalise_agent_response(resp: Any) -> tuple[int, Any]:
     # already a JSON-payload (e.g. other agent commands)
     return 200, resp
 
+def _bytes_or_json(blob: bytes | str):
+    """
+    • If *blob* is str → return it as-is (already JSON-decoded upstream).
+    • If bytes → try UTF-8 → json.loads() → dict.
+      - valid JSON  → dict/list/…           (good for /state, /states)
+      - invalid JSON → leave as raw bytes   (needed for /image etc.)
+    """
+    if isinstance(blob, (bytes, bytearray)):
+        try:
+            return json.loads(blob.decode())   # UTF-8 is the JSON default
+        except Exception:
+            return blob                        # truly binary
+    return blob
 
 async def _use_agent(frame: Frame, redis: Redis) -> bool:
     """
@@ -147,7 +160,7 @@ async def _forward_frame_request(
 
     # 0) maybe serve from cache
     if cache_key and (cached := await redis.get(cache_key)):
-        return json.loads(cached)
+        return _bytes_or_json(cached)
 
     # JSON body must be encoded as *string* when travelling through the agent
     body_for_agent: str | None = None
@@ -164,8 +177,15 @@ async def _forward_frame_request(
         )
         status, payload = _normalise_agent_response(agent_resp)
         if status == 200:
+            # 2a) store in cache  ───────────────────────────────────────────
             if cache_key:
-                await redis.set(cache_key, json.dumps(payload).encode(), ex=cache_ttl)
+                if isinstance(payload, (bytes, bytearray)):
+                    await redis.set(cache_key, payload, ex=cache_ttl)
+                else:
+                    try:
+                        await redis.set(cache_key, json.dumps(payload).encode(), ex=cache_ttl)
+                    except TypeError:
+                        pass
             return payload
 
         raise HTTPException(status_code=400, detail=f"Agent error: {status} {payload}")
@@ -190,9 +210,9 @@ async def _forward_frame_request(
             return response.json()
         return response.text
 
-    # last-ditch: stale cache ----------------------------------------------
+    # last-ditch: serve stale cache (JSON or bytes) ------------------------
     if cache_key and (cached := await redis.get(cache_key)):
-        return json.loads(cached)
+        return _bytes_or_json(cached)
 
     raise HTTPException(status_code=response.status_code, detail="Unable to reach frame")
 
