@@ -29,12 +29,12 @@ export function Frame(props: FrameSceneProps) {
   } = useActions(frameLogic(frameLogicProps))
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
   const canDeployAgent = !!(frame.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret)
-  const agentExtra = canDeployAgent && frame.agent?.agentRunCommands ? ' (via agent)' : ' (via ssh)'
+  const agentExtra = canDeployAgent ? (frame.agent?.agentRunCommands ? ' (via agent)' : ' (via ssh)') : ''
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
       {frame ? (
-        <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute flex flex-col">
+        <div className="h-full w-full max-w-screen max-h-screen overflow-hidden left-0 top-0 absolute flex flex-col">
           <Header
             title={!frame ? `Loading frame ${props.id}...` : frame.name || frameHost(frame)}
             buttons={
