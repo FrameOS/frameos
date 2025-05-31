@@ -48,8 +48,10 @@ function buildAssetTree(assets: AssetType[]): AssetNode {
       currentNode = currentNode.children[part]
     })
 
-    if (Object.keys(currentNode.children).length === 0) {
+    if (!asset.is_dir && Object.keys(currentNode.children).length === 0) {
       currentNode.isFolder = false
+    } else {
+      currentNode.isFolder = true
     }
 
     currentNode.size = asset.size

@@ -707,18 +707,30 @@ async def api_frame_get_assets(
 
     ssh = await get_ssh_connection(db, redis, frame)
     try:
-        cmd = f"find {assets_path} -type f -exec stat --format='%s %Y %n' {{}} +"
+        cmd = (
+            f"find {shlex.quote(assets_path)} \
+                \( -type f -o -type d \) \
+                -exec stat --printf='%F|%s|%Y|%n\n' {{}} +"
+        )
         output: list[str] = []
         await exec_command(db, redis, frame, ssh, cmd, output, log_output=False)
     finally:
         await remove_ssh_connection(db, redis, ssh, frame)
 
-    assets = [
-        {"path": p.strip(), "size": int(s), "mtime": int(m)}
-        for line in output
-        if (parts := line.split(" ", 2)) and len(parts) == 3
-        for s, m, p in [parts]
-    ]
+    assets = []
+    for line in output:
+        if not line:
+            continue
+        parts = line.split("|", 3)
+        if len(parts) != 4:
+            continue
+        ftype, s, m, p = parts
+        assets.append({
+            "path": p.strip(),
+            "size": int(s),
+            "mtime": int(m),
+            "is_dir": ftype == "directory",
+        })
     assets.sort(key=lambda a: a["path"])
     return {"assets": assets}
 
@@ -779,6 +791,7 @@ async def api_frame_assets_upload(
         "path": rel,
         "size": len(data),
         "mtime": int(datetime.now().timestamp()),
+        "is_dir": False,
     }
 
 

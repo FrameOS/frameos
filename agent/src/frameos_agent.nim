@@ -383,12 +383,13 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
                        %*{"error": "dir not found"})
       else:
         var items = newSeq[JsonNode]()
-        for path in walkDirRec(root):
+        for path in walkDirRec(root, yieldFilter = {pcFile, pcDir}):
           let fi = getFileInfo(path)
           items.add %*{
             "path": path,
             "size": fi.size,
-            "mtime": fi.lastWriteTime.toUnix()
+            "mtime": fi.lastWriteTime.toUnix(),
+            "is_dir": dirExists(path)
           }
         await sendResp(ws, cfg, id, true, %*{"assets": items})
     else:
