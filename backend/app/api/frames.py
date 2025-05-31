@@ -47,7 +47,12 @@ from app.schemas.frames import (
 from app.api.auth import ALGORITHM, SECRET_KEY
 from app.config import config
 from app.utils.network import is_safe_host
-from app.utils.remote_exec import upload_file, _use_agent
+from app.utils.remote_exec import (
+    upload_file,
+    delete_path,
+    rename_path,
+    _use_agent,
+)
 from app.redis import get_redis
 from app.websockets import publish_message
 from app.ws.agent_ws import (
@@ -60,6 +65,7 @@ from app.ws.agent_ws import (
 )
 from . import api_with_auth, api_no_auth
 
+
 def _not_found():
     raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
@@ -67,11 +73,14 @@ def _not_found():
 def _bad_request(msg: str):
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=msg)
 
-_ascii_re = re.compile(r'[^A-Za-z0-9._-]')
+
+_ascii_re = re.compile(r"[^A-Za-z0-9._-]")
+
 
 def _ascii_safe(name: str) -> str:
     """Return a stripped ASCII fallback (for very old clients)."""
-    return _ascii_re.sub('_', name)[:150] or 'download'
+    return _ascii_re.sub("_", name)[:150] or "download"
+
 
 def _build_frame_path(
     frame: Frame,
@@ -90,7 +99,11 @@ def _build_frame_path(
     if not is_safe_host(frame.frame_host):
         raise HTTPException(status_code=400, detail="Unsafe frame host")
 
-    if method == 'GET' and frame.frame_access not in ("public", "protected") and frame.frame_access_key:
+    if (
+        method == "GET"
+        and frame.frame_access not in ("public", "protected")
+        and frame.frame_access_key
+    ):
         sep = "&" if "?" in path else "?"
         path = f"{path}{sep}k={frame.frame_access_key}"
     return path
@@ -106,7 +119,9 @@ def _build_frame_url(frame: Frame, path: str, method: str) -> str:
     return url
 
 
-def _auth_headers(frame: Frame, hdrs: Optional[dict[str, str]] = None) -> dict[str, str]:
+def _auth_headers(
+    frame: Frame, hdrs: Optional[dict[str, str]] = None
+) -> dict[str, str]:
     """
     Inject HTTP Authorization header when the frame is not public.
     """
@@ -133,6 +148,7 @@ def _normalise_agent_response(resp: Any) -> tuple[int, Any]:
     # already a JSON-payload (e.g. other agent commands)
     return 200, resp
 
+
 def _bytes_or_json(blob: bytes | str):
     """
     • If *blob* is str → return it as-is (already JSON-decoded upstream).
@@ -142,10 +158,11 @@ def _bytes_or_json(blob: bytes | str):
     """
     if isinstance(blob, (bytes, bytearray)):
         try:
-            return json.loads(blob.decode())   # UTF-8 is the JSON default
+            return json.loads(blob.decode())  # UTF-8 is the JSON default
         except Exception:
-            return blob                        # truly binary
+            return blob  # truly binary
     return blob
+
 
 async def _forward_frame_request(
     frame: Frame,
@@ -186,14 +203,16 @@ async def _forward_frame_request(
                     await redis.set(cache_key, payload, ex=cache_ttl)
                 else:
                     try:
-                        await redis.set(cache_key, json.dumps(payload).encode(), ex=cache_ttl)
+                        await redis.set(
+                            cache_key, json.dumps(payload).encode(), ex=cache_ttl
+                        )
                     except TypeError:
                         pass
             return payload
 
         raise HTTPException(status_code=400, detail=f"Agent error: {status} {payload}")
 
-    url  = _build_frame_url(frame, path, method)
+    url = _build_frame_url(frame, path, method)
     hdrs = _auth_headers(frame)
     async with httpx.AsyncClient() as client:
         try:
@@ -224,9 +243,13 @@ async def _forward_frame_request(
                     timeout=60.0,
                 )
         except httpx.ReadTimeout:
-            raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Timeout to {url}")
+            raise HTTPException(
+                status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Timeout to {url}"
+            )
         except Exception as exc:
-            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc))
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
+            )
 
     if response.status_code == 200:
         if cache_key:
@@ -239,7 +262,9 @@ async def _forward_frame_request(
     if cache_key and (cached := await redis.get(cache_key)):
         return _bytes_or_json(cached)
 
-    raise HTTPException(status_code=response.status_code, detail="Unable to reach frame")
+    raise HTTPException(
+        status_code=response.status_code, detail="Unable to reach frame"
+    )
 
 
 async def _remote_file_md5(
@@ -314,11 +339,13 @@ async def _fetch_frame_http_bytes(
         if isinstance(resp, dict):
             status = int(resp.get("status", 0))
             if resp.get("binary"):
-                body = resp.get("body", b"")            # already bytes
+                body = resp.get("body", b"")  # already bytes
             else:
                 raw = resp.get("body", "")
                 body = raw.encode("latin1") if isinstance(raw, str) else raw
-            hdrs = {str(k).lower(): str(v) for k, v in (resp.get("headers") or {}).items()}
+            hdrs = {
+                str(k).lower(): str(v) for k, v in (resp.get("headers") or {}).items()
+            }
             return status, body, hdrs
         else:
             raise HTTPException(status_code=500, detail="Bad agent response")
@@ -329,24 +356,34 @@ async def _fetch_frame_http_bytes(
         try:
             response = await client.get(url, headers=hdrs, timeout=60.0)
         except httpx.ReadTimeout:
-            raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Timeout to {url}")
+            raise HTTPException(
+                status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Timeout to {url}"
+            )
         except Exception as exc:
-            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc))
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
+            )
 
     return response.status_code, response.content, dict(response.headers)
+
 
 # ---------------------------------------------------------------------------
 #   📡  Endpoints
 # ---------------------------------------------------------------------------
 
+
 @api_with_auth.get("/frames", response_model=FramesListResponse)
-async def api_frames_list(db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+async def api_frames_list(
+    db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+):
     frames = db.query(Frame).all()
     return {
         "frames": [
             {
                 **f.to_dict(),
-                "active_connections": await number_of_connections_for_frame(redis, f.id),
+                "active_connections": await number_of_connections_for_frame(
+                    redis, f.id
+                ),
             }
             for f in frames
         ]
@@ -354,7 +391,9 @@ async def api_frames_list(db: Session = Depends(get_db), redis: Redis = Depends(
 
 
 @api_with_auth.get("/frames/{id:int}/state", response_model=FrameStateResponse)
-async def api_frame_get_state(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+async def api_frame_get_state(
+    id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+):
     frame = db.get(Frame, id) or _not_found()
     state = await _forward_frame_request(
         frame,
@@ -368,7 +407,9 @@ async def api_frame_get_state(id: int, db: Session = Depends(get_db), redis: Red
 
 
 @api_with_auth.get("/frames/{id:int}/states", response_model=FrameStateResponse)
-async def api_frame_get_states(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+async def api_frame_get_states(
+    id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+):
     frame = db.get(Frame, id) or _not_found()
     states = await _forward_frame_request(
         frame,
@@ -382,21 +423,32 @@ async def api_frame_get_states(id: int, db: Session = Depends(get_db), redis: Re
 
 
 @api_with_auth.post("/frames/{id:int}/event/{event}")
-async def api_frame_event(id: int, event: str, request: Request, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+async def api_frame_event(
+    id: int,
+    event: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
     frame = db.get(Frame, id) or _not_found()
     body = await (
-        request.json() if request.headers.get("content-type") == "application/json" else request.body()
+        request.json()
+        if request.headers.get("content-type") == "application/json"
+        else request.body()
     )
     try:
-        await _forward_frame_request(frame, redis, path=f"/event/{event}", method="POST", json_body=body)
+        await _forward_frame_request(
+            frame, redis, path=f"/event/{event}", method="POST", json_body=body
+        )
         return "OK"
     except HTTPException as exc:
-        await log(db, redis, id, "stderr", f"Error on frame event {event}: {exc.detail}")
+        await log(
+            db, redis, id, "stderr", f"Error on frame event {event}: {exc.detail}"
+        )
         raise exc
     except RuntimeError as exc:
         await log(db, redis, id, "stderr", f"Error on frame event {event}: {str(exc)}")
         raise exc
-
 
 
 @api_with_auth.get("/frames/{id:int}/asset")
@@ -409,9 +461,11 @@ async def api_frame_get_asset(
     frame = db.get(Frame, id) or _not_found()
 
     assets_path = frame.assets_path or "/srv/assets"
-    rel_path    = request.query_params.get("path") or _bad_request("Path parameter is required")
-    mode        = request.query_params.get("mode", "download")
-    filename    = request.query_params.get("filename", os.path.basename(rel_path))
+    rel_path = request.query_params.get("path") or _bad_request(
+        "Path parameter is required"
+    )
+    mode = request.query_params.get("mode", "download")
+    filename = request.query_params.get("filename", os.path.basename(rel_path))
 
     full_path = os.path.normpath(os.path.join(assets_path, rel_path))
     if not full_path.startswith(os.path.normpath(assets_path)):
@@ -421,7 +475,9 @@ async def api_frame_get_asset(
         try:
             data = await file_read_on_frame(frame.id, full_path)
         except Exception:  # file_read returns RuntimeError on missing file
-            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Asset not found")
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND, detail="Asset not found"
+            )
 
         md5 = hashlib.md5(data).hexdigest()
         cache_key = f"asset:{md5}"
@@ -430,7 +486,9 @@ async def api_frame_get_asset(
     else:
         md5, exists = await _remote_file_md5(db, redis, frame, full_path)
         if not exists:
-            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Asset not found")
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND, detail="Asset not found"
+            )
 
         cache_key = f"asset:{md5}"
         if cached := await redis.get(cache_key):
@@ -477,13 +535,15 @@ async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
     return {"logs": logs}
 
 
-@api_with_auth.get("/frames/{id:int}/image_token", response_model=FrameImageLinkResponse)
+@api_with_auth.get(
+    "/frames/{id:int}/image_token", response_model=FrameImageLinkResponse
+)
 async def get_image_token(id: int):
     expire_minutes = 5
-    now    = datetime.utcnow()
+    now = datetime.utcnow()
     expire = now + timedelta(minutes=expire_minutes)
     to_encode = {"sub": f"frame={id}", "exp": expire}
-    token     = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return {"token": token, "expires_in": int((expire - now).total_seconds())}
 
 
@@ -495,7 +555,7 @@ async def api_frame_get_image(
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    if config.HASSIO_RUN_MODE != 'ingress':
+    if config.HASSIO_RUN_MODE != "ingress":
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             if payload.get("sub") != f"frame={id}":
@@ -507,13 +567,13 @@ async def api_frame_get_image(
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    cache_key = f"frame:{frame.frame_host}:{frame.frame_port}:image"
     path = "/image"
 
-    if request.query_params.get('t') == '-1':
+    if request.query_params.get("t") == "-1":
         last_image = await redis.get(cache_key)
         if last_image:
-            return Response(content=last_image, media_type='image/png')
+            return Response(content=last_image, media_type="image/png")
 
     # Use shared semaphore and client
     status = 0
@@ -523,17 +583,18 @@ async def api_frame_get_image(
 
         if status == 200:
             await redis.set(cache_key, body, ex=86400 * 30)
-            scene_id = headers.get('x-scene-id')
+            scene_id = headers.get("x-scene-id")
             if not scene_id:
                 encoded_scene_id = await redis.get(f"frame:{id}:active_scene")
                 if encoded_scene_id:
-                    scene_id = encoded_scene_id.decode('utf-8')
+                    scene_id = encoded_scene_id.decode("utf-8")
             if scene_id:
                 # dimensions (best‑effort – don’t crash if Pillow missing)
                 width = height = None
                 try:
                     from PIL import Image
                     import io
+
                     img = Image.open(io.BytesIO(body))
                     width, height = img.width, img.height
                 except Exception:
@@ -542,48 +603,75 @@ async def api_frame_get_image(
                 # upsert into SceneImage
                 from app.models.scene_image import SceneImage
                 from app.api.scene_images import _generate_thumbnail
+
                 now = datetime.utcnow()
                 img_row = (
                     db.query(SceneImage)
-                      .filter_by(frame_id=id, scene_id=scene_id)
-                      .first()
+                    .filter_by(frame_id=id, scene_id=scene_id)
+                    .first()
                 )
                 thumb, t_width, t_height = _generate_thumbnail(body)
                 if img_row:
-                    img_row.image      = body
-                    img_row.timestamp  = now
-                    img_row.width      = width
-                    img_row.height     = height
+                    img_row.image = body
+                    img_row.timestamp = now
+                    img_row.width = width
+                    img_row.height = height
                     img_row.thumb_image = thumb
                     img_row.thumb_width = t_width
                     img_row.thumb_height = t_height
                 else:
                     img_row = SceneImage(
-                        frame_id    = id,
-                        scene_id    = scene_id,
-                        image       = body,
-                        timestamp   = now,
-                        width       = width,
-                        height      = height,
-                        thumb_image = thumb,
-                        thumb_width = t_width,
-                        thumb_height = t_height
+                        frame_id=id,
+                        scene_id=scene_id,
+                        image=body,
+                        timestamp=now,
+                        width=width,
+                        height=height,
+                        thumb_image=thumb,
+                        thumb_width=t_width,
+                        thumb_height=t_height,
                     )
                     db.add(img_row)
                 db.commit()
 
-            await publish_message(redis, "new_scene_image", {"frameId": id, "sceneId": scene_id, "timestamp": now.isoformat(), "width": width, "height": height})
+            await publish_message(
+                redis,
+                "new_scene_image",
+                {
+                    "frameId": id,
+                    "sceneId": scene_id,
+                    "timestamp": now.isoformat(),
+                    "width": width,
+                    "height": height,
+                },
+            )
 
-            return Response(content=body, media_type='image/png')
+            return Response(content=body, media_type="image/png")
         else:
-            await log(db, redis, id, "stderr", f"Error fetching image from frame {id}: {status} {body.decode(errors='ignore')}")
+            await log(
+                db,
+                redis,
+                id,
+                "stderr",
+                f"Error fetching image from frame {id}: {status} {body.decode(errors='ignore')}",
+            )
             raise HTTPException(status_code=status, detail="Unable to fetch image")
 
     except httpx.ReadTimeout:
-        await log(db, redis, id, "stderr", f"Error fetching image from frame {id}: request timeout")
-        raise HTTPException(status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout")
+        await log(
+            db,
+            redis,
+            id,
+            "stderr",
+            f"Error fetching image from frame {id}: request timeout",
+        )
+        raise HTTPException(
+            status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout"
+        )
     except Exception as e:
-        await log(db, redis, id, "stderr", f"Error fetching image from frame {id}: {str(e)}")
+        await log(
+            db, redis, id, "stderr", f"Error fetching image from frame {id}: {str(e)}"
+        )
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
@@ -594,13 +682,17 @@ async def api_frame_scene_source(id: int, scene: str, db: Session = Depends(get_
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     for scene_json in frame.scenes or []:
-        if scene_json.get('id') == scene:
+        if scene_json.get("id") == scene:
             return {"source": write_scene_nim(frame, scene_json)}
-    raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=f"Scene {scene} not found")
+    raise HTTPException(
+        status_code=HTTPStatus.NOT_FOUND, detail=f"Scene {scene} not found"
+    )
 
 
 @api_with_auth.get("/frames/{id:int}/assets", response_model=FrameAssetsResponse)
-async def api_frame_get_assets(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+async def api_frame_get_assets(
+    id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+):
     frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
@@ -622,19 +714,24 @@ async def api_frame_get_assets(id: int, db: Session = Depends(get_db), redis: Re
 
     assets = [
         {"path": p.strip(), "size": int(s), "mtime": int(m)}
-        for line in output if (parts := line.split(" ", 2)) and len(parts) == 3
+        for line in output
+        if (parts := line.split(" ", 2)) and len(parts) == 3
         for s, m, p in [parts]
     ]
     assets.sort(key=lambda a: a["path"])
     return {"assets": assets}
 
+
 @api_with_auth.post("/frames/{id:int}/assets/sync")
-async def api_frame_assets_sync(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+async def api_frame_assets_sync(
+    id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+):
     frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
     try:
         from app.models.assets import sync_assets
+
         if await _use_agent(frame, redis):
             await sync_assets(db, redis, frame, None)
         else:
@@ -647,6 +744,7 @@ async def api_frame_assets_sync(id: int, db: Session = Depends(get_db), redis: R
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
+
 @api_with_auth.post("/frames/{id:int}/assets/upload")
 async def api_frame_assets_upload(
     id: int,
@@ -655,7 +753,8 @@ async def api_frame_assets_upload(
         description="Sub-folder inside the frame's assets directory (optional)",
     ),
     file: UploadFile = File(...),
-    db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     frame = db.get(Frame, id) or _not_found()
 
@@ -663,7 +762,7 @@ async def api_frame_assets_upload(
     if "*" in subdir or ".." in subdir or os.path.isabs(subdir):
         _bad_request("Invalid character * in path")
 
-    assets_path   = frame.assets_path or "/srv/assets"
+    assets_path = frame.assets_path or "/srv/assets"
     combined_path = os.path.normpath(
         os.path.join(assets_path, subdir, file.filename or "uploaded_file")
     )
@@ -676,27 +775,88 @@ async def api_frame_assets_upload(
 
     rel = os.path.relpath(combined_path, assets_path)
     return {
-        "path":  rel,
-        "size":  len(data),
+        "path": rel,
+        "size": len(data),
         "mtime": int(datetime.now().timestamp()),
     }
 
+
+@api_with_auth.post("/frames/{id:int}/assets/delete")
+async def api_frame_assets_delete(
+    id: int,
+    path: str = Form(...),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    rel_path = path.lstrip("/")
+    if ".." in rel_path or "*" in rel_path or os.path.isabs(rel_path):
+        _bad_request("Invalid asset path")
+
+    assets_path = frame.assets_path or "/srv/assets"
+    full_path = os.path.normpath(os.path.join(assets_path, rel_path))
+    if not full_path.startswith(os.path.normpath(assets_path)):
+        _bad_request("Invalid asset path")
+
+    await delete_path(db, redis, frame, full_path)
+    return {"message": "Deleted"}
+
+
+@api_with_auth.post("/frames/{id:int}/assets/rename")
+async def api_frame_assets_rename(
+    id: int,
+    src: str = Form(...),
+    dst: str = Form(...),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    s_rel = src.lstrip("/")
+    d_rel = dst.lstrip("/")
+    if any(x in s_rel for x in ["..", "*"]) or os.path.isabs(s_rel):
+        _bad_request("Invalid source path")
+    if any(x in d_rel for x in ["..", "*"]) or os.path.isabs(d_rel):
+        _bad_request("Invalid destination path")
+
+    assets_path = frame.assets_path or "/srv/assets"
+    src_full = os.path.normpath(os.path.join(assets_path, s_rel))
+    dst_full = os.path.normpath(os.path.join(assets_path, d_rel))
+    if not src_full.startswith(
+        os.path.normpath(assets_path)
+    ) or not dst_full.startswith(os.path.normpath(assets_path)):
+        _bad_request("Invalid asset path")
+
+    await rename_path(db, redis, frame, src_full, dst_full)
+    return {"message": "Renamed"}
+
+
 @api_with_auth.post("/frames/{id:int}/clear_build_cache")
-async def api_frame_clear_build_cache(id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)):
+async def api_frame_clear_build_cache(
+    id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)
+):
     frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     if await _use_agent(frame, redis):
         try:
-            await log(db, redis, id, "stdout", "> rm -rf /srv/frameos/build/cache && echo DONE")
+            await log(
+                db,
+                redis,
+                id,
+                "stdout",
+                "> rm -rf /srv/frameos/build/cache && echo DONE",
+            )
             await exec_shell_on_frame(
-                frame.id,
-                "rm -rf /srv/frameos/build/cache && echo DONE"
+                frame.id, "rm -rf /srv/frameos/build/cache && echo DONE"
             )
             return {"message": "Build cache cleared successfully"}
         except Exception as e:
-            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e)
+            )
 
     try:
         ssh = await get_ssh_connection(db, redis, frame)
@@ -709,10 +869,12 @@ async def api_frame_clear_build_cache(id: int, redis: Redis = Depends(get_redis)
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
+
 @api_with_auth.post("/frames/{id:int}/reset")
 async def api_frame_reset_event(id: int, redis: Redis = Depends(get_redis)):
     try:
         from app.tasks import reset_frame
+
         await reset_frame(id, redis)
         return "Success"
     except Exception as e:
@@ -723,33 +885,40 @@ async def api_frame_reset_event(id: int, redis: Redis = Depends(get_redis)):
 async def api_frame_restart_event(id: int, redis: Redis = Depends(get_redis)):
     try:
         from app.tasks import restart_frame
+
         await restart_frame(id, redis)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
+
 @api_with_auth.post("/frames/{id:int}/reboot")
 async def api_frame_reboot_event(id: int, redis: Redis = Depends(get_redis)):
     try:
         from app.tasks import reboot_frame
+
         await reboot_frame(id, redis)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
+
 @api_with_auth.post("/frames/{id:int}/deploy_agent")
 async def api_frame_deploy_agent_event(id: int, redis: Redis = Depends(get_redis)):
     try:
         from app.tasks import deploy_agent
+
         await deploy_agent(id, redis)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
+
 @api_with_auth.post("/frames/{id:int}/restart_agent")
 async def api_frame_restart_agent_event(id: int, redis: Redis = Depends(get_redis)):
     try:
         from app.tasks import restart_agent
+
         await restart_agent(id, redis)
         return "Success"
     except Exception as e:
@@ -760,6 +929,7 @@ async def api_frame_restart_agent_event(id: int, redis: Redis = Depends(get_redi
 async def api_frame_stop_event(id: int, redis: Redis = Depends(get_redis)):
     try:
         from app.tasks import stop_frame
+
         await stop_frame(id, redis)
         return "Success"
     except Exception as e:
@@ -770,6 +940,7 @@ async def api_frame_stop_event(id: int, redis: Redis = Depends(get_redis)):
 async def api_frame_deploy_event(id: int, redis: Redis = Depends(get_redis)):
     try:
         from app.tasks import deploy_frame
+
         await deploy_frame(id, redis)
         return "Success"
     except Exception as e:
@@ -780,6 +951,7 @@ async def api_frame_deploy_event(id: int, redis: Redis = Depends(get_redis)):
 async def api_frame_fast_deploy_event(id: int, redis: Redis = Depends(get_redis)):
     try:
         from app.tasks import fast_deploy_frame
+
         await fast_deploy_frame(id, redis)
         return "Success"
     except Exception as e:
@@ -799,37 +971,55 @@ async def api_frame_update_endpoint(
 
     update_data = data.model_dump(exclude_unset=True)
     # If 'scenes' is a string, parse it as JSON
-    if isinstance(update_data.get('scenes'), str):
+    if isinstance(update_data.get("scenes"), str):
         try:
-            update_data['scenes'] = json.loads(update_data['scenes'])
+            update_data["scenes"] = json.loads(update_data["scenes"])
         except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
+            raise HTTPException(
+                status_code=400, detail="Invalid input for scenes (must be JSON)"
+            )
 
     for field, value in update_data.items():
         setattr(frame, field, value)
 
     await update_frame(db, redis, frame)
 
-    if data.next_action == 'restart':
+    if data.next_action == "restart":
         from app.tasks import restart_frame
+
         await restart_frame(id, redis)
-    elif data.next_action == 'reboot':
+    elif data.next_action == "reboot":
         from app.tasks import reboot_frame
+
         await reboot_frame(id, redis)
-    elif data.next_action == 'stop':
+    elif data.next_action == "stop":
         from app.tasks import stop_frame
+
         await stop_frame(id, redis)
-    elif data.next_action == 'deploy':
+    elif data.next_action == "deploy":
         from app.tasks import deploy_frame
+
         await deploy_frame(id, redis)
 
     return {"message": "Frame updated successfully"}
 
 
 @api_with_auth.post("/frames/new", response_model=FrameResponse)
-async def api_frame_new(data: FrameCreateRequest, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+async def api_frame_new(
+    data: FrameCreateRequest,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
     try:
-        frame = await new_frame(db, redis, data.name, data.frame_host, data.server_host, data.device, data.interval)
+        frame = await new_frame(
+            db,
+            redis,
+            data.name,
+            data.frame_host,
+            data.server_host,
+            data.device,
+            data.interval,
+        )
         return {"frame": frame.to_dict()}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -837,9 +1027,7 @@ async def api_frame_new(data: FrameCreateRequest, db: Session = Depends(get_db),
 
 @api_with_auth.delete("/frames/{frame_id}")
 async def api_frame_delete(
-    frame_id: int,
-    db: Session = Depends(get_db),
-    redis: Redis = Depends(get_redis)
+    frame_id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
 ):
     success = await delete_frame(db, redis, frame_id)
     if success:
@@ -857,10 +1045,10 @@ async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
         metrics = db.query(Metrics).filter_by(frame_id=id).all()
         metrics_list = [
             {
-                'id': metric.id,
-                'timestamp': metric.timestamp.isoformat(),
-                'frame_id': metric.frame_id,
-                'metrics': metric.metrics,
+                "id": metric.id,
+                "timestamp": metric.timestamp.isoformat(),
+                "frame_id": metric.frame_id,
+                "metrics": metric.metrics,
             }
             for metric in metrics
         ]

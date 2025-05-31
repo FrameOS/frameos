@@ -69,6 +69,10 @@ export const assetsLogic = kea<assetsLogicType>([
     filesToUpload: (files: string[]) => ({ files }),
     uploadFailure: (path: string) => ({ path }),
     syncAssets: true,
+    deleteAsset: (path: string) => ({ path }),
+    assetDeleted: (path: string) => ({ path }),
+    renameAsset: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
+    assetRenamed: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
   }),
   loaders(({ props }) => ({
     assets: [
@@ -156,6 +160,28 @@ export const assetsLogic = kea<assetsLogicType>([
       }
       input.click()
     },
+    deleteAsset: async ({ path }) => {
+      try {
+        await apiFetch(`/api/frames/${props.frameId}/assets/delete`, {
+          method: 'POST',
+          body: new URLSearchParams({ path }),
+        })
+        actions.assetDeleted(path)
+      } catch (error) {
+        console.error(error)
+      }
+    },
+    renameAsset: async ({ oldPath, newPath }) => {
+      try {
+        await apiFetch(`/api/frames/${props.frameId}/assets/rename`, {
+          method: 'POST',
+          body: new URLSearchParams({ src: oldPath, dst: newPath }),
+        })
+        actions.assetRenamed(oldPath, newPath)
+      } catch (error) {
+        console.error(error)
+      }
+    },
   })),
   reducers({
     assets: {
@@ -181,6 +207,9 @@ export const assetsLogic = kea<assetsLogicType>([
       },
       uploadFailure: (state, { path }) =>
         state.map((asset) => (asset.path === path ? { ...asset, size: -2, mtime: -2 } : asset)),
+      assetDeleted: (state, { path }) => state.filter((a) => a.path !== path),
+      assetRenamed: (state, { oldPath, newPath }) =>
+        state.map((a) => (a.path === oldPath ? { ...a, path: newPath } : a)),
     },
   }),
   afterMount(({ actions }) => {

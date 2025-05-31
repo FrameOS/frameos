@@ -24,19 +24,22 @@ from app.models.log import new_log as log
 
 router = APIRouter()
 
-MAX_AGENTS = 1000       # DoS safeguard
-CONN_TTL   = 60         # seconds - how long one WS key lives in Redis
+MAX_AGENTS = 1000  # DoS safeguard
+CONN_TTL = 60  # seconds - how long one WS key lives in Redis
 
 # frame_id → list[websocket]
 active_sockets_by_frame: dict[int, list[WebSocket]] = {}
 active_sockets: set[WebSocket] = set()
 
 _frame_queues: dict[int, asyncio.Queue] = defaultdict(asyncio.Queue)
-_pending: dict[str, asyncio.Future] = {}   # cmd-id → Future
+_pending: dict[str, asyncio.Future] = {}  # cmd-id → Future
 _binary_buffers: dict[str, bytearray] = {}
 _pending_bin_by_ws: dict[WebSocket, str] = {}
 
-def queue_command(frame_id: int, payload: dict, blob: bytes | None = None) -> tuple[asyncio.Future, str]:
+
+def queue_command(
+    frame_id: int, payload: dict, blob: bytes | None = None
+) -> tuple[asyncio.Future, str]:
     """
     Add a command payload to the per-frame queue, return a Future that
     resolves when the agent answers.
@@ -45,7 +48,8 @@ def queue_command(frame_id: int, payload: dict, blob: bytes | None = None) -> tu
     payload["id"] = cmd_id
     fut = _pending[cmd_id] = asyncio.get_event_loop().create_future()
     _frame_queues[frame_id].put_nowait((payload, blob))
-    return fut, cmd_id # caller will await it
+    return fut, cmd_id  # caller will await it
+
 
 async def next_command(frame_id: int) -> tuple[dict, bytes | None] | None:
     """Wait until there is a command for this frame (or None if queue empty)."""
@@ -53,6 +57,7 @@ async def next_command(frame_id: int) -> tuple[dict, bytes | None] | None:
         return await _frame_queues[frame_id].get()
     except asyncio.CancelledError:
         return None
+
 
 def resolve_command(cmd_id: str, ok: bool, result):
     fut = _pending.pop(cmd_id, None)
@@ -65,7 +70,7 @@ def resolve_command(cmd_id: str, ok: bool, result):
             try:
                 raw_decompressed = gzip.decompress(raw)
             except Exception:
-                raw_decompressed = raw # not gzipped
+                raw_decompressed = raw  # not gzipped
 
             if isinstance(result, dict) and "status" in result:
                 # ← http command: return dictbody
@@ -83,10 +88,8 @@ def resolve_command(cmd_id: str, ok: bool, result):
             else:
                 fut.set_exception(RuntimeError(result))
 
-async def pump_commands(ws: WebSocket,
-                        frame_id: int,
-                        api_key: str,
-                        shared_secret: str):
+
+async def pump_commands(ws: WebSocket, frame_id: int, api_key: str, shared_secret: str):
     try:
         while True:
             item = await next_command(frame_id)
@@ -101,13 +104,13 @@ async def pump_commands(ws: WebSocket,
                     _pending_bin_by_ws[ws] = cmd["id"]
                 if blob:
                     for i in range(0, len(blob), 4096):
-                        await ws.send_bytes(blob[i:i+4096])
+                        await ws.send_bytes(blob[i : i + 4096])
             except RuntimeError:
                 # re-queue so another connection can pick it up
                 if cmd.get("name") == "file_read":
                     _pending_bin_by_ws.pop(ws, None)
                 _frame_queues[frame_id].put_nowait(item)
-                break # exit the loop
+                break  # exit the loop
     finally:
         # make sure no zombie task hangs around and clear any buffers
         if ws in _pending_bin_by_ws:
@@ -118,18 +121,22 @@ async def pump_commands(ws: WebSocket,
                 fut.set_exception(RuntimeError("connection closed"))
         await ws.close(code=1000)
 
-async def http_get_on_frame(frame_id: int, path: str,
-                            method: str = "GET",
-                            body = None,
-                            headers: dict[str, str] | None = None,
-                            timeout: int = 30):
+
+async def http_get_on_frame(
+    frame_id: int,
+    path: str,
+    method: str = "GET",
+    body=None,
+    headers: dict[str, str] | None = None,
+    timeout: int = 30,
+):
     payload = {
         "type": "cmd",
         "name": "http",
         "args": {
-            "method":  method,
-            "path":    path,
-            "body":    body,
+            "method": method,
+            "path": path,
+            "body": body,
             "headers": headers or {},
         },
     }
@@ -139,8 +146,8 @@ async def http_get_on_frame(frame_id: int, path: str,
     _binary_buffers[cmd_id] = bytearray()
     return await asyncio.wait_for(fut, timeout=timeout)
 
-async def assets_list_on_frame(frame_id: int, path: str,
-                               timeout: int = 60):
+
+async def assets_list_on_frame(frame_id: int, path: str, timeout: int = 60):
     """
     Ask the agent to enumerate every asset (JSON list).
     """
@@ -156,8 +163,7 @@ async def assets_list_on_frame(frame_id: int, path: str,
     raise RuntimeError("bad response from agent assets_list")
 
 
-async def exec_shell_on_frame(frame_id: int, cmd: str,
-                              timeout: int = 120):
+async def exec_shell_on_frame(frame_id: int, cmd: str, timeout: int = 120):
     """
     Fire-and-forget shell helper. Raises if exit != 0.
     """
@@ -204,13 +210,13 @@ async def number_of_connections_for_frame(redis: Redis, frame_id: int) -> int:
 
 def make_envelope(payload: dict, api_key: str, shared_secret: str) -> dict:
     nonce = int(time.time())
-    body  = canonical_dumps(payload)
-    mac   = hmac_sha256(shared_secret, f"{api_key}{nonce}{body}")
+    body = canonical_dumps(payload)
+    mac = hmac_sha256(shared_secret, f"{api_key}{nonce}{body}")
     return {
-        "nonce":        nonce,
+        "nonce": nonce,
         "serverApiKey": api_key,
-        "payload":      payload,
-        "mac":          mac,
+        "payload": payload,
+        "mac": mac,
     }
 
 
@@ -251,9 +257,33 @@ async def file_write_on_frame(frame_id: int, path: str, data: bytes, timeout: in
     fut, _ = queue_command(frame_id, payload, compressed)
     return await asyncio.wait_for(fut, timeout=timeout)
 
+
+async def file_delete_on_frame(frame_id: int, path: str, timeout: int = 60):
+    """Delete a file or directory on the frame via agent."""
+    payload = {
+        "type": "cmd",
+        "name": "file_delete",
+        "args": {"path": path},
+    }
+    fut, _ = queue_command(frame_id, payload)
+    return await asyncio.wait_for(fut, timeout=timeout)
+
+
+async def file_rename_on_frame(frame_id: int, src: str, dst: str, timeout: int = 60):
+    """Rename a file or directory on the frame via agent."""
+    payload = {
+        "type": "cmd",
+        "name": "file_rename",
+        "args": {"src": src, "dst": dst},
+    }
+    fut, _ = queue_command(frame_id, payload)
+    return await asyncio.wait_for(fut, timeout=timeout)
+
+
 # ---------------------------------------------------------------------------
 # Main WS endpoint
 # ---------------------------------------------------------------------------
+
 
 @router.websocket("/ws/agent")
 async def ws_agent_endpoint(
@@ -283,7 +313,9 @@ async def ws_agent_endpoint(
 
     # Look up the **Frame** that owns this server-side key.
     if not server_api_key:
-        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="missing server key")
+        await ws.close(
+            code=status.WS_1008_POLICY_VIOLATION, reason="missing server key"
+        )
         return
 
     frame = db.query(Frame).filter_by(server_api_key=server_api_key).first()
@@ -294,7 +326,9 @@ async def ws_agent_endpoint(
     # Each frame has an associated *shared secret* used for HMAC
     shared_secret: str = frame.agent.get("agentSharedSecret", "") if frame.agent else ""
     if not shared_secret:
-        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="frame missing secret")
+        await ws.close(
+            code=status.WS_1008_POLICY_VIOLATION, reason="frame missing secret"
+        )
         return
 
     # STEP 1 - server → challenge
@@ -316,7 +350,9 @@ async def ws_agent_endpoint(
 
     expected_mac = sign(challenge, server_api_key, shared_secret)
     if not hmac.compare_digest(expected_mac, mac):
-        print(f"Invalid MAC for frame {frame.id} \"{frame.name}\": expected {expected_mac}, got {mac}")
+        print(
+            f'Invalid MAC for frame {frame.id} "{frame.name}": expected {expected_mac}, got {mac}'
+        )
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")
         return
 
@@ -331,30 +367,41 @@ async def ws_agent_endpoint(
     active_sockets_by_frame.setdefault(frame.id, []).append(ws)
 
     # Each connection gets its own Redis key that self-expires.
-    conn_id  = secrets.token_hex(16)
+    conn_id = secrets.token_hex(16)
     conn_key = f"frame:{frame.id}:conn:{conn_id}"
     await redis.set(conn_key, "1", ex=CONN_TTL)
 
     await publish_message(
         redis,
         "update_frame",
-        {"active_connections": await number_of_connections_for_frame(redis, frame.id), "id": frame.id},
+        {
+            "active_connections": await number_of_connections_for_frame(
+                redis, frame.id
+            ),
+            "id": frame.id,
+        },
     )
 
-    await log(db, redis, frame.id, "agent", f"☎️ Frame \"{frame.name}\" connected ☎️")
+    await log(db, redis, frame.id, "agent", f'☎️ Frame "{frame.name}" connected ☎️')
 
     # Main receive loop (enveloped messages)
     try:
         while True:
             packet = await asyncio.wait_for(ws.receive(), timeout=60)
 
-            if packet.get("type") == "websocket.receive" and packet.get("bytes") is not None:
+            if (
+                packet.get("type") == "websocket.receive"
+                and packet.get("bytes") is not None
+            ):
                 cmd_id = _pending_bin_by_ws.get(ws)
                 if cmd_id and cmd_id in _binary_buffers:
                     _binary_buffers[cmd_id].extend(packet["bytes"])
                 continue
 
-            if packet.get("type") == "websocket.receive" and packet.get("text") is not None:
+            if (
+                packet.get("type") == "websocket.receive"
+                and packet.get("text") is not None
+            ):
                 msg = json.loads(packet["text"])
             else:
                 if packet.get("type") == "websocket.disconnect":
@@ -366,7 +413,9 @@ async def ws_agent_endpoint(
 
             # Basic schema check
             if not {"nonce", "payload", "mac"} <= msg.keys():
-                await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad envelope")
+                await ws.close(
+                    code=status.WS_1008_POLICY_VIOLATION, reason="bad envelope"
+                )
                 break
 
             data_to_check = (
@@ -388,7 +437,7 @@ async def ws_agent_endpoint(
             elif pl.get("type") == "cmd/stream":
                 # Stream chunks arrive while a shell command runs on the frame.
                 stream = pl.get("stream", "stdout")
-                data   = pl.get("data", "")
+                data = pl.get("data", "")
 
                 for line in data.splitlines():
                     if line:  # skip blanks to match exec_command
@@ -431,9 +480,16 @@ async def ws_agent_endpoint(
         await publish_message(
             redis,
             "update_frame",
-            {"active_connections": await number_of_connections_for_frame(redis, frame.id), "id": frame.id},
+            {
+                "active_connections": await number_of_connections_for_frame(
+                    redis, frame.id
+                ),
+                "id": frame.id,
+            },
         )
-        await log(db, redis, frame.id, "agent", f"👋 Frame \"{frame.name}\" disconnected 👋")
+        await log(
+            db, redis, frame.id, "agent", f'👋 Frame "{frame.name}" disconnected 👋'
+        )
 
         with contextlib.suppress(Exception):
             await send_task

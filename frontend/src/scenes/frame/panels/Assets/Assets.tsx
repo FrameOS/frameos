@@ -2,7 +2,12 @@ import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { assetsLogic } from './assetsLogic'
 import { panelsLogic } from '../panelsLogic'
-import { CloudArrowDownIcon, DocumentArrowUpIcon } from '@heroicons/react/24/outline'
+import {
+  CloudArrowDownIcon,
+  DocumentArrowUpIcon,
+  PencilSquareIcon,
+  TrashIcon,
+} from '@heroicons/react/24/solid'
 import { useState } from 'react'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { Spinner } from '../../../../components/Spinner'
@@ -34,11 +39,15 @@ function TreeNode({
   frameId,
   openAsset,
   uploadAssets,
+  deleteAsset,
+  renameAsset,
 }: {
   node: AssetNode
   frameId: number
   openAsset: (path: string) => void
   uploadAssets: (path: string) => void
+  deleteAsset: (path: string) => void
+  renameAsset: (oldPath: string, newPath: string) => void
 }): JSX.Element {
   const [expanded, setExpanded] = useState(node.path === '')
   const [isDownloading, setIsDownloading] = useState(false)
@@ -62,6 +71,24 @@ function TreeNode({
                 icon: <DocumentArrowUpIcon className="w-5 h-5" />,
                 onClick: () => uploadAssets(node.path),
               },
+              node.path && {
+                label: 'Rename',
+                icon: <PencilSquareIcon className="w-5 h-5" />,
+                onClick: () => {
+                  const base = node.path.split('/').slice(0, -1).join('/')
+                  const newName = window.prompt('New name', node.name)
+                  if (newName) {
+                    const newPath = (base ? base + '/' : '') + newName
+                    renameAsset(node.path, newPath)
+                  }
+                },
+              },
+              node.path && {
+                label: 'Delete',
+                confirm: 'Are you sure?',
+                icon: <TrashIcon className="w-5 h-5" />,
+                onClick: () => deleteAsset(node.path),
+              },
             ]}
           />
         </div>
@@ -74,6 +101,8 @@ function TreeNode({
                 frameId={frameId}
                 openAsset={openAsset}
                 uploadAssets={uploadAssets}
+                deleteAsset={deleteAsset}
+                renameAsset={renameAsset}
               />
             ))}
           </div>
@@ -123,6 +152,31 @@ function TreeNode({
             )}
           </a>
         )}
+        <DropdownMenu
+          horizontal
+          className="w-fit"
+          buttonColor="none"
+          items={[
+            {
+              label: 'Rename',
+              icon: <PencilSquareIcon className="w-4 h-4" />,
+              onClick: () => {
+                const base = node.path.split('/').slice(0, -1).join('/')
+                const newName = window.prompt('New name', node.name)
+                if (newName) {
+                  const newPath = (base ? base + '/' : '') + newName
+                  renameAsset(node.path, newPath)
+                }
+              },
+            },
+            {
+              label: 'Delete',
+              confirm: 'Are you sure?',
+              icon: <TrashIcon className="w-4 h-4" />,
+              onClick: () => deleteAsset(node.path),
+            },
+          ]}
+        />
       </div>
     )
   }
@@ -132,7 +186,9 @@ export function Assets(): JSX.Element {
   const { frame } = useValues(frameLogic)
   const { openLogs } = useActions(panelsLogic)
   const { assetsLoading, assetTree } = useValues(assetsLogic({ frameId: frame.id }))
-  const { syncAssets, uploadAssets } = useActions(assetsLogic({ frameId: frame.id }))
+  const { syncAssets, uploadAssets, deleteAsset, renameAsset } = useActions(
+    assetsLogic({ frameId: frame.id })
+  )
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
 
   return (
@@ -157,7 +213,14 @@ export function Assets(): JSX.Element {
         <div>Loading assets...</div>
       ) : (
         <div>
-          <TreeNode node={assetTree} frameId={frame.id} openAsset={openAsset} uploadAssets={uploadAssets} />
+          <TreeNode
+            node={assetTree}
+            frameId={frame.id}
+            openAsset={openAsset}
+            uploadAssets={uploadAssets}
+            deleteAsset={deleteAsset}
+            renameAsset={renameAsset}
+          />
         </div>
       )}
     </div>
