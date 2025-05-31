@@ -8,9 +8,11 @@ import hashlib
 import io
 import json
 import os
+import re
 import shlex
 from tempfile import NamedTemporaryFile
 from typing import Any, Optional, Tuple
+from urllib.parse import quote
 
 # third-party ---------------------------------------------------------------
 import httpx
@@ -45,6 +47,7 @@ from app.schemas.frames import (
 from app.api.auth import ALGORITHM, SECRET_KEY
 from app.config import config
 from app.utils.network import is_safe_host
+from app.utils.remote_exec import upload_file
 from app.redis import get_redis
 from app.websockets import publish_message
 from app.ws.agent_ws import (
@@ -52,7 +55,6 @@ from app.ws.agent_ws import (
     number_of_connections_for_frame,
     file_md5_on_frame,
     file_read_on_frame,
-    file_write_on_frame,
     assets_list_on_frame,
     exec_shell_on_frame,
 )
@@ -65,6 +67,11 @@ def _not_found():
 def _bad_request(msg: str):
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=msg)
 
+_ascii_re = re.compile(r'[^A-Za-z0-9._-]')
+
+def _ascii_safe(name: str) -> str:
+    """Return a stripped ASCII fallback (for very old clients)."""
+    return _ascii_re.sub('_', name)[:150] or 'download'
 
 def _build_frame_path(frame: Frame, path: str) -> str:
     """
@@ -383,7 +390,11 @@ async def api_frame_get_asset(
         io.BytesIO(data),
         media_type="image/png" if mode == "image" else "application/octet-stream",
         headers={
-            "Content-Disposition": f"{'attachment' if mode == 'download' else 'inline'}; filename={filename}",
+            "Content-Disposition": (
+                f"{'attachment' if mode == 'download' else 'inline'}; "
+                f'filename="{_ascii_safe(filename)}"; '
+                f"filename*=UTF-8''{quote(filename, safe='')}"
+            ),
         },
     )
 
@@ -589,48 +600,30 @@ async def api_frame_assets_upload(
     db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
 ):
     frame = db.get(Frame, id) or _not_found()
-    path = (path or "").lstrip("/")                # “/icons” → “icons”
 
-    if "*" in path or ".." in path or os.path.isabs(path):
+    # normalise and validate optional sub-directory
+    subdir = (path or "").lstrip("/")
+    if "*" in subdir or ".." in subdir or os.path.isabs(subdir):
         _bad_request("Invalid character * in path")
 
-    assets_path = frame.assets_path or "/srv/assets"
+    assets_path   = frame.assets_path or "/srv/assets"
     combined_path = os.path.normpath(
-        os.path.join(assets_path, path, file.filename or "uploaded_file")
+        os.path.join(assets_path, subdir, file.filename or "uploaded_file")
     )
-
-    # Security: ensure we stay **inside** assets_path
     if not combined_path.startswith(os.path.normpath(assets_path) + os.sep):
         _bad_request("Invalid asset path")
 
-    contents = await file.read()
+    data = await file.read()
 
-    # ---------- 1) try agent upload ---------------------------------------
-    if (await _use_agent(frame, redis)):
-        await log(db, redis, id, "stdout", f"Agent upload: {combined_path}")
-        await file_write_on_frame(frame.id, combined_path, contents)
-        path_relative = os.path.relpath(combined_path, assets_path)
-        return {"path": path_relative, "size": len(contents), "mtime": int(datetime.now().timestamp())}
+    # one-liner: let remote_exec decide (agent → SSH) and log appropriately
+    await upload_file(db, redis, frame, combined_path, data)
 
-    # ---------- 2) SSH fallback -------------------------------------------
-    ssh = await get_ssh_connection(db, redis, frame)
-    try:
-        with NamedTemporaryFile(delete=True) as temp_file:
-            local_temp_path = temp_file.name
-            with open(local_temp_path, "wb") as f:
-                f.write(contents)
-            await log(db, redis, id, "stdout", f"SCP upload: {combined_path}")
-            scp_escaped_path = shlex.quote(combined_path)
-            await asyncssh.scp(
-                local_temp_path,
-                (ssh, scp_escaped_path),
-                recurse=False
-            )
-    finally:
-        await remove_ssh_connection(db, redis, ssh, frame)
-
-    path_relative = os.path.relpath(combined_path, assets_path)
-    return {"path": path_relative, "size": len(contents), "mtime": int(datetime.now().timestamp())}
+    rel = os.path.relpath(combined_path, assets_path)
+    return {
+        "path":  rel,
+        "size":  len(data),
+        "mtime": int(datetime.now().timestamp()),
+    }
 
 @api_with_auth.post("/frames/{id:int}/clear_build_cache")
 async def api_frame_clear_build_cache(id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)):
