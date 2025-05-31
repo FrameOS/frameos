@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import json
 import uuid
+import asyncssh
+import tempfile
+import os
+import shlex
 
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
@@ -16,7 +20,7 @@ from app.utils.ssh_utils import (
     remove_ssh_connection,
 )
 
-__all__ = ["run_commands"]  # what the tasks import
+__all__ = ["run_commands", "upload_file"]  # what the tasks import
 
 # ---------------------------------------------------------------------------#
 # internal helpers                                                           #
@@ -99,4 +103,54 @@ async def run_commands(
         for cmd in commands:
             await exec_command(db, redis, frame, ssh, cmd)
     finally:
+        await remove_ssh_connection(db, redis, ssh, frame)
+
+
+async def upload_file(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    remote_path: str,
+    data: bytes,
+    *,
+    timeout: int = 120,
+) -> None:
+    """
+    Write *data* to *remote_path* on the device:
+
+    1. Try the WebSocket agent (`file_write_on_frame`).
+    2. If no live agent or it errors, fall back to SCP over the pooled SSH connection
+    """
+    from app.ws.agent_ws import file_write_on_frame  # local import to avoid cycles
+
+    # ── agent first ───────────────────────────────────────────────────────
+    if await _use_agent(redis, frame):
+        try:
+            await log(db, redis, frame.id, "stdout", f"> write {remote_path} (agent)")
+            await file_write_on_frame(frame.id, remote_path, data, timeout=timeout)
+        except Exception as e:  # noqa: BLE001
+            await log(
+                db,
+                redis,
+                frame.id,
+                "stderr",
+                f"Agent file_write error ({e})",
+            )
+        return
+
+    # ── ssh fallback ──────────────────────────────────────────────────────
+    ssh = await get_ssh_connection(db, redis, frame)
+    try:
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+
+        await log(db, redis, frame.id, "stdout", f"> scp → {remote_path}")
+        await asyncssh.scp(
+            tmp_path,
+            (ssh, shlex.quote(remote_path)),
+            recurse=False,
+        )
+    finally:
+        os.remove(tmp_path)
         await remove_ssh_connection(db, redis, ssh, frame)

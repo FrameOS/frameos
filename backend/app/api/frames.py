@@ -581,19 +581,26 @@ async def api_frame_assets_sync(id: int, db: Session = Depends(get_db), redis: R
 @api_with_auth.post("/frames/{id:int}/assets/upload")
 async def api_frame_assets_upload(
     id: int,
-    path: str = Form(..., description="Folder where to place this asset"),
+    path: Optional[str] = Form(
+        None,
+        description="Sub-folder inside the frame's assets directory (optional)",
+    ),
     file: UploadFile = File(...),
     db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
 ):
     frame = db.get(Frame, id) or _not_found()
-    if not path:
-        _bad_request("Path parameter is required")
-    if "*" in path:
+    path = (path or "").lstrip("/")                # “/icons” → “icons”
+
+    if "*" in path or ".." in path or os.path.isabs(path):
         _bad_request("Invalid character * in path")
 
     assets_path = frame.assets_path or "/srv/assets"
-    combined_path = os.path.normpath(os.path.join(assets_path, path, file.filename or "uploaded_file"))
-    if not combined_path.startswith(os.path.normpath(assets_path) + '/'):
+    combined_path = os.path.normpath(
+        os.path.join(assets_path, path, file.filename or "uploaded_file")
+    )
+
+    # Security: ensure we stay **inside** assets_path
+    if not combined_path.startswith(os.path.normpath(assets_path) + os.sep):
         _bad_request("Invalid asset path")
 
     contents = await file.read()

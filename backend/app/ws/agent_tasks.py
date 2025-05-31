@@ -26,9 +26,9 @@ async def _handle_one(redis: Redis, raw: bytes) -> None:
     timeout  = job.get("timeout", 120)
 
     try:
-        fut     = queue_command(frame_id, payload)
-        result  = await asyncio.wait_for(fut, timeout=timeout)
-        reply   = {"ok": True, "result": result}
+        fut, _ = queue_command(frame_id, payload)
+        result = await asyncio.wait_for(fut, timeout=timeout)
+        reply  = {"ok": True, "result": result}
     except Exception as e:  # noqa: BLE001
         reply = {"ok": False, "error": str(e)}
 

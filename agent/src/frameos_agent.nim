@@ -312,7 +312,7 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
       else:
         try:
           var received = 0
-          var zipped = newString(size)
+          var zipped = newStringOfCap(size) # capacity only, len = 0
           while received < size:
             let chunk = await recvBinary(ws)
             zipped.add chunk
