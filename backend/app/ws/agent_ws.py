@@ -8,7 +8,7 @@ import hmac
 import hashlib
 import time
 import uuid
-import base64
+import gzip
 from collections import defaultdict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status, Depends
@@ -33,8 +33,10 @@ active_sockets: set[WebSocket] = set()
 
 _frame_queues: dict[int, asyncio.Queue] = defaultdict(asyncio.Queue)
 _pending: dict[str, asyncio.Future] = {}   # cmd-id → Future
+_binary_buffers: dict[str, bytearray] = {}
+_pending_bin_by_ws: dict[WebSocket, str] = {}
 
-def queue_command(frame_id: int, payload: dict) -> asyncio.Future:
+def queue_command(frame_id: int, payload: dict, blob: bytes | None = None) -> tuple[asyncio.Future, str]:
     """
     Add a command payload to the per-frame queue, return a Future that
     resolves when the agent answers.
@@ -42,10 +44,10 @@ def queue_command(frame_id: int, payload: dict) -> asyncio.Future:
     cmd_id = str(uuid.uuid4())
     payload["id"] = cmd_id
     fut = _pending[cmd_id] = asyncio.get_event_loop().create_future()
-    _frame_queues[frame_id].put_nowait(payload)
-    return fut                       # caller will await it
+    _frame_queues[frame_id].put_nowait((payload, blob))
+    return fut, cmd_id                       # caller will await it
 
-async def next_command(frame_id: int) -> dict | None:
+async def next_command(frame_id: int) -> tuple[dict, bytes | None] | None:
     """Wait until there is a command for this frame (or None if queue empty)."""
     try:
         return await _frame_queues[frame_id].get()
@@ -55,10 +57,21 @@ async def next_command(frame_id: int) -> dict | None:
 def resolve_command(cmd_id: str, ok: bool, result):
     fut = _pending.pop(cmd_id, None)
     if fut and not fut.done():
-        if ok:
-            fut.set_result(result)
+        if cmd_id in _binary_buffers:
+            data = bytes(_binary_buffers.pop(cmd_id))
+            try:
+                data = gzip.decompress(data)
+            except Exception:
+                data = b""
+            if ok:
+                fut.set_result(data)
+            else:
+                fut.set_exception(RuntimeError(result))
         else:
-            fut.set_exception(RuntimeError(result))
+            if ok:
+                fut.set_result(result)
+            else:
+                fut.set_exception(RuntimeError(result))
 
 async def pump_commands(ws: WebSocket,
                         frame_id: int,
@@ -66,19 +79,33 @@ async def pump_commands(ws: WebSocket,
                         shared_secret: str):
     try:
         while True:
-            cmd = await next_command(frame_id)
-            if cmd is None:
+            item = await next_command(frame_id)
+            if item is None:
                 return
+            cmd, blob = item
             env = make_envelope(cmd, api_key, shared_secret)
 
             try:
                 await ws.send_json(env)
+                if cmd.get("name") == "file_read":
+                    _pending_bin_by_ws[ws] = cmd["id"]
+                if blob:
+                    for i in range(0, len(blob), 4096):
+                        await ws.send_bytes(blob[i:i+4096])
             except RuntimeError:
                 # re-queue so another connection can pick it up
-                _frame_queues[frame_id].put_nowait(cmd)
+                if cmd.get("name") == "file_read":
+                    _pending_bin_by_ws.pop(ws, None)
+                _frame_queues[frame_id].put_nowait(item)
                 break                            # exit the loop
     finally:
-        # make sure no zombie task hangs around
+        # make sure no zombie task hangs around and clear any buffers
+        if ws in _pending_bin_by_ws:
+            cmd_id = _pending_bin_by_ws.pop(ws)
+            _binary_buffers.pop(cmd_id, None)
+            fut = _pending.pop(cmd_id, None)
+            if fut and not fut.done():
+                fut.set_exception(RuntimeError("connection closed"))
         await ws.close(code=1000)
 
 async def http_get_on_frame(frame_id: int, path: str,
@@ -88,7 +115,7 @@ async def http_get_on_frame(frame_id: int, path: str,
         "name": "http",
         "args": {"method": method, "path": path, "body": body},
     }
-    fut = queue_command(frame_id, payload)
+    fut, _ = queue_command(frame_id, payload)
     return await asyncio.wait_for(fut, timeout=timeout)
 
 async def assets_list_on_frame(frame_id: int, path: str,
@@ -101,7 +128,7 @@ async def assets_list_on_frame(frame_id: int, path: str,
         "name": "assets_list",
         "args": {"path": path},
     }
-    fut = queue_command(frame_id, payload)
+    fut, _ = queue_command(frame_id, payload)
     resp = await asyncio.wait_for(fut, timeout=timeout)
     if isinstance(resp, dict) and "assets" in resp:
         return resp["assets"]
@@ -118,7 +145,7 @@ async def exec_shell_on_frame(frame_id: int, cmd: str,
         "name": "shell",
         "args": {"cmd": cmd},
     }
-    fut   = queue_command(frame_id, payload)
+    fut, _ = queue_command(frame_id, payload)
     reply = await asyncio.wait_for(fut, timeout=timeout)
     if isinstance(reply, dict) and reply.get("exit", 1) == 0:
         return
@@ -173,32 +200,34 @@ async def file_md5_on_frame(frame_id: int, path: str, timeout: int = 30):
         "name": "file_md5",
         "args": {"path": path},
     }
-    fut = queue_command(frame_id, payload)
+    fut, _ = queue_command(frame_id, payload)
     return await asyncio.wait_for(fut, timeout=timeout)
 
 
 async def file_read_on_frame(frame_id: int, path: str, timeout: int = 60) -> bytes:
-    """Download *path* from agent – returns raw bytes."""
+    """Download *path* from agent - returns raw bytes."""
     payload = {
         "type": "cmd",
         "name": "file_read",
         "args": {"path": path},
     }
-    fut = queue_command(frame_id, payload)
+    fut, cmd_id = queue_command(frame_id, payload)
+    _binary_buffers[cmd_id] = bytearray()
     resp = await asyncio.wait_for(fut, timeout=timeout)
-    if isinstance(resp, dict) and "data" in resp:
-        return base64.b64decode(resp["data"])
+    if isinstance(resp, bytes):
+        return resp
     raise RuntimeError("bad response from agent file_read")
 
 
-async def file_write_on_frame(frame_id: int, path: str, data_b64: str, timeout: int = 60):
+async def file_write_on_frame(frame_id: int, path: str, data: bytes, timeout: int = 60):
     """Upload a file to the frame via agent."""
+    compressed = gzip.compress(data)
     payload = {
         "type": "cmd",
         "name": "file_write",
-        "args": {"path": path, "data": data_b64},
+        "args": {"path": path, "size": len(compressed)},
     }
-    fut = queue_command(frame_id, payload)
+    fut, _ = queue_command(frame_id, payload, compressed)
     return await asyncio.wait_for(fut, timeout=timeout)
 
 # ---------------------------------------------------------------------------
@@ -310,7 +339,20 @@ async def ws_agent_endpoint(
     # ----------------------------------------------------------------------
     try:
         while True:
-            msg = await asyncio.wait_for(ws.receive_json(), timeout=60)
+            packet = await asyncio.wait_for(ws.receive(), timeout=60)
+
+            if packet.get("type") == "websocket.receive" and packet.get("bytes") is not None:
+                cmd_id = _pending_bin_by_ws.get(ws)
+                if cmd_id and cmd_id in _binary_buffers:
+                    _binary_buffers[cmd_id].extend(packet["bytes"])
+                continue
+
+            if packet.get("type") == "websocket.receive" and packet.get("text") is not None:
+                msg = json.loads(packet["text"])
+            else:
+                if packet.get("type") == "websocket.disconnect":
+                    break
+                continue
 
             # keep the connection key alive
             await redis.expire(conn_key, CONN_TTL)
@@ -335,6 +377,8 @@ async def ws_agent_endpoint(
             pl = msg["payload"]
             if pl.get("type") == "cmd/resp":
                 resolve_command(pl["id"], pl.get("ok", False), pl.get("result"))
+                if _pending_bin_by_ws.get(ws) == pl["id"]:
+                    _pending_bin_by_ws.pop(ws, None)
                 continue
             elif pl.get("type") == "cmd/stream":
                 # Stream chunks arrive while a shell command runs on the frame.
@@ -359,6 +403,12 @@ async def ws_agent_endpoint(
             active_sockets_by_frame[frame.id].remove(ws)
 
         send_task.cancel()
+        cmd_id = _pending_bin_by_ws.pop(ws, None)
+        if cmd_id:
+            _binary_buffers.pop(cmd_id, None)
+            fut = _pending.pop(cmd_id, None)
+            if fut and not fut.done():
+                fut.set_exception(RuntimeError("connection closed"))
 
         # Remove this connection’s Redis key (if we still can)
         try:

@@ -5,6 +5,7 @@ import json, jsony
 import ws
 import nimcrypto
 import nimcrypto/hmac
+import zippy
 
 const
   DefaultConfigPath* = "./frame.json" # secure location
@@ -171,6 +172,28 @@ proc recvText(ws: WebSocket): Future[string] {.async.} =
     else:
       discard # ignore binary, pong …
 
+proc recvBinary(ws: WebSocket): Future[string] {.async.} =
+  ## Wait for the next *binary* frame, replying to pings automatically.
+  while true:
+    let (opcode, payload) = await ws.receivePacket()
+    case opcode
+    of Opcode.Binary:
+      return cast[string](payload)
+    of Opcode.Ping:
+      await ws.send(payload, OpCode.Pong)
+    of Opcode.Close:
+      if payload.len >= 2:
+        let code = (uint16(payload[0]) shl 8) or uint16(payload[1])
+        let reason = if payload.len > 2:
+                       cast[string](payload[2 .. ^1])
+                     else: ""
+        raise newException(Exception,
+          &"connection closed by server (code {code}): {reason}")
+      else:
+        raise newException(Exception, "connection closed by server")
+    else:
+      discard # ignore text, pong …
+
 # ----------------------------------------------------------------------------
 # Challenge-response handshake (server-initiated)
 # ----------------------------------------------------------------------------
@@ -253,18 +276,30 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
       elif not fileExists(path):
         await sendResp(ws, cfg, id, false, %*{"error": "file not found"})
       else:
-        let raw = readFile(path) # binary safe
-        let b64 = encode(raw) # std/base64
-        await sendResp(ws, cfg, id, true, %*{"data": b64})
+        let raw = readFile(path)
+        let zipped = compress(raw)
+        var sent = 0
+        const chunkSize = 65536
+        while sent < zipped.len:
+          let chunkEnd = min(sent + chunkSize, zipped.len)
+          await ws.send(zipped[sent ..< chunkEnd], OpCode.Binary)
+          sent = chunkEnd
+        await sendResp(ws, cfg, id, true, %*{"size": raw.len})
 
     of "file_write":
       let path = args{"path"}.getStr("")
-      let data64 = args{"data"}.getStr("")
-      if path.len == 0 or data64.len == 0:
-        await sendResp(ws, cfg, id, false, %*{"error": "`path`/`data` missing"})
+      let size = args{"size"}.getInt(0)
+      if path.len == 0 or size <= 0:
+        await sendResp(ws, cfg, id, false, %*{"error": "`path`/`size` missing"})
       else:
         try:
-          let bytes = decode(data64) # base64 → string
+          var received = 0
+          var zipped = newString(size)
+          while received < size:
+            let chunk = await recvBinary(ws)
+            zipped.add chunk
+            received = zipped.len
+          let bytes = uncompress(zipped)
           writeFile(path, bytes)
           await sendResp(ws, cfg, id, true, %*{"written": bytes.len})
         except CatchableError as e:
