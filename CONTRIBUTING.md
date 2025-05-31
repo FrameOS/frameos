@@ -25,7 +25,7 @@ cd backend
 python3 -m venv env
 source env/bin/activate
 uv pip install -r requirements.txt
-DEBUG=1 alembic ugprade head
+DEBUG=1 alembic upgrade head
 
 cd ../frontend
 npm install

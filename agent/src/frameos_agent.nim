@@ -1,9 +1,11 @@
 import std/[algorithm, segfaults, strformat, strutils, asyncdispatch, terminal,
-            times, os, sysrand]
+            times, os, sysrand, httpclient, osproc, streams, unicode]
+import checksums/md5
 import json, jsony
 import ws
 import nimcrypto
 import nimcrypto/hmac
+import zippy
 
 const
   DefaultConfigPath* = "./frame.json" # secure location
@@ -23,7 +25,10 @@ type
     wifiHotspotSsid*: string
     wifiHotspotPassword*: string
     wifiHotspotTimeoutSeconds*: float
-    agentConnection*: bool
+
+  AgentConfig* = ref object
+    agentEnabled*: bool
+    agentRunCommands*: bool
     agentSharedSecret*: string
 
   FrameConfig* = ref object
@@ -45,6 +50,7 @@ type
     debug*: bool
     timeZone*: string
     network*: NetworkConfig
+    agent*: AgentConfig
 
 # ----------------------------------------------------------------------------
 # Config IO (fails hard if unreadable)
@@ -71,12 +77,12 @@ proc hmacSha256Hex(key, data: string): string =
 # ----------------------------------------------------------------------------
 proc sign(data: string; cfg: FrameConfig): string =
   ## data   = the “open” string we want to protect
-  ## secret = cfg.network.agentSharedSecret   (never leaves the device)
+  ## secret = cfg.agent.agentSharedSecret   (never leaves the device)
   ## apiKey = cfg.serverApiKey                (public “username”)
   ##
   ## The server re-creates exactly the same byte-sequence:
   ##   apiKey || data   (no separators, keep order)
-  result = hmacSha256Hex(cfg.network.agentSharedSecret,
+  result = hmacSha256Hex(cfg.agent.agentSharedSecret,
                          cfg.serverApiKey & data)
 
 # ----------------------------------------------------------------------------
@@ -122,7 +128,21 @@ proc verifyEnvelope(node: JsonNode; cfg: FrameConfig): bool =
   node.hasKey("serverApiKey") and
   node["serverApiKey"].getStr == cfg.serverApiKey and
   node["mac"].getStr.toLowerAscii() ==
-    sign($node["nonce"].getInt & $node["payload"], cfg)
+    sign($node["nonce"].getInt & canonical(node["payload"]), cfg)
+
+proc sendResp(ws: WebSocket; cfg: FrameConfig;
+              id: string; ok: bool; res: JsonNode) {.async.} =
+  let env = makeSecureEnvelope(%*{
+    "type": "cmd/resp", "id": id, "ok": ok, "result": res
+  }, cfg)
+  await ws.send($env)
+
+proc streamChunk(ws: WebSocket; cfg: FrameConfig;
+                 id: string; which: string; data: string) {.async.} =
+  let env = makeSecureEnvelope(%*{
+    "type": "cmd/stream", "id": id, "stream": which, "data": data
+  }, cfg)
+  await ws.send($env)
 
 # ----------------------------------------------------------------------------
 # utils – tiny print-and-quit helper
@@ -156,9 +176,192 @@ proc recvText(ws: WebSocket): Future[string] {.async.} =
     else:
       discard # ignore binary, pong …
 
+proc recvBinary(ws: WebSocket): Future[string] {.async.} =
+  ## Wait for the next *binary* frame, replying to pings automatically.
+  while true:
+    let (opcode, payload) = await ws.receivePacket()
+    case opcode
+    of Opcode.Binary:
+      return cast[string](payload)
+    of Opcode.Ping:
+      await ws.send(payload, OpCode.Pong)
+    of Opcode.Close:
+      if payload.len >= 2:
+        let code = (uint16(payload[0]) shl 8) or uint16(payload[1])
+        let reason = if payload.len > 2:
+                       cast[string](payload[2 .. ^1])
+                     else: ""
+        raise newException(Exception,
+          &"connection closed by server (code {code}): {reason}")
+      else:
+        raise newException(Exception, "connection closed by server")
+    else:
+      discard # ignore text, pong …
+
 # ----------------------------------------------------------------------------
 # Challenge-response handshake (server-initiated)
 # ----------------------------------------------------------------------------
+proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
+  let id = cmd{"id"}.getStr()
+  let name = cmd{"name"}.getStr()
+  let args = cmd{"args"}
+
+  echo &"📥 cmd: {name}({args})"
+
+  # No remote execution available
+  if not cfg.agent.agentRunCommands:
+    if name != "version":
+      await sendResp(ws, cfg, id, false, %*{"error": "agentRunCommands disabled in config"})
+      return
+
+  try:
+    case name
+    of "version":
+      await sendResp(ws, cfg, id, true, %*{"version": "0.0.0"})
+
+    of "http":
+      let methodArg = args{"method"}.getStr("GET")
+      let path = args{"path"}.getStr("/")
+      let bodyArg = args{"body"}.getStr("")
+
+      var client = newAsyncHttpClient()
+      if args.hasKey("headers"):
+        for k, v in args["headers"].pairs:
+          try:
+            client.headers.add(k, v.getStr())
+          except Exception:
+            discard # ignore malformed header values
+      let url = &"http://127.0.0.1:{cfg.framePort}{path}"
+      let resp = await (if methodArg == "POST": client.post(url, bodyArg) else: client.get(url))
+
+      let bodyBytes = await resp.body # raw bytes
+      var hdrs = %*{}
+      for k, v in resp.headers: hdrs[k.toLowerAscii()] = %*v
+
+      # ---------- send binary when body is not UTF-8 ---------- #
+      let isBinary = bodyBytes.validateUtf8() >= 0
+      if isBinary:
+        # ── 1. stream the bytes FIRST ───────────────────────────────
+        var sent = 0
+        const chunk = 65536
+        while sent < bodyBytes.len:
+          let endPos = min(sent + chunk, bodyBytes.len)
+          await ws.send(bodyBytes[sent ..< endPos], OpCode.Binary)
+          sent = endPos
+
+        # ── 2. JSON reply AFTER all chunks ──────────────────────────
+        await sendResp(ws, cfg, id, true, %*{
+          "status": resp.code.int,
+          "size": bodyBytes.len,
+          "headers": hdrs,
+          "binary": true # flag for backend
+        })
+      else:
+        await sendResp(
+          ws, cfg, id, true,
+          %*{"status": resp.code.int,
+              "body": cast[string](bodyBytes),
+              "headers": hdrs,
+              "binary": false})
+    of "shell":
+      if not args.hasKey("cmd"):
+        await sendResp(ws, cfg, id, false,
+                      %*{"error": "`cmd` missing"})
+        return
+
+      let cmdStr = args["cmd"].getStr
+
+      var p = startProcess(
+        "/bin/sh",             # command
+        args = ["-c", cmdStr], # argv
+        options = {poUsePath, poStdErrToStdOut}
+      )
+
+      let bufSize = 4096
+      var buf = newString(bufSize)
+
+      while true:
+        let n = p.outputStream.readData(addr buf[0], buf.len)
+        if n == 0:
+          if p.running: await sleepAsync(100) # no data yet – yield
+          else: break # process finished – exit loop
+        else:
+          await streamChunk(ws, cfg, id, "stdout", buf[0 ..< n])
+
+      let rc = p.waitForExit()
+      await sendResp(ws, cfg, id, rc == 0, %*{"exit": rc})
+
+    of "file_md5":
+      let path = args{"path"}.getStr("")
+      if path.len == 0:
+        await sendResp(ws, cfg, id, false, %*{"error": "`path` missing"})
+      elif not fileExists(path):
+        await sendResp(ws, cfg, id, true, %*{"exists": false, "md5": ""})
+      else:
+        let contents = readFile(path)
+        let digest = getMD5(contents)
+        await sendResp(ws, cfg, id, true,
+                       %*{"exists": true, "md5": $digest.toLowerAscii()})
+
+    of "file_read":
+      let path = args{"path"}.getStr("")
+      if path.len == 0:
+        await sendResp(ws, cfg, id, false, %*{"error": "`path` missing"})
+      elif not fileExists(path):
+        await sendResp(ws, cfg, id, false, %*{"error": "file not found"})
+      else:
+        let raw = readFile(path)
+        let zipped = compress(raw)
+        var sent = 0
+        const chunkSize = 65536
+        while sent < zipped.len:
+          let chunkEnd = min(sent + chunkSize, zipped.len)
+          await ws.send(zipped[sent ..< chunkEnd], OpCode.Binary)
+          sent = chunkEnd
+        await sendResp(ws, cfg, id, true, %*{"size": raw.len})
+
+    of "file_write":
+      let path = args{"path"}.getStr("")
+      let size = args{"size"}.getInt(0)
+      if path.len == 0 or size <= 0:
+        await sendResp(ws, cfg, id, false, %*{"error": "`path`/`size` missing"})
+      else:
+        try:
+          var received = 0
+          var zipped = newStringOfCap(size) # capacity only, len = 0
+          while received < size:
+            let chunk = await recvBinary(ws)
+            zipped.add chunk
+            received = zipped.len
+          let bytes = uncompress(zipped)
+          writeFile(path, bytes)
+          await sendResp(ws, cfg, id, true, %*{"written": bytes.len})
+        except CatchableError as e:
+          await sendResp(ws, cfg, id, false, %*{"error": e.msg})
+
+    of "assets_list":
+      let root = args{"path"}.getStr("")
+      if root.len == 0:
+        await sendResp(ws, cfg, id, false,
+                       %*{"error": "`path` missing"})
+      elif not dirExists(root):
+        await sendResp(ws, cfg, id, false,
+                       %*{"error": "dir not found"})
+      else:
+        var items = newSeq[JsonNode]()
+        for path in walkDirRec(root):
+          let fi = getFileInfo(path)
+          items.add %*{
+            "path": path,
+            "size": fi.size,
+            "mtime": fi.lastWriteTime.toUnix()
+          }
+        await sendResp(ws, cfg, id, true, %*{"assets": items})
+    else:
+      await sendResp(ws, cfg, id, false,
+                     %*{"error": "unknown command: " & name})
+  except CatchableError as e:
+    await sendResp(ws, cfg, id, false, %*{"error": e.msg})
 
 proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
   ## Implements the protocol:
@@ -171,9 +374,9 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
     echo "⚠️  serverApiKey is empty, cannot connect"
     raise newException(Exception, "⚠️  serverApiKey is empty, cannot connect")
 
-  if len(cfg.network.agentSharedSecret) == 0:
+  if len(cfg.agent.agentSharedSecret) == 0:
     echo "⚠️  agentSharedSecret is empty, cannot connect"
-    raise newException(Exception, "⚠️  network.agentSharedSecret is empty, cannot connect")
+    raise newException(Exception, "⚠️  agent.agentSharedSecret is empty, cannot connect")
 
   # --- Step 0: say hello ----------------------------------------------------
   var hello = %*{
@@ -193,7 +396,7 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
   let challenge = challengeJson["c"].getStr
 
   # --- Step 2: answer -------------------------------------------------------
-  let mac = if cfg.network.agentSharedSecret.len > 0:
+  let mac = if cfg.agent.agentSharedSecret.len > 0:
               sign(challenge, cfg)
             else: ""
   let reply = %*{
@@ -254,8 +457,11 @@ proc runAgent(cfg: FrameConfig) {.async.} =
           if not verifyEnvelope(node, cfg):
             echo "⚠️  bad MAC – dropping packet"; continue
           let payload = node["payload"]
-          echo &"📥 {payload}"
-          # TODO: handle backend commands …
+          case payload{"type"}.getStr("")
+          of "cmd":
+            await handleCmd(payload, ws, cfg)
+          else:
+            echo &"📥 {payload}"
 
       finally:
         if not ws.isNil:
@@ -276,6 +482,11 @@ proc runAgent(cfg: FrameConfig) {.async.} =
 when isMainModule:
   try:
     var cfg = loadConfig()
+    if not cfg.agent.agentEnabled:
+      echo "ℹ️  agentEnabled = false  →  no websocket connection started. Exiting in 10s."
+      waitFor sleepAsync(10_000)
+      quit(0) # graceful, zero-exit
+
     waitFor runAgent(cfg)
   except Exception as e:
     fatal(e.msg)

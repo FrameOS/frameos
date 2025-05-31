@@ -44,6 +44,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'schedule',
   'gpio_buttons',
   'network',
+  'agent',
 ]
 
 const FRAME_KEYS_REQUIRE_RECOMPILE: (keyof FrameType)[] = ['device', 'scenes', 'reboot']
@@ -224,8 +225,7 @@ export const frameLogic = kea<frameLogicType>([
         !lastDeploy ||
         FRAME_KEYS_REQUIRE_RECOMPILE.some(
           (key) => !equal(lastDeploy?.[key as keyof FrameType], frame?.[key as keyof FrameType])
-        ) ||
-        lastDeploy?.network?.agentConnection !== frame?.network?.agentConnection,
+        ),
     ],
     defaultScene: [
       (s) => [s.frame, s.frameForm],

@@ -349,36 +349,86 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                     )}
                   </>
                 )}
-                <Field name="agentConnection" label="Enable FrameOS Agent reverse connection (EXPERIMENTAL)">
-                  {({ value, onChange }) => <Switch name="agentConnection" value={value} onChange={onChange} />}
-                </Field>
+              </Group>
+            </div>
+            <H6>Agent</H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Group name="agent">
                 <Field
-                  name="agentSharedSecret"
-                  label={<div>Agent shared secret</div>}
-                  labelRight={
-                    <Button
-                      color="secondary"
-                      size="small"
-                      onClick={() => {
-                        setFrameFormValues({
-                          network: { ...(frameForm.network ?? {}), agentSharedSecret: secureToken(20) },
-                        })
-                        touchFrameFormField('network.agentSharedSecret')
-                      }}
-                    >
-                      Regenerate
-                    </Button>
+                  name="agentEnabled"
+                  label="Enable FrameOS Agent (EXPERIMENTAL)"
+                  tooltip={
+                    <div className="space-y-2">
+                      <p>
+                        The FrameOS Agent is a reverse tunnel that allows you to control the frame from the server, even
+                        if the frame is behind a NAT or firewall. The server must be publicly accessible for this to
+                        work.
+                      </p>
+                      <p>
+                        The frame will open a secure websocket connection to the server, which will then be used to
+                        control the frame, pass logs and metrics, and more.
+                      </p>
+                      <p>
+                        This is still experimental. Enable this switch, save, and then select "Deploy agent" from the
+                        "..." menu in the header. The agent will then be deployed to the frame and connect to the
+                        backend.
+                      </p>
+                    </div>
                   }
-                  tooltip="This key is used when communicating with the frame over secure websockets."
                 >
-                  <TextInput
-                    name="agentSharedSecret"
-                    onClick={() => touchFrameFormField('network.agentSharedSecret')}
-                    type={frameFormTouches['network.agentSharedSecret'] ? 'text' : 'password'}
-                    placeholder=""
-                    required
-                  />
+                  {({ value, onChange }) => <Switch name="agentEnabled" value={value} onChange={onChange} />}
                 </Field>
+                {frameForm.agent?.agentEnabled && (
+                  <>
+                    <Field
+                      name="agentRunCommands"
+                      label="Run commands through the agent (EXPERIMENTAL)"
+                      tooltip={
+                        <div className="space-y-2">
+                          <p>Execute updates over the agent connection, instead of using SSH or HTTP.</p>
+                          <p>
+                            Enable this to allow the backend to send commands to the frame through the established
+                            websocket connection.
+                          </p>
+                          <p>
+                            Without this, the agent will only send logs to the backend, and SSH and HTTP will be used
+                            for sending commands.
+                          </p>
+                          <p>Make sure to only enable this if your backend is running over a secure TLS connection.</p>
+                        </div>
+                      }
+                    >
+                      {({ value, onChange }) => <Switch name="agentRunCommands" value={value} onChange={onChange} />}
+                    </Field>
+                    <Field
+                      name="agentSharedSecret"
+                      label={<div>Agent shared secret</div>}
+                      labelRight={
+                        <Button
+                          color="secondary"
+                          size="small"
+                          onClick={() => {
+                            setFrameFormValues({
+                              agent: { ...(frameForm.agent ?? {}), agentSharedSecret: secureToken(20) },
+                            })
+                            touchFrameFormField('agent.agentSharedSecret')
+                          }}
+                        >
+                          Regenerate
+                        </Button>
+                      }
+                      tooltip="This key is used when communicating with the frame over secure websockets."
+                    >
+                      <TextInput
+                        name="agentSharedSecret"
+                        onClick={() => touchFrameFormField('agent.agentSharedSecret')}
+                        type={frameFormTouches['agent.agentSharedSecret'] ? 'text' : 'password'}
+                        placeholder=""
+                        required
+                      />
+                    </Field>
+                  </>
+                )}
               </Group>
             </div>
             <H6>Defaults</H6>
