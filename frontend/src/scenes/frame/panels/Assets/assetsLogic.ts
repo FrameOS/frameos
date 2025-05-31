@@ -133,7 +133,7 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     ],
   }),
-  listeners(({ actions, props }) => ({
+  listeners(({ actions, props, values }) => ({
     uploadAssets: async ({ path }) => {
       const input = document.createElement('input')
       input.type = 'file'
@@ -166,7 +166,8 @@ export const assetsLogic = kea<assetsLogicType>([
           method: 'POST',
           body: new URLSearchParams({ path }),
         })
-        actions.assetDeleted(path)
+        const assetsPath = values.frame.assets_path ?? '/srv/assets'
+        actions.assetDeleted(assetsPath + '/' + path)
       } catch (error) {
         console.error(error)
       }
@@ -177,7 +178,8 @@ export const assetsLogic = kea<assetsLogicType>([
           method: 'POST',
           body: new URLSearchParams({ src: oldPath, dst: newPath }),
         })
-        actions.assetRenamed(oldPath, newPath)
+        const assetsPath = values.frame.assets_path ?? '/srv/assets'
+        actions.assetRenamed(assetsPath + '/' + oldPath, assetsPath + '/' + newPath)
       } catch (error) {
         console.error(error)
       }
@@ -208,8 +210,9 @@ export const assetsLogic = kea<assetsLogicType>([
       uploadFailure: (state, { path }) =>
         state.map((asset) => (asset.path === path ? { ...asset, size: -2, mtime: -2 } : asset)),
       assetDeleted: (state, { path }) => state.filter((a) => a.path !== path),
-      assetRenamed: (state, { oldPath, newPath }) =>
-        state.map((a) => (a.path === oldPath ? { ...a, path: newPath } : a)),
+      assetRenamed: (state, { oldPath, newPath }) => {
+        return state.map((a) => (a.path === oldPath ? { ...a, path: newPath } : a))
+      },
     },
   }),
   afterMount(({ actions }) => {

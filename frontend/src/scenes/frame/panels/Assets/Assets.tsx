@@ -2,16 +2,11 @@ import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { assetsLogic } from './assetsLogic'
 import { panelsLogic } from '../panelsLogic'
-import {
-  CloudArrowDownIcon,
-  DocumentArrowUpIcon,
-  PencilSquareIcon,
-  TrashIcon,
-} from '@heroicons/react/24/solid'
+import { CloudArrowDownIcon, DocumentArrowUpIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { useState } from 'react'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { Spinner } from '../../../../components/Spinner'
-import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { DropdownMenu, DropdownMenuItem } from '../../../../components/DropdownMenu'
 
 function humaniseSize(size: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -65,31 +60,37 @@ function TreeNode({
             horizontal
             className="w-fit"
             buttonColor="none"
-            items={[
-              {
-                label: 'Upload files',
-                icon: <DocumentArrowUpIcon className="w-5 h-5" />,
-                onClick: () => uploadAssets(node.path),
-              },
-              node.path && {
-                label: 'Rename',
-                icon: <PencilSquareIcon className="w-5 h-5" />,
-                onClick: () => {
-                  const base = node.path.split('/').slice(0, -1).join('/')
-                  const newName = window.prompt('New name', node.name)
-                  if (newName) {
-                    const newPath = (base ? base + '/' : '') + newName
-                    renameAsset(node.path, newPath)
-                  }
+            items={
+              [
+                {
+                  label: 'Upload files',
+                  icon: <DocumentArrowUpIcon className="w-5 h-5" />,
+                  onClick: () => uploadAssets(node.path),
                 },
-              },
-              node.path && {
-                label: 'Delete',
-                confirm: 'Are you sure?',
-                icon: <TrashIcon className="w-5 h-5" />,
-                onClick: () => deleteAsset(node.path),
-              },
-            ]}
+                node.path
+                  ? {
+                      label: 'Rename',
+                      icon: <PencilSquareIcon className="w-5 h-5" />,
+                      onClick: () => {
+                        const base = node.path.split('/').slice(0, -1).join('/')
+                        const newName = window.prompt('New name', node.name)
+                        if (newName) {
+                          const newPath = (base ? base + '/' : '') + newName
+                          renameAsset(node.path, newPath)
+                        }
+                      },
+                    }
+                  : null,
+                node.path
+                  ? {
+                      label: 'Delete',
+                      confirm: 'Are you sure?',
+                      icon: <TrashIcon className="w-5 h-5" />,
+                      onClick: () => deleteAsset(node.path),
+                    }
+                  : null,
+              ].filter(Boolean) as DropdownMenuItem[]
+            }
           />
         </div>
         {expanded && (
@@ -124,39 +125,36 @@ function TreeNode({
             {new Date(node.mtime * 1000).toLocaleString()}
           </span>
         )}
-        {node.size === -1 && node.mtime === -1 ? (
+        {(node.size === -1 && node.mtime === -1) || isDownloading ? (
           <Spinner className="w-4 h-4" color="white" />
         ) : node.size === -2 && node.mtime === -2 ? (
           <span className="text-red-500">Upload error</span>
-        ) : (
-          <a
-            className="text-gray-300 hover:text-white cursor-pointer"
-            onClick={async (e) => {
-              e.preventDefault()
-              setIsDownloading(true)
-              const resource = await apiFetch(`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}`)
-              const blob = await resource.blob()
-              const url = URL.createObjectURL(blob)
-              const a = document.createElement('a')
-              a.href = url
-              a.download = node.name
-              a.click()
-              URL.revokeObjectURL(url)
-              setIsDownloading(false)
-            }}
-          >
-            {isDownloading ? (
-              <Spinner className="w-4 h-4 inline-block" />
-            ) : (
-              <CloudArrowDownIcon className="w-4 h-4 inline-block" />
-            )}
-          </a>
-        )}
+        ) : null}
         <DropdownMenu
           horizontal
           className="w-fit"
           buttonColor="none"
           items={[
+            {
+              label: 'Download',
+              icon: isDownloading ? (
+                <Spinner className="w-4 h-4 inline-block" />
+              ) : (
+                <CloudArrowDownIcon className="w-4 h-4 inline-block" />
+              ),
+              onClick: async () => {
+                setIsDownloading(true)
+                const resource = await apiFetch(`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}`)
+                const blob = await resource.blob()
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = node.name
+                a.click()
+                URL.revokeObjectURL(url)
+                setIsDownloading(false)
+              },
+            },
             {
               label: 'Rename',
               icon: <PencilSquareIcon className="w-4 h-4" />,
@@ -186,9 +184,7 @@ export function Assets(): JSX.Element {
   const { frame } = useValues(frameLogic)
   const { openLogs } = useActions(panelsLogic)
   const { assetsLoading, assetTree } = useValues(assetsLogic({ frameId: frame.id }))
-  const { syncAssets, uploadAssets, deleteAsset, renameAsset } = useActions(
-    assetsLogic({ frameId: frame.id })
-  )
+  const { syncAssets, uploadAssets, deleteAsset, renameAsset } = useActions(assetsLogic({ frameId: frame.id }))
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
 
   return (
