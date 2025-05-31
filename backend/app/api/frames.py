@@ -517,8 +517,6 @@ async def api_frame_get_image(
 
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
     path = "/image"
-    if frame.frame_access not in ["public", "protected"] and frame.frame_access_key:
-        path += "?k=" + frame.frame_access_key
 
     if request.query_params.get('t') == '-1':
         last_image = await redis.get(cache_key)
