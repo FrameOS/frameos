@@ -101,7 +101,8 @@ def _build_frame_url(frame: Frame, path: str, method: str) -> str:
     if not is_safe_host(frame.frame_host):
         raise HTTPException(status_code=400, detail="Unsafe frame host")
 
-    url = f"http://{frame.frame_host}:{frame.frame_port}{_build_frame_path(frame, path, method)}"
+    scheme = "https" if frame.frame_port % 1000 == 443 else "http"
+    url = f"{scheme}://{frame.frame_host}:{frame.frame_port}{_build_frame_path(frame, path, method)}"
     return url
 
 
