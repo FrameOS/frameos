@@ -61,12 +61,21 @@ RUN apt-get remove -y nodejs curl build-essential libffi-dev ca-certificates gnu
     && rm -rf /app/frontend/node_modules \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 
-# Change back to the main directory
+# Install frameos nim deps
 WORKDIR /app/frameos
 
 COPY frameos/frameos.nimble ./
 COPY frameos/nimble.lock ./
 COPY frameos/nim.cfg ./
+
+RUN nimble install -d -y && nimble setup
+
+# Install frameos agent nim deps
+WORKDIR /app/agent
+
+COPY agent/frameos_agent.nimble ./
+COPY agent/nimble.lock ./
+COPY agent/nim.cfg ./
 
 # Cache nimble deps for when deploying on frame
 RUN nimble install -d -y && nimble setup
