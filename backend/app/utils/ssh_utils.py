@@ -253,7 +253,7 @@ async def exec_command(
         await asyncio.gather(stdout_task, stderr_task)
 
         response = await process.wait()
-        exit_status = response.exit_status or -1
+        exit_status = response.exit_status or 0
 
         # Capture combined stdout if needed
         if output is not None:
