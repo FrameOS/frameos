@@ -8,7 +8,6 @@ import string
 import tempfile
 from typing import Any, Optional
 
-import asyncssh
 
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
@@ -21,7 +20,8 @@ from app.models import get_apps_from_scenes
 from app.models.assets import sync_assets
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json
-from app.utils.ssh_utils import get_ssh_connection, exec_command, remove_ssh_connection, exec_local_command
+from app.utils.remote_exec import run_command, upload_file
+from app.utils.local_exec import exec_local_command
 from app.models.apps import get_one_app_sources
 
 from .utils import find_nim_v2, find_nimbase_file
@@ -31,13 +31,12 @@ async def deploy_frame(id: int, redis: Redis):
 
 class FrameDeployer:
     ## This entire file is a big refactor in progress.
-    def __init__(self, db: Session, redis: Redis, frame: Frame, nim_path: str, temp_dir: str, ssh: asyncssh.SSHClientConnection):
+    def __init__(self, db: Session, redis: Redis, frame: Frame, nim_path: str, temp_dir: str):
         self.db = db
         self.redis = redis
         self.frame = frame
         self.nim_path = nim_path
         self.temp_dir = temp_dir
-        self.ssh = ssh
         self.build_id = ''.join(random.choice(string.ascii_lowercase) for _ in range(12))
 
     async def exec_command(
@@ -47,10 +46,17 @@ class FrameDeployer:
         log_output: bool = True,
         raise_on_error: bool = True
     ) -> int:
-        return await exec_command(
-            self.db, self.redis, self.frame, self.ssh,
-            command, output=output, log_output=log_output, raise_on_error=raise_on_error
+        status, stdout, stderr = await run_command(
+            self.db, self.redis, self.frame, command, log_output=log_output
         )
+        if output is not None:
+            lines = (stdout + "\n" + stderr).splitlines()
+            output.extend(lines)
+        if status != 0 and raise_on_error:
+            raise Exception(
+                f"Command '{command}' failed with code {status}\nstderr: {stderr}\nstdout: {stdout}"
+            )
+        return status
 
     async def log(self, type: str, line: str, timestamp: Optional[datetime] = None):
         await log(self.db, self.redis, int(self.frame.id), type=type, line=line, timestamp=timestamp)
@@ -60,7 +66,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
     db: Session = ctx['db']
     redis: Redis = ctx['redis']
 
-    ssh = None
     frame = db.get(Frame, id)
     if not frame:
         raise Exception("Frame not found")
@@ -82,7 +87,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         await update_frame(db, redis, frame)
 
         nim_path = find_nim_v2()
-        ssh = await get_ssh_connection(db, redis, frame)
 
         async def install_if_necessary(pkg: str, raise_on_error=True) -> int:
             search_strings = ["run apt-get update", "404 Not Found", "failed to fetch", "Unable to fetch some archives"]
@@ -105,7 +109,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             return response
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path=nim_path, temp_dir=temp_dir, ssh=ssh)
+            self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
             build_id = self.build_id
             await self.log("stdout", f"Deploying frame {frame.name} with build id {self.build_id}")
 
@@ -216,10 +220,14 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await self.log("stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
 
             # 3. Upload the local tarball
-            await asyncssh.scp(
-                archive_path,
-                (ssh, f"/srv/frameos/build/build_{build_id}.tar.gz"),
-                recurse=False
+            with open(archive_path, "rb") as fh:
+                data = fh.read()
+            await upload_file(
+                self.db,
+                self.redis,
+                self.frame,
+                f"/srv/frameos/build/build_{build_id}.tar.gz",
+                data,
             )
 
             # Unpack & compile on device
@@ -237,16 +245,15 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 f"/srv/frameos/releases/release_{build_id}/frameos"
             )
 
-            # 4. Upload frame.json using a TEMP FILE approach
-            frame_json_data = (json.dumps(get_frame_json(db, frame), indent=4) + "\n").encode('utf-8')
-            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmpf:
-                local_json_path = tmpf.name
-                tmpf.write(frame_json_data)
-            await asyncssh.scp(
-                local_json_path, (ssh, f"/srv/frameos/releases/release_{build_id}/frame.json"),
-                recurse=False
+            # 4. Upload frame.json
+            frame_json_data = (
+                json.dumps(get_frame_json(db, frame), indent=4) + "\n"
+            ).encode("utf-8")
+            await upload_file(
+                self.db, self.redis, self.frame,
+                f"/srv/frameos/releases/release_{build_id}/frame.json",
+                frame_json_data,
             )
-            os.remove(local_json_path)  # remove local temp file
             await self.log("stdout", f"> add /srv/frameos/releases/release_{build_id}/frame.json")
 
             # Driver-specific vendor steps
@@ -283,19 +290,14 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     "sha256sum requirements.txt > requirements.txt.sha256sum))"
                 )
 
-            # 5. Upload frameos.service with a TEMP FILE approach
+            # 5. Upload frameos.service
             with open("../frameos/frameos.service", "r") as f:
                 service_contents = f.read().replace("%I", frame.ssh_user)
-            service_data = service_contents.encode('utf-8')
-            with tempfile.NamedTemporaryFile(suffix=".service", delete=False) as tmpservice:
-                local_service_path = tmpservice.name
-                tmpservice.write(service_data)
-            await asyncssh.scp(
-                local_service_path,
-                (ssh, f"/srv/frameos/releases/release_{build_id}/frameos.service"),
-                recurse=False
+            await upload_file(
+                self.db, self.redis, self.frame,
+                f"/srv/frameos/releases/release_{build_id}/frameos.service",
+                service_contents.encode("utf-8"),
             )
-            os.remove(local_service_path)
 
             await self.exec_command(
                 f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state "
@@ -315,7 +317,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             )
 
             # Figure out the difference between /srv/assets and the local assets folder
-            await sync_assets(db, redis, frame, ssh)
+            await sync_assets(db, redis, frame)
 
             # Clean old builds
             await self.exec_command("cd /srv/frameos/build && ls -dt1 build_* | tail -n +11 | xargs rm -rf")
@@ -388,13 +390,11 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await update_frame(db, redis, frame)
 
     except Exception as e:
-        await self.log("stderr", str(e))
+        await log(db, redis, int(frame.id), type="stderr", line=str(e))
         if frame:
             frame.status = 'uninitialized'
             await update_frame(db, redis, frame)
-    finally:
-        if ssh is not None:
-            await remove_ssh_connection(db, redis, ssh, frame)
+
 
 
 def create_build_folders(temp_dir, build_id):

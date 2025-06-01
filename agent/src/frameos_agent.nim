@@ -1,5 +1,5 @@
 import std/[algorithm, segfaults, strformat, strutils, asyncdispatch, terminal,
-            times, os, sysrand, httpclient, osproc, streams, unicode]
+            times, os, sysrand, httpclient, osproc, streams, unicode, typedthreads]
 import checksums/md5
 import json, jsony
 import ws
@@ -51,6 +51,14 @@ type
     timeZone*: string
     network*: NetworkConfig
     agent*: AgentConfig
+
+  WhichStream* = enum stdoutStr, stderrStr
+
+  LineMsg* = object
+    stream*: WhichStream ## stdout or stderr
+    txt*: string         ## one complete line
+    done*: bool          ## true when process finished
+    exit*: int           ## exit code (only valid if done)
 
 # ----------------------------------------------------------------------------
 # Config IO (fails hard if unreadable)
@@ -199,7 +207,63 @@ proc recvBinary(ws: WebSocket): Future[string] {.async.} =
       discard # ignore text, pong …
 
 # ----------------------------------------------------------------------------
-# Challenge-response handshake (server-initiated)
+# Shell command helpers
+# ----------------------------------------------------------------------------
+type
+  StreamParams = tuple[
+    pipe: Stream;
+    which: WhichStream;
+    ch: ptr Channel[LineMsg]
+  ]
+
+  OutParams = tuple[
+    process: Process;
+    ch: ptr Channel[LineMsg]
+  ]
+
+proc readErr(p: StreamParams) {.thread.} =
+  let (pipe, which, ch) = p
+  var line: string
+  while pipe.readLine(line):
+    ch[].send LineMsg(stream: which, txt: line, done: false)
+
+proc readOut(p: OutParams) {.thread.} =
+  let (process, ch) = p
+  var line: string
+  while process.outputStream.readLine(line):
+    ch[].send LineMsg(stream: stdoutStr, txt: line, done: false)
+  let rc = process.waitForExit() # EOF ⇒ child quit
+  ch[].send LineMsg(done: true, exit: rc) # final signal
+
+proc execShellThreaded(rawCmd: string; ws: WebSocket;
+                       cfg: FrameConfig; id: string): Future[void] {.async.} =
+  var ch: Channel[LineMsg]
+  ch.open()
+  var p = startProcess("/bin/bash",
+          args = ["-c", rawCmd],
+          options = {poUsePath})
+
+  var thrOut: Thread[OutParams]
+  var thrErr: Thread[StreamParams]
+
+  createThread(thrOut, readOut, (p, addr ch)) # stdout + exit code
+  createThread(thrErr, readErr, (p.errorStream, stderrStr, addr ch))
+
+  while true:
+    let (ready, msg) = tryRecv(ch) # new one-arg form
+    if ready:
+      if msg.done:
+        await sendResp(ws, cfg, id, msg.exit == 0, %*{"exit": msg.exit})
+        break
+      else:
+        let which = if msg.stream == stdoutStr: "stdout" else: "stderr"
+        await streamChunk(ws, cfg, id, which, msg.txt & "\n")
+    else:
+      await sleepAsync(100)
+  ch.close()
+
+# ----------------------------------------------------------------------------
+# All command handlers
 # ----------------------------------------------------------------------------
 proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
   let id = cmd{"id"}.getStr()
@@ -210,7 +274,7 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
 
   # No remote execution available
   if not cfg.agent.agentRunCommands:
-    if name != "version":
+    if name != "version": # only allow "version" command
       await sendResp(ws, cfg, id, false, %*{"error": "agentRunCommands disabled in config"})
       return
 
@@ -265,31 +329,9 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
               "binary": false})
     of "shell":
       if not args.hasKey("cmd"):
-        await sendResp(ws, cfg, id, false,
-                      %*{"error": "`cmd` missing"})
-        return
-
-      let cmdStr = args["cmd"].getStr
-
-      var p = startProcess(
-        "/bin/sh",             # command
-        args = ["-c", cmdStr], # argv
-        options = {poUsePath, poStdErrToStdOut}
-      )
-
-      let bufSize = 4096
-      var buf = newString(bufSize)
-
-      while true:
-        let n = p.outputStream.readData(addr buf[0], buf.len)
-        if n == 0:
-          if p.running: await sleepAsync(100) # no data yet – yield
-          else: break # process finished – exit loop
-        else:
-          await streamChunk(ws, cfg, id, "stdout", buf[0 ..< n])
-
-      let rc = p.waitForExit()
-      await sendResp(ws, cfg, id, rc == 0, %*{"exit": rc})
+        await sendResp(ws, cfg, id, false, %*{"error": "`cmd` missing"})
+      else:
+        asyncCheck execShellThreaded(args["cmd"].getStr(), ws, cfg, id)
 
     of "file_md5":
       let path = args{"path"}.getStr("")
@@ -452,14 +494,11 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
     echo &"⚠️ handshake failed, unexpected action: {act} in {ackMsg}"
     raise newException(Exception, "Handshake failed: " & ackMsg)
 
-# ----------------------------------------------------------------------------
-# Heartbeat helper
-# ----------------------------------------------------------------------------
 proc startHeartbeat(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
   ## Keeps server-side idle-timeout at bay.
   try:
     while true:
-      await sleepAsync(20_000)
+      await sleepAsync(40_000)
       let env = makeSecureEnvelope(%*{"type": "heartbeat"}, cfg)
       await ws.send($env)
   except Exception: discard # will quit when ws closes / errors out
@@ -483,7 +522,7 @@ proc runAgent(cfg: FrameConfig) {.async.} =
         await doHandshake(ws, cfg) # throws on failure
         backoff = InitialBackoffSeconds # reset back-off
 
-        asyncCheck startHeartbeat(ws, cfg) # fire-and-forget
+        asyncCheck startHeartbeat(ws, cfg)
 
         # ── Main receive loop ───────────────────────────────────────────────
         while true:

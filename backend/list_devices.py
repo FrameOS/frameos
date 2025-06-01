@@ -30,9 +30,10 @@ if __name__ == '__main__':
             "SpectraSixColor": "Spectra 6 Color",
         }.get(v.color_option, v.color_option)
         code = "" if v.code == "" else f" ({v.code.upper()})"
+        dim = f'{max(v.width or 0, v.height or 0)}x{min(v.width or 0, v.height or 0)}'
         output = {
             "value": f"waveshare.{v.key}",
-            "label": f'Waveshare {v.size}"{code} {max(v.width, v.height)}x{min(v.width, v.height)} {color}',
+            "label": f'Waveshare {v.size}"{code} {dim} {color}',
         }
         print(f"    {json.dumps(output)},")
 

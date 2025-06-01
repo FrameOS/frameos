@@ -8,6 +8,7 @@ import hmac
 import hashlib
 import json
 import secrets
+import re
 import time
 from typing import Any, Dict, Optional
 
@@ -42,8 +43,16 @@ def hmac_sha256(key: str, data: str) -> str:
 
 
 def canonical_dumps(obj: Any) -> str:
-    """Dump JSON with deterministic key ordering – matches Nim's canonical()."""
-    return json.dumps(obj, separators=(",", ":"), sort_keys=True)
+    # 1. don’t escape printable Unicode – keep them exactly like Nim does
+    s = json.dumps(obj, separators=(',', ':'), sort_keys=True, ensure_ascii=False)
+
+    # 2. boostrap control-character escapes to Nim’s style
+    #    (\u00xx → \u00XX, i.e. last two hex digits upper-case)
+    return re.sub(
+        r'\\u00([0-9a-f]{2})',
+        lambda m: '\\u00' + m.group(1).upper(),
+        s,
+    )
 
 
 def make_envelope(payload: dict, api_key: str, shared_secret: str) -> dict:
@@ -296,7 +305,7 @@ async def ws_agent_endpoint(
     # =======================================================================
     try:
         while True:
-            packet = await asyncio.wait_for(ws.receive(), timeout=60)
+            packet = await asyncio.wait_for(ws.receive(), timeout=300)
 
             # -- Binary frames (part of file_read / http) --------------------
             if packet.get("type") == "websocket.receive" and packet.get("bytes") is not None:

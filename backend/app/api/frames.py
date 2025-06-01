@@ -707,11 +707,7 @@ async def api_frame_get_assets(
 
     ssh = await get_ssh_connection(db, redis, frame)
     try:
-        cmd = (
-            f"find {shlex.quote(assets_path)} \
-                \( -type f -o -type d \) \
-                -exec stat --printf='%F|%s|%Y|%n\n' {{}} +"
-        )
+        cmd = f"find {shlex.quote(assets_path)} -exec stat --printf='%F|%s|%Y|%n\\n' {{}} +"
         output: list[str] = []
         await exec_command(db, redis, frame, ssh, cmd, output, log_output=False)
     finally:
@@ -725,12 +721,13 @@ async def api_frame_get_assets(
         if len(parts) != 4:
             continue
         ftype, s, m, p = parts
-        assets.append({
-            "path": p.strip(),
-            "size": int(s),
-            "mtime": int(m),
-            "is_dir": ftype == "directory",
-        })
+        if p.strip() != assets_path:
+            assets.append({
+                "path": p.strip(),
+                "size": int(s),
+                "mtime": int(m),
+                "is_dir": ftype == "directory",
+            })
     assets.sort(key=lambda a: a["path"])
     return {"assets": assets}
 
@@ -745,14 +742,7 @@ async def api_frame_assets_sync(
     try:
         from app.models.assets import sync_assets
 
-        if await _use_agent(frame, redis):
-            await sync_assets(db, redis, frame, None)
-        else:
-            ssh = await get_ssh_connection(db, redis, frame)
-            try:
-                await sync_assets(db, redis, frame, ssh)
-            finally:
-                await remove_ssh_connection(db, redis, ssh, frame)
+        await sync_assets(db, redis, frame)
         return {"message": "Assets synced successfully"}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

@@ -19,8 +19,8 @@ from app.utils.ssh_utils import (
     get_ssh_connection,
     exec_command,
     remove_ssh_connection,
-    exec_local_command,
 )
+from app.utils.local_exec import exec_local_command
 from .utils import find_nim_v2, find_nimbase_file
 
 
