@@ -55,6 +55,19 @@ class FrameDeployer:
     async def log(self, type: str, line: str, timestamp: Optional[datetime] = None):
         await log(self.db, self.redis, int(self.frame.id), type=type, line=line, timestamp=timestamp)
 
+    async def scp_content(self, content: bytes, remote_path: str, suffix: str = ""):
+        """Upload file content to the frame via SCP.
+
+        A temporary file is created internally and removed after upload.
+        """
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmpf:
+            tmpf.write(content)
+            local_path = tmpf.name
+        try:
+            await asyncssh.scp(local_path, (self.ssh, remote_path), recurse=False)
+        finally:
+            os.remove(local_path)
+
 
 async def deploy_frame_task(ctx: dict[str, Any], id: int):
     db: Session = ctx['db']
@@ -237,16 +250,15 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 f"/srv/frameos/releases/release_{build_id}/frameos"
             )
 
-            # 4. Upload frame.json using a TEMP FILE approach
-            frame_json_data = (json.dumps(get_frame_json(db, frame), indent=4) + "\n").encode('utf-8')
-            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmpf:
-                local_json_path = tmpf.name
-                tmpf.write(frame_json_data)
-            await asyncssh.scp(
-                local_json_path, (ssh, f"/srv/frameos/releases/release_{build_id}/frame.json"),
-                recurse=False
+            # 4. Upload frame.json
+            frame_json_data = (
+                json.dumps(get_frame_json(db, frame), indent=4) + "\n"
+            ).encode("utf-8")
+            await self.scp_content(
+                frame_json_data,
+                f"/srv/frameos/releases/release_{build_id}/frame.json",
+                suffix=".json",
             )
-            os.remove(local_json_path)  # remove local temp file
             await self.log("stdout", f"> add /srv/frameos/releases/release_{build_id}/frame.json")
 
             # Driver-specific vendor steps
@@ -283,19 +295,14 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     "sha256sum requirements.txt > requirements.txt.sha256sum))"
                 )
 
-            # 5. Upload frameos.service with a TEMP FILE approach
+            # 5. Upload frameos.service
             with open("../frameos/frameos.service", "r") as f:
                 service_contents = f.read().replace("%I", frame.ssh_user)
-            service_data = service_contents.encode('utf-8')
-            with tempfile.NamedTemporaryFile(suffix=".service", delete=False) as tmpservice:
-                local_service_path = tmpservice.name
-                tmpservice.write(service_data)
-            await asyncssh.scp(
-                local_service_path,
-                (ssh, f"/srv/frameos/releases/release_{build_id}/frameos.service"),
-                recurse=False
+            await self.scp_content(
+                service_contents.encode("utf-8"),
+                f"/srv/frameos/releases/release_{build_id}/frameos.service",
+                suffix=".service",
             )
-            os.remove(local_service_path)
 
             await self.exec_command(
                 f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state "
