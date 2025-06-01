@@ -394,7 +394,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await update_frame(db, redis, frame)
 
     except Exception as e:
-        await self.log("stderr", str(e))
+        await log(db, redis, int(frame.id), type="stderr", line=str(e))
         if frame:
             frame.status = 'uninitialized'
             await update_frame(db, redis, frame)
