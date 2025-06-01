@@ -194,7 +194,7 @@ class AgentDeployer:
         cmd = (
             f"cd {source_dir} && nimble setup && "
             f"{self.nim_path} compile --os:linux --cpu:{cpu} "
-            f"--compileOnly --genScript --nimcache:{build_dir} "
+            f"--compileOnly --genScript --nimcache:{build_dir} -d:ssl "
             f"{debug_opts} src/frameos_agent.nim 2>&1"
         )
 
