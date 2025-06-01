@@ -296,7 +296,7 @@ async def ws_agent_endpoint(
     # =======================================================================
     try:
         while True:
-            packet = await asyncio.wait_for(ws.receive(), timeout=60)
+            packet = await asyncio.wait_for(ws.receive(), timeout=300)
 
             # -- Binary frames (part of file_read / http) --------------------
             if packet.get("type") == "websocket.receive" and packet.get("bytes") is not None:

@@ -456,13 +456,17 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
 # Heartbeat helper
 # ----------------------------------------------------------------------------
 proc startHeartbeat(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
-  ## Keeps server-side idle-timeout at bay.
   try:
     while true:
       await sleepAsync(20_000)
-      let env = makeSecureEnvelope(%*{"type": "heartbeat"}, cfg)
-      await ws.send($env)
-  except Exception: discard # will quit when ws closes / errors out
+      try:
+        let env = makeSecureEnvelope(%*{"type": "heartbeat"}, cfg)
+        await ws.send($env)
+      except Exception as e:
+        echo "⚠️ heartbeat failed: ", e.msg
+        raise e
+  except Exception as e:
+    echo "❌ heartbeat loop exited: ", e.msg
 
 # ----------------------------------------------------------------------------
 # Run-forever loop with exponential back-off
