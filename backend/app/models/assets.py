@@ -1,14 +1,12 @@
-import tempfile
 import uuid
 import os
-import asyncssh
+
 from sqlalchemy import LargeBinary, String, Text
 from sqlalchemy.orm import Session, mapped_column
 from app.models.frame import Frame
 from app.database import Base
 from arq import ArqRedis as Redis
-from app.utils.remote_exec import _use_agent, run_commands
-from app.utils.ssh_utils import exec_command
+from app.utils.remote_exec import _use_agent, run_commands, run_command, upload_file
 from app.models.log import new_log as log
 
 default_assets_path = "/srv/assets"
@@ -26,13 +24,13 @@ class Assets(Base):
             'size': len(self.data) if self.data else 0,
         }
 
-async def sync_assets(db: Session, redis: Redis, frame: Frame, ssh=None):
+async def sync_assets(db: Session, redis: Redis, frame: Frame, _ssh=None):
     assets_path = frame.assets_path or default_assets_path
-    await make_asset_folders(db, redis, frame, ssh, assets_path)
+    await make_asset_folders(db, redis, frame, assets_path)
     if frame.upload_fonts != "none":
-        await upload_font_assets(db, redis, frame, ssh, assets_path)
+        await upload_font_assets(db, redis, frame, assets_path)
 
-async def make_asset_folders(db: Session, redis: Redis, frame: Frame, ssh, assets_path: str):
+async def make_asset_folders(db: Session, redis: Redis, frame: Frame, assets_path: str):
     if frame.upload_fonts != "none":
         cmd = (
             f"if [ ! -d {assets_path}/fonts ]; then "
@@ -52,23 +50,19 @@ async def make_asset_folders(db: Session, redis: Redis, frame: Frame, ssh, asset
             f"fi"
         )
 
-    if await _use_agent(frame, redis):
-        await run_commands(db, redis, frame, [cmd])
-    else:
-        await exec_command(db, redis, frame, ssh, cmd)
+    await run_commands(db, redis, frame, [cmd])
 
-async def upload_font_assets(db: Session, redis: Redis, frame: Frame, ssh, assets_path: str):
+async def upload_font_assets(db: Session, redis: Redis, frame: Frame, assets_path: str):
     if await _use_agent(frame, redis):
         from app.ws.agent_ws import assets_list_on_frame
         assets = await assets_list_on_frame(frame.id, assets_path + "/fonts")
         remote_fonts = {a["path"]: int(a.get("size", 0)) for a in assets}
     else:
         command = f"find {assets_path}/fonts -type f -exec stat --format='%s %Y %n' {{}} +"
-        output: list[str] = []
-        await exec_command(db, redis, frame, ssh, command, output, log_output=False)
-
+        status, stdout, _ = await run_command(db, redis, frame, command)
+        stdout_lines = stdout.splitlines()
         remote_fonts = {}
-        for line in output:
+        for line in stdout_lines:
             if not line:
                 continue
             size, mtime, path = line.split(' ', 2)
@@ -119,23 +113,12 @@ async def upload_font_assets(db: Session, redis: Redis, frame: Frame, ssh, asset
             await file_write_on_frame(frame.id, remote_path, font.data)
 
     else:
-        await log(db, redis, frame.id, "stdout", f"Uploading {len(fonts_to_upload) + len(custom_fonts_to_upload)} fonts")
         for local_path, remote_path in fonts_to_upload:
-            await asyncssh.scp(
-                local_path,
-                (ssh, remote_path),
-                recurse=False,
-            )
+            with open(local_path, "rb") as fh:
+                data = fh.read()
+            await upload_file(db, redis, frame, remote_path, data)
         for font, remote_path in custom_fonts_to_upload:
-            with tempfile.NamedTemporaryFile(suffix=".ttf", delete=False) as tmpf:
-                tempfile_path = tmpf.name
-                tmpf.write(font.data)
-            await asyncssh.scp(
-                tempfile_path,
-                (ssh, remote_path),
-                recurse=False,
-            )
-            os.remove(tempfile_path)
+            await upload_file(db, redis, frame, remote_path, font.data)
 
     await log(
         db,
