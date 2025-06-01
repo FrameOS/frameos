@@ -494,14 +494,14 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
     echo &"⚠️ handshake failed, unexpected action: {act} in {ackMsg}"
     raise newException(Exception, "Handshake failed: " & ackMsg)
 
-proc startPing(ws: WebSocket): Future[void] {.async.} =
-  ## send a WebSocket-level PING every 15 s
+proc startHeartbeat(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
+  ## Keeps server-side idle-timeout at bay.
   try:
     while true:
-      await sleepAsync(20_000) # keep under server’s 20 s budget
-      # echo "🔄 sending ping"
-      await ws.send("", OpCode.Ping) # zero-byte control frame
-  except Exception: discard # exits when socket is closed
+      await sleepAsync(40_000)
+      let env = makeSecureEnvelope(%*{"type": "heartbeat"}, cfg)
+      await ws.send($env)
+  except Exception: discard # will quit when ws closes / errors out
 
 # ----------------------------------------------------------------------------
 # Run-forever loop with exponential back-off
@@ -522,7 +522,7 @@ proc runAgent(cfg: FrameConfig) {.async.} =
         await doHandshake(ws, cfg) # throws on failure
         backoff = InitialBackoffSeconds # reset back-off
 
-        asyncCheck startPing(ws)
+        asyncCheck startHeartbeat(ws, cfg)
 
         # ── Main receive loop ───────────────────────────────────────────────
         while true:
