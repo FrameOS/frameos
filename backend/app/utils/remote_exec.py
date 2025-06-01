@@ -68,7 +68,7 @@ async def _exec_via_agent(
         "timeout": timeout,
     }
 
-    await redis.rpush("agent:cmd:queue", json.dumps(message).encode())
+    await redis.rpush(f"agent:cmd:{frame.id}", json.dumps(message).encode())
 
     resp_key = f"agent:resp:{cmd_id}"
     res = await redis.blpop(resp_key, timeout=timeout)
@@ -108,7 +108,7 @@ async def _file_write_via_agent(
         "blob": base64.b64encode(zipped).decode(),
     }
 
-    await redis.rpush("agent:cmd:queue", json.dumps(message).encode())
+    await redis.rpush(f"agent:cmd:{frame.id}", json.dumps(message).encode())
 
     resp_key = f"agent:resp:{cmd_id}"
     res = await redis.blpop(resp_key, timeout=timeout)

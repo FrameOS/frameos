@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from httpx import AsyncClient, Limits
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse
@@ -13,8 +13,6 @@ from app.api import api_no_auth, api_with_auth, api_public
 from fastapi.middleware.gzip import GZipMiddleware
 from app.middleware import GzipRequestMiddleware
 from app.ws.agent_ws import router as agent_ws_router
-from app.ws.agent_tasks import start_background_listener
-from app.redis import create_redis_connection
 from app.websockets import register_ws_routes, redis_listener
 from app.config import config
 from app.utils.sentry import initialize_sentry
@@ -24,14 +22,10 @@ async def lifespan(app: FastAPI):
     initialize_sentry()
     app.state.http_client = AsyncClient(limits=Limits(max_connections=20, max_keepalive_connections=10))
     app.state.http_semaphore = asyncio.Semaphore(10)
-    app.state.redis = create_redis_connection()
     task = asyncio.create_task(redis_listener())
-    start_background_listener(app)
     yield
     await app.state.http_client.aclose()
     task.cancel()
-    with suppress(Exception):
-        await app.state.redis.close()
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(GZipMiddleware)
