@@ -14,6 +14,7 @@ RestartSec=5
 LimitNOFILE=65536
 PrivateTmp=yes
 ProtectSystem=full
+ReadWritePaths=/etc/systemd/system /etc/cron.d /boot /boot/firmware
 
 [Install]
 WantedBy=multi-user.target

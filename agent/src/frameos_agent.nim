@@ -272,7 +272,7 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
       let cmdStr = args["cmd"].getStr
 
       var p = startProcess(
-        "/bin/sh",             # command
+        "/bin/bash",           # command
         args = ["-c", cmdStr], # argv
         options = {poUsePath, poStdErrToStdOut}
       )

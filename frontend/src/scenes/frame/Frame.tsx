@@ -50,7 +50,7 @@ export function Frame(props: FrameSceneProps) {
                     ...(!requiresRecompilation
                       ? [
                           {
-                            label: 'Full deploy',
+                            label: 'Full deploy' + agentExtra,
                             onClick: () => {
                               fullDeployFrame()
                               openLogs()
