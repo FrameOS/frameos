@@ -1,9 +1,8 @@
-import subprocess
 from arq import ArqRedis
 import asyncssh
 import asyncio
 import time
-from typing import Optional
+from typing import Optional, Any
 from sqlalchemy.orm import Session
 
 from app.models.log import new_log as log
@@ -17,7 +16,7 @@ _pool_lock = asyncio.Lock()
 
 # Keys in this dict: (host, port, username, 'password' or 'key'), e.g. ("192.168.1.1", 22, "ubuntu", "password")
 # Values: List of PooledConnection objects
-_ssh_pool: dict[str, "PooledConnection"] = {}
+_ssh_pool: dict[tuple[Any, Any | int, Any, str], list["PooledConnection"]] = {}
 
 # If a connection is idle more than this many seconds, it will be closed.
 IDLE_TIMEOUT_SECONDS = 30
@@ -31,7 +30,7 @@ class PooledConnection:
         self.ssh = ssh
         self.in_use = False
         self.last_used = time.time()
-        self.closing_task = None
+        self.closing_task: Optional[asyncio.Task] = None
 
     def expired(self):
         return (time.time() - self.last_used) >= IDLE_TIMEOUT_SECONDS
@@ -236,9 +235,9 @@ async def exec_command(
     """
     await log(db, redis, frame.id, "stdout", f"> {command}")
 
-    stdout_buffer = []
-    stderr_buffer = []
-    combined_buffer = []
+    stdout_buffer: list[str] = []
+    stderr_buffer: list[str] = []
+    combined_buffer: list[str] = []
 
     try:
         process = await ssh.create_process(command)
@@ -253,8 +252,8 @@ async def exec_command(
 
         await asyncio.gather(stdout_task, stderr_task)
 
-        respoonse = await process.wait()
-        exit_status = respoonse.exit_status
+        response = await process.wait()
+        exit_status = response.exit_status or -1
 
         # Capture combined stdout if needed
         if output is not None:
@@ -307,43 +306,3 @@ async def _stream_lines(
             combined_buffer_list.append(line)
         if log_output:
             await log(db, redis, frame.id, log_type, line.rstrip('\n'))
-
-
-async def exec_local_command(db: Session, redis: ArqRedis, frame: Frame, command: str, generate_log=True) -> tuple[int, Optional[str], Optional[str]]:
-    if generate_log:
-        await log(db, redis, int(frame.id), "stdout", f"$ {command}")
-    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    errors = []
-    outputs = []
-    break_next = False
-
-    while True:
-        if process.stdout:
-            while True:
-                output = process.stdout.readline()
-                if not output:
-                    break
-                await log(db, redis, int(frame.id), "stdout", output)
-                outputs.append(output)
-
-        if process.stderr:
-            while True:
-                error = process.stderr.readline()
-                if not error:
-                    break
-                await log(db, redis, int(frame.id), "stderr", error)
-                errors.append(error)
-
-        if break_next:
-            break
-        if process.poll() is not None:
-            break_next = True
-        await asyncio.sleep(0.1)
-
-    exit_status = process.returncode
-    if exit_status != 0:
-        await log(db, redis, int(frame.id), "exit_status", f"The command exited with status {exit_status}")
-
-    return (exit_status,
-            ''.join(outputs) if len(outputs) > 0 else None,
-            ''.join(errors) if len(errors) > 0 else None)

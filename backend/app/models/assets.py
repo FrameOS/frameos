@@ -24,7 +24,7 @@ class Assets(Base):
             'size': len(self.data) if self.data else 0,
         }
 
-async def sync_assets(db: Session, redis: Redis, frame: Frame, _ssh=None):
+async def sync_assets(db: Session, redis: Redis, frame: Frame):
     assets_path = frame.assets_path or default_assets_path
     await make_asset_folders(db, redis, frame, assets_path)
     if frame.upload_fonts != "none":

@@ -60,17 +60,6 @@ type
     done*: bool          ## true when process finished
     exit*: int           ## exit code (only valid if done)
 
-  StreamParams = tuple[
-    pipe: Stream,
-    which: WhichStream,
-    ch: ptr Channel[LineMsg]
-  ]
-
-  OutParams = tuple[ # stdout reader *also* sees the Process
-    process: Process,
-    ch: ptr Channel[LineMsg]
-  ]
-
 # ----------------------------------------------------------------------------
 # Config IO (fails hard if unreadable)
 # ----------------------------------------------------------------------------
@@ -218,8 +207,20 @@ proc recvBinary(ws: WebSocket): Future[string] {.async.} =
       discard # ignore text, pong …
 
 # ----------------------------------------------------------------------------
-# Shell helpers
+# Shell command helpers
 # ----------------------------------------------------------------------------
+type
+  StreamParams = tuple[
+    pipe: Stream;
+    which: WhichStream;
+    ch: ptr Channel[LineMsg]
+  ]
+
+  OutParams = tuple[
+    process: Process;
+    ch: ptr Channel[LineMsg]
+  ]
+
 proc readErr(p: StreamParams) {.thread.} =
   let (pipe, which, ch) = p
   var line: string
@@ -261,6 +262,9 @@ proc execShellThreaded(rawCmd: string; ws: WebSocket;
       await sleepAsync(100)
   ch.close()
 
+# ----------------------------------------------------------------------------
+# All command handlers
+# ----------------------------------------------------------------------------
 proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
   let id = cmd{"id"}.getStr()
   let name = cmd{"name"}.getStr()
@@ -270,7 +274,7 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
 
   # No remote execution available
   if not cfg.agent.agentRunCommands:
-    if name != "version":
+    if name != "version": # only allow "version" command
       await sendResp(ws, cfg, id, false, %*{"error": "agentRunCommands disabled in config"})
       return
 

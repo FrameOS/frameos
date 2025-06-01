@@ -404,7 +404,6 @@ async def _run_command_ssh(
     try:
         await log(db, redis, frame.id, "stdout", f"> {cmd}")
 
-        # ‼ You could pass encoding=None to get raw bytes, but we keep the default.
         proc = await ssh.create_process(cmd)
 
         try:
@@ -413,7 +412,7 @@ async def _run_command_ssh(
             proc.kill()
             raise TimeoutError(f"SSH command timed-out after {timeout}s: {cmd}")
 
-        # --- read whatever we get (bytes or str) ---------------------------
+        # read whatever we get (bytes or str)
         raw_out: str | bytes = await proc.stdout.read()
         raw_err: str | bytes = await proc.stderr.read()
 
@@ -426,7 +425,6 @@ async def _run_command_ssh(
 
         exit_status: int = proc.exit_status if proc.exit_status is not None else 1
 
-        # forward logs so the live log view stays complete
         if log_output:
             for line in stdout.splitlines():
                 await log(db, redis, frame.id, "stdout", line)

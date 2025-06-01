@@ -21,7 +21,7 @@ from app.models.assets import sync_assets
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame, get_frame_json
 from app.utils.remote_exec import run_command, upload_file
-from app.utils.ssh_utils import exec_local_command
+from app.utils.local_exec import exec_local_command
 from app.models.apps import get_one_app_sources
 
 from .utils import find_nim_v2, find_nimbase_file
@@ -60,10 +60,6 @@ class FrameDeployer:
 
     async def log(self, type: str, line: str, timestamp: Optional[datetime] = None):
         await log(self.db, self.redis, int(self.frame.id), type=type, line=line, timestamp=timestamp)
-
-    async def scp_content(self, content: bytes, remote_path: str, suffix: str = ""):
-        """Upload *content* to *remote_path* on the frame."""
-        await upload_file(self.db, self.redis, self.frame, remote_path, content)
 
 
 async def deploy_frame_task(ctx: dict[str, Any], id: int):
@@ -253,10 +249,10 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             frame_json_data = (
                 json.dumps(get_frame_json(db, frame), indent=4) + "\n"
             ).encode("utf-8")
-            await self.scp_content(
-                frame_json_data,
+            await upload_file(
+                self.db, self.redis, self.frame,
                 f"/srv/frameos/releases/release_{build_id}/frame.json",
-                suffix=".json",
+                frame_json_data,
             )
             await self.log("stdout", f"> add /srv/frameos/releases/release_{build_id}/frame.json")
 
@@ -297,10 +293,10 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             # 5. Upload frameos.service
             with open("../frameos/frameos.service", "r") as f:
                 service_contents = f.read().replace("%I", frame.ssh_user)
-            await self.scp_content(
-                service_contents.encode("utf-8"),
+            await upload_file(
+                self.db, self.redis, self.frame,
                 f"/srv/frameos/releases/release_{build_id}/frameos.service",
-                suffix=".service",
+                service_contents.encode("utf-8"),
             )
 
             await self.exec_command(
