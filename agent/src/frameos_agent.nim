@@ -327,7 +327,7 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
       if not args.hasKey("cmd"):
         await sendResp(ws, cfg, id, false, %*{"error": "`cmd` missing"})
       else:
-        await execShellThreaded(args["cmd"].getStr(), ws, cfg, id)
+        asyncCheck execShellThreaded(args["cmd"].getStr(), ws, cfg, id)
 
     of "file_md5":
       let path = args{"path"}.getStr("")

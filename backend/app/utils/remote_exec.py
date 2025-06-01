@@ -384,12 +384,6 @@ async def _run_command_agent(
                       else stderr_lines).append(chunk.get("data", ""))
     await redis.delete(stream_key)
 
-    if log_output:
-        for line in stdout_lines:
-            await log(db, redis, frame.id, "stdout", line)
-        for line in stderr_lines:
-            await log(db, redis, frame.id, "stderr", line)
-
     return exit_status or 0, "\n".join(stdout_lines), "\n".join(stderr_lines)
 
 
