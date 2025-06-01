@@ -140,6 +140,7 @@ async def run_commands(
     commands: list[str],
     *,
     timeout: int = 120,
+    log_output: bool = True,
 ) -> None:
     """
     Execute *commands* (in order) on the frame. Either via the WebSocket agent or via SSH.
@@ -165,7 +166,7 @@ async def run_commands(
     ssh = await get_ssh_connection(db, redis, frame)
     try:
         for cmd in commands:
-            await exec_command(db, redis, frame, ssh, cmd)
+            await exec_command(db, redis, frame, ssh, cmd, log_output=log_output)
     finally:
         await remove_ssh_connection(db, redis, ssh, frame)
 
@@ -318,6 +319,8 @@ async def _run_command_agent(
     frame: Frame,
     cmd: str,
     timeout: int,
+    *,
+    log_output: bool = True,
 ) -> Tuple[int, str, str]:
     """
     Execute *cmd* via the WebSocket agent, collecting stdout/stderr that are
@@ -381,6 +384,12 @@ async def _run_command_agent(
                       else stderr_lines).append(chunk.get("data", ""))
     await redis.delete(stream_key)
 
+    if log_output:
+        for line in stdout_lines:
+            await log(db, redis, frame.id, "stdout", line)
+        for line in stderr_lines:
+            await log(db, redis, frame.id, "stderr", line)
+
     return exit_status or 0, "\n".join(stdout_lines), "\n".join(stderr_lines)
 
 
@@ -390,6 +399,8 @@ async def _run_command_ssh(
     frame: Frame,
     cmd: str,
     timeout: int,
+    *,
+    log_output: bool = True,
 ) -> Tuple[int, str, str]:
     """
     Execute *cmd* over SSH, capturing stdout & stderr separately.
@@ -422,10 +433,11 @@ async def _run_command_ssh(
         exit_status: int = proc.exit_status if proc.exit_status is not None else 1
 
         # forward logs so the live log view stays complete
-        for line in stdout.splitlines():
-            await log(db, redis, frame.id, "stdout", line)
-        for line in stderr.splitlines():
-            await log(db, redis, frame.id, "stderr", line)
+        if log_output:
+            for line in stdout.splitlines():
+                await log(db, redis, frame.id, "stdout", line)
+            for line in stderr.splitlines():
+                await log(db, redis, frame.id, "stderr", line)
 
         return exit_status, stdout, stderr
     finally:
@@ -439,6 +451,7 @@ async def run_command(
     command: str,
     *,
     timeout: int = 120,
+    log_output: bool = True,
 ) -> Tuple[int, str, str]:
     """
     Run a single *command* on *frame* and capture its textual output.
@@ -449,5 +462,5 @@ async def run_command(
     Returns a tuple: **(exit_status, stdout, stderr)** – all text.
     """
     if await _use_agent(frame, redis):
-        return await _run_command_agent(db, redis, frame, command, timeout)
-    return await _run_command_ssh(db, redis, frame, command, timeout)
+        return await _run_command_agent(db, redis, frame, command, timeout, log_output=log_output)
+    return await _run_command_ssh(db, redis, frame, command, timeout, log_output=log_output)

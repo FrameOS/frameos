@@ -47,7 +47,7 @@ class FrameDeployer:
         raise_on_error: bool = True
     ) -> int:
         status, stdout, stderr = await run_command(
-            self.db, self.redis, self.frame, command
+            self.db, self.redis, self.frame, command, log_output=log_output
         )
         if output is not None:
             lines = (stdout + "\n" + stderr).splitlines()
