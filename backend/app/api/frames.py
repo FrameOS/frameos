@@ -745,14 +745,7 @@ async def api_frame_assets_sync(
     try:
         from app.models.assets import sync_assets
 
-        if await _use_agent(frame, redis):
-            await sync_assets(db, redis, frame, None)
-        else:
-            ssh = await get_ssh_connection(db, redis, frame)
-            try:
-                await sync_assets(db, redis, frame, ssh)
-            finally:
-                await remove_ssh_connection(db, redis, ssh, frame)
+        await sync_assets(db, redis, frame)
         return {"message": "Assets synced successfully"}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
