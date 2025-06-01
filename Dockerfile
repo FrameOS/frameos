@@ -75,7 +75,6 @@ WORKDIR /app/agent
 
 COPY agent/frameos_agent.nimble ./
 COPY agent/nimble.lock ./
-COPY agent/nim.cfg ./
 
 # Cache nimble deps for when deploying on frame
 RUN nimble install -d -y && nimble setup
