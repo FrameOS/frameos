@@ -44,10 +44,11 @@ class FrameDeployer:
         command: str,
         output: Optional[list[str]] = None,
         log_output: bool = True,
-        raise_on_error: bool = True
+        raise_on_error: bool = True,
+        timeout: int = 300 # 5 minutes default timeout
     ) -> int:
         status, stdout, stderr = await run_command(
-            self.db, self.redis, self.frame, command, log_output=log_output
+            self.db, self.redis, self.frame, command, log_output=log_output, timeout=timeout
         )
         if output is not None:
             lines = (stdout + "\n" + stderr).splitlines()
@@ -236,7 +237,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 f"cd /srv/frameos/build/build_{build_id} && "
                 "PARALLEL_MEM=$(awk '/MemTotal/{printf \"%.0f\\n\", $2/1024/250}' /proc/meminfo) && "
                 "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
-                "make -j$PARALLEL"
+                "make -j$PARALLEL",
+                timeout=3600, # 30 minute timeout for compilation
             )
 
             await self.exec_command(f"mkdir -p /srv/frameos/releases/release_{build_id}")

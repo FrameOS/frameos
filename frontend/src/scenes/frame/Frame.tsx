@@ -23,6 +23,7 @@ export function Frame(props: FrameSceneProps) {
     restartFrame,
     stopFrame,
     deployFrame,
+    fastDeployFrame,
     fullDeployFrame,
     deployAgent,
     restartAgent,
@@ -47,17 +48,24 @@ export function Frame(props: FrameSceneProps) {
                     { label: 'Restart FrameOS' + agentExtra, onClick: () => restartFrame() },
                     { label: 'Stop FrameOS' + agentExtra, onClick: () => stopFrame() },
                     { label: 'Reboot device' + agentExtra, onClick: () => rebootFrame() },
-                    ...(!requiresRecompilation
-                      ? [
+                    ...(requiresRecompilation
+                      ? []
+                      : [
                           {
-                            label: 'Full deploy' + agentExtra,
+                            label: 'Fast deploy' + agentExtra,
                             onClick: () => {
-                              fullDeployFrame()
+                              fastDeployFrame()
                               openLogs()
                             },
                           },
-                        ]
-                      : []),
+                        ]),
+                    {
+                      label: 'Full deploy' + agentExtra,
+                      onClick: () => {
+                        fullDeployFrame()
+                        openLogs()
+                      },
+                    },
                     ...(canDeployAgent
                       ? [
                           {
