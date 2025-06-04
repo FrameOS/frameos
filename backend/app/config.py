@@ -30,6 +30,8 @@ class Config:
     HASSIO_RUN_MODE = os.environ.get('HASSIO_RUN_MODE', None)
     HASSIO_TOKEN = os.environ.get('HASSIO_TOKEN', None)
     SUPERVISOR_TOKEN = os.environ.get('SUPERVISOR_TOKEN', None)
+    POSTHOG_API_KEY = os.environ.get('POSTHOG_API_KEY', None)
+    POSTHOG_HOST = os.environ.get('POSTHOG_HOST', 'https://us.i.posthog.com')
     ingress_path = ''
 
     def __init__(self):

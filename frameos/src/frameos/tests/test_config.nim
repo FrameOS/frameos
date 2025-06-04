@@ -15,12 +15,7 @@ block test_load_config:
     doAssert config.rotate == 0
     doAssert config.debug == true
     doAssert config.scalingMode == "cover"
-    doAssert config.settings == %*{"sentry": {"frame_dsn": nil}}
-    doAssert config.settings{"sentry"} == %*{"frame_dsn": nil}
-    doAssert config.settings{"sentry"}{"not_found"} == nil
-    doAssert config.settings{"sentry"}{"frame_dsn"} != nil
-    doAssert config.settings{"sentry"}{"frame_dsn"}.kind == JNull
-    doAssert config.settings{"sentry"}{"frame_dsn"}.getStr() == ""
+    doAssert config.settings == %*{}
     doAssert config.settings{"nothere"}{"neitherme"}{"orme"} == nil
     doAssert config.settings{"nothere"}{"neitherme"}{"orme"}.getStr() == ""
     doAssert config.settings{"nothere"}{"neitherme"}{"orme"}.isNil() == true

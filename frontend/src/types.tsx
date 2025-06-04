@@ -490,10 +490,6 @@ export interface FrameOSSettings {
   github?: {
     api_key?: string
   }
-  sentry?: {
-    controller_dsn?: string
-    frame_dsn?: string
-  }
   openAI?: {
     apiKey?: string
   }

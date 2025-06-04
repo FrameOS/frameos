@@ -15,11 +15,11 @@ from app.middleware import GzipRequestMiddleware
 from app.ws.agent_ws import router as agent_ws_router
 from app.websockets import register_ws_routes, redis_listener
 from app.config import config
-from app.utils.sentry import initialize_sentry
+from app.utils.posthog import initialize_posthog, capture_exception as posthog_capture_exception
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    initialize_sentry()
+    initialize_posthog()
     app.state.http_client = AsyncClient(limits=Limits(max_connections=20, max_keepalive_connections=10))
     app.state.http_semaphore = asyncio.Semaphore(10)
     task = asyncio.create_task(redis_listener())
@@ -94,6 +94,11 @@ if serve_html:
                 content={"detail": exc.errors()}
             )
         return HTMLResponse(index_html)
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception):
+        posthog_capture_exception(exc)
+        return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 if __name__ == '__main__':
     # run migrations

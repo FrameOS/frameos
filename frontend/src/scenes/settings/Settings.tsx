@@ -90,18 +90,6 @@ export function Settings() {
                     </Field>
                   </Box>
                 </Group>
-                <Group name="sentry">
-                  <Box className="p-2 mb-4 space-y-2">
-                    <H6>Sentry</H6>
-                    <p>Enable Sentry to monitor track errors and exceptions</p>
-                    <Field name="controller_dsn" label="Controller DSN">
-                      <TextInput autoFocus={!!savedSettings?.sentry?.controller_dsn} />
-                    </Field>
-                    <Field name="frame_dsn" label="Frame DSN">
-                      <TextInput autoFocus={!!savedSettings?.sentry?.frame_dsn} />
-                    </Field>
-                  </Box>
-                </Group>
                 <Group name="github">
                   <Box className="p-2 mb-4 space-y-2">
                     <H6>Github</H6>

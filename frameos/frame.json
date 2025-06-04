@@ -20,9 +20,6 @@
     "rotate": 0,
     "debug": true,
     "settings": {
-        "sentry": {
-            "frame_dsn": null
-        }
     },
     "schedule": {
         "events": [
