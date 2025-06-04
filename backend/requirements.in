@@ -24,3 +24,4 @@ types-Pillow
 types-redis
 types-requests
 types-python-jose
+werkzeug

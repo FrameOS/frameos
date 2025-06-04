@@ -105,6 +105,7 @@ markupsafe==2.1.3
     # via
     #   jinja2
     #   mako
+    #   werkzeug
 mdurl==0.1.2
     # via markdown-it-py
 mypy==1.13.0
@@ -257,6 +258,8 @@ watchfiles==1.0.3
     # via uvicorn
 websockets==14.1
     # via uvicorn
+werkzeug==3.1.3
+    # via -r requirements.in
 wheel==0.41.3
     # via pip-tools
 
