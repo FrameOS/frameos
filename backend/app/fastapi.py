@@ -97,7 +97,7 @@ if serve_html:
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
-        posthog_capture_exception(exc)
+        posthog_capture_exception(exc, request)
         return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 if __name__ == '__main__':
