@@ -44,6 +44,13 @@
       "value": "#FF0000",
       "required": true,
       "label": "Time color"
+    },
+    {
+      "name": "startWithToday",
+      "type": "boolean",
+      "value": "true",
+      "required": true,
+      "label": "Always start with today's date"
     }
   ],
   "output": [
