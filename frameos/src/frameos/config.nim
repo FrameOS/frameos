@@ -14,7 +14,7 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.frameHost == "": config.frameHost = "localhost"
   if config.frameAccess == "": config.frameAccess = "private"
   if config.name == "": config.name = config.frameHost
-  if config.timeZone == "": config.timeZone = findSystemTimeZone()
+  if config.timeZone == "": config.timeZone = detectSystemTimeZone()
 
 proc loadSchedule*(data: JsonNode): FrameSchedule =
   result = FrameSchedule(events: @[])
@@ -101,7 +101,7 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     saveAssets: if data{"saveAssets"} == nil: %*(false) else: data{"saveAssets"},
     logToFile: data{"logToFile"}.getStr(),
     debug: data{"debug"}.getBool() or commandLineParams().contains("--debug"),
-    timeZone: data{"timeZone"}.getStr("UTC"),
+    timeZone: data{"timeZone"}.getStr(""),
     schedule: loadSchedule(data{"schedule"}),
     gpioButtons: loadGPIOButtons(data{"gpioButtons"}),
     controlCode: loadControlCode(data{"controlCode"}),
