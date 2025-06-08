@@ -157,6 +157,19 @@ async def test_api_frame_new_missing_fields(async_client):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_import(async_client, db, redis):
+    payload = {
+        "name": "ImportedFrame",
+        "frameHost": "importhost",
+        "serverHost": "importserver"
+    }
+    resp = await async_client.post('/api/frames/import', json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data['frame']['name'] == "ImportedFrame"
+
+
+@pytest.mark.asyncio
 async def test_api_frame_delete(async_client, db, redis):
     frame = await new_frame(db, redis, 'DeleteMe', 'localhost', 'localhost')
     resp = await async_client.delete(f'/api/frames/{frame.id}')

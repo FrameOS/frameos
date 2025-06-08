@@ -1051,6 +1051,73 @@ async def api_frame_new(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@api_with_auth.post("/frames/import", response_model=FrameResponse)
+async def api_frame_import(
+    request: Request,
+    file: UploadFile = File(None),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """Import a frame from a JSON body or uploaded file."""
+    try:
+        if file is not None:
+            content = await file.read()
+            data = json.loads(content)
+        else:
+            data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid JSON")
+
+    try:
+        frame = await new_frame(
+            db,
+            redis,
+            data.get("name"),
+            data.get("frameHost") or data.get("frame_host"),
+            data.get("serverHost") or data.get("server_host"),
+            data.get("device"),
+            data.get("interval") or data.get("metricsInterval"),
+        )
+
+        mapping = {
+            "framePort": "frame_port",
+            "frameAccessKey": "frame_access_key",
+            "frameAccess": "frame_access",
+            "sshUser": "ssh_user",
+            "sshPass": "ssh_pass",
+            "sshPort": "ssh_port",
+            "serverPort": "server_port",
+            "serverApiKey": "server_api_key",
+            "width": "width",
+            "height": "height",
+            "color": "color",
+            "metricsInterval": "metrics_interval",
+            "debug": "debug",
+            "scalingMode": "scaling_mode",
+            "rotate": "rotate",
+            "backgroundColor": "background_color",
+            "interval": "interval",
+            "logToFile": "log_to_file",
+            "assetsPath": "assets_path",
+            "saveAssets": "save_assets",
+            "uploadFonts": "upload_fonts",
+            "schedule": "schedule",
+            "gpioButtons": "gpio_buttons",
+            "controlCode": "control_code",
+            "network": "network",
+            "agent": "agent",
+            "scenes": "scenes",
+        }
+        for src, dest in mapping.items():
+            if data.get(src) is not None:
+                setattr(frame, dest, data[src])
+
+        await update_frame(db, redis, frame)
+        return {"frame": frame.to_dict()}
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 @api_with_auth.delete("/frames/{frame_id}")
 async def api_frame_delete(
     frame_id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
