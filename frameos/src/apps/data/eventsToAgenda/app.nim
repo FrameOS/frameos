@@ -41,15 +41,17 @@ proc get*(self: App, context: ExecutionContext): string =
   proc h1(text: string): string = &"{title}{text}\n{normal}\n"
   proc formatDay(day: string): string = format(parseTs("{year/4}-{month/2}-{day/2}", day), titleFormat)
 
+  let noEvents = events == nil or events.kind != JArray or events.len == 0
+
   result = ""
 
   var currentDay = ""
-  if self.appConfig.startWithToday:
+  if self.appConfig.startWithToday or noEvents:
     let todayTs = epochTime().Timestamp
     result &= h1(format(todayTs, titleFormat, tzName = timezone))
     currentDay = format(todayTs, "{year/4}-{month/2}-{day/2}", tzName = timezone)
 
-  if events == nil or events.kind != JArray or events.len == 0:
+  if noEvents:
     result &= &"No events found\n"
     return
 
