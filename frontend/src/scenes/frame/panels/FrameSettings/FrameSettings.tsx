@@ -15,6 +15,7 @@ import { Spinner } from '../../../../components/Spinner'
 import { H6 } from '../../../../components/H6'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ArrowDownTrayIcon, ArrowPathIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline'
+import { apiFetch } from '../../../../utils/apiFetch'
 import { PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import { Switch } from '../../../../components/Switch'
@@ -55,6 +56,39 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                   ) : (
                     <ArrowPathIcon className="w-5 h-5" />
                   ),
+                },
+                {
+                  label: 'Download SD card image',
+                  async onClick() {
+                    try {
+                      const response = await apiFetch(`/api/frames/${frameId}/sdcard`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          wifi_ssid: 'MyWiFi',
+                          wifi_password: 'supersecret',
+                          hostname: frame?.name || 'frameos',
+                        }),
+                      })
+
+                      if (!response.ok) {
+                        throw new Error('Failed to build image')
+                      }
+
+                      const blob = await response.blob()
+                      const url = window.URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url
+                      a.download = 'frameos.img.gz'
+                      document.body.appendChild(a)
+                      a.click()
+                      a.remove()
+                      window.URL.revokeObjectURL(url)
+                    } catch (error) {
+                      console.error('Error downloading sd card image', error)
+                    }
+                  },
+                  icon: <ArrowDownTrayIcon className="w-5 h-5" />,
                 },
                 {
                   label: 'Import .json',
