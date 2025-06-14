@@ -42,7 +42,7 @@ Read more in [the documentation](https://frameos.net/guide/backend).
 The easiest way to install the FrameOS backend on a Mac or Debian/Ubuntu Linux is to run the following installation script:
 
 ```bash
-curl -fsSL https://frameos.net/install.sh | bash
+bash <(curl -fsSL https://frameos.net/install.sh)
 ```
 
 ### Running via Docker manually
