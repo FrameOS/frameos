@@ -167,6 +167,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     # Try installing liblgpio-dev
                     if await install_if_necessary("liblgpio-dev", raise_on_error=False) != 0:
                         await self.log("stdout", "--> Could not find liblgpio-dev. Installing from source.")
+                        await install_if_necessary("python3-setuptools")
                         command = (
                             "if [ ! -f /usr/local/include/lgpio.h ]; then "
                             "  rm -rf /tmp/lgpio-install && "
@@ -370,14 +371,21 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await self.exec_command("sudo rm -f /etc/cron.d/frameos-reboot")
 
         must_reboot = False
+
         if drivers.get("bootconfig"):
             for line in drivers["bootconfig"].lines:
-                if await self.exec_command(                                      f'grep -q "^{line}" ' + boot_config, raise_on_error=False) != 0:
+                if await self.exec_command(f'grep -q "^{line}" ' + boot_config, raise_on_error=False) != 0:
                     await self.exec_command(command=f'echo "{line}" | sudo tee -a ' + boot_config, log_output=False)
                     must_reboot = True
 
         await self.exec_command("sudo systemctl daemon-reload")
         await self.exec_command("sudo systemctl enable frameos.service")
+
+        if frame.last_successful_deploy_at is None:
+            # Reboot after the first deploy to make sure any modifications to config.txt are persisted to disk
+            # Otherwise if you pull out the power, you'll end up with a blank config.txt on the next boot.
+            must_reboot = True
+
         frame.status = 'starting'
         frame.last_successful_deploy = frame_dict
         frame.last_successful_deploy_at = datetime.now(timezone.utc)
