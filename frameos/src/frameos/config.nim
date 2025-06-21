@@ -18,7 +18,8 @@ proc setConfigDefaults*(config: var FrameConfig) =
 
 proc loadSchedule*(data: JsonNode): FrameSchedule =
   result = FrameSchedule(events: @[])
-  if data == nil or data.kind != JObject or data["events"] == nil or data["events"].kind != JArray:
+  if data == nil or data.kind != JObject or (not data.contains("colors")) or data["events"] == nil or data[
+      "events"].kind != JArray:
     return result
   for event in data["events"].items:
     result.events.add(ScheduledEvent(
@@ -70,10 +71,9 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
     )
 
 proc loadPalette*(data: JsonNode): PaletteConfig =
-  if data == nil or data.kind != JObject or data["colors"] == nil or data["colors"].kind != JArray:
-    result = PaletteConfig(colors: @[])
-  else:
-    result = PaletteConfig(colors: @[])
+  result = PaletteConfig(colors: @[])
+  if data != nil and data.kind == JObject and data.contains("colors") and data["colors"] != nil and data[
+      "colors"].kind == JArray:
     for color in data["colors"].items:
       try:
         let color = parseHtmlColor(color.getStr())
