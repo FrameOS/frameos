@@ -7,7 +7,7 @@ import { Select } from '../../../../components/Select'
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
-import { devices, Palette, spectraPalettes, withCustomPalette } from '../../../../devices'
+import { devices, spectraPalettes, withCustomPalette } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 import { appsLogic } from '../Apps/appsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
@@ -19,6 +19,7 @@ import { PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import { Switch } from '../../../../components/Switch'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
+import { Palette } from '../../../../types'
 
 export interface FrameSettingsProps {
   className?: string
