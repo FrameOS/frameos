@@ -1,4 +1,4 @@
-import pixie, json, times, locks
+import pixie, json, times, locks, options, sequtils
 
 import frameos/types
 import frameos/utils/image
@@ -12,6 +12,7 @@ type Driver* = ref object of FrameOSDriver
   height: int
   lastImageData: seq[ColorRGBX]
   lastRenderAt: float
+  palette: Option[seq[(int, int, int)]]
 
 var
   lastFloatImageLock: Lock
@@ -53,7 +54,23 @@ proc init*(frameOS: FrameOS): Driver =
       logger: logger,
       width: width,
       height: height,
+      palette: none(seq[(int, int, int)]),
     )
+
+    if waveshareDriver.colorOption == ColorOption.SpectraSixColor and len(frameOS.frameConfig.palette.colors) == 6:
+      let c = frameOS.frameConfig.palette.colors
+      result.palette = some(@[
+        (c[0][0], c[0][1], c[0][2]),
+        (c[1][0], c[1][1], c[1][2]),
+        (c[2][0], c[2][1], c[2][2]),
+        (c[3][0], c[3][1], c[3][2]),
+        (999, 999, 999),
+        (c[4][0], c[4][1], c[4][2]),
+        (c[5][0], c[5][1], c[5][2]),
+      ])
+    else:
+      result.palette = some(spectra6ColorPalette)
+
   except Exception as e:
     logger.log(%*{"event": "driver:waveshare",
         "error": "Failed to initialize driver", "exception": e.msg,
@@ -136,7 +153,7 @@ proc renderSevenColor*(self: Driver, image: Image) =
   waveshareDriver.renderImage(pixels)
 
 proc renderSpectraSixColor*(self: Driver, image: Image) =
-  let pixels = ditherPaletteIndexed(image, spectra6ColorPalette)
+  let pixels = ditherPaletteIndexed(image, if self.palette.isSome(): self.palette.get() else: spectra6ColorPalette)
   setLastPixels(pixels)
   self.notifyImageAvailable()
   waveshareDriver.renderImage(pixels)

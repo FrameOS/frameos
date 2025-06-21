@@ -27,6 +27,7 @@ type
     controlCode*: ControlCode
     network*: NetworkConfig
     agent*: AgentConfig
+    palette*: PaletteConfig
 
   GPIOButton* = ref object
     pin*: int
@@ -55,6 +56,9 @@ type
     agentEnabled*: bool
     agentRunCommands*: bool
     agentSharedSecret*: string
+
+  PaletteConfig* = ref object
+    colors*: seq[(int, int, int)]
 
   FrameSchedule* = ref object
     events*: seq[ScheduledEvent]

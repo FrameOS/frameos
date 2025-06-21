@@ -45,6 +45,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'gpio_buttons',
   'network',
   'agent',
+  'palette',
 ]
 
 const FRAME_KEYS_REQUIRE_RECOMPILE: (keyof FrameType)[] = ['device', 'scenes', 'reboot']

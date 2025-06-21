@@ -7,7 +7,7 @@ import { Select } from '../../../../components/Select'
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
-import { devices } from '../../../../devices'
+import { devices, Palette, spectraPalettes, withCustomPalette } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 import { appsLogic } from '../Apps/appsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
@@ -32,6 +32,8 @@ export function FrameSettings({ className }: FrameSettingsProps) {
   const { clearBuildCache } = useActions(frameSettingsLogic({ frameId }))
   const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
   const { openLogs } = useActions(panelsLogic({ frameId }))
+
+  const palette = withCustomPalette[frame.device || '']
 
   return (
     <div className={className}>
@@ -147,6 +149,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                 )}
               </Field>
             </div>
+
             <H6>Connection</H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               <Field name="frame_host" label="Frame host">
@@ -431,6 +434,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                 )}
               </Group>
             </div>
+
             <H6>Defaults</H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               <Field name="width" label="Width">
@@ -467,6 +471,71 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                 />
               </Field>
             </div>
+
+            <H6>Palette</H6>
+            {frame.device && withCustomPalette[frame.device] ? (
+              <div className="pl-2 @md:pl-8 space-y-2">
+                <Field name="palette" label="Color palette">
+                  {({ value, onChange }: { value: Palette; onChange: (v: Palette) => void }) => (
+                    <div className="space-y-2 w-full">
+                      <div className="flex items-center gap-2">
+                        <span>Set&nbsp;to</span>
+                        <Select
+                          name="palette"
+                          value={''}
+                          onChange={(v) => {
+                            const selectedPalette = spectraPalettes.find((p) => p.name === v)
+                            if (selectedPalette) {
+                              onChange(selectedPalette)
+                            }
+                          }}
+                          options={[
+                            { value: '', label: '' },
+                            ...spectraPalettes.map((palette) => ({
+                              value: palette.name || '',
+                              label: palette.name || 'Custom',
+                            })),
+                          ]}
+                        />
+                      </div>
+                      {palette?.colors.map((color, index) => (
+                        <div className="flex items-center gap-2" key={index}>
+                          <TextInput
+                            type="color"
+                            theme="node"
+                            className="!w-24"
+                            name={`colors.${index}`}
+                            value={value?.colors?.[index] ?? color}
+                            onChange={(_value) => {
+                              const newColors = palette.colors.map((c, i) =>
+                                i === index ? _value : value?.colors?.[i] ?? c ?? '#000000'
+                              )
+                              onChange({ colors: newColors })
+                            }}
+                          />
+                          <TextInput
+                            type="text"
+                            className="!w-24"
+                            name={`colors.${index}`}
+                            value={value?.colors?.[index] ?? color}
+                            onChange={(_value) => {
+                              const newColors = palette.colors.map((c, i) =>
+                                i === index ? _value : value?.colors?.[i] ?? c ?? '#000000'
+                              )
+                              onChange({ colors: newColors })
+                            }}
+                          />
+                          <span>{palette?.colorNames?.[index]}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Field>
+              </div>
+            ) : (
+              <div>This frame does not support changing the palette</div>
+            )}
+
             <H6>QR Control Code</H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               <Group name="control_code">

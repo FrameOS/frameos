@@ -69,6 +69,24 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
       wifiHostpotTimeoutSeconds: data{"wifiHotspotTimeoutSeconds"}.getFloat(600),
     )
 
+proc loadPalette*(data: JsonNode): PaletteConfig =
+  if data == nil or data.kind != JObject or data["colors"] == nil or data["colors"].kind != JArray:
+    result = PaletteConfig(colors: @[])
+  else:
+    result = PaletteConfig(colors: @[])
+    for color in data["colors"].items:
+      try:
+        let color = parseHtmlColor(color.getStr())
+        result.colors.add((
+          int(color.r * 255),
+          int(color.g * 255),
+          int(color.b * 255),
+        ))
+      except:
+        echo "Warning: Invalid color in palette: ", color.getStr()
+        result.colors = @[]
+        return result
+
 proc loadAgent*(data: JsonNode): AgentConfig =
   if data == nil or data.kind != JObject:
     result = AgentConfig(agentEnabled: false)
@@ -106,6 +124,7 @@ proc loadConfig*(filename: string = "frame.json"): FrameConfig =
     gpioButtons: loadGPIOButtons(data{"gpioButtons"}),
     controlCode: loadControlCode(data{"controlCode"}),
     network: loadNetwork(data{"network"}),
+    palette: loadPalette(data{"palette"}),
   )
   if result.assetsPath.endswith("/"):
     result.assetsPath = result.assetsPath.strip(leading = false, trailing = true, chars = {'/'})

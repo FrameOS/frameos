@@ -64,6 +64,7 @@ export interface FrameType {
     agentRunCommands?: boolean
     agentSharedSecret?: string
   }
+  palette?: Palette
   active_connections?: number
 }
 
@@ -506,4 +507,10 @@ export interface FrameOSSettings {
 export interface FrameStateRecord {
   sceneId: string
   states: Record<string, Record<string, any>>
+}
+
+export interface Palette {
+  name?: string
+  colors: string[]
+  colorNames?: string[]
 }
