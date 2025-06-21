@@ -1106,6 +1106,7 @@ async def api_frame_import(
             "controlCode": "control_code",
             "network": "network",
             "agent": "agent",
+            "palette": "palette",
             "scenes": "scenes",
         }
         for src, dest in mapping.items():

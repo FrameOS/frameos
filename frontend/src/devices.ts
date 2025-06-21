@@ -1,4 +1,5 @@
 import { Option } from './components/Select'
+import { Palette } from './types'
 
 // To generate a new version:
 // cd backend && python3 list_devices.py
@@ -98,3 +99,63 @@ export const devices: Option[] = [
   { value: 'waveshare.EPD_13in3k', label: 'Waveshare 13.3" (K) 960x680 Black/White' },
   { value: 'waveshare.EPD_13in3e', label: 'Waveshare 13.3" (E) 1600x1200 Spectra 6 Color' },
 ]
+
+const colorNames = ['Black', 'White', 'Yellow', 'Red', 'Blue', 'Green']
+export const spectraPalettes: Palette[] = [
+  {
+    name: 'Default',
+    colorNames,
+    colors: [
+      '#000000', // Black
+      '#ffffff', // White
+      '#fff338', // Yellow
+      '#bf0000', // Red
+      '#6440ff', // Blue
+      '#438a1c', // Green
+    ],
+  },
+  {
+    name: 'Desaturated',
+    colorNames,
+    colors: [
+      '#000000', // Black
+      '#ffffff', // White
+      '#ffff00', // Yellow
+      '#ff0000', // Red
+      '#0000ff', // Blue
+      '#00ff00', // Green
+    ],
+  },
+  {
+    name: 'Pimoroni Saturated',
+    colorNames,
+    colors: [
+      '#000000', // Black
+      '#a1a4a5', // Gray
+      '#d0be47', // Yellow
+      '#9c484b', // Red
+      '#3d3b5e', // Blue
+      '#3a5b46', // Green
+    ],
+  },
+  {
+    name: 'Measured',
+    colorNames,
+    colors: [
+      '#3C3542', // Black
+      '#DCDDD4', // White
+      '#EDD600', // Yellow
+      '#C12117', // Red
+      '#2461C5', // Blue
+      '#548B79', // Green
+    ],
+  },
+]
+
+// SATURATED_PALETTE = [
+
+export const withCustomPalette: Record<string, Palette> = {
+  'waveshare.EPD_13in3e': spectraPalettes[0],
+  'waveshare.EPD_7in3e': spectraPalettes[0],
+  'waveshare.EPD_4in0e': spectraPalettes[0],
+}

@@ -58,6 +58,7 @@ class Frame(Base):
     gpio_buttons = mapped_column(JSON, nullable=True)
     network = mapped_column(JSON, nullable=True)
     agent = mapped_column(JSON, nullable=True)
+    palette = mapped_column(JSON, nullable=True)
 
     # not used
     apps = mapped_column(JSON, nullable=True)
@@ -102,6 +103,7 @@ class Frame(Base):
             'gpio_buttons': self.gpio_buttons,
             'network': self.network,
             'agent': self.agent,
+            'palette': self.palette,
             'last_successful_deploy': self.last_successful_deploy,
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
@@ -246,6 +248,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             for button in (frame.gpio_buttons or [])
             if int(button.get("pin", 0)) > 0
         ],
+        "palette": frame.palette or {},
         "controlCode": {
             "enabled": frame.control_code.get('enabled', 'true') == 'true',
             "position": frame.control_code.get('position', 'top-right'),

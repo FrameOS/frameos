@@ -46,7 +46,7 @@ proc start*(self: FrameOS) {.async.} =
     "logToFile": self.frameConfig.logToFile,
     "debug": self.frameConfig.debug,
     "timeZone": self.frameConfig.timeZone,
-    "gpioButtons": self.frameConfig.gpioButtons,
+    "gpioButtons": self.frameConfig.gpioButtons
   }}
   self.logger.log(message)
   netportal.setLogger(self.logger)
