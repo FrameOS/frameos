@@ -103,15 +103,15 @@ export const devices: Option[] = [
 const colorNames = ['Black', 'White', 'Yellow', 'Red', 'Blue', 'Green']
 export const spectraPalettes: Palette[] = [
   {
-    name: 'Default',
+    name: 'FrameOS default',
     colorNames,
     colors: [
-      '#000000', // Black
-      '#ffffff', // White
-      '#fff338', // Yellow
-      '#bf0000', // Red
-      '#6440ff', // Blue
-      '#438a1c', // Green
+      '#191426', // Black
+      '#b2c1c0', // White
+      '#c7bb00', // Yellow
+      '#6b1119', // Red
+      '#18539a', // Blue
+      '#2a5531', // Green
     ],
   },
   {
@@ -139,15 +139,15 @@ export const spectraPalettes: Palette[] = [
     ],
   },
   {
-    name: 'Measured',
+    name: 'Old default with more range',
     colorNames,
     colors: [
-      '#3C3542', // Black
-      '#DCDDD4', // White
-      '#EDD600', // Yellow
-      '#C12117', // Red
-      '#2461C5', // Blue
-      '#548B79', // Green
+      '#000000', // Black
+      '#ffffff', // White
+      '#fff338', // Yellow
+      '#bf0000', // Red
+      '#6440ff', // Blue
+      '#438a1c', // Green
     ],
   },
 ]
