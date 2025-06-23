@@ -264,7 +264,7 @@ async def _forward_frame_request(
         return _bytes_or_json(cached)
 
     raise HTTPException(
-        status_code=response.status_code, detail="Unable to reach frame"
+        status_code=400, detail="Unable to reach frame"
     )
 
 

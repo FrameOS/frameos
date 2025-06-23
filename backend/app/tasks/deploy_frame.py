@@ -386,6 +386,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             # Otherwise if you pull out the power, you'll end up with a blank config.txt on the next boot.
             must_reboot = True
 
+            # On first deploy disable the enter "new username" prompt
+            await self.exec_command("sudo systemctl disable userconfig || true")
+
         frame.status = 'starting'
         frame.last_successful_deploy = frame_dict
         frame.last_successful_deploy_at = datetime.now(timezone.utc)
