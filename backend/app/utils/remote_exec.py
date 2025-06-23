@@ -406,30 +406,35 @@ async def _run_command_ssh(
 
         proc = await ssh.create_process(cmd)
 
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+
+        async def _read_stream(stream, dest: list[str], log_type: str) -> None:
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                if isinstance(line, (bytes, bytearray)):
+                    line = line.decode(errors="ignore")
+                line = line.rstrip("\n")
+                dest.append(line)
+                if log_output:
+                    await log(db, redis, frame.id, log_type, line)
+
+        stdout_task = asyncio.create_task(_read_stream(proc.stdout, stdout_lines, "stdout"))
+        stderr_task = asyncio.create_task(_read_stream(proc.stderr, stderr_lines, "stderr"))
+
         try:
-            await asyncio.wait_for(proc.wait_closed(), timeout=timeout)
+            await asyncio.wait_for(proc.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             proc.kill()
             raise TimeoutError(f"SSH command timed-out after {timeout}s: {cmd}")
 
-        # read whatever we get (bytes or str)
-        raw_out: str | bytes = await proc.stdout.read()
-        raw_err: str | bytes = await proc.stderr.read()
-
-        stdout: str = (
-            raw_out.decode(errors="ignore") if isinstance(raw_out, (bytes, bytearray)) else raw_out
-        ) or ""
-        stderr: str = (
-            raw_err.decode(errors="ignore") if isinstance(raw_err, (bytes, bytearray)) else raw_err
-        ) or ""
+        await asyncio.gather(stdout_task, stderr_task)
 
         exit_status: int = proc.exit_status if proc.exit_status is not None else 1
-
-        if log_output:
-            for line in stdout.splitlines():
-                await log(db, redis, frame.id, "stdout", line)
-            for line in stderr.splitlines():
-                await log(db, redis, frame.id, "stderr", line)
+        stdout = "\n".join(stdout_lines)
+        stderr = "\n".join(stderr_lines)
 
         return exit_status, stdout, stderr
     finally:
