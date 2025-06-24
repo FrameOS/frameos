@@ -18,13 +18,16 @@ from urllib.parse import quote
 import httpx
 from jose import JWTError, jwt
 from fastapi import Depends, File, Form, Request, HTTPException, UploadFile
-from fastapi.responses import Response, StreamingResponse
+from pydantic import BaseModel
+from fastapi.responses import Response, StreamingResponse, FileResponse
 from sqlalchemy.orm import Session
 
 # local ---------------------------------------------------------------------
 from app.database import get_db
 from arq import ArqRedis as Redis
 from app.models.frame import Frame, new_frame, delete_frame, update_frame
+from app.models.frame import get_frame_json
+from app.models.settings import get_settings_dict
 from app.models.log import new_log as log
 from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
@@ -54,6 +57,7 @@ from app.utils.remote_exec import (
     make_dir,
     _use_agent,
 )
+from app.utils.image_builder import build_custom_image
 from app.redis import get_redis
 from app.websockets import publish_message
 from app.ws.agent_ws import (
@@ -722,12 +726,14 @@ async def api_frame_get_assets(
             continue
         ftype, s, m, p = parts
         if p.strip() != assets_path:
-            assets.append({
-                "path": p.strip(),
-                "size": int(s),
-                "mtime": int(m),
-                "is_dir": ftype == "directory",
-            })
+            assets.append(
+                {
+                    "path": p.strip(),
+                    "size": int(s),
+                    "mtime": int(m),
+                    "is_dir": ftype == "directory",
+                }
+            )
     assets.sort(key=lambda a: a["path"])
     return {"assets": assets}
 
@@ -856,6 +862,42 @@ async def api_frame_assets_rename(
 
     await rename_path(db, redis, frame, src_full, dst_full)
     return {"message": "Renamed"}
+
+
+class FrameSDCardRequest(BaseModel):
+    wifi_ssid: str
+    wifi_password: str
+    hostname: str | None = None
+
+
+@api_with_auth.post("/frames/{id:int}/sdcard")
+async def api_frame_sdcard(
+    id: int,
+    req: FrameSDCardRequest,
+    db: Session = Depends(get_db),
+):
+    frame = db.get(Frame, id) or _not_found()
+    settings = get_settings_dict(db)
+    ssh_value = settings.get("ssh_keys") if settings else None
+    ssh_key = ssh_value.get("default_public") if isinstance(ssh_value, dict) else None
+    ssh_keys = [ssh_key] if ssh_key else []
+
+    try:
+        image_path = build_custom_image(
+            wifi_ssid=req.wifi_ssid,
+            wifi_password=req.wifi_password,
+            hostname=req.hostname or frame.name,
+            ssh_keys=ssh_keys,
+            frame_json=get_frame_json(db, frame),
+        )
+    except Exception as exc:  # pragma: no cover - runtime failures
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return FileResponse(
+        image_path,
+        filename="frameos.img.gz",
+        media_type="application/gzip",
+    )
 
 
 @api_with_auth.post("/frames/{id:int}/clear_build_cache")
