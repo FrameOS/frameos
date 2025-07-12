@@ -9,9 +9,9 @@
 
   outputs = { self, nixpkgs, nixos-generators, ... }:
   let
-    # We import nixpkgs with our overlay so that `pkgs.lgpio` will exist.
-    pkgs = import nixpkgs {
-      system = "aarch64-linux";
+    # A helper so we can create pkgs for any host/target.
+    mkPkgsFor = system: import nixpkgs {
+      inherit system;
       overlays = [
         # -------------------------
         # BEGIN: The lgpio overlay
@@ -21,27 +21,19 @@
             pname = "lgpio";
             version = "0.2.2";
 
-            # Pull from GitHub as a source
             src = prev.fetchFromGitHub {
-              owner = "joan2937";
-              repo = "lg";
-              rev = "v0.2.2";
-              # Using the sha256 you got from nix-prefetch-url:
-              sha256 = "sha256-92lLV+EMuJj4Ul89KIFHkpPxVMr/VvKGEocYSW2tFiE=";
+              owner   = "joan2937";
+              repo    = "lg";
+              rev     = "v0.2.2";
+              sha256  = "sha256-92lLV+EMuJj4Ul89KIFHkpPxVMr/VvKGEocYSW2tFiE=";
             };
 
-            # If the Makefile might need pkg-config or something else:
             nativeBuildInputs = [ prev.pkg-config ];
+            buildInputs       = [ ];
 
-            # If it requires development libraries (e.g. glibc, etc.), add them here:
-            buildInputs = [];
-
-            # The project uses a straightforward Makefile, so we override the typical phases:
             phases = [ "unpackPhase" "patchPhase" "buildPhase" "installPhase" ];
 
-            buildPhase = ''
-              make
-            '';
+            buildPhase = ''make'';
 
             installPhase = ''
               make DESTDIR=$out install
@@ -54,16 +46,14 @@
                 mv $out/usr/local/lib/* $out/lib/
               fi
               rm -rf $out/usr
-
-              # Optionally strip unneeded symbols:
               patchelf --shrink-rpath $out/lib/*.so* || true
             '';
 
             meta = with prev.lib; {
-              description = "GPIO library and tools by joan2937 (the author of pigpio)";
-              homepage = "https://github.com/joan2937/lg";
-              license = licenses.gpl3;
-              platforms = platforms.linux;
+              description = "GPIO library and tools by joan2937 (author of pigpio)";
+              homepage    = "https://github.com/joan2937/lg";
+              license     = licenses.gpl3;
+              platforms   = platforms.linux;
             };
           };
         })
@@ -72,15 +62,21 @@
         # -------------------------
       ];
     };
+
+    # Convenience list of the two host systems we care about.
+    allSystems = [ "x86_64-linux" "aarch64-linux" ];
+
+    # Generate an attr-set like { x86_64-linux = pkgs; aarch64-linux = pkgs; }
+    pkgsFor = builtins.listToAttrs
+      (map (s: { name = s; value = mkPkgsFor s; }) allSystems);
   in
   {
+    ########################################################################
+    ## NixOS modules and SD-card image (unchanged)
+    ########################################################################
     nixosModules = {
-      system = { config, ... }: {
-        nix.settings.experimental-features = [
-          "nix-command"
-          "flakes"
-        ];
-
+      system = { config, pkgs, ... }: {
+        nix.settings.experimental-features = [ "nix-command" "flakes" ];
         disabledModules = [ "profiles/base.nix" ];
 
         # TODO: Set the hostname to something meaningful
@@ -96,95 +92,85 @@
         };
 
         services.openssh.enable = true;
-        system.stateVersion = "23.11";
+        services.ntp.enable     = true;
+        system.stateVersion     = "23.11";
         hardware.enableRedistributableFirmware = true;
 
-        environment.systemPackages = with pkgs; [
-          lgpio # This is the custom GPIO library
-          ffmpeg
-          libevdev
-          ntp
-          gcc
-          gnumake
-          binutils
-          pkg-config
-          autoconf
-          automake
-          libtool
-          cmake
-        ];
-
-        services.ntp.enable = true;
-        security.sudo.enable = true;
-        security.sudo.wheelNeedsPassword = false;
-      };
-
-      users = {
-        users.users = {
-          # TODO: Replace with actual users and keys
-          admin = {
-            password = "not-an-admin-!!!";
-            isNormalUser = true;
-            extraGroups = [ "wheel" ];
-          };
-          marius = {
-            openssh.authorizedKeys.keys = [
-              "ssh-rsa xxx marius@xxx"
-            ];
-            isNormalUser = true;
-            extraGroups = [ "wheel" ];
-          };
-          pi = {
-            openssh.authorizedKeys.keys = [
-              "ssh-rsa xxx marius@xxx"
-            ];
-            isNormalUser = true;
-            extraGroups = [ "wheel" ];
-          };
+        security.sudo = {
+          enable             = true;
+          wheelNeedsPassword = false;
         };
-      };
-    };
 
-    packages.aarch64-linux = {
-      sdcard = nixos-generators.nixosGenerate {
-        system = "aarch64-linux";
-        format = "sd-aarch64";
-        modules = [
-          self.nixosModules.system
-          self.nixosModules.users
+        environment.systemPackages = with pkgs; [
+          lgpio
+          ffmpeg libevdev ntp
+          gcc gnumake binutils pkg-config
+          autoconf automake libtool cmake
         ];
       };
+
+      users = { users.users = {
+        admin = {
+          password     = "not-an-admin-!!!";
+          isNormalUser = true;
+          extraGroups  = [ "wheel" ];
+        };
+        marius = {
+          openssh.authorizedKeys.keys = [
+            "ssh-rsa xxx marius@xxx"
+          ];
+          isNormalUser = true;
+          extraGroups  = [ "wheel" ];
+        };
+        pi = {
+          openssh.authorizedKeys.keys = [
+            "ssh-rsa xxx marius@xxx"
+          ];
+          isNormalUser = true;
+          extraGroups  = [ "wheel" ];
+        };
+      };};
     };
 
-    devShells.aarch64-linux = {
-      # Default shell retained for other ad-hoc needs (optional).
-      default = pkgs.mkShell {
-        buildInputs = pkgs;
-      };
-
-      frameos = pkgs.mkShell {
-        packages = with pkgs; [
-          # ---- Nim tool-chain ----
-          nim nimble
-
-          # ---- Build helpers identical to apt-installs ----
-          gcc gnumake pkg-config
-          libevdev
-          lgpio           # from our overlay
-          ntp hostapd
-
-          # ---- Extras that smooth C and Python vendor blobs ----
-          clang-tools
-          python3Full python3Packages.venv
-        ];
-
-        shellHook = ''
-          export NIMBLE_BIN="${pkgs.nimble}/bin/nimble"
-          echo "Dev-shell ready - run:  make build"
-        '';
-      };
+    packages.aarch64-linux.sdcard = nixos-generators.nixosGenerate {
+      system  = "aarch64-linux";
+      format  = "sd-aarch64";
+      modules = [
+        self.nixosModules.system
+        self.nixosModules.users
+      ];
     };
 
+
+    devShells = builtins.mapAttrs
+      (system: pkgs: {
+        # generic/default shell still here if you need it
+        default = pkgs.mkShell { buildInputs = pkgs; };
+
+        # FrameOS build shell
+        frameos = pkgs.mkShell {
+          packages = with pkgs; [
+            # Nim tool-chain
+            nim nimble
+
+            # Tools & libs mirrored from the old apt-install list
+            gcc gnumake pkg-config
+            libevdev lgpio ntp hostapd
+
+            # Extras
+            clang-tools
+            gitMinimal openssl
+            python3Full python3Packages.virtualenv
+          ];
+
+          shellHook = ''
+            export NIMBLE_BIN="${pkgs.nimble}/bin/nimble"
+            export PATH="${pkgs.gitMinimal}/bin:${pkgs.openssl}/bin:$PATH"
+            export NIMBLE_BIN="${pkgs.nimble}/bin/nimble"
+            echo "Dev-shell (${system}) ready – run:  make build"
+          '';
+        };
+      })
+      pkgsFor;                                  # ← iterates over x86_64 & aarch64
   };
-
 }
