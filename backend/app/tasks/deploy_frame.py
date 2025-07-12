@@ -127,6 +127,27 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             else:
                 cpu = "amd64"
 
+            distro_out: list[str] = []
+            await self.exec_command(
+                "bash -c '"
+                "if [ -e /etc/nixos/version ]; then echo nixos ; "
+                "elif [ -f /etc/rpi-issue ] || grep -q \"^ID=raspbian\" /etc/os-release ; then echo raspios ; "
+                "else . /etc/os-release ; echo ${ID:-unknown} ; "
+                "fi'",
+                distro_out
+            )
+            distro = distro_out[0].strip().lower()
+
+            if distro == "nixos":
+                await self.log("stdout", "- NixOS detected")
+            elif distro == "raspios":
+                await self.log("stdout", "- Raspberry Pi OS detected")
+            elif distro in ("debian", "ubuntu"):
+                await self.log("stdout", "- Debian/Ubuntu detected")
+            else:
+                await self.log("stdout", f"- Unknown distro '{distro}', trying apt and hoping for the best")
+                distro = "debian"
+
             total_memory = 0
             try:
                 mem_output: list[str] = []
