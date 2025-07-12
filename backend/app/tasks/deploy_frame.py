@@ -148,15 +148,15 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 await self.log("stdout", f"- Unknown distro '{distro}', trying apt and hoping for the best")
                 distro = "debian"
 
-            total_memory = 0
-            try:
-                mem_output: list[str] = []
-                await self.exec_command("free -m", mem_output)
-                total_memory = int(mem_output[1].split()[1])  # line 1 => "Mem:  ... 991  ..."
-            except Exception as e:
-                await self.log("stderr", str(e))
-            low_memory = total_memory < 512
 
+            mem_output: list[str] = []
+            await self.exec_command(
+                "grep MemTotal /proc/meminfo | awk '{print $2}'",
+                mem_output,
+            )
+            kib = int(mem_output[0].strip()) if mem_output else 0   # kB from the kernel
+            total_memory = kib // 1024                             # MiB
+            low_memory = total_memory < 512
             drivers = drivers_for_frame(frame)
 
             # 1. Create build tar.gz locally
@@ -469,7 +469,7 @@ async def make_local_modifications(self: FrameDeployer, source_dir: str):
         source = write_scenes_nim(frame)
         f.write(source)
         if frame.debug:
-            await self.log("stdout", f"Generated scenes.nim:\n{source}")
+            await self.log("stdout", f"Generated scenes.nim (showing because debug=true):\n{source}")
 
     drivers = drivers_for_frame(frame)
     with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
