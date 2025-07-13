@@ -6,7 +6,7 @@ description   = "A new awesome nimble package"
 license       = "Apache-2.0"
 srcDir        = "src"
 binDir        = "build"
-bin           = @["frameos"]  
+bin           = @["frameos"]
 
 
 # Dependencies
@@ -19,7 +19,7 @@ requires "jester >= 0.6.0"
 requires "linuxfb >= 0.1.0"
 requires "psutil >= 0.6.0"
 requires "ws >= 0.5.0"
-requires "qrgen >= 3.1.0"
+requires "QRgen >= 3.1.0"
 
 taskRequires "assets", "nimassets >= 0.2.4"
 

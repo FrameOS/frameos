@@ -48,7 +48,6 @@ patterns=(
     # "frameos/src/scenes/*.nim"
     # "frameos/src/drivers/drivers.nim"
     # "frameos/src/apps/*/*/*"
-    "frameos/nix-sd-card/*"
 )
 
 for pattern in "${patterns[@]}"; do
