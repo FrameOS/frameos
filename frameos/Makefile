@@ -15,13 +15,13 @@ test:
 
 
 nix-sdcard:
-	nix --extra-experimental-features 'nix-command flakes' \
+	time nix --extra-experimental-features 'nix-command flakes' \
 		build .#packages.aarch64-linux.sdImage \
 		--system aarch64-linux \
 		--show-trace
 
 nix-bin:
-	nix --extra-experimental-features 'nix-command flakes' \
+	time nix --extra-experimental-features 'nix-command flakes' \
 		build .#packages.aarch64-linux.frameos \
 		--system aarch64-linux \
 		--show-trace \
@@ -34,5 +34,5 @@ nix-shell:
 		develop .#frameos
 
 nix-lock:
-	nix --extra-experimental-features 'nix-command flakes' \
+	time nix --extra-experimental-features 'nix-command flakes' \
 		run .#nim_lk -- . > lock.json

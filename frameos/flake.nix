@@ -1,19 +1,22 @@
 {
   description = "FrameOS for Raspberry Pi - packages, dev shells and flash-ready SD image";
 
-  #──────────────────────────────────────────────────────────────────────────────
   inputs = {
     nixpkgs.url          = "nixpkgs/nixos-unstable";
     nixos-generators.url = "github:nix-community/nixos-generators";
   };
 
-  #──────────────────────────────────────────────────────────────────────────────
   outputs = { self, nixpkgs, nixos-generators, ... }@inputs:
     let
       shortHash = "nixtest"; # TODO
       hostName   = "frame-${shortHash}";
 
-      # overlay that builds lgpio v0.2.2
+      allowMissingMods = _: prev: {
+        makeModulesClosure = x: prev.makeModulesClosure (x // { allowMissing = true; });
+      };
+
+      # ──────────────────────────────────────────────────────────────────
+      # Overlay that builds lgpio v0.2.2
       lgpioOverlay = final: prev: {
         lgpio = prev.stdenv.mkDerivation rec {
           pname    = "lgpio"; version = "0.2.2";
@@ -57,18 +60,16 @@
     in rec {
 
       # ──────────────────────────────────────────────────────────────────
-      #  Common module used for both the sd image *and* nixosConfigurations
+      # Common module used for both the sd image *and* nixosConfigurations
       # ──────────────────────────────────────────────────────────────────
       frameosModule = { pkgs, lib, ... }: {
-        nixpkgs.overlays = [ lgpioOverlay ];
+        nixpkgs.overlays = [ lgpioOverlay allowMissingMods ];
+        system.stateVersion     = "25.05";
 
         networking.hostName = hostName;
         time.timeZone       = "Europe/Brussels";
-
-        # --- Wi-Fi (same as before) -------------------------------------
         networking.networkmanager.enable = true;
         networking.wireless.enable       = lib.mkForce false;
-        hardware.enableRedistributableFirmware = true;
         environment.etc."NetworkManager/system-connections/frameos-wifi.nmconnection" = {
           user  = "root"; group = "root"; mode = "0600";
           text  = ''
@@ -85,7 +86,7 @@
 
             [wifi-security]
             key-mgmt=wpa-psk
-            psk=XXXXX
+            psk=XXX
 
             [ipv4]
             method=auto
@@ -99,26 +100,95 @@
           22
           8787
         ];
-
-        # sdImage.populateFirmwareCommands = lib.mkAfter ''
-        #   # "firmware/" is the work-dir created by the standard sd-image module
-        #   sed -i '/^gpu_mem=/d'   firmware/config.txt   # drop any previous lines
-        #   sed -i '/^start_x=/d'   firmware/config.txt
-        #   echo 'start_x=0'  >> firmware/config.txt      # camera off = +128 MiB RAM
-        #   echo 'gpu_mem=16' >> firmware/config.txt      # minimal split
-        # '';
-
-        # ③  keep the default extlinux boot loader (already enabled by the
-        #     sd-image-aarch64 profile, but good to have when you rebuild on-device)
-        boot.loader.generic-extlinux-compatible.enable = true;
-
-        # ④  the VC4 driver pre-allocates 64 MiB of CMA – pin it there
-        boot.kernelParams = [ "cma=64M" ];
-
         services.openssh.enable = true;
-        system.stateVersion     = "25.05";
 
-        security.sudo.wheelNeedsPassword = false;
+        hardware = {
+          enableRedistributableFirmware = lib.mkForce false;
+          firmware = [ pkgs.raspberrypiWirelessFirmware ];
+          i2c.enable = true;          # already present, kept
+
+          deviceTree = {
+            enable        = true;
+            # Use the Raspberry Pi-specific kernel; same choice as pi-zero-2 flake
+            kernelPackage = pkgs.linuxKernel.packages.linux_rpi3.kernel;
+            filter        = "*2837*";        # BCM2837 / Pi 3 / Zero 2 W
+
+            overlays = [
+              # -------- I²C
+              {
+                name    = "i2c_arm";
+                dtsText = ''
+                  /dts-v1/;
+                  /plugin/;
+                  / { compatible = "brcm,bcm2835";
+                    fragment@0 { target = <&i2c1>;
+                      __overlay__ { status = "okay"; };
+                    };
+                  };
+                '';
+              }
+
+              # -------- SPI  (new – enables both CS0 & CS1 as spidev)
+              {
+                name    = "spi0-2cs";
+                dtsText = ''
+                  /dts-v1/;
+                  /plugin/;
+                  / { compatible = "brcm,bcm2837";
+                    fragment@0 { target = <&spi0>;
+                      __overlay__ {
+                        status = "okay";
+                        spidev0: spidev@0 {
+                          compatible = "spidev";
+                          reg        = <0>;            // CS0
+                          spi-max-frequency = <50000000>;
+                        };
+                        spidev1: spidev@1 {
+                          compatible = "spidev";
+                          reg        = <1>;            // CS1
+                          spi-max-frequency = <50000000>;
+                        };
+                      };
+                    };
+                  };
+                '';
+              }
+
+              # -------- PWM 2-channel  (taken from pwm.dts in pi-zero-2 repo)
+              {
+                name    = "pwm-2chan";
+                dtsText = ''
+                  /dts-v1/;
+                  /plugin/;
+                  / { compatible = "brcm,bcm2837";
+                    fragment@0 { target = <&gpio>;
+                      __overlay__ {
+                        pwm_pins: pwm_pins {
+                          brcm,pins     = <18 19>;
+                          brcm,function = <2 2>; /* Alt5 */
+                        };
+                      };
+                    };
+                    fragment@1 { target = <&pwm>;
+                      __overlay__ {
+                        pinctrl-names = "default";
+                        pinctrl-0     = <&pwm_pins>;
+                        status        = "okay";
+                      };
+                    };
+                  };
+                '';
+              }
+            ];
+          };
+        };
+        services.udev.extraRules = ''
+          SUBSYSTEM=="spidev",  GROUP="spi", MODE="0660"
+          SUBSYSTEM=="i2c-dev", GROUP="i2c", MODE="0660"
+        '';
+
+        # Groups & permissions (unchanged but required)
+        users.groups.spi = {};
 
         users.users = {
           admin = { password = "not-an-admin-!!!"; isNormalUser = true; extraGroups = [ "wheel" ]; };
@@ -126,22 +196,30 @@
           pi     = { openssh.authorizedKeys.keys = [ "ssh-rsa XXX" ]; isNormalUser = true; extraGroups = [ "wheel" ]; };
         };
 
-        environment.systemPackages = with pkgs; [
-          lgpio libevdev ffmpeg
-          self.packages.${pkgs.system}.frameos
-        ];
+        security.sudo.wheelNeedsPassword = false;
+        
+        boot = {
+          kernelPackages = pkgs.linuxPackages_rpi3;             # tuned Pi kernel
+          initrd.availableKernelModules = [ "xhci_pci" "usbhid" "usb_storage" ];
+          loader.generic-extlinux-compatible.enable = true;      # already true
+          loader.grub.enable  = false;
+          swraid.enable       = lib.mkForce false;               # silence mdadm
+          supportedFilesystems.zfs = lib.mkForce false;          # save time compiling zfs
+        };
+
 
         systemd.services.frameos = {
           wantedBy      = [ "multi-user.target" ];
           serviceConfig = {
-            ExecStart        = "${self.packages.${pkgs.system}.frameos}/bin/frameos";
-            WorkingDirectory = "/srv/frameos";
+            ExecStart        = "/srv/frameos/current/frameos";
+            WorkingDirectory = "/srv/frameos/current";
             Restart          = "always";
           };
         };
       };
 
-      #──────────────────────────────────────────────────────────────────────────
+
+      # ──────────────────────────────────────────────────────────────────
       packages = builtins.listToAttrs (map
         (system:
           { name = system; value = {
@@ -150,7 +228,7 @@
 
               sdImage = nixos-generators.nixosGenerate {
                 inherit system;
-                format  = "sd-aarch64";         # compressed .img.zst
+                format  = "sd-aarch64";   # compressed .img.zst
                 modules = [ frameosModule ];
               };
             };
@@ -166,14 +244,14 @@
           modules = [ frameosModule ];
         };
       };
-      
-      #──────────────────────────────────────────────────────────────────────────
+
+      # ──────────────────────────────────────────────────────────────────
       devShells = builtins.listToAttrs (map
         (system:
           { name = system; value = {
               default = (pkgsFor system).mkShell { buildInputs = [ ]; };
               frameos = (pkgsFor system).mkShell {
-                inputsFrom = [ self.packages.${system}.frameos ];   # reuse buildInputs
+                inputsFrom = [ self.packages.${system}.frameos ];
                 packages   = with (pkgsFor system); [
                   nim nimble gcc gnumake pkg-config
                   openssl zstd
@@ -187,5 +265,4 @@
           })
         supported);
     };
-
 }

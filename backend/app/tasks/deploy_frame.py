@@ -192,6 +192,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 if flake_changed:
                     await self.log("stdout", "- System flake changed → uploading & rebuilding NixOS. This may take 10+ minutes... (SKIPPING)")
 
+                # TODO: there is not enough memory to build on the frame, so build locally and push somehow
+                # note that we can't push directly via nix, as we must support both ssh and agent uploads
+
                 #     with open(local_flake, "rb") as f:  data_flake = f.read()
                 #     with open(local_lock,  "rb") as f:  data_lock  = f.read()
 
@@ -210,36 +213,20 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 #         timeout=3600
                 #     )
 
-                # # ─── 2.  Build FrameOS for the Pi locally (cross-build) ──
-                # await self.log("stdout", "- Building frameos (nix aarch64-linux)…")
-                # build_cmd = (
-                #     "nix --extra-experimental-features 'nix-command flakes' "
-                #     "build frameos#packages.aarch64-linux.frameos "
-                #     "--system aarch64-linux --print-out-paths"
-                # )
-                # local_out: list[str] = []
-                # status = await self.exec_command(build_cmd, local_out, raise_on_error=True)
-                # if status != 0 or not local_out:
-                #     raise Exception("nix build failed – see logs above")
-
-                # store_path = local_out[-1].strip()
-                # binary_path = os.path.join(store_path, "bin", "frameos")
-                # if not os.path.exists(binary_path):
-                #     raise Exception(f"Expected binary not found at {binary_path}")
-
-
                 # ─── 2.  Re-generate sources & cross-build locally ───────
                 await self.log("stdout", "- Preparing sources with local modifications")
                 with tempfile.TemporaryDirectory() as temp_dir_local:
                     build_dir_local, source_dir_local = create_build_folders(temp_dir_local, self.build_id)
                     await make_local_modifications(self, source_dir_local)
 
-                    await self.log("stdout", "- Building frameos (nix aarch64-linux)…")
+                    await self.log("stdout", "- Building frameos (nix aarch64-linux, local copy)…")
                     build_cmd = (
+                        f"cd {source_dir_local} && "
                         "nix --extra-experimental-features 'nix-command flakes' "
-                        f"build {flake_dir}#packages.aarch64-linux.frameos "
+                        "build .#packages.aarch64-linux.frameos "
                         "--system aarch64-linux --print-out-paths"
                     )
+
                     status, out, err = await exec_local_command(self.db, self.redis, self.frame, build_cmd)
                     if status != 0:
                         raise Exception(f"Local nix build failed:\n{err}")
@@ -247,6 +234,50 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     binary_path = os.path.join(store_path, "bin", "frameos")
                     if not os.path.exists(binary_path):
                         raise Exception(f"Expected binary not found at {binary_path}")
+
+
+                    # ─── 2 b.  Export the whole runtime closure ────────────────
+                    await self.log("stdout", "- Collecting runtime closure")
+                    list_cmd = f"nix-store -qR {store_path}"
+                    status, paths_out, _ = await exec_local_command(
+                        self.db, self.redis, self.frame, list_cmd
+                    )
+                    if status != 0 or not paths_out:
+                        raise Exception("Failed to collect runtime closure with nix-store -qR")
+
+                    runtime_paths = paths_out.strip().splitlines()
+                    await self.log("stdout", f"  → {len(runtime_paths)} store paths")
+
+                    nar_path = os.path.join(
+                        temp_dir_local, f"frameos_closure_{build_id}.nar"
+                    )
+                    export_cmd = (
+                        "bash -c 'nix-store --export "
+                        + " ".join(runtime_paths)
+                        + f" > {nar_path}'"
+                    )
+                    status, _, err = await exec_local_command(
+                        self.db, self.redis, self.frame, export_cmd
+                    )
+                    if status != 0:
+                        raise Exception(f"Failed to export closure:\n{err}")
+
+                    # upload the .nar to the frame
+                    await self.log("stdout", "- Uploading closure.nar to the frame")
+                    with open(nar_path, "rb") as fh:
+                        await upload_file(
+                            self.db,
+                            self.redis,
+                            self.frame,
+                            f"/tmp/frameos_closure_{build_id}.nar",
+                            fh.read(),
+                        )
+
+                # import it into /nix/store on the device
+                await self.exec_command(
+                    f"sudo nix-store --import < /tmp/frameos_closure_{build_id}.nar && "
+                    f"rm /tmp/frameos_closure_{build_id}.nar"
+                )
 
                 # ─── 3.  Create new release on the device ────────────────
                 await self.exec_command(
@@ -274,23 +305,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     frame_json_data,
                 )
 
-                # #  service file (same template as before)
-                # with open("../frameos/frameos.service", "r") as f:
-                #     service_contents = f.read()
-                #     service_contents = service_contents.replace("%I", frame.ssh_user)
-                # await upload_file(
-                #     self.db, self.redis, self.frame,
-                #     f"/srv/frameos/releases/release_{build_id}/frameos.service",
-                #     service_contents.encode("utf-8"),
-                # )
-
-                # await self.exec_command(
-                #     f"sudo cp /srv/frameos/releases/release_{build_id}/frameos.service "
-                #     f"/etc/systemd/system/frameos.service"
-                # )
-                # await self.exec_command("sudo chown root:root /etc/systemd/system/frameos.service")
-                # await self.exec_command("sudo chmod 644 /etc/systemd/system/frameos.service")
-
                 await self.exec_command(
                     f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state "
                     f"/srv/frameos/releases/release_{build_id}/state"
@@ -312,6 +326,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 await update_frame(db, redis, frame)
                 await self.log("stdinfo", "Deploy finished on NixOS 🎉")
                 return   # ← all done, skip the legacy RPiOS flow
+
+            ## /END NIXOS
 
 
             if distro == "raspios":
