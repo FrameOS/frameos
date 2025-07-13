@@ -30,6 +30,56 @@ ENV PATH="/opt/nim/bin:${PATH}"
 RUN nim --version \
     nimble --version
 
+# Install frameos nim deps
+WORKDIR /app/frameos
+
+COPY frameos/frameos.nimble ./
+COPY frameos/nimble.lock ./
+COPY frameos/nim.cfg ./
+
+RUN nimble install -d -y && nimble setup
+
+# Install frameos agent nim deps
+WORKDIR /app/agent
+
+COPY agent/frameos_agent.nimble ./
+COPY agent/nimble.lock ./
+
+# Cache nimble deps for when deploying on frame
+RUN nimble install -d -y && nimble setup
+
+# ─── Install Nix (single-user, root, flakes on) ──────────────────────
+ARG NIX_VERSION=2.22.1
+RUN set -eux; \
+    # helper tools + user/group utilities
+    apt-get update && apt-get install -y --no-install-recommends \
+        curl xz-utils gnupg procps sudo ; \
+    \
+    # 1. builder group *and* members that really appear in /etc/group
+    groupadd -r nixbld ; \
+    for i in $(seq 1 10); do \
+        useradd -r -m -s /usr/sbin/nologin \
+                -g nixbld        \
+                -G nixbld        \
+                nixbld$i ; \
+    done ; \
+    \
+    # 2. run the no-daemon installer
+    curl -L "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install" \
+      | sh -s -- --no-daemon --yes ; \
+    \
+    # 3. make nix usable in this layer
+    export USER=root ; \
+    . /root/.nix-profile/etc/profile.d/nix.sh ; \
+    nix --version
+# keep nix visible for later layers and at runtime
+ENV PATH="/root/.nix-profile/bin:/nix/var/nix/profiles/default/bin:${PATH}"
+RUN mkdir /etc/nix && printf '%s\n' \
+      "experimental-features = nix-command flakes" \
+      "build-users-group = nixbld" \
+    > /etc/nix/nix.conf
+ENV USER=root
+
 # Copy the requirements file and install using pip
 WORKDIR /app/backend
 COPY backend/requirements.txt .
@@ -60,24 +110,6 @@ RUN apt-get remove -y nodejs curl build-essential libffi-dev ca-certificates gnu
     && apt-get clean \
     && rm -rf /app/frontend/node_modules \
     && rm -rf /var/lib/apt/lists/* /root/.npm
-
-# Install frameos nim deps
-WORKDIR /app/frameos
-
-COPY frameos/frameos.nimble ./
-COPY frameos/nimble.lock ./
-COPY frameos/nim.cfg ./
-
-RUN nimble install -d -y && nimble setup
-
-# Install frameos agent nim deps
-WORKDIR /app/agent
-
-COPY agent/frameos_agent.nimble ./
-COPY agent/nimble.lock ./
-
-# Cache nimble deps for when deploying on frame
-RUN nimble install -d -y && nimble setup
 
 # Change back to the main directory
 WORKDIR /app

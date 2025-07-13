@@ -1,4 +1,3 @@
-# backend/app/api/scene_images.py
 import io
 from jose import JWTError, jwt
 
@@ -138,7 +137,9 @@ async def get_scene_image(
     if frame is None:
         raise HTTPException(status_code=404, detail="Frame not found")
 
-    if request.query_params.get("thumb") == "1":
+    if frame.width is None or frame.height is None:
+        new_width, new_height = 320, 240
+    elif request.query_params.get("thumb") == "1":
         scale = min(320 / frame.width, 320 / frame.height, 1.0)
         new_width  = int(round(frame.width  * scale))
         new_height = int(round(frame.height * scale))

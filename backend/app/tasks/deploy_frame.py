@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
+from pathlib import Path
 import json
 import os
 import random
+import hashlib
 import re
 import shutil
 import string
@@ -138,17 +140,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             )
             distro = distro_out[0].strip().lower()
 
-            if distro == "nixos":
-                await self.log("stdout", "- NixOS detected")
-            elif distro == "raspios":
-                await self.log("stdout", "- Raspberry Pi OS detected")
-            elif distro in ("debian", "ubuntu"):
-                await self.log("stdout", "- Debian/Ubuntu detected")
-            else:
-                await self.log("stdout", f"- Unknown distro '{distro}', trying apt and hoping for the best")
-                distro = "debian"
-
-
             mem_output: list[str] = []
             await self.exec_command(
                 "grep MemTotal /proc/meminfo | awk '{print $2}'",
@@ -157,6 +148,180 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             kib = int(mem_output[0].strip()) if mem_output else 0   # kB from the kernel
             total_memory = kib // 1024                             # MiB
             low_memory = total_memory < 512
+
+            await self.log("stdout", f"- Detected distro: {distro}, architecture: {arch}, total memory: {total_memory} MiB")
+
+            #  Fast-path for NixOS targets
+            #───────────────────────────────────────────────────────────────
+            if distro == "nixos":
+                await self.log("stdout", "- NixOS detected – using flake-based deploy")
+
+                # ─── 1.  Check whether flake.{nix,lock} changed ──────────
+                def sha256(path: str) -> str:
+                    h = hashlib.sha256()
+                    with open(path, "rb") as fp:
+                        for chunk in iter(lambda: fp.read(65536), b""):
+                            h.update(chunk)
+                    return h.hexdigest()
+
+                project_root   = Path(__file__).resolve().parents[3]   # repo root
+                flake_dir      = project_root / "frameos"
+                local_flake    = flake_dir / "flake.nix"
+                local_lock     = flake_dir / "flake.lock"
+                local_flake_sha = sha256(local_flake)
+                local_lock_sha  = sha256(local_lock)
+
+                remote_flake_sha_out: list[str] = []
+                remote_lock_sha_out:  list[str] = []
+
+                await self.exec_command(
+                    "sha256sum /etc/nixos/flake.nix 2>/dev/null | cut -d' ' -f1 || true",
+                    remote_flake_sha_out, raise_on_error=False
+                )
+                await self.exec_command(
+                    "sha256sum /etc/nixos/flake.lock 2>/dev/null | cut -d' ' -f1 || true",
+                    remote_lock_sha_out, raise_on_error=False
+                )
+
+                remote_flake_sha = (remote_flake_sha_out[0].strip() if remote_flake_sha_out else "")
+                remote_lock_sha  = (remote_lock_sha_out[0].strip()  if remote_lock_sha_out  else "")
+
+                flake_changed = (local_flake_sha != remote_flake_sha) or (local_lock_sha != remote_lock_sha)
+
+
+                if flake_changed:
+                    await self.log("stdout", "- System flake changed → uploading & rebuilding NixOS. This may take 10+ minutes... (SKIPPING)")
+
+                #     with open(local_flake, "rb") as f:  data_flake = f.read()
+                #     with open(local_lock,  "rb") as f:  data_lock  = f.read()
+
+                #     await upload_file(self.db, self.redis, self.frame,
+                #                       "/tmp/flake.nix",  data_flake)
+                #     await upload_file(self.db, self.redis, self.frame,
+                #                       "/tmp/flake.lock", data_lock)
+
+                #     await self.exec_command(
+                #         "sudo mv /tmp/flake.nix  /etc/nixos/flake.nix  && "
+                #         "sudo mv /tmp/flake.lock /etc/nixos/flake.lock"
+                #     )
+                #     # (`--show-trace` is handy in case the rebuild fails)
+                #     await self.exec_command(
+                #         "sudo nixos-rebuild switch --flake /etc/nixos --show-trace",
+                #         timeout=3600
+                #     )
+
+                # # ─── 2.  Build FrameOS for the Pi locally (cross-build) ──
+                # await self.log("stdout", "- Building frameos (nix aarch64-linux)…")
+                # build_cmd = (
+                #     "nix --extra-experimental-features 'nix-command flakes' "
+                #     "build frameos#packages.aarch64-linux.frameos "
+                #     "--system aarch64-linux --print-out-paths"
+                # )
+                # local_out: list[str] = []
+                # status = await self.exec_command(build_cmd, local_out, raise_on_error=True)
+                # if status != 0 or not local_out:
+                #     raise Exception("nix build failed – see logs above")
+
+                # store_path = local_out[-1].strip()
+                # binary_path = os.path.join(store_path, "bin", "frameos")
+                # if not os.path.exists(binary_path):
+                #     raise Exception(f"Expected binary not found at {binary_path}")
+
+
+                # ─── 2.  Re-generate sources & cross-build locally ───────
+                await self.log("stdout", "- Preparing sources with local modifications")
+                with tempfile.TemporaryDirectory() as temp_dir_local:
+                    build_dir_local, source_dir_local = create_build_folders(temp_dir_local, self.build_id)
+                    await make_local_modifications(self, source_dir_local)
+
+                    await self.log("stdout", "- Building frameos (nix aarch64-linux)…")
+                    build_cmd = (
+                        "nix --extra-experimental-features 'nix-command flakes' "
+                        f"build {flake_dir}#packages.aarch64-linux.frameos "
+                        "--system aarch64-linux --print-out-paths"
+                    )
+                    status, out, err = await exec_local_command(self.db, self.redis, self.frame, build_cmd)
+                    if status != 0:
+                        raise Exception(f"Local nix build failed:\n{err}")
+                    store_path  = out.strip().splitlines()[-1]
+                    binary_path = os.path.join(store_path, "bin", "frameos")
+                    if not os.path.exists(binary_path):
+                        raise Exception(f"Expected binary not found at {binary_path}")
+
+                # ─── 3.  Create new release on the device ────────────────
+                await self.exec_command(
+                    "if [ ! -d /srv/frameos/ ]; then "
+                    "  sudo mkdir -p /srv/frameos/ && sudo chown $(whoami) /srv/frameos/; "
+                    "fi"
+                )
+                await self.exec_command(f"mkdir -p /srv/frameos/releases/release_{build_id}")
+
+                with open(binary_path, "rb") as fh:
+                    await upload_file(
+                        self.db, self.redis, self.frame,
+                        f"/srv/frameos/releases/release_{build_id}/frameos",
+                        fh.read()
+                    )
+                await self.exec_command(f"chmod 700 /srv/frameos/releases/release_{build_id}/frameos")
+
+                #  frame.json as before
+                frame_json_data = (
+                    json.dumps(get_frame_json(db, frame), indent=4) + "\n"
+                ).encode("utf-8")
+                await upload_file(
+                    self.db, self.redis, self.frame,
+                    f"/srv/frameos/releases/release_{build_id}/frame.json",
+                    frame_json_data,
+                )
+
+                # #  service file (same template as before)
+                # with open("../frameos/frameos.service", "r") as f:
+                #     service_contents = f.read()
+                #     service_contents = service_contents.replace("%I", frame.ssh_user)
+                # await upload_file(
+                #     self.db, self.redis, self.frame,
+                #     f"/srv/frameos/releases/release_{build_id}/frameos.service",
+                #     service_contents.encode("utf-8"),
+                # )
+
+                # await self.exec_command(
+                #     f"sudo cp /srv/frameos/releases/release_{build_id}/frameos.service "
+                #     f"/etc/systemd/system/frameos.service"
+                # )
+                # await self.exec_command("sudo chown root:root /etc/systemd/system/frameos.service")
+                # await self.exec_command("sudo chmod 644 /etc/systemd/system/frameos.service")
+
+                await self.exec_command(
+                    f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state "
+                    f"/srv/frameos/releases/release_{build_id}/state"
+                )
+                #  Switch /srv/frameos/current → new release
+                await self.exec_command(
+                    f"rm -rf /srv/frameos/current && "
+                    f"ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current"
+                )
+
+                await self.exec_command("sudo systemctl daemon-reload")
+                await self.exec_command("sudo systemctl enable frameos.service")
+                await self.exec_command("sudo systemctl restart frameos.service")
+
+                #  Save deploy metadata & finish early – nothing else to do
+                frame.status = 'starting'
+                frame.last_successful_deploy     = frame_dict
+                frame.last_successful_deploy_at  = datetime.now(timezone.utc)
+                await update_frame(db, redis, frame)
+                await self.log("stdinfo", "Deploy finished on NixOS 🎉")
+                return   # ← all done, skip the legacy RPiOS flow
+
+
+            if distro == "raspios":
+                await self.log("stdout", "- Raspberry Pi OS detected")
+            elif distro in ("debian", "ubuntu"):
+                await self.log("stdout", "- Debian/Ubuntu detected")
+            else:
+                await self.log("stdout", f"- Unknown distro '{distro}', trying apt and hoping for the best")
+                distro = "debian"
+
             drivers = drivers_for_frame(frame)
 
             # 1. Create build tar.gz locally
