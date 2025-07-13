@@ -42,7 +42,7 @@
         version      = "0.1.0";
         src          = frameosSrc;
         nimbleFile   = "frameos.nimble";
-        lockFile    = "${frameosSrc}/lock.json";
+        lockFile     = "${frameosSrc}/lock.json";
         nimFlags     = [ "--lineTrace:on" ];
         buildInputs  = with pkgs; [ lgpio libevdev zstd ];
         meta.mainProgram = "frameos";
@@ -64,7 +64,7 @@
                 inherit system;
                 format  = "sd-aarch64";         # compressed .img.zst
                 modules = [
-                  ({ pkgs, ... }: {
+                  ({ pkgs, lib, ... }: {
                     nixpkgs.overlays = [ lgpioOverlay ];
 
                     networking.hostName =
@@ -75,9 +75,66 @@
                       in "frame-${short}";
 
                     time.timeZone = "Europe/Brussels";
-                    networking.useDHCP = true;
+
+                    # ──────────────── Wi-Fi configuration ────────────────
+                    networking.networkmanager.enable = true;
+                    networking.wireless.enable = lib.mkForce false;  # disable the old interface
+                    hardware.enableRedistributableFirmware = true;   # ← adds linux-firmware, incl. brcmfmac blobs
+                    
+                    environment.etc."NetworkManager/system-connections/frameos-wifi.nmconnection" = {
+                      user  = "root";
+                      group = "root";
+                      mode  = "0600";
+                      text  = ''
+                        [connection]
+                        id=frameos-wifi
+                        uuid=d96b6096-93a5-4c39-9f5c-6bb64bb97f7b
+                        type=wifi
+                        interface-name=wlan0
+                        autoconnect=true
+
+                        [wifi]
+                        mode=infrastructure
+                        ssid=TODOTODOTODOTODO
+
+                        [wifi-security]
+                        key-mgmt=wpa-psk
+                        psk=TODOTODOTODOTODO
+
+                        [ipv4]
+                        method=auto
+                        never-default=false
+
+                        [ipv6]
+                        method=auto
+                      '';
+                    };          
                     services.openssh.enable = true;
-                    system.stateVersion = "23.11";
+                    system.stateVersion = "25.05";
+
+
+                    # ──────────────── User accounts ────────────────
+                    users.users = {
+                      admin = {
+                        password     = "not-an-admin-!!!";
+                        isNormalUser = true;
+                        extraGroups  = [ "wheel" ];
+                      };
+                      marius = {
+                        openssh.authorizedKeys.keys = [
+                          "ssh-rsa TODO marius@TODO"
+                        ];
+                        isNormalUser = true;
+                        extraGroups  = [ "wheel" ];
+                      };
+                      pi = {
+                        openssh.authorizedKeys.keys = [
+                          "ssh-rsa TODO marius@TODO"
+                        ];
+                        isNormalUser = true;
+                        extraGroups  = [ "wheel" ];
+                      };
+                    };
 
                     environment.systemPackages = with pkgs; [
                       lgpio libevdev ffmpeg
@@ -105,12 +162,12 @@
           { name = system; value = {
               default = (pkgsFor system).mkShell { buildInputs = [ ]; };
               frameos = (pkgsFor system).mkShell {
-              inputsFrom = [ self.packages.${system}.frameos ];   # reuse buildInputs
-              packages   = with (pkgsFor system); [
-                nim nimble gcc gnumake pkg-config
-                openssl zstd
-                nim_lk
-              ];
+                inputsFrom = [ self.packages.${system}.frameos ];   # reuse buildInputs
+                packages   = with (pkgsFor system); [
+                  nim nimble gcc gnumake pkg-config
+                  openssl zstd
+                  nim_lk
+                ];
                 shellHook = ''
                   echo "Dev-shell ($system) ready - run: cd frameos && nimble build"
                 '';
