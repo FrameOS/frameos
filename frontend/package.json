@@ -54,6 +54,7 @@
     "react-virtuoso": "^4.6.1",
     "reactflow": "^11.8.3",
     "remark-gfm": "^4.0.0",
+    "streamsaver": "^2.0.6",
     "uuid": "^9.0.0"
   },
   "devDependencies": {
@@ -61,6 +62,7 @@
     "@types/react-dom": "^18.0.6",
     "@types/react-syntax-highlighter": "^15.5.9",
     "@types/uuid": "^9.0.3",
+    "@types/streamsaver": "^2.0.5",
     "autoprefixer": "^10.4.14",
     "concurrently": "^7.4.0",
     "cors": "^2.8.5",

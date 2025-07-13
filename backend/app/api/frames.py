@@ -3,6 +3,7 @@ from __future__ import annotations
 # stdlib ---------------------------------------------------------------------
 from datetime import datetime, timedelta
 from http import HTTPStatus
+import aiofiles
 import asyncssh
 import hashlib
 import io
@@ -961,6 +962,39 @@ async def api_frame_stop_event(id: int, redis: Redis = Depends(get_redis)):
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
+@api_with_auth.post("/frames/{id:int}/build_sd_image")
+async def api_frame_build_sd_image_event(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+    try:
+        from app.tasks.build_sd_card_image import build_sd_card_image_task
+
+        try:
+            img_path = await build_sd_card_image_task({"db": db, "redis": redis}, id=id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
+            )
+
+        if not img_path.exists():
+            raise HTTPException(status_code=500, detail="Image build failed")
+
+        async def sender():
+            async with aiofiles.open(img_path, "rb") as fh:
+                while chunk := await fh.read(64 << 10):   # 64 KiB chunks
+                    yield chunk
+            # os.remove(img_path) # tidy up
+
+        frame = db.get(Frame, id)
+        if not frame:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+        name = (frame.name or "Untitled Frame").replace(" ", "_").replace("/", "_")
+
+        filename = f"{name}.img.zst"
+        headers  = {
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+        return StreamingResponse(sender(), headers=headers, media_type="application/zstd")
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 @api_with_auth.post("/frames/{id:int}/deploy")
 async def api_frame_deploy_event(id: int, redis: Redis = Depends(get_redis)):

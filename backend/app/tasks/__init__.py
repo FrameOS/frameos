@@ -1,3 +1,4 @@
+from .build_sd_card_image import build_sd_card_image_task # noqa
 from .fast_deploy_frame import fast_deploy_frame # noqa
 from .deploy_frame import deploy_frame # noqa
 from .reset_frame import reset_frame # noqa

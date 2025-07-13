@@ -8,10 +8,38 @@ import { sanitizeScene } from '../scenes/frame/frameLogic'
 import { apiFetch } from '../utils/apiFetch'
 import { entityImagesModel } from './entityImagesModel'
 import { urls } from '../urls'
+import streamSaver from 'streamsaver'
 
 export interface FrameImageInfo {
   url: string
   expiresAt: number
+}
+
+async function buildSDCard(id: number): Promise<void> {
+  const resp = await apiFetch(`/api/frames/${id}/build_sd_image`, { method: 'POST' })
+  if (!resp.ok) throw new Error(await resp.text())
+
+  const cd = resp.headers.get('content-disposition') ?? ''
+  const name = decodeURIComponent(
+    cd.match(/filename\*=UTF-8''([^;]+)|filename="([^"]+)"/)?.[1] ??
+      cd.match(/filename\*=UTF-8''([^;]+)|filename="([^"]+)"/)?.[2] ??
+      `frame_${id}.img.zst`
+  )
+
+  const size = Number(resp.headers.get('content-length')) || undefined
+  const fileStream = streamSaver.createWriteStream(name, { size })
+  const writer = fileStream.getWriter()
+  if (!resp.body) {
+    throw new Error('No response body received')
+  }
+  const reader = resp.body.getReader()
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    await writer.write(value) // chunk-by-chunk, zero extra copies
+  }
+  await writer.close()
 }
 
 export const framesModel = kea<framesModelType>([
@@ -28,6 +56,7 @@ export const framesModel = kea<framesModelType>([
     deleteFrame: (id: number) => ({ id }),
     deployAgent: (id: number) => ({ id }),
     restartAgent: (id: number) => ({ id }),
+    buildSDCard: (id: number) => ({ id }),
   }),
   loaders(({ values }) => ({
     frames: [
@@ -132,6 +161,9 @@ export const framesModel = kea<framesModelType>([
     },
     restartAgent: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/restart_agent`, { method: 'POST' })
+    },
+    buildSDCard: async ({ id }) => {
+      await buildSDCard(id)
     },
     deleteFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })

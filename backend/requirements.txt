@@ -4,6 +4,8 @@
 #
 #    pip-compile requirements.in
 #
+aiofiles==24.1.0
+    # via -r requirements.in
 alembic==1.11.2
     # via -r requirements.in
 annotated-types==0.7.0

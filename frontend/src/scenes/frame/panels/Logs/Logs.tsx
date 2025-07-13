@@ -67,6 +67,7 @@ export function Logs() {
                 'text-yellow-300': log.type === 'stdinfo',
                 'text-red-300': log.type === 'stderr',
                 'text-blue-300': log.type === 'agent',
+                'text-yellow-200': log.type === 'build',
               })}
             >
               <div className="flex-0 mr-2 text-yellow-900 whitespace-nowrap">{formatTimestamp(log.timestamp)}</div>

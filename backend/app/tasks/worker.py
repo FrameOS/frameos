@@ -9,6 +9,7 @@ from typing import Any, Dict
 from arq.connections import RedisSettings
 from arq.worker import func
 
+from app.tasks.build_sd_card_image import build_sd_card_image_task
 from app.tasks.deploy_frame import deploy_frame_task
 from app.tasks.fast_deploy_frame import fast_deploy_frame_task
 from app.tasks.reset_frame import reset_frame_task
@@ -47,6 +48,7 @@ class WorkerSettings:
     You run it with: `arq app.tasks.worker.WorkerSettings`.
     """
     functions = [
+        func(build_sd_card_image_task, name="build_sd_card_image"),
         func(deploy_frame_task,      name="deploy_frame"),
         func(fast_deploy_frame_task, name="fast_deploy_frame"),
         func(reset_frame_task,       name="reset_frame"),

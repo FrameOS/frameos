@@ -216,8 +216,33 @@
             Restart          = "always";
           };
         };
-      };
 
+        system.activationScripts.initializeFrameOS.text =
+          let bin = self.packages.${pkgs.system}.frameos + "/bin/frameos";
+          in ''
+            initial="/srv/frameos/releases/initial"
+
+            # Only run on very first boot
+            if [ ! -e "/srv/frameos" ]; then
+              echo "⏩  populating first-boot FrameOS release"
+
+              mkdir -p "$initial" /srv/frameos/state
+
+              # Only copy the binary if it actually exists for the target arch
+              if [ -x "${bin}" ]; then
+                install -m700 "${bin}" "$initial/frameos"
+              else
+                echo "⚠️  ${bin} not found – skipping copy" >&2
+              fi
+              chown -R admin:users /srv/frameos
+
+              ln -sfn /srv/frameos/state "$initial/state"
+              echo '{"name":"first-boot","frameHost":"localhost","framePort":8787}' > "$initial/frame.json"
+
+              ln -sfn "$initial" /srv/frameos/current
+            fi
+          '';
+      };
 
       # ──────────────────────────────────────────────────────────────────
       packages = builtins.listToAttrs (map

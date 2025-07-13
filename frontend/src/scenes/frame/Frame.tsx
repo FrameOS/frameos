@@ -26,6 +26,7 @@ export function Frame(props: FrameSceneProps) {
     fastDeployFrame,
     fullDeployFrame,
     deployAgent,
+    buildSDCard,
     restartAgent,
   } = useActions(frameLogic(frameLogicProps))
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
@@ -48,6 +49,7 @@ export function Frame(props: FrameSceneProps) {
                     { label: 'Restart FrameOS' + agentExtra, onClick: () => restartFrame() },
                     { label: 'Stop FrameOS' + agentExtra, onClick: () => stopFrame() },
                     { label: 'Reboot device' + agentExtra, onClick: () => rebootFrame() },
+                    { label: 'Build SD card' + agentExtra, onClick: () => buildSDCard() },
                     ...(requiresRecompilation
                       ? []
                       : [
