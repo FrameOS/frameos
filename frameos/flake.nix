@@ -217,6 +217,8 @@
           };
         };
 
+        environment.etc."frame-initial.json".source = ./frame.json;
+
         system.activationScripts.initializeFrameOS.text =
           let bin = self.packages.${pkgs.system}.frameos + "/bin/frameos";
           in ''
@@ -237,7 +239,7 @@
               chown -R admin:users /srv/frameos
 
               ln -sfn /srv/frameos/state "$initial/state"
-              echo '{"name":"first-boot","frameHost":"localhost","framePort":8787}' > "$initial/frame.json"
+              cp /etc/frame-initial.json "$initial/frame.json"
 
               ln -sfn "$initial" /srv/frameos/current
             fi
