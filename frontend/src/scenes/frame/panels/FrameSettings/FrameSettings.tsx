@@ -336,13 +336,13 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                           )}
                         </Field>
                         <Field
-                          name="wifiHotspotTimeout"
+                          name="wifiHotspotTimeoutSeconds"
                           label="Wifi Hotspot Timeout in seconds"
                           tooltip="How long to keep the hotspot active after boot. After this timeout it won't turn on again without a reboot."
                         >
                           {({ onChange, value }) => (
                             <NumberTextInput
-                              name="wifiHotspotTimeout"
+                              name="wifiHotspotTimeoutSeconds"
                               placeholder="600"
                               onChange={onChange}
                               value={value ?? 600}

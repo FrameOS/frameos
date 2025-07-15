@@ -266,7 +266,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "wifiHotspot": network.get('wifiHotspot', "disabled"),
             "wifiHotspotSsid": network.get('wifiHotspotSsid', "FrameOS-Setup"),
             "wifiHotspotPassword": network.get('wifiHotspotPassword', "frame1234"),
-            "wifiHotspotTimeoutSeconds": int(network.get('wifiHotspotTimeoutSeconds', 600)),
+            "wifiHotspotTimeoutSeconds": int(network.get('wifiHotspotTimeoutSeconds', 300)),
         },
         "agent": {
             "agentEnabled": bool(agent.get('agentEnabled', False)),
