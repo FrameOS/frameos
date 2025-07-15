@@ -264,16 +264,6 @@
               "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
             ];
             DevicePolicy = lib.mkForce "private";
-            # DevicePolicy   = "auto";
-            # DeviceAllow    = [
-            #   "/dev/fb0 rw"
-            #   "/dev/gpiomem rw"
-            #   "/dev/gpiochip0 rw"
-            #   "/dev/spidev0.0 rw"
-            #   "char-i2c    rw"
-            #   "char-drm      rw"   # GPUs
-            #   "char-graphics rw"   # generic fb devices (v259+)
-            # ];
             AmbientCapabilities = [ "CAP_SYS_RAWIO" ];
             WorkingDirectory = "/srv/frameos/current";
             ExecStart = "/srv/frameos/current/frameos";
@@ -307,6 +297,7 @@
               ln -sfn /srv/frameos/state "$initial/state"
               cp /etc/frame-initial.json "$initial/frame.json"
               chown -R admin:users "$initial/frame.json"
+              chmod 660 "$initial/frame.json"
 
               ln -sfn "$initial" /srv/frameos/current
             fi

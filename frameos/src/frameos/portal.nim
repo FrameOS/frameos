@@ -141,20 +141,6 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool =
 proc masked*(s: string; keep: int = 2): string =
   if s.len <= keep: "*".repeat(s.len) else: s[0..keep-1] & "*".repeat(s.len - keep)
 
-proc patchConfig(updates: Table[string, string]) =
-  let filename = "frame.json"
-  var data: JsonNode
-  try:
-    data = parseFile(filename)
-  except:
-    data = %*{}
-  for k, v in updates:
-    data[k] = %*v
-  try:
-    writeFile(filename, pretty(data, indent = 4))
-  except CatchableError:
-    echo "[portal] failed to write updated frame.json"
-
 proc connectToWifi*(frameOS: FrameOS,
                     ssid, password, serverHost, serverPort: string) {.gcsafe.} =
   let frameConfig = frameOS.frameConfig
@@ -174,10 +160,23 @@ proc connectToWifi*(frameOS: FrameOS,
             pLog("portal:connect:updatingConfig",
                  %*{"serverHost": serverHost, "serverPort": serverPort,
                      "oldServerHost": oldServerHost, "oldServerPort": oldServerPort})
-            var up: Table[string, string]
-            up["serverHost"] = frameConfig.serverHost
-            up["serverPort"] = $frameConfig.serverPort
-            patchConfig(up)
+            try:
+              let filename = "frame.json"
+              var data: JsonNode
+              data = parseFile(filename)
+              data["serverHost"] = %*(serverHost)
+              data["serverPort"] = %*(parseInt(serverPort))
+              pLog("portal:connect:writing...", %*{"serverHost": serverHost, "serverPort": serverPort})
+              writeFile(filename, pretty(data, indent = 4))
+              frameConfig.serverHost = serverHost
+              frameConfig.serverPort = parseInt(serverPort)
+              # TODO: reload config in the running FrameOS instance, or reload the instance
+            except CatchableError as e:
+              rememberError("Failed to persist new server host & port: " & e.msg)
+              pLog("portal:connect:configUpdateError",
+                   %*{"error": e.msg, "serverHost": serverHost, "serverPort": serverPort,
+                       "oldServerHost": oldServerHost, "oldServerPort": oldServerPort})
+              echo "[portal] failed to write updated frame.json"
           else:
             pLog("portal:connect:configUnchanged")
 
@@ -202,6 +201,7 @@ proc connectToWifi*(frameOS: FrameOS,
       startAp(frameOS) # fall back to AP
   else:
     log(%*{"event": "portal:connectFailed"})
+    rememberError("Wifi connection failed. Check your credentials.")
     startAp(frameOS)
 
 proc checkNetwork*(self: FrameOS): bool =
