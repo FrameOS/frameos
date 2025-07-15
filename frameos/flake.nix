@@ -64,12 +64,13 @@
       # ──────────────────────────────────────────────────────────────────
       frameosModule = { pkgs, lib, ... }: {
         nixpkgs.overlays = [ lgpioOverlay allowMissingMods ];
-        system.stateVersion     = "25.05";
+        system.stateVersion = "25.05";
 
-        networking.hostName = hostName;
         time.timeZone       = "Europe/Brussels";
-        networking.networkmanager.enable = true;
-        networking.wireless.enable       = lib.mkForce false;
+        environment = {
+          systemPackages = with pkgs; [ cacert openssl ];
+          variables.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
+        };
         environment.etc."NetworkManager/system-connections/frameos-wifi.nmconnection" = {
           user  = "root"; group = "root"; mode = "0600";
           text  = ''
@@ -96,11 +97,33 @@
             method=auto
           '';
         };
-        networking.firewall.allowedTCPPorts = [
-          22
-          8787
-        ];
+        networking = {
+          hostName = hostName;
+          wireless.enable = lib.mkForce false; # using NetworkManager instead
+          networkmanager = {
+            enable = true;
+            dns = "dnsmasq";
+          };
+          firewall = {
+            allowedUDPPorts = [ 53 67 123 ];
+            allowedTCPPorts = [
+              22
+              8787
+            ];
+          };
+        };
         services.openssh.enable = true;
+
+        services.timesyncd = {
+          enable = true;
+          servers         = [ "time.cloudflare.com" ];           # primary pool
+          fallbackServers = [ "time.google.com" ];               # back‑up
+          extraConfig = ''
+            InitialBurst=yes           # 4 packets in quick succession
+            PollIntervalMinSec=16      # legal minimum (default is 32 s) :contentReference[oaicite:0]{index=0}
+            ConnectionRetrySec=5
+          '';
+        };
 
         hardware = {
           enableRedistributableFirmware = lib.mkForce false;
@@ -185,19 +208,39 @@
         services.udev.extraRules = ''
           SUBSYSTEM=="spidev",  GROUP="spi", MODE="0660"
           SUBSYSTEM=="i2c-dev", GROUP="i2c", MODE="0660"
+          KERNEL=="gpiomem",    GROUP="gpio", MODE="0660"
+          KERNEL=="gpiochip[0-9]*", GROUP="gpio", MODE="0660"
         '';
 
-        # Groups & permissions (unchanged but required)
+        # Groups & permissions
         users.groups.spi = {};
+        users.groups.gpio = {};
 
         users.users = {
-          admin = { password = "not-an-admin-!!!"; isNormalUser = true; extraGroups = [ "wheel" ]; };
-          marius = { openssh.authorizedKeys.keys = [ "XXX" ]; isNormalUser = true; extraGroups = [ "wheel" ]; };
-          pi     = { openssh.authorizedKeys.keys = [ "ssh-rsa XXX" ]; isNormalUser = true; extraGroups = [ "wheel" ]; };
+          admin = { password = "not-an-admin-!!!"; isNormalUser = true; extraGroups = [ "gpio" "spi" "i2c" "video" "wheel" ]; };
+          # pi     = { openssh.authorizedKeys.keys = [ "ssh-rsa XXX" ]; isNormalUser = true; extraGroups = [ "wheel" ]; };
         };
 
-        security.sudo.wheelNeedsPassword = false;
-        
+        security.sudo = {
+          enable = true;
+          wheelNeedsPassword = false;
+          extraConfig = ''
+            Defaults env_keep += "SSL_CERT_FILE"
+          '';
+        };
+
+        services.avahi = {
+          enable       = true;      # start avahi‑daemon
+          nssmdns      = true;      # write mdns entries to /etc/nsswitch.conf
+          openFirewall = true;      # allow UDP 5353 and related traffic
+          publish = {               # advertise the hostname & IP
+            enable      = true;
+            addresses   = true;
+            workstation = true;     # so “_workstation._tcp” shows up
+            domain      = true;     # broadcast the .local domain
+          };
+        };
+
         boot = {
           kernelPackages = pkgs.linuxPackages_rpi3;             # tuned Pi kernel
           initrd.availableKernelModules = [ "xhci_pci" "usbhid" "usb_storage" ];
@@ -206,15 +249,38 @@
           swraid.enable       = lib.mkForce false;               # silence mdadm
           supportedFilesystems.zfs = lib.mkForce false;          # save time compiling zfs
         };
-
+        systemd.globalEnvironment.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
 
         systemd.services.frameos = {
-          wantedBy      = [ "multi-user.target" ];
+          wantedBy = [ "multi-user.target" ];
+          after    = [ "systemd-udev-settle.service" ];
+
           serviceConfig = {
-            ExecStart        = "/srv/frameos/current/frameos";
+            User  = "admin";
+            SupplementaryGroups  = [ "gpio" "spi" "i2c" "video" "wheel" ];
+            After = ["systemd-udev-settle.service" "time-sync.target"];
+            Environment = [
+              "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
+              "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
+            ];
+            DevicePolicy = lib.mkForce "private";
+            # DevicePolicy   = "auto";
+            # DeviceAllow    = [
+            #   "/dev/fb0 rw"
+            #   "/dev/gpiomem rw"
+            #   "/dev/gpiochip0 rw"
+            #   "/dev/spidev0.0 rw"
+            #   "char-i2c    rw"
+            #   "char-drm      rw"   # GPUs
+            #   "char-graphics rw"   # generic fb devices (v259+)
+            # ];
+            AmbientCapabilities = [ "CAP_SYS_RAWIO" ];
             WorkingDirectory = "/srv/frameos/current";
-            Restart          = "always";
+            ExecStart = "/srv/frameos/current/frameos";
+            Restart   = "always";
+            NoNewPrivileges = "no";
           };
+          path = [ pkgs.coreutils ];
         };
 
         environment.etc."frame-initial.json".source = ./frame.json;
@@ -228,7 +294,7 @@
             if [ ! -e "/srv/frameos" ]; then
               echo "⏩  populating first-boot FrameOS release"
 
-              mkdir -p "$initial" /srv/frameos/state
+              mkdir -p "$initial" /srv/frameos/state /srv/frameos/logs /srv/frameos/assets
 
               # Only copy the binary if it actually exists for the target arch
               if [ -x "${bin}" ]; then
@@ -240,6 +306,7 @@
 
               ln -sfn /srv/frameos/state "$initial/state"
               cp /etc/frame-initial.json "$initial/frame.json"
+              chown -R admin:users "$initial/frame.json"
 
               ln -sfn "$initial" /srv/frameos/current
             fi

@@ -71,6 +71,6 @@
         "wifiHotspot": "disabled",
         "wifiHotspotSsid": "FrameOS",
         "wifiHotspotPassword": "frame1234",
-        "wifiHotspotTimeoutSeconds": 600
+        "wifiHotspotTimeoutSeconds": 300
     }
 }

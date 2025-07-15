@@ -1,6 +1,6 @@
 import { useValues } from 'kea'
 import clsx from 'clsx'
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { logsLogic } from './logsLogic'
 import { insertBreaks } from '../../../../utils/insertBreaks'
 import { frameLogic } from '../../frameLogic'
@@ -22,6 +22,19 @@ export function Logs() {
   const [atBottom, setAtBottom] = useState(false)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
 
+  useEffect(() => {
+    if (atBottom) {
+      // wait one frame so the new rows are measured
+      requestAnimationFrame(() => {
+        virtuosoRef.current?.scrollToIndex({
+          index: logs.length - 1,
+          align: 'end',
+          behavior: 'auto',
+        })
+      })
+    }
+  }, [logs.length, atBottom])
+
   return logsLoading ? (
     <div>...</div>
   ) : logs.length === 0 ? (
@@ -33,8 +46,9 @@ export function Logs() {
         ref={virtuosoRef}
         initialTopMostItemIndex={logs.length - 1}
         data={logs}
-        followOutput={'auto'}
+        followOutput={(isBottom) => (isBottom ? 'smooth' : false)}
         atBottomStateChange={(bottom) => setAtBottom(bottom)}
+        increaseViewportBy={{ top: 0, bottom: 600 }}
         itemContent={(index, log) => {
           let logLine: string | JSX.Element = String(log.line)
           if (log.type === 'webhook') {

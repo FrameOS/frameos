@@ -67,7 +67,7 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
       wifiHotspot: if data{"networkCheck"}.getBool(): data{"wifiHotspot"}.getStr("disabled") else: "disabled",
       wifiHotspotSsid: data{"wifiHotspotSsid"}.getStr("FrameOS-Setup"),
       wifiHotspotPassword: data{"wifiHotspotPassword"}.getStr("frame1234"),
-      wifiHostpotTimeoutSeconds: data{"wifiHotspotTimeoutSeconds"}.getFloat(600),
+      wifiHostpotTimeoutSeconds: data{"wifiHotspotTimeoutSeconds"}.getFloat(300),
     )
 
 proc loadPalette*(data: JsonNode): PaletteConfig =

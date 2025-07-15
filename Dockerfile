@@ -81,6 +81,12 @@ RUN mkdir /etc/nix && printf '%s\n' \
 ENV USER=root
 
 # Copy the requirements file and install using pip
+WORKDIR /app/frameos
+COPY frameos/ ./
+# Cache a build so that the nix libraries are already there
+RUN make nix-bin
+
+# Copy the requirements file and install using pip
 WORKDIR /app/backend
 COPY backend/requirements.txt .
 RUN pip3 install --upgrade uv \

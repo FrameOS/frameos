@@ -1,4 +1,4 @@
-import os, osproc, httpclient, json, strformat, strutils, streams, times, threadpool
+import os, osproc, httpclient, json, strformat, strutils, streams, times, threadpool, locks, tables
 import frameos/types
 import frameos/scenes
 import frameos/channels
@@ -8,6 +8,18 @@ const
   nmConnectionName = "frameos-wifi"
 
 var logger: Logger
+var lastErrorLock: Lock
+var lastError: string
+
+proc getLastError(): string =
+  {.gcsafe.}:
+    withLock lastErrorLock:
+      return lastError & ""
+
+proc rememberError(msg: string) =
+  {.gcsafe.}:
+    withLock lastErrorLock:
+      lastError = strip(msg)[0 ..< min(len(msg), 160)] # 160‑char cap
 
 proc isHotspotActive*(frameOS: FrameOS): bool =
   frameOS.network.hotspotStatus == HotspotStatus.enabled
@@ -29,6 +41,16 @@ proc run(cmd: string): (string, int) =
   let (output, rc) = execCmdEx(cmd) # no extra nested bash
   pLog("portal:exec", %*{"cmd": cmd, "rc": rc, "output": output.strip()})
   (output, rc)
+
+proc availableNetworks*(frameOS: FrameOS): seq[string] =
+  ## Return a list of nearby Wi-Fi SSIDs using nmcli
+  let (output, rc) = run("sudo nmcli --terse --fields SSID device wifi list 2>/dev/null || true")
+  if rc != 0:
+    return @[]
+  for line in output.splitLines():
+    let ssid = line.strip()
+    if ssid.len > 0 and ssid notin result:
+      result.add ssid
 
 proc hotspotRunning(frameOS: FrameOS): bool =
   let (output, _) = run("sudo nmcli --colors no -t -f NAME connection show --active | grep '^" &
@@ -111,31 +133,69 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool =
   result = (rc == 0)
   frameOS.network.status = if result: NetworkStatus.connected else: NetworkStatus.error
 
+  if frameOS.network.status == NetworkStatus.connected:
+    sleep(5000) # give DHCP etc a moment
+
   sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
 
 proc masked*(s: string; keep: int = 2): string =
   if s.len <= keep: "*".repeat(s.len) else: s[0..keep-1] & "*".repeat(s.len - keep)
 
-proc connectToWifi*(frameOS: FrameOS, ssid, password: string) {.gcsafe.} =
+proc patchConfig(updates: Table[string, string]) =
+  let filename = "frame.json"
+  var data: JsonNode
+  try:
+    data = parseFile(filename)
+  except:
+    data = %*{}
+  for k, v in updates:
+    data[k] = %*v
+  try:
+    writeFile(filename, pretty(data, indent = 4))
+  except CatchableError:
+    echo "[portal] failed to write updated frame.json"
+
+proc connectToWifi*(frameOS: FrameOS,
+                    ssid, password, serverHost, serverPort: string) {.gcsafe.} =
   let frameConfig = frameOS.frameConfig
   stopAp(frameOS) # close hotspot before connecting
-  if attemptConnect(frameOS, ssid, password):
-    sleep(5000) # give DHCP etc a moment
 
+  if attemptConnect(frameOS, ssid, password):
     var connected = false
-    let client = newHttpClient(timeout = 5000)
-    try:
-      let response = client.get(frameConfig.network.networkCheckUrl)
-      if response.status.startsWith("200"):
-        log(%*{"event": "networkCheck", "status": "success"})
-        sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
-        return
-      else:
-        log(%*{"event": "networkCheck", "status": "failed", "response": response.status})
-    except CatchableError as e:
-      log(%*{"event": "networkCheck", "status": "error", "error": e.msg})
-    finally:
-      client.close()
+    for attempt in 0..<4:
+      let client = newHttpClient(timeout = 5000)
+      try:
+        let response = client.get(frameConfig.network.networkCheckUrl)
+        if response.status.startsWith("200"):
+          let oldServerHost = frameConfig.serverHost
+          let oldServerPort = $frameConfig.serverPort
+
+          if len(serverHost) > 0 and len(serverPort) > 0 and serverHost != oldServerHost or serverPort != oldServerPort:
+            pLog("portal:connect:updatingConfig",
+                 %*{"serverHost": serverHost, "serverPort": serverPort,
+                     "oldServerHost": oldServerHost, "oldServerPort": oldServerPort})
+            var up: Table[string, string]
+            up["serverHost"] = frameConfig.serverHost
+            up["serverPort"] = $frameConfig.serverPort
+            patchConfig(up)
+          else:
+            pLog("portal:connect:configUnchanged")
+
+          log(%*{"event": "networkCheck", "status": "success"})
+          sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
+          rememberError("")
+          return
+        else:
+          log(%*{"event": "networkCheck", "status": "failed", "response": response.status})
+          rememberError("Network check failed. Please try again." &
+                        fmt" (HTTP {response.status})")
+          sleep(3000 * (attempt + 1)) # wait before retrying
+      except CatchableError as e:
+        log(%*{"event": "networkCheck", "status": "error", "error": e.msg})
+        rememberError("Network check failed: " & e.msg)
+        sleep(3000 * (attempt + 1)) # wait before retrying
+      finally:
+        client.close()
 
     if not connected:
       log(%*{"event": "portal:connect:netCheckFailed"})
@@ -179,6 +239,13 @@ proc checkNetwork*(self: FrameOS): bool =
     attempt += 1
   return false
 
+proc htmlEscape(input: string): string =
+  result = input.replace("&", "&amp;")
+    .replace("<", "&lt;")
+    .replace(">", "&gt;")
+    .replace("\"", "&quot;")
+    .replace("'", "&apos;")
+
 const styleBlock* = """
 <style>
 body{font-family:system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background-color:#111827;color:#f9fafb}
@@ -186,11 +253,12 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;m
 h1{margin:0 0 1rem;font-size:1.5rem;font-weight:600;line-height:1.2}
 p,li{font-size:.875rem;color:#d1d5db;margin:0 0 1rem}
 label{display:block;font-weight:500;font-size:.875rem;margin-bottom:.25rem}
-input{box-sizing:border-box;width:100%;padding:.5rem .75rem;font-size:.875rem;color:#f9fafb;background-color:#111827;border:1px solid #374151;border-radius:.375rem;margin-bottom:1rem;margin-top:0.5rem;}
-input:focus{outline:none;border-color:#4a4b8c;box-shadow:0 0 0 1px #4a4b8c}
+input,select{box-sizing:border-box;width:100%;padding:.5rem .75rem;font-size:.875rem;color:#f9fafb;background-color:#111827;border:1px solid #374151;border-radius:.375rem;margin-bottom:1rem;margin-top:.5rem;}
+input:focus,select:focus{outline:none;border-color:#4a4b8c;box-shadow:0 0 0 1px #4a4b8c}
 button{display:block;width:100%;padding:.5rem;font-size:.875rem;font-weight:500;color:#fff;background-color:#4a4b8c;border:none;border-radius:.375rem;cursor:pointer;text-align:center}
 button:hover{background-color:#484984}
 button:focus{outline:none;box-shadow:0 0 0 1px #484984}
+select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath fill='%23d1d5db' d='M5.23 7.21a.75.75 0 0 1 1.06 0L10 10.92l3.71-3.71a.75.75 0 1 1 1.06 1.06l-4.24 4.24a.75.75 0 0 1-1.06 0L5.23 8.27a.75.75 0 0 1 0-1.06z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right .75rem center;background-size:1rem}
 </style>"""
 
 proc layout*(inner: string): string =
@@ -198,15 +266,81 @@ proc layout*(inner: string): string =
 <meta charset="utf-8"><title>FrameOS Setup</title>{styleBlock}</head>
 <body><div class="card">{inner}</div></body></html>"""
 
-proc setupHtml*(): string =
-  layout("""
+proc setupHtml*(frameOS: FrameOS): string =
+  layout(fmt"""
 <h1>Connect your Frame to Wi-Fi</h1>
 <p>If the connection fails, reconnect to this access point and try again.</p>
+<p id="err" style="color:#f87171">{htmlEscape(getLastError())}</p>
 <form method="post" action="/setup">
-  <label>Wi-Fi SSID<input name="ssid" required></label>
+  <label>Wi-Fi SSID
+    <select id="ssid" name="ssid" required>
+      <option disabled selected>Loading…</option>
+    </select>
+  </label>
   <label>Password<input type="password" name="password"></label>
+
+  <hr style="margin:1.5rem 0;border:0;border-top:1px solid #334155">
+  <h2 style="margin:0 0 1rem;font-size:1rem;font-weight:600;color:#f9fafb">
+    Server connection
+  </h2>
+
+  <label>Server Host
+    <input type="text" name="serverHost"
+           placeholder="my.frameos.server"
+           value="{htmlEscape(frameOS.frameConfig.serverHost)}" required>
+  </label>
+
+  <label>Server Port
+    <input type="number" min="1" max="65535"
+           name="serverPort"
+           value="{frameOS.frameConfig.serverPort}">
+  </label>
+
   <button type="submit">Save &amp; Connect</button>
-</form>""")
+</form>
+""" & """
+<script>
+const sel = document.getElementById('ssid');
+
+function setOptions(list, current) {
+  sel.innerHTML = '';
+  list.forEach(s => {
+    const o = document.createElement('option');
+    o.value = s;
+    o.textContent = s;
+    sel.appendChild(o);
+  });
+  if (current && list.includes(current)) sel.value = current;
+}
+
+function loadCached() {
+  try {
+    const cached = JSON.parse(localStorage.getItem('wifiSsids') || '[]');
+    if (Array.isArray(cached) && cached.length) {
+      setOptions(cached);
+    }
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function updateNetworks() {
+  fetch('/wifi')
+    .then(r => r.json())
+    .then(d => {
+      const unique = [...new Set(d.networks.filter(n => n.trim()))]
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+      localStorage.setItem('wifiSsids', JSON.stringify(unique));
+      const current = sel ? sel.value : null;
+      setOptions(unique, current);
+    })
+    .catch(console.error);
+}
+
+loadCached();      // show cached list immediately if we have one
+updateNetworks();  // initial fetch to refresh list
+setInterval(updateNetworks, 10000); // refresh every 10 s
+</script>""")
 
 proc confirmHtml*(): string =
   layout("""
@@ -217,4 +351,13 @@ proc confirmHtml*(): string =
   <li>Wait about 60 seconds—your device can stay “stuck” on the frame’s network for a short time.</li>
   <li>Manually disconnect from that network. If the “FrameOS-Setup” access-point reappears, the Wi-Fi credentials were likely wrong.</li>
   <li>Reconnect to the access-point and run the setup again, double-checking SSID and password.</li>
-</ul>""")
+</ul><script>
+// Reload the page when it comes back
+window.setInterval(() => {
+  window.fetch('/').then(() => {
+    window.location.href = '/';
+  }).catch(() => {
+    // ignore errors, we just want to reload the page
+  });
+}, 10000);
+</script>""")

@@ -978,10 +978,12 @@ async def api_frame_build_sd_image_event(id: int, db: Session = Depends(get_db),
             raise HTTPException(status_code=500, detail="Image build failed")
 
         async def sender():
-            async with aiofiles.open(img_path, "rb") as fh:
-                while chunk := await fh.read(64 << 10):   # 64 KiB chunks
-                    yield chunk
-            # os.remove(img_path) # tidy up
+            try:
+                async with aiofiles.open(img_path, "rb") as fh:
+                    while chunk := await fh.read(64 << 14):   # 1 MiB chunks
+                        yield chunk
+            finally:
+                os.remove(img_path) # tidy up
 
         frame = db.get(Frame, id)
         if not frame:

@@ -162,14 +162,14 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
             "wifiHotspot": "disabled",
             "wifiHotspotSsid": "FrameOS-Setup",
             "wifiHotspotPassword": "frame1234",
-            "wifiHotspotTimeoutSeconds": 600,
+            "wifiHotspotTimeoutSeconds": 300,
         },
         agent={
             "agentEnabled": False,
             "agentRunCommands": False,
             "agentSharedSecret": secure_token(32)
         },
-        control_code={"enabled": "true", "position": "top-right"},
+        control_code={"enabled": "false", "position": "top-right"},
         schedule={"events": []},
         reboot={"enabled": "true", "crontab": "4 0 * * *"},
     )
@@ -250,7 +250,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         ],
         "palette": frame.palette or {},
         "controlCode": {
-            "enabled": frame.control_code.get('enabled', 'true') == 'true',
+            "enabled": frame.control_code.get('enabled', 'false') == 'true',
             "position": frame.control_code.get('position', 'top-right'),
             "size": float(frame.control_code.get('size', '2')),
             "padding": int(frame.control_code.get('padding', '1')),

@@ -67,7 +67,7 @@ router myrouter:
     {.gcsafe.}:
       if netportal.isHotspotActive(globalFrameOS):
         log(%*{"event": "portal:http", "get": request.pathInfo})
-        resp Http200, netportal.setupHtml()
+        resp Http200, netportal.setupHtml(globalFrameOS)
       elif not hasAccess(request, Read):
         resp Http401, "Unauthorized"
       else:
@@ -86,8 +86,19 @@ router myrouter:
         globalFrameOS,
         params["ssid"],
         params.getOrDefault("password", ""),
+        params.getOrDefault("serverHost", globalFrameOS.frameConfig.serverHost),
+        params.getOrDefault("serverPort", $globalFrameOS.frameConfig.serverPort),
       )
     resp Http200, netportal.confirmHtml()
+  get "/setup":
+    redirect "/"
+  get "/wifi":
+    {.gcsafe.}:
+      if not netportal.isHotspotActive(globalFrameOS):
+        resp Http400, "Not in setup mode"
+      else:
+        let nets = netportal.availableNetworks(globalFrameOS)
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"networks": nets})
   get "/ws":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"
