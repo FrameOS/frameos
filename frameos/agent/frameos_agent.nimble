@@ -3,7 +3,7 @@
 version       = "0.1.0"
 author        = "Marius Andra"
 description   = "FrameOS agent"
-license       = "Apache-2.0"
+license       = "AGPL"
 srcDir        = "src"
 binDir        = "build"
 bin           = @["frameos_agent"]

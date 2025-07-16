@@ -58,13 +58,13 @@
         '';
       };
       mkFrameOSAgent = pkgs: pkgs.buildNimPackage {
-        pname        = "frameos-agent";
+        pname        = "frameos_agent";
         version      = "0.1.0";
-        src          = ./../agent;
+        src          = ./agent;
         nimbleFile   = "frameos_agent.nimble";
-        lockFile     = "${./../agent}/lock.json";
+        lockFile     = ./agent/lock.json;
         nimFlags     = [ "--lineTrace:on" ];
-        buildInputs  = with pkgs; [ zstd openssl ];  # Add anything else agent needs
+        buildInputs  = with pkgs; [ zstd openssl ];
         meta.mainProgram = "frameos_agent";
         postPatch = ''
           substituteInPlace frameos_agent.nimble \
@@ -266,7 +266,7 @@
         };
         systemd.globalEnvironment.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
 
-        systemd.services.frameos-agent = {
+        systemd.services.frameos_agent = {
           wantedBy = [ "multi-user.target" ];
           after    = [ "network-online.target" ];
           wants    = [ "network-online.target" ];
@@ -275,6 +275,10 @@
             Type        = "simple";
             User        = "admin";
             SupplementaryGroups  = [ "wheel" ];
+            Environment = [
+              "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
+              "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
+            ];
             WorkingDirectory = "/srv/frameos/agent/current";
             ExecStart   = "/srv/frameos/agent/current/frameos_agent";
             Restart     = "always";
@@ -311,7 +315,7 @@
 
         system.activationScripts.initializeFrameOS.text =
           let frameosBinary = self.packages.${pkgs.system}.frameos + "/bin/frameos";
-              frameosAgentBinary = self.packages.${pkgs.system}.frameos-agent + "/bin/frameos_agent";
+              frameosAgentBinary = self.packages.${pkgs.system}.frameos_agent + "/bin/frameos_agent";
           in ''
             # Only run on very first boot
             if [ ! -e "/srv/frameos" ]; then
@@ -361,7 +365,7 @@
         (system:
           { name = system; value = {
               frameos = mkFrameOS (pkgsFor system);
-              frameos-agent = mkFrameOSAgent (pkgsFor system);
+              frameos_agent = mkFrameOSAgent (pkgsFor system);
               nim_lk  = (pkgsFor system).nim_lk;
 
               sdImage = nixos-generators.nixosGenerate {

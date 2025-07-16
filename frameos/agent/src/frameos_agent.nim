@@ -239,8 +239,8 @@ proc execShellThreaded(rawCmd: string; ws: WebSocket;
                        cfg: FrameConfig; id: string): Future[void] {.async.} =
   var ch: Channel[LineMsg]
   ch.open()
-  var p = startProcess("/bin/bash",
-          args = ["-c", rawCmd],
+  var p = startProcess("/usr/bin/env",
+          args = ["bash", "-c", rawCmd],
           options = {poUsePath})
 
   var thrOut: Thread[OutParams]
@@ -254,6 +254,8 @@ proc execShellThreaded(rawCmd: string; ws: WebSocket;
     if ready:
       if msg.done:
         await sendResp(ws, cfg, id, msg.exit == 0, %*{"exit": msg.exit})
+        joinThread thrOut
+        joinThread thrErr
         break
       else:
         let which = if msg.stream == stdoutStr: "stdout" else: "stderr"

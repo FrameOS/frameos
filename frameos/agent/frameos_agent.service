@@ -1,4 +1,4 @@
-# /etc/systemd/system/frameos-agent.service
+# /etc/systemd/system/frameos_agent.service
 [Unit]
 Description=FrameOS Agent (auto-reconnect, hardened)
 After=network-online.target

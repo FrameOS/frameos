@@ -15,7 +15,7 @@ test:
 
 nix-bin:
 	nix --extra-experimental-features 'nix-command flakes' \
-		build ../frameos#packages.aarch64-linux.frameos-agent \
+		build ../#packages.aarch64-linux.frameos_agent \
 		--system aarch64-linux \
 		--show-trace \
 		-o dist
@@ -23,4 +23,4 @@ nix-bin:
 
 nix-lock:
 	nix --extra-experimental-features 'nix-command flakes' \
-		run ../frameos#nim_lk -- . > lock.json
+		run ../#nim_lk -- . > lock.json

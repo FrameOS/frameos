@@ -339,7 +339,9 @@ function updateNetworks() {
 
 loadCached();      // show cached list immediately if we have one
 updateNetworks();  // initial fetch to refresh list
-setInterval(updateNetworks, 10000); // refresh every 10 s
+setInterval(updateNetworks, 10000); // refresh every 10 sec on a loop
+setTimeout(updateNetworks, 1000); // refresh in 1 sec
+setTimeout(updateNetworks, 4000); // refresh in 4 sec
 </script>""")
 
 proc confirmHtml*(): string =

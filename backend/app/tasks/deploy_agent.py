@@ -74,8 +74,23 @@ class AgentDeployer:
                 # 2. Build & deploy the agent (if needed)
                 if self._can_deploy_agent():
                     await self.log("stdout", "- Deploying agent")
-                    await self._deploy_agent(cpu)
-                    await self._setup_agent_service()
+
+                    distro_out: list[str] = []
+                    await self.exec_command(
+                        "bash -c '"
+                        "if [ -e /etc/nixos/version ]; then echo nixos ; "
+                        "elif [ -f /etc/rpi-issue ] || grep -q \"^ID=raspbian\" /etc/os-release ; then echo raspios ; "
+                        "else . /etc/os-release ; echo ${ID:-unknown} ; "
+                        "fi'",
+                        distro_out
+                    )
+                    distro = distro_out[0].strip().lower()
+
+                    if distro == "nixos":
+                        await self._deploy_agent_nixos(cpu)
+                    else:
+                        await self._deploy_agent(cpu)
+                        await self._setup_agent_service()
 
                     # 3. Upload *frame.json* for this release
                     await self._upload_frame_json()
@@ -91,6 +106,9 @@ class AgentDeployer:
                     await self.exec_command("sudo systemctl enable frameos_agent.service")
                     await self.exec_command("sudo systemctl restart frameos_agent.service")
                     await self.exec_command("sudo systemctl status frameos_agent.service")
+
+                    if distro != "nixos":
+                        await self._cleanup_old_builds()
                 else:
                     await self.log(
                         "stdout",
@@ -104,7 +122,6 @@ class AgentDeployer:
                         "sudo systemctl stop frameos_agent.service", raise_on_error=False
                     )
 
-                await self._cleanup_old_builds()
                 await self.log(
                     "stdout",
                     f"Agent deployment completed for {self.frame.name} (build id: {self.build_id})",
@@ -178,7 +195,7 @@ class AgentDeployer:
         source_dir = os.path.join(self.temp_dir, "agent")
 
         os.makedirs(source_dir, exist_ok=True)
-        shutil.copytree("../agent", source_dir, dirs_exist_ok=True)  # idempotent copy
+        shutil.copytree("./agent", source_dir, dirs_exist_ok=True)  # idempotent copy
         os.makedirs(build_dir, exist_ok=True)
 
         return build_dir, source_dir
@@ -261,7 +278,7 @@ class AgentDeployer:
 
     async def _setup_agent_service(self) -> None:
         """Upload and install the systemd service file for the new release."""
-        with open("../agent/frameos_agent.service", "r", encoding="utf-8") as fh:
+        with open("./agent/frameos_agent.service", "r", encoding="utf-8") as fh:
             service_contents = fh.read().replace("%I", self.frame.ssh_user)
 
         # Local temp copy
@@ -284,6 +301,87 @@ class AgentDeployer:
         )
         await self.exec_command("sudo chown root:root /etc/systemd/system/frameos_agent.service")
         await self.exec_command("sudo chmod 644 /etc/systemd/system/frameos_agent.service")
+
+    # ----------------------------------------------------------------------
+    #   NixOS deployment
+    # ----------------------------------------------------------------------
+    async def _deploy_agent_nixos(self, cpu: str) -> None:
+        """
+        Cross-build frameos_agent with Nix, ship the whole runtime closure,
+        stage a new release and restart the systemd service.
+        """
+        await self.log("stdout", "- NixOS detected – using flake-based deploy")
+
+        # ─── 1.  Build the package on the *server* ───────────────────────
+        build_cmd = (
+            "nix --extra-experimental-features 'nix-command flakes' "
+            "build ../frameos#packages.aarch64-linux.frameos_agent "
+            "--system aarch64-linux --print-out-paths"
+        )
+        status, store_path, err = await exec_local_command(
+            self.db, self.redis, self.frame,
+            build_cmd, generate_log=True
+        )
+        if status != 0 or not store_path:
+            raise Exception(f"Local nix build failed:\n{err}")
+        store_path = store_path.strip().splitlines()[-1]
+        binary_path = os.path.join(store_path, "bin", "frameos_agent")
+        if not os.path.exists(binary_path):
+            raise Exception(f"Binary missing at {binary_path}")
+
+        # ─── 2.  Export runtime closure → .nar ───────────────────────────
+        status, paths_out, _ = await exec_local_command(
+            self.db, self.redis, self.frame,
+            f"nix-store -qR {store_path}"
+        )
+        runtime_paths = (paths_out or "").strip().splitlines()
+        nar_path = os.path.join(self.temp_dir, f"frameos_agent_closure_{self.build_id}.nar")
+        export_cmd = (
+            "bash -c 'nix-store --export "
+            + " ".join(runtime_paths)
+            + f" > {nar_path}'"
+        )
+        status, _, err = await exec_local_command(
+            self.db, self.redis, self.frame,
+            export_cmd
+        )
+        if status != 0:
+            raise Exception(f"Failed to export closure:\n{err}")
+
+        # ─── 3.  Upload & import on the device ───────────────────────────
+        await self.log("stdout", "- Uploading closure.nar")
+        await asyncssh.scp(
+            nar_path,
+            (self.ssh, f"/tmp/frameos_agent_closure_{self.build_id}.nar"),
+            recurse=False
+        )
+        await self.exec_command(
+            f"sudo nix-store --import < /tmp/frameos_agent_closure_{self.build_id}.nar && "
+            f"rm /tmp/frameos_agent_closure_{self.build_id}.nar"
+        )
+
+        # ─── 4.  Stage new release  ───────────────────────────────────────
+        await self.exec_command(
+            f"mkdir -p /srv/frameos/agent/releases/release_{self.build_id}"
+        )
+        # copy the binary (it’s already in the store on the device)
+        await self.exec_command(
+            f"cp {store_path}/bin/frameos_agent "
+            f"/srv/frameos/agent/releases/release_{self.build_id}/frameos_agent"
+        )
+        await self._upload_frame_json()
+
+        # ─── 5.  Atomically switch & restart service ─────────────────────
+        await self.exec_command(
+            "rm -rf /srv/frameos/agent/current && "
+            f"ln -s /srv/frameos/agent/releases/release_{self.build_id} "
+            "/srv/frameos/agent/current"
+        )
+        await self.exec_command("sudo systemctl daemon-reload")
+        await self.exec_command("sudo systemctl enable  frameos_agent.service")
+        await self.exec_command("sudo systemctl restart frameos_agent.service")
+
+        await self.log("stdout", "Agent deploy finished on NixOS 🎉")
 
     # --------------- MISC ------------------------------------------------ #
 

@@ -2,8 +2,8 @@
 
 version       = "0.1.0"
 author        = "Marius Andra"
-description   = "A new awesome nimble package"
-license       = "Apache-2.0"
+description   = "An operating system for single function displays."
+license       = "AGPL"
 srcDir        = "src"
 binDir        = "build"
 bin           = @["frameos"]

@@ -49,7 +49,7 @@ export function Frame(props: FrameSceneProps) {
                     { label: 'Restart FrameOS' + agentExtra, onClick: () => restartFrame() },
                     { label: 'Stop FrameOS' + agentExtra, onClick: () => stopFrame() },
                     { label: 'Reboot device' + agentExtra, onClick: () => rebootFrame() },
-                    { label: 'Build SD card' + agentExtra, onClick: () => buildSDCard() },
+                    { label: 'Build SD card', onClick: () => buildSDCard() },
                     ...(requiresRecompilation
                       ? []
                       : [

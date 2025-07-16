@@ -40,10 +40,10 @@ COPY frameos/nim.cfg ./
 RUN nimble install -d -y && nimble setup
 
 # Install frameos agent nim deps
-WORKDIR /app/agent
+WORKDIR /app/frameos/agent
 
-COPY agent/frameos_agent.nimble ./
-COPY agent/nimble.lock ./
+COPY frameos/agent/frameos_agent.nimble ./
+COPY frameos/agent/nimble.lock ./
 
 # Cache nimble deps for when deploying on frame
 RUN nimble install -d -y && nimble setup
