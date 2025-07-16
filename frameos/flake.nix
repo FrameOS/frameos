@@ -57,6 +57,21 @@
             --replace-fail '@["frameos"]' '"frameos"'
         '';
       };
+      mkFrameOSAgent = pkgs: pkgs.buildNimPackage {
+        pname        = "frameos-agent";
+        version      = "0.1.0";
+        src          = ./../agent;
+        nimbleFile   = "frameos_agent.nimble";
+        lockFile     = "${./../agent}/lock.json";
+        nimFlags     = [ "--lineTrace:on" ];
+        buildInputs  = with pkgs; [ zstd openssl ];  # Add anything else agent needs
+        meta.mainProgram = "frameos_agent";
+        postPatch = ''
+          substituteInPlace frameos_agent.nimble \
+            --replace-fail '@["frameos_agent"]' '"frameos_agent"'
+        '';
+      };
+
     in rec {
 
       # ──────────────────────────────────────────────────────────────────
@@ -251,6 +266,25 @@
         };
         systemd.globalEnvironment.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
 
+        systemd.services.frameos-agent = {
+          wantedBy = [ "multi-user.target" ];
+          after    = [ "network-online.target" ];
+          wants    = [ "network-online.target" ];
+
+          serviceConfig = {
+            Type        = "simple";
+            User        = "admin";
+            SupplementaryGroups  = [ "wheel" ];
+            WorkingDirectory = "/srv/frameos/agent/current";
+            ExecStart   = "/srv/frameos/agent/current/frameos_agent";
+            Restart     = "always";
+            RestartSec  = 5;
+            LimitNOFILE = 65536;
+            PrivateTmp  = true;
+            DevicePolicy = lib.mkForce "private";
+          };
+        };
+
         systemd.services.frameos = {
           wantedBy = [ "multi-user.target" ];
           after    = [ "systemd-udev-settle.service" ];
@@ -276,30 +310,48 @@
         environment.etc."frame-initial.json".source = ./frame.json;
 
         system.activationScripts.initializeFrameOS.text =
-          let bin = self.packages.${pkgs.system}.frameos + "/bin/frameos";
+          let frameosBinary = self.packages.${pkgs.system}.frameos + "/bin/frameos";
+              frameosAgentBinary = self.packages.${pkgs.system}.frameos-agent + "/bin/frameos_agent";
           in ''
-            initial="/srv/frameos/releases/initial"
-
             # Only run on very first boot
             if [ ! -e "/srv/frameos" ]; then
               echo "⏩  populating first-boot FrameOS release"
-
-              mkdir -p "$initial" /srv/frameos/state /srv/frameos/logs /srv/frameos/assets
+              mkdir -p "/srv/frameos/releases/initial" /srv/frameos/state /srv/frameos/logs /srv/frameos/assets 
 
               # Only copy the binary if it actually exists for the target arch
-              if [ -x "${bin}" ]; then
-                install -m700 "${bin}" "$initial/frameos"
+              if [ -x "${frameosBinary}" ]; then
+                install -m700 "${frameosBinary}" "/srv/frameos/releases/initial/frameos"
               else
-                echo "⚠️  ${bin} not found – skipping copy" >&2
+                echo "⚠️  ${frameosBinary} not found – skipping copy" >&2
               fi
               chown -R admin:users /srv/frameos
 
-              ln -sfn /srv/frameos/state "$initial/state"
-              cp /etc/frame-initial.json "$initial/frame.json"
-              chown -R admin:users "$initial/frame.json"
-              chmod 660 "$initial/frame.json"
+              ln -sfn /srv/frameos/state "/srv/frameos/releases/initial/state"
+              cp /etc/frame-initial.json "/srv/frameos/releases/initial/frame.json"
+              chown -R admin:users "/srv/frameos/releases/initial/frame.json"
+              chmod 660 "/srv/frameos/releases/initial/frame.json"
 
-              ln -sfn "$initial" /srv/frameos/current
+              ln -sfn "/srv/frameos/releases/initial" /srv/frameos/current
+            fi
+
+            # Only run on very first boot
+            if [ ! -e "/srv/frameos/agent" ]; then
+              echo "⏩  populating first-boot FrameOS release"
+              mkdir -p "/srv/frameos/agent/releases/initial" 
+
+              # Only copy the binary if it actually exists for the target arch
+              if [ -x "${frameosAgentBinary}" ]; then
+                install -m700 "${frameosAgentBinary}" "/srv/frameos/agent/releases/initial/frameos_agent"
+              else
+                echo "⚠️  ${frameosAgentBinary} not found – skipping copy" >&2
+              fi
+              chown -R admin:users /srv/frameos/agent
+
+              cp /etc/frame-initial.json "/srv/frameos/agent/releases/initial/frame.json"
+              chown -R admin:users "/srv/frameos/agent/releases/initial/frame.json"
+              chmod 660 "/srv/frameos/agent/releases/initial/frame.json"
+
+              ln -sfn "/srv/frameos/agent/releases/initial" /srv/frameos/agent/current
             fi
           '';
       };
@@ -309,6 +361,7 @@
         (system:
           { name = system; value = {
               frameos = mkFrameOS (pkgsFor system);
+              frameos-agent = mkFrameOSAgent (pkgsFor system);
               nim_lk  = (pkgsFor system).nim_lk;
 
               sdImage = nixos-generators.nixosGenerate {
