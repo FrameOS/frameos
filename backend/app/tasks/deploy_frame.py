@@ -5,6 +5,7 @@ import os
 import random
 import hashlib
 import re
+import shlex
 import shutil
 import string
 import tempfile
@@ -64,6 +65,27 @@ class FrameDeployer:
     async def log(self, type: str, line: str, timestamp: Optional[datetime] = None):
         await log(self.db, self.redis, int(self.frame.id), type=type, line=line, timestamp=timestamp)
 
+    async def _store_paths_missing(self, paths: list[str]) -> list[str]:
+        """
+        Return *only* those paths that are **missing** from /nix/store on the
+        frame.  All paths are checked in a single SSH exec.
+        """
+        if not paths:
+            return []
+
+        # Quote every path once; the remote loop echoes the missing ones.
+        joined = " ".join(shlex.quote(p) for p in paths)
+        out: list[str] = []
+        await self.exec_command(
+            "bash -c 'for p in " + joined + "; do "
+            "  [ -e \"$p\" ] || echo \"$p\"; "
+            "done'",
+            output=out,
+            raise_on_error=False,
+            log_output=False,
+        )
+        # Every line produced by the loop is a missing store path.
+        return [p.strip() for p in out if p.strip()]
 
 async def deploy_frame_task(ctx: dict[str, Any], id: int):
     db: Session = ctx['db']
@@ -168,8 +190,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 flake_dir      = project_root / "frameos"
                 local_flake    = flake_dir / "flake.nix"
                 local_lock     = flake_dir / "flake.lock"
-                local_flake_sha = sha256(local_flake)
-                local_lock_sha  = sha256(local_lock)
+                local_flake_sha = sha256(str(local_flake))
+                local_lock_sha  = sha256(str(local_lock))
 
                 remote_flake_sha_out: list[str] = []
                 remote_lock_sha_out:  list[str] = []
@@ -230,54 +252,54 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     status, out, err = await exec_local_command(self.db, self.redis, self.frame, build_cmd)
                     if status != 0:
                         raise Exception(f"Local nix build failed:\n{err}")
-                    store_path  = out.strip().splitlines()[-1]
+                    store_path  = (out or "").strip().splitlines()[-1]
                     binary_path = os.path.join(store_path, "bin", "frameos")
                     if not os.path.exists(binary_path):
                         raise Exception(f"Expected binary not found at {binary_path}")
 
-
-                    # ─── 2 b.  Export the whole runtime closure ────────────────
+                    # -- 2b.  Streamed export/import  -------------------------
                     await self.log("stdout", "- Collecting runtime closure")
                     list_cmd = f"nix-store -qR {store_path}"
                     status, paths_out, _ = await exec_local_command(
                         self.db, self.redis, self.frame, list_cmd
                     )
-                    if status != 0 or not paths_out:
-                        raise Exception("Failed to collect runtime closure with nix-store -qR")
+                    if status != 0:
+                        raise Exception("Failed to collect runtime closure")
 
-                    runtime_paths = paths_out.strip().splitlines()
+                    runtime_paths = (paths_out or "").strip().splitlines()
                     await self.log("stdout", f"  → {len(runtime_paths)} store paths")
 
-                    nar_path = os.path.join(
-                        temp_dir_local, f"frameos_closure_{build_id}.nar"
-                    )
-                    export_cmd = (
-                        "bash -c 'nix-store --export "
-                        + " ".join(runtime_paths)
-                        + f" > {nar_path}'"
-                    )
-                    status, _, err = await exec_local_command(
-                        self.db, self.redis, self.frame, export_cmd
-                    )
-                    if status != 0:
-                        raise Exception(f"Failed to export closure:\n{err}")
+                    remote_tmp = f"/tmp/frameos_import_{build_id}"
+                    await self.exec_command(f"mkdir -p {remote_tmp}")
 
-                    # upload the .nar to the frame
-                    await self.log("stdout", "- Uploading closure.nar to the frame")
-                    with open(nar_path, "rb") as fh:
-                        await upload_file(
-                            self.db,
-                            self.redis,
-                            self.frame,
-                            f"/tmp/frameos_closure_{build_id}.nar",
-                            fh.read(),
+                    missing = await self._store_paths_missing(runtime_paths)
+
+                    await self.log("stdout", f"  → {len(runtime_paths)} store paths "
+                                            f"({len(missing)} need upload)")
+
+                    for idx, p in enumerate(missing, 1):
+                        base = os.path.basename(p)
+                        nar_local = os.path.join(temp_dir_local or "", f"{base}.nar")  # nar_dir already exists
+                        cmd = f"nix-store --export {p} > {nar_local}"
+                        status, _, err = await exec_local_command(
+                            self.db, self.redis, self.frame, cmd
                         )
+                        if status != 0:
+                            raise Exception(f"Export failed for {p}:\n{err}")
 
-                # import it into /nix/store on the device
-                await self.exec_command(
-                    f"sudo nix-store --import < /tmp/frameos_closure_{build_id}.nar && "
-                    f"rm /tmp/frameos_closure_{build_id}.nar"
-                )
+                        with open(nar_local, "rb") as fh:
+                            await upload_file(
+                                self.db, self.redis, self.frame,
+                                f"{remote_tmp}/{base}.nar",
+                                fh.read(),
+                            )
+
+                        await self.exec_command(
+                            f"sudo nix-store --import < {remote_tmp}/{base}.nar && "
+                            f"rm {remote_tmp}/{base}.nar"
+                        )
+                        await self.log("stdout", f"    [{idx}/{len(missing)}] {base} imported")
+                    await self.exec_command(f"rmdir {remote_tmp}")
 
                 # ─── 3.  Create new release on the device ────────────────
                 await self.exec_command(
