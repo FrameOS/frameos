@@ -576,6 +576,12 @@ async def api_frame_get_image(
         last_image = await redis.get(cache_key)
         if last_image:
             return Response(content=last_image, media_type="image/png")
+        else:
+            # When asking for the cached image, raise instead of trying to fetch a real one
+            # Somehow we get stuck when trying to fetch a lot of new images.
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND, detail="No cached image available"
+            )
 
     # Use shared semaphore and client
     status = 0
