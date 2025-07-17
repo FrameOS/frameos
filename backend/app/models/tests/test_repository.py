@@ -24,7 +24,7 @@ async def test_repository_update_templates(mock_get, db):
     db.add(repo)
     db.commit()
 
-    repo.update_templates()
+    await repo.update_templates()
     db.commit()
     assert repo.name == "My Repo"
     assert repo.description == "A sample repository"
