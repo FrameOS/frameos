@@ -30,7 +30,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic)
-  const { clearBuildCache } = useActions(frameSettingsLogic({ frameId }))
+  const { clearBuildCache, downloadBuildZip } = useActions(frameSettingsLogic({ frameId }))
   const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
   const { openLogs } = useActions(panelsLogic({ frameId }))
 
@@ -104,6 +104,13 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                   label: 'Export .json',
                   onClick: () => {
                     downloadJson(frame, `${frame.name || `frame-${frame.id}`}.json`)
+                  },
+                  icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                },
+                {
+                  label: 'Download build .zip',
+                  onClick: () => {
+                    downloadBuildZip()
                   },
                   icon: <ArrowUpTrayIcon className="w-5 h-5" />,
                 },

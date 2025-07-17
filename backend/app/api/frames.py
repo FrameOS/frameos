@@ -10,7 +10,9 @@ import io
 import json
 import os
 import re
+import tempfile
 import shlex
+import zipfile
 from tempfile import NamedTemporaryFile
 from typing import Any, Optional, Tuple
 from urllib.parse import quote
@@ -54,6 +56,12 @@ from app.utils.remote_exec import (
     rename_path,
     make_dir,
     _use_agent,
+)
+from app.tasks.utils import find_nim_v2
+from app.tasks.deploy_frame import (
+    FrameDeployer,
+    create_build_folders,
+    make_local_modifications,
 )
 from app.redis import get_redis
 from app.websockets import publish_message
@@ -451,6 +459,72 @@ async def api_frame_event(
     except RuntimeError as exc:
         await log(db, redis, id, "stderr", f"Error on frame event {event}: {str(exc)}")
         raise exc
+
+
+@api_with_auth.post("/frames/{id:int}/download_build_zip")
+async def api_frame_local_build_zip(                 # noqa: D401
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """
+    Return a **zip archive** containing the locally‑generated sources
+    produced by ``make_local_modifications`` for this frame.
+
+    The archive includes:
+    * every scene/app file produced for the frame
+    * the generated ``drivers.nim`` / ``waveshare`` driver (if any)
+    * a ready‑to‑compile C/Makefile tree (no heavy cross‑build step)
+    """
+    frame = db.get(Frame, id) or _not_found()
+
+    # Locate Nim (needed only for path checks inside helpers)
+    try:
+        nim_path = find_nim_v2()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Unable to locate Nim installation: {exc}",
+        )
+
+    # Workspace ────────────────────────────────────────────────────────────
+    with tempfile.TemporaryDirectory() as tmp:
+        deployer = FrameDeployer(db, redis, frame, nim_path, tmp)
+        build_dir, source_dir = create_build_folders(tmp, deployer.build_id)
+
+        # Apply all frame‑specific code generation (scenes, drivers, …)
+        await make_local_modifications(deployer, source_dir)
+
+        # Package → .zip
+        zip_path = os.path.join(tmp, f"frameos_{deployer.build_id}.zip")
+        with zipfile.ZipFile(
+            zip_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            strict_timestamps=False,   # 🚩 allow < 1980 timestamps
+        ) as zf:
+            for root, _dirs, files in os.walk(source_dir):
+                for file in files:
+                    full = os.path.join(root, file)
+                    arc  = os.path.relpath(full, source_dir)
+                    zf.write(full, arc)
+
+        # --- read once *before* tmp dir vanishes ---------------------------
+        async with aiofiles.open(zip_path, "rb") as fh:
+            zip_bytes = await fh.read()
+
+        async def sender():
+            # stream from an in‑memory view – no filesystem dependency
+            yield zip_bytes
+
+        safe_name = (frame.name or "frame").replace(" ", "_").replace("/", "_")
+        filename  = f"{safe_name}_{deployer.build_id}.zip"
+        headers   = {
+            "Content-Disposition": (
+                f'attachment; filename="{_ascii_safe(filename)}"'
+            )
+        }
+        return StreamingResponse(sender(), headers=headers, media_type="application/zip")
 
 
 @api_with_auth.get("/frames/{id:int}/asset")
