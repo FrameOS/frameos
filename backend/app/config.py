@@ -12,9 +12,9 @@ if get_bool_env('DEBUG'):
     load_dotenv(override=False)
 
     if not os.environ.get('SECRET_KEY'):
-        secret = secrets.token_hex(32)
+        secret = secrets.token_urlsafe(32)
         with open('.env', 'a') as f:
-            f.write(f'# Development environment variables. Don\'t commit.\nSECRET_KEY={secret}')
+            f.write(f'# Development environment variables. Don\'t commit this file.\nSECRET_KEY={secret}')
         os.environ['SECRET_KEY'] = secret
 
 
@@ -23,7 +23,7 @@ INSTANCE_ID = str(uuid.uuid4())
 class Config:
     DEBUG = get_bool_env('DEBUG')
     TEST = get_bool_env('TEST')
-    SECRET_KEY = os.environ.get('SECRET_KEY')
+    SECRET_KEY = os.environ.get('SECRET_KEY') or secrets.token_urlsafe(32)
     DATABASE_URL = os.environ.get('DATABASE_URL') or 'sqlite:///../db/frameos.db'
     REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
     INSTANCE_ID = INSTANCE_ID
