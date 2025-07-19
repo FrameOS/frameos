@@ -10,7 +10,7 @@ echo "" >> "$OUTPUT"
 # Define the patterns you want to collect files from:
 patterns=(
     # "docker-entrypoint.sh"
-    # "Dockerfile"
+    "Dockerfile"
     # "backend/app/*.py"
     # "backend/app/schemas/*.py"
     # "backend/app/api/agent.py"

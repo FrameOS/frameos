@@ -183,10 +183,15 @@ async def upload_file(
     """
     Write *data* to *remote_path* on the device:
     """
+    kbs = len(data) // 1024
+    if kbs > 1024:
+        size = f"{kbs // 1024} MiB"
+    else:
+        size = f"{kbs} KiB"
 
     if await _use_agent(frame, redis):
         try:
-            await log(db, redis, frame.id, "stdout", f"> write {remote_path} (agent)")
+            await log(db, redis, frame.id, "stdout", f"> write {remote_path} ({size} via agent)")
             await _file_write_via_agent(redis, frame, remote_path, data, timeout)
             await log(
                 db,
@@ -212,7 +217,7 @@ async def upload_file(
             tmp.write(data)
             tmp_path = tmp.name
 
-        await log(db, redis, frame.id, "stdout", f"> scp → {remote_path}")
+        await log(db, redis, frame.id, "stdout", f"> scp → {remote_path} ({size})")
         await asyncssh.scp(
             tmp_path,
             (ssh, shlex.quote(remote_path)),

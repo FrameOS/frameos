@@ -74,8 +74,7 @@ proc run(self: LoggerThread) =
       sleep(250)
     let (success, payload) = logChannel.tryRecv()
     if success:
-      if self.frameConfig.debug:
-        echo payload
+      echo payload # print to stdout / journal
       self.logs.add(payload)
       logToFile(self.frameConfig.logToFile, payload[1])
     else:
