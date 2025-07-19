@@ -108,4 +108,4 @@ if __name__ == '__main__':
             os.makedirs('../db', exist_ok=True)
     # start server
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8989)
+    uvicorn.run(app, host="0.0.0.0", port=8989, log_level="debug",)
