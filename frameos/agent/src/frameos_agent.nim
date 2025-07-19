@@ -505,12 +505,18 @@ proc startHeartbeat(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
       await ws.send($env)
   except Exception: discard # will quit when ws closes / errors out
 
+proc calcBackoff(elapsed: int): int =
+  result = elapsed div 60 # whole minutes since disconnect
+  if result < 3: result = 3
+  if result > MaxBackoffSeconds: result = MaxBackoffSeconds
+
 # ----------------------------------------------------------------------------
 # Run-forever loop with exponential back-off
 # ----------------------------------------------------------------------------
 
 proc runAgent(cfg: FrameConfig) {.async.} =
-  var backoff = InitialBackoffSeconds
+  var disconnectAt = getTime().toUnix() # boot time
+  var wasConnected = false # did we ever finish handshake?
   while true:
     try:
       # --- Connect ----------------------------------------------------------
@@ -522,7 +528,8 @@ proc runAgent(cfg: FrameConfig) {.async.} =
       var ws = await newWebSocket(url)
       try:
         await doHandshake(ws, cfg) # throws on failure
-        backoff = InitialBackoffSeconds # reset back-off
+        wasConnected = true # handshake succeeded
+        disconnectAt = getTime().toUnix() # reset “downtime” marker
 
         asyncCheck startHeartbeat(ws, cfg)
 
@@ -547,9 +554,14 @@ proc runAgent(cfg: FrameConfig) {.async.} =
       echo &"⚠️  connection error: {e.msg}"
 
     # --- Back-off & retry ----------------------------------------------------
-    echo &"⏳ reconnecting in {backoff}s …"
+    let now = getTime().toUnix()
+    if wasConnected:
+      disconnectAt = now
+      wasConnected = false
+    let elapsed = now - disconnectAt
+    let backoff = min(calcBackoff(elapsed), MaxBackoffSeconds)
+    echo &"⏳ reconnecting in {backoff}s (disconnected {elapsed}s)…"
     await sleepAsync(backoff * 1_000)
-    backoff = min(backoff * 2, MaxBackoffSeconds)
 
 # ----------------------------------------------------------------------------
 # Program entry
