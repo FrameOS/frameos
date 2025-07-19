@@ -27,7 +27,6 @@ async def stop_frame_task(ctx: dict[str, Any], id: int):
             frame,
             [
                 "sudo systemctl stop frameos.service || true",
-                "sudo systemctl disable frameos.service",
             ],
         )
         frame.status = 'stopped'

@@ -102,23 +102,26 @@ async def build_sd_card_image_task(
                       f"Unexpected output from nix build: {image_path}")
             raise RuntimeError("Unexpected output from nix build")
 
-    await log(db, redis, id, "stdinfo", "SD-card image ready 🎉")
+    try:
+        sd_dir = Path(image_path) / Path("sd-image")
+        candidates = list(sd_dir.glob("*.img*"))  # matches .img and .img.zst
 
-    sd_dir = Path(image_path) / Path("sd-image")
-    candidates = list(sd_dir.glob("*.img*"))  # matches .img and .img.zst
+        if len(candidates) != 1:
+            await log(
+                db,
+                redis,
+                id,
+                "stderr",
+                f"Expected exactly one image in {sd_dir}, found {len(candidates)} "
+                f"({', '.join(p.name for p in candidates)})",
+            )
+            raise RuntimeError("Unable to identify unique SD-card image")
 
-    if len(candidates) != 1:
-        await log(
-            db,
-            redis,
-            id,
-            "stderr",
-            f"Expected exactly one image in {sd_dir}, found {len(candidates)} "
-            f"({', '.join(p.name for p in candidates)})",
-        )
-        raise RuntimeError("Unable to identify unique SD-card image")
+        size = candidates[0].stat().st_size
+        await log(db, redis, id, "stdinfo", "🎉 SD-card image ready: " + candidates[0].name + f" ({size / (1024 * 1024):.2f} MiB)")
+    except Exception as e:
+        await log(db, redis, id, "stderr", f"SD-card image ready, but we can't find it: {e}")
+        raise
 
-    size = candidates[0].stat().st_size
-    await log(db, redis, id, "stdinfo", "Found SD-card image: " + candidates[0].name + f" ({size / (1024 * 1024):.2f} MiB)")
 
     return candidates[0]

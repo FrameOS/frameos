@@ -147,7 +147,7 @@ proc syncClock*() =
   try:
     # NixOS & any systemd host: systemd‑timesyncd one‑shot
     if fileExists("/run/systemd/system"):
-      discard execShellCmd("sudo systemctl restart --no-block systemd-timesyncd.service")
+      discard execShellCmd("sudo systemctl restart systemd-timesyncd.service")
     # Classic Debian / Raspberry Pi OS: one‑shot ntpd
     elif findExe("ntpd") != "":
       discard execShellCmd("sudo ntpd -gq") # exits after first successful poll
@@ -222,6 +222,11 @@ proc connectToWifi*(frameOS: FrameOS,
     startAp(frameOS)
 
 proc checkNetwork*(self: FrameOS): bool =
+  proc nmState(): string =
+    ## `nmcli` prints “connected”, “connecting”, “disconnected”, …
+    let (output, _) = run("nmcli --terse --fields STATE general 2>/dev/null || true")
+    result = output.strip()
+
   if not self.frameConfig.network.networkCheck or self.frameConfig.network.networkCheckTimeoutSeconds <= 0:
     return false
 
@@ -252,6 +257,13 @@ proc checkNetwork*(self: FrameOS): bool =
       self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
     finally:
       client.close()
+
+    # If no connection, check if wifi is disconnected. If so, return false.
+    if nmState() == "disconnected":
+      self.network.status = NetworkStatus.error
+      self.logger.log(%*{"event": "networkCheck", "status": "nm_disconnected"})
+      return false
+
     sleep(attempt * 1000)
     attempt += 1
   return false

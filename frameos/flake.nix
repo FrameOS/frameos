@@ -73,7 +73,6 @@
       };
 
     in rec {
-
       # ──────────────────────────────────────────────────────────────────
       # Common module used for both the sd image *and* nixosConfigurations
       # ──────────────────────────────────────────────────────────────────
@@ -86,32 +85,31 @@
           systemPackages = with pkgs; [ cacert openssl ];
           variables.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
         };
-        environment.etc."NetworkManager/system-connections/frameos-default.nmconnection" = {
-          user  = "root"; group = "root"; mode = "0600";
-          text  = ''
-            [connection]
-            id=frameos-default
-            uuid=d96b6096-93a5-4c39-9f5c-6bb64bb97f7b
-            type=wifi
-            interface-name=wlan0
-            autoconnect=true
-
-            [wifi]
-            mode=infrastructure
-            ssid=XXX
-
-            [wifi-security]
-            key-mgmt=wpa-psk
-            psk=XXX
-
-            [ipv4]
-            method=auto
-            never-default=false
-
-            [ipv6]
-            method=auto
-          '';
-        };
+        environment.etc."nixos/flake.nix".source = ./flake.nix;
+        environment.etc."nixos/flake.lock".source = ./flake.lock;
+        # TODO: uncomment when we want to add a default WiFi connection
+        # environment.etc."NetworkManager/system-connections/frameos-default.nmconnection" = {
+        #   user  = "root"; group = "root"; mode = "0600";
+        #   text  = ''
+        #     [connection]
+        #     id=frameos-default
+        #     uuid=d96b6096-93a5-4c39-9f5c-6bb64bb97f7b
+        #     type=wifi
+        #     interface-name=wlan0
+        #     autoconnect=true
+        #     [wifi]
+        #     mode=infrastructure
+        #     ssid=XXX
+        #     [wifi-security]
+        #     key-mgmt=wpa-psk
+        #     psk=XXX
+        #     [ipv4]
+        #     method=auto
+        #     never-default=false
+        #     [ipv6]
+        #     method=auto
+        #   '';
+        # };
         networking = {
           hostName = hostName;
           wireless.enable = lib.mkForce false; # using NetworkManager instead
@@ -135,7 +133,7 @@
           fallbackServers = [ "time.google.com" ];               # back‑up
           extraConfig = ''
             InitialBurst=yes           # 4 packets in quick succession
-            PollIntervalMinSec=16      # legal minimum (default is 32 s) :contentReference[oaicite:0]{index=0}
+            PollIntervalMinSec=16      # legal minimum (default is 32 s)
             ConnectionRetrySec=5
           '';
         };
@@ -276,7 +274,9 @@
         };
         systemd.globalEnvironment.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
 
-        systemd.services.frameos_agent = {
+        systemd.services.frameos_agent = let
+          frameosAgentPkg  = self.packages.${pkgs.system}.frameos_agent;
+        in {
           wantedBy = [ "multi-user.target" ];
           after    = [ "network-online.target" ];
           wants    = [ "network-online.target" ];
@@ -290,7 +290,7 @@
               "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
             ];
             WorkingDirectory = "/srv/frameos/agent/current";
-            ExecStart   = "/srv/frameos/agent/current/frameos_agent";
+            ExecStart = lib.mkForce "${frameosAgentPkg}/bin/frameos_agent";
             Restart     = "always";
             RestartSec  = 5;
             LimitNOFILE = 65536;
@@ -299,7 +299,9 @@
           };
         };
 
-        systemd.services.frameos = {
+        systemd.services.frameos = let
+          frameosPkg       = self.packages.${pkgs.system}.frameos; 
+        in {
           wantedBy = [ "multi-user.target" ];
           after    = [ "systemd-udev-settle.service" ];
 
@@ -314,7 +316,7 @@
             DevicePolicy = lib.mkForce "private";
             AmbientCapabilities = [ "CAP_SYS_RAWIO" ];
             WorkingDirectory = "/srv/frameos/current";
-            ExecStart = "/srv/frameos/current/frameos";
+            ExecStart = lib.mkForce "${frameosPkg}/bin/frameos";
             Restart   = "always";
             NoNewPrivileges = "no";
           };
@@ -334,9 +336,7 @@
 
               # Only copy the binary if it actually exists for the target arch
               if [ -x "${frameosBinary}" ]; then
-                install -m700 "${frameosBinary}" "/srv/frameos/releases/initial/frameos"
-              else
-                echo "⚠️  ${frameosBinary} not found – skipping copy" >&2
+                ln -s "${frameosBinary}" "/srv/frameos/releases/initial/frameos"
               fi
               chown -R admin:users /srv/frameos
 
@@ -360,9 +360,7 @@
 
               # Only copy the binary if it actually exists for the target arch
               if [ -x "${frameosAgentBinary}" ]; then
-                install -m700 "${frameosAgentBinary}" "/srv/frameos/agent/releases/initial/frameos_agent"
-              else
-                echo "⚠️  ${frameosAgentBinary} not found – skipping copy" >&2
+                ln -s "${frameosAgentBinary}" "/srv/frameos/agent/releases/initial/frameos_agent"
               fi
               chown -R admin:users /srv/frameos/agent
 
