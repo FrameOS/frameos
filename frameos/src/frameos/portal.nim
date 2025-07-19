@@ -141,6 +141,22 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool =
 proc masked*(s: string; keep: int = 2): string =
   if s.len <= keep: "*".repeat(s.len) else: s[0..keep-1] & "*".repeat(s.len - keep)
 
+# Immediately sync the clock so HTTPS certificates validate
+proc syncClock*() =
+  ## Tries the best available tool on the current distro.
+  try:
+    # NixOS & any systemd host: systemd‑timesyncd one‑shot
+    if fileExists("/run/systemd/system"):
+      discard execShellCmd("sudo systemctl restart --no-block systemd-timesyncd.service")
+    # Classic Debian / Raspberry Pi OS: one‑shot ntpd
+    elif findExe("ntpd") != "":
+      discard execShellCmd("sudo ntpd -gq") # exits after first successful poll
+    # BusyBox systems (rare): fall back to sntp
+    elif findExe("sntp") != "":
+      discard execShellCmd("sudo sntp -sS pool.ntp.org")
+  except CatchableError:
+    echo "⚠️  Time‑sync failed – will retry later"
+
 proc connectToWifi*(frameOS: FrameOS,
                     ssid, password, serverHost, serverPort: string) {.gcsafe.} =
   let frameConfig = frameOS.frameConfig
@@ -148,6 +164,7 @@ proc connectToWifi*(frameOS: FrameOS,
 
   if attemptConnect(frameOS, ssid, password):
     var connected = false
+    syncClock()
     for attempt in 0..<4:
       let client = newHttpClient(timeout = 5000)
       try:
