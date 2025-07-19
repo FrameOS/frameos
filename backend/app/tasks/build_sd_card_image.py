@@ -118,6 +118,7 @@ async def build_sd_card_image_task(
         )
         raise RuntimeError("Unable to identify unique SD-card image")
 
-    await log(db, redis, id, "stdinfo", "Found SD-card image: " + candidates[0].name)
+    size = candidates[0].stat().st_size
+    await log(db, redis, id, "stdinfo", "Found SD-card image: " + candidates[0].name + f" ({size / (1024 * 1024):.2f} MiB)")
 
     return candidates[0]

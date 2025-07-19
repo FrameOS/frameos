@@ -1063,7 +1063,8 @@ async def api_frame_build_sd_image_event(id: int, db: Session = Depends(get_db),
                     while chunk := await fh.read(64 << 14):   # 1 MiB chunks
                         yield chunk
             finally:
-                os.remove(img_path) # tidy up
+                # do not remove the file, as it won't rebuild next time
+                pass
 
         frame = db.get(Frame, id)
         if not frame:

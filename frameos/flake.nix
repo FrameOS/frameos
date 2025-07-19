@@ -86,11 +86,11 @@
           systemPackages = with pkgs; [ cacert openssl ];
           variables.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
         };
-        environment.etc."NetworkManager/system-connections/frameos-wifi.nmconnection" = {
+        environment.etc."NetworkManager/system-connections/frameos-default.nmconnection" = {
           user  = "root"; group = "root"; mode = "0600";
           text  = ''
             [connection]
-            id=frameos-wifi
+            id=frameos-default
             uuid=d96b6096-93a5-4c39-9f5c-6bb64bb97f7b
             type=wifi
             interface-name=wlan0
@@ -246,7 +246,7 @@
 
         services.avahi = {
           enable       = true;      # start avahi‑daemon
-          nssmdns      = true;      # write mdns entries to /etc/nsswitch.conf
+          nssmdns4     = true;      # write mdns entries to /etc/nsswitch.conf
           openFirewall = true;      # allow UDP 5353 and related traffic
           publish = {               # advertise the hostname & IP
             enable      = true;
@@ -261,8 +261,18 @@
           initrd.availableKernelModules = [ "xhci_pci" "usbhid" "usb_storage" ];
           loader.generic-extlinux-compatible.enable = true;      # already true
           loader.grub.enable  = false;
+          # nixos-rebuild complains if GRUB targets are missing; neutralise it
+          loader.grub.devices = lib.mkDefault [ ];
           swraid.enable       = lib.mkForce false;               # silence mdadm
           supportedFilesystems.zfs = lib.mkForce false;          # save time compiling zfs
+        };
+
+        # ── dummy root so evaluation succeeds when no hardware‑configuration.nix
+        fileSystems."/" = lib.mkDefault {
+          device  = "none";       # literally the string “none”
+          fsType  = "tmpfs";      # no real disk needed
+          options = [ "mode=755" ];
+          neededForBoot = true;   # placates later checks
         };
         systemd.globalEnvironment.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
 
@@ -337,7 +347,12 @@
 
               ln -sfn "/srv/frameos/releases/initial" /srv/frameos/current
             fi
-
+            if [ ! -e "/srv/assets" ]; then
+              echo "Creating assets folder"
+              mkdir -p "/srv/assets"
+              chown -R admin:users /srv/assets
+              chmod 770 /srv/assets
+            fi
             # Only run on very first boot
             if [ ! -e "/srv/frameos/agent" ]; then
               echo "⏩  populating first-boot FrameOS release"

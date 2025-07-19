@@ -26,3 +26,4 @@ npm-debug.log
 .aws
 frameos/nimble.paths
 db
+frameos/result

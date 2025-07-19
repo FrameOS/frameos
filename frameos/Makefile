@@ -20,6 +20,13 @@ nix-sdcard:
 		--system aarch64-linux \
 		--show-trace
 
+nix-update:
+	nix --extra-experimental-features 'nix-command flakes' \
+		build .#nixosConfigurations."frame-nixtest".config.system.build.toplevel \
+		--system aarch64-linux \
+		--print-out-paths \
+		--show-trace
+
 nix-bin:
 	nix --extra-experimental-features 'nix-command flakes' \
 		build .#packages.aarch64-linux.frameos \

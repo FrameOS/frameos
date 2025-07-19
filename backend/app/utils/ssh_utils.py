@@ -297,7 +297,10 @@ async def _stream_lines(
     - Optionally store each line in buffer_list
     """
     while True:
-        line = await stream.readline()
+        raw = await stream.readline()
+        if not raw:                       # EOF
+            break
+        line = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
         if not line:
             break
         if buffer_list is not None:

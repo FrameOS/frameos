@@ -1,48 +1,51 @@
-import subprocess
 from arq import ArqRedis
 import asyncio
-from typing import Optional
+from typing import Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.models.log import new_log as log
 from app.models.frame import Frame
 
+async def exec_local_command(
+    db: Session,
+    redis: ArqRedis,
+    frame: Frame,
+    command: str,
+    generate_log: bool = True
+) -> Tuple[int, Optional[str], Optional[str]]:
 
-async def exec_local_command(db: Session, redis: ArqRedis, frame: Frame, command: str, generate_log=True) -> tuple[int, Optional[str], Optional[str]]:
     if generate_log:
         await log(db, redis, int(frame.id), "stdout", f"$ {command}")
-    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    errors = []
-    outputs = []
-    break_next = False
 
-    while True:
-        if process.stdout:
-            while True:
-                output = process.stdout.readline()
-                if not output:
-                    break
-                await log(db, redis, int(frame.id), "stdout", output)
-                outputs.append(output)
+    proc = await asyncio.create_subprocess_shell(
+        command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
 
-        if process.stderr:
-            while True:
-                error = process.stderr.readline()
-                if not error:
-                    break
-                await log(db, redis, int(frame.id), "stderr", error)
-                errors.append(error)
+    async def pump(stream, tag, buf):
+        while True:
+            raw = await stream.readline()
+            if not raw:                       # EOF
+                break
+            line = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+            buf.append(line)
+            await log(db, redis, int(frame.id), tag, line)
 
-        if break_next:
-            break
-        if process.poll() is not None:
-            break_next = True
-        await asyncio.sleep(0.1)
+    out_buf: list[str] = []
+    err_buf: list[str] = []
+    await asyncio.gather(
+        pump(proc.stdout, "stdout", out_buf),
+        pump(proc.stderr, "stderr", err_buf),
+    )
 
-    exit_status = process.returncode
-    if exit_status != 0:
-        await log(db, redis, int(frame.id), "exit_status", f"The command exited with status {exit_status}")
+    exit_code = await proc.wait()
+    if exit_code:
+        await log(db, redis, int(frame.id), "exit_status",
+                  f"The command exited with status {exit_code}")
 
-    return (exit_status,
-            ''.join(outputs) if len(outputs) > 0 else None,
-            ''.join(errors) if len(errors) > 0 else None)
+    return (
+        exit_code,
+        "".join(out_buf) or None,
+        "".join(err_buf) or None,
+    )

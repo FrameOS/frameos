@@ -173,80 +173,137 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             await self.log("stdout", f"- Detected distro: {distro}, architecture: {arch}, total memory: {total_memory} MiB")
 
-            #  Fast-path for NixOS targets
-            #───────────────────────────────────────────────────────────────
-            if distro == "nixos":
-                await self.log("stdout", "- NixOS detected – using flake-based deploy")
+            with tempfile.TemporaryDirectory() as temp_dir_local:
+                await self.log("stdout", f"- Preparing sources with local modifications under {temp_dir_local}")
+                build_dir_local, source_dir_local = create_build_folders(temp_dir_local, self.build_id)
+                await make_local_modifications(self, source_dir_local)
 
-                # ─── 1.  Check whether flake.{nix,lock} changed ──────────
-                def sha256(path: str) -> str:
-                    h = hashlib.sha256()
-                    with open(path, "rb") as fp:
-                        for chunk in iter(lambda: fp.read(65536), b""):
-                            h.update(chunk)
-                    return h.hexdigest()
+                #  Fast-path for NixOS targets
+                #───────────────────────────────────────────────────────────────
+                if distro == "nixos":
+                    await self.log("stdout", "- NixOS detected – using flake-based deploy")
 
-                project_root   = Path(__file__).resolve().parents[3]   # repo root
-                flake_dir      = project_root / "frameos"
-                local_flake    = flake_dir / "flake.nix"
-                local_lock     = flake_dir / "flake.lock"
-                local_flake_sha = sha256(str(local_flake))
-                local_lock_sha  = sha256(str(local_lock))
+                    # ─── 1.  Check whether flake.{nix,lock} changed ──────────
+                    def sha256(path: str) -> str:
+                        h = hashlib.sha256()
+                        with open(path, "rb") as fp:
+                            for chunk in iter(lambda: fp.read(65536), b""):
+                                h.update(chunk)
+                        return h.hexdigest()
 
-                remote_flake_sha_out: list[str] = []
-                remote_lock_sha_out:  list[str] = []
+                    flake_dir      = Path(source_dir_local)
+                    local_flake    = flake_dir / "flake.nix"
+                    local_lock     = flake_dir / "flake.lock"
+                    local_flake_sha = sha256(str(local_flake))
+                    local_lock_sha  = sha256(str(local_lock))
 
-                await self.exec_command(
-                    "sha256sum /etc/nixos/flake.nix 2>/dev/null | cut -d' ' -f1 || true",
-                    remote_flake_sha_out, raise_on_error=False
-                )
-                await self.exec_command(
-                    "sha256sum /etc/nixos/flake.lock 2>/dev/null | cut -d' ' -f1 || true",
-                    remote_lock_sha_out, raise_on_error=False
-                )
+                    remote_flake_sha_out: list[str] = []
+                    remote_lock_sha_out:  list[str] = []
 
-                remote_flake_sha = (remote_flake_sha_out[0].strip() if remote_flake_sha_out else "")
-                remote_lock_sha  = (remote_lock_sha_out[0].strip()  if remote_lock_sha_out  else "")
+                    await self.exec_command(
+                        "sha256sum /etc/nixos/flake.nix 2>/dev/null | cut -d' ' -f1 || true",
+                        remote_flake_sha_out, raise_on_error=False
+                    )
+                    await self.exec_command(
+                        "sha256sum /etc/nixos/flake.lock 2>/dev/null | cut -d' ' -f1 || true",
+                        remote_lock_sha_out, raise_on_error=False
+                    )
 
-                flake_changed = (local_flake_sha != remote_flake_sha) or (local_lock_sha != remote_lock_sha)
+                    remote_flake_sha = (remote_flake_sha_out[0].strip() if remote_flake_sha_out else "")
+                    remote_lock_sha  = (remote_lock_sha_out[0].strip()  if remote_lock_sha_out  else "")
 
+                    flake_changed = (local_flake_sha != remote_flake_sha) or (local_lock_sha != remote_lock_sha)
 
-                if flake_changed:
-                    await self.log("stdout", "- System flake changed → uploading & rebuilding NixOS. This may take 10+ minutes... (SKIPPING)")
+                    if flake_changed:
+                        await self.log("stdout", "- System flake changed → building system closure on backend & streaming to device")
 
-                # TODO: there is not enough memory to build on the frame, so build locally and push somehow
-                # note that we can't push directly via nix, as we must support both ssh and agent uploads
+                        # ─── a.  Build the *system* derivation locally (aarch64‑linux) ──────────────
+                        hostname_out: list[str] = []
+                        await self.exec_command("hostname", hostname_out)  # remote hostname for flake attribute
+                        target_host = hostname_out[0].strip() or "frame-unknown"
 
-                #     with open(local_flake, "rb") as f:  data_flake = f.read()
-                #     with open(local_lock,  "rb") as f:  data_lock  = f.read()
+                        # ── helper: quote attr names that contain ‘-’ etc. ──────────
+                        def nix_attr(name: str) -> str:
+                            """
+                            Return *name* in a form that can safely be used in a Nix
+                            attribute path.  Bare identifiers may only contain
+                            [A‑Za‑z0‑9_].  Everything else must be quoted.
+                            """
+                            import re
+                            return name if re.fullmatch(r"[A-Za-z0-9_]+", name) else f'"{name}"'
 
-                #     await upload_file(self.db, self.redis, self.frame,
-                #                       "/tmp/flake.nix",  data_flake)
-                #     await upload_file(self.db, self.redis, self.frame,
-                #                       "/tmp/flake.lock", data_lock)
+                        attr_host = nix_attr(target_host)
 
-                #     await self.exec_command(
-                #         "sudo mv /tmp/flake.nix  /etc/nixos/flake.nix  && "
-                #         "sudo mv /tmp/flake.lock /etc/nixos/flake.lock"
-                #     )
-                #     # (`--show-trace` is handy in case the rebuild fails)
-                #     await self.exec_command(
-                #         "sudo nixos-rebuild switch --flake /etc/nixos --show-trace",
-                #         timeout=3600
-                #     )
+                        sys_build_cmd = (
+                            f"nix --extra-experimental-features 'nix-command flakes' "
+                            f"build {flake_dir}#nixosConfigurations.{attr_host}.config.system.build.toplevel "
+                            "--system aarch64-linux --print-out-paths "
+                            "--log-format raw -L"
+                        )
 
-                # ─── 2.  Re-generate sources & cross-build locally ───────
-                await self.log("stdout", "- Preparing sources with local modifications")
-                with tempfile.TemporaryDirectory() as temp_dir_local:
-                    build_dir_local, source_dir_local = create_build_folders(temp_dir_local, self.build_id)
-                    await make_local_modifications(self, source_dir_local)
+                        status, sys_out, sys_err = await exec_local_command(self.db, self.redis, self.frame, sys_build_cmd)
+                        if status != 0 or not sys_out:
+                            raise Exception(f"Local NixOS system build failed:\n{sys_err}")
+
+                        system_path = sys_out.strip().splitlines()[-1]
+
+                        # ─── b.  Push store closure (missing paths only) ────────────────────────────
+                        status, paths_out, _ = await exec_local_command(
+                            self.db, self.redis, self.frame,
+                            f"nix-store -qR {system_path}"
+                        )
+                        runtime_paths = (paths_out or "").strip().splitlines()
+
+                        await self.log("stdout", f"  → system closure has {len(runtime_paths)} store paths")
+
+                        remote_tmp = f"/tmp/nixos_sys_{build_id}"
+                        await self.exec_command(f"mkdir -p {remote_tmp}")
+
+                        missing = await self._store_paths_missing(runtime_paths)
+                        await self.log("stdout", f"  → uploading {len(missing)} missing paths")
+
+                        for idx, p in enumerate(missing, 1):
+                            base = os.path.basename(p)
+                            nar_local = os.path.join(self.temp_dir, f"{base}.nar")
+                            export_cmd = f"nix-store --export {p} > {nar_local}"
+                            status, _, err = await exec_local_command(self.db, self.redis, self.frame, export_cmd)
+                            if status != 0:
+                                raise Exception(f"Failed to export {p}: {err}")
+
+                            # stream nar via agent/ssh
+                            with open(nar_local, "rb") as fh:
+                                await upload_file(self.db, self.redis, self.frame, f"{remote_tmp}/{base}.nar", fh.read())
+
+                            await self.exec_command(
+                                f"sudo nix-store --import < {remote_tmp}/{base}.nar && rm {remote_tmp}/{base}.nar"
+                            )
+                            await self.log("stdout", f"    [{idx}/{len(missing)}] {base} imported")
+
+                        await self.exec_command(f"rmdir {remote_tmp}")
+
+                        # ─── c.  Activate the new system generation on the device ───────────────────
+                        await self.exec_command(
+                            f"sudo nix-env --profile /nix/var/nix/profiles/system --set {system_path}"
+                        )
+                        await self.exec_command("sudo /nix/var/nix/profiles/system/bin/switch-to-configuration switch")
+
+                        # ─── d.  Sync flake.{nix,lock} for future equality checks ───────────────────
+                        for local, remote in [(local_flake, "/etc/nixos/flake.nix"), (local_lock, "/etc/nixos/flake.lock")]:
+                            with open(local, "rb") as f:
+                                await upload_file(self.db, self.redis, self.frame, remote, f.read())
+
+                        # flake applied & system switched – continue deploy flow
+
+                    # ─── End full‑system‑update path ───────────────────────────────────────────────
+
+                    # ─── 2.  Re-generate sources & cross-build locally ───────
 
                     await self.log("stdout", "- Building frameos (nix aarch64-linux, local copy)…")
                     build_cmd = (
                         f"cd {source_dir_local} && "
                         "nix --extra-experimental-features 'nix-command flakes' "
                         "build .#packages.aarch64-linux.frameos "
-                        "--system aarch64-linux --print-out-paths"
+                        "--system aarch64-linux --print-out-paths --log-format raw"
                     )
 
                     status, out, err = await exec_local_command(self.db, self.redis, self.frame, build_cmd)
