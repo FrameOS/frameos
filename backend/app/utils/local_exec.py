@@ -11,10 +11,11 @@ async def exec_local_command(
     redis: ArqRedis,
     frame: Frame,
     command: str,
-    generate_log: bool = True
+    log_command: bool = True,
+    log_output: bool = True
 ) -> Tuple[int, Optional[str], Optional[str]]:
 
-    if generate_log:
+    if log_command:
         await log(db, redis, int(frame.id), "stdout", f"$ {command}")
 
     proc = await asyncio.create_subprocess_shell(
@@ -30,7 +31,8 @@ async def exec_local_command(
                 break
             line = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
             buf.append(line)
-            await log(db, redis, int(frame.id), tag, line)
+            if log_output:
+                await log(db, redis, int(frame.id), tag, line)
 
     out_buf: list[str] = []
     err_buf: list[str] = []

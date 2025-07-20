@@ -10,13 +10,14 @@ import gzip
 import tempfile
 import os
 import shlex
+import zlib
 
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.models.frame import Frame
 from app.models.log import new_log as log
-from app.ws.agent_ws import number_of_connections_for_frame
+from app.ws.agent_ws import number_of_connections_for_frame, file_write_open_on_frame, file_write_chunk_on_frame, file_write_close_on_frame
 
 from app.utils.ssh_utils import (
     get_ssh_connection,
@@ -32,6 +33,9 @@ __all__ = [
     "rename_path",
     "make_dir",
 ]  # what the tasks import
+
+CHUNK_SIZE   = 2* 1024 * 1024  # 2 Mib
+CHUNK_ZLEVEL = 6               # good compromise
 
 # ---------------------------------------------------------------------------#
 # internal helpers                                                           #
@@ -127,6 +131,14 @@ async def _file_write_via_agent(
     if not reply.get("ok"):
         raise RuntimeError(reply.get("error", "agent error"))
 
+async def _stream_file_via_agent(db, redis, frame, remote_path, data, timeout: int = 120):
+    await file_write_open_on_frame(frame.id, remote_path,
+                                   meta={"compression": "zlib"})
+    for off in range(0, len(data), CHUNK_SIZE):
+        raw  = data[off:off+CHUNK_SIZE]
+        comp = zlib.compress(raw, CHUNK_ZLEVEL)
+        await file_write_chunk_on_frame(frame.id, comp, timeout)
+    await file_write_close_on_frame(frame.id)
 
 # ---------------------------------------------------------------------------#
 # public facade                                                              #
@@ -171,6 +183,21 @@ async def run_commands(
         await remove_ssh_connection(db, redis, ssh, frame)
 
 
+def print_size(size: int) -> str:
+    """
+    Format a size in bytes into a human-readable string.
+    """
+    if size < 1024:
+        return f"{size} B"
+    size //= 1024
+    if size < 1024:
+        return f"{size} KiB"
+    size //= 1024
+    if size < 1024:
+        return f"{size} MiB"
+    size //= 1024
+    return f"{size} GiB"
+
 async def upload_file(
     db: Session,
     redis: Redis,
@@ -183,23 +210,15 @@ async def upload_file(
     """
     Write *data* to *remote_path* on the device:
     """
-    kbs = len(data) // 1024
-    if kbs > 1024:
-        size = f"{kbs // 1024} MiB"
-    else:
-        size = f"{kbs} KiB"
+    size = len(data)
 
     if await _use_agent(frame, redis):
         try:
-            await log(db, redis, frame.id, "stdout", f"> write {remote_path} ({size} via agent)")
-            await _file_write_via_agent(redis, frame, remote_path, data, timeout)
-            await log(
-                db,
-                redis,
-                frame.id,
-                "stdout",
-                f"> file written to {remote_path} (agent)",
-            )
+            await log(db, redis, frame.id, "stdout", f"> uploading {remote_path} ({print_size(size)} via agent)")
+            if len(data) > 2 * 1024 * 1024:           # >2 MiB → streamed
+                await _stream_file_via_agent(db, redis, frame, remote_path, data)
+            else:
+                await _file_write_via_agent(redis, frame, remote_path, data, timeout)
             return
         except Exception as e:  # noqa: BLE001
             await log(
@@ -207,7 +226,7 @@ async def upload_file(
                 redis,
                 frame.id,
                 "stderr",
-                f"Agent file_write error ({e})",
+                f"> ERROR writing {remote_path} ({print_size(size)} via agent) - {e}",
             )
             raise
 
@@ -217,7 +236,7 @@ async def upload_file(
             tmp.write(data)
             tmp_path = tmp.name
 
-        await log(db, redis, frame.id, "stdout", f"> scp → {remote_path} ({size})")
+        await log(db, redis, frame.id, "stdout", f"> scp → {remote_path} ({print_size(size)})")
         await asyncssh.scp(
             tmp_path,
             (ssh, shlex.quote(remote_path)),

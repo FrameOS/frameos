@@ -4,7 +4,7 @@ run: build
 	./build/frameos_agent --verbose
 
 build:
-	nimble build -y --verbose --lineTrace:on -d:ssl
+	nimble build -y --verbose --lineTrace:on --define:useMalloc -d:ssl --panics:on --profiler:on
 
 debug:
 	nimble build -y --verbose --debugger:native --lineTrace:on -d:ssl

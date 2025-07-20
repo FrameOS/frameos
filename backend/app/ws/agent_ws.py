@@ -174,6 +174,42 @@ async def file_rename_on_frame(frame_id: int, src: str, dst: str,
     }
     return await send_cmd(redis, frame_id, payload, timeout=timeout)
 
+async def file_write_open_on_frame(
+    frame_id: int, path: str, meta: dict[str, Any] | None = None,
+    timeout: int = 30, redis: Redis | None = None,
+):
+    redis = await _ensure_redis(redis)
+    payload = {
+        "type": "cmd", "name": "file_write_open",
+        "args": {"path": path, **(meta or {})},
+    }
+    return await send_cmd(redis, frame_id, payload, timeout=timeout)
+
+
+async def file_write_chunk_on_frame(
+    frame_id: int, chunk: bytes,
+    timeout: int = 60, redis: Redis | None = None,
+):
+    # small (< 300 KB) so embedding is OK
+    return await send_cmd(
+        await _ensure_redis(redis),
+        frame_id,
+        {"type": "cmd", "name": "file_write_chunk", "args": {"size": len(chunk)}},
+        blob=chunk,
+        timeout=timeout,
+    )
+
+
+async def file_write_close_on_frame(
+    frame_id: int, timeout: int = 30, redis: Redis | None = None,
+):
+    return await send_cmd(
+        await _ensure_redis(redis),
+        frame_id,
+        {"type": "cmd", "name": "file_write_close", "args": {}},
+        timeout=timeout,
+    )
+
 # ────────────────────────────────────────────────────────────────────────────
 # Redis ⇄ WebSocket pump
 # ────────────────────────────────────────────────────────────────────────────

@@ -63,7 +63,7 @@
         src          = ./agent;
         nimbleFile   = "frameos_agent.nimble";
         lockFile     = ./agent/lock.json;
-        nimFlags     = [ "--lineTrace:on" ];
+        nimFlags     = [ "--debugger:native" "--lineTrace:on" "--stackTrace:on" "--define:useMalloc" "--profiler:on" "--panics:on" "-g" ];
         buildInputs  = with pkgs; [ zstd openssl ];
         meta.mainProgram = "frameos_agent";
         postPatch = ''
@@ -264,7 +264,12 @@
           swraid.enable       = lib.mkForce false;               # silence mdadm
           supportedFilesystems.zfs = lib.mkForce false;          # save time compiling zfs
         };
-
+        swapDevices = [
+          {
+            device = "/swapfile"; # prevent random OOMs
+            size   = 1024;
+          }
+        ];
         # ── dummy root so evaluation succeeds when no hardware‑configuration.nix
         fileSystems."/" = lib.mkDefault {
           device  = "none";       # literally the string “none”

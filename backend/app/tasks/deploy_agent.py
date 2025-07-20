@@ -92,22 +92,21 @@ class AgentDeployer:
                         await self._deploy_agent(cpu)
                         await self._setup_agent_service()
 
-                    # 3. Upload *frame.json* for this release
-                    await self._upload_frame_json()
+                        # 3. Upload *frame.json* for this release
+                        await self._upload_frame_json()
 
-                    # 4. Atomically switch *current* → new release + housekeeping
-                    await self.exec_command(
-                        "rm -rf /srv/frameos/agent/current && "
-                        f"ln -s /srv/frameos/agent/releases/release_{self.build_id} "
-                        "/srv/frameos/agent/current"
-                    )
+                        # 4. Atomically switch *current* → new release + housekeeping
+                        await self.exec_command(
+                            "rm -rf /srv/frameos/agent/current && "
+                            f"ln -s /srv/frameos/agent/releases/release_{self.build_id} "
+                            "/srv/frameos/agent/current"
+                        )
 
-                    # Enable + start service
-                    await self.exec_command("sudo systemctl enable frameos_agent.service")
-                    await self.exec_command("sudo systemctl restart frameos_agent.service")
-                    await self.exec_command("sudo systemctl status frameos_agent.service")
+                        # Enable + start service
+                        await self.exec_command("sudo systemctl enable frameos_agent.service")
+                        await self.exec_command("sudo systemctl restart frameos_agent.service")
+                        await self.exec_command("sudo systemctl status frameos_agent.service")
 
-                    if distro != "nixos":
                         await self._cleanup_old_builds()
                 else:
                     await self.log(
@@ -320,7 +319,7 @@ class AgentDeployer:
         )
         status, store_path, err = await exec_local_command(
             self.db, self.redis, self.frame,
-            build_cmd, generate_log=True
+            build_cmd, log_command=True
         )
         if status != 0 or not store_path:
             raise Exception(f"Local nix build failed:\n{err}")

@@ -48,7 +48,7 @@ class FrameDeployer:
         output: Optional[list[str]] = None,
         log_output: bool = True,
         raise_on_error: bool = True,
-        timeout: int = 300 # 5 minutes default timeout
+        timeout: int = 600 # 10 minutes default timeout
     ) -> int:
         status, stdout, stderr = await run_command(
             self.db, self.redis, self.frame, command, log_output=log_output, timeout=timeout
@@ -216,7 +216,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
                     if flake_changed:
                         await self.log("stdout", "- System flake changed → building system closure on backend & streaming to device")
-
                         # ─── a.  Build the *system* derivation locally (aarch64‑linux) ──────────────
                         hostname_out: list[str] = []
                         await self.exec_command("hostname", hostname_out)  # remote hostname for flake attribute
@@ -250,7 +249,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                         # ─── b.  Push store closure (missing paths only) ────────────────────────────
                         status, paths_out, _ = await exec_local_command(
                             self.db, self.redis, self.frame,
-                            f"nix-store -qR {system_path}"
+                            f"nix-store -qR {system_path}",
+                            log_command=True,
+                            log_output=False
                         )
                         runtime_paths = (paths_out or "").strip().splitlines()
 
@@ -266,16 +267,17 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                             base = os.path.basename(p)
                             nar_local = os.path.join(self.temp_dir, f"{base}.nar")
                             export_cmd = f"nix-store --export {p} > {nar_local}"
-                            status, _, err = await exec_local_command(self.db, self.redis, self.frame, export_cmd)
+                            status, _, err = await exec_local_command(self.db, self.redis, self.frame, export_cmd, log_command=False, log_output=False)
                             if status != 0:
-                                raise Exception(f"Failed to export {p}: {err}")
+                                raise Exception(f"Failed to run \"{export_cmd}\". Error: {err}")
 
                             # stream nar via agent/ssh
                             with open(nar_local, "rb") as fh:
                                 await upload_file(self.db, self.redis, self.frame, f"{remote_tmp}/{base}.nar", fh.read())
 
                             await self.exec_command(
-                                f"sudo nix-store --import < {remote_tmp}/{base}.nar && rm {remote_tmp}/{base}.nar"
+                                f"sudo nix-store --import < {remote_tmp}/{base}.nar && rm {remote_tmp}/{base}.nar",
+                                log_output=False, raise_on_error=True
                             )
                             await self.log("stdout", f"    [{idx}/{len(missing)}] {base} imported")
 
@@ -286,11 +288,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                             f"sudo nix-env --profile /nix/var/nix/profiles/system --set {system_path}"
                         )
                         await self.exec_command("sudo /nix/var/nix/profiles/system/bin/switch-to-configuration switch")
-
-                        # ─── d.  Sync flake.{nix,lock} for future equality checks ───────────────────
-                        for local, remote in [(local_flake, "/etc/nixos/flake.nix"), (local_lock, "/etc/nixos/flake.lock")]:
-                            with open(local, "rb") as f:
-                                await upload_file(self.db, self.redis, self.frame, remote, f.read())
 
                         # flake applied & system switched – continue deploy flow
 

@@ -24,7 +24,7 @@ patterns=(
     # "backend/app/models/assets.py"
     # "backend/app/utils/ssh_utils.py"
     # "backend/app/utils/local_exec.py"
-    # "backend/app/utils/remote_exec.py"
+    "backend/app/utils/remote_exec.py"
     # "backend/app/tasks/*.py"
     "backend/app/tasks/deploy_agent.py"
     "backend/app/tasks/deploy_frame.py"
