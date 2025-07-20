@@ -22,7 +22,8 @@ from app.utils.ssh_utils import (
 )
 from app.utils.local_exec import exec_local_command
 from .utils import find_nim_v2, find_nimbase_file
-
+from app.models.settings import get_settings_dict
+from app.utils.nix_utils import nix_cmd
 
 async def deploy_agent(id: int, redis: Redis) -> None:  # noqa: N802
     await redis.enqueue_job("deploy_agent", id=id)
@@ -312,15 +313,21 @@ class AgentDeployer:
         await self.log("stdout", "- NixOS detected – using flake-based deploy")
 
         # ─── 1.  Build the package on the *server* ───────────────────────
-        build_cmd = (
+        settings = get_settings_dict(self.db)
+        build_cmd, masked_cmd, cleanup = nix_cmd(
             "nix --extra-experimental-features 'nix-command flakes' "
             "build ../frameos#packages.aarch64-linux.frameos_agent "
-            "--system aarch64-linux --print-out-paths"
+            "--system aarch64-linux --print-out-paths",
+            settings
         )
-        status, store_path, err = await exec_local_command(
-            self.db, self.redis, self.frame,
-            build_cmd, log_command=True
-        )
+        try:
+            await self.log("stdout", f"$ {masked_cmd}")
+            status, store_path, err = await exec_local_command(
+                self.db, self.redis, self.frame,
+                build_cmd, log_command=False
+            )
+        finally:
+            cleanup()
         if status != 0 or not store_path:
             raise Exception(f"Local nix build failed:\n{err}")
         store_path = store_path.strip().splitlines()[-1]

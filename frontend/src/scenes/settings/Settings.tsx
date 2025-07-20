@@ -22,7 +22,7 @@ export function Settings() {
     isCustomFontsFormSubmitting,
     customFonts,
   } = useValues(settingsLogic)
-  const { submitSettings, newKey, deleteCustomFont } = useActions(settingsLogic)
+  const { submitSettings, newKey, newNixKey, deleteCustomFont } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
 
@@ -52,31 +52,32 @@ export function Settings() {
             <Masonry id="frames" className="p-4">
               <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings}>
                 <Group name="frameOS">
-                  <Box className="p-2 mb-4 space-y-2">
+                  <Box className="p-2 mb-4 space-y-2 @container">
                     <H6>FrameOS Gallery</H6>
-                    <p>
-                      Sign up to the premium{' '}
+                    <p className="text-sm leading-loose">
                       <a className="text-blue-400 hover:underline" target="_blank" href="https://gallery.frameos.net/">
-                        FrameOS galleries
+                        Premium AI slop
                       </a>{' '}
-                      and support this project.
+                      to get you started.
                     </p>
                     <Field name="apiKey" label="API key" secret={!!savedSettings?.frameOS?.apiKey}>
-                      <TextInput autoFocus={!!savedSettings?.frameOS?.apiKey} />
+                      <TextInput />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="openAI">
-                  <Box className="p-2 mb-4 space-y-2">
+                  <Box className="p-2 mb-4 space-y-2 @container">
                     <H6>OpenAI</H6>
-                    The OpenAI API key is used within OpenAI apps, and for GPT4 coding assistance.
+                    <p className="text-sm leading-loose">
+                      The OpenAI API key is used within OpenAI apps, and for GPT4 coding assistance.
+                    </p>
                     <Field name="apiKey" label="API key" secret={!!savedSettings?.openAI?.apiKey}>
-                      <TextInput name="apiKey" autoFocus={!!savedSettings?.openAI?.apiKey} />
+                      <TextInput name="apiKey" />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="homeAssistant">
-                  <Box className="p-2 mb-4 space-y-2">
+                  <Box className="p-2 mb-4 space-y-2 @container">
                     <H6>Home Assistant</H6>
                     <Field name="url" label="Home assistant URL">
                       <TextInput placeholder="http://homeassistant.local:8123" />
@@ -86,28 +87,62 @@ export function Settings() {
                       label="Access token (Profile -> Long-Lived Access Tokens)"
                       secret={!!savedSettings?.homeAssistant?.accessToken}
                     >
-                      <TextInput autoFocus={!!savedSettings?.homeAssistant?.accessToken} />
+                      <TextInput />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="github">
-                  <Box className="p-2 mb-4 space-y-2">
+                  <Box className="p-2 mb-4 space-y-2 @container">
                     <H6>Github</H6>
                     <Field name="api_key" label="API key" secret={!!savedSettings?.github?.api_key}>
-                      <TextInput autoFocus={!!savedSettings?.github?.api_key} />
+                      <TextInput />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="unsplash">
-                  <Box className="p-2 mb-4 space-y-2">
+                  <Box className="p-2 mb-4 space-y-2 @container">
                     <H6>Unsplash API</H6>
                     <Field name="accessKey" label="Access key" secret={!!savedSettings?.unsplash?.accessKey}>
-                      <TextInput autoFocus={!!savedSettings?.unsplash?.accessKey} />
+                      <TextInput />
+                    </Field>
+                  </Box>
+                </Group>
+                <Group name="nix">
+                  <Box className="p-2 mb-4 space-y-2 @container">
+                    <H6>Nix settings</H6>
+                    <p className="text-sm leading-loose">
+                      These settings are used to build frames on a remote server. If you don't have a remote build
+                      server, you can leave these fields empty.
+                    </p>
+                    <Field name="buildExtraArgs" label="Extra args to build commands">
+                      <TextInput placeholder="-j0" />
+                    </Field>
+                    <Field name="buildServer" label="Build server address">
+                      <TextInput placeholder="build.frameos.net" />
+                    </Field>
+                    <Field name="buildServerPort" label="Build server port">
+                      <TextInput type="number" placeholder="22" />
+                    </Field>
+                    <Field name="buildServerUser" label="Build server user">
+                      <TextInput placeholder="frameos" />
+                    </Field>
+                    <Field name="buildServerPrivateKey" label="Build server private key" secret>
+                      <TextArea />
+                    </Field>
+                    <Button
+                      onClick={newNixKey}
+                      color={savedSettings?.ssh_keys?.default ? 'secondary' : 'primary'}
+                      size="small"
+                    >
+                      Generate new keypair
+                    </Button>
+                    <Field name="buildServerPublicKey" label="Build server public key">
+                      <TextArea />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="ssh_keys">
-                  <Box className="p-2 mb-4 space-y-2">
+                  <Box className="p-2 mb-4 space-y-2 @container">
                     <H6>SSH Keys</H6>
                     <p className="text-sm leading-loose">
                       This SSH key will be used on all frames that don't have a password set for SSH.
@@ -120,15 +155,15 @@ export function Settings() {
                       Generate new keypair
                     </Button>
                     <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
-                      <TextArea autoFocus={!!savedSettings?.ssh_keys?.default} />
+                      <TextArea />
                     </Field>
                     <Field name="default_public" label="Default public SSH key (use this in the RPi Imager)">
-                      <TextArea autoFocus={!!savedSettings?.ssh_keys?.default_public} />
+                      <TextArea />
                     </Field>
                   </Box>
                 </Group>
               </Form>
-              <Box className="p-2 mb-4 space-y-2">
+              <Box className="p-2 mb-4 space-y-2 @container">
                 <H6>Custom fonts</H6>
                 <p className="text-sm leading-loose">
                   These fonts will be uploaded to all frames and can be used in the FrameOS editor.

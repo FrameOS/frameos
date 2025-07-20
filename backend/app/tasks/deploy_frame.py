@@ -26,6 +26,8 @@ from app.models.frame import Frame, update_frame, get_frame_json
 from app.utils.remote_exec import run_command, upload_file
 from app.utils.local_exec import exec_local_command
 from app.models.apps import get_one_app_sources
+from app.models.settings import get_settings_dict
+from app.utils.nix_utils import nix_cmd
 
 from .utils import find_nim_v2, find_nimbase_file
 
@@ -112,6 +114,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         await update_frame(db, redis, frame)
 
         nim_path = find_nim_v2()
+        settings = get_settings_dict(db)
 
         async def install_if_necessary(pkg: str, raise_on_error=True) -> int:
             search_strings = ["run apt-get update", "404 Not Found", "failed to fetch", "Unable to fetch some archives"]
@@ -233,14 +236,18 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
                         attr_host = nix_attr(target_host)
 
-                        sys_build_cmd = (
+                        sys_build_cmd, masked_build_cmd, cleanup = nix_cmd(
                             f"nix --extra-experimental-features 'nix-command flakes' "
-                            f"build {flake_dir}#nixosConfigurations.{attr_host}.config.system.build.toplevel "
+                            f"build \"$(realpath {flake_dir})\"#nixosConfigurations.{attr_host}.config.system.build.toplevel "
                             "--system aarch64-linux --print-out-paths "
-                            "--log-format raw -L"
+                            "--log-format raw -L",
+                            settings
                         )
-
-                        status, sys_out, sys_err = await exec_local_command(self.db, self.redis, self.frame, sys_build_cmd)
+                        try:
+                            await self.log("stdout", f"$ {masked_build_cmd}")
+                            status, sys_out, sys_err = await exec_local_command(self.db, self.redis, self.frame, sys_build_cmd, log_command=False)
+                        finally:
+                            cleanup()
                         if status != 0 or not sys_out:
                             raise Exception(f"Local NixOS system build failed:\n{sys_err}")
 
@@ -296,14 +303,17 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     # ─── 2.  Re-generate sources & cross-build locally ───────
 
                     await self.log("stdout", "- Building frameos (nix aarch64-linux, local copy)…")
-                    build_cmd = (
-                        f"cd {source_dir_local} && "
+                    build_cmd, masked_build_cmd, cleanup = nix_cmd(
                         "nix --extra-experimental-features 'nix-command flakes' "
-                        "build .#packages.aarch64-linux.frameos "
-                        "--system aarch64-linux --print-out-paths --log-format raw"
+                        f"build \"$(realpath {source_dir_local})\"#packages.aarch64-linux.frameos "
+                        "--system aarch64-linux --print-out-paths --log-format raw",
+                        settings,
                     )
-
-                    status, out, err = await exec_local_command(self.db, self.redis, self.frame, build_cmd)
+                    try:
+                        await self.log("stdout", f"$ {masked_build_cmd}")
+                        status, out, err = await exec_local_command(self.db, self.redis, self.frame, build_cmd, log_command=False)
+                    finally:
+                        cleanup()
                     if status != 0:
                         raise Exception(f"Local nix build failed:\n{err}")
                     store_path  = (out or "").strip().splitlines()[-1]

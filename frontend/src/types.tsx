@@ -502,6 +502,14 @@ export interface FrameOSSettings {
   unsplash?: {
     accessKey?: string
   }
+  nix?: {
+    buildExtraArgs?: string
+    buildServer?: string
+    buildServerPort?: number
+    buildServerUser?: string
+    buildServerPrivateKey?: string
+    buildServerPublicKey?: string
+  }
 }
 
 export interface FrameStateRecord {

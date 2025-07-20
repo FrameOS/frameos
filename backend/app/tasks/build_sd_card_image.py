@@ -18,8 +18,8 @@ from app.models.frame import Frame, get_frame_json
 from app.models.log   import new_log as log
 from app.tasks.deploy_frame import FrameDeployer, make_local_modifications
 from .utils import find_nim_v2
-
-NIX_BUILD = "nix --extra-experimental-features 'nix-command flakes'"
+from app.models.settings import get_settings_dict
+from app.utils.nix_utils import nix_cmd
 
 async def build_sd_card_image(id: int, redis: Redis):
     await redis.enqueue_job("build_sd_card_image", id=id)
@@ -71,15 +71,22 @@ async def build_sd_card_image_task(
         # ──────────────────────────────────────────────────────────
         # 2.  nix build → sdImage
         # ──────────────────────────────────────────────────────────
-        cmd = (
-            f"{NIX_BUILD} build {flake_dir}#packages.aarch64-linux.sdImage "
-            "--system aarch64-linux --show-trace --print-out-paths"
+        settings = get_settings_dict(db)
+        cmd, masked_cmd, cleanup = nix_cmd(
+            "nix --extra-experimental-features 'nix-command flakes' "
+            f"build \"$(realpath {flake_dir})\"#packages.aarch64-linux.sdImage "
+            "--system aarch64-linux --show-trace --print-out-paths",
+            settings
         )
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
+        try:
+            await log(db, redis, id, "build", f"$ {masked_cmd}")
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        finally:
+            cleanup()
 
         if proc.stdout is None:
             raise RuntimeError("Failed to start nix build process")

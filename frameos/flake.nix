@@ -264,12 +264,6 @@
           swraid.enable       = lib.mkForce false;               # silence mdadm
           supportedFilesystems.zfs = lib.mkForce false;          # save time compiling zfs
         };
-        swapDevices = [
-          {
-            device = "/swapfile"; # prevent random OOMs
-            size   = 1024;
-          }
-        ];
         # ── dummy root so evaluation succeeds when no hardware‑configuration.nix
         fileSystems."/" = lib.mkDefault {
           device  = "none";       # literally the string “none”
