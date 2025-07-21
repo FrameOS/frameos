@@ -289,7 +289,8 @@
               "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
             ];
             WorkingDirectory = "/srv/frameos/agent/current";
-            ExecStart = lib.mkForce "${frameosAgentPkg}/bin/frameos_agent";
+            # ExecStart = lib.mkForce "${frameosAgentPkg}/bin/frameos_agent";
+            ExecStart      = lib.mkForce "/srv/frameos/agent/current/frameos_agent";
             Restart     = "always";
             RestartSec  = 5;
             LimitNOFILE = 65536;
@@ -315,7 +316,8 @@
             DevicePolicy = lib.mkForce "private";
             AmbientCapabilities = [ "CAP_SYS_RAWIO" ];
             WorkingDirectory = "/srv/frameos/current";
-            ExecStart = lib.mkForce "${frameosPkg}/bin/frameos";
+            ExecStart      = lib.mkForce "/srv/frameos/current/frameos";
+            # ExecStart = lib.mkForce "${frameosPkg}/bin/frameos";
             Restart   = "always";
             NoNewPrivileges = "no";
           };
