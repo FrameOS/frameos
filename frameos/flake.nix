@@ -151,7 +151,7 @@
             filter        = "*2837*";        # BCM2837 / Pi 3 / Zero 2 W
 
             overlays = [
-              # -------- I²C
+              # I²C
               {
                 name    = "i2c_arm";
                 dtsText = ''
@@ -165,7 +165,7 @@
                 '';
               }
 
-              # -------- SPI  (new – enables both CS0 & CS1 as spidev)
+              # SPI (enables both CS0 & CS1 as spidev)
               {
                 name    = "spi0-2cs";
                 dtsText = ''
@@ -191,7 +191,7 @@
                 '';
               }
 
-              # -------- PWM 2-channel  (taken from pwm.dts in pi-zero-2 repo)
+              # PWM 2-channel (taken from pwm.dts in pi-zero-2 repo)
               {
                 name    = "pwm-2chan";
                 dtsText = ''
