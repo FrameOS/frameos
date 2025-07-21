@@ -1,120 +1,88 @@
 from __future__ import annotations
-
 import os
-import stat
+import shlex
+import subprocess
 import tempfile
-from typing import Dict, Any, Tuple, Callable, Optional
+from typing import Any, Callable, Dict, Tuple
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1.  Ephemeral ssh‑agent helper  (RAM‑only key storage)
+# ─────────────────────────────────────────────────────────────────────────────
+_active_agent_dirs: list[tempfile.TemporaryDirectory] = []  # keep sockets alive
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# Private helpers
-# ────────────────────────────────────────────────────────────────────────────
-
-def _prepare_ssh_key(raw_or_path: str) -> str:
+def _spawn_ephemeral_agent(key: str) -> str:
     """
-    Return an *absolute* path to a private key file usable by `ssh`:
-
-    • If *raw_or_path* already points to a file → return its absolute path.
-    • Otherwise treat *raw_or_path* as inline PEM, write it once to a unique
-      0600 temp file and return that path.
+    Launch a private ssh-agent, feed it *key* (inline PEM or file),
+    and return the $SSH_AUTH_SOCK to export.  The key never hits the FS.
     """
-    path = os.path.abspath(os.path.expanduser(raw_or_path))
-    if os.path.exists(path):
-        return path                               # already a file on disk
+    tmpd = tempfile.TemporaryDirectory(prefix="nix_agent_")
+    _active_agent_dirs.append(tmpd)              # keep dir alive
+    sock = os.path.join(tmpd.name, "agent.sock")
 
-    tf = tempfile.NamedTemporaryFile(
-        prefix="nixkey_", suffix=".pem", delete=False, mode="w", encoding="utf-8"
-    )
-    # TODO: make this safer
-    tf.write(raw_or_path.strip() + "\n")
-    tf.flush()
-    os.fchmod(tf.fileno(), stat.S_IRUSR | stat.S_IWUSR)   # 0600
-    return tf.name
+    # Start the agent bound to our private socket
+    subprocess.check_call(["ssh-agent", "-a", sock, "-s"],
+                          stdout=subprocess.DEVNULL)
 
+    # Prepare the key material
+    key_data = (key.strip() + "\n").encode()
 
-def _ssh_builder_uri(nix_cfg: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Return *(builder_uri, key_path)*.
+    # Load the key into the agent via stdin (ssh‑add -)
+    subprocess.run(["ssh-add", "-"],
+                   input=key_data,
+                   check=True,
+                   stdout=subprocess.DEVNULL)
 
-    • builder_uri - e.g. 'ssh://alice@builder.example'  (no :port!)
-    • key_path    - absolute path to private key (temp), or *None*
-    """
-    host = nix_cfg.get("buildServer")
-    if not host:
-        return None, None
-
-    user = nix_cfg.get("buildServerUser") or os.getenv("USER", "root")
-    uri  = f"ssh://{user}@{host}"
-
-    key_val = nix_cfg.get("buildServerPrivateKey")
-    if key_val:
-        key_path = _prepare_ssh_key(key_val)
-        return uri, key_path
-
-    return uri, None
+    return sock
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# Public helper
-# ────────────────────────────────────────────────────────────────────────────
-
+# ─────────────────────────────────────────────────────────────────────────────
+# 2.  Public API ­– nix_cmd
+# ─────────────────────────────────────────────────────────────────────────────
 def nix_cmd(base: str, settings: Dict[str, Any] | None) -> Tuple[str, str, Callable[[], None]]:
     """
-    Expand a ready-made **`base`** `nix …` command string using the project's
-    **Settings → nix → …** fields and return a triple:
+    Expand *base* with user‑provided Nix settings.
 
-        *(cmd, masked_cmd, cleanup_fn)*
-
-    * **cmd**        - string ready to `subprocess …`
-    * **masked_cmd** - safe for logs (identity path redacted)
-    * **cleanup_fn** - ALWAYS call once the build finishes (even on errors)
-
-    Recognised settings (all optional):
-      • nix.buildExtraArgs
-      • nix.buildServer, nix.buildServerPort, nix.buildServerUser
-      • nix.buildServerPrivateKey / nix.buildServerPublicKey
+    Returns  (actual_cmd, masked_cmd)  – the latter is safe to log.
     """
-    nix_cfg = (settings or {}).get("nix") or {}
+    nix = (settings or {}).get("nix") or {}
 
-    # 1. arbitrary extra flags ------------------------------------------------
-    extra = nix_cfg.get("buildExtraArgs")
+    # -- 1. free‑form flags --------------------------------------------------
+    extra = nix.get("buildExtraArgs")
     if extra:
         base   += f" {extra}"
 
-    masked = base
+    masked = base  # will diverge only for secrets
+
     def cleanup() -> None:
-        return None          # default no-op
+        return None
 
-    # 2. remote builder -------------------------------------------------------
-    builder_uri, key_path = _ssh_builder_uri(nix_cfg)
-    if builder_uri:
-        # --- craft NIX_SSHOPTS ----------------------------------------------
-        port = int(nix_cfg.get("buildServerPort") or 22)
-        ssh_opts: list[str] = []
+    # -- 2. remote builder ---------------------------------------------------
+    host = nix.get("buildServer")
+    if not host:
+        return base, masked, cleanup                          # nothing else to add
 
-        if key_path:
-            ssh_opts += ["-i", key_path]
-        if port != 22:
-            ssh_opts += ["-p", str(port)]
+    user = nix.get("buildServerUser") or os.getenv("USER", "root")
+    port = int(nix.get("buildServerPort", 22))
 
-        ssh_opts += ["-o", "StrictHostKeyChecking=no"]
+    # Builder URI (host **without** “:port”; port is a query parameter)
+    builder_uri = f"ssh://{user}@{host}"
 
-        if ssh_opts:
-            env_prefix = f'NIX_SSHOPTS="{" ".join(ssh_opts)}" '
-            base   = env_prefix + base
-            masked = (
-                'NIX_SSHOPTS="' +
-                " ".join("***" if tok == key_path else tok for tok in ssh_opts) +
-                '" ' + masked
-            )
+    query_params: list[str] = []
+    if port != 22:
+        query_params.append(f"ssh-port={port}")
 
-        # attach builder (no :port here!)
-        base   += f" --builders '{builder_uri}'"
-        masked += " --builders '***masked***'"
+    # ----- key handling -----------------------------------------------------
+    private_key = nix.get("buildServerPrivateKey")
+    if private_key:
+        sock = _spawn_ephemeral_agent(private_key)
+        base   = f'SSH_AUTH_SOCK={shlex.quote(sock)} ' + base
+        masked = 'SSH_AUTH_SOCK=*** ' + masked
 
-        # cleanup temp key afterwards
-        if key_path:
-            def cleanup() -> None:
-                os.unlink(key_path)
+    if query_params:
+        builder_uri += "?" + ("&".join(query_params))
+
+    base   += f" --builders {shlex.quote(builder_uri)}"
+    masked += " --builders '***masked***'"
 
     return base, masked, cleanup
