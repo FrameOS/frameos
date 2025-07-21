@@ -9,7 +9,7 @@ import {
   TrashIcon,
   FolderPlusIcon,
 } from '@heroicons/react/24/solid'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { Spinner } from '../../../../components/Spinner'
 import { DropdownMenu, DropdownMenuItem } from '../../../../components/DropdownMenu'
@@ -204,10 +204,14 @@ export function Assets(): JSX.Element {
   const { frame } = useValues(frameLogic)
   const { openLogs } = useActions(panelsLogic)
   const { assetsLoading, assetTree } = useValues(assetsLogic({ frameId: frame.id }))
-  const { syncAssets, uploadAssets, deleteAsset, renameAsset, createFolder } = useActions(
+  const { loadAssets, syncAssets, uploadAssets, deleteAsset, renameAsset, createFolder } = useActions(
     assetsLogic({ frameId: frame.id })
   )
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
+
+  useEffect(() => {
+    loadAssets()
+  }, [])
 
   return (
     <div className="space-y-2">
@@ -227,10 +231,20 @@ export function Assets(): JSX.Element {
           ]}
         />
       </div>
-      {assetsLoading ? (
-        <div>Loading assets...</div>
+      {assetsLoading && (!assetTree.children || Object.keys(assetTree.children).length === 0) ? (
+        <div>
+          <div className="float-right mr-2">
+            <Spinner />
+          </div>
+          <div>Loading assets...</div>
+        </div>
       ) : (
         <div>
+          {assetsLoading ? (
+            <div className="float-right mr-2">
+              <Spinner />
+            </div>
+          ) : null}
           <TreeNode
             node={assetTree}
             frameId={frame.id}

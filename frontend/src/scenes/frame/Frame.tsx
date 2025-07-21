@@ -1,4 +1,4 @@
-import { BindLogic, useActions, useValues } from 'kea'
+import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { frameLogic } from './frameLogic'
 import { frameHost } from '../../decorators/frame'
 import { Spinner } from '../../components/Spinner'
@@ -7,6 +7,7 @@ import { Header } from '../../components/Header'
 import { Panels } from './panels/Panels'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { panelsLogic } from './panels/panelsLogic'
+import { assetsLogic } from './panels/Assets/assetsLogic'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -29,6 +30,7 @@ export function Frame(props: FrameSceneProps) {
     buildSDCard,
     restartAgent,
   } = useActions(frameLogic(frameLogicProps))
+  useMountedLogic(assetsLogic(frameLogicProps)) // Don't lose what we downloaded when navigating away from the tab
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
   const canDeployAgent = !!(frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret)
   const agentExtra = canDeployAgent ? (frame?.agent?.agentRunCommands ? ' (via agent)' : ' (via ssh)') : ''
