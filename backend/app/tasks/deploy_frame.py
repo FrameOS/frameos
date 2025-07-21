@@ -27,7 +27,7 @@ from app.utils.remote_exec import run_command, upload_file
 from app.utils.local_exec import exec_local_command
 from app.models.apps import get_one_app_sources
 from app.models.settings import get_settings_dict
-from app.utils.nix_utils import nix_cmd
+from app.utils.nix_utils import nix_attr, nix_cmd
 
 from .utils import find_nim_v2, find_nimbase_file
 
@@ -180,239 +180,96 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 build_dir_local, source_dir_local = create_build_folders(temp_dir_local, self.build_id)
                 await make_local_modifications(self, source_dir_local)
 
-                #  Fast-path for NixOS targets
-                #───────────────────────────────────────────────────────────────
+                # Fast-path for NixOS targets
                 if distro == "nixos":
                     await self.log("stdout", "- NixOS detected – using flake-based deploy")
 
-                    # ─── 1.  Check whether flake.{nix,lock} changed ──────────
-                    def sha256(path: str) -> str:
-                        h = hashlib.sha256()
-                        with open(path, "rb") as fp:
-                            for chunk in iter(lambda: fp.read(65536), b""):
-                                h.update(chunk)
-                        return h.hexdigest()
-
-                    flake_dir      = Path(source_dir_local)
-                    local_flake    = flake_dir / "flake.nix"
-                    local_lock     = flake_dir / "flake.lock"
-                    local_flake_sha = sha256(str(local_flake))
-                    local_lock_sha  = sha256(str(local_lock))
-
-                    remote_flake_sha_out: list[str] = []
-                    remote_lock_sha_out:  list[str] = []
-
-                    await self.exec_command(
-                        "sha256sum /etc/nixos/flake.nix 2>/dev/null | cut -d' ' -f1 || true",
-                        remote_flake_sha_out, raise_on_error=False
-                    )
-                    await self.exec_command(
-                        "sha256sum /etc/nixos/flake.lock 2>/dev/null | cut -d' ' -f1 || true",
-                        remote_lock_sha_out, raise_on_error=False
+                    flake_up_to_date = (
+                        await file_in_sync(self, "/etc/nixos/flake.nix", str(Path(source_dir_local) / "flake.nix")) and
+                        await file_in_sync(self, "/etc/nixos/flake.lock", str(Path(source_dir_local) / "flake.lock"))
                     )
 
-                    remote_flake_sha = (remote_flake_sha_out[0].strip() if remote_flake_sha_out else "")
-                    remote_lock_sha  = (remote_lock_sha_out[0].strip()  if remote_lock_sha_out  else "")
+                    if flake_up_to_date:
+                        await self.log("stdout", "- flake.nix up to date → updating just frameos")
+                        build_command = f"build \"$(realpath {source_dir_local})\"#packages.aarch64-linux.frameos "
+                    else:
+                        await self.log("stdout", "- flake.nix changed → updating the entire system")
+                        target_host = await get_hostname(self)
+                        build_command = f"build \"$(realpath {source_dir_local})\"#nixosConfigurations.{nix_attr(target_host)}.config.system.build.toplevel"
 
-                    flake_changed = (local_flake_sha != remote_flake_sha) or (local_lock_sha != remote_lock_sha)
-
-                    # Redeploy the entire system. Always forcing redeploy for debugging.
-                    # flake_changed = True
-                    if flake_changed:
-                        await self.log("stdout", "- System flake changed → building system closure on backend & streaming to device")
-                        # ─── a.  Build the *system* derivation locally (aarch64‑linux) ──────────────
-                        hostname_out: list[str] = []
-                        await self.exec_command("hostname", hostname_out)  # remote hostname for flake attribute
-                        target_host = hostname_out[0].strip() or "frame-unknown"
-
-                        # ── helper: quote attr names that contain ‘-’ etc. ──────────
-                        def nix_attr(name: str) -> str:
-                            """
-                            Return *name* in a form that can safely be used in a Nix
-                            attribute path.  Bare identifiers may only contain
-                            [A‑Za‑z0‑9_].  Everything else must be quoted.
-                            """
-                            import re
-                            return name if re.fullmatch(r"[A-Za-z0-9_]+", name) else f'"{name}"'
-
-                        attr_host = nix_attr(target_host)
-
-                        sys_build_cmd, masked_build_cmd, cleanup = nix_cmd(
-                            f"nix --extra-experimental-features 'nix-command flakes' "
-                            f"build \"$(realpath {flake_dir})\"#nixosConfigurations.{attr_host}.config.system.build.toplevel "
-                            "--system aarch64-linux --print-out-paths "
-                            "--log-format raw -L",
-                            settings
-                        )
-                        try:
-                            await self.log("stdout", f"$ {masked_build_cmd}")
-                            status, sys_out, sys_err = await exec_local_command(self.db, self.redis, self.frame, sys_build_cmd, log_command=False)
-                        finally:
-                            cleanup()
-                        if status != 0 or not sys_out:
-                            raise Exception(f"Local NixOS system build failed:\n{sys_err}")
-
-                        system_path = sys_out.strip().splitlines()[-1]
-
-                        # ─── b.  Push store closure (missing paths only) ────────────────────────────
-                        status, paths_out, _ = await exec_local_command(
-                            self.db, self.redis, self.frame,
-                            f"nix-store -qR {system_path}",
-                            log_command=True,
-                            log_output=False
-                        )
-                        runtime_paths = (paths_out or "").strip().splitlines()
-
-                        await self.log("stdout", f"  → system closure has {len(runtime_paths)} store paths")
-
-                        remote_tmp = f"/tmp/nixos_sys_{build_id}"
-                        await self.exec_command(f"mkdir -p {remote_tmp}")
-
-                        missing = await self._store_paths_missing(runtime_paths)
-                        await self.log("stdout", f"  → uploading {len(missing)} missing paths")
-
-                        for idx, p in enumerate(missing, 1):
-                            base = os.path.basename(p)
-                            nar_local = os.path.join(self.temp_dir, f"{base}.nar")
-                            export_cmd = f"nix-store --export {p} > {nar_local}"
-                            status, _, err = await exec_local_command(self.db, self.redis, self.frame, export_cmd, log_command=False, log_output=False)
-                            if status != 0:
-                                raise Exception(f"Failed to run \"{export_cmd}\". Error: {err}")
-
-                            # stream nar via agent/ssh
-                            with open(nar_local, "rb") as fh:
-                                await upload_file(self.db, self.redis, self.frame, f"{remote_tmp}/{base}.nar", fh.read())
-
-                            await self.exec_command(
-                                f"sudo nix-store --import < {remote_tmp}/{base}.nar && rm {remote_tmp}/{base}.nar",
-                                log_output=False, raise_on_error=True
-                            )
-                            await self.log("stdout", f"    [{idx}/{len(missing)}] {base} imported")
-
-                        await self.exec_command(f"rmdir {remote_tmp}")
-
-                        # ─── c.  Activate the new system generation on the device ───────────────────
-                        await self.exec_command(
-                            f"sudo nix-env --profile /nix/var/nix/profiles/system --set {system_path}"
-                        )
-                        await self.exec_command("sudo /nix/var/nix/profiles/system/bin/switch-to-configuration switch")
-
-                        # flake applied & system switched – continue deploy flow
-
-                    # ─── End full‑system‑update path ───────────────────────────────────────────────
-
-                    # ─── 2.  Re-generate sources & cross-build locally ───────
-
-                    await self.log("stdout", "- Building frameos (nix aarch64-linux, local copy)…")
-                    build_cmd, masked_build_cmd, cleanup = nix_cmd(
+                    sys_build_cmd, masked_build_cmd, cleanup = nix_cmd(
                         "nix --extra-experimental-features 'nix-command flakes' "
-                        f"build \"$(realpath {source_dir_local})\"#packages.aarch64-linux.frameos "
-                        "--system aarch64-linux --print-out-paths --log-format raw",
-                        settings,
+                        f"{build_command} "
+                        "--system aarch64-linux --print-out-paths "
+                        "--log-format raw -L",
+                        settings
                     )
                     try:
                         await self.log("stdout", f"$ {masked_build_cmd}")
-                        status, out, err = await exec_local_command(self.db, self.redis, self.frame, build_cmd, log_command=False)
+                        status, sys_out, sys_err = await exec_local_command(self.db, self.redis, self.frame, sys_build_cmd, log_command=False)
                     finally:
                         cleanup()
-                    if status != 0:
-                        raise Exception(f"Local nix build failed:\n{err}")
-                    store_path  = (out or "").strip().splitlines()[-1]
-                    binary_path = os.path.join(store_path, "bin", "frameos")
-                    if not os.path.exists(binary_path):
-                        raise Exception(f"Expected binary not found at {binary_path}")
+                    if status != 0 or not sys_out:
+                        raise Exception(f"Local NixOS system build failed:\n{sys_err}")
+                    result_path = sys_out.strip().splitlines()[-1]
 
-                    # -- 2b.  Streamed export/import  -------------------------
-                    await self.log("stdout", "- Collecting runtime closure")
-                    list_cmd = f"nix-store -qR {store_path}"
-                    status, paths_out, _ = await exec_local_command(
-                        self.db, self.redis, self.frame, list_cmd
-                    )
-                    if status != 0:
-                        raise Exception("Failed to collect runtime closure")
+                    await nix_upload_path_and_deps(self, result_path)
 
-                    runtime_paths = (paths_out or "").strip().splitlines()
-                    await self.log("stdout", f"  → {len(runtime_paths)} store paths")
+                    if not flake_up_to_date:
+                        await self.exec_command(f"sudo nix-env --profile /nix/var/nix/profiles/system --set {result_path}")
+                        await self.exec_command("sudo /nix/var/nix/profiles/system/bin/switch-to-configuration switch")
+                    else:
+                        binary_path = os.path.join(result_path, "bin", "frameos")
+                        if not os.path.exists(binary_path):
+                            raise Exception(f"Expected binary not found at {binary_path}")
 
-                    remote_tmp = f"/tmp/frameos_import_{build_id}"
-                    await self.exec_command(f"mkdir -p {remote_tmp}")
-
-                    missing = await self._store_paths_missing(runtime_paths)
-
-                    await self.log("stdout", f"  → {len(runtime_paths)} store paths "
-                                            f"({len(missing)} need upload)")
-
-                    for idx, p in enumerate(missing, 1):
-                        base = os.path.basename(p)
-                        nar_local = os.path.join(temp_dir_local or "", f"{base}.nar")  # nar_dir already exists
-                        cmd = f"nix-store --export {p} > {nar_local}"
-                        status, _, err = await exec_local_command(
-                            self.db, self.redis, self.frame, cmd
+                        # ─── 3.  Create new release on the device ────────────────
+                        await self.exec_command(
+                            "if [ ! -d /srv/frameos/ ]; then "
+                            "  sudo mkdir -p /srv/frameos/ && sudo chown $(whoami) /srv/frameos/; "
+                            "fi"
                         )
-                        if status != 0:
-                            raise Exception(f"Export failed for {p}:\n{err}")
+                        await self.exec_command(f"mkdir -p /srv/frameos/releases/release_{build_id}")
 
-                        with open(nar_local, "rb") as fh:
+                        with open(binary_path, "rb") as fh:
                             await upload_file(
                                 self.db, self.redis, self.frame,
-                                f"{remote_tmp}/{base}.nar",
-                                fh.read(),
+                                f"/srv/frameos/releases/release_{build_id}/frameos",
+                                fh.read()
                             )
+                        await self.exec_command(f"chmod 700 /srv/frameos/releases/release_{build_id}/frameos")
+
+                        #  frame.json as before
+                        frame_json_data = (
+                            json.dumps(get_frame_json(db, frame), indent=4) + "\n"
+                        ).encode("utf-8")
+                        await upload_file(
+                            self.db, self.redis, self.frame,
+                            f"/srv/frameos/releases/release_{build_id}/frame.json",
+                            frame_json_data,
+                        )
 
                         await self.exec_command(
-                            f"sudo nix-store --import < {remote_tmp}/{base}.nar && "
-                            f"rm {remote_tmp}/{base}.nar"
+                            f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state "
+                            f"/srv/frameos/releases/release_{build_id}/state"
                         )
-                        await self.log("stdout", f"    [{idx}/{len(missing)}] {base} imported")
-                    await self.exec_command(f"rmdir {remote_tmp}")
+                        #  Switch /srv/frameos/current → new release
+                        await self.exec_command(
+                            f"rm -rf /srv/frameos/current && "
+                            f"ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current"
+                        )
 
-                # ─── 3.  Create new release on the device ────────────────
-                await self.exec_command(
-                    "if [ ! -d /srv/frameos/ ]; then "
-                    "  sudo mkdir -p /srv/frameos/ && sudo chown $(whoami) /srv/frameos/; "
-                    "fi"
-                )
-                await self.exec_command(f"mkdir -p /srv/frameos/releases/release_{build_id}")
+                        await self.exec_command("sudo systemctl daemon-reload")
+                        await self.exec_command("sudo systemctl enable frameos.service")
+                        await self.exec_command("sudo systemctl restart frameos.service")
 
-                with open(binary_path, "rb") as fh:
-                    await upload_file(
-                        self.db, self.redis, self.frame,
-                        f"/srv/frameos/releases/release_{build_id}/frameos",
-                        fh.read()
-                    )
-                await self.exec_command(f"chmod 700 /srv/frameos/releases/release_{build_id}/frameos")
-
-                #  frame.json as before
-                frame_json_data = (
-                    json.dumps(get_frame_json(db, frame), indent=4) + "\n"
-                ).encode("utf-8")
-                await upload_file(
-                    self.db, self.redis, self.frame,
-                    f"/srv/frameos/releases/release_{build_id}/frame.json",
-                    frame_json_data,
-                )
-
-                await self.exec_command(
-                    f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state "
-                    f"/srv/frameos/releases/release_{build_id}/state"
-                )
-                #  Switch /srv/frameos/current → new release
-                await self.exec_command(
-                    f"rm -rf /srv/frameos/current && "
-                    f"ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current"
-                )
-
-                await self.exec_command("sudo systemctl daemon-reload")
-                await self.exec_command("sudo systemctl enable frameos.service")
-                await self.exec_command("sudo systemctl restart frameos.service")
-
-                #  Save deploy metadata & finish early – nothing else to do
-                frame.status = 'starting'
-                frame.last_successful_deploy     = frame_dict
-                frame.last_successful_deploy_at  = datetime.now(timezone.utc)
-                await update_frame(db, redis, frame)
-                await self.log("stdinfo", "Deploy finished on NixOS 🎉")
-                return   # ← all done, skip the legacy RPiOS flow
+                    #  Save deploy metadata & finish early – nothing else to do
+                    frame.status = 'starting'
+                    frame.last_successful_deploy     = frame_dict
+                    frame.last_successful_deploy_at  = datetime.now(timezone.utc)
+                    await update_frame(db, redis, frame)
+                    await self.log("stdinfo", "Deploy finished on NixOS 🎉")
+                    return   # ← all done, skip the legacy RPiOS flow
 
             ## /END NIXOS
 
@@ -697,6 +554,11 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             frame.status = 'uninitialized'
             await update_frame(db, redis, frame)
 
+async def get_hostname(self) -> str:
+    hostname_out: list[str] = []
+    await self.exec_command("hostname", hostname_out)  # remote hostname for flake attribute
+    target_host = hostname_out[0].strip() or "frame-unknown"
+    return target_host
 
 
 def create_build_folders(temp_dir, build_id):
@@ -891,4 +753,76 @@ async def create_local_build_archive(
     zip_base = os.path.join(temp_dir, f"build_{build_id}")
     shutil.make_archive(zip_base, 'gztar', temp_dir, f"build_{build_id}")
     return archive_path
+
+async def nix_upload_path_and_deps(
+    self: "FrameDeployer",
+    path: str,
+):
+    await self.log("stdout", f"- Collecting runtime closure for {path}")
+    list_cmd = f"nix-store -qR {path}"
+    status, paths_out, _ = await exec_local_command(
+        self.db, self.redis, self.frame, list_cmd
+    )
+    if status != 0:
+        raise Exception("Failed to collect runtime closure")
+
+    runtime_paths = (paths_out or "").strip().splitlines()
+    await self.log("stdout", f"  → {len(runtime_paths)} store paths")
+    missing = await self._store_paths_missing(runtime_paths)
+    if not missing:
+        await self.log("stdout", "  → No missing store paths, skipping upload")
+        return
+
+    await self.log("stdout", f"  → {len(runtime_paths)} store paths ({len(missing)} need upload)")
+
+    remote_tmp = f"/tmp/frameos_import_{self.build_id}"
+    await self.exec_command(f"mkdir -p {remote_tmp}")
+    try:
+        for idx, p in enumerate(missing, 1):
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                base = os.path.basename(p)
+                nar_local = os.path.join(tmpdirname, f"{base}.nar")
+                cmd = f"nix-store --export {p} > {nar_local}"
+                status, _, err = await exec_local_command(
+                    self.db, self.redis, self.frame, cmd
+                )
+                if status != 0:
+                    raise Exception(f"Export failed for {p}:\n{err}")
+
+                with open(nar_local, "rb") as fh:
+                    await upload_file(
+                        self.db, self.redis, self.frame,
+                        f"{remote_tmp}/{base}.nar",
+                        fh.read(),
+                    )
+
+                await self.exec_command(
+                    f"sudo nix-store --import < {remote_tmp}/{base}.nar && "
+                    f"rm {remote_tmp}/{base}.nar"
+                )
+                await self.log("stdout", f"    [{idx}/{len(missing)}] {base} imported")
+    finally:
+        await self.exec_command(f"rmdir {remote_tmp}")
+
+async def file_in_sync(
+    self: "FrameDeployer",
+    remote_path: str,
+    local_path: str,
+) -> bool:
+    """
+    Check if the remote path is the same as the local path.
+    """
+    def sha256(path: str) -> str:
+        h = hashlib.sha256()
+        with open(path, "rb") as fp:
+            for chunk in iter(lambda: fp.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    remote_sha_out: list[str] = []
+    await self.exec_command(f"sha256sum {remote_path} 2>/dev/null | cut -d' ' -f1 || true", remote_sha_out)
+    remote_sha = (remote_sha_out[0].strip() if remote_sha_out else "")
+
+    local_sha = sha256(local_path)
+    return remote_sha == local_sha
 

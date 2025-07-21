@@ -90,3 +90,14 @@ def nix_cmd(base: str, settings: Dict[str, Any] | None) -> Tuple[str, str, Calla
     masked += " --builders '***masked***'"
 
     return base, masked, cleanup
+
+
+# ── helper: quote attr names that contain ‘-’ etc. ──────────
+def nix_attr(name: str) -> str:
+    """
+    Return *name* in a form that can safely be used in a Nix
+    attribute path.  Bare identifiers may only contain
+    [A‑Za‑z0‑9_].  Everything else must be quoted.
+    """
+    import re
+    return name if re.fullmatch(r"[A-Za-z0-9_]+", name) else f'"{name}"'
