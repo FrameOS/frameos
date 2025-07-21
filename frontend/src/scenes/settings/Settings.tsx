@@ -12,6 +12,7 @@ import { TextArea } from '../../components/TextArea'
 import { sceneLogic } from '../sceneLogic'
 import { Masonry } from '../../components/Masonry'
 import { TrashIcon } from '@heroicons/react/24/solid'
+import { NumberTextInput } from '../../components/NumberTextInput'
 
 export function Settings() {
   const {
@@ -121,7 +122,10 @@ export function Settings() {
                       <TextInput placeholder="build.frameos.net" />
                     </Field>
                     <Field name="buildServerPort" label="Build server port">
-                      <TextInput type="number" placeholder="22" />
+                      <NumberTextInput placeholder="22" />
+                    </Field>
+                    <Field name="buildServerMaxParallelJobs" label="Max parallel jobs on build server">
+                      <NumberTextInput placeholder="8" />
                     </Field>
                     <Field name="buildServerUser" label="Build server user">
                       <TextInput placeholder="frameos" />

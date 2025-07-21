@@ -509,6 +509,7 @@ export interface FrameOSSettings {
     buildServerUser?: string
     buildServerPrivateKey?: string
     buildServerPublicKey?: string
+    buildServerMaxParallelJobs?: number
   }
 }
 

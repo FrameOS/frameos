@@ -82,7 +82,11 @@ def nix_cmd(base: str, settings: Dict[str, Any] | None) -> Tuple[str, str, Calla
     if query_params:
         builder_uri += "?" + ("&".join(query_params))
 
-    base   += f" --builders {shlex.quote(builder_uri)}"
+    max_jobs = int(nix.get("buildServerMaxParallelJobs", 8))
+    if max_jobs < 1:
+        raise ValueError("Max parallel jobs must be at least 1")
+    builder_spec = f"{builder_uri} aarch64-linux - {max_jobs}"
+    base   += f" --builders {shlex.quote(builder_spec)}"
     masked += " --builders '***masked***'"
 
     return base, masked, cleanup

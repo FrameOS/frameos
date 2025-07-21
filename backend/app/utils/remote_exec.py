@@ -215,10 +215,11 @@ async def upload_file(
     if await _use_agent(frame, redis):
         try:
             await log(db, redis, frame.id, "stdout", f"> uploading {remote_path} ({print_size(size)} via agent)")
-            if len(data) > 2 * 1024 * 1024:           # >2 MiB → streamed
-                await _stream_file_via_agent(db, redis, frame, remote_path, data)
-            else:
-                await _file_write_via_agent(redis, frame, remote_path, data, timeout)
+            await _stream_file_via_agent(db, redis, frame, remote_path, data)
+            # TODO: restore faster path for smaller files?
+            # if len(data) > 2 * 1024 * 1024:           # >2 MiB → streamed
+            # else:
+            #     await _file_write_via_agent(redis, frame, remote_path, data, timeout)
             return
         except Exception as e:  # noqa: BLE001
             await log(
