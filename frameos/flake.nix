@@ -43,6 +43,22 @@
         inherit system; overlays = [ lgpioOverlay ];
       };
 
+      rootFsModule = { lib, ... }: {
+        fileSystems = {
+          "/" = {
+            device = "/dev/disk/by-label/NIXOS_SD";
+            fsType = "ext4";
+          };
+          # Keep /boot/firmware mounted on rebuilds so kernel + DTBs get updated,
+          # but don’t fail the boot if it’s missing.
+          "/boot/firmware" = {
+            device  = "/dev/disk/by-label/FIRMWARE";
+            fsType  = "vfat";
+            options = [ "nofail" "noauto" ];
+          };
+        };
+      };
+
       frameosSrc = ./.;
       mkFrameOS = pkgs: pkgs.buildNimPackage {
         pname        = "frameos";
@@ -265,13 +281,7 @@
           swraid.enable       = lib.mkForce false;               # silence mdadm
           supportedFilesystems.zfs = lib.mkForce false;          # save time compiling zfs
         };
-        # ── dummy root so evaluation succeeds when no hardware‑configuration.nix
-        fileSystems."/" = lib.mkDefault {
-          device  = "none";       # literally the string “none”
-          fsType  = "tmpfs";      # no real disk needed
-          options = [ "mode=755" ];
-          neededForBoot = true;   # placates later checks
-        };
+        
         systemd.globalEnvironment.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
 
         systemd.services.frameos_agent = let
@@ -386,7 +396,7 @@
               sdImage = nixos-generators.nixosGenerate {
                 inherit system;
                 format  = "sd-aarch64";   # compressed .img.zst
-                modules = [ frameosModule ];
+                modules = [ rootFsModule frameosModule ];
               };
             };
           })
@@ -398,7 +408,7 @@
       nixosConfigurations = {
         "${hostName}" = nixpkgs.lib.nixosSystem {
           system  = "aarch64-linux";
-          modules = [ frameosModule ];
+          modules = [ rootFsModule frameosModule ];
         };
       };
 
