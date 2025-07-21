@@ -2,8 +2,9 @@
   description = "FrameOS for Raspberry Pi - packages, dev shells and flash-ready SD image";
 
   inputs = {
-    nixpkgs.url          = "nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     nixos-generators.url = "github:nix-community/nixos-generators";
+    nixos-generators.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = { self, nixpkgs, nixos-generators, ... }@inputs:

@@ -130,7 +130,18 @@ export function Settings() {
                     <Field name="buildServerUser" label="Build server user">
                       <TextInput placeholder="frameos" />
                     </Field>
-                    <Field name="buildServerPrivateKey" label="Build server private key" secret>
+                    <Field
+                      name="buildServerPrivateKey"
+                      label="Build server private key"
+                      secret={!!savedSettings?.nix?.buildServerPrivateKey}
+                    >
+                      <TextArea />
+                    </Field>
+                    <Field
+                      name="buildServerPublicKey"
+                      label="Build server public key"
+                      secret={!!savedSettings?.nix?.buildServerPublicKey}
+                    >
                       <TextArea />
                     </Field>
                     <Button
@@ -140,9 +151,6 @@ export function Settings() {
                     >
                       Generate new keypair
                     </Button>
-                    <Field name="buildServerPublicKey" label="Build server public key">
-                      <TextArea />
-                    </Field>
                   </Box>
                 </Group>
                 <Group name="ssh_keys">
@@ -151,6 +159,16 @@ export function Settings() {
                     <p className="text-sm leading-loose">
                       This SSH key will be used on all frames that don't have a password set for SSH.
                     </p>
+                    <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
+                      <TextArea />
+                    </Field>
+                    <Field
+                      name="default_public"
+                      label="Default public SSH key (use this in the RPi Imager)"
+                      secret={!!savedSettings?.ssh_keys?.default_public}
+                    >
+                      <TextArea />
+                    </Field>
                     <Button
                       onClick={newKey}
                       color={savedSettings?.ssh_keys?.default ? 'secondary' : 'primary'}
@@ -158,12 +176,6 @@ export function Settings() {
                     >
                       Generate new keypair
                     </Button>
-                    <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
-                      <TextArea />
-                    </Field>
-                    <Field name="default_public" label="Default public SSH key (use this in the RPi Imager)">
-                      <TextArea />
-                    </Field>
                   </Box>
                 </Group>
               </Form>

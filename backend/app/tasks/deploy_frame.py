@@ -77,11 +77,10 @@ class FrameDeployer:
 
         # Quote every path once; the remote loop echoes the missing ones.
         joined = " ".join(shlex.quote(p) for p in paths)
+        script = "for p; do [ -e \"$p\" ] || echo \"$p\"; done"
         out: list[str] = []
         await self.exec_command(
-            "bash -c 'for p in " + joined + "; do "
-            "  [ -e \"$p\" ] || echo \"$p\"; "
-            "done'",
+            f"bash -s -- {joined} <<'EOF'\n{script}\nEOF",
             output=out,
             raise_on_error=False,
             log_output=False,
@@ -217,6 +216,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
                     flake_changed = (local_flake_sha != remote_flake_sha) or (local_lock_sha != remote_lock_sha)
 
+                    # Redeploy the entire system. Always forcing redeploy for debugging.
+                    # flake_changed = True
                     if flake_changed:
                         await self.log("stdout", "- System flake changed → building system closure on backend & streaming to device")
                         # ─── a.  Build the *system* derivation locally (aarch64‑linux) ──────────────
