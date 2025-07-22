@@ -308,29 +308,29 @@ proc setupHtml*(frameOS: FrameOS): string =
     </select>
   </label>
   <label>Password<input type="password" name="password"></label>
+  <div style="margin:0 0 1rem;font-size:.875rem;color:#f9fafb;cursor:pointer;" id="portal-server-toggle">
+    ► Server connection
+  </div>
+  <div id="portal-server" style="display:none">
+    <label>Server Host
+      <input type="text" name="serverHost"
+            placeholder="my.frameos.server"
+            value="{htmlEscape(frameOS.frameConfig.serverHost)}" required>
+    </label>
 
-  <hr style="margin:1.5rem 0;border:0;border-top:1px solid #334155">
-  <h2 style="margin:0 0 1rem;font-size:1rem;font-weight:600;color:#f9fafb">
-    Server connection
-  </h2>
-
-  <label>Server Host
-    <input type="text" name="serverHost"
-           placeholder="my.frameos.server"
-           value="{htmlEscape(frameOS.frameConfig.serverHost)}" required>
-  </label>
-
-  <label>Server Port
-    <input type="number" min="1" max="65535"
-           name="serverPort"
-           value="{frameOS.frameConfig.serverPort}">
-  </label>
-
+    <label>Server Port
+      <input type="number" min="1" max="65535"
+            name="serverPort"
+            value="{frameOS.frameConfig.serverPort}">
+    </label>
+  </div>
   <button type="submit">Save &amp; Connect</button>
 </form>
 """ & """
 <script>
 const sel = document.getElementById('ssid');
+const toggleEl = document.getElementById('portal-server-toggle');
+const paneEl   = document.getElementById('portal-server');
 
 function setOptions(list, current) {
   sel.innerHTML = '';
@@ -367,11 +367,21 @@ function updateNetworks() {
     .catch(console.error);
 }
 
+function updateUI(open = false) {
+  paneEl.style.display = open ? 'block' : 'none';
+  toggleEl.textContent = (open ? '▼' : '►') + ' Server connection';
+}
+
+toggleEl.addEventListener('click', () =>
+  updateUI(paneEl.style.display === 'none')
+);
+
 loadCached();      // show cached list immediately if we have one
 updateNetworks();  // initial fetch to refresh list
 setInterval(updateNetworks, 10000); // refresh every 10 sec on a loop
 setTimeout(updateNetworks, 1000); // refresh in 1 sec
 setTimeout(updateNetworks, 4000); // refresh in 4 sec
+updateUI(false);         // start collapsed
 </script>""")
 
 proc confirmHtml*(): string =
@@ -380,8 +390,8 @@ proc confirmHtml*(): string =
 <p>The frame is now attempting to connect to Wi-Fi. You may close this tab.</p>
 <h2>Troubleshooting</h2>
 <ul>
-  <li>Wait about 60 seconds—your device can stay “stuck” on the frame’s network for a short time.</li>
-  <li>Manually disconnect from that network. If the “FrameOS-Setup” access-point reappears, the Wi-Fi credentials were likely wrong.</li>
+  <li>Wait about 60 seconds—your device can stay stuck on the setup network for a short time.</li>
+  <li>If the “FrameOS-Setup” access-point reappears, the Wi-Fi credentials were likely wrong.</li>
   <li>Reconnect to the access-point and run the setup again, double-checking SSID and password.</li>
 </ul><script>
 // Reload the page when it comes back
