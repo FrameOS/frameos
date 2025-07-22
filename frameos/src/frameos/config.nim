@@ -97,11 +97,14 @@ proc loadAgent*(data: JsonNode): AgentConfig =
       agentSharedSecret: data{"agentSharedSecret"}.getStr(""),
     )
 
+proc getConfigFilename*(): string =
+  result = getEnv("FRAMEOS_CONFIG")
+  if result == "":
+    result = "./frame.json"
+
 proc loadConfig*(): FrameConfig =
-  var filename = getEnv("FRAMEOS_CONFIG")
-  if filename == "":
-    filename = "./frame.json"
-  let data = parseFile(filename)
+  let data = parseFile(getConfigFilename())
+  # TODO: switch to jsony
   result = FrameConfig(
     name: data{"name"}.getStr(),
     serverHost: data{"serverHost"}.getStr(),

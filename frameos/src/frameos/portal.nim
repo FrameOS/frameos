@@ -1,4 +1,5 @@
 import os, osproc, httpclient, json, strformat, strutils, streams, times, threadpool, locks, tables
+import frameos/config
 import frameos/types
 import frameos/scenes
 import frameos/channels
@@ -178,7 +179,7 @@ proc connectToWifi*(frameOS: FrameOS,
                  %*{"serverHost": serverHost, "serverPort": serverPort,
                      "oldServerHost": oldServerHost, "oldServerPort": oldServerPort})
             try:
-              let filename = "frame.json"
+              let filename = getConfigFilename()
               var data: JsonNode
               data = parseFile(filename)
               data["serverHost"] = %*(serverHost)
