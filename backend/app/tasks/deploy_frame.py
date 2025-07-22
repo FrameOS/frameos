@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from pathlib import Path
 import json
 import os
 import random
@@ -184,22 +183,10 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 if distro == "nixos":
                     await self.log("stdout", "- NixOS detected – using flake-based deploy")
 
-                    flake_up_to_date = (
-                        await file_in_sync(self, "/etc/nixos/flake.nix", str(Path(source_dir_local) / "flake.nix")) and
-                        await file_in_sync(self, "/etc/nixos/flake.lock", str(Path(source_dir_local) / "flake.lock"))
-                    )
-
-                    if flake_up_to_date:
-                        await self.log("stdout", "- flake.nix up to date → updating just frameos")
-                        build_command = f"build \"$(realpath {source_dir_local})\"#packages.aarch64-linux.frameos "
-                    else:
-                        await self.log("stdout", "- flake.nix changed → updating the entire system")
-                        target_host = await get_hostname(self)
-                        build_command = f"build \"$(realpath {source_dir_local})\"#nixosConfigurations.{nix_attr(target_host)}.config.system.build.toplevel"
-
+                    target_host = await get_hostname(self)
                     sys_build_cmd, masked_build_cmd, cleanup = nix_cmd(
                         "nix --extra-experimental-features 'nix-command flakes' "
-                        f"{build_command} "
+                        f"build \"$(realpath {source_dir_local})\"#nixosConfigurations.{nix_attr(target_host)}.config.system.build.toplevel "
                         "--system aarch64-linux --print-out-paths "
                         "--log-format raw -L",
                         settings
@@ -218,12 +205,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     frame_json_data = (json.dumps(get_frame_json(db, frame), indent=4) + "\n").encode("utf-8")
                     await upload_file(self.db, self.redis, self.frame, "/var/lib/frameos/frame.json", frame_json_data)
 
-                    if not flake_up_to_date:
-                        await self.exec_command(f"sudo nix-env --profile /nix/var/nix/profiles/system --set {result_path}")
-                        await self.exec_command("nohup sudo /nix/var/nix/profiles/system/bin/switch-to-configuration switch")
-                    else:
-                        await self.exec_command(f"sudo nix-env --profile /nix/var/nix/profiles/system --set {result_path}")
-                        await self.exec_command("nohup sudo /nix/var/nix/profiles/system/bin/switch-to-configuration switch frameos")
+                    await self.exec_command(f"sudo nix-env --profile /nix/var/nix/profiles/system --set {result_path}")
+                    await self.exec_command("nohup sudo /nix/var/nix/profiles/system/bin/switch-to-configuration switch")
 
                     #  Save deploy metadata & finish early – nothing else to do
                     frame.status = 'starting'
@@ -726,7 +709,7 @@ async def nix_upload_path_and_deps(
     await self.log("stdout", f"- Collecting runtime closure for {path}")
     list_cmd = f"nix-store -qR {path}"
     status, paths_out, _ = await exec_local_command(
-        self.db, self.redis, self.frame, list_cmd
+        self.db, self.redis, self.frame, list_cmd, log_output=False
     )
     if status != 0:
         raise Exception("Failed to collect runtime closure")
@@ -765,7 +748,7 @@ async def nix_upload_path_and_deps(
                     f"sudo nix-store --import < {remote_tmp}/{base}.nar && "
                     f"rm {remote_tmp}/{base}.nar"
                 )
-                await self.log("stdout", f"    [{idx}/{len(missing)}] {base} imported")
+                await self.log("stdout", f"🍀 [{idx}/{len(missing)}] 🍀 {base} imported")
     finally:
         await self.exec_command(f"rmdir {remote_tmp}")
 

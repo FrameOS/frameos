@@ -51,7 +51,7 @@
           };
           # Keep /boot/firmware mounted on rebuilds so kernel + DTBs get updated,
           # but don’t fail the boot if it’s missing.
-          "/boot/firmware" = {
+          "/boot/firmware" = lib.mkIf (builtins.pathExists "/dev/disk/by-label/FIRMWARE") {
             device  = "/dev/disk/by-label/FIRMWARE";
             fsType  = "vfat";
             options = [ "nofail" "noauto" ];

@@ -59,6 +59,11 @@ proc hotspotRunning(frameOS: FrameOS): bool =
   result = output.strip().len > 0
   frameOS.network.hotspotStatus = if result: HotspotStatus.enabled else: HotspotStatus.disabled
 
+proc wifiConfigured(frameOS: FrameOS): bool =
+  let (output, _) = run("sudo nmcli --colors no -t -f NAME connection show | grep '^" &
+                     nmConnectionName & "$' || true")
+  result = output.strip().len > 0
+
 proc stopAp*(frameOS: FrameOS) =
   ## Tear down the hotspot
   if not hotspotRunning(frameOS):
@@ -259,10 +264,10 @@ proc checkNetwork*(self: FrameOS): bool =
     finally:
       client.close()
 
-    # If no connection, check if wifi is disconnected. If so, return false.
-    if nmState() == "disconnected":
+    # If no frameos-wifi connection configured (first boot?), no need to attempt more than once
+    if not wifiConfigured(self):
       self.network.status = NetworkStatus.error
-      self.logger.log(%*{"event": "networkCheck", "status": "nm_disconnected"})
+      self.logger.log(%*{"event": "networkCheck", "status": "wifi_not_configured"})
       return false
 
     sleep(attempt * 1000)
