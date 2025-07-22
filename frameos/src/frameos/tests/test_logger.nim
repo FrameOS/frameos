@@ -7,7 +7,7 @@ import std/json
 
 suite "Logger Tests":
   # We load your real config, but you can also stub or mock if you like.
-  let testConfig = loadConfig("./frame.json")
+  let testConfig = loadConfig()
 
   setup:
     # Before each test, clear out any leftover items in the log channel

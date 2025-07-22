@@ -97,7 +97,10 @@ proc loadAgent*(data: JsonNode): AgentConfig =
       agentSharedSecret: data{"agentSharedSecret"}.getStr(""),
     )
 
-proc loadConfig*(filename: string = "frame.json"): FrameConfig =
+proc loadConfig*(): FrameConfig =
+  var filename = getEnv("FRAMEOS_CONFIG")
+  if filename == "":
+    filename = "./frame.json"
   let data = parseFile(filename)
   result = FrameConfig(
     name: data{"name"}.getStr(),

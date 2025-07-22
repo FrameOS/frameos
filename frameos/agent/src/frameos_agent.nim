@@ -70,7 +70,10 @@ var currentUpload: UploadSession
 # Config IO (fails hard if unreadable)
 # ----------------------------------------------------------------------------
 
-proc loadConfig(path = DefaultConfigPath): FrameConfig =
+proc loadConfig(): FrameConfig =
+  var path = getEnv("FRAMEOS_CONFIG")
+  if path == "":
+    path = DefaultConfigPath
   if not fileExists(path):
     raise newException(IOError, "⚠️  config file not found: " & path)
   let raw = readFile(path)
