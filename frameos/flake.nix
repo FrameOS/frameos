@@ -96,7 +96,6 @@
       frameosModule = { pkgs, lib, ... }: {
         nixpkgs.overlays = [ lgpioOverlay allowMissingMods ];
         system.stateVersion = "25.05";
-
         time.timeZone       = "Europe/Brussels";
         environment = {
           systemPackages = with pkgs; [ cacert openssl ];
@@ -104,29 +103,6 @@
         };
         environment.etc."nixos/flake.nix".source = ./flake.nix;
         environment.etc."nixos/flake.lock".source = ./flake.lock;
-        # TODO: uncomment when we want to add a default WiFi connection
-        # environment.etc."NetworkManager/system-connections/frameos-default.nmconnection" = {
-        #   user  = "root"; group = "root"; mode = "0600";
-        #   text  = ''
-        #     [connection]
-        #     id=frameos-default
-        #     uuid=d96b6096-93a5-4c39-9f5c-6bb64bb97f7b
-        #     type=wifi
-        #     interface-name=wlan0
-        #     autoconnect=true
-        #     [wifi]
-        #     mode=infrastructure
-        #     ssid=XXX
-        #     [wifi-security]
-        #     key-mgmt=wpa-psk
-        #     psk=XXX
-        #     [ipv4]
-        #     method=auto
-        #     never-default=false
-        #     [ipv6]
-        #     method=auto
-        #   '';
-        # };
         networking = {
           hostName = hostName;
           wireless.enable = lib.mkForce false; # using NetworkManager instead
@@ -283,35 +259,8 @@
         };
         
         systemd.globalEnvironment.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
-
-        systemd.services.frameos_agent = let
-          frameosAgentPkg  = self.packages.${pkgs.system}.frameos_agent;
-        in {
-          wantedBy = [ "multi-user.target" ];
-          after    = [ "network-online.target" ];
-          wants    = [ "network-online.target" ];
-          restartIfChanged = true;
-
-          serviceConfig = {
-            Type        = "simple";
-            User        = "admin";
-            StateDirectory  = "frameos_agent";
-            SupplementaryGroups  = [ "wheel" ];
-            Environment = [
-              "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
-              "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
-              "FRAMEOS_CONFIG=/var/lib/frameos/frame.json"
-            ];
-            WorkingDirectory = "%S/frameos_agent";
-            ExecStart = "${self.packages.${pkgs.system}.frameos_agent}/bin/frameos_agent";
-
-            Restart     = "always";
-            RestartSec  = 5;
-            LimitNOFILE = 65536;
-            PrivateTmp  = true;
-            DevicePolicy = lib.mkForce "private";
-          };
-        };
+        systemd.globalEnvironment.FRAMEOS_CONFIG = "/var/lib/frameos/frame.json";
+        systemd.globalEnvironment.FRAMEOS_STATE = "/var/lib/frameos/state";
 
         systemd.services.frameos = let
           frameosPkg       = self.packages.${pkgs.system}.frameos; 
@@ -327,12 +276,10 @@
             SupplementaryGroups  = [ "gpio" "spi" "i2c" "video" "wheel" ];
             After       = ["systemd-udev-settle.service" "time-sync.target"];
             Environment = [
-              "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
               "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
-              "FRAMEOS_CONFIG=/var/lib/frameos/frame.json"
-              "FRAMEOS_STATE=/var/lib/frameos/state"
             ];
             ExecStart   = "${self.packages.${pkgs.system}.frameos}/bin/frameos";
+            # ExecStart   = "frameos";
 
             Restart   = "always";
             AmbientCapabilities = [ "CAP_SYS_RAWIO" ];
@@ -342,12 +289,52 @@
           path = [ pkgs.coreutils ];
         };
 
+        systemd.services.frameos_agent = let
+          frameosAgentPkg  = self.packages.${pkgs.system}.frameos_agent;
+        in {
+          wantedBy = [ "multi-user.target" ];
+          after    = [ "network-online.target" ];
+          wants    = [ "network-online.target" ];
+          restartIfChanged = true;
+
+          serviceConfig = {
+            Type        = "simple";
+            User        = "admin";
+            StateDirectory  = "frameos_agent";
+            SupplementaryGroups  = [ "wheel" ];
+            Environment = [
+              "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
+            ];
+            WorkingDirectory = "%S/frameos_agent";
+            ExecStart = "${self.packages.${pkgs.system}.frameos_agent}/bin/frameos_agent";
+            # ExecStart = "frameos_agent";
+
+            Restart     = "always";
+            RestartSec  = 5;
+            LimitNOFILE = 65536;
+            PrivateTmp  = true;
+            DevicePolicy = lib.mkForce "private";
+          };
+        };
+
+        systemd.services.NetworkManager = {
+          # Tell systemd to keep /var/lib/NetworkManager around
+          serviceConfig.StateDirectory = "NetworkManager";
+        };
+        environment.etc."NetworkManager/NetworkManager.conf".text = lib.mkForce ''
+          [main]
+          plugins=keyfile
+
+          [keyfile]
+          # Save every profile here instead of /etc
+          path=/var/lib/NetworkManager/system-connections
+        '';
+
         environment.etc."frame-initial.json".source = ./frame.json;
 
         systemd.tmpfiles.rules = [
           "d /var/lib/frameos/state    0770 admin users - -"
           "C /var/lib/frameos/frame.json 0660 admin users - ${./frame.json}"
-          "C /var/lib/frameos_agent/frame.json 0660 admin users - ${./frame.json}"
           "C /etc/nixos/flake.nix 0644 root root - ${./flake.nix}"
           "C /etc/nixos/flake.lock 0644 root root - ${./flake.lock}"
         ];
