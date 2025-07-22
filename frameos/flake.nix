@@ -290,18 +290,21 @@
           wantedBy = [ "multi-user.target" ];
           after    = [ "network-online.target" ];
           wants    = [ "network-online.target" ];
+          restartIfChanged = true;
 
           serviceConfig = {
             Type        = "simple";
             User        = "admin";
+            StateDirectory  = "frameos_agent";
             SupplementaryGroups  = [ "wheel" ];
             Environment = [
               "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
               "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
+              "FRAMEOS_CONFIG=/var/lib/frameos/frame.json"
             ];
-            WorkingDirectory = "/srv/frameos/agent/current";
-            # ExecStart = lib.mkForce "${frameosAgentPkg}/bin/frameos_agent";
-            ExecStart      = lib.mkForce "/srv/frameos/agent/current/frameos_agent";
+            WorkingDirectory = "%S/frameos_agent";
+            ExecStart = "${self.packages.${pkgs.system}.frameos_agent}/bin/frameos_agent";
+
             Restart     = "always";
             RestartSec  = 5;
             LimitNOFILE = 65536;
@@ -314,75 +317,40 @@
           frameosPkg       = self.packages.${pkgs.system}.frameos; 
         in {
           wantedBy = [ "multi-user.target" ];
-          after    = [ "systemd-udev-settle.service" ];
+          after    = [ "systemd-udev-settle.service" "time-sync.target" ];
+          restartIfChanged = true;
 
           serviceConfig = {
-            User  = "admin";
+            User        = "admin";
+            StateDirectory  = "frameos";
+            WorkingDirectory = "%S/frameos";    # %S → /var/lib
             SupplementaryGroups  = [ "gpio" "spi" "i2c" "video" "wheel" ];
-            After = ["systemd-udev-settle.service" "time-sync.target"];
+            After       = ["systemd-udev-settle.service" "time-sync.target"];
             Environment = [
               "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
               "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
+              "FRAMEOS_CONFIG=/var/lib/frameos/frame.json"
+              "FRAMEOS_STATE=/var/lib/frameos/state"
             ];
-            DevicePolicy = lib.mkForce "private";
-            AmbientCapabilities = [ "CAP_SYS_RAWIO" ];
-            WorkingDirectory = "/srv/frameos/current";
-            ExecStart      = lib.mkForce "/srv/frameos/current/frameos";
-            # ExecStart = lib.mkForce "${frameosPkg}/bin/frameos";
+            ExecStart   = "${self.packages.${pkgs.system}.frameos}/bin/frameos";
+
             Restart   = "always";
+            AmbientCapabilities = [ "CAP_SYS_RAWIO" ];
             NoNewPrivileges = "no";
+            DevicePolicy = lib.mkForce "private";
           };
           path = [ pkgs.coreutils ];
         };
 
         environment.etc."frame-initial.json".source = ./frame.json;
 
-        system.activationScripts.initializeFrameOS.text =
-          let frameosBinary = self.packages.${pkgs.system}.frameos + "/bin/frameos";
-              frameosAgentBinary = self.packages.${pkgs.system}.frameos_agent + "/bin/frameos_agent";
-          in ''
-            # Only run on very first boot
-            if [ ! -e "/srv/frameos" ]; then
-              echo "⏩  populating first-boot FrameOS release"
-              mkdir -p "/srv/frameos/releases/initial" /srv/frameos/state /srv/frameos/logs /srv/frameos/assets 
-
-              # Only copy the binary if it actually exists for the target arch
-              if [ -x "${frameosBinary}" ]; then
-                ln -s "${frameosBinary}" "/srv/frameos/releases/initial/frameos"
-              fi
-              chown -R admin:users /srv/frameos
-
-              ln -sfn /srv/frameos/state "/srv/frameos/releases/initial/state"
-              cp /etc/frame-initial.json "/srv/frameos/releases/initial/frame.json"
-              chown -R admin:users "/srv/frameos/releases/initial/frame.json"
-              chmod 660 "/srv/frameos/releases/initial/frame.json"
-
-              ln -sfn "/srv/frameos/releases/initial" /srv/frameos/current
-            fi
-            if [ ! -e "/srv/assets" ]; then
-              echo "Creating assets folder"
-              mkdir -p "/srv/assets"
-              chown -R admin:users /srv/assets
-              chmod 770 /srv/assets
-            fi
-            # Only run on very first boot
-            if [ ! -e "/srv/frameos/agent" ]; then
-              echo "⏩  populating first-boot FrameOS release"
-              mkdir -p "/srv/frameos/agent/releases/initial" 
-
-              # Only copy the binary if it actually exists for the target arch
-              if [ -x "${frameosAgentBinary}" ]; then
-                ln -s "${frameosAgentBinary}" "/srv/frameos/agent/releases/initial/frameos_agent"
-              fi
-              chown -R admin:users /srv/frameos/agent
-
-              cp /etc/frame-initial.json "/srv/frameos/agent/releases/initial/frame.json"
-              chown -R admin:users "/srv/frameos/agent/releases/initial/frame.json"
-              chmod 660 "/srv/frameos/agent/releases/initial/frame.json"
-
-              ln -sfn "/srv/frameos/agent/releases/initial" /srv/frameos/agent/current
-            fi
-          '';
+        systemd.tmpfiles.rules = [
+          "d /var/lib/frameos/state    0770 admin users - -"
+          "C /var/lib/frameos/frame.json 0660 admin users - ${./frame.json}"
+          "C /var/lib/frameos_agent/frame.json 0660 admin users - ${./frame.json}"
+          "C /etc/nixos/flake.nix 0644 root root - ${./flake.nix}"
+          "C /etc/nixos/flake.lock 0644 root root - ${./flake.lock}"
+        ];
       };
 
       # ──────────────────────────────────────────────────────────────────

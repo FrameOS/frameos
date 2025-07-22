@@ -215,53 +215,15 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
                     await nix_upload_path_and_deps(self, result_path)
 
+                    frame_json_data = (json.dumps(get_frame_json(db, frame), indent=4) + "\n").encode("utf-8")
+                    await upload_file(self.db, self.redis, self.frame, "/var/lib/frameos/frame.json", frame_json_data)
+
                     if not flake_up_to_date:
                         await self.exec_command(f"sudo nix-env --profile /nix/var/nix/profiles/system --set {result_path}")
-                        await self.exec_command("sudo /nix/var/nix/profiles/system/bin/switch-to-configuration switch")
+                        await self.exec_command("nohup sudo /nix/var/nix/profiles/system/bin/switch-to-configuration switch")
                     else:
-                        binary_path = os.path.join(result_path, "bin", "frameos")
-                        if not os.path.exists(binary_path):
-                            raise Exception(f"Expected binary not found at {binary_path}")
-
-                        # ─── 3.  Create new release on the device ────────────────
-                        await self.exec_command(
-                            "if [ ! -d /srv/frameos/ ]; then "
-                            "  sudo mkdir -p /srv/frameos/ && sudo chown $(whoami) /srv/frameos/; "
-                            "fi"
-                        )
-                        await self.exec_command(f"mkdir -p /srv/frameos/releases/release_{build_id}")
-
-                        with open(binary_path, "rb") as fh:
-                            await upload_file(
-                                self.db, self.redis, self.frame,
-                                f"/srv/frameos/releases/release_{build_id}/frameos",
-                                fh.read()
-                            )
-                        await self.exec_command(f"chmod 700 /srv/frameos/releases/release_{build_id}/frameos")
-
-                        #  frame.json as before
-                        frame_json_data = (
-                            json.dumps(get_frame_json(db, frame), indent=4) + "\n"
-                        ).encode("utf-8")
-                        await upload_file(
-                            self.db, self.redis, self.frame,
-                            f"/srv/frameos/releases/release_{build_id}/frame.json",
-                            frame_json_data,
-                        )
-
-                        await self.exec_command(
-                            f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state "
-                            f"/srv/frameos/releases/release_{build_id}/state"
-                        )
-                        #  Switch /srv/frameos/current → new release
-                        await self.exec_command(
-                            f"rm -rf /srv/frameos/current && "
-                            f"ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current"
-                        )
-
-                        await self.exec_command("sudo systemctl daemon-reload")
-                        await self.exec_command("sudo systemctl enable frameos.service")
-                        await self.exec_command("sudo systemctl restart frameos.service")
+                        await self.exec_command(f"sudo nix-env --profile /nix/var/nix/profiles/system --set {result_path}")
+                        await self.exec_command("nohup sudo /nix/var/nix/profiles/system/bin/switch-to-configuration switch frameos")
 
                     #  Save deploy metadata & finish early – nothing else to do
                     frame.status = 'starting'
@@ -272,6 +234,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     return   # ← all done, skip the legacy RPiOS flow
 
             ## /END NIXOS
+
+
+            ## Deploy onto Raspberry Pi OS or Debian/Ubuntu:
 
 
             if distro == "raspios":
