@@ -346,6 +346,7 @@ async def _run_command_agent(
     timeout: int,
     *,
     log_output: bool = True,
+    log_command: str | bool = True,
 ) -> Tuple[int, str, str]:
     """
     Execute *cmd* via the WebSocket agent, collecting stdout/stderr that are
@@ -355,7 +356,8 @@ async def _run_command_agent(
     cmd_id = str(uuid.uuid4())
     payload = {"type": "cmd", "name": "shell", "args": {"cmd": cmd}}
 
-    await log(db, redis, frame.id, "stdout", f"> {cmd}")
+    if log_command:
+        await log(db, redis, frame.id, "stdout", f"> {log_command if isinstance(log_command, str) else cmd}")
 
     from app.ws.agent_bridge import CMD_KEY, STREAM_KEY, RESP_KEY
 
@@ -364,6 +366,7 @@ async def _run_command_agent(
         "frame_id": frame.id,
         "payload":  payload,
         "timeout":  timeout,
+        # TODO: "log": bool(log_command),  # not used yet
     }
     await redis.rpush(CMD_KEY.format(id=frame.id), json.dumps(job).encode())
 
@@ -420,6 +423,7 @@ async def _run_command_ssh(
     timeout: int,
     *,
     log_output: bool = True,
+    log_command: str | bool = True
 ) -> Tuple[int, str, str]:
     """
     Execute *cmd* over SSH, capturing stdout & stderr separately.
@@ -427,7 +431,8 @@ async def _run_command_ssh(
     """
     ssh = await get_ssh_connection(db, redis, frame)
     try:
-        await log(db, redis, frame.id, "stdout", f"> {cmd}")
+        if log_command:
+            await log(db, redis, frame.id, "stdout", f"> {log_command if isinstance(log_command, str) else cmd}")
 
         proc = await ssh.create_process(cmd)
 
@@ -474,6 +479,7 @@ async def run_command(
     *,
     timeout: int = 120,
     log_output: bool = True,
+    log_command: str | bool = True,
 ) -> Tuple[int, str, str]:
     """
     Run a single *command* on *frame* and capture its textual output.
@@ -484,5 +490,5 @@ async def run_command(
     Returns a tuple: **(exit_status, stdout, stderr)** – all text.
     """
     if await _use_agent(frame, redis):
-        return await _run_command_agent(db, redis, frame, command, timeout, log_output=log_output)
-    return await _run_command_ssh(db, redis, frame, command, timeout, log_output=log_output)
+        return await _run_command_agent(db, redis, frame, command, timeout, log_output=log_output, log_command=log_command)
+    return await _run_command_ssh(db, redis, frame, command, timeout, log_output=log_output, log_command=log_command)

@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 import json
+import math
 import os
+from pathlib import Path
 import random
 import hashlib
 import re
@@ -48,11 +50,12 @@ class FrameDeployer:
         command: str,
         output: Optional[list[str]] = None,
         log_output: bool = True,
+        log_command: str | bool = True,
         raise_on_error: bool = True,
         timeout: int = 600 # 10 minutes default timeout
     ) -> int:
         status, stdout, stderr = await run_command(
-            self.db, self.redis, self.frame, command, log_output=log_output, timeout=timeout
+            self.db, self.redis, self.frame, command, log_output=log_output, log_command=log_command, timeout=timeout
         )
         if output is not None:
             lines = (stdout + "\n" + stderr).splitlines()
@@ -82,6 +85,7 @@ class FrameDeployer:
             f"bash -s -- {joined} <<'EOF'\n{script}\nEOF",
             output=out,
             raise_on_error=False,
+            log_command=f"bash -s -- **SKIPPED** <<'EOF'\n{script}\nEOF",
             log_output=False,
         )
         # Every line produced by the loop is a missing store path.
@@ -176,7 +180,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             with tempfile.TemporaryDirectory() as temp_dir_local:
                 await self.log("stdout", f"- Preparing sources with local modifications under {temp_dir_local}")
-                build_dir_local, source_dir_local = create_build_folders(temp_dir_local, self.build_id)
+                source_dir_local = create_local_source_folder(temp_dir_local)
                 await make_local_modifications(self, source_dir_local)
 
                 # Fast-path for NixOS targets
@@ -206,8 +210,10 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     await upload_file(self.db, self.redis, self.frame, "/var/lib/frameos/frame.json", frame_json_data)
 
                     await self.exec_command(f"sudo nix-env --profile /nix/var/nix/profiles/system --set {result_path}")
-                    await self.exec_command("nohup sudo /nix/var/nix/profiles/system/bin/switch-to-configuration switch")
-
+                    await self.exec_command(
+                        "sudo systemd-run --unit=nixos-switch --no-ask-password "
+                        "/nix/var/nix/profiles/system/bin/switch-to-configuration switch"
+                    )
                     #  Save deploy metadata & finish early – nothing else to do
                     frame.status = 'starting'
                     frame.last_successful_deploy     = frame_dict
@@ -234,7 +240,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             # 1. Create build tar.gz locally
             await self.log("stdout", "- Copying build folders")
-            build_dir, source_dir = create_build_folders(temp_dir, build_id)
+            build_dir = create_build_folder(temp_dir, build_id)
+            source_dir = create_local_source_folder(temp_dir)
             await self.log("stdout", "- Applying local modifications")
             await make_local_modifications(self, source_dir)
             await self.log("stdout", "- Creating build archive")
@@ -509,13 +516,16 @@ async def get_hostname(self) -> str:
     return target_host
 
 
-def create_build_folders(temp_dir, build_id):
+def create_build_folder(temp_dir, build_id):
     build_dir = os.path.join(temp_dir, f"build_{build_id}")
+    os.makedirs(build_dir, exist_ok=True)
+    return build_dir
+
+def create_local_source_folder(temp_dir):
     source_dir = os.path.join(temp_dir, "frameos")
     os.makedirs(source_dir, exist_ok=True)
     shutil.copytree("../frameos", source_dir, dirs_exist_ok=True)
-    os.makedirs(build_dir, exist_ok=True)
-    return build_dir, source_dir
+    return source_dir
 
 
 async def make_local_modifications(self: FrameDeployer, source_dir: str):
@@ -702,53 +712,113 @@ async def create_local_build_archive(
     shutil.make_archive(zip_base, 'gztar', temp_dir, f"build_{build_id}")
     return archive_path
 
+BYTES_PER_MB   = 1_048_576
+DEFAULT_CHUNK  = 25 * BYTES_PER_MB
+
 async def nix_upload_path_and_deps(
     self: "FrameDeployer",
     path: str,
+    max_chunk_size: int = DEFAULT_CHUNK,
 ):
+    """
+    Export the full runtime closure of *path* and import it on the target
+    machine, but bundle the nar streams so that at most `max_chunk_size`
+    bytes are transferred per upload (≈10 MiB by default).
+
+    The implementation relies on
+        • `nix path-info --json` to get the *narSize* of every path once,
+        • `nix-store --export …` which can export many store paths in one
+          go, producing a concatenated nar stream,
+        • `nix-store --import` on the device to unpack an entire chunk.
+    """
     await self.log("stdout", f"- Collecting runtime closure for {path}")
-    list_cmd = f"nix-store -qR {path}"
-    status, paths_out, _ = await exec_local_command(
-        self.db, self.redis, self.frame, list_cmd, log_output=False
+
+    # 1. Get complete closure
+    status, paths_out, err = await exec_local_command(
+        self.db, self.redis, self.frame, f"nix-store -qR {path}", log_output=False
     )
-    if status != 0:
-        raise Exception("Failed to collect runtime closure")
+    if status:
+        raise RuntimeError(f"Failed to collect closure: {err}")
 
     runtime_paths = (paths_out or "").strip().splitlines()
     await self.log("stdout", f"  → {len(runtime_paths)} store paths")
+
+    # 2. Filter out paths that are already present on the device
     missing = await self._store_paths_missing(runtime_paths)
     if not missing:
         await self.log("stdout", "  → No missing store paths, skipping upload")
         return
+    await self.log(
+        "stdout",
+        f"  → {len(missing)} paths need upload; bundling in ≤{max_chunk_size // BYTES_PER_MB} MiB chunks"
+    )
 
-    await self.log("stdout", f"  → {len(runtime_paths)} store paths ({len(missing)} need upload)")
+    # 3. Query nar sizes once for all paths
+    cmd = ["nix", "path-info", "--json", *missing]
+    status, size_json, err = await exec_local_command(
+        self.db, self.redis, self.frame, " ".join(cmd), log_output=False
+    )
+    if status:
+        raise RuntimeError(f"nix path-info failed: {err}")
+
+    size_info: dict[str, int] = {}
+    info = json.loads(size_json or "{}")
+
+    if isinstance(info, dict):
+        # `info` maps path → metadata
+        for p, meta in info.items():
+            # prefer `narSize` (current), fall back to legacy `nar`
+            size_info[p] = int(meta.get("narSize") or meta.get("nar") or 0)
+    else:  # older nix (<2.4) returned a list
+        for meta in info:                          # type: ignore[arg-type]
+            size_info[meta["path"]] = int(meta.get("narSize") or meta.get("nar") or 0)
+
+    # 4. Greedily pack paths up to ~max_chunk_size each
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    current_size = 0
+    for p in missing:
+        nar_size = size_info.get(p, 0)
+        # start new chunk if adding would overflow (but always put at least one)
+        if current and current_size + nar_size > max_chunk_size:
+            chunks.append(current)
+            current, current_size = [], 0
+        current.append(p)
+        current_size += nar_size
+    if current:
+        chunks.append(current)
+
+    await self.log("stdout", f"  → Uploading in {len(chunks)} chunk(s)")
 
     remote_tmp = f"/tmp/frameos_import_{self.build_id}"
     await self.exec_command(f"mkdir -p {remote_tmp}")
-    try:
-        for idx, p in enumerate(missing, 1):
-            with tempfile.TemporaryDirectory() as tmpdirname:
-                base = os.path.basename(p)
-                nar_local = os.path.join(tmpdirname, f"{base}.nar")
-                cmd = f"nix-store --export {p} > {nar_local}"
-                status, _, err = await exec_local_command(
-                    self.db, self.redis, self.frame, cmd
-                )
-                if status != 0:
-                    raise Exception(f"Export failed for {p}:\n{err}")
 
+    try:
+        for i, chunk in enumerate(chunks, 1):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                nar_local = Path(tmpdir) / f"chunk_{i}.nar"
+                export_cmd = f"nix-store --export {' '.join(shlex.quote(p) for p in chunk)} > {nar_local}"
+                status, _, err = await exec_local_command(
+                    self.db, self.redis, self.frame, export_cmd
+                )
+                if status:
+                    raise RuntimeError(f"Export failed for chunk {i}: {err}")
+
+                # 5. Ship and import the chunk
+                remote_nar = f"{remote_tmp}/chunk_{i}.nar"
                 with open(nar_local, "rb") as fh:
                     await upload_file(
-                        self.db, self.redis, self.frame,
-                        f"{remote_tmp}/{base}.nar",
-                        fh.read(),
+                        self.db, self.redis, self.frame, remote_nar, fh.read()
                     )
 
                 await self.exec_command(
-                    f"sudo nix-store --import < {remote_tmp}/{base}.nar && "
-                    f"rm {remote_tmp}/{base}.nar"
+                    f"sudo nix-store --import < {remote_nar} && rm {remote_nar}"
                 )
-                await self.log("stdout", f"🍀 [{idx}/{len(missing)}] 🍀 {base} imported")
+                await self.log(
+                    "stdout",
+                    f"🍀 imported chunk {i}/{len(chunks)} 🍀 "
+                    f"({len(chunk)} paths, {math.ceil(nar_local.stat().st_size/BYTES_PER_MB)} MiB)"
+                )
     finally:
         await self.exec_command(f"rmdir {remote_tmp}")
 

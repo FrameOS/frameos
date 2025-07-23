@@ -11,7 +11,7 @@ async def exec_local_command(
     redis: ArqRedis,
     frame: Frame,
     command: str,
-    log_command: bool = True,
+    log_command: str | bool = True,
     log_output: bool = True
 ) -> Tuple[int, Optional[str], Optional[str]]:
 
