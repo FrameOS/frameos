@@ -18,7 +18,7 @@ RUN apt-get update && \
   apt-get install -y curl xz-utils gcc openssl ca-certificates git # &&
 
 RUN mkdir -p /opt/nim && \
-    curl -L https://nim-lang.org/download/nim-2.2.0.tar.xz | tar -xJf - -C /opt/nim --strip-components=1 && \
+    curl -L https://nim-lang.org/download/nim-2.2.4.tar.xz | tar -xJf - -C /opt/nim --strip-components=1 && \
     cd /opt/nim && \
     sh build.sh && \
     bin/nim c koch && \

@@ -93,14 +93,17 @@
       # ──────────────────────────────────────────────────────────────────
       # Common module used for both the sd image *and* nixosConfigurations
       # ──────────────────────────────────────────────────────────────────
-      frameosModule = { pkgs, lib, ... }: {
+      frameosModule = { pkgs, lib, ... }: let
+        frameosPkg = self.packages.${pkgs.system}.frameos; 
+        frameosAgentPkg = self.packages.${pkgs.system}.frameos_agent;
+      in {
         nixpkgs.overlays = [ lgpioOverlay allowMissingMods ];
         system.stateVersion = "25.05";
         time.timeZone       = "Europe/Brussels";
-        environment = {
-          systemPackages = with pkgs; [ cacert openssl ];
-          variables.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
-        };
+        environment.systemPackages = with pkgs; [ 
+          cacert openssl frameosPkg frameosAgentPkg
+        ];
+        environment.variables.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
         environment.etc."nixos/flake.nix".source = ./flake.nix;
         environment.etc."nixos/flake.lock".source = ./flake.lock;
         networking = {
@@ -262,24 +265,20 @@
         systemd.globalEnvironment.FRAMEOS_CONFIG = "/var/lib/frameos/frame.json";
         systemd.globalEnvironment.FRAMEOS_STATE = "/var/lib/frameos/state";
 
-        systemd.services.frameos = let
-          frameosPkg       = self.packages.${pkgs.system}.frameos; 
-        in {
+        systemd.services.frameos = {
           wantedBy = [ "multi-user.target" ];
           after    = [ "systemd-udev-settle.service" "time-sync.target" ];
           restartIfChanged = true;
-
+          restartTriggers = [ frameosPkg ];
+          
           serviceConfig = {
             User        = "admin";
             StateDirectory  = "frameos";
             WorkingDirectory = "%S/frameos";    # %S → /var/lib
             SupplementaryGroups  = [ "gpio" "spi" "i2c" "video" "wheel" ];
             After       = ["systemd-udev-settle.service" "time-sync.target"];
-            Environment = [
-              "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
-            ];
-            ExecStart   = "${self.packages.${pkgs.system}.frameos}/bin/frameos";
-            # ExecStart   = "frameos";
+            Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
+            ExecStart   = "${frameosPkg}/bin/frameos";
 
             Restart   = "always";
             AmbientCapabilities = [ "CAP_SYS_RAWIO" ];
@@ -289,28 +288,24 @@
           path = [ pkgs.coreutils ];
         };
 
-        systemd.services.frameos_agent = let
-          frameosAgentPkg  = self.packages.${pkgs.system}.frameos_agent;
-        in {
+        systemd.services.frameos_agent = {
           wantedBy = [ "multi-user.target" ];
           after    = [ "network-online.target" ];
           wants    = [ "network-online.target" ];
           restartIfChanged = true;
+          restartTriggers = [ frameosAgentPkg ];
 
           serviceConfig = {
             Type        = "simple";
             User        = "admin";
             StateDirectory  = "frameos_agent";
             SupplementaryGroups  = [ "wheel" ];
-            Environment = [
-              "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
-            ];
+            Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
             WorkingDirectory = "%S/frameos_agent";
-            ExecStart = "${self.packages.${pkgs.system}.frameos_agent}/bin/frameos_agent";
-            # ExecStart = "frameos_agent";
+            ExecStart   = "${frameosAgentPkg}/bin/frameos_agent";
 
             Restart     = "always";
-            RestartSec  = 5;
+            RestartSec  = 1;
             LimitNOFILE = 65536;
             PrivateTmp  = true;
             DevicePolicy = lib.mkForce "private";
@@ -329,8 +324,6 @@
           # Save every profile here instead of /etc
           path=/var/lib/NetworkManager/system-connections
         '';
-
-        environment.etc."frame-initial.json".source = ./frame.json;
 
         systemd.tmpfiles.rules = [
           "d /var/lib/frameos/state    0770 admin users - -"
