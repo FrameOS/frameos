@@ -54,8 +54,8 @@ async def build_sd_card_image_task(
                         flake_dir, dirs_exist_ok=True)
 
         await log(db, redis, id, "build",
-                  f"Building SD-card image for frame {id} ({frame.name}) "
-                  f"with build ID {build_id}. This may take a while. The download will begin once the logs stop. Please don't run a second time while this is running.")
+                  f"Building SD-card image for frame \"{frame.name}\" with build ID {build_id}. "
+                  "This may take around 5 minutes. The download will begin then. Please don't run a second time while already building.")
 
         # patch sources exactly like deploy_frame (re-use helpers)
         await make_local_modifications(
