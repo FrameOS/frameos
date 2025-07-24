@@ -13,9 +13,11 @@ import { sceneLogic } from '../sceneLogic'
 import { Masonry } from '../../components/Masonry'
 import { TrashIcon } from '@heroicons/react/24/solid'
 import { NumberTextInput } from '../../components/NumberTextInput'
+import { Switch } from '../../components/Switch'
 
 export function Settings() {
   const {
+    settings,
     savedSettings,
     savedSettingsLoading,
     settingsChanged,
@@ -118,39 +120,46 @@ export function Settings() {
                     <Field name="buildExtraArgs" label="Extra args to build commands">
                       <TextInput placeholder="-j0" />
                     </Field>
-                    <Field name="buildServer" label="Build server address">
-                      <TextInput placeholder="build.frameos.net" />
+                    <Field name="buildServerEnabled" label="Enable remote build server">
+                      <Switch />
                     </Field>
-                    <Field name="buildServerPort" label="Build server port">
-                      <NumberTextInput placeholder="22" />
-                    </Field>
-                    <Field name="buildServerMaxParallelJobs" label="Max parallel jobs on build server">
-                      <NumberTextInput placeholder="8" />
-                    </Field>
-                    <Field name="buildServerUser" label="Build server user">
-                      <TextInput placeholder="frameos" />
-                    </Field>
-                    <Field
-                      name="buildServerPrivateKey"
-                      label="Build server private key"
-                      secret={!!savedSettings?.nix?.buildServerPrivateKey}
-                    >
-                      <TextArea />
-                    </Field>
-                    <Field
-                      name="buildServerPublicKey"
-                      label="Build server public key"
-                      secret={!!savedSettings?.nix?.buildServerPublicKey}
-                    >
-                      <TextArea />
-                    </Field>
-                    <Button
-                      onClick={newNixKey}
-                      color={savedSettings?.ssh_keys?.default ? 'secondary' : 'primary'}
-                      size="small"
-                    >
-                      Generate new keypair
-                    </Button>
+                    {settings?.nix?.buildServerEnabled ? (
+                      <>
+                        <Field name="buildServer" label="Build server address">
+                          <TextInput placeholder="build.frameos.net" />
+                        </Field>
+                        <Field name="buildServerPort" label="Build server port">
+                          <NumberTextInput placeholder="22" />
+                        </Field>
+                        <Field name="buildServerMaxParallelJobs" label="Max parallel jobs on build server">
+                          <NumberTextInput placeholder="8" />
+                        </Field>
+                        <Field name="buildServerUser" label="Build server user">
+                          <TextInput placeholder="frameos" />
+                        </Field>
+                        <Field
+                          name="buildServerPrivateKey"
+                          label="Build server private key"
+                          secret={!!savedSettings?.nix?.buildServerPrivateKey}
+                        >
+                          <TextArea />
+                        </Field>
+                        <Field
+                          name="buildServerPublicKey"
+                          label="Build server public key"
+                          secret={!!savedSettings?.nix?.buildServerPublicKey}
+                        >
+                          <TextArea />
+                        </Field>
+                        <Button
+                          onClick={newNixKey}
+                          color={savedSettings?.ssh_keys?.default ? 'secondary' : 'primary'}
+                          size="small"
+                        >
+                          Generate new keypair
+                        </Button>
+                      </>
+                    ) : null}
                   </Box>
                 </Group>
                 <Group name="ssh_keys">

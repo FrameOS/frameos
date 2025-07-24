@@ -504,6 +504,7 @@ export interface FrameOSSettings {
   }
   nix?: {
     buildExtraArgs?: string
+    buildServerEnabled?: booelan
     buildServer?: string
     buildServerPort?: number
     buildServerUser?: string

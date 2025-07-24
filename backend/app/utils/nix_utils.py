@@ -58,6 +58,9 @@ def nix_cmd(base: str, settings: Dict[str, Any] | None) -> Tuple[str, str, Calla
         return None
 
     # -- 2. remote builder ---------------------------------------------------
+    enabled = nix.get("buildServerEnabled")
+    if not enabled:
+        return base, masked, cleanup                          # nothing else to add
     host = nix.get("buildServer")
     if not host:
         return base, masked, cleanup                          # nothing else to add
