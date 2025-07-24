@@ -60,7 +60,7 @@ from app.utils.remote_exec import (
 from app.tasks.utils import find_nim_v2
 from app.tasks.deploy_frame import (
     FrameDeployer,
-    create_build_folders,
+    create_local_source_folder,
     make_local_modifications,
 )
 from app.redis import get_redis
@@ -490,7 +490,7 @@ async def api_frame_local_build_zip(                 # noqa: D401
     # Workspace ────────────────────────────────────────────────────────────
     with tempfile.TemporaryDirectory() as tmp:
         deployer = FrameDeployer(db, redis, frame, nim_path, tmp)
-        build_dir, source_dir = create_build_folders(tmp, deployer.build_id)
+        source_dir = create_local_source_folder(tmp)
 
         # Apply all frame‑specific code generation (scenes, drivers, …)
         await make_local_modifications(deployer, source_dir)
