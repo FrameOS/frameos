@@ -66,8 +66,9 @@
         src          = frameosSrc;
         nimbleFile   = "frameos.nimble";
         lockFile     = "${frameosSrc}/lock.json";
-        nimFlags     = [ "--lineTrace:on" ];
-        buildInputs  = with pkgs; [ lgpio libevdev zstd ];
+        buildInputs  = with pkgs; [ lgpio libevdev zstd openssl ];
+        nimDefines   = [ "ssl" ];
+        nimFlags     = [ "--lineTrace:on" "--stackTrace:on" "-d:ssl" ];
         meta.mainProgram = "frameos";
         postPatch = ''
           substituteInPlace frameos.nimble \
@@ -80,8 +81,9 @@
         src          = ./agent;
         nimbleFile   = "frameos_agent.nimble";
         lockFile     = ./agent/lock.json;
-        nimFlags     = [ "--debugger:native" "--lineTrace:on" "--stackTrace:on" "--define:useMalloc" "--profiler:on" "--panics:on" "-g" ];
         buildInputs  = with pkgs; [ zstd openssl ];
+        nimDefines   = [ "ssl" ];
+        nimFlags     = [ "--lineTrace:on" "--stackTrace:on" "--define:useMalloc" "--profiler:on" "--panics:on" "-g" "-d:ssl" ];
         meta.mainProgram = "frameos_agent";
         postPatch = ''
           substituteInPlace frameos_agent.nimble \
