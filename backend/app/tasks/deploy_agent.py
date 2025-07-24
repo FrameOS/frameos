@@ -54,6 +54,7 @@ class AgentDeployer:
 
         # Build identifier (12-random-letters)
         self.build_id = "".join(random.choices(string.ascii_lowercase, k=12))
+        self.deploy_start = datetime.now()
 
     async def run(self) -> None:
         """Main orchestration coroutine (used by global ``deploy_agent_task``)."""
@@ -94,7 +95,7 @@ class AgentDeployer:
                         await self._setup_agent_service()
 
                         # 3. Upload *frame.json* for this release
-                        await self._upload_frame_json()
+                        await self._upload_frame_json(f"/srv/frameos/agent/releases/release_{self.build_id}/frame.json")
 
                         # 4. Atomically switch *current* → new release + housekeeping
                         await self.exec_command(
@@ -109,6 +110,10 @@ class AgentDeployer:
                         await self.exec_command("sudo systemctl status frameos_agent.service")
 
                         await self._cleanup_old_builds()
+                        await self.log(
+                            "stdout",
+                            f"Agent deployment completed for {self.frame.name} (build id: {self.build_id})",
+                        )
                 else:
                     await self.log(
                         "stdout",
@@ -122,10 +127,6 @@ class AgentDeployer:
                         "sudo systemctl stop frameos_agent.service", raise_on_error=False
                     )
 
-                await self.log(
-                    "stdout",
-                    f"Agent deployment completed for {self.frame.name} (build id: {self.build_id})",
-                )
 
         except Exception as exc:  # keep logging parity with legacy code
             await self.log("stderr", str(exc))
@@ -365,33 +366,12 @@ class AgentDeployer:
             f"sudo nix-store --import < /tmp/frameos_agent_closure_{self.build_id}.nar && "
             f"rm /tmp/frameos_agent_closure_{self.build_id}.nar"
         )
-
-        # ─── 4.  Stage new release  ───────────────────────────────────────
-        await self.exec_command(
-            f"mkdir -p /srv/frameos/agent/releases/release_{self.build_id}"
-        )
-        # copy the binary (it’s already in the store on the device)
-        await self.exec_command(
-            f"cp {store_path}/bin/frameos_agent "
-            f"/srv/frameos/agent/releases/release_{self.build_id}/frameos_agent"
-        )
-        await self._upload_frame_json()
-
-        # ─── 5.  Atomically switch & restart service ─────────────────────
-        await self.exec_command(
-            "rm -rf /srv/frameos/agent/current && "
-            f"ln -s /srv/frameos/agent/releases/release_{self.build_id} "
-            "/srv/frameos/agent/current"
-        )
-        await self.exec_command("sudo systemctl daemon-reload")
-        await self.exec_command("sudo systemctl enable  frameos_agent.service")
-        await self.exec_command("sudo systemctl restart frameos_agent.service")
-
-        await self.log("stdout", "Agent deploy finished on NixOS 🎉")
+        await self._upload_frame_json("/var/lib/frameos/frame.json")
+        await self.log("stdout", f"Agent deploy finished in {datetime.now() - self.deploy_start} 🎉")
 
     # --------------- MISC ------------------------------------------------ #
 
-    async def _upload_frame_json(self) -> None:
+    async def _upload_frame_json(self, path: str) -> None:
         """Upload the release-specific `frame.json`."""
         json_data = json.dumps(get_frame_json(self.db, self.frame), indent=4).encode() + b"\n"
 
@@ -401,13 +381,13 @@ class AgentDeployer:
 
         await asyncssh.scp(
             tmp_path,
-            (self.ssh, f"/srv/frameos/agent/releases/release_{self.build_id}/frame.json"),
+            (self.ssh, path),
             recurse=False,
         )
         os.remove(tmp_path)
         await self.log(
             "stdout",
-            f"> add /srv/frameos/agent/releases/release_{self.build_id}/frame.json",
+            f"> add {path}",
         )
 
     async def _cleanup_old_builds(self) -> None:

@@ -44,6 +44,7 @@ class FrameDeployer:
         self.nim_path = nim_path
         self.temp_dir = temp_dir
         self.build_id = ''.join(random.choice(string.ascii_lowercase) for _ in range(12))
+        self.deploy_start: datetime = datetime.now()
 
     async def exec_command(
         self,
@@ -219,7 +220,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     frame.last_successful_deploy     = frame_dict
                     frame.last_successful_deploy_at  = datetime.now(timezone.utc)
                     await update_frame(db, redis, frame)
-                    await self.log("stdinfo", "Deploy finished on NixOS 🎉")
+                    await self.log("stdinfo", f"Deploy finished in {datetime.now() - self.deploy_start} 🎉")
                     return   # ← all done, skip the legacy RPiOS flow
 
             ## /END NIXOS

@@ -35,6 +35,8 @@ async def build_sd_card_image_task(
     if frame is None:
         raise RuntimeError("Frame not found")
 
+    start_time = datetime.now()
+
     # ──────────────────────────────────────────────────────────────
     # 0.  Preconditions
     # ──────────────────────────────────────────────────────────────
@@ -125,7 +127,7 @@ async def build_sd_card_image_task(
             raise RuntimeError("Unable to identify unique SD-card image")
 
         size = candidates[0].stat().st_size
-        await log(db, redis, id, "stdinfo", "🎉 SD-card image ready: " + candidates[0].name + f" ({size / (1024 * 1024):.2f} MiB)")
+        await log(db, redis, id, "stdinfo", f"🎉 SD-card image ready in {datetime.now() - start_time}: " + candidates[0].name + f" ({size / (1024 * 1024):.2f} MiB)")
     except Exception as e:
         await log(db, redis, id, "stderr", f"SD-card image ready, but we can't find it: {e}")
         raise
