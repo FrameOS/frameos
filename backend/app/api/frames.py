@@ -1163,6 +1163,14 @@ async def api_frame_new(
             data.device,
             data.interval,
         )
+        if data.mode == "nixos":
+            frame.network['wifiHotspot'] = 'bootOnly'
+            frame.agent['agentEnabled'] = True
+            frame.agent['agentRunCommands'] = True
+            db.add(frame)
+            db.commit()
+            db.refresh(frame)
+
         return {"frame": frame.to_dict()}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

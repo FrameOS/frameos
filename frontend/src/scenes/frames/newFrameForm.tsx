@@ -1,7 +1,7 @@
 import { actions, afterMount, kea, listeners, path, reducers } from 'kea'
 
 import { forms } from 'kea-forms'
-import { FrameMode, NewFrameFormType } from '../../types'
+import { NewFrameFormType } from '../../types'
 
 import type { newFrameFormType } from './newFrameFormType'
 import { framesModel } from '../../models/framesModel'
@@ -71,6 +71,7 @@ export const newFrameForm = kea<newFrameFormType>([
           actions.hideForm()
           const result = await response.json()
           if (result?.frame?.id) {
+            framesModel.actions.addFrame(result.frame)
             router.actions.push(urls.frame(result.frame.id))
           }
         } catch (error) {
