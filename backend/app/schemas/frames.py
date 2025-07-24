@@ -53,6 +53,7 @@ class FramesListResponse(BaseModel):
     frames: List[FrameBase]
 
 class FrameCreateRequest(BaseModel):
+    mode: Optional[str] = None
     name: str
     frame_host: str
     server_host: str

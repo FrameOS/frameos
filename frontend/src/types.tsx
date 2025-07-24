@@ -68,6 +68,15 @@ export interface FrameType {
   active_connections?: number
 }
 
+export type FrameMode = 'rpios' | 'nixos' | 'import'
+export interface NewFrameFormType {
+  mode: FrameMode
+  name?: string | null
+  frame_host?: string | null
+  device?: string | null
+  server_host?: string | null
+}
+
 export interface GPIOButton {
   pin: number
   label: string
@@ -504,7 +513,7 @@ export interface FrameOSSettings {
   }
   nix?: {
     buildExtraArgs?: string
-    buildServerEnabled?: booelan
+    buildServerEnabled?: boolean
     buildServer?: string
     buildServerPort?: number
     buildServerUser?: string
