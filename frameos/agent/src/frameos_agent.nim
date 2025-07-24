@@ -1,5 +1,5 @@
 import std/[algorithm, segfaults, strformat, strutils, asyncdispatch, terminal,
-            times, os, sysrand, httpclient, osproc, streams, unicode, typedthreads]
+            times, os, sysrand, httpclient, osproc, streams, unicode, typedthreads, monotimes]
 import checksums/md5
 import json, jsony
 import ws
@@ -586,7 +586,7 @@ proc calcBackoff(elapsed: int): int =
 # ----------------------------------------------------------------------------
 
 proc runAgent(cfg: FrameConfig) {.async.} =
-  var disconnectAt = getTime().toUnix() # boot time
+  var disconnectAt = getMonoTime()
   var wasConnected = false # did we ever finish handshake?
   while true:
     try:
@@ -600,7 +600,6 @@ proc runAgent(cfg: FrameConfig) {.async.} =
       try:
         await doHandshake(ws, cfg) # throws on failure
         wasConnected = true # handshake succeeded
-        disconnectAt = getTime().toUnix() # reset “downtime” marker
 
         asyncCheck startHeartbeat(ws, cfg)
 
@@ -625,11 +624,10 @@ proc runAgent(cfg: FrameConfig) {.async.} =
       echo &"⚠️  connection error: {e.msg}"
 
     # --- Back-off & retry ----------------------------------------------------
-    let now = getTime().toUnix()
     if wasConnected:
-      disconnectAt = now
+      disconnectAt = getMonoTime()
       wasConnected = false
-    let elapsed = now - disconnectAt
+    let elapsed = (getMonoTime() - disconnectAt).inSeconds.int
     let backoff = min(calcBackoff(elapsed), MaxBackoffSeconds)
     echo &"⏳ reconnecting in {backoff}s (disconnected {elapsed}s)…"
     await sleepAsync(backoff * 1_000)
