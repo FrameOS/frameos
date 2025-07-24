@@ -4,6 +4,7 @@ from datetime import datetime
 import json
 import os
 import random
+import shlex
 import shutil
 import string
 import tempfile
@@ -141,6 +142,7 @@ class AgentDeployer:
         output: Optional[List[str]] = None,
         *,
         log_output: bool = True,
+        log_command: bool | str = True,
         raise_on_error: bool = True,
     ) -> int:
         if self.ssh is None:
@@ -153,6 +155,7 @@ class AgentDeployer:
             command,
             output=output,
             log_output=log_output,
+            log_command=log_command,
             raise_on_error=raise_on_error,
         )
 
@@ -342,34 +345,68 @@ class AgentDeployer:
             f"nix-store -qR {store_path}"
         )
         runtime_paths = (paths_out or "").strip().splitlines()
-        nar_path = os.path.join(self.temp_dir, f"frameos_agent_closure_{self.build_id}.nar")
-        export_cmd = (
-            "bash -c 'nix-store --export "
-            + " ".join(runtime_paths)
-            + f" > {nar_path}'"
-        )
-        status, _, err = await exec_local_command(
-            self.db, self.redis, self.frame,
-            export_cmd
-        )
-        if status != 0:
-            raise Exception(f"Failed to export closure:\n{err}")
 
-        # ─── 3.  Upload & import on the device ───────────────────────────
-        await self.log("stdout", "- Uploading closure.nar")
-        await asyncssh.scp(
-            nar_path,
-            (self.ssh, f"/tmp/frameos_agent_closure_{self.build_id}.nar"),
-            recurse=False
-        )
-        await self.exec_command(
-            f"sudo nix-store --import < /tmp/frameos_agent_closure_{self.build_id}.nar && "
-            f"rm /tmp/frameos_agent_closure_{self.build_id}.nar"
-        )
-        await self._upload_frame_json("/var/lib/frameos/frame.json")
-        await self.log("stdout", f"Agent deploy finished in {datetime.now() - self.deploy_start} 🎉")
+        missing = await self._store_paths_missing(runtime_paths)
+        if not missing:
+            await self.log("stdout", "  → No missing store paths, skipping upload")
+            await self._upload_frame_json("/var/lib/frameos/frame.json")
+            await self.exec_command("sudo systemctl enable frameos_agent.service")
+            await self.exec_command("sudo systemctl restart frameos_agent.service")
+            await self.exec_command("sudo systemctl status frameos_agent.service")
+            await self.log("stdout", f"Agent deploy finished in {datetime.now() - self.deploy_start} 🎉")
+        else:
+            await self.log("stdout", f"  → {len(missing)} paths need upload")
+
+            nar_path = os.path.join(self.temp_dir, f"frameos_agent_closure_{self.build_id}.nar")
+            export_cmd = (
+                "bash -c 'nix-store --export "
+                + " ".join(runtime_paths)
+                + f" > {nar_path}'"
+            )
+            status, _, err = await exec_local_command(
+                self.db, self.redis, self.frame,
+                export_cmd
+            )
+            if status != 0:
+                raise Exception(f"Failed to export closure:\n{err}")
+
+            # ─── 3.  Upload & import on the device ───────────────────────────
+            await self.log("stdout", "- Uploading closure.nar")
+            await asyncssh.scp(
+                nar_path,
+                (self.ssh, f"/tmp/frameos_agent_closure_{self.build_id}.nar"),
+                recurse=False
+            )
+            await self.exec_command(
+                f"sudo nix-store --import < /tmp/frameos_agent_closure_{self.build_id}.nar && "
+                f"rm /tmp/frameos_agent_closure_{self.build_id}.nar"
+            )
+            await self._upload_frame_json("/var/lib/frameos/frame.json")
+            await self.log("stdout", f"Agent deploy finished in {datetime.now() - self.deploy_start} 🎉")
 
     # --------------- MISC ------------------------------------------------ #
+    # TODO: deduplicate with deploy_frame
+
+    async def _store_paths_missing(self, paths: list[str]) -> list[str]:
+        """
+        Return *only* those paths that are **missing** from /nix/store on the
+        frame.  All paths are checked in a single SSH exec.
+        """
+        if not paths:
+            return []
+
+        # Quote every path once; the remote loop echoes the missing ones.
+        joined = " ".join(shlex.quote(p) for p in paths)
+        script = "for p; do [ -e \"$p\" ] || echo \"$p\"; done"
+        out: list[str] = []
+        await self.exec_command(
+            f"bash -s -- {joined} <<'EOF'\n{script}\nEOF",
+            output=out,
+            raise_on_error=False,
+            log_output=False,
+        )
+        # Every line produced by the loop is a missing store path.
+        return [p.strip() for p in out if p.strip()]
 
     async def _upload_frame_json(self, path: str) -> None:
         """Upload the release-specific `frame.json`."""

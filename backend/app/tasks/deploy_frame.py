@@ -205,16 +205,21 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                         raise Exception(f"Local NixOS system build failed:\n{sys_err}")
                     result_path = sys_out.strip().splitlines()[-1]
 
-                    await nix_upload_path_and_deps(self, result_path)
+                    updated_count = await nix_upload_path_and_deps(self, result_path)
 
                     frame_json_data = (json.dumps(get_frame_json(db, frame), indent=4) + "\n").encode("utf-8")
                     await upload_file(self.db, self.redis, self.frame, "/var/lib/frameos/frame.json", frame_json_data)
 
-                    await self.exec_command(f"sudo nix-env --profile /nix/var/nix/profiles/system --set {result_path}")
-                    await self.exec_command(
-                        "sudo systemd-run --unit=nixos-switch --no-ask-password "
-                        "/nix/var/nix/profiles/system/bin/switch-to-configuration switch"
-                    )
+                    if updated_count == 0:
+                        await self.exec_command("sudo systemctl enable frameos.service")
+                        await self.exec_command("sudo systemctl restart frameos.service")
+                        await self.exec_command("sudo systemctl status frameos.service")
+                    else:
+                        await self.exec_command(f"sudo nix-env --profile /nix/var/nix/profiles/system --set {result_path}")
+                        await self.exec_command(
+                            "sudo systemd-run --unit=nixos-switch --no-ask-password "
+                            "/nix/var/nix/profiles/system/bin/switch-to-configuration switch"
+                        )
                     #  Save deploy metadata & finish early – nothing else to do
                     frame.status = 'starting'
                     frame.last_successful_deploy     = frame_dict
@@ -720,7 +725,7 @@ async def nix_upload_path_and_deps(
     self: "FrameDeployer",
     path: str,
     max_chunk_size: int = DEFAULT_CHUNK,
-):
+) -> int: # return number of uploaded items
     """
     Export the full runtime closure of *path* and import it on the target
     machine, but bundle the nar streams so that at most `max_chunk_size`
@@ -748,7 +753,7 @@ async def nix_upload_path_and_deps(
     missing = await self._store_paths_missing(runtime_paths)
     if not missing:
         await self.log("stdout", "  → No missing store paths, skipping upload")
-        return
+        return 0
     await self.log(
         "stdout",
         f"  → {len(missing)} paths need upload; bundling in ≤{max_chunk_size // BYTES_PER_MB} MiB chunks"
@@ -822,6 +827,8 @@ async def nix_upload_path_and_deps(
                 )
     finally:
         await self.exec_command(f"rmdir {remote_tmp}")
+
+    return len(missing)
 
 async def file_in_sync(
     self: "FrameDeployer",

@@ -16,7 +16,7 @@ async def exec_local_command(
 ) -> Tuple[int, Optional[str], Optional[str]]:
 
     if log_command:
-        await log(db, redis, int(frame.id), "stdout", f"$ {command}")
+        await log(db, redis, int(frame.id), "stdout", f"$ {log_command if isinstance(log_command, str) else command}")
 
     proc = await asyncio.create_subprocess_shell(
         command,
