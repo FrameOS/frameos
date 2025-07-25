@@ -328,6 +328,7 @@
         '';
 
         systemd.tmpfiles.rules = [
+          "d /var/log/frameos 0750 admin users - -"
           "d /var/lib/frameos/state    0770 admin users - -"
           "C /var/lib/frameos/frame.json 0660 admin users - ${./frame.json}"
           "C /etc/nixos/flake.nix 0644 root root - ${./flake.nix}"
