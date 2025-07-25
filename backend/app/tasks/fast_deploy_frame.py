@@ -35,8 +35,8 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
         if "last_successful_deploy_at" in frame_dict:
             del frame_dict["last_successful_deploy_at"]
 
-        arch = await self.get_cpu_architecture()
-        if arch == 'nixos':
+        distro = await self.get_distro()
+        if distro == 'nixos':
             await self._upload_frame_json("/var/lib/frameos/frame.json")
         else:
             await self._upload_frame_json("/srv/frameos/current/frame.json")

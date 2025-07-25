@@ -83,8 +83,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             build_id = self.build_id
             await self.log("stdout", f"Deploying frame {frame.name} with build id {self.build_id}")
 
-            await self.log("stdout", "- Getting target architecture")
-
             arch = await self.get_cpu_architecture()
             distro = await self.get_distro()
             total_memory = await self.get_total_memory_mb()
