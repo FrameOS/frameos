@@ -278,7 +278,7 @@
             StateDirectory  = "frameos";
             WorkingDirectory = "%S/frameos";    # %S → /var/lib
             SupplementaryGroups  = [ "gpio" "spi" "i2c" "video" "wheel" ];
-            After       = ["systemd-udev-settle.service" "time-sync.target"];
+            After       = ["systemd-udev-settle.service" "dev-spidev0.0.device" "time-sync.target"];
             Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
             ExecStart   = "${frameosPkg}/bin/frameos";
 
