@@ -20,6 +20,7 @@ import { panelsLogic } from '../panelsLogic'
 import { Switch } from '../../../../components/Switch'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Palette } from '../../../../types'
+import { A } from 'kea-router'
 
 export interface FrameSettingsProps {
   className?: string
@@ -133,7 +134,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
             className="space-y-4 @container"
             enableFormOnSubmit
           >
-            <H6 className="mt-2">Frame Settings</H6>
+            <H6 className="mt-2">Basic Settings</H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               <Field name="name" label="Name">
                 <TextInput name="name" placeholder="Hallway frame" required />
@@ -157,18 +158,189 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                 )}
               </Field>
             </div>
-
-            <H6>Connection</H6>
+            <H6 className="mt-2">
+              SSH <span className="text-gray-500">(backend &#8594; frame)</span>
+            </H6>
             <div className="pl-2 @md:pl-8 space-y-2">
-              <Field name="frame_host" label="Frame host">
+              <Field
+                name="frame_host"
+                label="Frame host"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>The hostname or IP address that the backend connects to over SSH and HTTP.</p>
+                    <p>You can leave it blank if you're only using the FrameOS agent to communicate.</p>
+                  </div>
+                }
+              >
                 <TextInput name="frame_host" placeholder="127.0.0.1" required />
               </Field>
-              <Field name="frame_port" label="Frame port">
+              <Field name="ssh_user" label="SSH user">
+                <TextInput name="ssh_user" placeholder="pi" required />
+              </Field>
+              <Field
+                name="ssh_pass"
+                label="SSH pass"
+                tooltip={
+                  <>
+                    Leave empty to use a SSH key. Configure it under{' '}
+                    <A href="/settings" className="text-blue-400 hover:underline">
+                      global settings.
+                    </A>
+                  </>
+                }
+              >
+                <TextInput
+                  name="ssh_pass"
+                  onClick={() => touchFrameFormField('ssh_pass')}
+                  type={frameFormTouches.ssh_pass ? 'text' : 'password'}
+                  placeholder="no password, using SSH key"
+                />
+              </Field>
+              <Field name="ssh_port" label="SSH port">
+                <TextInput name="ssh_port" placeholder="22" required />
+              </Field>
+            </div>
+
+            <H6>
+              FrameOS Agent <span className="text-gray-500">(backend &#8594; frame)</span>
+            </H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Group name="agent">
+                <Field
+                  name="agentEnabled"
+                  label="Enable FrameOS Agent (beta)"
+                  tooltip={
+                    <div className="space-y-2">
+                      <p>
+                        The FrameOS Agent opens a websocket connection from the frame to the backend, which is then used
+                        to control the frame, pass logs and more. This allows you to control the frame even if it's
+                        behind a firewall. The backend must be publicly accessible for this to work.
+                      </p>
+                      <p>
+                        This is still beta. Enable both toggles, then save. Download the SD card image, and deploy it to
+                        the frame. With any luck, after the Wifi setup, the frame will start sending logs to the
+                        backend.
+                      </p>
+                    </div>
+                  }
+                >
+                  {({ value, onChange }) => <Switch name="agentEnabled" value={value} onChange={onChange} />}
+                </Field>
+                {frameForm.agent?.agentEnabled && (
+                  <>
+                    <Field
+                      name="agentRunCommands"
+                      label="Run commands through the agent (beta)"
+                      tooltip={
+                        <div className="space-y-2">
+                          <p>Can the FrameOS agent actually run commands and execute updates?</p>
+                          <p>
+                            This is a second "are you really sure?" toggle, as this carries great risk when enabled on
+                            an unsecure connection.
+                          </p>
+                          <p>
+                            Make sure you're either aware of the risks, or that the backend is accessible over HTTPS
+                            before enabling this.
+                          </p>
+                        </div>
+                      }
+                    >
+                      {({ value, onChange }) => <Switch name="agentRunCommands" value={value} onChange={onChange} />}
+                    </Field>
+                    <Field
+                      name="agentSharedSecret"
+                      label={<div>Agent shared secret</div>}
+                      labelRight={
+                        <Button
+                          color="secondary"
+                          size="small"
+                          onClick={() => {
+                            setFrameFormValues({
+                              agent: { ...(frameForm.agent ?? {}), agentSharedSecret: secureToken(20) },
+                            })
+                            touchFrameFormField('agent.agentSharedSecret')
+                          }}
+                        >
+                          Regenerate
+                        </Button>
+                      }
+                      tooltip="This key is used as part of the handshake when communicating with the frame over websockets."
+                    >
+                      <TextInput
+                        name="agentSharedSecret"
+                        onClick={() => touchFrameFormField('agent.agentSharedSecret')}
+                        type={frameFormTouches['agent.agentSharedSecret'] ? 'text' : 'password'}
+                        placeholder=""
+                        required
+                      />
+                    </Field>
+                  </>
+                )}
+              </Group>
+            </div>
+
+            <H6 className="mt-2">
+              Backend access <span className="text-gray-500">(frame &#8594; backend)</span>
+            </H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Field
+                name="server_host"
+                label="Backend host"
+                tooltip={
+                  <>
+                    The public host of your FrameOS backend server (this webserver). Used by both FrameOS and the
+                    FrameOS agent.
+                  </>
+                }
+              >
+                <TextInput name="server_host" placeholder="localhost" required />
+              </Field>
+              <Field
+                name="server_port"
+                label="Backend port"
+                tooltip="The port the backend server is running on. Everything ending in 443 is assumed to be HTTPS."
+              >
+                <TextInput name="server_port" placeholder="8989" required />
+              </Field>
+              <Field
+                name="server_api_key"
+                label={<div>Backend API key</div>}
+                labelRight={
+                  <Button
+                    color="secondary"
+                    size="small"
+                    onClick={() => {
+                      setFrameFormValues({ server_api_key: secureToken(32) })
+                      touchFrameFormField('server_api_key')
+                    }}
+                  >
+                    Regenerate
+                  </Button>
+                }
+                tooltip="This key is used by the frame to access the backend server's API. For example to send logs. It should be kept secret."
+              >
+                <TextInput
+                  name="server_api_key"
+                  onClick={() => touchFrameFormField('server_api_key')}
+                  type={frameFormTouches.server_api_key ? 'text' : 'password'}
+                  placeholder=""
+                  required
+                />
+              </Field>
+            </div>
+
+            <H6>HTTP server on frame</H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Field
+                name="frame_port"
+                label="FrameOS port"
+                tooltip="The port on which FrameOS accepts HTTP requests and serves a simple control interface."
+              >
                 <TextInput name="frame_port" placeholder="8787" required />
               </Field>
               <Field
                 name="frame_access"
-                label="Frame access"
+                label="HTTP access level"
                 tooltip={
                   <div className="space-y-2">
                     <p>
@@ -184,7 +356,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                     </p>
                     <p>
                       Please note that frames are currenly accessed over unsecured HTTP. You can still capture the key
-                      by intercepting network traffic. More secure methods are planned.
+                      by intercepting network traffic.
                     </p>
                   </div>
                 }
@@ -200,7 +372,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
               </Field>
               <Field
                 name="frame_access_key"
-                label={<div>Frame access key</div>}
+                label={<div>HTTP access key</div>}
                 labelRight={
                   <Button
                     color="secondary"
@@ -213,7 +385,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                     Regenerate
                   </Button>
                 }
-                tooltip="This key is used when communicating with the frame over HTTP."
+                tooltip="This key is used when communicating with the frame over HTTP. Mostly to download images."
               >
                 <TextInput
                   name="frame_access_key"
@@ -223,52 +395,8 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                   required
                 />
               </Field>
-              <Field name="ssh_user" label="SSH user">
-                <TextInput name="ssh_user" placeholder="pi" required />
-              </Field>
-              <Field name="ssh_pass" label="SSH pass">
-                <TextInput
-                  name="ssh_pass"
-                  onClick={() => touchFrameFormField('ssh_pass')}
-                  type={frameFormTouches.ssh_pass ? 'text' : 'password'}
-                  placeholder="no password, using SSH key"
-                />
-              </Field>
-              <Field name="ssh_port" label="SSH port">
-                <TextInput name="ssh_port" placeholder="22" required />
-              </Field>
-              <Field name="server_host" label="Server host">
-                <TextInput name="server_host" placeholder="localhost" required />
-              </Field>
-              <Field name="server_port" label="Server port">
-                <TextInput name="server_port" placeholder="8989" required />
-              </Field>
-              <Field
-                name="server_api_key"
-                label={<div>Server API key</div>}
-                labelRight={
-                  <Button
-                    color="secondary"
-                    size="small"
-                    onClick={() => {
-                      setFrameFormValues({ server_api_key: secureToken(32) })
-                      touchFrameFormField('server_api_key')
-                    }}
-                  >
-                    Regenerate
-                  </Button>
-                }
-                tooltip="This is the API key that the frame uses to communicate with the server. It should be kept secret."
-              >
-                <TextInput
-                  name="server_api_key"
-                  onClick={() => touchFrameFormField('server_api_key')}
-                  type={frameFormTouches.server_api_key ? 'text' : 'password'}
-                  placeholder=""
-                  required
-                />
-              </Field>
             </div>
+
             <H6>Network</H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               <Group name="network">
@@ -358,86 +486,6 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                         </Field>
                       </>
                     )}
-                  </>
-                )}
-              </Group>
-            </div>
-            <H6>Agent</H6>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              <Group name="agent">
-                <Field
-                  name="agentEnabled"
-                  label="Enable FrameOS Agent (EXPERIMENTAL)"
-                  tooltip={
-                    <div className="space-y-2">
-                      <p>
-                        The FrameOS Agent is a reverse tunnel that allows you to control the frame from the server, even
-                        if the frame is behind a NAT or firewall. The server must be publicly accessible for this to
-                        work.
-                      </p>
-                      <p>
-                        The frame will open a secure websocket connection to the server, which will then be used to
-                        control the frame, pass logs and metrics, and more.
-                      </p>
-                      <p>
-                        This is still experimental. Enable this switch, save, and then select "Deploy agent" from the
-                        "..." menu in the header. The agent will then be deployed to the frame and connect to the
-                        backend.
-                      </p>
-                    </div>
-                  }
-                >
-                  {({ value, onChange }) => <Switch name="agentEnabled" value={value} onChange={onChange} />}
-                </Field>
-                {frameForm.agent?.agentEnabled && (
-                  <>
-                    <Field
-                      name="agentRunCommands"
-                      label="Run commands through the agent (EXPERIMENTAL)"
-                      tooltip={
-                        <div className="space-y-2">
-                          <p>Execute updates over the agent connection, instead of using SSH or HTTP.</p>
-                          <p>
-                            Enable this to allow the backend to send commands to the frame through the established
-                            websocket connection.
-                          </p>
-                          <p>
-                            Without this, the agent will only send logs to the backend, and SSH and HTTP will be used
-                            for sending commands.
-                          </p>
-                          <p>Make sure to only enable this if your backend is running over a secure TLS connection.</p>
-                        </div>
-                      }
-                    >
-                      {({ value, onChange }) => <Switch name="agentRunCommands" value={value} onChange={onChange} />}
-                    </Field>
-                    <Field
-                      name="agentSharedSecret"
-                      label={<div>Agent shared secret</div>}
-                      labelRight={
-                        <Button
-                          color="secondary"
-                          size="small"
-                          onClick={() => {
-                            setFrameFormValues({
-                              agent: { ...(frameForm.agent ?? {}), agentSharedSecret: secureToken(20) },
-                            })
-                            touchFrameFormField('agent.agentSharedSecret')
-                          }}
-                        >
-                          Regenerate
-                        </Button>
-                      }
-                      tooltip="This key is used when communicating with the frame over secure websockets."
-                    >
-                      <TextInput
-                        name="agentSharedSecret"
-                        onClick={() => touchFrameFormField('agent.agentSharedSecret')}
-                        type={frameFormTouches['agent.agentSharedSecret'] ? 'text' : 'password'}
-                        placeholder=""
-                        required
-                      />
-                    </Field>
                   </>
                 )}
               </Group>
