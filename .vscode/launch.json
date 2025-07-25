@@ -11,7 +11,6 @@
             "env": {
                 "PYTHONPATH": "${workspaceFolder}",
                 "GEVENT_SUPPORT": "True",
-                "DEBUG": "True",
             },
             "justMyCode": false
         }
