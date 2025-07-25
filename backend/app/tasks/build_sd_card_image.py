@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 
 from app.models.frame import Frame, get_frame_json
 from app.models.log   import new_log as log
-from app.tasks.deploy_frame import FrameDeployer, make_local_modifications
+from app.tasks._frame_deployer import FrameDeployer
+from app.tasks.deploy_frame import make_local_modifications
 from .utils import find_nim_v2
 from app.models.settings import get_settings_dict
 from app.utils.nix_utils import nix_cmd
