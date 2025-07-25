@@ -290,6 +290,7 @@ p,li{font-size:.875rem;color:#d1d5db;margin:0 0 1rem}
 label{display:block;font-weight:500;font-size:.875rem;margin-bottom:.25rem}
 input,select{box-sizing:border-box;width:100%;padding:.5rem .75rem;font-size:.875rem;color:#f9fafb;background-color:#111827;border:1px solid #374151;border-radius:.375rem;margin-bottom:1rem;margin-top:.5rem;}
 input:focus,select:focus{outline:none;border-color:#4a4b8c;box-shadow:0 0 0 1px #4a4b8c}
+a{text-decoration:none;color:#8283bf;} a:hover{text-decoration:underline;}
 button{display:block;width:100%;padding:.5rem;font-size:.875rem;font-weight:500;color:#fff;background-color:#4a4b8c;border:none;border-radius:.375rem;cursor:pointer;text-align:center}
 button:hover{background-color:#484984}
 button:focus{outline:none;box-shadow:0 0 0 1px #484984}
@@ -307,7 +308,7 @@ proc setupHtml*(frameOS: FrameOS): string =
 <p>If the connection fails, reconnect to this access point and try again.</p>
 <p id="err" style="color:#f87171">{htmlEscape(getLastError())}</p>
 <form method="post" action="/setup">
-  <label>Wi-Fi SSID
+  <label>Wi-Fi SSID<span id='wifi-loading'></span>
     <select id="ssid" name="ssid" required>
       <option disabled selected>Loading…</option>
     </select>
@@ -317,7 +318,7 @@ proc setupHtml*(frameOS: FrameOS): string =
     ► Server connection
   </div>
   <div id="portal-server" style="display:none">
-    <label>Server Host
+    <label><a href='#' onclick='updateNetworks();return false;' style='float:right'>Reload</a>Server Host
       <input type="text" name="serverHost"
             placeholder="my.frameos.server"
             value="{htmlEscape(frameOS.frameConfig.serverHost)}" required>
