@@ -16,7 +16,7 @@ from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.drivers.devices import drivers_for_frame
 from app.drivers.waveshare import write_waveshare_driver_nim, get_variant_folder
 from app.models import get_apps_from_scenes
-from app.models.assets import sync_assets
+from app.models.assets import copy_custom_fonts_to_local_source_folder, sync_assets
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame
 from app.utils.remote_exec import upload_file
@@ -90,13 +90,13 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             await self.log("stdout", f"- Detected distro: {distro}, architecture: {arch}, total memory: {total_memory} MiB")
 
-            await self.log("stdout", f"- Preparing sources with local modifications under {temp_dir}")
-            source_dir_local = create_local_source_folder(temp_dir)
-            await make_local_modifications(self, source_dir_local)
-
             # Fast-path for NixOS targets
             if distro == "nixos":
                 await self.log("stdout", "- NixOS detected – using flake-based deploy")
+                await self.log("stdout", f"- Preparing sources with local modifications under {temp_dir}")
+                source_dir_local = create_local_source_folder(temp_dir)
+                await make_local_modifications(self, source_dir_local)
+                await copy_custom_fonts_to_local_source_folder(db, source_dir_local)
 
                 target_host = await get_hostname(self)
                 sys_build_cmd, masked_build_cmd, cleanup = nix_cmd(

@@ -73,6 +73,7 @@ from app.ws.agent_ws import (
     assets_list_on_frame,
     exec_shell_on_frame,
 )
+from app.models.assets import copy_custom_fonts_to_local_source_folder
 from . import api_with_auth, api_no_auth
 
 
@@ -494,6 +495,7 @@ async def api_frame_local_build_zip(                 # noqa: D401
 
         # Apply all frame‑specific code generation (scenes, drivers, …)
         await make_local_modifications(deployer, source_dir)
+        await copy_custom_fonts_to_local_source_folder(db, source_dir)
 
         # Package → .zip
         zip_path = os.path.join(tmp, f"frameos_{deployer.build_id}.zip")

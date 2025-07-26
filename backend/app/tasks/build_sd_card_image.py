@@ -18,6 +18,7 @@ from app.models.frame import Frame, get_frame_json
 from app.models.log   import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.deploy_frame import make_local_modifications
+from app.models.assets import copy_custom_fonts_to_local_source_folder
 from .utils import find_nim_v2
 from app.models.settings import get_settings_dict
 from app.utils.nix_utils import nix_cmd
@@ -65,6 +66,7 @@ async def build_sd_card_image_task(
             FrameDeployer(db, redis, frame, nim_path, str(tmp)),
             str(flake_dir)
         )
+        await copy_custom_fonts_to_local_source_folder(db, str(flake_dir))
 
         # write frame.json so the binary is reproducible
         (flake_dir / "frame.json").write_text(
