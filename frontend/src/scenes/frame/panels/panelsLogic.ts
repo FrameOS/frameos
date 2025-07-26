@@ -24,7 +24,6 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
   ],
   [Area.BottomLeft]: [
     { panel: Panel.Logs, active: true, hidden: false },
-    { panel: Panel.FrameDetails, active: false, hidden: false },
     { panel: Panel.Metrics, active: false, hidden: false },
     { panel: Panel.Terminal, active: false, hidden: false },
     { panel: Panel.Debug, active: false, hidden: false },

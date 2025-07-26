@@ -4,6 +4,7 @@ import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
+import { frameControlUrl, frameUrl } from '../../../../decorators/frame'
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
@@ -34,6 +35,8 @@ export function FrameSettings({ className }: FrameSettingsProps) {
   const { clearBuildCache, downloadBuildZip } = useActions(frameSettingsLogic({ frameId }))
   const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
   const { openLogs } = useActions(panelsLogic({ frameId }))
+  const url = frameUrl(frame)
+  const controlUrl = frameControlUrl(frame)
 
   const palette = withCustomPalette[frame.device || '']
 
@@ -403,6 +406,24 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                   required
                 />
               </Field>
+              {frame.frame_host ? (
+                <Field name="_noop" label="Load">
+                  <div className="w-full">
+                    <A href={url} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
+                      Frame URL
+                    </A>
+                    {', '}
+                    <A
+                      href={controlUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-blue-400 hover:underline"
+                    >
+                      Control URL
+                    </A>
+                  </div>
+                </Field>
+              ) : null}
             </div>
 
             <H6>Network</H6>

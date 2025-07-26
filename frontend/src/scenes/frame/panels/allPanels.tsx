@@ -5,7 +5,6 @@ import { Debug } from './Debug/Debug'
 import { Diagram } from './Diagram/Diagram'
 import { EditApp } from './EditApp/EditApp'
 import { Events } from './Events/Events'
-import { FrameDetails } from './FrameDetails/FrameDetails'
 import { FrameSettings } from './FrameSettings/FrameSettings'
 import { Image } from './Image/Image'
 import { Logs } from './Logs/Logs'
@@ -28,7 +27,6 @@ export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   Diagram,
   EditApp,
   Events,
-  FrameDetails,
   FrameSettings,
   Image,
   Logs,

@@ -71,13 +71,13 @@ export function NewFrame(): JSX.Element {
             >
               <TextInput name="frame_host" placeholder="user:pass@127.0.0.1" required />
             </Field>
-            <Field name="server_host" label="Controller IP or hostname for reverse access">
+            <Field name="server_host" label="Backend IP or hostname for reverse access">
               {({ value, onChange }) => (
                 <>
                   <TextInput name="server_host" placeholder="127.0.0.1" required value={value} onChange={onChange} />
                   {isLocalServer(value) ? (
                     <p className="text-sm">
-                      <span className="text-orange-500">Warning!</span> Set this to the real host/IP of this server, not
+                      <span className="text-yellow-500">Warning!</span> Set this to the real host/IP of this server, not
                       to "localhost". The frame needs to use it to connect back to the backend.
                     </p>
                   ) : null}
@@ -102,6 +102,10 @@ export function NewFrame(): JSX.Element {
           </Form>
         ) : mode === 'nixos' ? (
           <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
+            <p className="text-sm text-yellow-500">
+              This mode is <strong>experimental</strong> and under active development. Your frames could break with any
+              new update, so proceed with caution.
+            </p>
             <p className="text-sm text-gray-500">
               Register your frame, and download a customized SD card image. Flash it on the device, set up your WiFi
               through the captive portal, and optionally use the FrameOS agent for all communication.
@@ -109,13 +113,13 @@ export function NewFrame(): JSX.Element {
             <Field name="name" label="Name">
               <TextInput name="name" placeholder="Kitchen Frame" required />
             </Field>
-            <Field name="server_host" label="Controller IP or hostname for reverse access">
+            <Field name="server_host" label="Backend IP or hostname for reverse access">
               {({ value, onChange }) => (
                 <>
                   <TextInput name="server_host" placeholder="127.0.0.1" required value={value} onChange={onChange} />
                   {isLocalServer(value) ? (
                     <p className="text-sm">
-                      <span className="text-orange-500">Warning!</span> Set this to the real host/IP of this server, not
+                      <span className="text-yellow-500">Warning!</span> Set this to the real host/IP of this server, not
                       to "localhost". The frame needs to use it to connect back to the backend.
                     </p>
                   ) : null}

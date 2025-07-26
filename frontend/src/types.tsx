@@ -465,7 +465,6 @@ export enum Panel {
   Diagram = 'Diagram',
   EditApp = 'EditApp',
   Events = 'Events',
-  FrameDetails = 'FrameDetails',
   FrameSettings = 'FrameSettings',
   Image = 'Image',
   Logs = 'Logs',
