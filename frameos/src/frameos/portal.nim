@@ -308,7 +308,7 @@ proc setupHtml*(frameOS: FrameOS): string =
 <p>If the connection fails, reconnect to this access point and try again.</p>
 <p id="err" style="color:#f87171">{htmlEscape(getLastError())}</p>
 <form method="post" action="/setup">
-  <label>Wi-Fi SSID<span id='wifi-loading'></span>
+  <label><a href='#' onclick='updateNetworks();return false;' style='float:right'>Reload</a>Wi-Fi SSID
     <select id="ssid" name="ssid" required>
       <option disabled selected>Loading…</option>
     </select>
@@ -318,7 +318,7 @@ proc setupHtml*(frameOS: FrameOS): string =
     ► Server connection
   </div>
   <div id="portal-server" style="display:none">
-    <label><a href='#' onclick='updateNetworks();return false;' style='float:right'>Reload</a>Server Host
+    <label>Server Host
       <input type="text" name="serverHost"
             placeholder="my.frameos.server"
             value="{htmlEscape(frameOS.frameConfig.serverHost)}" required>
