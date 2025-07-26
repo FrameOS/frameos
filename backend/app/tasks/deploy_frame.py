@@ -118,6 +118,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 updated_count = await self.nix_upload_path_and_deps(result_path)
 
                 await self._upload_frame_json("/var/lib/frameos/frame.json")
+                await sync_assets(db, redis, frame)
 
                 if updated_count == 0:
                     await self.restart_service("frameos")

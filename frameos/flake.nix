@@ -9,8 +9,7 @@
 
   outputs = { self, nixpkgs, nixos-generators, ... }@inputs:
     let
-      shortHash = "nixtest"; # TODO
-      hostName   = "frame-${shortHash}";
+      hostName   = "frame-nixtest";
 
       allowMissingMods = _: prev: {
         makeModulesClosure = x: prev.makeModulesClosure (x // { allowMissing = true; });
@@ -239,8 +238,12 @@
         users.groups.gpio = {};
 
         users.users = {
-          admin = { password = "not-an-admin-!!!"; isNormalUser = true; extraGroups = [ "gpio" "spi" "i2c" "video" "wheel" ]; };
-          # pi     = { openssh.authorizedKeys.keys = [ "ssh-rsa XXX" ]; isNormalUser = true; extraGroups = [ "wheel" ]; };
+          raam = { 
+            password = "not-an-admin-!!!"; 
+            # openssh.authorizedKeys.keys = [ "ssh-rsa XXX" ];
+            isNormalUser = true; 
+            extraGroups = [ "gpio" "spi" "i2c" "video" "wheel" ]; 
+          };
         };
 
         security.sudo = {
@@ -285,7 +288,7 @@
           restartTriggers = [ frameosPkg ];
           
           serviceConfig = {
-            User        = "admin";
+            User        = "raam";
             StateDirectory  = "frameos";
             WorkingDirectory = "%S/frameos";    # %S → /var/lib
             SupplementaryGroups  = [ "gpio" "spi" "i2c" "video" "wheel" ];
@@ -310,7 +313,7 @@
 
           serviceConfig = {
             Type        = "simple";
-            User        = "admin";
+            User        = "raam";
             StateDirectory  = "frameos_agent";
             SupplementaryGroups  = [ "wheel" ];
             Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
@@ -339,14 +342,14 @@
         '';
 
         systemd.tmpfiles.rules = [
-          "d /var/log/frameos 0750 admin users - -"
-          "d /var/lib/frameos/state    0770 admin users - -"
-          "C /var/lib/frameos/frame.json 0660 admin users - ${./frame.json}"
+          "d /var/log/frameos 0750 raam users - -"
+          "d /var/lib/frameos/state    0770 raam users - -"
+          "C /var/lib/frameos/frame.json 0660 raam users - ${./frame.json}"
 
           "C /etc/nixos/flake.nix 0644 root root - ${./flake.nix}"
           "C /etc/nixos/flake.lock 0644 root root - ${./flake.lock}"
 
-          "C /srv/assets 0755 admin users - ${frameosAssetsPkg}"
+          "C /srv/assets 0755 raam users - ${frameosAssetsPkg}"
         ];
       };
 

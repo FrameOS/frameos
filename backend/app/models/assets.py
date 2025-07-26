@@ -34,19 +34,22 @@ async def make_asset_folders(db: Session, redis: Redis, frame: Frame, assets_pat
     if frame.upload_fonts != "none":
         cmd = (
             f"if [ ! -d {assets_path}/fonts ]; then "
-            f"  sudo mkdir -p {assets_path}/fonts && sudo chown -R $(whoami) {assets_path}; "
-            f"elif [ ! -w {assets_path} ] || [ ! -w {assets_path}/fonts ]; then "
+            f"  sudo mkdir -p {assets_path}/fonts && sudo chown -R $(whoami) {assets_path} && sudo chmod -R u+rwX,go+rX {assets_path}; "
+            f"elif [ ! -w {assets_path} ]; then "
             f"  echo 'User lacks write access to {assets_path}. Fixing...'; "
-            f"  sudo chown -R $(whoami) {assets_path}; "
+            f"  sudo chown -R $(whoami) {assets_path} && sudo chmod -R u+rwX,go+rX {assets_path}; "
+            f"elif [ ! -w {assets_path}/fonts ]; then "
+            f"  echo 'User lacks write access to {assets_path}/fonts. Fixing...'; "
+            f"  sudo chown -R $(whoami) {assets_path}/fonts && sudo chmod -R u+rwX,go+rX {assets_path}/fonts; "
             f"fi"
         )
     else:
         cmd = (
             f"if [ ! -d {assets_path} ]; then "
-            f"  sudo mkdir -p {assets_path} && sudo chown -R $(whoami) {assets_path}; "
+            f"  sudo mkdir -p {assets_path} && sudo chown -R $(whoami) {assets_path} && sudo chmod -R u+rwX,go+rX {assets_path}; "
             f"elif [ ! -w {assets_path} ]; then "
             f"  echo 'User lacks write access to {assets_path}. Fixing...'; "
-            f"  sudo chown -R $(whoami) {assets_path}; "
+            f"  sudo chown -R $(whoami) {assets_path} && sudo chmod -R u+rwX,go+rX {assets_path}; "
             f"fi"
         )
 
