@@ -24,7 +24,7 @@ export function Frames() {
   }, [])
 
   return (
-    <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">
+    <div className="h-full w-full overflow-hidden max-w-screen max-h-screen left-0 top-0 absolute">
       <div className="flex flex-col h-full max-h-full">
         <div className="h-[60px]">
           <Header
