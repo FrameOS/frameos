@@ -49,3 +49,12 @@ export function frameControlUrl(frame: FrameType): string | null {
     return `${url}?k=${frame.frame_access_key}`
   }
 }
+interface FrameConnectionProps {
+  frame: FrameType
+}
+
+export function FrameConnection({ frame }: FrameConnectionProps): JSX.Element | null {
+  return (frame?.active_connections ?? 0) > 0 ? (
+    <span title="FrameOS Agent connected">{frame?.agent?.agentRunCommands ? '🟢' : '🟠'}</span>
+  ) : null
+}

@@ -8,6 +8,7 @@ import { Panels } from './panels/Panels'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { panelsLogic } from './panels/panelsLogic'
 import { assetsLogic } from './panels/Assets/assetsLogic'
+import { FrameConnection } from '../frames/Frame'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -40,7 +41,16 @@ export function Frame(props: FrameSceneProps) {
       {frame ? (
         <div className="h-full w-full max-w-screen max-h-screen overflow-hidden left-0 top-0 absolute flex flex-col">
           <Header
-            title={!frame ? `Loading frame ${props.id}...` : frame.name || frameHost(frame)}
+            title={
+              !frame ? (
+                `Loading frame ${props.id}...`
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span>{frame.name || frameHost(frame)}</span>
+                  <FrameConnection frame={frame} />
+                </div>
+              )
+            }
             buttons={
               <div className="flex divide-x divide-gray-700 space-x-2">
                 <DropdownMenu
