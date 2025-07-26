@@ -46,42 +46,44 @@ export function Settings() {
           />
         </div>
         <div
-          // id="frames"
-          className="h-full"
+          className="h-full w-full overflow-y-auto p-4 @container"
         >
           {savedSettingsLoading ? (
             <Spinner />
           ) : (
-            <Masonry id="frames" className="p-4">
-              <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings}>
+            <>
+              <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings} className="space-y-4">
                 <Group name="frameOS">
-                  <Box className="p-2 mb-4 space-y-2 @container">
-                    <H6>FrameOS Gallery</H6>
+                  <H6 className="pt-4">FrameOS Gallery</H6>
+                  <Box className="p-2 space-y-2">
                     <p className="text-sm leading-loose">
                       <a className="text-blue-400 hover:underline" target="_blank" href="https://gallery.frameos.net/">
                         Premium AI slop
                       </a>{' '}
                       to get you started.
                     </p>
-                    <Field name="apiKey" label="API key" secret={!!savedSettings?.frameOS?.apiKey}>
+                    <Field
+                      name="apiKey"
+                      label="API key"
+                      secret={!!savedSettings?.frameOS?.apiKey}
+                      tooltip="Just use 2024 for now. We might add custom accounts in the future"
+                    >
                       <TextInput />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="openAI">
-                  <Box className="p-2 mb-4 space-y-2 @container">
-                    <H6>OpenAI</H6>
-                    <p className="text-sm leading-loose">
-                      The OpenAI API key is used within OpenAI apps, and for GPT4 coding assistance.
-                    </p>
+                  <H6 className="pt-4">OpenAI</H6>
+                  <Box className="p-2 space-y-2">
+                    <p className="text-sm leading-loose">The OpenAI API key is used within OpenAI apps.</p>
                     <Field name="apiKey" label="API key" secret={!!savedSettings?.openAI?.apiKey}>
                       <TextInput name="apiKey" />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="homeAssistant">
-                  <Box className="p-2 mb-4 space-y-2 @container">
-                    <H6>Home Assistant</H6>
+                  <H6 className="pt-4">Home Assistant</H6>
+                  <Box className="p-2 space-y-2">
                     <Field name="url" label="Home assistant URL">
                       <TextInput placeholder="http://homeassistant.local:8123" />
                     </Field>
@@ -95,33 +97,38 @@ export function Settings() {
                   </Box>
                 </Group>
                 <Group name="github">
-                  <Box className="p-2 mb-4 space-y-2 @container">
-                    <H6>Github</H6>
+                  <H6 className="pt-4">Github</H6>
+                  <Box className="p-2 space-y-2">
                     <Field name="api_key" label="API key" secret={!!savedSettings?.github?.api_key}>
                       <TextInput />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="unsplash">
-                  <Box className="p-2 mb-4 space-y-2 @container">
-                    <H6>Unsplash API</H6>
+                  <H6 className="pt-4">Unsplash API</H6>
+                  <Box className="p-2 space-y-2">
                     <Field name="accessKey" label="Access key" secret={!!savedSettings?.unsplash?.accessKey}>
                       <TextInput />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="nix">
-                  <Box className="p-2 mb-4 space-y-2 @container">
-                    <H6>Nix settings</H6>
-                    <p className="text-sm leading-loose">
-                      These settings are used to build frames on a remote server. If you don't have a remote build
-                      server, you can leave these fields empty.
-                    </p>
+                  <H6 className="pt-4">Nix settings</H6>
+                  <Box className="p-2 space-y-2">
                     <Field name="buildExtraArgs" label="Extra args to build commands">
                       <TextInput placeholder="-j0" />
                     </Field>
-                    <Field name="buildServerEnabled" label="Enable remote build server">
-                      <Switch />
+                    <Field
+                      name="buildServerEnabled"
+                      label="Enable remote build server"
+                      tooltip="These settings are used to build frames on a remote server. If you don't have a remote build
+                      server, you can leave these fields empty."
+                    >
+                      {({ value, onChange }) => (
+                        <div className="w-full">
+                          <Switch value={value} onChange={onChange} />
+                        </div>
+                      )}
                     </Field>
                     {settings?.nix?.buildServerEnabled ? (
                       <>
@@ -163,8 +170,8 @@ export function Settings() {
                   </Box>
                 </Group>
                 <Group name="ssh_keys">
-                  <Box className="p-2 mb-4 space-y-2 @container">
-                    <H6>SSH Keys</H6>
+                  <H6 className="pt-4">SSH Keys</H6>
+                  <Box className="p-2 space-y-2">
                     <p className="text-sm leading-loose">
                       This SSH key will be used on all frames that don't have a password set for SSH.
                     </p>
@@ -188,47 +195,49 @@ export function Settings() {
                   </Box>
                 </Group>
               </Form>
-              <Box className="p-2 mb-4 space-y-2 @container">
-                <H6>Custom fonts</H6>
-                <p className="text-sm leading-loose">
-                  These fonts will be uploaded to all frames and can be used in the FrameOS editor.
-                </p>
-                <div className="space-y-1">
-                  {customFonts.map((font) => (
-                    <div key={font.id} className="flex items-center gap-2">
-                      <div className="flex-1">{font.path.substring(6)}</div>
-                      <Button size="tiny" color="secondary" onClick={() => deleteCustomFont(font)}>
-                        <TrashIcon className="w-5 h-5" />
+              <div className="space-y-4 mt-4">
+                <H6 className="pt-4">Custom fonts</H6>
+                <Box className="p-2 space-y-2">
+                  <p className="text-sm leading-loose">
+                    These fonts will be uploaded to all frames and can be used in the FrameOS editor.
+                  </p>
+                  <div className="space-y-1">
+                    {customFonts.map((font) => (
+                      <div key={font.id} className="flex items-center gap-2">
+                        <div className="flex-1">{font.path.substring(6)}</div>
+                        <Button size="tiny" color="secondary" onClick={() => deleteCustomFont(font)}>
+                          <TrashIcon className="w-5 h-5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  {customFontsLoading || isCustomFontsFormSubmitting ? <Spinner /> : <div className="flex gap-2"></div>}
+                  <Form logic={settingsLogic} formKey="customFontsForm" enableFormOnSubmit className="space-y-2">
+                    <Field label="" name="files">
+                      {({ onChange }) => (
+                        <input
+                          type="file"
+                          accept=".ttf"
+                          multiple
+                          className="w-full"
+                          onChange={(e: React.FormEvent<HTMLInputElement>) => {
+                            const target = e.target as HTMLInputElement & {
+                              files: FileList
+                            }
+                            onChange(target.files)
+                          }}
+                        />
+                      )}
+                    </Field>
+                    <div className="flex gap-2">
+                      <Button type="submit" size="small" color="primary">
+                        Upload fonts
                       </Button>
                     </div>
-                  ))}
-                </div>
-                {customFontsLoading || isCustomFontsFormSubmitting ? <Spinner /> : <div className="flex gap-2"></div>}
-                <Form logic={settingsLogic} formKey="customFontsForm" enableFormOnSubmit className="space-y-2">
-                  <Field label="" name="files">
-                    {({ onChange }) => (
-                      <input
-                        type="file"
-                        accept=".ttf"
-                        multiple
-                        className="w-full"
-                        onChange={(e: React.FormEvent<HTMLInputElement>) => {
-                          const target = e.target as HTMLInputElement & {
-                            files: FileList
-                          }
-                          onChange(target.files)
-                        }}
-                      />
-                    )}
-                  </Field>
-                  <div className="flex gap-2">
-                    <Button type="submit" size="small" color="primary">
-                      Upload fonts
-                    </Button>
-                  </div>
-                </Form>
-              </Box>
-            </Masonry>
+                  </Form>
+                </Box>
+              </div>
+            </>
           )}
         </div>
       </div>

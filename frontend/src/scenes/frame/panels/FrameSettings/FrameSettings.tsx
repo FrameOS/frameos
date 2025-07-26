@@ -224,7 +224,11 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                     </div>
                   }
                 >
-                  {({ value, onChange }) => <Switch name="agentEnabled" value={value} onChange={onChange} />}
+                  {({ value, onChange }) => (
+                    <div className="w-full">
+                      <Switch name="agentEnabled" value={value} onChange={onChange} />
+                    </div>
+                  )}
                 </Field>
                 {frameForm.agent?.agentEnabled && (
                   <>
@@ -245,7 +249,11 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                         </div>
                       }
                     >
-                      {({ value, onChange }) => <Switch name="agentRunCommands" value={value} onChange={onChange} />}
+                      {({ value, onChange }) => (
+                        <div className="w-full">
+                          <Switch name="agentRunCommands" value={value} onChange={onChange} />
+                        </div>
+                      )}
                     </Field>
                     <Field
                       name="agentSharedSecret"
@@ -401,7 +409,11 @@ export function FrameSettings({ className }: FrameSettingsProps) {
             <div className="pl-2 @md:pl-8 space-y-2">
               <Group name="network">
                 <Field name="networkCheck" label="Wait for network before rendering">
-                  {({ value, onChange }) => <Switch name="networkCheck" value={value} onChange={onChange} />}
+                  {({ value, onChange }) => (
+                    <div className="w-full">
+                      <Switch name="networkCheck" value={value} onChange={onChange} />
+                    </div>
+                  )}
                 </Field>
                 {frameForm.network?.networkCheck && (
                   <>
