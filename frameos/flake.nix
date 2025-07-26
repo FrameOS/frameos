@@ -238,7 +238,7 @@
         users.groups.gpio = {};
 
         users.users = {
-          raam = { 
+          frame = { 
             password = "not-an-admin-!!!"; 
             # openssh.authorizedKeys.keys = [ "ssh-rsa XXX" ];
             isNormalUser = true; 
@@ -288,7 +288,7 @@
           restartTriggers = [ frameosPkg ];
           
           serviceConfig = {
-            User        = "raam";
+            User        = "frame";
             StateDirectory  = "frameos";
             WorkingDirectory = "%S/frameos";    # %S → /var/lib
             SupplementaryGroups  = [ "gpio" "spi" "i2c" "video" "wheel" ];
@@ -313,7 +313,7 @@
 
           serviceConfig = {
             Type        = "simple";
-            User        = "raam";
+            User        = "frame";
             StateDirectory  = "frameos_agent";
             SupplementaryGroups  = [ "wheel" ];
             Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
@@ -342,14 +342,14 @@
         '';
 
         systemd.tmpfiles.rules = [
-          "d /var/log/frameos 0750 raam users - -"
-          "d /var/lib/frameos/state    0770 raam users - -"
-          "C /var/lib/frameos/frame.json 0660 raam users - ${./frame.json}"
+          "d /var/log/frameos 0750 frame users - -"
+          "d /var/lib/frameos/state    0770 frame users - -"
+          "C /var/lib/frameos/frame.json 0660 frame users - ${./frame.json}"
 
           "C /etc/nixos/flake.nix 0644 root root - ${./flake.nix}"
           "C /etc/nixos/flake.lock 0644 root root - ${./flake.lock}"
 
-          "C /srv/assets 0755 raam users - ${frameosAssetsPkg}"
+          "C /srv/assets 0755 frame users - ${frameosAssetsPkg}"
         ];
       };
 
