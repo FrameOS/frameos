@@ -90,7 +90,17 @@
             --replace-fail '@["frameos_agent"]' '"frameos_agent"'
         '';
       };
-
+      mkFrameOSAssets = pkgs: pkgs.stdenv.mkDerivation rec {
+        pname        = "frameos-assets";
+        version      = "0.1.0";
+        src          = ./assets/copied;
+        dontBuild    = true;
+        installPhase = ''
+          mkdir -p $out
+          cp -a $src/* $out/
+          chmod -R u+rwX,go+rX $out
+        '';
+      };
     in rec {
       # ──────────────────────────────────────────────────────────────────
       # Common module used for both the sd image *and* nixosConfigurations
@@ -98,12 +108,13 @@
       frameosModule = { pkgs, lib, ... }: let
         frameosPkg = self.packages.${pkgs.system}.frameos; 
         frameosAgentPkg = self.packages.${pkgs.system}.frameos_agent;
+        frameosAssetsPkg = self.packages.${pkgs.system}.frameos_assets;
       in {
         nixpkgs.overlays = [ lgpioOverlay allowMissingMods ];
         system.stateVersion = "25.05";
         time.timeZone       = "Europe/Brussels";
         environment.systemPackages = with pkgs; [ 
-          cacert openssl frameosPkg frameosAgentPkg
+          cacert openssl frameosPkg frameosAgentPkg frameosAssetsPkg
         ];
         environment.variables.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
         environment.etc."nixos/flake.nix".source = ./flake.nix;
@@ -331,8 +342,11 @@
           "d /var/log/frameos 0750 admin users - -"
           "d /var/lib/frameos/state    0770 admin users - -"
           "C /var/lib/frameos/frame.json 0660 admin users - ${./frame.json}"
+
           "C /etc/nixos/flake.nix 0644 root root - ${./flake.nix}"
           "C /etc/nixos/flake.lock 0644 root root - ${./flake.lock}"
+
+          "C /srv/assets 0755 admin users - ${frameosAssetsPkg}"
         ];
       };
 
@@ -342,6 +356,7 @@
           { name = system; value = {
               frameos = mkFrameOS (pkgsFor system);
               frameos_agent = mkFrameOSAgent (pkgsFor system);
+              frameos_assets = mkFrameOSAssets (pkgsFor system);
               nim_lk  = (pkgsFor system).nim_lk;
 
               sdImage = nixos-generators.nixosGenerate {
