@@ -113,14 +113,6 @@ async def upload_font_assets(db: Session, redis: Redis, frame: Frame, assets_pat
     for font, remote_path in custom_fonts_to_upload:
         await upload_file(db, redis, frame, remote_path, font.data)
 
-    await log(
-        db,
-        redis,
-        frame.id,
-        "stdout",
-        f"Uploaded {len(fonts_to_upload) + len(custom_fonts_to_upload)} fonts",
-    )
-
 async def copy_custom_fonts_to_local_source_folder(db: Session, local_source_folder: str):
     custom_fonts = db.query(Assets).filter(Assets.path.like("fonts/%.ttf")).all()
     for font in custom_fonts:
