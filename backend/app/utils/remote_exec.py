@@ -49,9 +49,7 @@ async def _use_agent(frame: Frame, redis: Redis) -> bool:
     agent = frame.agent or {}
     if agent.get("agentEnabled") and agent.get("agentRunCommands"):
         if (await number_of_connections_for_frame(redis, frame.id)) <= 0:
-            raise RuntimeError(
-                f"Frame {frame.id} agent enabled, but offline. Can't connect."
-            )
+            raise RuntimeError(f"Frame {frame.id} agent disconnected.")
         return True
     return False
 

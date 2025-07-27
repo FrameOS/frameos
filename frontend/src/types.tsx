@@ -3,6 +3,7 @@ import { Edge, Node } from 'reactflow'
 export interface FrameType {
   id: number
   name: string
+  mode?: 'rpios' | 'nixos'
   frame_host: string
   frame_port: number
   frame_access_key: string
@@ -65,6 +66,7 @@ export interface FrameType {
     agentSharedSecret?: string
   }
   palette?: Palette
+  nix?: FrameNixConfig
   active_connections?: number
 }
 
@@ -531,4 +533,10 @@ export interface Palette {
   name?: string
   colors: string[]
   colorNames?: string[]
+}
+
+export interface FrameNixConfig {
+  hostname?: string
+  platform?: string
+  timezone?: string
 }

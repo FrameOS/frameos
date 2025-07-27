@@ -1207,6 +1207,7 @@ async def api_frame_import(
         )
 
         mapping = {
+            "mode": "mode",
             "framePort": "frame_port",
             "frameAccessKey": "frame_access_key",
             "frameAccess": "frame_access",
@@ -1234,6 +1235,7 @@ async def api_frame_import(
             "network": "network",
             "agent": "agent",
             "palette": "palette",
+            "nix": "nix",
             "scenes": "scenes",
         }
         for src, dest in mapping.items():

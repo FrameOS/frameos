@@ -8,7 +8,7 @@ import { frameControlUrl, frameUrl } from '../../../../decorators/frame'
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
-import { devices, spectraPalettes, withCustomPalette } from '../../../../devices'
+import { devices, spectraPalettes, withCustomPalette, platforms, modes, devicesNixOS } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 import { appsLogic } from '../Apps/appsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
@@ -25,10 +25,12 @@ import { A } from 'kea-router'
 
 export interface FrameSettingsProps {
   className?: string
+  hideDropdown?: boolean
+  hideDeploymentMode?: boolean
 }
 
-export function FrameSettings({ className }: FrameSettingsProps) {
-  const { frameId, frame, frameForm, frameFormTouches } = useValues(frameLogic)
+export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: FrameSettingsProps) {
+  const { mode, frameId, frame, frameForm, frameFormTouches } = useValues(frameLogic)
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic)
@@ -46,90 +48,96 @@ export function FrameSettings({ className }: FrameSettingsProps) {
         `Loading frame ${frameId}...`
       ) : (
         <>
-          <div className="float-right">
-            <DropdownMenu
-              className="w-fit"
-              buttonColor="secondary"
-              items={[
-                {
-                  label: 'Clear build cache',
-                  onClick: () => {
-                    clearBuildCache()
-                    openLogs()
-                  },
-                  icon: buildCacheLoading ? (
-                    <Spinner color="white" className="w-4 h-4" />
-                  ) : (
-                    <ArrowPathIcon className="w-5 h-5" />
-                  ),
-                },
-                {
-                  label: 'Import .json',
-                  onClick: () => {
-                    function handleFileSelect(event: Event): void {
-                      const inputElement = event.target as HTMLInputElement
-                      const file = inputElement.files?.[0]
+          {!hideDropdown ? (
+            <div className="float-right">
+              <DropdownMenu
+                className="w-fit"
+                buttonColor="secondary"
+                items={[
+                  ...(mode === 'rpios'
+                    ? [
+                        {
+                          label: 'Clear build cache',
+                          onClick: () => {
+                            clearBuildCache()
+                            openLogs()
+                          },
+                          icon: buildCacheLoading ? (
+                            <Spinner color="white" className="w-4 h-4" />
+                          ) : (
+                            <ArrowPathIcon className="w-5 h-5" />
+                          ),
+                        },
+                      ]
+                    : []),
+                  {
+                    label: 'Import .json',
+                    onClick: () => {
+                      function handleFileSelect(event: Event): void {
+                        const inputElement = event.target as HTMLInputElement
+                        const file = inputElement.files?.[0]
 
-                      if (!file) {
-                        console.error('No file selected')
-                        return
-                      }
-
-                      const reader = new FileReader()
-
-                      reader.onload = (loadEvent: ProgressEvent<FileReader>) => {
-                        try {
-                          const jsonData = JSON.parse(loadEvent.target?.result as string)
-                          const { id, ...rest } = jsonData
-                          setFrameFormValues(rest)
-                          console.log('Imported frame:', jsonData)
-                          console.log('Press SAVE now to save the imported frame')
-                        } catch (error) {
-                          console.error('Error parsing JSON:', error)
+                        if (!file) {
+                          console.error('No file selected')
+                          return
                         }
+
+                        const reader = new FileReader()
+
+                        reader.onload = (loadEvent: ProgressEvent<FileReader>) => {
+                          try {
+                            const jsonData = JSON.parse(loadEvent.target?.result as string)
+                            const { id, ...rest } = jsonData
+                            setFrameFormValues(rest)
+                            console.log('Imported frame:', jsonData)
+                            console.log('Press SAVE now to save the imported frame')
+                          } catch (error) {
+                            console.error('Error parsing JSON:', error)
+                          }
+                        }
+
+                        reader.onerror = () => {
+                          console.error('Error reading file:', reader.error)
+                        }
+
+                        reader.readAsText(file)
                       }
 
-                      reader.onerror = () => {
-                        console.error('Error reading file:', reader.error)
+                      const fileInput = document.createElement('input')
+                      fileInput.type = 'file'
+                      fileInput.accept = '.json'
+                      fileInput.addEventListener('change', handleFileSelect)
+                      fileInput.click()
+                    },
+                    icon: <ArrowDownTrayIcon className="w-5 h-5" />,
+                  },
+                  {
+                    label: 'Export .json',
+                    onClick: () => {
+                      downloadJson(frame, `${frame.name || `frame-${frame.id}`}.json`)
+                    },
+                    icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                  },
+                  {
+                    label: 'Download build .zip',
+                    onClick: () => {
+                      downloadBuildZip()
+                    },
+                    icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                  },
+                  {
+                    label: 'Delete frame',
+                    onClick: () => {
+                      if (confirm('Are you sure you want to DELETE this frame?')) {
+                        deleteFrame(frame.id)
                       }
-
-                      reader.readAsText(file)
-                    }
-
-                    const fileInput = document.createElement('input')
-                    fileInput.type = 'file'
-                    fileInput.accept = '.json'
-                    fileInput.addEventListener('change', handleFileSelect)
-                    fileInput.click()
+                    },
+                    icon: <TrashIcon className="w-5 h-5" />,
                   },
-                  icon: <ArrowDownTrayIcon className="w-5 h-5" />,
-                },
-                {
-                  label: 'Export .json',
-                  onClick: () => {
-                    downloadJson(frame, `${frame.name || `frame-${frame.id}`}.json`)
-                  },
-                  icon: <ArrowUpTrayIcon className="w-5 h-5" />,
-                },
-                {
-                  label: 'Download build .zip',
-                  onClick: () => {
-                    downloadBuildZip()
-                  },
-                  icon: <ArrowUpTrayIcon className="w-5 h-5" />,
-                },
-                {
-                  label: 'Delete frame',
-                  onClick: () => {
-                    if (confirm('Are you sure you want to DELETE this frame?')) {
-                      deleteFrame(frame.id)
-                    }
-                  },
-                  icon: <TrashIcon className="w-5 h-5" />,
-                },
-              ]}
-            />
-          </div>
+                ]}
+              />
+            </div>
+          ) : null}
           <Form
             formKey="frameForm"
             logic={frameLogic}
@@ -142,9 +150,23 @@ export function FrameSettings({ className }: FrameSettingsProps) {
               <Field name="name" label="Name">
                 <TextInput name="name" placeholder="Hallway frame" required />
               </Field>
-              <Field name="device" label="Device">
-                <Select name="device" options={devices} />
+              {!hideDeploymentMode ? (
+                <Field name="mode" label="Deployment mode">
+                  <Select name="mode" options={modes} />
+                </Field>
+              ) : null}
+              <Field
+                name="device"
+                label="Device"
+                tooltip="We're adding support for all the devices really soon. This is an early beta feature after all."
+              >
+                <Select name="device" options={mode === 'nixos' ? devicesNixOS : devices} />
               </Field>
+              {frameForm.mode === 'nixos' ? (
+                <Field name="nix.platform" label="Platform">
+                  <Select name="nix.platform" options={platforms} />
+                </Field>
+              ) : null}
               <Field name="rotate" label="Rotation">
                 {({ value, onChange }) => (
                   <Select
@@ -161,6 +183,53 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                 )}
               </Field>
             </div>
+
+            {frameForm.mode == 'nixos' ? (
+              <>
+                <H6 className="mt-2">System settings</H6>
+                <div className="pl-2 @md:pl-8 space-y-2">
+                  <Field
+                    name="nix.hostname"
+                    label="Hostname"
+                    tooltip="You can use the hostname specificied here followed by .local to access the frame over mDNS."
+                  >
+                    <TextInput name="nix.hostname" placeholder="nixframe" />
+                  </Field>
+                  <Field name="ssh_user" label="Username" tooltip='The user is always "frame" when using NixOS'>
+                    <TextInput name="ssh_user" value="frame" disabled required />
+                  </Field>
+                  <Field
+                    name="ssh_pass"
+                    label="Password"
+                    tooltip={
+                      <div>
+                        <p>
+                          Whatever you specify here is used for both SSH and terminal access. You can leave it blank to
+                          disable password access.
+                        </p>
+                        <p>
+                          You can also access the frame with the SSH key configured under{' '}
+                          <A href="/settings" className="text-blue-400 hover:underline">
+                            global settings.
+                          </A>
+                        </p>
+                      </div>
+                    }
+                  >
+                    <TextInput
+                      name="ssh_pass"
+                      onClick={() => touchFrameFormField('ssh_pass')}
+                      type={frameFormTouches.ssh_pass ? 'text' : 'password'}
+                      placeholder="no password, using SSH key"
+                    />
+                  </Field>
+                  <Field name="nix.timezone" label="Timezone">
+                    <TextInput name="nix.timezone" placeholder="Europe/Brussels" />
+                  </Field>
+                </div>
+              </>
+            ) : null}
+
             <H6 className="mt-2">
               SSH <span className="text-gray-500">(backend &#8594; frame)</span>
             </H6>
@@ -170,35 +239,39 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                 label="Frame host"
                 tooltip={
                   <div className="space-y-2">
-                    <p>The hostname or IP address that the backend connects to over SSH and HTTP.</p>
-                    <p>You can leave it blank if you're only using the FrameOS agent to communicate.</p>
+                    <p>The hostname or IP address that the backend uses to connect to the frame for SSH and HTTP.</p>
+                    <p>You can leave it blank if you only use the FrameOS agent to communicate.</p>
                   </div>
                 }
               >
                 <TextInput name="frame_host" placeholder="127.0.0.1" required />
               </Field>
-              <Field name="ssh_user" label="SSH user">
-                <TextInput name="ssh_user" placeholder="pi" required />
-              </Field>
-              <Field
-                name="ssh_pass"
-                label="SSH pass"
-                tooltip={
-                  <>
-                    Leave empty to use a SSH key. Configure it under{' '}
-                    <A href="/settings" className="text-blue-400 hover:underline">
-                      global settings.
-                    </A>
-                  </>
-                }
-              >
-                <TextInput
-                  name="ssh_pass"
-                  onClick={() => touchFrameFormField('ssh_pass')}
-                  type={frameFormTouches.ssh_pass ? 'text' : 'password'}
-                  placeholder="no password, using SSH key"
-                />
-              </Field>
+              {frameForm.mode !== 'nixos' ? (
+                <>
+                  <Field name="ssh_user" label="SSH user">
+                    <TextInput name="ssh_user" placeholder="pi" required />
+                  </Field>
+                  <Field
+                    name="ssh_pass"
+                    label="SSH pass"
+                    tooltip={
+                      <p>
+                        Leave empty to use a SSH key. Configure it under{' '}
+                        <A href="/settings" className="text-blue-400 hover:underline">
+                          global settings.
+                        </A>
+                      </p>
+                    }
+                  >
+                    <TextInput
+                      name="ssh_pass"
+                      onClick={() => touchFrameFormField('ssh_pass')}
+                      type={frameFormTouches.ssh_pass ? 'text' : 'password'}
+                      placeholder="no password, using SSH key"
+                    />
+                  </Field>
+                </>
+              ) : null}
               <Field name="ssh_port" label="SSH port">
                 <TextInput name="ssh_port" placeholder="22" required />
               </Field>
@@ -221,17 +294,12 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                       </p>
                       <p>
                         This is still beta. Enable both toggles, then save. Download the SD card image, and deploy it to
-                        the frame. With any luck, after the Wifi setup, the frame will start sending logs to the
-                        backend.
+                        the frame. The agent will then connect to the frame to await further commands.
                       </p>
                     </div>
                   }
                 >
-                  {({ value, onChange }) => (
-                    <div className="w-full">
-                      <Switch name="agentEnabled" value={value} onChange={onChange} />
-                    </div>
-                  )}
+                  <Switch name="agentEnabled" fullWidth />
                 </Field>
                 {frameForm.agent?.agentEnabled && (
                   <>
@@ -242,12 +310,12 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                         <div className="space-y-2">
                           <p>Can the FrameOS agent actually run commands and execute updates?</p>
                           <p>
-                            This is a second "are you really sure?" toggle, as this carries great risk when enabled on
-                            an unsecure connection.
+                            This is a second "are you really sure?" toggle, as this comes with risk when enabled on an
+                            unsecure connection.
                           </p>
                           <p>
-                            Make sure you're either aware of the risks, or that the backend is accessible over HTTPS
-                            before enabling this.
+                            Make sure you're either aware of the risks, or that the backend is only accessible over
+                            HTTPS before enabling this.
                           </p>
                         </div>
                       }
@@ -299,8 +367,8 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                 label="Backend host"
                 tooltip={
                   <>
-                    The public host of your FrameOS backend server (this webserver). Used by both FrameOS and the
-                    FrameOS agent.
+                    The public host of your FrameOS backend server (this webserver). This is what the frame uses to
+                    reach the backend.
                   </>
                 }
               >
@@ -340,12 +408,16 @@ export function FrameSettings({ className }: FrameSettingsProps) {
               </Field>
             </div>
 
-            <H6>HTTP server on frame</H6>
+            <H6>HTTP API on frame</H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               <Field
                 name="frame_port"
                 label="FrameOS port"
-                tooltip="The port on which FrameOS accepts HTTP requests and serves a simple control interface."
+                tooltip={
+                  <div className="space-y-2">
+                    <p>The port on which the frame accepts HTTP API requests and serves a simple control interface.</p>
+                  </div>
+                }
               >
                 <TextInput name="frame_port" placeholder="8787" required />
               </Field>
@@ -362,12 +434,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                       update content.
                     </p>
                     <p>
-                      <strong>Public:</strong> Everyone can view or control the frame without a key. This makes for the
-                      smallest QR codes.
-                    </p>
-                    <p>
-                      Please note that frames are currenly accessed over unsecured HTTP. You can still capture the key
-                      by intercepting network traffic.
+                      <strong>Public:</strong> Everyone can view or control the frame without a key.
                     </p>
                   </div>
                 }
@@ -396,7 +463,7 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                     Regenerate
                   </Button>
                 }
-                tooltip="This key is used when communicating with the frame over HTTP. Mostly to download images."
+                tooltip="This key is used when communicating with the frame over HTTP."
               >
                 <TextInput
                   name="frame_access_key"
@@ -429,12 +496,23 @@ export function FrameSettings({ className }: FrameSettingsProps) {
             <H6>Network</H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               <Group name="network">
+                {frameForm.mode === 'nixos' ? (
+                  <>
+                    <Field
+                      name="wifiSSID"
+                      label="Wifi SSID"
+                      tooltip="The SSID of the wifi network to connect to on boot."
+                    >
+                      <TextInput name="wifiSSID" placeholder="MyWifi" />
+                    </Field>
+                    <Field name="wifiPassword" label="Wifi Password">
+                      <TextInput name="wifiPassword" placeholder="MyWifiPassword" />
+                    </Field>
+                  </>
+                ) : null}
+
                 <Field name="networkCheck" label="Wait for network before rendering">
-                  {({ value, onChange }) => (
-                    <div className="w-full">
-                      <Switch name="networkCheck" value={value} onChange={onChange} />
-                    </div>
-                  )}
+                  <Switch name="networkCheck" fullWidth />
                 </Field>
                 {frameForm.network?.networkCheck && (
                   <>
@@ -511,9 +589,9 @@ export function FrameSettings({ className }: FrameSettingsProps) {
                           {({ onChange, value }) => (
                             <NumberTextInput
                               name="wifiHotspotTimeoutSeconds"
-                              placeholder="600"
+                              placeholder="300"
                               onChange={onChange}
-                              value={value ?? 600}
+                              value={value ?? 300}
                             />
                           )}
                         </Field>

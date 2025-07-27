@@ -100,6 +100,12 @@ export const devices: Option[] = [
   { value: 'waveshare.EPD_13in3e', label: 'Waveshare 13.3" (E) 1600x1200 Spectra 6 Color' },
 ]
 
+export const devicesNixOS: Option[] = [
+  { value: 'web_only', label: 'Web only' },
+  { value: 'framebuffer', label: 'HDMI / Framebuffer' },
+  { value: 'waveshare.EPD_7in3e', label: 'Waveshare 7.3" (E) 800x480 Spectra 6 Color' },
+]
+
 const colorNames = ['Black', 'White', 'Yellow', 'Red', 'Blue', 'Green']
 export const spectraPalettes: Palette[] = [
   {
@@ -159,3 +165,13 @@ export const withCustomPalette: Record<string, Palette> = {
   'waveshare.EPD_7in3e': spectraPalettes[0],
   'waveshare.EPD_4in0e': spectraPalettes[0],
 }
+
+export const platforms: Option[] = [
+  { value: 'pi-zero2', label: 'Raspberry Pi Zero W2' },
+  { value: 'pi-5', label: 'Raspberry Pi 5' },
+]
+
+export const modes: Option[] = [
+  { value: 'rpios', label: 'Raspberry Pi OS (default)' },
+  { value: 'nixos', label: 'NixOS (new, experimental)' },
+]

@@ -14,6 +14,7 @@ export interface FrameLogicProps {
 }
 const FRAME_KEYS: (keyof FrameType)[] = [
   'name',
+  'mode',
   'frame_host',
   'frame_port',
   'frame_access_key',
@@ -46,6 +47,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'network',
   'agent',
   'palette',
+  'nix',
 ]
 
 const FRAME_KEYS_REQUIRE_RECOMPILE: (keyof FrameType)[] = ['device', 'scenes', 'reboot']
@@ -202,6 +204,7 @@ export const frameLogic = kea<frameLogicType>([
   selectors(() => ({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
     frame: [(s) => [s.frames, s.frameId], (frames, frameId) => frames[frameId] || null],
+    mode: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm?.mode || frame?.mode || 'rpios'],
     scenes: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm): FrameScene[] => frameForm?.scenes ?? frame.scenes ?? [],

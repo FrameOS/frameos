@@ -122,11 +122,7 @@ export function Settings() {
                       tooltip="These settings are used to build frames on a remote server. If you don't have a remote build
                       server, you can leave these fields empty."
                     >
-                      {({ value, onChange }) => (
-                        <div className="w-full">
-                          <Switch value={value} onChange={onChange} />
-                        </div>
-                      )}
+                      <Switch fullWidth />
                     </Field>
                     {settings?.nix?.buildServerEnabled ? (
                       <>

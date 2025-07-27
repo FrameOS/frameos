@@ -20,6 +20,7 @@ class Frame(Base):
     __tablename__ = 'frame'
     id = mapped_column(Integer, primary_key=True)
     name = mapped_column(String(256), nullable=False)
+    mode = mapped_column(String(32), nullable=True)
     # sending commands to frame
     frame_host = mapped_column(String(256), nullable=False)
     frame_port = mapped_column(Integer, default=8787)
@@ -59,6 +60,7 @@ class Frame(Base):
     network = mapped_column(JSON, nullable=True)
     agent = mapped_column(JSON, nullable=True)
     palette = mapped_column(JSON, nullable=True)
+    nix = mapped_column(JSON, nullable=True)
 
     # not used
     apps = mapped_column(JSON, nullable=True)
@@ -69,6 +71,7 @@ class Frame(Base):
         return {
             'id': self.id,
             'name': self.name,
+            'mode': self.mode,
             'frame_host': self.frame_host,
             'frame_port': self.frame_port,
             'frame_access_key': self.frame_access_key,
@@ -104,6 +107,7 @@ class Frame(Base):
             'network': self.network,
             'agent': self.agent,
             'palette': self.palette,
+            'nix': self.nix,
             'last_successful_deploy': self.last_successful_deploy,
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
@@ -222,6 +226,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     agent = frame.agent or {}
     frame_json: dict = {
         "name": frame.name,
+        # "mode": frame.mode or 'rpios', # We don't need this in the json. It's only used for building the system.
         "frameHost": frame.frame_host or "localhost",
         "framePort": frame.frame_port or 8787,
         "frameAccessKey": frame.frame_access_key,
@@ -249,6 +254,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             if int(button.get("pin", 0)) > 0
         ],
         "palette": frame.palette or {},
+        # "nix": frame.nix or {}, # We don't need this in the json. It's only used for building the system.
         "controlCode": {
             "enabled": frame.control_code.get('enabled', 'false') == 'true',
             "position": frame.control_code.get('position', 'top-right'),

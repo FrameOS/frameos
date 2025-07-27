@@ -19,7 +19,9 @@ interface FrameSceneProps {
 export function Frame(props: FrameSceneProps) {
   const frameId = parseInt(props.id)
   const frameLogicProps = { frameId }
-  const { frame, unsavedChanges, undeployedChanges, requiresRecompilation } = useValues(frameLogic(frameLogicProps))
+  const { frame, mode, unsavedChanges, undeployedChanges, requiresRecompilation } = useValues(
+    frameLogic(frameLogicProps)
+  )
   const {
     saveFrame,
     renderFrame,
@@ -35,7 +37,8 @@ export function Frame(props: FrameSceneProps) {
   const { openSDCardModal } = useActions(sdCardModalLogic(frameLogicProps))
   useMountedLogic(assetsLogic(frameLogicProps)) // Don't lose what we downloaded when navigating away from the tab
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
-  const canDeployAgent = !!(frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret)
+
+  const canDeployAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && mode === 'rpios'
   const agentExtra = canDeployAgent ? (frame?.agent?.agentRunCommands ? ' (via agent)' : ' (via ssh)') : ''
 
   return (
@@ -59,11 +62,11 @@ export function Frame(props: FrameSceneProps) {
                   buttonColor="secondary"
                   className="items-center"
                   items={[
+                    ...(mode === 'nixos' ? [{ label: 'Build SD card...', onClick: () => openSDCardModal() }] : []),
                     { label: 'Re-Render' + agentExtra, onClick: () => renderFrame() },
                     { label: 'Restart FrameOS' + agentExtra, onClick: () => restartFrame() },
                     { label: 'Stop FrameOS' + agentExtra, onClick: () => stopFrame() },
                     { label: 'Reboot device' + agentExtra, onClick: () => rebootFrame() },
-                    { label: 'Build SD card...', onClick: () => openSDCardModal() },
                     ...(requiresRecompilation
                       ? []
                       : [

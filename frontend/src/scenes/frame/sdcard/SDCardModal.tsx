@@ -1,13 +1,17 @@
-import { useActions, useValues } from 'kea'
+import { useActions, useAsyncActions, useValues } from 'kea'
 import { frameLogic } from '../frameLogic'
 import { Button } from '../../../components/Button'
 import { Modal } from '../../../components/Modal'
 import { sdCardModalLogic } from './sdCardModalLogic'
+import { FrameSettings } from '../panels/FrameSettings/FrameSettings'
+import { panelsLogic } from '../panels/panelsLogic'
 
 export function SDCardModal() {
   const { frameId } = useValues(frameLogic)
+  const { submitFrameForm } = useAsyncActions(frameLogic)
   const { showSDCardModal } = useValues(sdCardModalLogic({ frameId }))
   const { closeSDCardModal, buildSDCard } = useActions(sdCardModalLogic({ frameId }))
+  const { openLogs } = useActions(panelsLogic({ frameId }))
 
   return (
     <>
@@ -21,7 +25,17 @@ export function SDCardModal() {
               <Button color="none" onClick={closeSDCardModal}>
                 Close
               </Button>
-              <Button color="primary" onClick={buildSDCard} className="flex gap-2 items-center">
+              <Button
+                color="primary"
+                onClick={async () => {
+                  console.log('Submitting frame form...')
+                  await submitFrameForm()
+                  console.log('Building SD card image...')
+                  buildSDCard()
+                  openLogs()
+                }}
+                className="flex gap-2 items-center"
+              >
                 <div>Build SD card image</div>
               </Button>
             </div>
@@ -29,25 +43,15 @@ export function SDCardModal() {
         >
           <div className="relative p-6 flex-auto space-y-4">
             <p>
-              This will generate an <code>.img</code> for the current frame, with FrameOS precompiled, and all scenes
-              and assets included.
+              This will generate an <code>.img.zst</code> for the current frame, with FrameOS precompiled, and all
+              scenes and fonts included.
             </p>
-            <ul>
-              <li>SSH enabled</li>
-              <li>SSH key</li>
-              <li>Password</li>
-              <li>Agent enabled</li>
-              <li>Hostname</li>
-              <li>Platform</li>
-              <li>Driver</li>
-              <li>Wifi SSID</li>
-              <li>Wifi password</li>
-            </ul>
             <p>
               <span className="text-orange-500">Please note:</span> We will build the image in the background, and the
               download will start as soon as it's ready. You can follow along in the frame's logs. Please don't close or
               reload this page until the download starts.
             </p>
+            <FrameSettings hideDropdown hideDeploymentMode />
           </div>
         </Modal>
       ) : null}

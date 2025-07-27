@@ -7,6 +7,7 @@ class FrameBase(BaseModel):
 
     id: int
     name: str
+    mode: Optional[str] = None
     frame_host: str
     frame_port: int
     frame_access_key: Optional[str]
@@ -42,6 +43,7 @@ class FrameBase(BaseModel):
     network: Optional[Dict[str, Any]]
     agent: Optional[Dict[str, Any]]
     palette: Optional[Dict[str, Any]]
+    nix: Optional[Dict[str, Any]] = None
     last_successful_deploy: Optional[Dict[str, Any]]
     last_successful_deploy_at: Optional[datetime]
     active_connections: Optional[int] = None
@@ -62,6 +64,7 @@ class FrameCreateRequest(BaseModel):
 
 class FrameUpdateRequest(BaseModel):
     scenes: Optional[List[Any]] = None
+    mode: Optional[str] = None
     name: Optional[str] = None
     frame_host: Optional[str] = None
     frame_port: Optional[int] = None
@@ -93,6 +96,7 @@ class FrameUpdateRequest(BaseModel):
     network: Optional[Dict[str, Any]] = None
     agent: Optional[Dict[str, Any]] = None
     palette: Optional[Dict[str, Any]] = None
+    nix: Optional[Dict[str, Any]] = None
     next_action: Optional[str] = None
 
 class FrameLogsResponse(BaseModel):
