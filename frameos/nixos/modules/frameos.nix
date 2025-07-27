@@ -41,7 +41,6 @@ in
     servers         = [ "time.cloudflare.com" ];
     fallbackServers = [ "time.google.com" ];
     extraConfig = ''
-      InitialBurst=yes
       PollIntervalMinSec=16
       ConnectionRetrySec=5
     '';

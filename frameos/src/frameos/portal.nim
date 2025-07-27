@@ -228,11 +228,6 @@ proc connectToWifi*(frameOS: FrameOS,
     startAp(frameOS)
 
 proc checkNetwork*(self: FrameOS): bool =
-  proc nmState(): string =
-    ## `nmcli` prints “connected”, “connecting”, “disconnected”, …
-    let (output, _) = run("nmcli --terse --fields STATE general 2>/dev/null || true")
-    result = output.strip()
-
   if not self.frameConfig.network.networkCheck or self.frameConfig.network.networkCheckTimeoutSeconds <= 0:
     return false
 
@@ -260,7 +255,17 @@ proc checkNetwork*(self: FrameOS): bool =
             "response": response.status})
     except CatchableError as e:
       self.network.status = NetworkStatus.error
-      self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
+
+      # Error with SSL certificates. Most likely means the clock is wrong after a long downtime.
+      if e.msg.contains("certificate verify failed") or e.msg.contains("error:0A000086"):
+        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg,
+            "action": "syncing clock and trying again"})
+        syncClock()
+        sleep(min(max(3, attempt), 60) * 1000)
+        continue
+      else:
+        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
+
     finally:
       client.close()
 
@@ -270,7 +275,7 @@ proc checkNetwork*(self: FrameOS): bool =
       self.logger.log(%*{"event": "networkCheck", "status": "wifi_not_configured"})
       return false
 
-    sleep(attempt * 1000)
+    sleep(min(attempt, 60) * 1000)
     attempt += 1
   return false
 
