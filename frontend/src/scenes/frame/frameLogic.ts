@@ -145,7 +145,6 @@ export const frameLogic = kea<frameLogicType>([
     fullDeployFrame: true,
     deployAgent: true,
     restartAgent: true,
-    buildSDCard: true,
     applyTemplate: (template: Partial<TemplateType>, replaceScenes?: boolean) => ({
       template,
       replaceScenes: replaceScenes ?? false,
@@ -265,7 +264,6 @@ export const frameLogic = kea<frameLogicType>([
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
     deployAgent: () => framesModel.actions.deployAgent(props.frameId),
     restartAgent: () => framesModel.actions.restartAgent(props.frameId),
-    buildSDCard: () => framesModel.actions.buildSDCard(props.frameId),
     updateScene: ({ sceneId, scene }) => {
       const { frameForm } = values
       const hasScene = frameForm.scenes?.some(({ id }) => id === sceneId)

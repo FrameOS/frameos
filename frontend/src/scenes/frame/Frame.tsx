@@ -9,6 +9,8 @@ import { DropdownMenu } from '../../components/DropdownMenu'
 import { panelsLogic } from './panels/panelsLogic'
 import { assetsLogic } from './panels/Assets/assetsLogic'
 import { FrameConnection } from '../frames/Frame'
+import { sdCardModalLogic } from './sdcard/sdCardModalLogic'
+import { SDCardModal } from './sdcard/SDCardModal'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -28,9 +30,9 @@ export function Frame(props: FrameSceneProps) {
     fastDeployFrame,
     fullDeployFrame,
     deployAgent,
-    buildSDCard,
     restartAgent,
   } = useActions(frameLogic(frameLogicProps))
+  const { openSDCardModal } = useActions(sdCardModalLogic(frameLogicProps))
   useMountedLogic(assetsLogic(frameLogicProps)) // Don't lose what we downloaded when navigating away from the tab
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
   const canDeployAgent = !!(frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret)
@@ -61,7 +63,7 @@ export function Frame(props: FrameSceneProps) {
                     { label: 'Restart FrameOS' + agentExtra, onClick: () => restartFrame() },
                     { label: 'Stop FrameOS' + agentExtra, onClick: () => stopFrame() },
                     { label: 'Reboot device' + agentExtra, onClick: () => rebootFrame() },
-                    { label: 'Build SD card', onClick: () => buildSDCard() },
+                    { label: 'Build SD card...', onClick: () => openSDCardModal() },
                     ...(requiresRecompilation
                       ? []
                       : [
@@ -110,6 +112,7 @@ export function Frame(props: FrameSceneProps) {
                     deploy
                   </Button>
                 </div>
+                <SDCardModal />
               </div>
             }
           />
