@@ -98,7 +98,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 await make_local_modifications(self, source_dir_local)
                 await copy_custom_fonts_to_local_source_folder(db, source_dir_local)
 
-                target_host = await get_hostname(self)
+                target_host = "frame-nixtest"
                 sys_build_cmd, masked_build_cmd, cleanup = nix_cmd(
                     "nix --extra-experimental-features 'nix-command flakes' "
                     f"build \"$(realpath {source_dir_local})\"#nixosConfigurations.{nix_attr(target_host)}.config.system.build.toplevel "
