@@ -26,6 +26,7 @@ from app.models import get_apps_from_scenes
 from app.codegen.drivers_nim import write_drivers_nim
 from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.tasks.utils import find_nimbase_file
+from app.models.settings import get_settings_dict
 
 BYTES_PER_MB   = 1_048_576
 DEFAULT_CHUNK  = 25 * BYTES_PER_MB
@@ -203,7 +204,7 @@ class FrameDeployer:
 
     async def get_hostname(self) -> str:
         hostname_out: list[str] = []
-        await self.exec_command("hostname", hostname_out)  # remote hostname for flake attribute
+        await self.exec_command("hostname", hostname_out)
         target_host = hostname_out[0].strip() or "frame-unknown"
         return target_host
 
@@ -302,13 +303,109 @@ class FrameDeployer:
                 if frame.debug:
                     await self.log("stdout", f"Generated waveshare driver:\n{source}")
 
+        await self._update_flake_with_frame_settings(source_dir)
+
+    async def _update_flake_with_frame_settings(self, src: str) -> None:
+        """Inject per-frame settings into the generated Nix flake."""
+
+        all_settings = get_settings_dict(self.db)
+
+        frame_nix = self.frame.nix or {}
+
+        # ── generic / always present ──────────────────────────────────
+        hostname = frame_nix.get("hostname") or f"frame{self.frame.id}"
+        timezone = frame_nix.get("timezone") or "UTC"
+        platform = frame_nix.get("platform") or "pi-zero2"
+
+        # ── SSH credentials ───────────────────────────────────────────
+        ssh_pass = self.frame.ssh_pass or None
+        ssh_port = int(self.frame.ssh_port or 22)
+
+        # ── Network ‑ Wi‑Fi credentials (optional) ───────────────────
+        network_cfg = self.frame.network or {}
+        wifi_ssid  = (network_cfg.get("wifiSSID") or "").rstrip()
+        wifi_pass  = (network_cfg.get("wifiPassword") or "").rstrip()
+
+        # ── Misc. per‑frame paths/settings ───────────────────────────
+        assets_path = (self.frame.assets_path or "/srv/assets").rstrip("/")
+
+        reboot_cfg    = self.frame.reboot or {}
+        reboot_enable = reboot_cfg.get("enabled", "true") == "true"
+        reboot_cron   = reboot_cfg.get("crontab", "4 0 * * *")
+        reboot_type   = reboot_cfg.get("type", "frameos")  # frameos | raspberry
+
+        nixos_mod_dir = os.path.join(src, "nixos", "modules")
+        os.makedirs(nixos_mod_dir, exist_ok=True)
+
+        # 1.  Write  nixos/modules/frame-overrides.nix  with all overrides
+        override_path = os.path.join(nixos_mod_dir, "frame-overrides.nix")
+        lines: list[str] = [
+            "{ lib, ... }:",
+            "{",
+        ]
+
+        lines.extend([
+            f"  networking.hostName = \"{hostname}\";",
+            f"  time.timeZone       = \"{timezone}\";",
+        ])
+        if ssh_port != 22:
+            lines.extend([
+                f"  services.openssh.port = {ssh_port};",
+            ])
+        if ssh_pass:
+            lines.append(f"  users.users.frame.password = \"{ssh_pass}\";")
+        if key := all_settings.get("ssh_keys", {}).get("default_public"):
+            lines.append(f"  users.users.frame.openssh.authorizedKeys.keys = [ \"{key}\" ];")
+
+        if wifi_ssid and wifi_pass:
+            lines.extend([
+                "",
+                "  # Wi-Fi configuration (NetworkManager)",
+                f"  networking.wireless.networks.\"{wifi_ssid}\".psk = \"{wifi_pass}\";",
+            ])
+
+        if reboot_enable:
+            cron_cmd = ("systemctl restart frameos.service" if reboot_type == "frameos" else "/sbin/shutdown -r now")
+            lines.extend([
+                "",
+                "  # Nightly reboot (cron)",
+                "  systemd.timers.frameosReboot = {",
+                "    wantedBy  = [ \"timers.target\" ];",
+                "    after     = [ \"network.target\" ];",
+                "    timerConfig = {\n      OnCalendar = \"" + reboot_cron + "\";\n    };",
+                "  };",
+                "  systemd.services.frameosReboot = {",
+                "    serviceConfig.ExecStart = [ \"/usr/bin/env\" \"bash\" \"-c\" \"" + cron_cmd + "\" ];",
+                "  };",
+            ])
+
+        lines.append("}")
+
+        with open(override_path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+
+        if assets_path != "/srv/assets":
+            frameos_nix_path = os.path.join(nixos_mod_dir, "frameos.nix")
+            with open(frameos_nix_path, "r", encoding="utf-8") as fh:
+                frameos_nix = fh.read()
+            frameos_nix = frameos_nix.replace("/srv/assets", assets_path.rstrip("/"))
+            with open(frameos_nix_path, "w", encoding="utf-8") as fh:
+                fh.write(frameos_nix)
+
+        flake_path = os.path.join(src, "flake.nix")
+        with open(flake_path, "r", encoding="utf-8") as fh:
+            flake = fh.read()
+
+        flake = flake.replace("self.nixosModules.hardware.pi-zero2", f"self.nixosModules.hardware.{platform}")
+
+        with open(flake_path, "w", encoding="utf-8") as fh:
+            fh.write(flake)
 
     def create_local_source_folder(self, temp_dir: str) -> str:
         source_dir = os.path.join(temp_dir, "frameos")
         os.makedirs(source_dir, exist_ok=True)
         shutil.copytree("../frameos", source_dir, dirs_exist_ok=True)
         return source_dir
-
 
     async def create_local_build_archive(
         self,

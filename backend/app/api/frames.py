@@ -58,10 +58,7 @@ from app.utils.remote_exec import (
     _use_agent,
 )
 from app.tasks.utils import find_nim_v2
-from app.tasks.deploy_frame import (
-    FrameDeployer,
-    create_local_source_folder,
-)
+from app.tasks.deploy_frame import FrameDeployer
 from app.redis import get_redis
 from app.websockets import publish_message
 from app.ws.agent_ws import (
@@ -468,13 +465,13 @@ async def api_frame_local_build_zip(                 # noqa: D401
     redis: Redis = Depends(get_redis),
 ):
     """
-    Return a **zip archive** containing the locally‑generated sources
+    Return a **zip archive** containing the locally-generated sources
     produced by ``make_local_modifications`` for this frame.
 
     The archive includes:
     * every scene/app file produced for the frame
     * the generated ``drivers.nim`` / ``waveshare`` driver (if any)
-    * a ready‑to‑compile C/Makefile tree (no heavy cross‑build step)
+    * a ready-to-compile C/Makefile tree (no heavy cross-build step)
     """
     frame = db.get(Frame, id) or _not_found()
 
@@ -490,7 +487,7 @@ async def api_frame_local_build_zip(                 # noqa: D401
     # Workspace ────────────────────────────────────────────────────────────
     with tempfile.TemporaryDirectory() as tmp:
         deployer = FrameDeployer(db, redis, frame, nim_path, tmp)
-        source_dir = create_local_source_folder(tmp)
+        source_dir = deployer.create_local_source_folder(tmp)
 
         # Apply all frame‑specific code generation (scenes, drivers, …)
         await deployer.make_local_modifications(source_dir)

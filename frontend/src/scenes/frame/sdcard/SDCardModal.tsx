@@ -44,12 +44,12 @@ export function SDCardModal() {
           <div className="relative p-6 flex-auto space-y-4">
             <p>
               This will generate an <code>.img.zst</code> for the current frame, with FrameOS precompiled, and all
-              scenes and fonts included.
+              scenes and fonts included. You may update the frame's settings below.
             </p>
             <p>
               <span className="text-orange-500">Please note:</span> We will build the image in the background, and the
-              download will start as soon as it's ready. You can follow along in the frame's logs. Please don't close or
-              reload this page until the download starts.
+              download will start as soon as it's ready. Please don't close or reload this page until then. You can
+              follow along in the frame's logs.
             </p>
             <FrameSettings hideDropdown hideDeploymentMode />
           </div>

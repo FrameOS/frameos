@@ -52,6 +52,8 @@ export interface FrameType {
   schedule?: FrameSchedule
   gpio_buttons?: GPIOButton[]
   network?: {
+    wifiSSID?: string
+    wifiPassword?: string
     networkCheck?: boolean
     networkCheckTimeoutSeconds?: number
     networkCheckUrl?: string

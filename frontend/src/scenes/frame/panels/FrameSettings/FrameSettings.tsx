@@ -120,7 +120,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               {
                 label: 'Export .json',
                 onClick: () => {
-                  downloadJson(frame, `${frame.name || `frame-${frame.id}`}.json`)
+                  downloadJson(frame, `${frame.name || `frame${frame.id}`}.json`)
                 },
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
               },
@@ -199,9 +199,9 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 label="Hostname"
                 tooltip="You can use the hostname specificied here followed by .local to access the frame over mDNS."
               >
-                <TextInput name="nix.hostname" placeholder="nixframe" />
+                <TextInput name="nix.hostname" placeholder={`frame${frame.id}`} />
               </Field>
-              <Field name="ssh_user" label="Username" tooltip='The user is always "frame" when using NixOS'>
+              <Field name="ssh_user" label="Username" tooltip='The user is always "frame"'>
                 <TextInput name="ssh_user" value="frame" disabled required />
               </Field>
               <Field
@@ -507,7 +507,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 <Field name="wifiSSID" label="Wifi SSID" tooltip="The SSID of the wifi network to connect to on boot.">
                   <TextInput name="wifiSSID" placeholder="MyWifi" />
                 </Field>
-                <Field name="wifiPassword" label="Wifi Password">
+                <Field name="wifiPassword" label="Wifi Password" secret={!!frameForm.network?.wifiPassword}>
                   <TextInput name="wifiPassword" placeholder="MyWifiPassword" />
                 </Field>
               </>
@@ -918,7 +918,11 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 color="secondary"
                 size="small"
                 onClick={() => {
-                  setFrameFormValues({ log_to_file: '/srv/frameos/logs/frame-{date}.log' })
+                  if (frameForm.mode === 'nixos') {
+                    setFrameFormValues({ log_to_file: '/var/log/frameos/frame-{date}.log' })
+                  } else {
+                    setFrameFormValues({ log_to_file: '/srv/frameos/logs/frame-{date}.log' })
+                  }
                   touchFrameFormField('log_to_file')
                 }}
               >

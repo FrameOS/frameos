@@ -57,8 +57,6 @@ in
   users.groups.gpio = {};
 
   users.users.frame = {
-    password     = "not-an-admin-!!!";
-    # openssh.authorizedKeys.keys = [ "ssh-rsa XXX" ];
     isNormalUser = true;
     extraGroups  = [ "gpio" "spi" "i2c" "video" "wheel" ];
   };
