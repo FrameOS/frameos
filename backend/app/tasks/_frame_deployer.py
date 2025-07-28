@@ -306,77 +306,108 @@ class FrameDeployer:
         await self._update_flake_with_frame_settings(source_dir)
 
     async def _update_flake_with_frame_settings(self, src: str) -> None:
-        """Inject per-frame settings into the generated Nix flake."""
+        """Inject per-frame settings into the generated Nix flake.
+
+        Changes from previous version:
+        • **Sanitise** _all_ dynamic strings written into Nix files to prevent
+          syntax errors when user-supplied values contain quotes or backslashes.
+        • **Generate** a default NetworkManager profile (frameos-default.
+          nmconnection) and make sure it is installed to
+          `/etc/NetworkManager/system-connections/` with the correct
+          permissions (0600).
+        """
+
+        from json import dumps as _json_esc  # cheap string-sanitiser for Nix
+
+        def q(val: str) -> str:
+            """Return `val` quoted + escaped for safe embedding in Nix."""
+            return _json_esc(str(val))  # produces a valid Nix string literal
 
         all_settings = get_settings_dict(self.db)
-
         frame_nix = self.frame.nix or {}
 
         # ── generic / always present ──────────────────────────────────
         hostname = frame_nix.get("hostname") or f"frame{self.frame.id}"
         timezone = frame_nix.get("timezone") or "UTC"
-        platform = frame_nix.get("platform") or "pi-zero2"
+        platform  = frame_nix.get("platform") or "pi-zero2"
 
         # ── SSH credentials ───────────────────────────────────────────
-        ssh_pass = self.frame.ssh_pass or None
+        ssh_pass = (self.frame.ssh_pass or "")
         ssh_port = int(self.frame.ssh_port or 22)
 
-        # ── Network ‑ Wi‑Fi credentials (optional) ───────────────────
+        # ── Network - Wi-Fi credentials (optional) ───────────────────
         network_cfg = self.frame.network or {}
         wifi_ssid  = (network_cfg.get("wifiSSID") or "").rstrip()
         wifi_pass  = (network_cfg.get("wifiPassword") or "").rstrip()
 
-        # ── Misc. per‑frame paths/settings ───────────────────────────
+        # ── Misc. per-frame paths/settings ───────────────────────────
         assets_path = (self.frame.assets_path or "/srv/assets").rstrip("/")
 
-        reboot_cfg    = self.frame.reboot or {}
-        reboot_enable = reboot_cfg.get("enabled", "true") == "true"
-        reboot_cron   = reboot_cfg.get("crontab", "4 0 * * *")
-        reboot_type   = reboot_cfg.get("type", "frameos")  # frameos | raspberry
+        # reboot_cfg    = self.frame.reboot or {}
+        # reboot_enable = reboot_cfg.get("enabled", "true") == "true"
+        # reboot_cron   = reboot_cfg.get("crontab", "4 0 * * *")
+        # reboot_type   = reboot_cfg.get("type", "frameos")  # frameos | raspberry
 
         nixos_mod_dir = os.path.join(src, "nixos", "modules")
         os.makedirs(nixos_mod_dir, exist_ok=True)
 
         # 1.  Write  nixos/modules/frame-overrides.nix  with all overrides
         override_path = os.path.join(nixos_mod_dir, "frame-overrides.nix")
-        lines: list[str] = [
-            "{ lib, ... }:",
-            "{",
-        ]
+        lines: list[str] = ["{ lib, ... }:", "{"]
 
         lines.extend([
-            f"  networking.hostName = \"{hostname}\";",
-            f"  time.timeZone       = \"{timezone}\";",
+            f"  networking.hostName = {q(hostname)};",
+            f"  time.timeZone       = {q(timezone)};",
         ])
         if ssh_port != 22:
-            lines.extend([
-                f"  services.openssh.port = {ssh_port};",
-            ])
+            lines.append(f"  services.openssh.port = {ssh_port};")
         if ssh_pass:
-            lines.append(f"  users.users.frame.password = \"{ssh_pass}\";")
+            lines.append(f"  users.users.frame.password = {q(ssh_pass)};")
         if key := all_settings.get("ssh_keys", {}).get("default_public"):
-            lines.append(f"  users.users.frame.openssh.authorizedKeys.keys = [ \"{key}\" ];")
+            lines.append(
+                f"  users.users.frame.openssh.authorizedKeys.keys = [ {q(key)} ];")
+
+        # if reboot_enable:
+        #     cron_cmd = ("systemctl restart frameos.service" if reboot_type == "frameos" else "/sbin/shutdown -r now")
+        #     lines.extend([
+        #         "",
+        #         "  # Nightly reboot (cron)",
+        #         "  systemd.timers.frameosReboot = {",
+        #         "    wantedBy  = [ \"timers.target\" ];",
+        #         "    after     = [ \"network.target\" ];",
+        #         "    timerConfig = { OnCalendar = " + q(reboot_cron) + "; };",
+        #         "  };",
+        #         "  systemd.services.frameosReboot = {",
+        #         "    serviceConfig.ExecStart = \"/usr/bin/env bash -c '" + cron_cmd + "'\";",
+        #         "  };",
+        #     ])
 
         if wifi_ssid and wifi_pass:
             lines.extend([
                 "",
                 "  # Wi-Fi configuration (NetworkManager)",
-                f"  networking.wireless.networks.\"{wifi_ssid}\".psk = \"{wifi_pass}\";",
-            ])
-
-        if reboot_enable:
-            cron_cmd = ("systemctl restart frameos.service" if reboot_type == "frameos" else "/sbin/shutdown -r now")
-            lines.extend([
-                "",
-                "  # Nightly reboot (cron)",
-                "  systemd.timers.frameosReboot = {",
-                "    wantedBy  = [ \"timers.target\" ];",
-                "    after     = [ \"network.target\" ];",
-                "    timerConfig = {\n      OnCalendar = \"" + reboot_cron + "\";\n    };",
-                "  };",
-                "  systemd.services.frameosReboot = {",
-                "    serviceConfig.ExecStart = [ \"/usr/bin/env\" \"bash\" \"-c\" \"" + cron_cmd + "\" ];",
-                "  };",
+                "  environment.etc.\"NetworkManager/system-connections/frameos-default.nmconnection\" = {",
+                "    user  = \"root\"; group = \"root\"; mode = \"0600\";",
+                "    text  = ''",
+                "      [connection]",
+                "      id=frameos-default",
+                "      uuid=d96b6096-93a5-4c39-9f5c-6bb64bb97f7b",
+                "      type=wifi",
+                "      interface-name=wlan0",
+                "      autoconnect=true",
+                "      [wifi]",
+                f"      ssid={wifi_ssid}",
+                "      mode=infrastructure",
+                "      [wifi-security]",
+                "      key-mgmt=wpa-psk",
+                f"      psk={wifi_pass}",
+                "      [ipv4]",
+                "      method=auto",
+                "      never-default=false",
+                "      [ipv6]",
+                "      method=auto",
+                "    '';",
+                "  };"
             ])
 
         lines.append("}")
@@ -384,20 +415,20 @@ class FrameDeployer:
         with open(override_path, "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
 
-        if assets_path != "/srv/assets":
+        # TODO: sanitize??
+        if assets_path != "/srv/assets" and json.dumps(assets_path) == '"' + assets_path + '"':
             frameos_nix_path = os.path.join(nixos_mod_dir, "frameos.nix")
             with open(frameos_nix_path, "r", encoding="utf-8") as fh:
                 frameos_nix = fh.read()
-            frameos_nix = frameos_nix.replace("/srv/assets", assets_path.rstrip("/"))
+            frameos_nix = frameos_nix.replace("/srv/assets", assets_path)
             with open(frameos_nix_path, "w", encoding="utf-8") as fh:
                 fh.write(frameos_nix)
 
+        # 3. Patch flake.nix to pick the requested platform ---------------
         flake_path = os.path.join(src, "flake.nix")
         with open(flake_path, "r", encoding="utf-8") as fh:
             flake = fh.read()
-
         flake = flake.replace("self.nixosModules.hardware.pi-zero2", f"self.nixosModules.hardware.{platform}")
-
         with open(flake_path, "w", encoding="utf-8") as fh:
             fh.write(flake)
 

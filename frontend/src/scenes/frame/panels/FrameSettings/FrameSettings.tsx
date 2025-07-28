@@ -207,6 +207,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               <Field
                 name="ssh_pass"
                 label="Password"
+                secret={!!frameForm.ssh_pass}
                 tooltip={
                   <div>
                     <p>

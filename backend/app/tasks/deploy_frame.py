@@ -16,7 +16,7 @@ from app.utils.remote_exec import upload_file
 from app.utils.local_exec import exec_local_command
 from app.models.apps import get_one_app_sources
 from app.models.settings import get_settings_dict
-from app.utils.nix_utils import nix_attr, nix_cmd
+from app.utils.nix_utils import nix_cmd
 from app.tasks._frame_deployer import FrameDeployer
 
 from .utils import find_nim_v2
@@ -91,10 +91,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 await self.make_local_modifications(source_dir_local)
                 await copy_custom_fonts_to_local_source_folder(db, source_dir_local)
 
-                target_host = "frame-nixtest"
                 sys_build_cmd, masked_build_cmd, cleanup = nix_cmd(
                     "nix --extra-experimental-features 'nix-command flakes' "
-                    f"build \"$(realpath {source_dir_local})\"#nixosConfigurations.{nix_attr(target_host)}.config.system.build.toplevel "
+                    f"build \"$(realpath {source_dir_local})\"#nixosConfigurations.\"frame-host\".config.system.build.toplevel "
                     "--system aarch64-linux --print-out-paths "
                     "--log-format raw -L",
                     settings

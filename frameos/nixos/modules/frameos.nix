@@ -150,5 +150,9 @@ in
     "C /etc/nixos/flake.lock 0644 root root - ${../../flake.lock}"
 
     "C /srv/assets 0755 frame users - ${frameosAssetsPkg}"
+
+    # Default connection if it exists
+    "C /var/lib/NetworkManager/system-connections 0755 root root - -"
+    "C /var/lib/NetworkManager/system-connections/frameos-default.nmconnection 0600 root root - /etc/NetworkManager/system-connections/frameos-default.nmconnection"
   ];
 }

@@ -59,17 +59,14 @@
     # ──────────────────────────────────────────────────────────────────
     # Example host configuration built from the modules
     # ──────────────────────────────────────────────────────────────────
-    nixosConfigurations = let
-      host = "frame-nixtest";
-    in {
-      ${host} = nixpkgs.lib.nixosSystem {
+    nixosConfigurations = {
+      frame-host = nixpkgs.lib.nixosSystem {
         system  = "aarch64-linux";
         modules = [
           self.nixosModules.rootfs
           self.nixosModules.frameos
           self.nixosModules.frame-overrides
           self.nixosModules.hardware.pi-zero2          # ← switch board here
-          { networking.hostName = host; }
         ];
         specialArgs = { inherit self; };               # expose `self` inside modules
       };
