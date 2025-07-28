@@ -22,6 +22,7 @@ import { Switch } from '../../../../components/Switch'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Palette } from '../../../../types'
 import { A } from 'kea-router'
+import { timezoneOptions } from '../../../../decorators/timezones'
 
 export interface FrameSettingsProps {
   className?: string
@@ -229,7 +230,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 />
               </Field>
               <Field name="nix.timezone" label="Timezone">
-                <TextInput name="nix.timezone" placeholder="Europe/Brussels" />
+                <Select name="nix.timezone" options={timezoneOptions} />
               </Field>
             </div>
           </>
