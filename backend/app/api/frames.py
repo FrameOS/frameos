@@ -61,7 +61,6 @@ from app.tasks.utils import find_nim_v2
 from app.tasks.deploy_frame import (
     FrameDeployer,
     create_local_source_folder,
-    make_local_modifications,
 )
 from app.redis import get_redis
 from app.websockets import publish_message
@@ -494,7 +493,7 @@ async def api_frame_local_build_zip(                 # noqa: D401
         source_dir = create_local_source_folder(tmp)
 
         # Apply all frame‑specific code generation (scenes, drivers, …)
-        await make_local_modifications(deployer, source_dir)
+        await deployer.make_local_modifications(source_dir)
         await copy_custom_fonts_to_local_source_folder(db, source_dir)
 
         # Package → .zip
