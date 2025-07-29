@@ -347,8 +347,8 @@ class FrameDeployer:
         nixos_mod_dir = os.path.join(src, "nixos", "modules")
         os.makedirs(nixos_mod_dir, exist_ok=True)
 
-        # 1.  Write  nixos/modules/frame-overrides.nix  with all overrides
-        override_path = os.path.join(nixos_mod_dir, "frame-overrides.nix")
+        # 1.  Write  nixos/modules/overrides.nix  with all overrides
+        override_path = os.path.join(nixos_mod_dir, "overrides.nix")
         lines: list[str] = ["{ lib, pkgs, ... }:", "{"]
 
         lines.extend([
@@ -441,6 +441,12 @@ class FrameDeployer:
 
         with open(override_path, "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
+
+        if self.frame.nix.get("customModule"):
+            # 2. Write custom Nix module if requested
+            custom_module_path = os.path.join(nixos_mod_dir, "custom.nix")
+            with open(custom_module_path, "w", encoding="utf-8") as fh:
+                fh.write(self.frame.nix["customModule"] + "\n")
 
         # TODO: sanitize??
         if assets_path != "/srv/assets" and json.dumps(assets_path) == '"' + assets_path + '"':

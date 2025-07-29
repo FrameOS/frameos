@@ -39,8 +39,9 @@
             modules = [
               self.nixosModules.rootfs
               self.nixosModules.frameos
-              self.nixosModules.frame-overrides
-              self.nixosModules.hardware.pi-zero2      # ← pick another board here
+              self.nixosModules.overrides
+              self.nixosModules.hardware.pi-zero2  # will be swapped out
+              self.nixosModules.custom
             ];
             specialArgs = { inherit self; };
           };
@@ -52,8 +53,9 @@
     nixosModules = {
       rootfs  = import ./nixos/modules/rootfs.nix;
       frameos = import ./nixos/modules/frameos.nix;
-      frame-overrides = import ./nixos/modules/frame-overrides.nix;
+      overrides = import ./nixos/modules/overrides.nix;
       hardware = import ./nixos/modules/hardware;
+      custom = import ./nixos/modules/custom.nix;
     };
 
     # ──────────────────────────────────────────────────────────────────
@@ -65,10 +67,11 @@
         modules = [
           self.nixosModules.rootfs
           self.nixosModules.frameos
-          self.nixosModules.frame-overrides
-          self.nixosModules.hardware.pi-zero2          # ← switch board here
+          self.nixosModules.overrides
+          self.nixosModules.hardware.pi-zero2  # will be swapped out
+          self.nixosModules.custom
         ];
-        specialArgs = { inherit self; };               # expose `self` inside modules
+        specialArgs = { inherit self; };  # expose `self` inside modules
       };
     };
 

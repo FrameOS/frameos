@@ -543,4 +543,5 @@ export interface FrameNixConfig {
   hostname?: string
   platform?: string
   timezone?: string
+  customModule?: string
 }

@@ -23,6 +23,7 @@ import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Palette } from '../../../../types'
 import { A } from 'kea-router'
 import { timezoneOptions } from '../../../../decorators/timezones'
+import { TextArea } from '../../../../components/TextArea'
 
 export interface FrameSettingsProps {
   className?: string
@@ -30,6 +31,7 @@ export interface FrameSettingsProps {
   hideDeploymentMode?: boolean
 }
 
+const customModule = `{ lib, ... }:\n{\n  # boot.kernelParams = [ \"spi=off\" ];\n}\n`
 export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: FrameSettingsProps) {
   const { mode, frameId, frame, frameForm, frameFormTouches } = useValues(frameLogic)
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
@@ -231,6 +233,19 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               </Field>
               <Field name="nix.timezone" label="Timezone">
                 <Select name="nix.timezone" options={timezoneOptions} />
+              </Field>
+              <Field name="nix.customModule" label="Custom NixOS module">
+                <TextArea
+                  rows={4}
+                  placeholder={customModule}
+                  onClick={() => {
+                    if (!frameFormTouches['nix.customModule'] && !frameForm.nix?.customModule) {
+                      setFrameFormValues({
+                        nix: { ...(frameForm.nix ?? {}), customModule },
+                      })
+                    }
+                  }}
+                />
               </Field>
             </div>
           </>
