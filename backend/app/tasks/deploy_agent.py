@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 import os
 import shlex
 import shutil
@@ -19,8 +18,6 @@ from app.utils.ssh_utils import (
 from app.utils.local_exec import exec_local_command
 from app.tasks._frame_deployer import FrameDeployer
 from .utils import find_nim_v2, find_nimbase_file
-from app.models.settings import get_settings_dict
-from app.utils.nix_utils import nix_cmd
 
 async def deploy_agent(id: int, redis: Redis) -> None:  # noqa: N802
     await redis.enqueue_job("deploy_agent", id=id)
@@ -74,7 +71,7 @@ class AgentDeployer(FrameDeployer):
                     distro = distro_out[0].strip().lower()
 
                     if distro == "nixos":
-                        await self._deploy_agent_nixos(arch)
+                        await self.log("stderr", "NixOS is not supported for agent deployment")
                     else:
                         await self._deploy_agent(arch)
                         await self._setup_agent_service()
@@ -239,82 +236,6 @@ class AgentDeployer(FrameDeployer):
         )
         await self.exec_command("sudo chown root:root /etc/systemd/system/frameos_agent.service")
         await self.exec_command("sudo chmod 644 /etc/systemd/system/frameos_agent.service")
-
-    # ----------------------------------------------------------------------
-    #   NixOS deployment
-    # ----------------------------------------------------------------------
-    async def _deploy_agent_nixos(self, cpu: str) -> None:
-        """
-        Cross-build frameos_agent with Nix, ship the whole runtime closure,
-        stage a new release and restart the systemd service.
-        """
-        await self.log("stdout", "- NixOS detected – using flake-based deploy")
-
-        # ─── 1.  Build the package on the *server* ───────────────────────
-        settings = get_settings_dict(self.db)
-        build_cmd, masked_cmd, cleanup = nix_cmd(
-            "nix --extra-experimental-features 'nix-command flakes' "
-            "build ../frameos#packages.aarch64-linux.frameos_agent "
-            "--system aarch64-linux --print-out-paths",
-            settings
-        )
-        try:
-            await self.log("stdout", f"$ {masked_cmd}")
-            status, store_path, err = await exec_local_command(
-                self.db, self.redis, self.frame,
-                build_cmd, log_command=False
-            )
-        finally:
-            cleanup()
-        if status != 0 or not store_path:
-            raise Exception(f"Local nix build failed:\n{err}")
-        store_path = store_path.strip().splitlines()[-1]
-        binary_path = os.path.join(store_path, "bin", "frameos_agent")
-        if not os.path.exists(binary_path):
-            raise Exception(f"Binary missing at {binary_path}")
-
-        # ─── 2.  Export runtime closure → .nar ───────────────────────────
-        status, paths_out, _ = await exec_local_command(
-            self.db, self.redis, self.frame,
-            f"nix-store -qR {store_path}"
-        )
-        runtime_paths = (paths_out or "").strip().splitlines()
-
-        missing = await self._store_paths_missing(runtime_paths)
-        if not missing:
-            await self.log("stdout", "  → No missing store paths, skipping upload")
-            await self._upload_frame_json("/var/lib/frameos/frame.json")
-            await self.restart_service("frameos_agent")
-            await self.log("stdout", f"Agent deploy finished in {datetime.now() - self.deploy_start} 🎉")
-        else:
-            await self.log("stdout", f"  → {len(missing)} paths need upload")
-
-            nar_path = os.path.join(self.temp_dir, f"frameos_agent_closure_{self.build_id}.nar")
-            export_cmd = (
-                "bash -c 'nix-store --export "
-                + " ".join(runtime_paths)
-                + f" > {nar_path}'"
-            )
-            status, _, err = await exec_local_command(
-                self.db, self.redis, self.frame,
-                export_cmd
-            )
-            if status != 0:
-                raise Exception(f"Failed to export closure:\n{err}")
-
-            # ─── 3.  Upload & import on the device ───────────────────────────
-            await self.log("stdout", "- Uploading closure.nar")
-            await asyncssh.scp(
-                nar_path,
-                (self.ssh, f"/tmp/frameos_agent_closure_{self.build_id}.nar"),
-                recurse=False
-            )
-            await self.exec_command(
-                f"sudo nix-store --import < /tmp/frameos_agent_closure_{self.build_id}.nar && "
-                f"rm /tmp/frameos_agent_closure_{self.build_id}.nar"
-            )
-            await self._upload_frame_json("/var/lib/frameos/frame.json")
-            await self.log("stdout", f"Agent deploy finished in {datetime.now() - self.deploy_start} 🎉")
 
     # --------------- MISC ------------------------------------------------ #
     # TODO: deduplicate with deploy_frame

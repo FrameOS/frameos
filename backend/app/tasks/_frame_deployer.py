@@ -199,7 +199,7 @@ class FrameDeployer:
                         f"({len(chunk)} paths, {math.ceil(nar_local.stat().st_size/BYTES_PER_MB)} MiB)"
                     )
         finally:
-            await self.exec_command(f"rmdir {remote_tmp}")
+            await self.exec_command(f"rm -rf {remote_tmp}")
 
         return len(missing)
 
