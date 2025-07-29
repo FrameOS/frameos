@@ -377,10 +377,11 @@ class FrameDeployer:
                 cron_hour = "0" + cron_hour
             if len(cron_minute) < 2:
                 cron_minute = "0" + cron_minute
+
             reboot_calendar = f"*-*-* {cron_hour}:{cron_minute}:00"
 
             reboot_type = reboot_cfg.get("type", "frameos")  # frameos | raspberry
-            cron_cmd = ("systemctl restart frameos.service" if reboot_type == "frameos" else "/sbin/shutdown -r now")
+            cron_cmd = ("systemctl restart frameos.service" if reboot_type == "frameos" else "shutdown -r now")
 
             lines.extend([
                 "",
@@ -391,7 +392,7 @@ class FrameDeployer:
                 "    timerConfig = { OnCalendar = " + q(reboot_calendar) + "; Persistent = true; };",
                 "  };",
                 "  systemd.services.frameosReboot = {",
-                "    serviceConfig.ExecStart = \"/usr/bin/env bash -c '" + cron_cmd + "'\";",
+                "    serviceConfig.ExecStart = \"" + cron_cmd + "\";",
                 "  };",
             ])
 
