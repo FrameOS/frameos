@@ -248,8 +248,10 @@ export interface AppConfig {
   version?: string
   /** List of top level settings exported for this app */
   settings?: string[]
-  /** List of packages to install */
+  /** List of apt packages to install (mode=rpios) */
   apt?: string[]
+  /** List of nix packages to install (mode=nixos) */
+  nixpkgs?: string[]
   /** Fields for app in diagram editor */
   fields?: (AppConfigField | MarkdownField)[]
   /** Returned fields */

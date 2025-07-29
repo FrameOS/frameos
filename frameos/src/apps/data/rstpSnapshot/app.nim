@@ -23,7 +23,7 @@ proc renderError(self: App, context: ExecutionContext, message: string): Image =
 proc get*(self: App, context: ExecutionContext): Image =
   try:
     let url = self.appConfig.url.replace("'", "\\'")
-    let command = "/usr/bin/ffmpeg -loglevel quiet -y -i '" & url & "' -vframes 1 -f image2 -c:v bmp pipe:1"
+    let command = "ffmpeg -loglevel quiet -y -i '" & url & "' -vframes 1 -f image2 -c:v bmp pipe:1"
 
     if self.frameConfig.debug:
       self.log "Running: " & command

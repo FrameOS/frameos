@@ -16,6 +16,7 @@ from typing import Optional
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
+from app.models.apps import get_one_app_sources
 from app.models.frame import Frame, get_frame_json
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
@@ -348,7 +349,7 @@ class FrameDeployer:
 
         # 1.  Write  nixos/modules/frame-overrides.nix  with all overrides
         override_path = os.path.join(nixos_mod_dir, "frame-overrides.nix")
-        lines: list[str] = ["{ lib, ... }:", "{"]
+        lines: list[str] = ["{ lib, pkgs, ... }:", "{"]
 
         lines.extend([
             f"  networking.hostName = {q(hostname)};",
@@ -422,6 +423,18 @@ class FrameDeployer:
                 "      method=auto",
                 "    '';",
                 "  };"
+            ])
+
+        if extra_nixpkgs := self.get_nixpkgs():
+            lines.extend([
+                "",
+                "  # Extra packages requested by apps (config.json → nixpkgs)",
+                "  environment.systemPackages = lib.mkAfter (with pkgs; ["
+            ])
+            for pkg in sorted(extra_nixpkgs):
+                lines.append(f"    {pkg}")
+            lines.extend([
+                "  ]);"
             ])
 
         lines.append("}")
@@ -612,3 +625,47 @@ class FrameDeployer:
 
         local_sha = sha256(local_path)
         return remote_sha == local_sha
+
+    def _get_pkgs_from_apps(self: "FrameDeployer", field: str) -> list[str]:
+        extra_nixpkgs: set[str] = set()
+
+        for scene in self.frame.scenes or []:
+            for node in scene.get("nodes", []):
+                cfg: dict | None = None
+
+                if node.get("type") == "app":
+                    kw = node.get("data", {}).get("keyword")
+                    if kw:
+                        try:
+                            json_cfg = get_one_app_sources(kw).get("config.json")
+                            if json_cfg:
+                                cfg = json.loads(json_cfg)
+                        except Exception:
+                            pass
+
+                elif node.get("type") == "source":
+                    json_cfg = node.get("sources", {}).get("config.json")
+                    if json_cfg:
+                        try:
+                            cfg = json.loads(json_cfg)
+                        except Exception:
+                            pass
+
+                if cfg and field in cfg:
+                    for pkg in cfg[field]:
+                        if isinstance(pkg, str) and pkg:
+                            extra_nixpkgs.add(pkg)
+
+        return sorted(extra_nixpkgs)
+
+    def get_apt_packages(self: "FrameDeployer") -> list[str]:
+        apt_pkgs = self._get_pkgs_from_apps("apt")
+        if not apt_pkgs:
+            return []
+        return sorted(set(apt_pkgs))
+
+    def get_nixpkgs(self: "FrameDeployer") -> list[str]:
+        nix_pkgs = self._get_pkgs_from_apps("nixpkgs")
+        if not nix_pkgs:
+            return []
+        return sorted(set(nix_pkgs))

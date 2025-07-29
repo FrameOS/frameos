@@ -1,8 +1,7 @@
 from datetime import datetime, timezone
-import json
 import os
 import tempfile
-from typing import Any, Optional
+from typing import Any
 
 
 from arq import ArqRedis as Redis
@@ -14,7 +13,6 @@ from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame
 from app.utils.remote_exec import upload_file
 from app.utils.local_exec import exec_local_command
-from app.models.apps import get_one_app_sources
 from app.models.settings import get_settings_dict
 from app.utils.nix_utils import nix_cmd
 from app.tasks._frame_deployer import FrameDeployer
@@ -190,31 +188,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                         await self.exec_command(command)
 
             # Any app dependencies
-            all_deps = set()
-            for scene in frame.scenes:
-                try:
-                    for node in scene.get('nodes', []):
-                        try:
-                            config: Optional[dict[str, str]] = None
-                            if node.get('type') == 'app':
-                                app = node.get('data', {}).get('keyword')
-                                if app:
-                                    json_config = get_one_app_sources(app).get('config.json')
-                                    if json_config:
-                                        config = json.loads(json_config)
-                            if node.get('type') == 'source':
-                                json_config = node.get('sources', {}).get('config.json')
-                                if json_config:
-                                    config = json.loads(json_config)
-                            if config:
-                                if config.get('apt'):
-                                    for dep in config['apt']:
-                                        all_deps.add(dep)
-                        except Exception as e:
-                            await self.log("stderr", f"Error parsing node: {e}")
-                except Exception as e:
-                    await self.log("stderr", f"Error parsing scene: {e}")
-            for dep in all_deps:
+            for dep in self.get_apt_packages():
                 await install_if_necessary(dep)
 
             # Ensure /srv/frameos
