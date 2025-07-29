@@ -207,7 +207,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               <Field
                 name="ssh_pass"
                 label="Password"
-                secret={!!frameForm.ssh_pass}
                 tooltip={
                   <div>
                     <p>
@@ -508,8 +507,13 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 <Field name="wifiSSID" label="Wifi SSID" tooltip="The SSID of the wifi network to connect to on boot.">
                   <TextInput name="wifiSSID" placeholder="MyWifi" />
                 </Field>
-                <Field name="wifiPassword" label="Wifi Password" secret={!!frameForm.network?.wifiPassword}>
-                  <TextInput name="wifiPassword" placeholder="MyWifiPassword" />
+                <Field name="wifiPassword" label="Wifi Password">
+                  <TextInput
+                    name="wifiPassword"
+                    placeholder="MyWifiPassword"
+                    onClick={() => touchFrameFormField('network.wifiPassword')}
+                    type={frameFormTouches['network.wifiPassword'] ? 'text' : 'password'}
+                  />
                 </Field>
               </>
             ) : null}
