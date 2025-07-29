@@ -343,11 +343,6 @@ class FrameDeployer:
         # ── Misc. per-frame paths/settings ───────────────────────────
         assets_path = (self.frame.assets_path or "/srv/assets").rstrip("/")
 
-        # reboot_cfg    = self.frame.reboot or {}
-        # reboot_enable = reboot_cfg.get("enabled", "true") == "true"
-        # reboot_cron   = reboot_cfg.get("crontab", "4 0 * * *")
-        # reboot_type   = reboot_cfg.get("type", "frameos")  # frameos | raspberry
-
         nixos_mod_dir = os.path.join(src, "nixos", "modules")
         os.makedirs(nixos_mod_dir, exist_ok=True)
 
@@ -367,20 +362,38 @@ class FrameDeployer:
             lines.append(
                 f"  users.users.frame.openssh.authorizedKeys.keys = [ {q(key)} ];")
 
-        # if reboot_enable:
-        #     cron_cmd = ("systemctl restart frameos.service" if reboot_type == "frameos" else "/sbin/shutdown -r now")
-        #     lines.extend([
-        #         "",
-        #         "  # Nightly reboot (cron)",
-        #         "  systemd.timers.frameosReboot = {",
-        #         "    wantedBy  = [ \"timers.target\" ];",
-        #         "    after     = [ \"network.target\" ];",
-        #         "    timerConfig = { OnCalendar = " + q(reboot_cron) + "; };",
-        #         "  };",
-        #         "  systemd.services.frameosReboot = {",
-        #         "    serviceConfig.ExecStart = \"/usr/bin/env bash -c '" + cron_cmd + "'\";",
-        #         "  };",
-        #     ])
+        reboot_cfg = self.frame.reboot or {}
+        if reboot_cfg.get("enabled", "true") == "true":
+            # only hours and minutes are supported
+            reboot_cron = reboot_cfg.get("crontab", "4 0 * * *")
+            cron_parts = reboot_cron.split(" ")
+            cron_hour = cron_parts[0]
+            cron_minute = cron_parts[1]
+            if not cron_hour.isdigit() or not cron_minute.isdigit() or \
+               not (0 <= int(cron_hour) < 24) or not (0 <= int(cron_minute) < 60):
+                cron_hour = "04"
+                cron_minute = "00"
+            if len(cron_hour) < 2:
+                cron_hour = "0" + cron_hour
+            if len(cron_minute) < 2:
+                cron_minute = "0" + cron_minute
+            reboot_calendar = f"*-*-* {cron_hour}:{cron_minute}:00"
+
+            reboot_type = reboot_cfg.get("type", "frameos")  # frameos | raspberry
+            cron_cmd = ("systemctl restart frameos.service" if reboot_type == "frameos" else "/sbin/shutdown -r now")
+
+            lines.extend([
+                "",
+                "  # Nightly reboot (cron)",
+                "  systemd.timers.frameosReboot = {",
+                "    wantedBy  = [ \"timers.target\" ];",
+                "    after     = [ \"network.target\" ];",
+                "    timerConfig = { OnCalendar = " + q(reboot_calendar) + "; Persistent = true; };",
+                "  };",
+                "  systemd.services.frameosReboot = {",
+                "    serviceConfig.ExecStart = \"/usr/bin/env bash -c '" + cron_cmd + "'\";",
+                "  };",
+            ])
 
         if wifi_ssid and wifi_pass:
             lines.extend([
