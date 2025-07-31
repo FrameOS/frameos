@@ -1,4 +1,5 @@
 import os, osproc, httpclient, json, strformat, strutils, streams, times, threadpool, locks, tables
+import std/monotimes
 import frameos/config
 import frameos/types
 import frameos/scenes
@@ -59,9 +60,8 @@ proc hotspotRunning(frameOS: FrameOS): bool =
   result = output.strip().len > 0
   frameOS.network.hotspotStatus = if result: HotspotStatus.enabled else: HotspotStatus.disabled
 
-proc wifiConfigured(frameOS: FrameOS): bool =
-  let (output, _) = run("sudo nmcli --colors no -t -f NAME connection show | grep '^" &
-                     nmConnectionName & "$' || true")
+proc anyWifiConfigured(frameOS: FrameOS): bool =
+  let (output, _) = run("sudo nmcli --colors no -t -f NAME connection show | grep -v '^lo$' || true")
   result = output.strip().len > 0
 
 proc stopAp*(frameOS: FrameOS) =
@@ -98,20 +98,25 @@ proc startAp*(frameOS: FrameOS) =
   discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " ipv4.method shared")
 
   frameOS.network.hotspotStatus = HotspotStatus.enabled
+  let hotspotStarted = getMonoTime()
   frameOS.network.hotspotStartedAt = epochTime()
   pLog("portal:startAp:done")
   sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId})
 
-  proc watcher (frameOS: FrameOS) =
+  proc hotspotAutoTimeout(frameOS: FrameOS, startedAt: MonoTime) =
     while true:
       sleep(1000)
-      if frameOS.network.hotspotStatus != HotspotStatus.enabled or frameOS.network.hotspotStartedAt == 0:
+      if frameOS.network.hotspotStatus != HotspotStatus.enabled:
         return
-      if epochTime() - frameOS.network.hotspotStartedAt >= frameOS.frameConfig.network.wifiHostpotTimeoutSeconds:
+      let timeoutSec = frameOS.frameConfig.network.wifiHotspotTimeoutSeconds
+      if timeoutSec <= 0:
+        return # disabled or mis-configured – bail out immediately
+
+      if (getMonoTime() - startedAt) >= initDuration(milliseconds = int(timeoutSec * 1000)):
         pLog("portal:stopAp:autoTimeout")
         stopAp(frameOS)
         sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
-  spawn watcher(frameOS)
+  spawn hotspotAutoTimeout(frameOS, hotspotStarted) # pass snapshot
 
 proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool =
   frameOS.network.status = NetworkStatus.connecting
@@ -233,12 +238,12 @@ proc checkNetwork*(self: FrameOS): bool =
 
   let url = self.frameConfig.network.networkCheckUrl
   let timeout = self.frameConfig.network.networkCheckTimeoutSeconds
-  let timer = epochTime()
+  let timer = getMonoTime()
   var attempt = 1
   self.network.status = NetworkStatus.connecting
   self.logger.log(%*{"event": "networkCheck", "url": url})
   while true:
-    if epochTime() - timer >= timeout:
+    if (getMonoTime() - timer) >= initDuration(milliseconds = int(timeout*1000)):
       self.network.status = NetworkStatus.timeout
       self.logger.log(%*{"event": "networkCheck", "status": "timeout", "seconds": timeout})
       return false
@@ -269,11 +274,15 @@ proc checkNetwork*(self: FrameOS): bool =
     finally:
       client.close()
 
-    # If no frameos-wifi connection configured (first boot?), no need to attempt more than once
-    if not wifiConfigured(self):
-      self.network.status = NetworkStatus.error
-      self.logger.log(%*{"event": "networkCheck", "status": "wifi_not_configured"})
-      return false
+    # If no wifi configured (first boot?), bail and show the AP
+    if attempt == 1:
+      if not anyWifiConfigured(self):
+        self.network.status = NetworkStatus.error
+        self.logger.log(%*{"event": "networkCheck", "status": "wifi_not_configured"})
+        return false
+      else:
+        self.network.status = NetworkStatus.connecting
+        self.logger.log(%*{"event": "networkCheck", "status": "wifi_connecting"})
 
     sleep(min(attempt, 60) * 1000)
     attempt += 1

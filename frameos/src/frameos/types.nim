@@ -50,7 +50,7 @@ type
     wifiHotspot*: string
     wifiHotspotSsid*: string
     wifiHotspotPassword*: string
-    wifiHostpotTimeoutSeconds*: float
+    wifiHotspotTimeoutSeconds*: float
 
   AgentConfig* = ref object
     agentEnabled*: bool
