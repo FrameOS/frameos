@@ -31,7 +31,7 @@ export interface FrameSettingsProps {
   hideDeploymentMode?: boolean
 }
 
-const customModule = `{ lib, ... }:\n{\n  # boot.kernelParams = [ \"spi=off\" ];\n}\n`
+const customModule = `{ lib, ... }:\n{\n  # boot.kernelParams = [ \"quiet\" ];\n}\n`
 export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: FrameSettingsProps) {
   const { mode, frameId, frame, frameForm, frameFormTouches } = useValues(frameLogic)
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
@@ -265,7 +265,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               </div>
             }
           >
-            <TextInput name="frame_host" placeholder="127.0.0.1" required />
+            <TextInput name="frame_host" placeholder={`frame${frame.id}.local`} required />
           </Field>
           {frameForm.mode !== 'nixos' ? (
             <>
@@ -299,7 +299,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
         </div>
 
         <H6>
-          FrameOS Agent <span className="text-gray-500">(backend &#8594; frame)</span>
+          Reverse tunnel <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
         </H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Group name="agent">
@@ -309,13 +309,13 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               tooltip={
                 <div className="space-y-2">
                   <p>
-                    The FrameOS Agent opens a websocket connection from the frame to the backend, which is then used to
-                    control the frame, pass logs and more. This allows you to control the frame even if it's behind a
+                    The FrameOS Agent opens a websocket connection from the frame to the backend, which is then used by
+                    the backend to control the frame. This allows you to control the frame even if it's behind a
                     firewall. The backend must be publicly accessible for this to work.
                   </p>
                   <p>
                     This is still beta. Enable both toggles, then save. Download the SD card image, and deploy it to the
-                    frame. The agent will then connect to the frame to await further commands.
+                    frame. The agent will then connect to the backend to await further commands.
                   </p>
                 </div>
               }
@@ -429,7 +429,9 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Field>
         </div>
 
-        <H6>HTTP API on frame</H6>
+        <H6>
+          HTTP API on frame <span className="text-gray-500">(backend &#8594; frame)</span>
+        </H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field
             name="frame_port"

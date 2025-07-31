@@ -61,6 +61,7 @@ class FrameCreateRequest(BaseModel):
     server_host: str
     interval: Optional[float] = None
     device: Optional[str] = None
+    platform: Optional[str] = None
 
 class FrameUpdateRequest(BaseModel):
     scenes: Optional[List[Any]] = None

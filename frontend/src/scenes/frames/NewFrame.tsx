@@ -7,7 +7,7 @@ import { Field } from '../../components/Field'
 import { newFrameForm } from './newFrameForm'
 import { Select } from '../../components/Select'
 import { useActions, useValues } from 'kea'
-import { devices } from '../../devices'
+import { devices, devicesNixOS, platforms } from '../../devices'
 import { A } from 'kea-router'
 import { urls } from '../../urls'
 import { Spinner } from '../../components/Spinner'
@@ -53,7 +53,7 @@ export function NewFrame(): JSX.Element {
           <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
             <p className="text-sm text-gray-500">
               Enter the credentials of a running Raspberry Pi OS Lite (Bookworm) machine here. We will then deploy
-              FrameOS over SSH. This is the classic installation method.
+              FrameOS over SSH.
             </p>
             <Field name="name" label="Name">
               <TextInput name="name" placeholder="Kitchen Frame" required />
@@ -103,12 +103,11 @@ export function NewFrame(): JSX.Element {
         ) : mode === 'nixos' ? (
           <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
             <p className="text-sm text-yellow-500">
-              This mode is <strong>experimental</strong> and under active development. Your frames could break with any
-              new update, so proceed with caution.
+              This mode is <strong>under active development</strong>. Your frames could break with any new update, so
+              proceed with caution and take backups!
             </p>
             <p className="text-sm text-gray-500">
-              Register your frame, and download a customized SD card image. Flash it on the device, set up your WiFi
-              through the captive portal, and optionally use the FrameOS agent for all communication.
+              Steps: 1) add your frame, 2) add scenes to it, 3) download a SD card image, 4) flash it, 5) boot
             </p>
             <Field name="name" label="Name">
               <TextInput name="name" placeholder="Kitchen Frame" required />
@@ -127,7 +126,10 @@ export function NewFrame(): JSX.Element {
               )}
             </Field>
             <Field name="device" label="Driver">
-              <Select name="device" options={devices} />
+              <Select name="device" options={devicesNixOS} />
+            </Field>
+            <Field name="platform" label="Platform">
+              <Select name="platform" options={platforms} />
             </Field>
             <div className="flex gap-2">
               <Button type="submit">Add Frame</Button>

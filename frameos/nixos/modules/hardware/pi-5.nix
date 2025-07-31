@@ -10,7 +10,9 @@
       # Pi 5 kernel – adjust if the attribute name changes in nixpkgs
       kernelPackage = pkgs.linuxKernel.packages.linux_rpi5.kernel;
       filter        = "*2712*";                # BCM2712 / Pi 5
-      overlays      = [];                      # add your overlays here
+      overlays = [
+        #!- IMPORT OVERLAYS HERE -!#
+      ];
     };
   };
 

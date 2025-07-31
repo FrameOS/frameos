@@ -102,13 +102,15 @@ class FrameDeployer:
         """
         Export the full runtime closure of *path* and import it on the target
         machine, but bundle the nar streams so that at most `max_chunk_size`
-        bytes are transferred per upload (≈10 MiB by default).
+        bytes are transferred per upload (≈25 MiB by default).
 
         The implementation relies on
-            • `nix path-info --json` to get the *narSize* of every path once,
-            • `nix-store --export …` which can export many store paths in one
-            go, producing a concatenated nar stream,
-            • `nix-store --import` on the device to unpack an entire chunk.
+        - `nix path-info --json` to get the *narSize* of every path once,
+        - `nix-store --export …` to export many store paths into one .nar file,
+        - `nix-store --import` on the device to unpack an entire chunk.
+
+        Limitations:
+        - OOMS with very large closures (500MB+ on a pi zero 2)
         """
         await self.log("stdout", f"- Collecting runtime closure for {path}")
 
@@ -228,8 +230,8 @@ class FrameDeployer:
             "grep MemTotal /proc/meminfo | awk '{print $2}'",
             mem_output,
         )
-        kib = int(mem_output[0].strip()) if mem_output else 0   # kB from the kernel
-        total_memory = kib // 1024                             # MiB
+        kib = int(mem_output[0].strip()) if mem_output else 0 # kB from the kernel
+        total_memory = kib // 1024 # MiB
         return total_memory
 
     async def get_cpu_architecture(self) -> str:
@@ -307,54 +309,25 @@ class FrameDeployer:
         await self._update_flake_with_frame_settings(source_dir)
 
     async def _update_flake_with_frame_settings(self, src: str) -> None:
-        """Inject per-frame settings into the generated Nix flake.
-
-        Changes from previous version:
-        • **Sanitise** _all_ dynamic strings written into Nix files to prevent
-          syntax errors when user-supplied values contain quotes or backslashes.
-        • **Generate** a default NetworkManager profile (frameos-default.
-          nmconnection) and make sure it is installed to
-          `/etc/NetworkManager/system-connections/` with the correct
-          permissions (0600).
-        """
-
-        from json import dumps as _json_esc  # cheap string-sanitiser for Nix
-
         def q(val: str) -> str:
-            """Return `val` quoted + escaped for safe embedding in Nix."""
-            return _json_esc(str(val))  # produces a valid Nix string literal
+            return json.dumps(str(val))
 
         all_settings = get_settings_dict(self.db)
         frame_nix = self.frame.nix or {}
-
-        # ── generic / always present ──────────────────────────────────
         hostname = frame_nix.get("hostname") or f"frame{self.frame.id}"
         timezone = frame_nix.get("timezone") or "UTC"
         platform  = frame_nix.get("platform") or "pi-zero2"
 
-        # ── SSH credentials ───────────────────────────────────────────
-        ssh_pass = (self.frame.ssh_pass or "")
-        ssh_port = int(self.frame.ssh_port or 22)
-
-        # ── Network - Wi-Fi credentials (optional) ───────────────────
-        network_cfg = self.frame.network or {}
-        wifi_ssid  = (network_cfg.get("wifiSSID") or "").rstrip()
-        wifi_pass  = (network_cfg.get("wifiPassword") or "").rstrip()
-
-        # ── Misc. per-frame paths/settings ───────────────────────────
-        assets_path = (self.frame.assets_path or "/srv/assets").rstrip("/")
-
-        nixos_mod_dir = os.path.join(src, "nixos", "modules")
-        os.makedirs(nixos_mod_dir, exist_ok=True)
-
-        # 1.  Write  nixos/modules/overrides.nix  with all overrides
-        override_path = os.path.join(nixos_mod_dir, "overrides.nix")
+        ### nixos/modules/overrides.nix
         lines: list[str] = ["{ lib, pkgs, ... }:", "{"]
-
         lines.extend([
             f"  networking.hostName = {q(hostname)};",
             f"  time.timeZone       = {q(timezone)};",
         ])
+
+        # ssh and user/pass
+        ssh_pass = (self.frame.ssh_pass or "")
+        ssh_port = int(self.frame.ssh_port or 22)
         if ssh_port != 22:
             lines.append(f"  services.openssh.port = {ssh_port};")
         if ssh_pass:
@@ -363,11 +336,12 @@ class FrameDeployer:
             lines.append(
                 f"  users.users.frame.openssh.authorizedKeys.keys = [ {q(key)} ];")
 
+        # reboot
         reboot_cfg = self.frame.reboot or {}
         if reboot_cfg.get("enabled", "true") == "true":
-            # only hours and minutes are supported
             reboot_cron = reboot_cfg.get("crontab", "4 0 * * *")
             cron_parts = reboot_cron.split(" ")
+            # only hours and minutes are supported
             cron_hour = cron_parts[0]
             cron_minute = cron_parts[1]
             if not cron_hour.isdigit() or not cron_minute.isdigit() or \
@@ -380,7 +354,6 @@ class FrameDeployer:
                 cron_minute = "0" + cron_minute
 
             reboot_calendar = f"*-*-* {cron_hour}:{cron_minute}:00"
-
             reboot_type = reboot_cfg.get("type", "frameos")  # frameos | raspberry
             cron_cmd = ("systemctl restart frameos.service" if reboot_type == "frameos" else "shutdown -r now")
 
@@ -397,6 +370,10 @@ class FrameDeployer:
                 "  };",
             ])
 
+        # network / wifi
+        network_cfg = self.frame.network or {}
+        wifi_ssid  = (network_cfg.get("wifiSSID") or "").rstrip()
+        wifi_pass  = (network_cfg.get("wifiPassword") or "").rstrip()
         if wifi_ssid and wifi_pass:
             lines.extend([
                 "",
@@ -425,6 +402,7 @@ class FrameDeployer:
                 "  };"
             ])
 
+        # nixpkgs
         if extra_nixpkgs := self.get_nixpkgs():
             lines.extend([
                 "",
@@ -437,33 +415,126 @@ class FrameDeployer:
                 "  ]);"
             ])
 
-        lines.append("}")
+        ### nixos/modules/overrides.nix (new file)
 
+        nixos_mod_dir = os.path.join(src, "nixos", "modules")
+        override_path = os.path.join(nixos_mod_dir, "overrides.nix")
         with open(override_path, "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
 
+        ### nixos/modules/hardware/pi-xxxx.nix (add overlays)
+
+        drivers = drivers_for_frame(self.frame)
+        overlay_modules: list[str] = []
+        if drivers.get("i2c"):
+            overlay_modules.append("i2c")
+        if drivers.get("spi"):
+            overlay_modules.append("spi0-2cs")
+        elif drivers.get("noSpi"):
+            if self.frame.device == "waveshare.EPD_13in3e":
+                overlay_modules.append("spi0-0cs-low")
+        if overlay_modules:
+            hw_file = os.path.join(nixos_mod_dir, "hardware", f"{platform}.nix")
+            with open(hw_file, "r", encoding="utf-8") as fh:
+                hw_src = fh.read()
+
+            # find the placeholder *once* and replace the whole list
+            new_overlays = "\n        ".join(
+                f"(import ./overlays/{m}.nix)" for m in overlay_modules
+            )
+            hw_src = re.sub(
+                r"#\!\- IMPORT OVERLAYS HERE \-!\#[\s\S]*?\n",
+                new_overlays + "\n",
+                hw_src,
+                flags=re.M,
+            )
+            with open(hw_file, "w", encoding="utf-8") as fh:
+                fh.write(hw_src)
+
+        ### nixos/modules/custom.nix (new file)
+
         if self.frame.nix.get("customModule"):
-            # 2. Write custom Nix module if requested
             custom_module_path = os.path.join(nixos_mod_dir, "custom.nix")
             with open(custom_module_path, "w", encoding="utf-8") as fh:
                 fh.write(self.frame.nix["customModule"] + "\n")
 
-        # TODO: sanitize??
+        ### nixos/modules/frameos.nix (find/replace)
+
+        assets_path = (self.frame.assets_path or "/srv/assets").rstrip("/")
         if assets_path != "/srv/assets" and json.dumps(assets_path) == '"' + assets_path + '"':
             frameos_nix_path = os.path.join(nixos_mod_dir, "frameos.nix")
             with open(frameos_nix_path, "r", encoding="utf-8") as fh:
                 frameos_nix = fh.read()
+            # TODO: sanitize???
             frameos_nix = frameos_nix.replace("/srv/assets", assets_path)
             with open(frameos_nix_path, "w", encoding="utf-8") as fh:
                 fh.write(frameos_nix)
 
-        # 3. Patch flake.nix to pick the requested platform ---------------
+        ### flake.nix (find/replace)
+
         flake_path = os.path.join(src, "flake.nix")
         with open(flake_path, "r", encoding="utf-8") as fh:
             flake = fh.read()
         flake = flake.replace("self.nixosModules.hardware.pi-zero2", f"self.nixosModules.hardware.{platform}")
         with open(flake_path, "w", encoding="utf-8") as fh:
             fh.write(flake)
+
+        # # Driver-specific vendor steps
+        # if inkyPython := drivers.get("inkyPython"):
+        #     await self.exec_command(
+        #         f"mkdir -p /srv/frameos/vendor && "
+        #         f"cp -r /srv/frameos/build/build_{build_id}/vendor/inkyPython /srv/frameos/vendor/"
+        #     )
+        #     await install_if_necessary("python3-pip")
+        #     await install_if_necessary("python3-venv")
+        #     await self.exec_command(
+        #         f"cd /srv/frameos/vendor/{inkyPython.vendor_folder} && "
+        #         "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
+        #         "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
+        #         "(echo '> env/bin/pip3 install -r requirements.txt' && "
+        #         "env/bin/pip3 install -r requirements.txt && "
+        #         "sha256sum requirements.txt > requirements.txt.sha256sum))"
+        #     )
+
+        # if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
+        #     await self.exec_command(
+        #         f"mkdir -p /srv/frameos/vendor && "
+        #         f"cp -r /srv/frameos/build/build_{build_id}/vendor/inkyHyperPixel2r /srv/frameos/vendor/"
+        #     )
+        #     await install_if_necessary("python3-dev")
+        #     await install_if_necessary("python3-pip")
+        #     await install_if_necessary("python3-venv")
+        #     await self.exec_command(
+        #         f"cd /srv/frameos/vendor/{inkyHyperPixel2r.vendor_folder} && "
+        #         "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
+        #         "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
+        #         "(echo '> env/bin/pip3 install -r requirements.txt' && "
+        #         "env/bin/pip3 install -r requirements.txt && "
+        #         "sha256sum requirements.txt > requirements.txt.sha256sum))"
+        #     )
+
+        # if inkyPython := drivers.get('inkyPython'):
+        #     vendor_folder = inkyPython.vendor_folder or ""
+        #     os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
+        #     shutil.copytree(
+        #         f"../frameos/vendor/{vendor_folder}/",
+        #         os.path.join(build_dir, "vendor", vendor_folder),
+        #         dirs_exist_ok=True
+        #     )
+        #     shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "env"), ignore_errors=True)
+        #     shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
+
+        # if inkyHyperPixel2r := drivers.get('inkyHyperPixel2r'):
+        #     vendor_folder = inkyHyperPixel2r.vendor_folder or ""
+        #     os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
+        #     shutil.copytree(
+        #         f"../frameos/vendor/{vendor_folder}/",
+        #         os.path.join(build_dir, "vendor", vendor_folder),
+        #         dirs_exist_ok=True
+        #     )
+        #     shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "env"), ignore_errors=True)
+        #     shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
+
 
     def create_local_source_folder(self, temp_dir: str) -> str:
         source_dir = os.path.join(temp_dir, "frameos")
@@ -476,7 +547,7 @@ class FrameDeployer:
         build_dir: str,
         source_dir: str,
         arch: str
-    ):
+    ) -> str:
         db = self.db
         redis = self.redis
         frame = self.frame

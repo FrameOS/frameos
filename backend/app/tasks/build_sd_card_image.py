@@ -58,7 +58,7 @@ async def build_sd_card_image_task(
 
         await log(db, redis, id, "build",
                   f"Building SD-card image for frame \"{frame.name}\" with build ID {build_id}. "
-                  "This may take around 5 minutes. The download will begin then. Please don't run a second time while already building.")
+                  "This may take 2-10 minutes. The download will begin then. Please don't run a second time while already building.")
 
         # patch sources exactly like deploy_frame (re-use helpers)
         deployer = FrameDeployer(db, redis, frame, nim_path, str(tmp))

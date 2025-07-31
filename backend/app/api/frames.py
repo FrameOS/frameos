@@ -1120,8 +1120,16 @@ async def api_frame_update_endpoint(
                 status_code=400, detail="Invalid input for scenes (must be JSON)"
             )
 
+    old_mode = data.mode
     for field, value in update_data.items():
         setattr(frame, field, value)
+
+    if data.mode == "nixos" and old_mode == "rpios":
+        if frame.ssh_user == "pi":
+            frame.ssh_user = "frame"
+    elif data.mode == "rpios" and old_mode == "nixos":
+        if frame.ssh_user == "frame":
+            frame.ssh_user = "pi"
 
     await update_frame(db, redis, frame)
 
@@ -1161,10 +1169,18 @@ async def api_frame_new(
             data.device,
             data.interval,
         )
+        frame.mode = data.mode
         if data.mode == "nixos":
+            frame.mode = 'nixos'
+            frame.ssh_user = 'frame'
             frame.network['wifiHotspot'] = 'bootOnly'
             frame.agent['agentEnabled'] = True
             frame.agent['agentRunCommands'] = True
+            db.add(frame)
+            db.commit()
+            db.refresh(frame)
+            frame.nix = { **frame.nix, 'hostname': f'frame{frame.id}' }
+            frame.frame_host = f'frame{frame.id}.local'
             db.add(frame)
             db.commit()
             db.refresh(frame)
@@ -1196,49 +1212,23 @@ async def api_frame_import(
             db,
             redis,
             data.get("name"),
-            data.get("frameHost") or data.get("frame_host"),
-            data.get("serverHost") or data.get("server_host"),
+            data.get("frame_host"),
+            data.get("server_host"),
             data.get("device"),
-            data.get("interval") or data.get("metricsInterval"),
+            data.get("interval"),
         )
 
-        mapping = {
-            "mode": "mode",
-            "framePort": "frame_port",
-            "frameAccessKey": "frame_access_key",
-            "frameAccess": "frame_access",
-            "sshUser": "ssh_user",
-            "sshPass": "ssh_pass",
-            "sshPort": "ssh_port",
-            "serverPort": "server_port",
-            "serverApiKey": "server_api_key",
-            "width": "width",
-            "height": "height",
-            "color": "color",
-            "metricsInterval": "metrics_interval",
-            "debug": "debug",
-            "scalingMode": "scaling_mode",
-            "rotate": "rotate",
-            "backgroundColor": "background_color",
-            "interval": "interval",
-            "logToFile": "log_to_file",
-            "assetsPath": "assets_path",
-            "saveAssets": "save_assets",
-            "uploadFonts": "upload_fonts",
-            "schedule": "schedule",
-            "gpioButtons": "gpio_buttons",
-            "controlCode": "control_code",
-            "network": "network",
-            "agent": "agent",
-            "palette": "palette",
-            "nix": "nix",
-            "scenes": "scenes",
-        }
-        for src, dest in mapping.items():
-            if data.get(src) is not None:
-                setattr(frame, dest, data[src])
+        for key, value in data.items():
+            if key in ["id", "name", "frame_host", "server_host", "device", "interval", "last_success"]:
+                continue
+            if hasattr(frame, key):
+                if key in ["last_successful_deploy_at", "last_log_at"]:
+                    value = datetime.fromisoformat(value) if isinstance(value, str) else value
+                setattr(frame, key, value)
 
         await update_frame(db, redis, frame)
+        db.refresh(frame)
+
         return {"frame": frame.to_dict()}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

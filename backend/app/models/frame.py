@@ -139,6 +139,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
 
     frame = Frame(
         name=name,
+        mode="rpios",
         ssh_user=user,
         ssh_pass=password,
         ssh_port=ssh_port,
@@ -176,6 +177,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         control_code={"enabled": "false", "position": "top-right"},
         schedule={"events": []},
         reboot={"enabled": "true", "crontab": "4 0 * * *"},
+        nix={}
     )
     db.add(frame)
     db.commit()
