@@ -40,6 +40,8 @@ export function Frame(props: FrameSceneProps) {
 
   const canDeployAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && mode === 'rpios'
   const agentExtra = canDeployAgent ? (frame?.agent?.agentRunCommands ? ' (via agent)' : ' (via ssh)') : ''
+  // TODO
+  const firstEverForNixOS = false && frame.mode === 'nixos' && frame.status === 'uninitialized'
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -103,17 +105,29 @@ export function Frame(props: FrameSceneProps) {
                   <Button color={unsavedChanges ? 'primary' : 'secondary'} type="button" onClick={() => saveFrame()}>
                     Save
                   </Button>
-                  <Button
-                    color={undeployedChanges ? 'primary' : 'secondary'}
-                    type="button"
-                    onClick={() => {
-                      deployFrame()
-                      openLogs()
-                    }}
-                  >
-                    {requiresRecompilation ? 'Full ' : 'Fast '}
-                    deploy
-                  </Button>
+                  {firstEverForNixOS ? (
+                    <Button
+                      color="primary"
+                      type="button"
+                      onClick={() => {
+                        openSDCardModal()
+                      }}
+                    >
+                      Download SD card .img
+                    </Button>
+                  ) : (
+                    <Button
+                      color={undeployedChanges ? 'primary' : 'secondary'}
+                      type="button"
+                      onClick={() => {
+                        deployFrame()
+                        openLogs()
+                      }}
+                    >
+                      {requiresRecompilation ? 'Full ' : 'Fast '}
+                      deploy
+                    </Button>
+                  )}
                 </div>
                 <SDCardModal />
               </div>

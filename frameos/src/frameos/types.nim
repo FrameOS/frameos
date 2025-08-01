@@ -3,6 +3,7 @@ import json, jester, pixie, hashes, locks
 type
   FrameConfig* = ref object
     name*: string
+    mode*: string
     serverHost*: string
     serverPort*: int
     serverApiKey*: string

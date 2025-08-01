@@ -77,7 +77,7 @@ async def build_sd_card_image_task(
         cmd, masked_cmd, cleanup = nix_cmd(
             "nix --extra-experimental-features 'nix-command flakes' "
             f"build \"$(realpath {flake_dir})\"#packages.aarch64-linux.sdImage "
-            "--system aarch64-linux --show-trace --print-out-paths",
+            "--system aarch64-linux --print-out-paths",
             settings
         )
         try:

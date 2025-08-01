@@ -36,7 +36,7 @@ export function SDCardModal() {
                 }}
                 className="flex gap-2 items-center"
               >
-                <div>Build SD card image</div>
+                <div>Save & download SD card .img</div>
               </Button>
             </div>
           }

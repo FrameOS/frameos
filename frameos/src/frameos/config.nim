@@ -107,6 +107,7 @@ proc loadConfig*(): FrameConfig =
   # TODO: switch to jsony
   result = FrameConfig(
     name: data{"name"}.getStr(),
+    mode: data{"mode"}.getStr("rpios"),
     serverHost: data{"serverHost"}.getStr(),
     serverPort: data{"serverPort"}.getInt(),
     serverApiKey: data{"serverApiKey"}.getStr(),

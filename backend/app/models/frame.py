@@ -228,7 +228,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     agent = frame.agent or {}
     frame_json: dict = {
         "name": frame.name,
-        # "mode": frame.mode or 'rpios', # We don't need this in the json. It's only used for building the system.
+        "mode": frame.mode or 'rpios',
         "frameHost": frame.frame_host or "localhost",
         "framePort": frame.frame_port or 8787,
         "frameAccessKey": frame.frame_access_key,

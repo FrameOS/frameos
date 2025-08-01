@@ -1,4 +1,4 @@
-import osproc, os, streams, pixie, json, options, strutils
+import osproc, os, streams, pixie, json, options, strutils, strformat
 import frameos/types
 
 type ScreenInfo* = object
@@ -8,6 +8,7 @@ type ScreenInfo* = object
 
 type Driver* = ref object of FrameOSDriver
   screenInfo: ScreenInfo
+  mode*: string
   logger: Logger
   lastImageData: seq[ColorRGBX]
   debug: bool
@@ -20,6 +21,20 @@ proc safeLog(logger: Logger, message: string): JsonNode =
     result = %*{"event": "driver:inky", "log": message}
   logger.log(result)
 
+proc safeStartProcess*(cmd: string; args: seq[string] = @[];
+                       wdir: string; logger: Logger): Option[Process] =
+  try:
+    result = some startProcess(
+      workingDir = wdir,
+      command = cmd,
+      args = args,
+      options = {poStdErrToStdOut}
+    )
+  except OSError as e:
+    let errorMsg = fmt"Error starting process '{cmd}': {e.msg}"
+    discard logger.safeLog(errorMsg)
+    result = none(Process)
+
 proc init*(frameOS: FrameOS): Driver =
   discard frameOS.logger.safeLog("Initializing Inky driver")
 
@@ -30,12 +45,24 @@ proc init*(frameOS: FrameOS): Driver =
       height: 0,
       color: ""
     ),
+    mode: frameOS.frameConfig.mode,
     logger: frameOS.logger,
-    debug: frameOS.frameConfig.debug
+    debug: frameOS.frameConfig.debug,
   )
 
-  let process = startProcess(workingDir = "/srv/frameos/vendor/inkyPython",
-      command = "./env/bin/python3", args = ["check.py"], options = {poStdErrToStdOut})
+  let pOpt =
+    if result.mode == "nixos":
+      safeStartProcess("/nix/var/nix/profiles/system/sw/bin/inkyPython-check", @[],
+                       "/srv/frameos/vendor/inkyPython", result.logger)
+    else:
+      safeStartProcess("./env/bin/python3", @["check.py"],
+                       "/srv/frameos/vendor/inkyPython", result.logger)
+
+  if pOpt.isNone:
+    discard result.logger.safeLog("Inky command not found - driver disabled.")
+    return # leave screenInfo width/height = 0 ➜ renderer will noop
+
+  let process = pOpt.get()
   let pOut = process.outputStream()
   var line = ""
   var i = 0
@@ -70,8 +97,19 @@ proc render*(self: Driver, image: Image) =
   self.lastImageData = image.data
   let imageData = image.encodeImage(BmpFormat)
 
-  let process = startProcess(workingDir = "/srv/frameos/vendor/inkyPython",
-      command = "./env/bin/python3", args = ["run.py"], options = {poStdErrToStdOut})
+  let pOpt =
+    if self.mode == "nixos":
+      safeStartProcess("/nix/var/nix/profiles/system/sw/bin/inkyPython-run", @[],
+                       "/srv/frameos/vendor/inkyPython", self.logger)
+    else:
+      safeStartProcess("./env/bin/python3", @["run.py"],
+                       "/srv/frameos/vendor/inkyPython", self.logger)
+
+  if pOpt.isNone:
+    discard self.logger.safeLog("Render skipped - command missing.")
+    return
+
+  let process = pOpt.get()
   let pOut = process.outputStream()
   let pIn = process.inputStream()
   var line = ""

@@ -7,7 +7,6 @@
 
     deviceTree = {
       enable        = true;
-      # Use the Raspberry Pi-specific kernel; same choice as pi-zero-2 flake
       kernelPackage = pkgs.linuxKernel.packages.linux_rpi3.kernel;
       filter        = "*2837*";                 # BCM2837 / Pi 3 / Zero 2 W
       overlays = [

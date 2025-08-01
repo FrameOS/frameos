@@ -312,6 +312,7 @@ class FrameDeployer:
         def q(val: str) -> str:
             return json.dumps(str(val))
 
+        drivers = drivers_for_frame(self.frame)
         all_settings = get_settings_dict(self.db)
         frame_nix = self.frame.nix or {}
         hostname = frame_nix.get("hostname") or f"frame{self.frame.id}"
@@ -319,7 +320,7 @@ class FrameDeployer:
         platform  = frame_nix.get("platform") or "pi-zero2"
 
         ### nixos/modules/overrides.nix
-        lines: list[str] = ["{ lib, pkgs, ... }:", "{"]
+        lines: list[str] = ["{ lib, pkgs, self, ... }:", "{"]
         lines.extend([
             f"  networking.hostName = {q(hostname)};",
             f"  time.timeZone       = {q(timezone)};",
@@ -415,6 +416,41 @@ class FrameDeployer:
                 "  ]);"
             ])
 
+        # ─── Vendor blobs for Inky/Pimoroni drivers (not fully working yet)
+        vendor_pkgs: list[str] = []
+        vendor_tmpfiles: list[str] = []
+
+        if drivers.get("inkyPython"):
+            vendor_pkgs.append("self.packages.${pkgs.system}.inkyPython")
+            vendor_tmpfiles.append(
+                "C /srv/frameos/vendor/inkyPython 0755 frame users - ${self.packages.${pkgs.system}.inkyPython}"
+            )
+
+        if drivers.get("inkyHyperPixel2r"):
+            vendor_pkgs.append("self.packages.${pkgs.system}.inkyHyperPixel2r")
+            vendor_tmpfiles.append(
+                "C /srv/frameos/vendor/inkyHyperPixel2r 0755 frame users - ${self.packages.${pkgs.system}.inkyHyperPixel2r}"
+            )
+
+        if vendor_pkgs:
+            lines.extend([
+                "",
+                "  # Runtime blobs for Inky / HyperPixel",
+                "  environment.systemPackages = lib.mkAfter (with pkgs; [",
+            ])
+            for p in vendor_pkgs:
+                lines.append(f"    {p}")
+            lines.extend([
+                "  ]);",
+                "",
+                "  systemd.tmpfiles.rules = lib.mkAfter [",
+            ])
+            for rule in vendor_tmpfiles:
+                lines.append(f"    {q(rule)}")
+            lines.append("  ];")
+
+        lines.append("}")
+
         ### nixos/modules/overrides.nix (new file)
 
         nixos_mod_dir = os.path.join(src, "nixos", "modules")
@@ -424,11 +460,13 @@ class FrameDeployer:
 
         ### nixos/modules/hardware/pi-xxxx.nix (add overlays)
 
-        drivers = drivers_for_frame(self.frame)
         overlay_modules: list[str] = []
         if drivers.get("i2c"):
             overlay_modules.append("i2c")
         if drivers.get("spi"):
+            # TODO: what does 7.2 waveshare work with
+            # overlay_modules.append("spi0-0cs-low")
+            # overlay_modules.append("spi0-1cs")
             overlay_modules.append("spi0-2cs")
         elif drivers.get("noSpi"):
             if self.frame.device == "waveshare.EPD_13in3e":
@@ -478,63 +516,6 @@ class FrameDeployer:
         flake = flake.replace("self.nixosModules.hardware.pi-zero2", f"self.nixosModules.hardware.{platform}")
         with open(flake_path, "w", encoding="utf-8") as fh:
             fh.write(flake)
-
-        # # Driver-specific vendor steps
-        # if inkyPython := drivers.get("inkyPython"):
-        #     await self.exec_command(
-        #         f"mkdir -p /srv/frameos/vendor && "
-        #         f"cp -r /srv/frameos/build/build_{build_id}/vendor/inkyPython /srv/frameos/vendor/"
-        #     )
-        #     await install_if_necessary("python3-pip")
-        #     await install_if_necessary("python3-venv")
-        #     await self.exec_command(
-        #         f"cd /srv/frameos/vendor/{inkyPython.vendor_folder} && "
-        #         "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
-        #         "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
-        #         "(echo '> env/bin/pip3 install -r requirements.txt' && "
-        #         "env/bin/pip3 install -r requirements.txt && "
-        #         "sha256sum requirements.txt > requirements.txt.sha256sum))"
-        #     )
-
-        # if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
-        #     await self.exec_command(
-        #         f"mkdir -p /srv/frameos/vendor && "
-        #         f"cp -r /srv/frameos/build/build_{build_id}/vendor/inkyHyperPixel2r /srv/frameos/vendor/"
-        #     )
-        #     await install_if_necessary("python3-dev")
-        #     await install_if_necessary("python3-pip")
-        #     await install_if_necessary("python3-venv")
-        #     await self.exec_command(
-        #         f"cd /srv/frameos/vendor/{inkyHyperPixel2r.vendor_folder} && "
-        #         "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
-        #         "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
-        #         "(echo '> env/bin/pip3 install -r requirements.txt' && "
-        #         "env/bin/pip3 install -r requirements.txt && "
-        #         "sha256sum requirements.txt > requirements.txt.sha256sum))"
-        #     )
-
-        # if inkyPython := drivers.get('inkyPython'):
-        #     vendor_folder = inkyPython.vendor_folder or ""
-        #     os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
-        #     shutil.copytree(
-        #         f"../frameos/vendor/{vendor_folder}/",
-        #         os.path.join(build_dir, "vendor", vendor_folder),
-        #         dirs_exist_ok=True
-        #     )
-        #     shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "env"), ignore_errors=True)
-        #     shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
-
-        # if inkyHyperPixel2r := drivers.get('inkyHyperPixel2r'):
-        #     vendor_folder = inkyHyperPixel2r.vendor_folder or ""
-        #     os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
-        #     shutil.copytree(
-        #         f"../frameos/vendor/{vendor_folder}/",
-        #         os.path.join(build_dir, "vendor", vendor_folder),
-        #         dirs_exist_ok=True
-        #     )
-        #     shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "env"), ignore_errors=True)
-        #     shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
-
 
     def create_local_source_folder(self, temp_dir: str) -> str:
         source_dir = os.path.join(temp_dir, "frameos")
