@@ -13,6 +13,8 @@ import { sceneLogic } from '../sceneLogic'
 import { TrashIcon } from '@heroicons/react/24/solid'
 import { NumberTextInput } from '../../components/NumberTextInput'
 import { Switch } from '../../components/Switch'
+import { Select } from '../../components/Select'
+import { timezoneOptions } from '../../decorators/timezones'
 
 export function Settings() {
   const {
@@ -24,7 +26,7 @@ export function Settings() {
     isCustomFontsFormSubmitting,
     customFonts,
   } = useValues(settingsLogic)
-  const { submitSettings, newKey, newNixKey, deleteCustomFont } = useActions(settingsLogic)
+  const { submitSettings, newKey, newNixKey, deleteCustomFont, setSettingsValue } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
 
@@ -50,6 +52,67 @@ export function Settings() {
           ) : (
             <>
               <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings} className="space-y-4">
+                <Group name="defaults">
+                  <H6 className="pt-4">Defaults for new frames</H6>
+                  <Box className="p-2 space-y-2">
+                    <Field
+                      name="timezone"
+                      label={
+                        <>
+                          Timezone
+                          <Button
+                            size="small"
+                            color="secondary"
+                            onClick={() => {
+                              const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+                              setSettingsValue(['defaults', 'timezone'], timezone)
+                            }}
+                          >
+                            Detect
+                          </Button>
+                        </>
+                      }
+                    >
+                      <Select name="timezone" options={timezoneOptions} />
+                    </Field>
+                    <Field name="wifiSSID" label="Default WiFi SSID">
+                      <TextInput name="wifiSSID" placeholder="WiFi network name" />
+                    </Field>
+                    <Field
+                      name="wifiPassword"
+                      label="Default WiFi password"
+                      secret={!!savedSettings?.defaults?.wifiPassword}
+                    >
+                      <TextInput name="wifiPassword" placeholder="WiFi password" />
+                    </Field>
+                  </Box>
+                </Group>
+
+                <Group name="ssh_keys">
+                  <H6 className="pt-4">SSH Keys</H6>
+                  <Box className="p-2 space-y-2">
+                    <p className="text-sm leading-loose">
+                      This SSH key will be used on all frames that don't have a password set for SSH.
+                    </p>
+                    <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
+                      <TextArea />
+                    </Field>
+                    <Field
+                      name="default_public"
+                      label="Default public SSH key (use this in the RPi Imager)"
+                      secret={!!savedSettings?.ssh_keys?.default_public}
+                    >
+                      <TextArea />
+                    </Field>
+                    <Button
+                      onClick={newKey}
+                      color={savedSettings?.ssh_keys?.default ? 'secondary' : 'primary'}
+                      size="small"
+                    >
+                      Generate new keypair
+                    </Button>
+                  </Box>
+                </Group>
                 <Group name="frameOS">
                   <H6 className="pt-4">FrameOS Gallery</H6>
                   <Box className="p-2 space-y-2">
@@ -160,31 +223,6 @@ export function Settings() {
                         </Button>
                       </>
                     ) : null}
-                  </Box>
-                </Group>
-                <Group name="ssh_keys">
-                  <H6 className="pt-4">SSH Keys</H6>
-                  <Box className="p-2 space-y-2">
-                    <p className="text-sm leading-loose">
-                      This SSH key will be used on all frames that don't have a password set for SSH.
-                    </p>
-                    <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
-                      <TextArea />
-                    </Field>
-                    <Field
-                      name="default_public"
-                      label="Default public SSH key (use this in the RPi Imager)"
-                      secret={!!savedSettings?.ssh_keys?.default_public}
-                    >
-                      <TextArea />
-                    </Field>
-                    <Button
-                      onClick={newKey}
-                      color={savedSettings?.ssh_keys?.default ? 'secondary' : 'primary'}
-                      size="small"
-                    >
-                      Generate new keypair
-                    </Button>
                   </Box>
                 </Group>
               </Form>

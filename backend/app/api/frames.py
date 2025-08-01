@@ -70,6 +70,7 @@ from app.ws.agent_ws import (
     exec_shell_on_frame,
 )
 from app.models.assets import copy_custom_fonts_to_local_source_folder
+from app.models.settings import get_settings_dict
 from . import api_with_auth, api_no_auth
 
 
@@ -1159,6 +1160,7 @@ async def api_frame_new(
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    settings = get_settings_dict(db)
     try:
         frame = await new_frame(
             db,
@@ -1173,9 +1175,18 @@ async def api_frame_new(
         if data.mode == "nixos":
             frame.mode = 'nixos'
             frame.ssh_user = 'frame'
+            frame.network = {} # mark as changed for the orm
             frame.network['wifiHotspot'] = 'bootOnly'
-            frame.agent['agentEnabled'] = True
+            frame.agent = {} # mark as changed for the orm
+            frame.agent['agentEnabled'] = False
             frame.agent['agentRunCommands'] = True
+            if timezone := settings.get('defaults', {}).get('timezone'):
+                frame.nix = {} # mark as changed for the orm
+                frame.nix['timezone'] = timezone
+            if wifi_ssid := settings.get('defaults', {}).get('wifiSSID'):
+                frame.network['wifiSSID'] = wifi_ssid
+            if wifi_password := settings.get('defaults', {}).get('wifiPassword'):
+                frame.network['wifiPassword'] = wifi_password
             db.add(frame)
             db.commit()
             db.refresh(frame)

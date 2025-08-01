@@ -495,6 +495,11 @@ export type PanelWithMetadata = {
 }
 
 export interface FrameOSSettings {
+  defaults?: {
+    timezone?: string
+    wifiSSID?: string
+    wifiPassword?: string
+  }
   homeAssistant?: {
     url?: string
     accessToken?: string

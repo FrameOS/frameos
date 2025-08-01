@@ -171,7 +171,11 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             <Select name="device" options={mode === 'nixos' ? devicesNixOS : devices} />
           </Field>
           {frameForm.mode === 'nixos' ? (
-            <Field name="nix.platform" label="Platform">
+            <Field
+              name="nix.platform"
+              label="Platform"
+              tooltip='More coming soon... Try the generic "rpios" mode until then.'
+            >
               <Select name="nix.platform" options={platforms} />
             </Field>
           ) : null}
