@@ -10,7 +10,9 @@
             "console": "integratedTerminal",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}",
+                "SECRET_KEY": "your_secret_key",
                 "GEVENT_SUPPORT": "True",
+                "DEBUG": "True",
             },
             "justMyCode": false
         }

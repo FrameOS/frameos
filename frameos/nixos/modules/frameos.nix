@@ -9,7 +9,7 @@ in
   nixpkgs.overlays = import ../overlays;
 
   system.stateVersion = "25.05";
-  time.timeZone       = "Europe/Brussels";
+  time.timeZone       = lib.mkDefault "Europe/Brussels";
 
   environment.systemPackages = with pkgs; [
     cacert openssl frameosPkg frameosAgentPkg frameosAssetsPkg
