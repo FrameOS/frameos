@@ -490,11 +490,10 @@ class FrameDeployer:
                 fh.write(hw_src)
 
         ### nixos/modules/custom.nix (new file)
-
-        if self.frame.nix.get("customModule"):
+        if frame_nix.get("customModule"):
             custom_module_path = os.path.join(nixos_mod_dir, "custom.nix")
             with open(custom_module_path, "w", encoding="utf-8") as fh:
-                fh.write(self.frame.nix["customModule"] + "\n")
+                fh.write(frame_nix["customModule"] + "\n")
 
         ### nixos/modules/frameos.nix (find/replace)
 
