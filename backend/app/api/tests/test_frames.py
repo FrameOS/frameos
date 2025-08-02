@@ -160,8 +160,8 @@ async def test_api_frame_new_missing_fields(async_client):
 async def test_api_frame_import(async_client, db, redis):
     payload = {
         "name": "ImportedFrame",
-        "frameHost": "importhost",
-        "serverHost": "importserver"
+        "frame_host": "importhost",
+        "server_host": "importserver"
     }
     resp = await async_client.post('/api/frames/import', json=payload)
     assert resp.status_code == 200
