@@ -7,7 +7,7 @@ import { Field } from '../../components/Field'
 import { newFrameForm } from './newFrameForm'
 import { Select } from '../../components/Select'
 import { useActions, useValues } from 'kea'
-import { devices } from '../../devices'
+import { devices, devicesNixOS, platforms } from '../../devices'
 import { A } from 'kea-router'
 import { urls } from '../../urls'
 import { Spinner } from '../../components/Spinner'
@@ -18,23 +18,43 @@ function isLocalServer(host?: string): boolean {
 }
 
 export function NewFrame(): JSX.Element {
-  const { hideForm, resetNewFrame, setMode, setFile, importFrame } = useActions(newFrameForm)
-  const { mode, file, importingFrameLoading } = useValues(newFrameForm)
+  const { hideForm, resetNewFrame, setNewFrameValue, setFile, importFrame } = useActions(newFrameForm)
+  const { newFrame, file, importingFrameLoading } = useValues(newFrameForm)
+  const mode = newFrame.mode
 
   return (
     <>
       <H6 className="mb-4">Add a smart frame</H6>
       <Box id="add-frame" className="p-4 w-80 max-w-full">
         <div className="flex gap-2 mb-4">
-          <Button size="small" color={mode === 'create' ? 'primary' : 'secondary'} onClick={() => setMode('create')}>
-            New
+          <Button
+            size="small"
+            color={mode === 'rpios' ? 'primary' : 'secondary'}
+            onClick={() => setNewFrameValue('mode', 'rpios')}
+          >
+            RPi OS
           </Button>
-          <Button size="small" color={mode === 'import' ? 'primary' : 'secondary'} onClick={() => setMode('import')}>
+          <Button
+            size="small"
+            color={mode === 'nixos' ? 'primary' : 'secondary'}
+            onClick={() => setNewFrameValue('mode', 'nixos')}
+          >
+            NixOS (alpha)
+          </Button>
+          <Button
+            size="small"
+            color={mode === 'import' ? 'primary' : 'secondary'}
+            onClick={() => setNewFrameValue('mode', 'import')}
+          >
             Import JSON
           </Button>
         </div>
-        {mode === 'create' ? (
+        {mode === 'rpios' ? (
           <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
+            <p className="text-sm text-gray-500">
+              Enter the credentials of a running Raspberry Pi OS Lite (Bookworm) machine here. We will then deploy
+              FrameOS over SSH.
+            </p>
             <Field name="name" label="Name">
               <TextInput name="name" placeholder="Kitchen Frame" required />
             </Field>
@@ -51,14 +71,14 @@ export function NewFrame(): JSX.Element {
             >
               <TextInput name="frame_host" placeholder="user:pass@127.0.0.1" required />
             </Field>
-            <Field name="server_host" label="Controller IP or hostname for reverse access">
+            <Field name="server_host" label="Backend IP or hostname for reverse access">
               {({ value, onChange }) => (
                 <>
                   <TextInput name="server_host" placeholder="127.0.0.1" required value={value} onChange={onChange} />
                   {isLocalServer(value) ? (
                     <p className="text-sm">
-                      <span className="text-orange-500">Warning!</span> Set this to the real IP of this computer, not to
-                      "localhost". The frame needs to use it to connect back to the backend.
+                      <span className="text-yellow-500">Warning!</span> Set this to the real host/IP of this server, not
+                      to "localhost". The frame needs to use it to connect back to the backend.
                     </p>
                   ) : null}
                 </>
@@ -66,6 +86,50 @@ export function NewFrame(): JSX.Element {
             </Field>
             <Field name="device" label="Driver">
               <Select name="device" options={devices} />
+            </Field>
+            <div className="flex gap-2">
+              <Button type="submit">Add Frame</Button>
+              <Button
+                color="secondary"
+                onClick={() => {
+                  resetNewFrame()
+                  hideForm()
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </Form>
+        ) : mode === 'nixos' ? (
+          <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
+            <p className="text-sm text-yellow-500">
+              This mode is <strong>under active development</strong>. Your frames could break with any new update, so
+              proceed with caution and take backups! Not all devices are supported yet.
+            </p>
+            <p className="text-sm text-gray-500">
+              Steps: 1) add your frame, 2) add scenes to it, 3) download a SD card image, 4) flash it, 5) boot
+            </p>
+            <Field name="name" label="Name">
+              <TextInput name="name" placeholder="Kitchen Frame" required />
+            </Field>
+            <Field name="server_host" label="Backend IP or hostname for reverse access">
+              {({ value, onChange }) => (
+                <>
+                  <TextInput name="server_host" placeholder="127.0.0.1" required value={value} onChange={onChange} />
+                  {isLocalServer(value) ? (
+                    <p className="text-sm">
+                      <span className="text-yellow-500">Warning!</span> Set this to the real host/IP of this server, not
+                      to "localhost". The frame needs to use it to connect back to the backend.
+                    </p>
+                  ) : null}
+                </>
+              )}
+            </Field>
+            <Field name="device" label="Driver">
+              <Select name="device" options={devicesNixOS} />
+            </Field>
+            <Field name="platform" label="Platform">
+              <Select name="platform" options={platforms} />
             </Field>
             <div className="flex gap-2">
               <Button type="submit">Add Frame</Button>

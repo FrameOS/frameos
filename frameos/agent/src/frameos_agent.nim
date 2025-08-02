@@ -1,5 +1,5 @@
 import std/[algorithm, segfaults, strformat, strutils, asyncdispatch, terminal,
-            times, os, sysrand, httpclient, osproc, streams, unicode, typedthreads]
+            times, os, sysrand, httpclient, osproc, streams, unicode, typedthreads, monotimes]
 import checksums/md5
 import json, jsony
 import ws
@@ -10,7 +10,6 @@ import zippy
 const
   DefaultConfigPath* = "./frame.json" # secure location
   MaxBackoffSeconds* = 60             # don’t wait longer than this
-  InitialBackoffSeconds = 1           # first retry
 
 # ----------------------------------------------------------------------------
 # Types
@@ -60,11 +59,21 @@ type
     done*: bool          ## true when process finished
     exit*: int           ## exit code (only valid if done)
 
+  UploadSession = object
+    fh: File
+    compression: string
+    bytesWritten: int
+
+var currentUpload: UploadSession
+
 # ----------------------------------------------------------------------------
 # Config IO (fails hard if unreadable)
 # ----------------------------------------------------------------------------
 
-proc loadConfig(path = DefaultConfigPath): FrameConfig =
+proc loadConfig(): FrameConfig =
+  var path = getEnv("FRAMEOS_CONFIG")
+  if path == "":
+    path = DefaultConfigPath
   if not fileExists(path):
     raise newException(IOError, "⚠️  config file not found: " & path)
   let raw = readFile(path)
@@ -206,61 +215,21 @@ proc recvBinary(ws: WebSocket): Future[string] {.async.} =
     else:
       discard # ignore text, pong …
 
-# ----------------------------------------------------------------------------
-# Shell command helpers
-# ----------------------------------------------------------------------------
-type
-  StreamParams = tuple[
-    pipe: Stream;
-    which: WhichStream;
-    ch: ptr Channel[LineMsg]
-  ]
+# TODO: split stdout and stderr
+proc execShellSimple(rawCmd: string;
+                     ws: WebSocket;
+                     cfg: FrameConfig;
+                     id: string): Future[void] {.async.} =
+  var p = startProcess("/usr/bin/env",
+                       args = ["bash", "-c", rawCmd],
+                       options = {poUsePath, poStdErrToStdOut}) # <- merge stderr
 
-  OutParams = tuple[
-    process: Process;
-    ch: ptr Channel[LineMsg]
-  ]
-
-proc readErr(p: StreamParams) {.thread.} =
-  let (pipe, which, ch) = p
   var line: string
-  while pipe.readLine(line):
-    ch[].send LineMsg(stream: which, txt: line, done: false)
+  while p.outputStream.readLine(line):
+    await streamChunk(ws, cfg, id, "stdout", line & '\n')
 
-proc readOut(p: OutParams) {.thread.} =
-  let (process, ch) = p
-  var line: string
-  while process.outputStream.readLine(line):
-    ch[].send LineMsg(stream: stdoutStr, txt: line, done: false)
-  let rc = process.waitForExit() # EOF ⇒ child quit
-  ch[].send LineMsg(done: true, exit: rc) # final signal
-
-proc execShellThreaded(rawCmd: string; ws: WebSocket;
-                       cfg: FrameConfig; id: string): Future[void] {.async.} =
-  var ch: Channel[LineMsg]
-  ch.open()
-  var p = startProcess("/bin/bash",
-          args = ["-c", rawCmd],
-          options = {poUsePath})
-
-  var thrOut: Thread[OutParams]
-  var thrErr: Thread[StreamParams]
-
-  createThread(thrOut, readOut, (p, addr ch)) # stdout + exit code
-  createThread(thrErr, readErr, (p.errorStream, stderrStr, addr ch))
-
-  while true:
-    let (ready, msg) = tryRecv(ch) # new one-arg form
-    if ready:
-      if msg.done:
-        await sendResp(ws, cfg, id, msg.exit == 0, %*{"exit": msg.exit})
-        break
-      else:
-        let which = if msg.stream == stdoutStr: "stdout" else: "stderr"
-        await streamChunk(ws, cfg, id, which, msg.txt & "\n")
-    else:
-      await sleepAsync(100)
-  ch.close()
+  let rc = p.waitForExit() # closes pipe & reaps the child
+  await sendResp(ws, cfg, id, rc == 0, %*{"exit": rc})
 
 # ----------------------------------------------------------------------------
 # All command handlers
@@ -331,7 +300,7 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
       if not args.hasKey("cmd"):
         await sendResp(ws, cfg, id, false, %*{"error": "`cmd` missing"})
       else:
-        asyncCheck execShellThreaded(args["cmd"].getStr(), ws, cfg, id)
+        asyncCheck execShellSimple(args["cmd"].getStr(), ws, cfg, id)
 
     of "file_md5":
       let path = args{"path"}.getStr("")
@@ -364,22 +333,70 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
 
     of "file_write":
       let path = args{"path"}.getStr("")
-      let size = args{"size"}.getInt(0)
+      let size = args{"size"}.getInt(0) # COMPRESSED size!
       if path.len == 0 or size <= 0:
-        await sendResp(ws, cfg, id, false, %*{"error": "`path`/`size` missing"})
-      else:
-        try:
-          var received = 0
-          var zipped = newStringOfCap(size) # capacity only, len = 0
-          while received < size:
-            let chunk = await recvBinary(ws)
-            zipped.add chunk
-            received = zipped.len
-          let bytes = uncompress(zipped)
-          writeFile(path, bytes)
-          await sendResp(ws, cfg, id, true, %*{"written": bytes.len})
-        except CatchableError as e:
-          await sendResp(ws, cfg, id, false, %*{"error": e.msg})
+        await sendResp(ws, cfg, id, false,
+                      %*{"error": "`path`/`size` missing"})
+        return
+
+      try:
+        var buf = newStringUninit(size) # len == size (un‑init)
+        var pos = 0
+
+        while pos < size:
+          let frame = await recvBinary(ws) # raw WS frame (bytes)
+          copyMem(addr buf[pos], unsafeAddr frame[0], frame.len)
+          pos += frame.len
+
+        let payload =
+          if currentUpload.compression == "zlib":
+            uncompress(buf) # zippy
+          else:
+            buf
+
+        createDir(parentDir(path))
+        writeFile(path, payload)
+        await sendResp(ws, cfg, id, true, %*{"written": payload.len})
+      except CatchableError as e:
+        await sendResp(ws, cfg, id, false, %*{"error": e.msg})
+
+    of "file_write_open":
+      let path = args["path"].getStr("")
+      createDir(parentDir(path))
+      currentUpload.fh = open(path, fmWrite)
+      currentUpload.compression = args["compression"].getStr("none")
+      currentUpload.bytesWritten = 0
+      await sendResp(ws, cfg, id, true, %*{})
+
+    of "file_write_chunk":
+      if currentUpload.fh.isNil:
+        await sendResp(ws, cfg, id, false, %*{"error": "file_write_open missing"})
+        return
+      let expected = args["size"].getInt()
+      var buf = newStringUninit(expected) # one shot, uninitialised
+      var pos = 0
+
+      while pos < expected:
+        let frame = await recvBinary(ws) # returns raw bytes of a WS frame
+        copyMem(addr buf[pos], unsafeAddr frame[0], frame.len)
+        pos += frame.len
+
+      let data =
+        if currentUpload.compression == "zlib":
+          uncompress(buf) # zippy API
+        else:
+          buf
+
+      write(currentUpload.fh, data)
+      currentUpload.bytesWritten += data.len
+      await sendResp(ws, cfg, id, true, %*{"written": currentUpload.bytesWritten})
+
+    of "file_write_close":
+      if not currentUpload.fh.isNil:
+        currentUpload.fh.flushFile()
+        currentUpload.fh.close()
+      currentUpload = UploadSession() # reset
+      await sendResp(ws, cfg, id, true, %*{})
 
     of "file_delete":
       let path = args{"path"}.getStr("")
@@ -503,12 +520,18 @@ proc startHeartbeat(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
       await ws.send($env)
   except Exception: discard # will quit when ws closes / errors out
 
+proc calcBackoff(elapsed: int): int =
+  result = elapsed div 60 # whole minutes since disconnect
+  if result < 3: result = 3
+  if result > MaxBackoffSeconds: result = MaxBackoffSeconds
+
 # ----------------------------------------------------------------------------
 # Run-forever loop with exponential back-off
 # ----------------------------------------------------------------------------
 
 proc runAgent(cfg: FrameConfig) {.async.} =
-  var backoff = InitialBackoffSeconds
+  var disconnectAt = getMonoTime()
+  var wasConnected = false # did we ever finish handshake?
   while true:
     try:
       # --- Connect ----------------------------------------------------------
@@ -520,7 +543,7 @@ proc runAgent(cfg: FrameConfig) {.async.} =
       var ws = await newWebSocket(url)
       try:
         await doHandshake(ws, cfg) # throws on failure
-        backoff = InitialBackoffSeconds # reset back-off
+        wasConnected = true # handshake succeeded
 
         asyncCheck startHeartbeat(ws, cfg)
 
@@ -545,9 +568,13 @@ proc runAgent(cfg: FrameConfig) {.async.} =
       echo &"⚠️  connection error: {e.msg}"
 
     # --- Back-off & retry ----------------------------------------------------
-    echo &"⏳ reconnecting in {backoff}s …"
+    if wasConnected:
+      disconnectAt = getMonoTime()
+      wasConnected = false
+    let elapsed = (getMonoTime() - disconnectAt).inSeconds.int
+    let backoff = min(calcBackoff(elapsed), MaxBackoffSeconds)
+    echo &"⏳ reconnecting in {backoff}s (disconnected {elapsed}s)…"
     await sleepAsync(backoff * 1_000)
-    backoff = min(backoff * 2, MaxBackoffSeconds)
 
 # ----------------------------------------------------------------------------
 # Program entry

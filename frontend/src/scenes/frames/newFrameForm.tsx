@@ -1,7 +1,7 @@
 import { actions, afterMount, kea, listeners, path, reducers } from 'kea'
 
 import { forms } from 'kea-forms'
-import { FrameType } from '../../types'
+import { NewFrameFormType } from '../../types'
 
 import type { newFrameFormType } from './newFrameFormType'
 import { framesModel } from '../../models/framesModel'
@@ -15,17 +15,10 @@ export const newFrameForm = kea<newFrameFormType>([
   actions({
     showForm: true,
     hideForm: true,
-    setMode: (name: string) => ({ name }),
     setFile: (file: File | null) => ({ file }),
     importFrame: true,
   }),
   reducers({
-    mode: [
-      'create' as 'create' | 'import',
-      {
-        setMode: (_, { name }) => (name === 'import' ? 'import' : 'create'),
-      },
-    ],
     file: [
       null as File | null,
       {
@@ -43,6 +36,7 @@ export const newFrameForm = kea<newFrameFormType>([
   forms(({ actions }) => ({
     newFrame: {
       defaults: {
+        mode: 'rpios',
         name: '',
         frame_host: '',
         device: 'web_only',
@@ -53,11 +47,11 @@ export const newFrameForm = kea<newFrameFormType>([
                   ? '8989' // using ingress with home assistant
                   : window.location.port || (window.location.protocol === 'https:' ? '443' : '80')
               }`
-            : null,
-      } as FrameType,
-      errors: (frame: Partial<FrameType>) => ({
+            : undefined,
+      } as NewFrameFormType,
+      errors: (frame: Partial<NewFrameFormType>) => ({
         name: !frame.name ? 'Please enter a name' : null,
-        frame_host: !frame.frame_host ? 'Please enter a host' : null,
+        frame_host: frame.mode === 'rpios' && !frame.frame_host ? 'Please enter a host' : null,
       }),
       submit: async (frame) => {
         try {
@@ -77,6 +71,7 @@ export const newFrameForm = kea<newFrameFormType>([
           actions.hideForm()
           const result = await response.json()
           if (result?.frame?.id) {
+            framesModel.actions.addFrame(result.frame)
             router.actions.push(urls.frame(result.frame.id))
           }
         } catch (error) {

@@ -225,6 +225,7 @@ async def exec_command(
     command: str,
     output: Optional[list[str]] = None,
     log_output: bool = True,
+    log_command: bool | str = True,
     raise_on_error: bool = True
 ) -> int:
     """
@@ -233,7 +234,9 @@ async def exec_command(
     into 'output' and logging them in the database.
     Returns the process exit status.
     """
-    await log(db, redis, frame.id, "stdout", f"> {command}")
+
+    if log_command:
+        await log(db, redis, frame.id, "stdout", f"> {log_command if isinstance(log_command, str) else command}")
 
     stdout_buffer: list[str] = []
     stderr_buffer: list[str] = []
@@ -297,7 +300,10 @@ async def _stream_lines(
     - Optionally store each line in buffer_list
     """
     while True:
-        line = await stream.readline()
+        raw = await stream.readline()
+        if not raw:                       # EOF
+            break
+        line = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
         if not line:
             break
         if buffer_list is not None:

@@ -33,7 +33,7 @@ async def create_repository(data: RepositoryCreateRequest, db: Session = Depends
 
     try:
         new_repository = Repository(name="", url=url)
-        new_repository.update_templates()  # synchronous operation
+        await new_repository.update_templates()
         db.add(new_repository)
         db.commit()
         db.refresh(new_repository)
@@ -57,7 +57,7 @@ async def get_repositories(db: Session = Depends(get_db)):
         # Create samples repo if not done
         if not db.query(Settings).filter_by(key="@system/repository_samples_done").first():
             repository = Repository(name="", url=FRAMEOS_SAMPLES_URL)
-            repository.update_templates()  # synchronous
+            await repository.update_templates()
             db.add(repository)
             db.add(Settings(key="@system/repository_samples_done", value="true"))
             db.commit()
@@ -65,7 +65,7 @@ async def get_repositories(db: Session = Depends(get_db)):
         # Create gallery repo if not done
         if not db.query(Settings).filter_by(key="@system/repository_gallery_done").first():
             repository = Repository(name="", url=FRAMEOS_GALLERY_URL)
-            repository.update_templates()  # synchronous
+            await repository.update_templates()
             db.add(repository)
             db.add(Settings(key="@system/repository_gallery_done", value="true"))
             db.commit()
@@ -99,7 +99,7 @@ async def update_repository(repository_id: str, data: RepositoryUpdateRequest, d
             repository.name = data.name
         if data.url is not None:
             repository.url = data.url
-        repository.update_templates()  # synchronous
+        await repository.update_templates()
         db.commit()
         db.refresh(repository)
         return repository

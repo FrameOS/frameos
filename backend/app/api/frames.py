@@ -3,13 +3,16 @@ from __future__ import annotations
 # stdlib ---------------------------------------------------------------------
 from datetime import datetime, timedelta
 from http import HTTPStatus
+import aiofiles
 import asyncssh
 import hashlib
 import io
 import json
 import os
 import re
+import tempfile
 import shlex
+import zipfile
 from tempfile import NamedTemporaryFile
 from typing import Any, Optional, Tuple
 from urllib.parse import quote
@@ -54,6 +57,8 @@ from app.utils.remote_exec import (
     make_dir,
     _use_agent,
 )
+from app.tasks.utils import find_nim_v2
+from app.tasks.deploy_frame import FrameDeployer
 from app.redis import get_redis
 from app.websockets import publish_message
 from app.ws.agent_ws import (
@@ -64,6 +69,9 @@ from app.ws.agent_ws import (
     assets_list_on_frame,
     exec_shell_on_frame,
 )
+from app.models.assets import copy_custom_fonts_to_local_source_folder
+from app.models.settings import get_settings_dict
+from app.utils.local_exec import exec_local_command
 from . import api_with_auth, api_no_auth
 
 
@@ -452,6 +460,64 @@ async def api_frame_event(
         raise exc
 
 
+@api_with_auth.post("/frames/{id:int}/download_build_zip")
+async def api_frame_local_build_zip(                 # noqa: D401
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    # Locate Nim (needed only for path checks inside helpers)
+    try:
+        nim_path = find_nim_v2()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Unable to locate Nim installation: {exc}",
+        )
+
+    # Workspace ────────────────────────────────────────────────────────────
+    with tempfile.TemporaryDirectory() as tmp:
+        deployer = FrameDeployer(db, redis, frame, nim_path, tmp)
+        source_dir = deployer.create_local_source_folder(tmp)
+
+        # Apply all frame‑specific code generation (scenes, drivers, …)
+        await deployer.make_local_modifications(source_dir)
+        await copy_custom_fonts_to_local_source_folder(db, source_dir)
+
+        # Package → .zip
+        zip_path = os.path.join(tmp, f"frameos_{deployer.build_id}.zip")
+        with zipfile.ZipFile(
+            zip_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            strict_timestamps=False,   # 🚩 allow < 1980 timestamps
+        ) as zf:
+            for root, _dirs, files in os.walk(source_dir):
+                for file in files:
+                    full = os.path.join(root, file)
+                    arc  = os.path.relpath(full, source_dir)
+                    zf.write(full, arc)
+
+        # --- read once *before* tmp dir vanishes ---------------------------
+        async with aiofiles.open(zip_path, "rb") as fh:
+            zip_bytes = await fh.read()
+
+        async def sender():
+            # stream from an in‑memory view – no filesystem dependency
+            yield zip_bytes
+
+        safe_name = (frame.name or "frame").replace(" ", "_").replace("/", "_")
+        filename  = f"{safe_name}_{deployer.build_id}.zip"
+        headers   = {
+            "Content-Disposition": (
+                f'attachment; filename="{_ascii_safe(filename)}"'
+            )
+        }
+        return StreamingResponse(sender(), headers=headers, media_type="application/zip")
+
+
 @api_with_auth.get("/frames/{id:int}/asset")
 async def api_frame_get_asset(
     id: int,
@@ -575,6 +641,12 @@ async def api_frame_get_image(
         last_image = await redis.get(cache_key)
         if last_image:
             return Response(content=last_image, media_type="image/png")
+        else:
+            # When asking for the cached image, raise instead of trying to fetch a real one
+            # Somehow we get stuck when trying to fetch a lot of new images.
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND, detail="No cached image available"
+            )
 
     # Use shared semaphore and client
     status = 0
@@ -896,6 +968,46 @@ async def api_frame_clear_build_cache(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@api_with_auth.post("/frames/{id:int}/nix_collect_garbage_frame")
+async def api_frame_nix_collect_garbage_frame(
+    id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)
+):
+    frame = db.get(Frame, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    if await _use_agent(frame, redis):
+        try:
+            await log( db, redis, id, "stdout", "> nix-collect-garbage")
+            await exec_shell_on_frame(frame.id, "nix-collect-garbage")
+            return {"message": "Garbage collected"}
+        except Exception as e:
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e)
+            )
+    try:
+        ssh = await get_ssh_connection(db, redis, frame)
+        try:
+            await exec_command(db, redis, frame, ssh, "nix-collect-garbage")
+        finally:
+            await remove_ssh_connection(db, redis, ssh, frame)
+        return {"message": "Garbage collected"}
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+@api_with_auth.post("/frames/{id:int}/nix_collect_garbage_backend")
+async def api_frame_nix_collect_garbage_backend(
+    id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)
+):
+    cmd = 'nix-collect-garbage'
+    frame = db.get(Frame, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    await exec_local_command(db, redis, frame, cmd)
+    return {"message": "Garbage collected"}
+
+
 @api_with_auth.post("/frames/{id:int}/reset")
 async def api_frame_reset_event(id: int, redis: Redis = Depends(get_redis)):
     try:
@@ -961,6 +1073,42 @@ async def api_frame_stop_event(id: int, redis: Redis = Depends(get_redis)):
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
+@api_with_auth.post("/frames/{id:int}/build_sd_image")
+async def api_frame_build_sd_image_event(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+    try:
+        from app.tasks.build_sd_card_image import build_sd_card_image_task
+
+        try:
+            img_path = await build_sd_card_image_task({"db": db, "redis": redis}, id=id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
+            )
+
+        if not img_path.exists():
+            raise HTTPException(status_code=500, detail="Image build failed")
+
+        async def sender():
+            try:
+                async with aiofiles.open(img_path, "rb") as fh:
+                    while chunk := await fh.read(64 << 14):   # 1 MiB chunks
+                        yield chunk
+            finally:
+                # do not remove the file, as it won't rebuild next time
+                pass
+
+        frame = db.get(Frame, id)
+        if not frame:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+        name = (frame.name or "Untitled Frame").replace(" ", "_").replace("/", "_")
+
+        filename = f"{name}.img.zst"
+        headers  = {
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+        return StreamingResponse(sender(), headers=headers, media_type="application/zstd")
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 @api_with_auth.post("/frames/{id:int}/deploy")
 async def api_frame_deploy_event(id: int, redis: Redis = Depends(get_redis)):
@@ -1005,8 +1153,16 @@ async def api_frame_update_endpoint(
                 status_code=400, detail="Invalid input for scenes (must be JSON)"
             )
 
+    old_mode = data.mode
     for field, value in update_data.items():
         setattr(frame, field, value)
+
+    if data.mode == "nixos" and old_mode == "rpios":
+        if frame.ssh_user == "pi":
+            frame.ssh_user = "frame"
+    elif data.mode == "rpios" and old_mode == "nixos":
+        if frame.ssh_user == "frame":
+            frame.ssh_user = "pi"
 
     await update_frame(db, redis, frame)
 
@@ -1036,6 +1192,7 @@ async def api_frame_new(
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    settings = get_settings_dict(db)
     try:
         frame = await new_frame(
             db,
@@ -1046,6 +1203,31 @@ async def api_frame_new(
             data.device,
             data.interval,
         )
+        frame.mode = data.mode
+        if data.mode == "nixos":
+            frame.mode = 'nixos'
+            frame.ssh_user = 'frame'
+            frame.network = {} # mark as changed for the orm
+            frame.network['wifiHotspot'] = 'bootOnly'
+            frame.agent = {} # mark as changed for the orm
+            frame.agent['agentEnabled'] = False
+            frame.agent['agentRunCommands'] = True
+            if timezone := settings.get('defaults', {}).get('timezone'):
+                frame.nix = {} # mark as changed for the orm
+                frame.nix['timezone'] = timezone
+            if wifi_ssid := settings.get('defaults', {}).get('wifiSSID'):
+                frame.network['wifiSSID'] = wifi_ssid
+            if wifi_password := settings.get('defaults', {}).get('wifiPassword'):
+                frame.network['wifiPassword'] = wifi_password
+            db.add(frame)
+            db.commit()
+            db.refresh(frame)
+            frame.nix = { **frame.nix, 'hostname': f'frame{frame.id}' }
+            frame.frame_host = f'frame{frame.id}.local'
+            db.add(frame)
+            db.commit()
+            db.refresh(frame)
+
         return {"frame": frame.to_dict()}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -1073,47 +1255,23 @@ async def api_frame_import(
             db,
             redis,
             data.get("name"),
-            data.get("frameHost") or data.get("frame_host"),
-            data.get("serverHost") or data.get("server_host"),
+            data.get("frame_host"),
+            data.get("server_host"),
             data.get("device"),
-            data.get("interval") or data.get("metricsInterval"),
+            data.get("interval"),
         )
 
-        mapping = {
-            "framePort": "frame_port",
-            "frameAccessKey": "frame_access_key",
-            "frameAccess": "frame_access",
-            "sshUser": "ssh_user",
-            "sshPass": "ssh_pass",
-            "sshPort": "ssh_port",
-            "serverPort": "server_port",
-            "serverApiKey": "server_api_key",
-            "width": "width",
-            "height": "height",
-            "color": "color",
-            "metricsInterval": "metrics_interval",
-            "debug": "debug",
-            "scalingMode": "scaling_mode",
-            "rotate": "rotate",
-            "backgroundColor": "background_color",
-            "interval": "interval",
-            "logToFile": "log_to_file",
-            "assetsPath": "assets_path",
-            "saveAssets": "save_assets",
-            "uploadFonts": "upload_fonts",
-            "schedule": "schedule",
-            "gpioButtons": "gpio_buttons",
-            "controlCode": "control_code",
-            "network": "network",
-            "agent": "agent",
-            "palette": "palette",
-            "scenes": "scenes",
-        }
-        for src, dest in mapping.items():
-            if data.get(src) is not None:
-                setattr(frame, dest, data[src])
+        for key, value in data.items():
+            if key in ["id", "name", "frame_host", "server_host", "device", "interval", "last_success"]:
+                continue
+            if hasattr(frame, key):
+                if key in ["last_successful_deploy_at", "last_log_at"]:
+                    value = datetime.fromisoformat(value) if isinstance(value, str) else value
+                setattr(frame, key, value)
 
         await update_frame(db, redis, frame)
+        db.refresh(frame)
+
         return {"frame": frame.to_dict()}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

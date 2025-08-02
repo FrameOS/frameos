@@ -1,28 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime
-import json
 import os
-import random
 import shutil
-import string
 import tempfile
-from typing import Any, Optional, List
+from typing import Any, Optional
 
 import asyncssh
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
-from app.models.log import new_log as log
-from app.models.frame import Frame, get_frame_json
+from app.models.frame import Frame
 from app.utils.ssh_utils import (
     get_ssh_connection,
-    exec_command,
     remove_ssh_connection,
 )
 from app.utils.local_exec import exec_local_command
+from app.tasks._frame_deployer import FrameDeployer
 from .utils import find_nim_v2, find_nimbase_file
-
 
 async def deploy_agent(id: int, redis: Redis) -> None:  # noqa: N802
     await redis.enqueue_job("deploy_agent", id=id)
@@ -40,19 +34,8 @@ async def deploy_agent_task(ctx: dict[str, Any], id: int):  # noqa: N802
     await deployer.run()
 
 
-class AgentDeployer:
-    def __init__(self, db: Session, redis: Redis, frame: Frame):
-        self.db = db
-        self.redis = redis
-        self.frame = frame
-
-        # Attributes initialised later inside ``run()``
-        self.nim_path: str = ""
-        self.temp_dir: str = ""
-        self.ssh: Optional[asyncssh.SSHClientConnection] = None
-
-        # Build identifier (12-random-letters)
-        self.build_id = "".join(random.choices(string.ascii_lowercase, k=12))
+class AgentDeployer(FrameDeployer):
+    ssh: Optional[asyncssh.SSHClientConnection] = None
 
     async def run(self) -> None:
         """Main orchestration coroutine (used by global ``deploy_agent_task``)."""
@@ -69,46 +52,56 @@ class AgentDeployer:
                 )
 
                 # 1. Detect CPU architecture on target
-                cpu = await self._detect_remote_cpu()
+                arch = await self.get_cpu_architecture()
 
                 # 2. Build & deploy the agent (if needed)
                 if self._can_deploy_agent():
                     await self.log("stdout", "- Deploying agent")
-                    await self._deploy_agent(cpu)
-                    await self._setup_agent_service()
 
-                    # 3. Upload *frame.json* for this release
-                    await self._upload_frame_json()
-
-                    # 4. Atomically switch *current* → new release + housekeeping
+                    distro_out: list[str] = []
                     await self.exec_command(
-                        "rm -rf /srv/frameos/agent/current && "
-                        f"ln -s /srv/frameos/agent/releases/release_{self.build_id} "
-                        "/srv/frameos/agent/current"
+                        "bash -c '"
+                        "if [ -e /etc/nixos/version ]; then echo nixos ; "
+                        "elif [ -f /etc/rpi-issue ] || grep -q \"^ID=raspbian\" /etc/os-release ; then echo raspios ; "
+                        "else . /etc/os-release ; echo ${ID:-unknown} ; "
+                        "fi'",
+                        distro_out
                     )
+                    distro = distro_out[0].strip().lower()
 
-                    # Enable + start service
-                    await self.exec_command("sudo systemctl enable frameos_agent.service")
-                    await self.exec_command("sudo systemctl restart frameos_agent.service")
-                    await self.exec_command("sudo systemctl status frameos_agent.service")
+                    if distro == "nixos":
+                        await self.log("stderr", "NixOS is not supported for agent deployment")
+                    else:
+                        await self._deploy_agent(arch)
+                        await self._setup_agent_service()
+
+                        # 3. Upload *frame.json* for this release
+                        await self._upload_frame_json(f"/srv/frameos/agent/releases/release_{self.build_id}/frame.json")
+
+                        # 4. Atomically switch *current* → new release + housekeeping
+                        await self.exec_command(
+                            "rm -rf /srv/frameos/agent/current && "
+                            f"ln -s /srv/frameos/agent/releases/release_{self.build_id} "
+                            "/srv/frameos/agent/current"
+                        )
+
+                        # Enable + start service
+                        await self.restart_service("frameos_agent")
+
+                        await self._cleanup_old_builds()
+                        await self.log(
+                            "stdout",
+                            f"Agent deployment completed for {self.frame.name} (build id: {self.build_id})",
+                        )
                 else:
                     await self.log(
                         "stdout",
                         f"- Skipping agent deployment for {self.frame.name} (no agent connection configured)"
                     )
                     # If the frame has no agent connection configured, disable service
-                    await self.exec_command(
-                        "sudo systemctl disable frameos_agent.service", raise_on_error=False
-                    )
-                    await self.exec_command(
-                        "sudo systemctl stop frameos_agent.service", raise_on_error=False
-                    )
+                    await self.disable_service("frameos_agent")
+                    await self.stop_service("frameos_agent")
 
-                await self._cleanup_old_builds()
-                await self.log(
-                    "stdout",
-                    f"Agent deployment completed for {self.frame.name} (build id: {self.build_id})",
-                )
 
         except Exception as exc:  # keep logging parity with legacy code
             await self.log("stderr", str(exc))
@@ -117,53 +110,10 @@ class AgentDeployer:
             if self.ssh is not None:
                 await remove_ssh_connection(self.db, self.redis, self.ssh, self.frame)
 
-    async def exec_command(
-        self,
-        command: str,
-        output: Optional[List[str]] = None,
-        *,
-        log_output: bool = True,
-        raise_on_error: bool = True,
-    ) -> int:
-        if self.ssh is None:
-            raise Exception("SSH connection is not established")
-        return await exec_command(
-            self.db,
-            self.redis,
-            self.frame,
-            self.ssh,
-            command,
-            output=output,
-            log_output=log_output,
-            raise_on_error=raise_on_error,
-        )
-
-    async def log(
-        self,
-        type: str,  # noqa: A002 (match original signature)
-        line: str,
-        timestamp: Optional[datetime] = None,
-    ) -> None:
-        await log(self.db, self.redis, int(self.frame.id), type=type, line=line, timestamp=timestamp)
-
     def _can_deploy_agent(self) -> bool:
         """Whether ``frame.network`` declares an agent link + shared secret."""
         agent = self.frame.agent or {}
         return bool(agent.get("agentEnabled") and len(str(agent.get("agentSharedSecret", ""))) > 0)
-
-    async def _detect_remote_cpu(self) -> str:
-        """SSH into the device and map `uname -m` to Nim's `--cpu:` flag."""
-        uname_out: List[str] = []
-        await self.exec_command("uname -m", uname_out)
-        arch = "".join(uname_out).strip()
-
-        if arch in {"aarch64", "arm64"}:
-            return "arm64"
-        if arch in {"armv6l", "armv7l"}:
-            return "arm"
-        if arch == "i386":
-            return "i386"
-        return "amd64"
 
     # --------------- BUILD ─────────────────────────────────────────---- #
 
@@ -178,7 +128,7 @@ class AgentDeployer:
         source_dir = os.path.join(self.temp_dir, "agent")
 
         os.makedirs(source_dir, exist_ok=True)
-        shutil.copytree("../agent", source_dir, dirs_exist_ok=True)  # idempotent copy
+        shutil.copytree("./agent", source_dir, dirs_exist_ok=True)  # idempotent copy
         os.makedirs(build_dir, exist_ok=True)
 
         return build_dir, source_dir
@@ -187,10 +137,11 @@ class AgentDeployer:
         self,
         build_dir: str,
         source_dir: str,
-        cpu: str,
+        arch: str,
     ) -> str:
         """Compile locally (generate C + scripts), tarball the build directory, return archive path."""
         debug_opts = "--lineTrace:on" if self.frame.debug else ""
+        cpu = await self.arch_to_nim_cpu(arch)
         cmd = (
             f"cd {source_dir} && nimble setup && "
             f"{self.nim_path} compile --os:linux --cpu:{cpu} "
@@ -219,13 +170,13 @@ class AgentDeployer:
 
     # --------------- DEPLOY ─────────────────────────────────────────--- #
 
-    async def _deploy_agent(self, cpu: str) -> None:
+    async def _deploy_agent(self, arch: str) -> None:
         """
         Build the agent locally, upload the tarball to the device,
         compile natively, and stage the binary in the new release folder.
         """
         build_dir, source_dir = self._create_agent_build_folders()
-        archive_path = await self._create_local_build_archive(build_dir, source_dir, cpu)
+        archive_path = await self._create_local_build_archive(build_dir, source_dir, arch)
 
         # Ensure directory structure exists
         await self.exec_command(
@@ -261,7 +212,7 @@ class AgentDeployer:
 
     async def _setup_agent_service(self) -> None:
         """Upload and install the systemd service file for the new release."""
-        with open("../agent/frameos_agent.service", "r", encoding="utf-8") as fh:
+        with open("./agent/frameos_agent.service", "r", encoding="utf-8") as fh:
             service_contents = fh.read().replace("%I", self.frame.ssh_user)
 
         # Local temp copy
@@ -286,25 +237,6 @@ class AgentDeployer:
         await self.exec_command("sudo chmod 644 /etc/systemd/system/frameos_agent.service")
 
     # --------------- MISC ------------------------------------------------ #
-
-    async def _upload_frame_json(self) -> None:
-        """Upload the release-specific `frame.json`."""
-        json_data = json.dumps(get_frame_json(self.db, self.frame), indent=4).encode() + b"\n"
-
-        with tempfile.NamedTemporaryFile("wb", suffix=".json", delete=False) as tmp:
-            tmp_path = tmp.name
-            tmp.write(json_data)
-
-        await asyncssh.scp(
-            tmp_path,
-            (self.ssh, f"/srv/frameos/agent/releases/release_{self.build_id}/frame.json"),
-            recurse=False,
-        )
-        os.remove(tmp_path)
-        await self.log(
-            "stdout",
-            f"> add /srv/frameos/agent/releases/release_{self.build_id}/frame.json",
-        )
 
     async def _cleanup_old_builds(self) -> None:
         """Keep only the 10 most-recent builds + releases on the device."""

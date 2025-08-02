@@ -1,67 +1,26 @@
 from datetime import datetime, timezone
-import json
 import os
-import random
-import re
-import shutil
-import string
 import tempfile
-from typing import Any, Optional
+from typing import Any
 
 
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
-from app.codegen.drivers_nim import write_drivers_nim
-from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.drivers.devices import drivers_for_frame
-from app.drivers.waveshare import write_waveshare_driver_nim, get_variant_folder
-from app.models import get_apps_from_scenes
-from app.models.assets import sync_assets
+from app.models.assets import copy_custom_fonts_to_local_source_folder, sync_assets
 from app.models.log import new_log as log
-from app.models.frame import Frame, update_frame, get_frame_json
-from app.utils.remote_exec import run_command, upload_file
+from app.models.frame import Frame, update_frame
+from app.utils.remote_exec import upload_file
 from app.utils.local_exec import exec_local_command
-from app.models.apps import get_one_app_sources
+from app.models.settings import get_settings_dict
+from app.utils.nix_utils import nix_cmd
+from app.tasks._frame_deployer import FrameDeployer
 
-from .utils import find_nim_v2, find_nimbase_file
+from .utils import find_nim_v2
 
 async def deploy_frame(id: int, redis: Redis):
     await redis.enqueue_job("deploy_frame", id=id)
-
-class FrameDeployer:
-    ## This entire file is a big refactor in progress.
-    def __init__(self, db: Session, redis: Redis, frame: Frame, nim_path: str, temp_dir: str):
-        self.db = db
-        self.redis = redis
-        self.frame = frame
-        self.nim_path = nim_path
-        self.temp_dir = temp_dir
-        self.build_id = ''.join(random.choice(string.ascii_lowercase) for _ in range(12))
-
-    async def exec_command(
-        self,
-        command: str,
-        output: Optional[list[str]] = None,
-        log_output: bool = True,
-        raise_on_error: bool = True,
-        timeout: int = 300 # 5 minutes default timeout
-    ) -> int:
-        status, stdout, stderr = await run_command(
-            self.db, self.redis, self.frame, command, log_output=log_output, timeout=timeout
-        )
-        if output is not None:
-            lines = (stdout + "\n" + stderr).splitlines()
-            output.extend(lines)
-        if status != 0 and raise_on_error:
-            raise Exception(
-                f"Command '{command}' failed with code {status}\nstderr: {stderr}\nstdout: {stdout}"
-            )
-        return status
-
-    async def log(self, type: str, line: str, timestamp: Optional[datetime] = None):
-        await log(self.db, self.redis, int(self.frame.id), type=type, line=line, timestamp=timestamp)
-
 
 async def deploy_frame_task(ctx: dict[str, Any], id: int):
     db: Session = ctx['db']
@@ -88,6 +47,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         await update_frame(db, redis, frame)
 
         nim_path = find_nim_v2()
+        settings = get_settings_dict(db)
 
         async def install_if_necessary(pkg: str, raise_on_error=True) -> int:
             search_strings = ["run apt-get update", "404 Not Found", "failed to fetch", "Unable to fetch some archives"]
@@ -114,37 +74,81 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             build_id = self.build_id
             await self.log("stdout", f"Deploying frame {frame.name} with build id {self.build_id}")
 
-            await self.log("stdout", "- Getting target architecture")
-            uname_output: list[str] = []
-            await self.exec_command("uname -m", uname_output)
-            arch = "".join(uname_output).strip()
-            if arch in ("aarch64", "arm64"):
-                cpu = "arm64"
-            elif arch in ("armv6l", "armv7l"):
-                cpu = "arm"
-            elif arch == "i386":
-                cpu = "i386"
-            else:
-                cpu = "amd64"
-
-            total_memory = 0
-            try:
-                mem_output: list[str] = []
-                await self.exec_command("free -m", mem_output)
-                total_memory = int(mem_output[1].split()[1])  # line 1 => "Mem:  ... 991  ..."
-            except Exception as e:
-                await self.log("stderr", str(e))
+            arch = await self.get_cpu_architecture()
+            distro = await self.get_distro()
+            total_memory = await self.get_total_memory_mb()
             low_memory = total_memory < 512
+
+            await self.log("stdout", f"- Detected distro: {distro}, architecture: {arch}, total memory: {total_memory} MiB")
+
+            # Fast-path for NixOS targets
+            if distro == "nixos":
+                await self.log("stdout", "- NixOS detected – using flake-based deploy")
+                await self.log("stdout", f"- Preparing sources with local modifications under {temp_dir}")
+                source_dir_local = self.create_local_source_folder(temp_dir)
+                await self.make_local_modifications(source_dir_local)
+                await copy_custom_fonts_to_local_source_folder(db, source_dir_local)
+
+                sys_build_cmd, masked_build_cmd, cleanup = nix_cmd(
+                    "nix --extra-experimental-features 'nix-command flakes' "
+                    f"build \"$(realpath {source_dir_local})\"#nixosConfigurations.\"frame-host\".config.system.build.toplevel "
+                    "--system aarch64-linux --print-out-paths "
+                    "--log-format raw -L",
+                    settings
+                )
+                try:
+                    await self.log("stdout", f"$ {masked_build_cmd}")
+                    status, sys_out, sys_err = await exec_local_command(self.db, self.redis, self.frame, sys_build_cmd, log_command=False)
+                finally:
+                    cleanup()
+                if status != 0 or not sys_out:
+                    raise Exception(f"Local NixOS system build failed:\n{sys_err}")
+                result_path = sys_out.strip().splitlines()[-1]
+
+                updated_count = await self.nix_upload_path_and_deps(result_path)
+
+                await self._upload_frame_json("/var/lib/frameos/frame.json")
+                await sync_assets(db, redis, frame)
+
+                if updated_count == 0:
+                    await self.restart_service("frameos")
+                else:
+                    await self.exec_command(f"sudo nix-env --profile /nix/var/nix/profiles/system --set {result_path}")
+                    await self.exec_command(
+                        "sudo systemd-run --unit=nixos-switch --no-ask-password "
+                        "/nix/var/nix/profiles/system/bin/switch-to-configuration switch"
+                    )
+                #  Save deploy metadata & finish early – nothing else to do
+                frame.status = 'starting'
+                frame.last_successful_deploy     = frame_dict
+                frame.last_successful_deploy_at  = datetime.now(timezone.utc)
+                await update_frame(db, redis, frame)
+                await self.log("stdinfo", f"Deploy finished in {datetime.now() - self.deploy_start} 🎉")
+                return   # ← all done, skip the legacy RPiOS flow
+
+            ## /END NIXOS
+
+
+            ## Deploy onto Raspberry Pi OS or Debian/Ubuntu:
+
+            if distro == "raspios":
+                await self.log("stdout", "- Raspberry Pi OS detected")
+            elif distro in ("debian", "ubuntu"):
+                await self.log("stdout", "- Debian/Ubuntu detected")
+            else:
+                await self.log("stdout", f"- Unknown distro '{distro}', trying apt and hoping for the best")
+                distro = "debian"
 
             drivers = drivers_for_frame(frame)
 
             # 1. Create build tar.gz locally
             await self.log("stdout", "- Copying build folders")
-            build_dir, source_dir = create_build_folders(temp_dir, build_id)
+            build_dir = create_build_folder(temp_dir, build_id)
+            source_dir = self.create_local_source_folder(temp_dir)
             await self.log("stdout", "- Applying local modifications")
-            await make_local_modifications(self, source_dir)
+            await self.make_local_modifications(source_dir)
             await self.log("stdout", "- Creating build archive")
-            archive_path = await create_local_build_archive(self, build_dir, source_dir, cpu)
+            archive_path = await self.create_local_build_archive(build_dir, source_dir, arch)
 
             if low_memory:
                 await self.log("stdout", "- Low memory device, stopping FrameOS for compilation")
@@ -184,31 +188,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                         await self.exec_command(command)
 
             # Any app dependencies
-            all_deps = set()
-            for scene in frame.scenes:
-                try:
-                    for node in scene.get('nodes', []):
-                        try:
-                            config: Optional[dict[str, str]] = None
-                            if node.get('type') == 'app':
-                                app = node.get('data', {}).get('keyword')
-                                if app:
-                                    json_config = get_one_app_sources(app).get('config.json')
-                                    if json_config:
-                                        config = json.loads(json_config)
-                            if node.get('type') == 'source':
-                                json_config = node.get('sources', {}).get('config.json')
-                                if json_config:
-                                    config = json.loads(json_config)
-                            if config:
-                                if config.get('apt'):
-                                    for dep in config['apt']:
-                                        all_deps.add(dep)
-                        except Exception as e:
-                            await self.log("stderr", f"Error parsing node: {e}")
-                except Exception as e:
-                    await self.log("stderr", f"Error parsing scene: {e}")
-            for dep in all_deps:
+            for dep in self.get_apt_packages():
                 await install_if_necessary(dep)
 
             # Ensure /srv/frameos
@@ -249,15 +229,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             )
 
             # 4. Upload frame.json
-            frame_json_data = (
-                json.dumps(get_frame_json(db, frame), indent=4) + "\n"
-            ).encode("utf-8")
-            await upload_file(
-                self.db, self.redis, self.frame,
-                f"/srv/frameos/releases/release_{build_id}/frame.json",
-                frame_json_data,
-            )
-            await self.log("stdout", f"> add /srv/frameos/releases/release_{build_id}/frame.json")
+            await self._upload_frame_json(f"/srv/frameos/releases/release_{build_id}/frame.json")
 
             # Driver-specific vendor steps
             if inkyPython := drivers.get("inkyPython"):
@@ -378,9 +350,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     await self.exec_command(command=f'echo "{line}" | sudo tee -a ' + boot_config, log_output=False)
                     must_reboot = True
 
-        await self.exec_command("sudo systemctl daemon-reload")
-        await self.exec_command("sudo systemctl enable frameos.service")
-
         if frame.last_successful_deploy_at is None:
             # Reboot after the first deploy to make sure any modifications to config.txt are persisted to disk
             # Otherwise if you pull out the power, you'll end up with a blank config.txt on the next boot.
@@ -398,8 +367,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await self.log("stdinfo", "Deployed! Rebooting device after boot config changes")
             await self.exec_command("sudo reboot")
         else:
-            await self.exec_command("sudo systemctl restart frameos.service")
-            await self.exec_command("sudo systemctl status frameos.service")
+            await self.exec_command("sudo systemctl daemon-reload")
+            await self.restart_service("frameos")
             await update_frame(db, redis, frame)
 
     except Exception as e:
@@ -408,198 +377,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             frame.status = 'uninitialized'
             await update_frame(db, redis, frame)
 
-
-
-def create_build_folders(temp_dir, build_id):
+def create_build_folder(temp_dir, build_id):
     build_dir = os.path.join(temp_dir, f"build_{build_id}")
-    source_dir = os.path.join(temp_dir, "frameos")
-    os.makedirs(source_dir, exist_ok=True)
-    shutil.copytree("../frameos", source_dir, dirs_exist_ok=True)
     os.makedirs(build_dir, exist_ok=True)
-    return build_dir, source_dir
-
-
-async def make_local_modifications(self: FrameDeployer, source_dir: str):
-    frame = self.frame
-    shutil.rmtree(os.path.join(source_dir, "src", "scenes"), ignore_errors=True)
-    os.makedirs(os.path.join(source_dir, "src", "scenes"), exist_ok=True)
-
-    for node_id, sources in get_apps_from_scenes(list(frame.scenes)).items():
-        app_id = "nodeapp_" + node_id.replace('-', '_')
-        app_dir = os.path.join(source_dir, "src", "apps", app_id)
-        os.makedirs(app_dir, exist_ok=True)
-        for filename, code in sources.items():
-            with open(os.path.join(app_dir, filename), "w") as f:
-                f.write(code)
-
-    for scene in frame.scenes:
-        try:
-            scene_source = write_scene_nim(frame, scene)
-            safe_id = re.sub(r'\W+', '', scene.get('id', 'default'))
-            with open(os.path.join(source_dir, "src", "scenes", f"scene_{safe_id}.nim"), "w") as f:
-                f.write(scene_source)
-        except Exception as e:
-            await self.log("stderr",
-                      f"Error writing scene \"{scene.get('name','')}\" "
-                      f"({scene.get('id','default')}): {e}")
-            raise
-
-    with open(os.path.join(source_dir, "src", "scenes", "scenes.nim"), "w") as f:
-        source = write_scenes_nim(frame)
-        f.write(source)
-        if frame.debug:
-            await self.log("stdout", f"Generated scenes.nim:\n{source}")
-
-    drivers = drivers_for_frame(frame)
-    with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
-        source = write_drivers_nim(drivers)
-        f.write(source)
-        if frame.debug:
-            await self.log("stdout", f"Generated drivers.nim:\n{source}")
-
-    if drivers.get("waveshare"):
-        with open(os.path.join(source_dir, "src", "drivers", "waveshare", "driver.nim"), "w") as wf:
-            source = write_waveshare_driver_nim(drivers)
-            wf.write(source)
-            if frame.debug:
-                await self.log("stdout", f"Generated waveshare driver:\n{source}")
-
-
-async def create_local_build_archive(
-    self: FrameDeployer,
-    build_dir: str,
-    source_dir: str,
-    cpu: str
-):
-    db = self.db
-    redis = self.redis
-    frame = self.frame
-    build_id = self.build_id
-    nim_path = self.nim_path
-    temp_dir = self.temp_dir
-
-    drivers = drivers_for_frame(frame)
-    if inkyPython := drivers.get('inkyPython'):
-        vendor_folder = inkyPython.vendor_folder or ""
-        os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
-        shutil.copytree(
-            f"../frameos/vendor/{vendor_folder}/",
-            os.path.join(build_dir, "vendor", vendor_folder),
-            dirs_exist_ok=True
-        )
-        shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "env"), ignore_errors=True)
-        shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
-
-    if inkyHyperPixel2r := drivers.get('inkyHyperPixel2r'):
-        vendor_folder = inkyHyperPixel2r.vendor_folder or ""
-        os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
-        shutil.copytree(
-            f"../frameos/vendor/{vendor_folder}/",
-            os.path.join(build_dir, "vendor", vendor_folder),
-            dirs_exist_ok=True
-        )
-        shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "env"), ignore_errors=True)
-        shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
-
-    await self.log("stdout",
-              "- No cross compilation. Generating source code for compilation on frame.")
-
-    debug_options = "--lineTrace:on" if frame.debug else ""
-    cmd = (
-        f"cd {source_dir} && nimble assets -y && nimble setup && "
-        f"{nim_path} compile --os:linux --cpu:{cpu} "
-        f"--compileOnly --genScript --nimcache:{build_dir} "
-        f"{debug_options} src/frameos.nim 2>&1"
-    )
-
-    status, out, err = await exec_local_command(db, redis, frame, cmd)
-    if status != 0:
-        lines = (out or "").split("\n")
-        filtered = [ln for ln in lines if ln.strip()]
-        if filtered:
-            last_line = filtered[-1]
-            match = re.match(r'^(.*\.nim)\((\d+), (\d+)\),?.*', last_line)
-            if match:
-                fn = match.group(1)
-                line_nr = int(match.group(2))
-                column = int(match.group(3))
-                source_abs = os.path.realpath(source_dir)
-                final_path = os.path.realpath(os.path.join(source_dir, fn))
-                if os.path.commonprefix([final_path, source_abs]) == source_abs:
-                    rel_fn = final_path[len(source_abs) + 1:]
-                    with open(final_path, "r") as of:
-                        all_lines = of.readlines()
-                    await self.log("stdout", f"Error in {rel_fn}:{line_nr}:{column}")
-                    await self.log("stdout", f"Line {line_nr}: {all_lines[line_nr - 1]}")
-                    await self.log("stdout", f".......{'.'*(column - 1 + len(str(line_nr)))}^")
-                else:
-                    await self.log("stdout", f"Error in {fn}:{line_nr}:{column}")
-
-        raise Exception("Failed to generate frameos sources")
-
-    nimbase_path = find_nimbase_file(nim_path)
-    if not nimbase_path:
-        raise Exception("nimbase.h not found")
-
-    shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
-
-    if waveshare := drivers.get('waveshare'):
-        if waveshare.variant:
-            variant_folder = get_variant_folder(waveshare.variant)
-            util_files = ["Debug.h", "DEV_Config.c", "DEV_Config.h"]
-            for uf in util_files:
-                shutil.copy(
-                    os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, uf),
-                    os.path.join(build_dir, uf)
-                )
-
-            # color e-paper variants
-            if waveshare.variant in [
-                "EPD_2in9b", "EPD_2in9c", "EPD_2in13b", "EPD_2in13c",
-                "EPD_4in2b", "EPD_4in2c", "EPD_5in83b", "EPD_5in83c",
-                "EPD_7in5b", "EPD_7in5c"
-            ]:
-                c_file = re.sub(r'[bc]', 'bc', waveshare.variant)
-                variant_files = [f"{waveshare.variant}.nim", f"{c_file}.c", f"{c_file}.h"]
-            else:
-                variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
-
-            for vf in variant_files:
-                shutil.copy(
-                    os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, vf),
-                    os.path.join(build_dir, vf)
-                )
-
-    with open(os.path.join(build_dir, "Makefile"), "w") as mk:
-        script_path = os.path.join(build_dir, "compile_frameos.sh")
-        linker_flags = ["-pthread", "-lm", "-lrt", "-ldl"]
-        compiler_flags: list[str] = []
-        with open(script_path, "r") as sc:
-            lines_sc = sc.readlines()
-        for line in lines_sc:
-            if " -o frameos " in line and " -l" in line:
-                linker_flags = [
-                    fl.strip() for fl in line.split(' ')
-                    if fl.startswith('-') and fl != '-o'
-                ]
-            elif " -c " in line and not compiler_flags:
-                compiler_flags = [
-                    fl for fl in line.split(' ')
-                    if fl.startswith('-') and not fl.startswith('-I')
-                    and fl not in ['-o', '-c', '-D']
-                ]
-
-        with open(os.path.join(source_dir, "tools", "nimc.Makefile"), "r") as mf_in:
-            lines_make = mf_in.readlines()
-        for ln in lines_make:
-            if ln.startswith("LIBS = "):
-                ln = "LIBS = -L. " + " ".join(linker_flags) + "\n"
-            if ln.startswith("CFLAGS = "):
-                ln = "CFLAGS = " + " ".join([f for f in compiler_flags if f != '-c']) + "\n"
-            mk.write(ln)
-
-    archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")
-    zip_base = os.path.join(temp_dir, f"build_{build_id}")
-    shutil.make_archive(zip_base, 'gztar', temp_dir, f"build_{build_id}")
-    return archive_path
-
+    return build_dir

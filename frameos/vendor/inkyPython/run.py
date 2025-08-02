@@ -2,6 +2,7 @@ import sys
 import json
 import io
 import inspect
+import traceback
 
 def log(obj: dict):
     print(json.dumps(obj))
@@ -18,6 +19,7 @@ def read_binary_data():
 
 def init():
     try:
+        # TODO: we need i2c just for the auto switch. fix it for the nimos version or just ask the board beforehand
         from inky.auto import auto
         inky = auto()
         return inky
@@ -54,7 +56,7 @@ if __name__ == "__main__":
 
         inky.show()
     except Exception as e:
-        log({ "error": str(e) })
+        log({ "error": str(e), "stack": traceback.format_exc() })
         sys.exit(1)
 
     sys.exit(0)

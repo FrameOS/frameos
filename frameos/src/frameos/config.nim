@@ -67,7 +67,7 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
       wifiHotspot: if data{"networkCheck"}.getBool(): data{"wifiHotspot"}.getStr("disabled") else: "disabled",
       wifiHotspotSsid: data{"wifiHotspotSsid"}.getStr("FrameOS-Setup"),
       wifiHotspotPassword: data{"wifiHotspotPassword"}.getStr("frame1234"),
-      wifiHostpotTimeoutSeconds: data{"wifiHotspotTimeoutSeconds"}.getFloat(600),
+      wifiHotspotTimeoutSeconds: data{"wifiHotspotTimeoutSeconds"}.getFloat(300),
     )
 
 proc loadPalette*(data: JsonNode): PaletteConfig =
@@ -97,10 +97,17 @@ proc loadAgent*(data: JsonNode): AgentConfig =
       agentSharedSecret: data{"agentSharedSecret"}.getStr(""),
     )
 
-proc loadConfig*(filename: string = "frame.json"): FrameConfig =
-  let data = parseFile(filename)
+proc getConfigFilename*(): string =
+  result = getEnv("FRAMEOS_CONFIG")
+  if result == "":
+    result = "./frame.json"
+
+proc loadConfig*(): FrameConfig =
+  let data = parseFile(getConfigFilename())
+  # TODO: switch to jsony
   result = FrameConfig(
     name: data{"name"}.getStr(),
+    mode: data{"mode"}.getStr("rpios"),
     serverHost: data{"serverHost"}.getStr(),
     serverPort: data{"serverPort"}.getInt(),
     serverApiKey: data{"serverApiKey"}.getStr(),

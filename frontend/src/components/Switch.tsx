@@ -7,13 +7,14 @@ export interface SwitchProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonE
   onChange?: (value: boolean) => void
   value?: boolean
   label?: ReactNode
+  fullWidth?: boolean
 }
 
 export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch(
-  { className, onChange, value, disabled, label, ...props }: SwitchProps,
+  { className, onChange, value, disabled, label, fullWidth, ...props }: SwitchProps,
   ref
 ) {
-  return (
+  const switchTag = (
     <HeadlessSwitch
       checked={!!value}
       onChange={onChange}
@@ -36,4 +37,5 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch
       {label && <Label className="cursor-pointer">{label}</Label>}
     </HeadlessSwitch>
   )
+  return fullWidth ? <div className="w-full">{switchTag}</div> : switchTag
 })

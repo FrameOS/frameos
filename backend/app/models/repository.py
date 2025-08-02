@@ -1,4 +1,4 @@
-import requests
+import httpx
 import uuid
 from sqlalchemy.dialects.sqlite import JSON
 from datetime import datetime
@@ -37,8 +37,9 @@ class Repository(Base):
             'templates': self.templates,
         }
 
-    def update_templates(self):
-        response = requests.get(self.url)
+    async def update_templates(self):
+        async with httpx.AsyncClient() as client:
+            response = await client.get(self.url, timeout=10)
         if response.status_code == 200:
             self.last_updated_at = datetime.utcnow()
             try:

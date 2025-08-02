@@ -4,6 +4,7 @@
     "category": "data",
     "version": "1.0.0",
     "apt": ["ffmpeg"],
+    "nixpkgs": ["ffmpeg"],
     "fields": [
       {
         "name": "url",

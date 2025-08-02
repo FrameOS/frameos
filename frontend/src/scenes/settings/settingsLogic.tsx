@@ -16,6 +16,7 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     repositories: settings.repositories ?? [],
     ssh_keys: settings.ssh_keys ?? {},
     unsplash: settings.unsplash ?? {},
+    nix: settings.nix ?? {},
   }
 }
 
@@ -31,6 +32,7 @@ export const settingsLogic = kea<settingsLogicType>([
   actions({
     updateSavedSettings: (settings: Record<string, any>) => ({ settings }),
     newKey: true,
+    newNixKey: true,
   }),
   loaders(({ values }) => ({
     savedSettings: [
@@ -147,6 +149,27 @@ export const settingsLogic = kea<settingsLogicType>([
       const data = await response.json()
       actions.setSettingsValue(['ssh_keys', 'default'], data.private)
       actions.setSettingsValue(['ssh_keys', 'default_public'], `${data.public} frameos@${window.location.hostname}`)
+    },
+    newNixKey: async () => {
+      if (values.savedSettings.ssh_keys?.default) {
+        if (
+          !confirm('Are you sure you want to generate a new key? You might lose access to the existing build server.')
+        ) {
+          return
+        }
+      }
+      const response = await apiFetch(`/api/generate_ssh_keys`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        throw new Error('Failed to generate new key')
+      }
+      const data = await response.json()
+      actions.setSettingsValue(['nix', 'buildServerPrivateKey'], data.private)
+      actions.setSettingsValue(
+        ['nix', 'buildServerPublicKey'],
+        `${data.public} frameos-build@${window.location.hostname}`
+      )
     },
   })),
 ])

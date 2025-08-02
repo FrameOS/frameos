@@ -3,6 +3,7 @@ import { Edge, Node } from 'reactflow'
 export interface FrameType {
   id: number
   name: string
+  mode?: 'rpios' | 'nixos'
   frame_host: string
   frame_port: number
   frame_access_key: string
@@ -51,6 +52,8 @@ export interface FrameType {
   schedule?: FrameSchedule
   gpio_buttons?: GPIOButton[]
   network?: {
+    wifiSSID?: string
+    wifiPassword?: string
     networkCheck?: boolean
     networkCheckTimeoutSeconds?: number
     networkCheckUrl?: string
@@ -65,7 +68,17 @@ export interface FrameType {
     agentSharedSecret?: string
   }
   palette?: Palette
+  nix?: FrameNixConfig
   active_connections?: number
+}
+
+export type FrameMode = 'rpios' | 'nixos' | 'import'
+export interface NewFrameFormType {
+  mode: FrameMode
+  name?: string | null
+  frame_host?: string | null
+  device?: string | null
+  server_host?: string | null
 }
 
 export interface GPIOButton {
@@ -235,8 +248,10 @@ export interface AppConfig {
   version?: string
   /** List of top level settings exported for this app */
   settings?: string[]
-  /** List of packages to install */
+  /** List of apt packages to install (mode=rpios) */
   apt?: string[]
+  /** List of nix packages to install (mode=nixos) */
+  nixpkgs?: string[]
   /** Fields for app in diagram editor */
   fields?: (AppConfigField | MarkdownField)[]
   /** Returned fields */
@@ -456,7 +471,6 @@ export enum Panel {
   Diagram = 'Diagram',
   EditApp = 'EditApp',
   Events = 'Events',
-  FrameDetails = 'FrameDetails',
   FrameSettings = 'FrameSettings',
   Image = 'Image',
   Logs = 'Logs',
@@ -481,6 +495,11 @@ export type PanelWithMetadata = {
 }
 
 export interface FrameOSSettings {
+  defaults?: {
+    timezone?: string
+    wifiSSID?: string
+    wifiPassword?: string
+  }
   homeAssistant?: {
     url?: string
     accessToken?: string
@@ -502,6 +521,16 @@ export interface FrameOSSettings {
   unsplash?: {
     accessKey?: string
   }
+  nix?: {
+    buildExtraArgs?: string
+    buildServerEnabled?: boolean
+    buildServer?: string
+    buildServerPort?: number
+    buildServerUser?: string
+    buildServerPrivateKey?: string
+    buildServerPublicKey?: string
+    buildServerMaxParallelJobs?: number
+  }
 }
 
 export interface FrameStateRecord {
@@ -513,4 +542,11 @@ export interface Palette {
   name?: string
   colors: string[]
   colorNames?: string[]
+}
+
+export interface FrameNixConfig {
+  hostname?: string
+  platform?: string
+  timezone?: string
+  customModule?: string
 }

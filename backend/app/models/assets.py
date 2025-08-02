@@ -34,19 +34,22 @@ async def make_asset_folders(db: Session, redis: Redis, frame: Frame, assets_pat
     if frame.upload_fonts != "none":
         cmd = (
             f"if [ ! -d {assets_path}/fonts ]; then "
-            f"  sudo mkdir -p {assets_path}/fonts && sudo chown -R $(whoami):$(whoami) {assets_path}; "
-            f"elif [ ! -w {assets_path} ] || [ ! -w {assets_path}/fonts ]; then "
+            f"  sudo mkdir -p {assets_path}/fonts && sudo chown -R $(whoami) {assets_path} && sudo chmod -R u+rwX,go+rX {assets_path}; "
+            f"elif [ ! -w {assets_path} ]; then "
             f"  echo 'User lacks write access to {assets_path}. Fixing...'; "
-            f"  sudo chown -R $(whoami):$(whoami) {assets_path}; "
+            f"  sudo chown -R $(whoami) {assets_path} && sudo chmod -R u+rwX,go+rX {assets_path}; "
+            f"elif [ ! -w {assets_path}/fonts ]; then "
+            f"  echo 'User lacks write access to {assets_path}/fonts. Fixing...'; "
+            f"  sudo chown -R $(whoami) {assets_path}/fonts && sudo chmod -R u+rwX,go+rX {assets_path}/fonts; "
             f"fi"
         )
     else:
         cmd = (
             f"if [ ! -d {assets_path} ]; then "
-            f"  sudo mkdir -p {assets_path} && sudo chown -R $(whoami):$(whoami) {assets_path}; "
+            f"  sudo mkdir -p {assets_path} && sudo chown -R $(whoami) {assets_path} && sudo chmod -R u+rwX,go+rX {assets_path}; "
             f"elif [ ! -w {assets_path} ]; then "
             f"  echo 'User lacks write access to {assets_path}. Fixing...'; "
-            f"  sudo chown -R $(whoami):$(whoami) {assets_path}; "
+            f"  sudo chown -R $(whoami) {assets_path} && sudo chmod -R u+rwX,go+rX {assets_path}; "
             f"fi"
         )
 
@@ -103,27 +106,18 @@ async def upload_font_assets(db: Session, redis: Redis, frame: Frame, assets_pat
         f"Uploading {len(fonts_to_upload) + len(custom_fonts_to_upload)} fonts",
     )
 
-    if await _use_agent(frame, redis):
-        from app.ws.agent_ws import file_write_on_frame
-        for local_path, remote_path in fonts_to_upload:
-            with open(local_path, "rb") as fh:
-                data = fh.read()
-            await file_write_on_frame(frame.id, remote_path, data)
-        for font, remote_path in custom_fonts_to_upload:
-            await file_write_on_frame(frame.id, remote_path, font.data)
+    for local_path, remote_path in fonts_to_upload:
+        with open(local_path, "rb") as fh:
+            data = fh.read()
+        await upload_file(db, redis, frame, remote_path, data)
+    for font, remote_path in custom_fonts_to_upload:
+        await upload_file(db, redis, frame, remote_path, font.data)
 
-    else:
-        for local_path, remote_path in fonts_to_upload:
-            with open(local_path, "rb") as fh:
-                data = fh.read()
-            await upload_file(db, redis, frame, remote_path, data)
-        for font, remote_path in custom_fonts_to_upload:
-            await upload_file(db, redis, frame, remote_path, font.data)
-
-    await log(
-        db,
-        redis,
-        frame.id,
-        "stdout",
-        f"Uploaded {len(fonts_to_upload) + len(custom_fonts_to_upload)} fonts",
-    )
+async def copy_custom_fonts_to_local_source_folder(db: Session, local_source_folder: str):
+    custom_fonts = db.query(Assets).filter(Assets.path.like("fonts/%.ttf")).all()
+    for font in custom_fonts:
+        remote_path = font.path.replace("fonts/", local_source_folder + '/assets/copied/fonts/')
+        if not os.path.exists(os.path.dirname(remote_path)):
+            os.makedirs(os.path.dirname(remote_path))
+        with open(remote_path, "wb") as fh:
+            fh.write(font.data)

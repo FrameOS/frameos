@@ -40,6 +40,6 @@ class UpdateTemplateRequest(BaseModel):
     name: Optional[str]
     description: Optional[str]
 
-class TemplateImageLinkResponse(BaseModel):
-    url: str
+class TemplateImageTokenResponse(BaseModel):
+    token: str
     expires_in: int

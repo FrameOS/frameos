@@ -4,6 +4,7 @@
     "category": "data",
     "version": "1.0.0",
     "apt": ["python3-pip", "python3-venv", "chromium-browser"],
+    "nixpkgs": [],
     "fields": [
       {
         "name": "url",

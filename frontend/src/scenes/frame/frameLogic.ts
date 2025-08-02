@@ -14,6 +14,7 @@ export interface FrameLogicProps {
 }
 const FRAME_KEYS: (keyof FrameType)[] = [
   'name',
+  'mode',
   'frame_host',
   'frame_port',
   'frame_access_key',
@@ -46,9 +47,23 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'network',
   'agent',
   'palette',
+  'nix',
 ]
 
-const FRAME_KEYS_REQUIRE_RECOMPILE: (keyof FrameType)[] = ['device', 'scenes', 'reboot']
+const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot']
+const FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS: (keyof FrameType)[] = [
+  'device',
+  'scenes',
+  'reboot',
+  'ssh_user',
+  'ssh_port',
+  'ssh_pass',
+  'log_to_file',
+  'assets_path',
+  'network',
+  'agent',
+  'nix',
+]
 
 function cleanBackgroundColor(color: string): string {
   // convert the format "(r: 0, g: 0, b: 0)"
@@ -202,6 +217,7 @@ export const frameLogic = kea<frameLogicType>([
   selectors(() => ({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
     frame: [(s) => [s.frames, s.frameId], (frames, frameId) => frames[frameId] || null],
+    mode: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm?.mode || frame?.mode || 'rpios'],
     scenes: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm): FrameScene[] => frameForm?.scenes ?? frame.scenes ?? [],
@@ -222,10 +238,10 @@ export const frameLogic = kea<frameLogicType>([
         FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], lastDeploy?.[key as keyof FrameType])),
     ],
     requiresRecompilation: [
-      (s) => [s.frame, s.lastDeploy],
-      (frame, lastDeploy) =>
+      (s) => [s.frame, s.lastDeploy, s.mode],
+      (frame, lastDeploy, mode) =>
         !lastDeploy ||
-        FRAME_KEYS_REQUIRE_RECOMPILE.some(
+        (mode === 'nixos' ? FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS).some(
           (key) => !equal(lastDeploy?.[key as keyof FrameType], frame?.[key as keyof FrameType])
         ),
     ],

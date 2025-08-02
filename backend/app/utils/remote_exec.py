@@ -10,13 +10,14 @@ import gzip
 import tempfile
 import os
 import shlex
+import zlib
 
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.models.frame import Frame
 from app.models.log import new_log as log
-from app.ws.agent_ws import number_of_connections_for_frame
+from app.ws.agent_ws import number_of_connections_for_frame, file_write_open_on_frame, file_write_chunk_on_frame, file_write_close_on_frame
 
 from app.utils.ssh_utils import (
     get_ssh_connection,
@@ -33,6 +34,9 @@ __all__ = [
     "make_dir",
 ]  # what the tasks import
 
+CHUNK_SIZE   = 2* 1024 * 1024  # 2 Mib
+CHUNK_ZLEVEL = 6               # good compromise
+
 # ---------------------------------------------------------------------------#
 # internal helpers                                                           #
 # ---------------------------------------------------------------------------#
@@ -45,9 +49,7 @@ async def _use_agent(frame: Frame, redis: Redis) -> bool:
     agent = frame.agent or {}
     if agent.get("agentEnabled") and agent.get("agentRunCommands"):
         if (await number_of_connections_for_frame(redis, frame.id)) <= 0:
-            raise RuntimeError(
-                f"Frame {frame.id} agent enabled, but offline. Can't connect."
-            )
+            raise RuntimeError(f"Frame {frame.id} agent disconnected.")
         return True
     return False
 
@@ -127,6 +129,14 @@ async def _file_write_via_agent(
     if not reply.get("ok"):
         raise RuntimeError(reply.get("error", "agent error"))
 
+async def _stream_file_via_agent(db, redis, frame, remote_path, data, timeout: int = 120):
+    await file_write_open_on_frame(frame.id, remote_path,
+                                   meta={"compression": "zlib"})
+    for off in range(0, len(data), CHUNK_SIZE):
+        raw  = data[off:off+CHUNK_SIZE]
+        comp = zlib.compress(raw, CHUNK_ZLEVEL)
+        await file_write_chunk_on_frame(frame.id, comp, timeout)
+    await file_write_close_on_frame(frame.id)
 
 # ---------------------------------------------------------------------------#
 # public facade                                                              #
@@ -171,6 +181,21 @@ async def run_commands(
         await remove_ssh_connection(db, redis, ssh, frame)
 
 
+def print_size(size: int) -> str:
+    """
+    Format a size in bytes into a human-readable string.
+    """
+    if size < 1024:
+        return f"{size} B"
+    size //= 1024
+    if size < 1024:
+        return f"{size} KiB"
+    size //= 1024
+    if size < 1024:
+        return f"{size} MiB"
+    size //= 1024
+    return f"{size} GiB"
+
 async def upload_file(
     db: Session,
     redis: Redis,
@@ -183,18 +208,16 @@ async def upload_file(
     """
     Write *data* to *remote_path* on the device:
     """
+    size = len(data)
 
     if await _use_agent(frame, redis):
         try:
-            await log(db, redis, frame.id, "stdout", f"> write {remote_path} (agent)")
-            await _file_write_via_agent(redis, frame, remote_path, data, timeout)
-            await log(
-                db,
-                redis,
-                frame.id,
-                "stdout",
-                f"> file written to {remote_path} (agent)",
-            )
+            await log(db, redis, frame.id, "stdout", f"> uploading {remote_path} ({print_size(size)} via agent)")
+            await _stream_file_via_agent(db, redis, frame, remote_path, data)
+            # TODO: restore faster path for smaller files?
+            # if len(data) > 2 * 1024 * 1024:           # >2 MiB → streamed
+            # else:
+            #     await _file_write_via_agent(redis, frame, remote_path, data, timeout)
             return
         except Exception as e:  # noqa: BLE001
             await log(
@@ -202,7 +225,7 @@ async def upload_file(
                 redis,
                 frame.id,
                 "stderr",
-                f"Agent file_write error ({e})",
+                f"> ERROR writing {remote_path} ({print_size(size)} via agent) - {e}",
             )
             raise
 
@@ -212,7 +235,7 @@ async def upload_file(
             tmp.write(data)
             tmp_path = tmp.name
 
-        await log(db, redis, frame.id, "stdout", f"> scp → {remote_path}")
+        await log(db, redis, frame.id, "stdout", f"> scp → {remote_path} ({print_size(size)})")
         await asyncssh.scp(
             tmp_path,
             (ssh, shlex.quote(remote_path)),
@@ -321,6 +344,7 @@ async def _run_command_agent(
     timeout: int,
     *,
     log_output: bool = True,
+    log_command: str | bool = True,
 ) -> Tuple[int, str, str]:
     """
     Execute *cmd* via the WebSocket agent, collecting stdout/stderr that are
@@ -330,7 +354,8 @@ async def _run_command_agent(
     cmd_id = str(uuid.uuid4())
     payload = {"type": "cmd", "name": "shell", "args": {"cmd": cmd}}
 
-    await log(db, redis, frame.id, "stdout", f"> {cmd}")
+    if log_command:
+        await log(db, redis, frame.id, "stdout", f"> {log_command if isinstance(log_command, str) else cmd}")
 
     from app.ws.agent_bridge import CMD_KEY, STREAM_KEY, RESP_KEY
 
@@ -339,6 +364,7 @@ async def _run_command_agent(
         "frame_id": frame.id,
         "payload":  payload,
         "timeout":  timeout,
+        # TODO: "log": bool(log_command),  # not used yet
     }
     await redis.rpush(CMD_KEY.format(id=frame.id), json.dumps(job).encode())
 
@@ -395,6 +421,7 @@ async def _run_command_ssh(
     timeout: int,
     *,
     log_output: bool = True,
+    log_command: str | bool = True
 ) -> Tuple[int, str, str]:
     """
     Execute *cmd* over SSH, capturing stdout & stderr separately.
@@ -402,7 +429,8 @@ async def _run_command_ssh(
     """
     ssh = await get_ssh_connection(db, redis, frame)
     try:
-        await log(db, redis, frame.id, "stdout", f"> {cmd}")
+        if log_command:
+            await log(db, redis, frame.id, "stdout", f"> {log_command if isinstance(log_command, str) else cmd}")
 
         proc = await ssh.create_process(cmd)
 
@@ -449,6 +477,7 @@ async def run_command(
     *,
     timeout: int = 120,
     log_output: bool = True,
+    log_command: str | bool = True,
 ) -> Tuple[int, str, str]:
     """
     Run a single *command* on *frame* and capture its textual output.
@@ -459,5 +488,5 @@ async def run_command(
     Returns a tuple: **(exit_status, stdout, stderr)** – all text.
     """
     if await _use_agent(frame, redis):
-        return await _run_command_agent(db, redis, frame, command, timeout, log_output=log_output)
-    return await _run_command_ssh(db, redis, frame, command, timeout, log_output=log_output)
+        return await _run_command_agent(db, redis, frame, command, timeout, log_output=log_output, log_command=log_command)
+    return await _run_command_ssh(db, redis, frame, command, timeout, log_output=log_output, log_command=log_command)

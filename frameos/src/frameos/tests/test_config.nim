@@ -2,7 +2,7 @@ import std/json
 import ../config
 
 block test_load_config:
-    let config = loadConfig("./frame.json")
+    let config = loadConfig()
     doAssert config.frameHost == "localhost"
     doAssert config.framePort == 8787
     doAssert config.serverHost == "localhost"

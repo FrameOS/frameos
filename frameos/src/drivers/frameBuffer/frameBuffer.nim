@@ -17,8 +17,8 @@ type ScreenInfo* = object
   alphaLength*: uint32
 
 type Driver* = ref object of FrameOSDriver
-  screenInfo: ScreenInfo
-  logger: Logger
+  screenInfo*: ScreenInfo
+  logger*: Logger
 
 proc tryToDisableCursorBlinking() =
   let status = execCmd("echo 0 | sudo tee /sys/class/graphics/fbcon/cursor_blink")

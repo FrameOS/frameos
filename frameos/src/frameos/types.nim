@@ -3,6 +3,7 @@ import json, jester, pixie, hashes, locks
 type
   FrameConfig* = ref object
     name*: string
+    mode*: string
     serverHost*: string
     serverPort*: int
     serverApiKey*: string
@@ -50,7 +51,7 @@ type
     wifiHotspot*: string
     wifiHotspotSsid*: string
     wifiHotspotPassword*: string
-    wifiHostpotTimeoutSeconds*: float
+    wifiHotspotTimeoutSeconds*: float
 
   AgentConfig* = ref object
     agentEnabled*: bool
