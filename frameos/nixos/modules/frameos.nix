@@ -20,9 +20,6 @@ in
   environment.etc."nixos/flake.lock".source = ../../flake.lock;
 
   networking = {
-    # TODO!
-    # hostName = hostName;
-
     wireless.enable = lib.mkForce false;   # we use NetworkManager
     networkmanager = {
       enable = true;
