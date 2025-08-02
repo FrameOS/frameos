@@ -466,15 +466,6 @@ async def api_frame_local_build_zip(                 # noqa: D401
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    """
-    Return a **zip archive** containing the locally-generated sources
-    produced by ``make_local_modifications`` for this frame.
-
-    The archive includes:
-    * every scene/app file produced for the frame
-    * the generated ``drivers.nim`` / ``waveshare`` driver (if any)
-    * a ready-to-compile C/Makefile tree (no heavy cross-build step)
-    """
     frame = db.get(Frame, id) or _not_found()
 
     # Locate Nim (needed only for path checks inside helpers)

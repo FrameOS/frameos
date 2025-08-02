@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shlex
 import shutil
 import tempfile
 from typing import Any, Optional
@@ -238,28 +237,6 @@ class AgentDeployer(FrameDeployer):
         await self.exec_command("sudo chmod 644 /etc/systemd/system/frameos_agent.service")
 
     # --------------- MISC ------------------------------------------------ #
-    # TODO: deduplicate with deploy_frame
-
-    async def _store_paths_missing(self, paths: list[str]) -> list[str]:
-        """
-        Return *only* those paths that are **missing** from /nix/store on the
-        frame.  All paths are checked in a single SSH exec.
-        """
-        if not paths:
-            return []
-
-        # Quote every path once; the remote loop echoes the missing ones.
-        joined = " ".join(shlex.quote(p) for p in paths)
-        script = "for p; do [ -e \"$p\" ] || echo \"$p\"; done"
-        out: list[str] = []
-        await self.exec_command(
-            f"bash -s -- {joined} <<'EOF'\n{script}\nEOF",
-            output=out,
-            raise_on_error=False,
-            log_output=False,
-        )
-        # Every line produced by the loop is a missing store path.
-        return [p.strip() for p in out if p.strip()]
 
     async def _cleanup_old_builds(self) -> None:
         """Keep only the 10 most-recent builds + releases on the device."""

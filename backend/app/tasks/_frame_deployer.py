@@ -1,4 +1,3 @@
-
 from datetime import datetime
 import hashlib
 import json
@@ -33,7 +32,6 @@ BYTES_PER_MB   = 1_048_576
 DEFAULT_CHUNK  = 25 * BYTES_PER_MB
 
 class FrameDeployer:
-    ## This entire file is a big refactor in progress.
     def __init__(self, db: Session, redis: Redis, frame: Frame, nim_path: str, temp_dir: str):
         self.db = db
         self.redis = redis
@@ -464,7 +462,7 @@ class FrameDeployer:
         if drivers.get("i2c"):
             overlay_modules.append("i2c")
         if drivers.get("spi"):
-            # TODO: what does 7.2 waveshare work with
+            # TODO: figure out what do we need here for which device
             # overlay_modules.append("spi0-0cs-low")
             # overlay_modules.append("spi0-1cs")
             overlay_modules.append("spi0-2cs")
@@ -502,7 +500,6 @@ class FrameDeployer:
             frameos_nix_path = os.path.join(nixos_mod_dir, "frameos.nix")
             with open(frameos_nix_path, "r", encoding="utf-8") as fh:
                 frameos_nix = fh.read()
-            # TODO: sanitize???
             frameos_nix = frameos_nix.replace("/srv/assets", assets_path)
             with open(frameos_nix_path, "w", encoding="utf-8") as fh:
                 fh.write(frameos_nix)

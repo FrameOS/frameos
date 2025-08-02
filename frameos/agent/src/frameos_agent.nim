@@ -231,62 +231,6 @@ proc execShellSimple(rawCmd: string;
   let rc = p.waitForExit() # closes pipe & reaps the child
   await sendResp(ws, cfg, id, rc == 0, %*{"exit": rc})
 
-# type
-#   StreamParams = tuple[
-#     pipe: Stream;
-#     which: WhichStream;
-#     ch: ptr Channel[LineMsg]
-#   ]
-
-#   OutParams = tuple[
-#     process: Process;
-#     ch: ptr Channel[LineMsg]
-#   ]
-
-
-# proc readErr(p: StreamParams) {.thread.} =
-#   let (pipe, which, ch) = p
-#   var line: string
-#   while pipe.readLine(line):
-#     ch[].send LineMsg(stream: which, txt: line, done: false)
-#   ch[].send LineMsg(stream: which, done: true)
-
-# proc readOut(p: OutParams) {.thread.} =
-#   let (process, ch) = p
-#   var line: string
-#   while process.outputStream.readLine(line):
-#     ch[].send LineMsg(stream: stdoutStr, txt: line, done: false)
-#   ch[].send LineMsg(stream: stdoutStr, done: true)
-
-# proc execShellThreaded(rawCmd: string; ws: WebSocket;
-#                        cfg: FrameConfig; id: string): Future[void] {.async.} =
-#   var ch: Channel[LineMsg]
-#   ch.open()
-#   var p = startProcess("/usr/bin/env",
-#           args = ["bash", "-c", rawCmd],
-#           options = {poUsePath})
-
-#   var thrOut: Thread[OutParams]
-#   var thrErr: Thread[StreamParams]
-
-#   createThread(thrOut, readOut, (p, addr ch)) # stdout + exit code
-#   createThread(thrErr, readErr, (p.errorStream, stderrStr, addr ch))
-
-#   while true:
-#     let (ready, msg) = tryRecv(ch) # new one-arg form
-#     if ready:
-#       if msg.done:
-#         await sendResp(ws, cfg, id, msg.exit == 0, %*{"exit": msg.exit})
-#         joinThread thrOut
-#         joinThread thrErr
-#         break
-#       else:
-#         let which = if msg.stream == stdoutStr: "stdout" else: "stderr"
-#         await streamChunk(ws, cfg, id, which, msg.txt & "\n")
-#     else:
-#       await sleepAsync(100)
-#   ch.close()
-
 # ----------------------------------------------------------------------------
 # All command handlers
 # ----------------------------------------------------------------------------

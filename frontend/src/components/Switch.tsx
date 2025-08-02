@@ -11,7 +11,7 @@ export interface SwitchProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonE
 }
 
 export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch(
-  { className, onChange, value, disabled, label,fullWidth, ...props }: SwitchProps,
+  { className, onChange, value, disabled, label, fullWidth, ...props }: SwitchProps,
   ref
 ) {
   const switchTag = (
@@ -37,11 +37,5 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch
       {label && <Label className="cursor-pointer">{label}</Label>}
     </HeadlessSwitch>
   )
-  return fullWidth ? (
-    <div className="w-full">
-      {switchTag}
-    </div>
-  ) : (
-    switchTag
-  )
+  return fullWidth ? <div className="w-full">{switchTag}</div> : switchTag
 })
