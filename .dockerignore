@@ -17,6 +17,9 @@ coverage.xml
 .git
 .mypy_cache
 .pytest_cache
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache
 .hypothesis
 **/node_modules/
 **/dist
@@ -24,6 +27,8 @@ coverage.xml
 npm-debug.log
 .env
 .aws
+.vscode
+.idea
 frameos/nimble.paths
 db
 frameos/result

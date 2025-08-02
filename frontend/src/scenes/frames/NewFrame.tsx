@@ -104,7 +104,7 @@ export function NewFrame(): JSX.Element {
           <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
             <p className="text-sm text-yellow-500">
               This mode is <strong>under active development</strong>. Your frames could break with any new update, so
-              proceed with caution and take backups!
+              proceed with caution and take backups! Not all devices are supported yet.
             </p>
             <p className="text-sm text-gray-500">
               Steps: 1) add your frame, 2) add scenes to it, 3) download a SD card image, 4) flash it, 5) boot

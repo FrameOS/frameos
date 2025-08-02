@@ -5,7 +5,7 @@ FROM python:3.11-slim-bullseye
 WORKDIR /app
 
 # Install Node.js based on platform
-RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-server ca-certificates gnupg \
+RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-server ca-certificates gnupg openssh-client \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && NODE_MAJOR=18 \
@@ -49,7 +49,7 @@ COPY frameos/agent/nimble.lock ./
 RUN nimble install -d -y && nimble setup
 
 # ─── Install Nix (single-user, root, flakes on) ──────────────────────
-ARG NIX_VERSION=2.22.1
+ARG NIX_VERSION=2.30.2
 RUN set -eux; \
     # helper tools + user/group utilities
     apt-get update && apt-get install -y --no-install-recommends \
@@ -71,6 +71,7 @@ RUN set -eux; \
     # 3. make nix usable in this layer
     export USER=root ; \
     . /root/.nix-profile/etc/profile.d/nix.sh ; \
+    nix-store --optimise ; \
     nix --version
 # keep nix visible for later layers and at runtime
 ENV PATH="/root/.nix-profile/bin:/nix/var/nix/profiles/default/bin:${PATH}"
@@ -84,9 +85,9 @@ ENV USER=root
 WORKDIR /app/frameos
 COPY frameos/ ./
 # Cache a build so that the nix libraries are already there
-RUN make nix-bin
-RUN make nix-update
-RUN rm -rf /app/frameos/result
+# RUN make nix-bin
+# RUN make nix-update
+# RUN rm -rf /app/frameos/result
 
 # Copy the requirements file and install using pip
 WORKDIR /app/backend
