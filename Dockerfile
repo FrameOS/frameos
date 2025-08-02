@@ -113,13 +113,6 @@ RUN npm run build
 # Delete all files except the dist and schema folders
 RUN find . -maxdepth 1 ! -name 'dist' ! -name 'schema' ! -name '.' ! -name '..' -exec rm -rf {} \;
 
-# Cleanup node installations and build tools
-RUN apt-get remove -y nodejs curl build-essential libffi-dev ca-certificates gnupg \
-    && apt-get autoremove -y \
-    && apt-get clean \
-    && rm -rf /app/frontend/node_modules \
-    && rm -rf /var/lib/apt/lists/* /root/.npm
-
 # Change back to the main directory
 WORKDIR /app
 
