@@ -37,7 +37,9 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic)
-  const { clearBuildCache, downloadBuildZip } = useActions(frameSettingsLogic({ frameId }))
+  const { nixCollectGarbageFrame, nixCollectGarbageBackend, clearBuildCache, downloadBuildZip } = useActions(
+    frameSettingsLogic({ frameId })
+  )
   const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
   const { openLogs } = useActions(panelsLogic({ frameId }))
   const url = frameUrl(frame)
@@ -77,7 +79,32 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       ),
                     },
                   ]
-                : []),
+                : [
+                    {
+                      label: 'Collect NixOS garbage (on frame)',
+                      onClick: () => {
+                        nixCollectGarbageFrame()
+                        openLogs()
+                      },
+                      icon: buildCacheLoading ? (
+                        <Spinner color="white" className="w-4 h-4" />
+                      ) : (
+                        <ArrowPathIcon className="w-5 h-5" />
+                      ),
+                    },
+                    {
+                      label: 'Collect NixOS garbage (on backend)',
+                      onClick: () => {
+                        nixCollectGarbageBackend()
+                        openLogs()
+                      },
+                      icon: buildCacheLoading ? (
+                        <Spinner color="white" className="w-4 h-4" />
+                      ) : (
+                        <ArrowPathIcon className="w-5 h-5" />
+                      ),
+                    },
+                  ]),
               {
                 label: 'Import .json',
                 onClick: () => {

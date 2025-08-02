@@ -52,9 +52,38 @@ export function Settings() {
           ) : (
             <>
               <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings} className="space-y-4">
-                <Group name="defaults">
-                  <H6 className="pt-4">Defaults for new frames</H6>
+                <Group name="ssh_keys">
+                  <H6 className="pt-4">SSH Keys</H6>
                   <Box className="p-2 space-y-2">
+                    <p className="text-sm leading-loose">
+                      This SSH key will be used on all frames that don't have a password set for SSH.
+                    </p>
+                    <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
+                      <TextArea />
+                    </Field>
+                    <Field
+                      name="default_public"
+                      label="Default public SSH key (use this in the RPi Imager)"
+                      secret={!!savedSettings?.ssh_keys?.default_public}
+                    >
+                      <TextArea />
+                    </Field>
+                    <Button
+                      onClick={newKey}
+                      color={savedSettings?.ssh_keys?.default ? 'secondary' : 'primary'}
+                      size="small"
+                    >
+                      Generate new keypair
+                    </Button>
+                  </Box>
+                </Group>
+                <Group name="defaults">
+                  <H6 className="pt-4">NixOS defaults for new frames</H6>
+                  <Box className="p-2 space-y-2">
+                    <p>
+                      These are all used for NixOS based frames. Raspberry Pi OS based frames set them via the RPi
+                      Imager.
+                    </p>
                     <Field
                       name="timezone"
                       label={
@@ -88,31 +117,6 @@ export function Settings() {
                   </Box>
                 </Group>
 
-                <Group name="ssh_keys">
-                  <H6 className="pt-4">SSH Keys</H6>
-                  <Box className="p-2 space-y-2">
-                    <p className="text-sm leading-loose">
-                      This SSH key will be used on all frames that don't have a password set for SSH.
-                    </p>
-                    <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
-                      <TextArea />
-                    </Field>
-                    <Field
-                      name="default_public"
-                      label="Default public SSH key (use this in the RPi Imager)"
-                      secret={!!savedSettings?.ssh_keys?.default_public}
-                    >
-                      <TextArea />
-                    </Field>
-                    <Button
-                      onClick={newKey}
-                      color={savedSettings?.ssh_keys?.default ? 'secondary' : 'primary'}
-                      size="small"
-                    >
-                      Generate new keypair
-                    </Button>
-                  </Box>
-                </Group>
                 <Group name="frameOS">
                   <H6 className="pt-4">FrameOS Gallery</H6>
                   <Box className="p-2 space-y-2">

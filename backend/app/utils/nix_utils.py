@@ -27,6 +27,9 @@ def _spawn_ephemeral_agent(key: str) -> str:
     # Prepare the key material
     key_data = (key.strip() + "\n").encode()
 
+    # Set the environment variable to point to our socket
+    os.environ["SSH_AUTH_SOCK"] = sock
+
     # Load the key into the agent via stdin (ssh‑add -)
     subprocess.run(["ssh-add", "-"],
                    input=key_data,

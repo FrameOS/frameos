@@ -41,5 +41,35 @@ export const frameSettingsLogic = kea<frameSettingsLogicType>([
         },
       },
     ],
+    collectGarbageFrame: [
+      false,
+      {
+        nixCollectGarbageFrame: async () => {
+          if (confirm('Are you sure you want to collect garbage on the frame?')) {
+            try {
+              await apiFetch(`/api/frames/${props.frameId}/nix_collect_garbage_frame`, { method: 'POST' })
+            } catch (error) {
+              console.error(error)
+            }
+          }
+          return false
+        },
+      },
+    ],
+    collectGarbageBackend: [
+      false,
+      {
+        nixCollectGarbageBackend: async () => {
+          if (confirm('Are you sure you want to collect garbage on the backend?')) {
+            try {
+              await apiFetch(`/api/frames/${props.frameId}/nix_collect_garbage_backend`, { method: 'POST' })
+            } catch (error) {
+              console.error(error)
+            }
+          }
+          return false
+        },
+      },
+    ],
   })),
 ])

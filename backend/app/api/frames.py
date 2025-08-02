@@ -71,6 +71,7 @@ from app.ws.agent_ws import (
 )
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
+from app.utils.local_exec import exec_local_command
 from . import api_with_auth, api_no_auth
 
 
@@ -974,6 +975,46 @@ async def api_frame_clear_build_cache(
         return {"message": "Build cache cleared successfully"}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_with_auth.post("/frames/{id:int}/nix_collect_garbage_frame")
+async def api_frame_nix_collect_garbage_frame(
+    id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)
+):
+    frame = db.get(Frame, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    if await _use_agent(frame, redis):
+        try:
+            await log( db, redis, id, "stdout", "> nix-collect-garbage")
+            await exec_shell_on_frame(frame.id, "nix-collect-garbage")
+            return {"message": "Garbage collected"}
+        except Exception as e:
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e)
+            )
+    try:
+        ssh = await get_ssh_connection(db, redis, frame)
+        try:
+            await exec_command(db, redis, frame, ssh, "nix-collect-garbage")
+        finally:
+            await remove_ssh_connection(db, redis, ssh, frame)
+        return {"message": "Garbage collected"}
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+@api_with_auth.post("/frames/{id:int}/nix_collect_garbage_backend")
+async def api_frame_nix_collect_garbage_backend(
+    id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)
+):
+    cmd = 'nix-collect-garbage'
+    frame = db.get(Frame, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    await exec_local_command(db, redis, frame, cmd)
+    return {"message": "Garbage collected"}
 
 
 @api_with_auth.post("/frames/{id:int}/reset")
