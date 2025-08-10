@@ -234,7 +234,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               >
                 <TextInput name="nix.hostname" placeholder={`frame${frame.id}`} />
               </Field>
-              <Field name="ssh_user" label="Username" tooltip='The user is always "frame"'>
+              <Field name="ssh_user" label="Username" tooltip='The username is always "frame" in the NixOS mode.'>
                 <TextInput name="ssh_user" value="frame" disabled required />
               </Field>
               <Field
@@ -330,13 +330,13 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
         </div>
 
         <H6>
-          Reverse tunnel <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
+          Agent <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
         </H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Group name="agent">
             <Field
               name="agentEnabled"
-              label="Enable FrameOS Agent (beta)"
+              label="Enable Agent (beta)"
               tooltip={
                 <div className="space-y-2">
                   <p>
@@ -357,7 +357,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               <>
                 <Field
                   name="agentRunCommands"
-                  label="Run commands through the agent (beta)"
+                  label="Reverse tunnel via the agent (beta)"
                   tooltip={
                     <div className="space-y-2">
                       <p>Can the FrameOS agent actually run commands and execute updates?</p>

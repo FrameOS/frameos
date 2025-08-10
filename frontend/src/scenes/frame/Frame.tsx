@@ -39,6 +39,7 @@ export function Frame(props: FrameSceneProps) {
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
 
   const canDeployAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && mode === 'rpios'
+  const canRestartAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret
   const agentExtra = canDeployAgent ? (frame?.agent?.agentRunCommands ? ' (via agent)' : ' (via ssh)') : ''
   // TODO
   const firstEverForNixOS = false && frame.mode === 'nixos' && frame.status === 'uninitialized'
@@ -96,9 +97,9 @@ export function Frame(props: FrameSceneProps) {
                               openLogs()
                             },
                           },
-                          { label: 'Restart agent (via ssh)', onClick: () => restartAgent() },
                         ]
                       : []),
+                    ...(canRestartAgent ? [{ label: 'Restart agent (via ssh)', onClick: () => restartAgent() }] : []),
                   ]}
                 />
                 <div className="flex pl-2 space-x-2">
