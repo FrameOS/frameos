@@ -3,7 +3,6 @@ import io
 import argparse
 import inspect
 import traceback
-import json
 import numpy
 from devices.util import log, init_inky, get_int_tuple
 
@@ -15,24 +14,6 @@ def read_binary_data():
             break
         binary_data.extend(chunk)
     return binary_data
-
-def parse_palette(palette_str):
-    """
-    Expect a JSON array of 6 RGB triplets, e.g.:
-    [[0,0,0],[255,255,255],[255,255,0],[255,0,0],[0,0,255],[0,255,0]]
-    Returns list[list[int,int,int]] or None.
-    """
-    try:
-        pal = json.loads(palette_str)
-        if (
-            isinstance(pal, list) and len(pal) == 6 and
-            all(isinstance(c, list) and len(c) == 3 and all(isinstance(x, int) for x in c) for c in pal)
-        ):
-            # clamp just in case
-            return [[max(0, min(255, x)) for x in c] for c in pal]
-    except Exception:
-        pass
-    return None
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(add_help=False)
