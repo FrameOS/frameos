@@ -571,9 +571,15 @@ async def api_frame_get_asset(
         }:
             raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Not an image")
 
-        full_md5, exists = await _remote_file_md5(db, redis, frame, full_path)
-        if not full_md5:
-            _bad_request("Invalid asset path")
+        md5_key = f"asset-md5:{full_path}"
+        cached_md5 = await redis.get(md5_key)
+        if cached_md5:
+            full_md5 = cached_md5.decode() if isinstance(cached_md5, bytes) else cached_md5
+        else:
+            full_md5, exists = await _remote_file_md5(db, redis, frame, full_path)
+            if not full_md5:
+                _bad_request("Invalid asset path")
+            await redis.set(md5_key, full_md5, ex=86400 * 30)
 
         cache_key = f"asset:thumb:{full_md5}"
         if cached := await redis.get(cache_key):

@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { Spinner } from '../../../../components/Spinner'
 import { DropdownMenu, DropdownMenuItem } from '../../../../components/DropdownMenu'
+import { DeferredImage } from '../../../../components/DeferredImage'
 
 function humaniseSize(size: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -139,13 +140,14 @@ function TreeNode({
     return (
       <div className="ml-1 flex items-center space-x-2">
         {isImage && imageToken && !node.path.startsWith('.thumbs/') && !node.path.includes('/.thumbs/') && (
-          <img
-            src={`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}&thumb=1&token=${encodeURIComponent(
-              imageToken
-            )}`}
-            alt=""
-            className="w-8 h-8 object-cover border border-gray-600"
-          />
+          <div className="w-8 h-8">
+            <DeferredImage
+              url={`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}&thumb=1`}
+              token={imageToken}
+              className="w-8 h-8 object-cover border border-gray-600 rounded"
+              spinnerClassName="w-4 h-4"
+            />
+          </div>
         )}
         <div className="flex-1">
           <span className="cursor-pointer hover:underline text-white" onClick={() => openAsset(node.path)}>
