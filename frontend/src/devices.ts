@@ -7,7 +7,8 @@ import { Palette } from './types'
 export const devices: Option[] = [
   { value: 'web_only', label: 'Web only' },
   { value: 'framebuffer', label: 'HDMI / Framebuffer' },
-  { value: 'pimoroni.inky_impression_13', label: 'Pimoroni Inky Impression - 13.3" Spectra' },
+  { value: 'pimoroni.inky_impression_7', label: 'Pimoroni Inky Impression - 7.3" 2025 edition' },
+  { value: 'pimoroni.inky_impression_13', label: 'Pimoroni Inky Impression - 13.3" 2025 edition' },
   { value: 'pimoroni.inky_impression', label: 'Pimoroni Inky Impression - all others' },
   { value: 'pimoroni.inky_python', label: 'Pimoroni Inky other (Python driver)' },
   { value: 'pimoroni.hyperpixel2r', label: 'Pimoroni HyperPixel 2.1" Round' },
@@ -162,6 +163,8 @@ export const withCustomPalette: Record<string, Palette> = {
   'waveshare.EPD_13in3e': spectraPalettes[0],
   'waveshare.EPD_7in3e': spectraPalettes[0],
   'waveshare.EPD_4in0e': spectraPalettes[0],
+  'pimoroni.inky_impression_7': spectraPalettes[0],
+  'pimoroni.inky_impression_13': spectraPalettes[0],
 }
 
 // TODO: add more platforms

@@ -910,7 +910,9 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
         </div>
         <H6 className="flex items-center gap-2">
           GPIO buttons
-          {frameForm.device !== 'pimoroni.inky_impression' && frameForm.device !== 'pimoroni.inky_impression_13' ? (
+          {frameForm.device !== 'pimoroni.inky_impression' &&
+          frameForm.device !== 'pimoroni.inky_impression_7' &&
+          frameForm.device !== 'pimoroni.inky_impression_13' ? (
             <Button
               size="small"
               color="secondary"
@@ -923,7 +925,9 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           ) : null}
         </H6>
         <div className="pl-2 @md:pl-8 space-y-2">
-          {frameForm.device === 'pimoroni.inky_impression' || frameForm.device === 'pimoroni.inky_impression_13' ? (
+          {frameForm.device === 'pimoroni.inky_impression' ||
+          frameForm.device === 'pimoroni.inky_impression_7' ||
+          frameForm.device === 'pimoroni.inky_impression_13' ? (
             <div>
               Inky Impression boards automatically configure pins 5, 6,{' '}
               {frameForm.device === 'pimoroni.inky_impression_13' ? '25' : '16'} and 24 as buttons A, B, C and D

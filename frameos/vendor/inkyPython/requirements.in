@@ -7,3 +7,5 @@ inky==2.1.0
 numpy==1.26.1
 pillow==9.5.0
 RPi.GPIO==0.7.1
+gpiod==2.3.0
+gpiodevice==0.0.5

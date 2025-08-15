@@ -5,14 +5,16 @@ from app.drivers.waveshare import get_variant_keys
 def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
     device = frame.device
     device_drivers: dict[str, Driver] = {}
-    if device == "pimoroni.inky_impression" or device == "pimoroni.inky_impression_13" or device == "pimoroni.inky_python":
+    if device == "pimoroni.inky_impression" or device == "pimoroni.inky_impression_7" or device == "pimoroni.inky_impression_13" or device == "pimoroni.inky_python":
         device_drivers = {
             "inkyPython": DRIVERS["inkyPython"],
             "spi": DRIVERS["spi"],
             "i2c": DRIVERS["i2c"],
         }
-        if device == "pimoroni.inky_impression" or device == "pimoroni.inky_impression_13":
+        if device == "pimoroni.inky_impression" or device == "pimoroni.inky_impression_7" or device == "pimoroni.inky_impression_13":
             device_drivers["gpioButton"] = DRIVERS["gpioButton"]
+        if device == "pimoroni.inky_impression_7" or device == "pimoroni.inky_impression_13":
+            device_drivers["inkyPython"].can_png = True
     elif device == "pimoroni.hyperpixel2r":
         device_drivers = {"inkyHyperPixel2r": DRIVERS["inkyHyperPixel2r"]}
     elif device == "framebuffer":
@@ -41,10 +43,10 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
             ]
 
     # Always enable evdev if not eink
-    if device != "pimoroni.inky_impression" and device != "pimoroni.inky_impression_13" and not device.startswith("waveshare."):
+    if device != "pimoroni.inky_impression" and device != "pimoroni.inky_impression_7" and device != "pimoroni.inky_impression_13" and not device.startswith("waveshare."):
         device_drivers['evdev'] = DRIVERS['evdev']
 
-    if frame.device == "pimoroni.inky_impression" or frame.device == "pimoroni.inky_impression_13":
+    if frame.device == "pimoroni.inky_impression" or device == "pimoroni.inky_impression_7" or frame.device == "pimoroni.inky_impression_13":
         if frame.device == "pimoroni.inky_impression_13":
             frame.gpio_buttons = [
                 {"pin": 5, "label": "A"},

@@ -8,7 +8,8 @@ if __name__ == '__main__':
     list = [
         {"value": 'web_only', "label": 'Web only'},
         {"value": 'framebuffer', "label": 'HDMI / Framebuffer'},
-        {"value": 'pimoroni.inky_impression_13', "label": 'Pimoroni Inky Impression - 13.3" Spectra'},
+        {"value": 'pimoroni.inky_impression_13', "label": 'Pimoroni Inky Impression - 13.3" 2025 edition'},
+        {"value": 'pimoroni.inky_impression_7', "label": 'Pimoroni Inky Impression - 7.3" 2025 edition'},
         {"value": 'pimoroni.inky_impression', "label": 'Pimoroni Inky Impression - all others'},
         {"value": 'pimoroni.inky_python', "label": 'Pimoroni Inky other (Python driver)'},
         {"value": 'pimoroni.hyperpixel2r', "label": 'Pimoroni HyperPixel 2.1" Round'},

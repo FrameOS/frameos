@@ -10,13 +10,14 @@ class Driver:
     can_render: bool = False # add render(image)
     can_png: bool = False # add toPng(rotate)
     can_turn_on_off: bool = False # add turnOn() and turnOff()
-    lines: list[str] = None # extra config lines for drivers
+    lines: Optional[list[str]] = None # extra config lines for drivers
 
 DRIVERS = {
     "inkyPython": Driver(
         name="inkyPython",
         import_path="inkyPython/inkyPython",
         vendor_folder="inkyPython",
+        can_png=False, # will be set to true for the frames that support this
         can_render=True,
     ),
     "gpioButton": Driver(
