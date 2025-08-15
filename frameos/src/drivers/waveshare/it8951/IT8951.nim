@@ -53,7 +53,7 @@ type
     Area_W*: UWORD
     Area_H*: UWORD
 
-  IT8951_Dev_Info* {.bycopy.} = object
+  IT8951_Dev_Info* {.importc: "IT8951_Dev_Info", header: "IT8951.h", bycopy.} = object
     Panel_W*: UWORD
     Panel_H*: UWORD
     Memory_Addr_L*: UWORD
@@ -159,7 +159,8 @@ proc Enhance_Driving_Capability*() {.importc: "Enhance_Driving_Capability".}
 proc EPD_IT8951_SystemRun*() {.importc: "EPD_IT8951_SystemRun".}
 proc EPD_IT8951_Standby*() {.importc: "EPD_IT8951_Standby".}
 proc EPD_IT8951_Sleep*() {.importc: "EPD_IT8951_Sleep".}
-proc EPD_IT8951_Init*(VCOM: UWORD): IT8951_Dev_Info {.importc: "EPD_IT8951_Init".}
+proc EPD_IT8951_Init*(vcom: UWORD): IT8951_Dev_Info
+  {.importc: "EPD_IT8951_Init", header: "IT8951.h".}
 proc EPD_IT8951_Clear_Refresh*(Dev_Info: IT8951_Dev_Info;
                               Target_Memory_Addr: UDOUBLE; Mode: UWORD) {.
     importc: "EPD_IT8951_Clear_Refresh".}

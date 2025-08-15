@@ -41,7 +41,7 @@ proc init*(frameOS: FrameOS): Driver =
   let width = waveshareDriver.width
   let height = waveshareDriver.height
 
-  logger.log(%*{"event": "driver:waveshare", "width": width, "height": height})
+  logger.log(%*{"event": "driver:waveshare", "width": width, "height": height, "init": "starting"})
   waveshareDriver.init()
 
   try:
@@ -123,12 +123,14 @@ proc renderSixteenGray*(self: Driver, image: Image) =
 
   let rowWidth = ceil(image.width.float / 2).int
   var blackImage = newSeq[uint8](rowWidth * image.height)
+
   for y in 0..<image.height:
     for x in 0..<image.width:
       let inputIndex = y * image.width + x
-      let index = y * rowWidth * 2 + x
-      let bw: uint8 = gray[inputIndex].uint8 # 0, 1, 2 or 3
-      blackImage[index div 2] = blackImage[index div 2] or ((bw and 0b1111) shl ((index mod 2) * (-4)))
+      let i = y * image.width + x
+      let nibble = (gray[inputIndex].uint8 and 0x0F)
+      let shift = if (i mod 2) == 0: 4 else: 0
+      blackImage[i div 2] = blackImage[i div 2] or (nibble shl shift)
   waveshareDriver.renderImage(blackImage)
 
 proc renderBlackWhiteRed*(self: Driver, image: Image, isRed = true) =
@@ -185,6 +187,7 @@ proc render*(self: Driver, image: Image) =
 
   self.lastImageData = image.data
   self.lastRenderAt = epochTime()
+  self.logger.log(%*{"event": "driver:waveshare", "render": "starting", "color": waveshareDriver.colorOption})
   waveshareDriver.start()
 
   case waveshareDriver.colorOption:

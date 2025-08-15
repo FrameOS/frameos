@@ -39,6 +39,7 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
             device_drivers["bootconfig"] = DRIVERS["bootConfig"]
             device_drivers["bootconfig"].lines = [
                 "dtoverlay=spi0-0cs",
+                "#dtparam=spi=on"
             ]
         if waveshare.variant == "EPD_13in3e":
             device_drivers["bootconfig"] = DRIVERS["bootConfig"]

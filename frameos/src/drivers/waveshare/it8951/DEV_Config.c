@@ -165,6 +165,10 @@ UBYTE DEV_Module_Init(void)
         }
     }
     SPI_Handle = lgSpiOpen(0, 0, 12500000, 0);
+    if (SPI_Handle < 0) {
+        Debug("lgSpiOpen failed: %d\n", SPI_Handle);
+        return -1; // abort init so caller sees failure
+    }
     DEV_GPIO_Init();
     Debug("/***********************************/!! \r\n");
 	return 0;

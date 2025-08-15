@@ -58,13 +58,11 @@ parameter:
 ******************************************************************************/
 static void EPD_IT8951_ReadBusy(void)
 {
-	Debug("Busy ------\r\n");
     UBYTE Busy_State = DEV_Digital_Read(EPD_BUSY_PIN);
     //0: busy, 1: idle
     while(Busy_State == 0) {
         Busy_State = DEV_Digital_Read(EPD_BUSY_PIN);
     }
-	Debug("Busy Release ------\r\n");
 }
 
 

@@ -50,7 +50,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         settings = get_settings_dict(db)
 
         async def install_if_necessary(pkg: str, raise_on_error=True) -> int:
-            search_strings = ["run apt-get update", "404 Not Found", "failed to fetch", "Unable to fetch some archives"]
+            search_strings = ["run apt-get update", "404 Not Found", "Failed to fetch", "failed to fetch", "Unable to fetch some archives"]
             output: list[str] = []
             response = await self.exec_command(
                 f"dpkg -l | grep -q \"^ii  {pkg} \" || sudo apt-get install -y {pkg}",
@@ -346,10 +346,14 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         must_reboot = False
 
         if drivers.get("bootconfig"):
-            for line in drivers["bootconfig"].lines:
-                if await self.exec_command(f'grep -q "^{line}" ' + boot_config, raise_on_error=False) != 0:
-                    await self.exec_command(command=f'echo "{line}" | sudo tee -a ' + boot_config, log_output=False)
-                    must_reboot = True
+            for line in (drivers["bootconfig"].lines or []):
+                if line.startswith("#"):
+                    to_remove = line[1:]
+                    await self.exec_command(f'grep -q "^{to_remove}" {boot_config} && sudo sed -i "/^{to_remove}/d" {boot_config}', raise_on_error=False)
+                else:
+                    if (await self.exec_command(f'grep -q "^{line}" ' + boot_config, raise_on_error=False)) != 0:
+                        await self.exec_command(command=f'echo "{line}" | sudo tee -a ' + boot_config, log_output=False)
+                        must_reboot = True
 
         if frame.last_successful_deploy_at is None:
             # Reboot after the first deploy to make sure any modifications to config.txt are persisted to disk
@@ -366,6 +370,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         if must_reboot:
             await update_frame(db, redis, frame)
             await self.log("stdinfo", "Deployed! Rebooting device after boot config changes")
+            await self.exec_command("sudo systemctl enable frameos.service")
             await self.exec_command("sudo reboot")
         else:
             await self.exec_command("sudo systemctl daemon-reload")
