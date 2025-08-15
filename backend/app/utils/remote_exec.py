@@ -438,16 +438,29 @@ async def _run_command_ssh(
         stderr_lines: list[str] = []
 
         async def _read_stream(stream, dest: list[str], log_type: str) -> None:
+            buf = ""
             while True:
-                line = await stream.readline()
-                if not line:
+                chunk = await stream.read(32768)
+                if not chunk:
                     break
-                if isinstance(line, (bytes, bytearray)):
-                    line = line.decode(errors="ignore")
-                line = line.rstrip("\n")
-                dest.append(line)
+                if isinstance(chunk, (bytes, bytearray)):
+                    chunk = chunk.decode(errors="ignore")
+                buf += chunk
+
+                # Emit complete lines; keep last partial in buf
+                *lines, buf = buf.split("\n")
+                for ln in lines:
+                    ln = ln.rstrip("\r")
+                    dest.append(ln)              # <<< store it
+                    if log_output:
+                        await log(db, redis, frame.id, log_type, ln)
+
+            # Flush any leftover partial line at EOF
+            if buf:
+                ln = buf.rstrip("\r")
+                dest.append(ln)                  # <<< store the final partial
                 if log_output:
-                    await log(db, redis, frame.id, log_type, line)
+                    await log(db, redis, frame.id, log_type, ln)
 
         stdout_task = asyncio.create_task(_read_stream(proc.stdout, stdout_lines, "stdout"))
         stderr_task = asyncio.create_task(_read_stream(proc.stderr, stderr_lines, "stderr"))
