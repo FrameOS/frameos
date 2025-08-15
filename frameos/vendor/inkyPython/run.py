@@ -3,6 +3,7 @@ import io
 import argparse
 import inspect
 import traceback
+import json
 from devices.util import log, init_inky, get_int_tuple
 
 def read_binary_data():
@@ -14,14 +15,48 @@ def read_binary_data():
         binary_data.extend(chunk)
     return binary_data
 
+def parse_palette(palette_str):
+    """
+    Expect a JSON array of 6 RGB triplets, e.g.:
+    [[0,0,0],[255,255,255],[255,255,0],[255,0,0],[0,0,255],[0,255,0]]
+    Returns list[list[int,int,int]] or None.
+    """
+    try:
+        pal = json.loads(palette_str)
+        if (
+            isinstance(pal, list) and len(pal) == 6 and
+            all(isinstance(c, list) and len(c) == 3 and all(isinstance(x, int) for x in c) for c in pal)
+        ):
+            # clamp just in case
+            return [[max(0, min(255, x)) for x in c] for c in pal]
+    except Exception:
+        pass
+    return None
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--device", default="")
+    parser.add_argument("--palette", default="")
     args, _ = parser.parse_known_args()
 
     inky = init_inky(args.device)
     if not inky:
         sys.exit(1)
+
+    # If a palette is provided, override both palettes on the instance
+    if args.palette:
+        custom = parse_palette(args.palette)
+        if custom:
+            try:
+                inky.DESATURATED_PALETTE = custom
+                inky.SATURATED_PALETTE = custom
+                log({"message": "applying custom palette", "palette": custom})
+            except Exception as e:
+                log({"warning": f"failed to apply custom palette: {e}"})
+        else:
+            log({"warning": "invalid --palette format; ignoring"})
+    else:
+        log({"message": "no custom palette provided; using inky default"})
 
     resolution = getattr(inky, "resolution", (getattr(inky, "width", 0), getattr(inky, "height", 0)))
     width, height = get_int_tuple(resolution)
