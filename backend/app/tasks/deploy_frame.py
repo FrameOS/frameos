@@ -158,6 +158,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await install_if_necessary("ntp")
             await install_if_necessary("build-essential")
             await install_if_necessary("hostapd")
+            await install_if_necessary("imagemagick")
 
             if drivers.get("evdev"):
                 await install_if_necessary("libevdev-dev")

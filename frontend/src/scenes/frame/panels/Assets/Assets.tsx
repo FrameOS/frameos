@@ -43,6 +43,7 @@ function TreeNode({
   deleteAsset,
   renameAsset,
   createFolder,
+  imageToken,
 }: {
   node: AssetNode
   frameId: number
@@ -51,6 +52,7 @@ function TreeNode({
   deleteAsset: (path: string) => void
   renameAsset: (oldPath: string, newPath: string) => void
   createFolder: (path: string) => void
+  imageToken: string | null
 }): JSX.Element {
   const [expanded, setExpanded] = useState(node.path === '')
   const [isDownloading, setIsDownloading] = useState(false)
@@ -124,6 +126,7 @@ function TreeNode({
                 deleteAsset={deleteAsset}
                 renameAsset={renameAsset}
                 createFolder={createFolder}
+                imageToken={imageToken}
               />
             ))}
           </div>
@@ -132,8 +135,18 @@ function TreeNode({
     )
   } else {
     // This is a file
+    const isImage = node.name.match(/\.(png|jpe?g|gif|bmp|webp)$/i)
     return (
       <div className="ml-1 flex items-center space-x-2">
+        {isImage && imageToken && !node.path.startsWith('.thumbs/') && !node.path.includes('/.thumbs/') && (
+          <img
+            src={`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}&thumb=1&token=${encodeURIComponent(
+              imageToken
+            )}`}
+            alt=""
+            className="w-8 h-8 object-cover border border-gray-600"
+          />
+        )}
         <div className="flex-1">
           <span className="cursor-pointer hover:underline text-white" onClick={() => openAsset(node.path)}>
             {node.name}
@@ -208,10 +221,26 @@ export function Assets(): JSX.Element {
     assetsLogic({ frameId: frame.id })
   )
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
+  const [imageToken, setImageToken] = useState<string | null>(null)
 
   useEffect(() => {
     loadAssets()
   }, [])
+
+  useEffect(() => {
+    async function fetchToken(): Promise<void> {
+      try {
+        const resp = await apiFetch(`/api/frames/${frame.id}/image_token`)
+        if (resp.ok) {
+          const data = await resp.json()
+          setImageToken(data.token)
+        }
+      } catch (error) {
+        console.error(error)
+      }
+    }
+    fetchToken()
+  }, [frame.id])
 
   return (
     <div className="space-y-2">
@@ -253,6 +282,7 @@ export function Assets(): JSX.Element {
             deleteAsset={deleteAsset}
             renameAsset={renameAsset}
             createFolder={createFolder}
+            imageToken={imageToken}
           />
         </div>
       )}
