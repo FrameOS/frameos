@@ -229,7 +229,4 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     },
   }),
-  afterMount(({ actions }) => {
-    actions.loadAssets()
-  }),
 ])
