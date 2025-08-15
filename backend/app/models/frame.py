@@ -242,7 +242,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "height": frame.height or 0,
         "device": frame.device or "web_only",
         "deviceConfig": {
-            **({"vcom": float(frame.device_config.get('vcom', '0'))} if frame.device_config.get('vcom') else {})
+            **({"vcom": float(frame.device_config.get('vcom', '0'))} if frame.device_config and frame.device_config.get('vcom') else {})
         },
         "metricsInterval": frame.metrics_interval or 60.0,
         "debug": frame.debug or False,
