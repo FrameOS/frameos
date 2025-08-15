@@ -11,6 +11,7 @@ import { assetsLogic } from './panels/Assets/assetsLogic'
 import { FrameConnection } from '../frames/Frame'
 import { sdCardModalLogic } from './sdcard/sdCardModalLogic'
 import { SDCardModal } from './sdcard/SDCardModal'
+import { terminalLogic } from './panels/Terminal/terminalLogic'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -36,9 +37,11 @@ export function Frame(props: FrameSceneProps) {
   } = useActions(frameLogic(frameLogicProps))
   const { openSDCardModal } = useActions(sdCardModalLogic(frameLogicProps))
   useMountedLogic(assetsLogic(frameLogicProps)) // Don't lose what we downloaded when navigating away from the tab
+  useMountedLogic(terminalLogic(frameLogicProps))
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
 
   const canDeployAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && mode === 'rpios'
+  const canRestartAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret
   const agentExtra = canDeployAgent ? (frame?.agent?.agentRunCommands ? ' (via agent)' : ' (via ssh)') : ''
   // TODO
   const firstEverForNixOS = false && frame.mode === 'nixos' && frame.status === 'uninitialized'
@@ -96,9 +99,9 @@ export function Frame(props: FrameSceneProps) {
                               openLogs()
                             },
                           },
-                          { label: 'Restart agent (via ssh)', onClick: () => restartAgent() },
                         ]
                       : []),
+                    ...(canRestartAgent ? [{ label: 'Restart agent (via ssh)', onClick: () => restartAgent() }] : []),
                   ]}
                 />
                 <div className="flex pl-2 space-x-2">

@@ -20,7 +20,7 @@ from urllib.parse import quote
 # third-party ---------------------------------------------------------------
 import httpx
 from jose import JWTError, jwt
-from fastapi import Depends, File, Form, Request, HTTPException, UploadFile
+from fastapi import Depends, File, Form, Request, HTTPException, UploadFile, Header
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -47,7 +47,7 @@ from app.schemas.frames import (
     FrameCreateRequest,
     FrameUpdateRequest,
 )
-from app.api.auth import ALGORITHM, SECRET_KEY
+from app.api.auth import ALGORITHM, SECRET_KEY, get_current_user
 from app.config import config
 from app.utils.network import is_safe_host
 from app.utils.remote_exec import (
@@ -292,7 +292,7 @@ async def _remote_file_md5(
     ssh = await get_ssh_connection(db, redis, frame)
     try:
         md5_out: list[str] = []
-        await exec_command(
+        response = await exec_command(
             db,
             redis,
             frame,
@@ -300,7 +300,10 @@ async def _remote_file_md5(
             f"md5sum {shlex.quote(remote_path)}",
             output=md5_out,
             log_output=False,
+            raise_on_error=False,
         )
+        if response != 0:
+            return "", False
         txt = "".join(md5_out).strip()
         if not txt:
             return "", False
@@ -518,32 +521,96 @@ async def api_frame_local_build_zip(                 # noqa: D401
         return StreamingResponse(sender(), headers=headers, media_type="application/zip")
 
 
-@api_with_auth.get("/frames/{id:int}/asset")
+@api_no_auth.get("/frames/{id:int}/asset")
 async def api_frame_get_asset(
     id: int,
     request: Request,
+    token: str | None = None,
+    authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    if config.HASSIO_RUN_MODE != "ingress":
+        if authorization and authorization.startswith("Bearer "):
+            try:
+                await get_current_user(authorization.split(" ")[1], db)
+            except HTTPException:
+                raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
+        elif token:
+            try:
+                payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+                if payload.get("sub") != f"frame={id}":
+                    raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
+            except JWTError:
+                raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
+        else:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
+
     frame = db.get(Frame, id) or _not_found()
 
     assets_path = frame.assets_path or "/srv/assets"
     rel_path = request.query_params.get("path") or _bad_request(
-        "Path parameter is required"
+        "Path parameter is required",
     )
     mode = request.query_params.get("mode", "download")
     filename = request.query_params.get("filename", os.path.basename(rel_path))
+    thumb = request.query_params.get("thumb") == "1"
 
     full_path = os.path.normpath(os.path.join(assets_path, rel_path))
     if not full_path.startswith(os.path.normpath(assets_path)):
         _bad_request("Invalid asset path")
+
+    if thumb:
+        if os.path.splitext(rel_path)[1].lower() not in {
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".bmp",
+            ".webp",
+        }:
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Not an image")
+
+        md5_key = f"asset-md5:{full_path}"
+        cached_md5 = await redis.get(md5_key)
+        if cached_md5:
+            full_md5 = cached_md5.decode() if isinstance(cached_md5, bytes) else cached_md5
+        else:
+            full_md5, exists = await _remote_file_md5(db, redis, frame, full_path)
+            if not full_md5:
+                _bad_request("Invalid asset path")
+            await redis.set(md5_key, full_md5, ex=86400 * 30)
+
+        cache_key = f"asset:thumb:{full_md5}"
+        if cached := await redis.get(cache_key):
+            data = cached
+        else:
+            thumb_root = os.path.join(assets_path, ".thumbs")
+            thumb_rel = full_md5 + ".320x320.jpg"
+            thumb_full = os.path.normpath(os.path.join(thumb_root, thumb_rel))
+
+            try:
+                data = await _remote_download_file(db, redis, frame, thumb_full)
+                await redis.set(cache_key, data, ex=86400 * 30)
+            except Exception:
+                cmd = (
+                    f"mkdir -p {shlex.quote(os.path.dirname(thumb_full))} && "
+                    f"convert {shlex.quote(full_path)} -thumbnail 320x320 "
+                    f"{shlex.quote(thumb_full)}"
+                )
+                await exec_shell_on_frame(frame.id, cmd)
+
+                data = await _remote_download_file(db, redis, frame, thumb_full)
+                await redis.set(cache_key, data, ex=86400 * 30)
+
+        return StreamingResponse(io.BytesIO(data), media_type="image/jpeg")
 
     if await _use_agent(frame, redis):
         try:
             data = await file_read_on_frame(frame.id, full_path)
         except Exception:  # file_read returns RuntimeError on missing file
             raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND, detail="Asset not found"
+                status_code=HTTPStatus.NOT_FOUND, detail="Asset not found",
             )
 
         md5 = hashlib.md5(data).hexdigest()
@@ -554,7 +621,7 @@ async def api_frame_get_asset(
         md5, exists = await _remote_file_md5(db, redis, frame, full_path)
         if not exists:
             raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND, detail="Asset not found"
+                status_code=HTTPStatus.NOT_FOUND, detail="Asset not found",
             )
 
         cache_key = f"asset:{md5}"

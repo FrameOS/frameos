@@ -7,14 +7,14 @@ import { socketLogic } from '../../../socketLogic'
 import type { logsLogicType } from './logsLogicType'
 import { apiFetch } from '../../../../utils/apiFetch'
 
-export interface logsLogicProps {
+export interface LogsLogicProps {
   frameId: number
 }
 const MAX_LOG_LINES = 50000
 
 export const logsLogic = kea<logsLogicType>([
   path(['src', 'scenes', 'frame', 'logsLogic']),
-  props({} as logsLogicProps),
+  props({} as LogsLogicProps),
   connect({ logic: [socketLogic] }),
   key((props) => props.frameId),
   loaders(({ props }) => ({
