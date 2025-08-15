@@ -193,10 +193,21 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           <Field
             name="device"
             label="Device"
-            tooltip="We're adding support for all the devices really soon. This is an early beta feature after all."
+            tooltip={
+              frameForm.mode === 'nixos'
+                ? "We're adding support for all the devices into the NixOS version. Check back later for more."
+                : undefined
+            }
           >
             <Select name="device" options={mode === 'nixos' ? devicesNixOS : devices} />
           </Field>
+          {frameForm.device === 'waveshare.EPD_10in3' ? (
+            <Group name="device_config">
+              <Field name="vcom" label="VCOM">
+                <TextInput name="vcom" placeholder="-1.48" required />
+              </Field>
+            </Group>
+          ) : null}
           {frameForm.mode === 'nixos' ? (
             <Field
               name="nix.platform"

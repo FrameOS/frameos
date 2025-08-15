@@ -23,6 +23,7 @@ class FrameBase(BaseModel):
     width: Optional[int]
     height: Optional[int]
     device: Optional[str]
+    device_config: Optional[Dict[str, Any]] = None
     color: Optional[str]
     interval: float
     metrics_interval: float
@@ -89,6 +90,7 @@ class FrameUpdateRequest(BaseModel):
     upload_fonts: Optional[str] = None
     scaling_mode: Optional[str] = None
     device: Optional[str] = None
+    device_config: Optional[Dict[str, Any]] = None
     debug: Optional[bool] = None
     reboot: Any = None
     control_code: Any = None

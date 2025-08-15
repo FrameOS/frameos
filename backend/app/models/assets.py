@@ -62,7 +62,7 @@ async def upload_font_assets(db: Session, redis: Redis, frame: Frame, assets_pat
         remote_fonts = {a["path"]: int(a.get("size", 0)) for a in assets}
     else:
         command = f"find {assets_path}/fonts -type f -exec stat --format='%s %Y %n' {{}} +"
-        status, stdout, _ = await run_command(db, redis, frame, command)
+        status, stdout, _ = await run_command(db, redis, frame, command, log_output=False)
         stdout_lines = stdout.splitlines()
         remote_fonts = {}
         for line in stdout_lines:

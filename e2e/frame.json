@@ -7,6 +7,7 @@
     "width": 320,
     "height": 480,
     "device": "web_only",
+    "deviceConfig": {},
     "color": null,
     "backgroundColor": "blue",
     "interval": 1.0,

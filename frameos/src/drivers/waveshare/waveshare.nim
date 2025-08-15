@@ -1,18 +1,11 @@
-import pixie, json, times, locks, options, sequtils
+import pixie, json, times, locks, options
 
 import frameos/types
 import frameos/utils/image
 import frameos/utils/dither
-import driver as waveshareDriver
-import ./types
-
-type Driver* = ref object of FrameOSDriver
-  logger: Logger
-  width: int
-  height: int
-  lastImageData: seq[ColorRGBX]
-  lastRenderAt: float
-  palette: Option[seq[(int, int, int)]]
+import drivers/waveshare/driver as waveshareDriver
+from drivers/waveshare/types import Driver, ColorOption
+export Driver
 
 var
   lastFloatImageLock: Lock
@@ -41,7 +34,7 @@ proc init*(frameOS: FrameOS): Driver =
   let width = waveshareDriver.width
   let height = waveshareDriver.height
 
-  logger.log(%*{"event": "driver:waveshare", "width": width, "height": height})
+  logger.log(%*{"event": "driver:waveshare", "width": width, "height": height, "init": "starting"})
   waveshareDriver.init()
 
   try:
@@ -55,6 +48,7 @@ proc init*(frameOS: FrameOS): Driver =
       width: width,
       height: height,
       palette: none(seq[(int, int, int)]),
+      vcom: frameOS.frameConfig.deviceConfig.vcom
     )
 
     if waveshareDriver.colorOption == ColorOption.SpectraSixColor and len(frameOS.frameConfig.palette.colors) == 6:
@@ -77,7 +71,7 @@ proc init*(frameOS: FrameOS): Driver =
         "stack": e.getStackTrace()})
 
 proc notifyImageAvailable*(self: Driver) =
-  self.logger.log(%*{"event": "render:dither", "info": "Dithered image available"})
+  self.logger.log(%*{"event": "render:dither", "info": "Dithered image available, starting render"})
 
 proc renderBlack*(self: Driver, image: Image) =
   var gray = newSeq[float](image.width * image.height)
@@ -112,6 +106,25 @@ proc renderFourGray*(self: Driver, image: Image) =
       let index = y * rowWidth * 4 + x
       let bw: uint8 = gray[inputIndex].uint8 # 0, 1, 2 or 3
       blackImage[index div 4] = blackImage[index div 4] or ((bw and 0b11) shl (6 - (index mod 4) * 2))
+  waveshareDriver.renderImage(blackImage)
+
+proc renderSixteenGray*(self: Driver, image: Image) =
+  var gray = newSeq[float](image.width * image.height)
+  image.toGrayscaleFloat(gray, 15)
+  gray.floydSteinberg(image.width, image.height)
+  setLastFloatImage(gray)
+  self.notifyImageAvailable()
+
+  let rowWidth = ceil(image.width.float / 2).int
+  var blackImage = newSeq[uint8](rowWidth * image.height)
+
+  for y in 0..<image.height:
+    for x in 0..<image.width:
+      let inputIndex = y * image.width + x
+      let i = y * image.width + x
+      let nibble = (gray[inputIndex].uint8 and 0x0F)
+      let shift = if (i mod 2) == 0: 4 else: 0
+      blackImage[i div 2] = blackImage[i div 2] or (nibble shl shift)
   waveshareDriver.renderImage(blackImage)
 
 proc renderBlackWhiteRed*(self: Driver, image: Image, isRed = true) =
@@ -168,7 +181,8 @@ proc render*(self: Driver, image: Image) =
 
   self.lastImageData = image.data
   self.lastRenderAt = epochTime()
-  waveshareDriver.start()
+  self.logger.log(%*{"event": "driver:waveshare", "render": "starting", "color": waveshareDriver.colorOption})
+  waveshareDriver.start(self)
 
   case waveshareDriver.colorOption:
   of ColorOption.Black:
@@ -183,6 +197,8 @@ proc render*(self: Driver, image: Image) =
     self.renderSpectraSixColor(image)
   of ColorOption.FourGray:
     self.renderFourGray(image)
+  of ColorOption.SixteenGray:
+    self.renderSixteenGray(image)
   of ColorOption.BlackWhiteYellowRed:
     self.renderBlackWhiteYellowRed(image)
 
@@ -212,6 +228,18 @@ proc toPng*(rotate: int = 0): string =
       for x in 0 ..< width:
         let index = y * width + x
         let pixel = (pixels[index] * 85).uint8
+        outputImage.data[index].r = pixel
+        outputImage.data[index].g = pixel
+        outputImage.data[index].b = pixel
+        outputImage.data[index].a = 255
+  of ColorOption.SixteenGray:
+    let pixels = getLastFloatImage()
+    if pixels.len == 0:
+      raise newException(Exception, "No render yet")
+    for y in 0 ..< height:
+      for x in 0 ..< width:
+        let index = y * width + x
+        let pixel = (pixels[index] * 17).uint8
         outputImage.data[index].r = pixel
         outputImage.data[index].g = pixel
         outputImage.data[index].b = pixel

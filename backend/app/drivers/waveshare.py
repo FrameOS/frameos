@@ -14,13 +14,14 @@ class WaveshareVariant:
     width: Optional[int] = None
     height: Optional[int] = None
     init_function: Optional[str] = None
+    init_args: str = ""
     clear_function: Optional[str] = None
     clear_args: str = ""
     sleep_function: Optional[str] = None
     display_function: Optional[str] = None
     display_arguments: Optional[list[str]] = None
     init_returns_zero: bool = False
-    color_option: Literal["Unknown", "Black", "BlackWhiteRed", "BlackWhiteYellow", "FourGray", "SpectraSixColor", "SevenColor", "BlackWhiteYellowRed"] = "Unknown"
+    color_option: Literal["Unknown", "Black", "BlackWhiteRed", "BlackWhiteYellow", "FourGray", "SpectraSixColor", "SevenColor", "BlackWhiteYellowRed", "SixteenGray"] = "Unknown"
 
 # Colors if we can't autodetect
 VARIANT_COLORS = {
@@ -66,6 +67,8 @@ VARIANT_COLORS = {
     "EPD_4in0e": "SpectraSixColor",
     "EPD_7in3e": "SpectraSixColor",
     "EPD_13in3e": "SpectraSixColor",
+
+    "EPD_10in3": "SixteenGray",
 }
 
 def get_variant_keys_for(folder: str) -> list[str]:
@@ -77,13 +80,20 @@ def get_variant_keys_for(folder: str) -> list[str]:
     ]
 
 def get_variant_keys() -> list[str]:
-    return [*get_variant_keys_for("ePaper"), *get_variant_keys_for("epd12in48"), *get_variant_keys_for("epd13in3e")]
+    return [
+        *get_variant_keys_for("ePaper"),
+        *get_variant_keys_for("it8951"),
+        *get_variant_keys_for("epd12in48"),
+        *get_variant_keys_for("epd13in3e"),
+    ]
 
 def get_variant_folder(variant_key: str) -> str:
     if variant_key in get_variant_keys_for("ePaper") :
         return "ePaper"
     elif variant_key == "EPD_13in3e":
         return "epd13in3e"
+    elif variant_key == "EPD_10in3":
+        return "it8951"
     else:
         return "epd12in48"
 
@@ -160,13 +170,13 @@ def convert_waveshare_source(variant_key: Optional[str]) -> WaveshareVariant:
                 proc_name = line.split("*(")[0].split(" ")[1]
                 if proc_name.lower() == f"{variant.prefix}_Init".lower() and variant.init_function is None:
                     variant.init_function = proc_name
-                    variant.init_returns_zero = "(): UBYTE" in line
+                    variant.init_returns_zero = "): UBYTE" in line
                 if proc_name.lower() == f"{variant.prefix}_Init_4Gray".lower():
                     variant.init_function = proc_name
-                    variant.init_returns_zero = "(): UBYTE" in line
+                    variant.init_returns_zero = "): UBYTE" in line
                 if proc_name.lower() == f"{variant.prefix}_4Gray_Init".lower():
                     variant.init_function = proc_name
-                    variant.init_returns_zero = "(): UBYTE" in line
+                    variant.init_returns_zero = "): UBYTE" in line
                 if proc_name.lower() == f"{variant.prefix}_Clear".lower() and variant.clear_function is None:
                     variant.clear_function = proc_name
                     if "color: UBYTE" in line:
@@ -181,6 +191,9 @@ def convert_waveshare_source(variant_key: Optional[str]) -> WaveshareVariant:
                     variant.display_function = proc_name
                     variant.display_arguments = get_proc_arguments(line, variant_key)
                     # print("-> " + proc_name + "(" + (", ".join(variant.display_arguments)) + ") <-")
+                if (proc_name.lower() == f"{variant.prefix}_16Gray_Display".lower()):
+                    variant.display_function = proc_name
+                    variant.display_arguments = get_proc_arguments(line, variant_key)
 
         if variant.display_arguments == ["Black"]:
             variant.color_option = "Black"
@@ -197,6 +210,10 @@ def convert_waveshare_source(variant_key: Optional[str]) -> WaveshareVariant:
             variant.color_option = "SevenColor"
         elif variant.display_arguments == ["SpectraSixColor"]:
             variant.color_option = "SpectraSixColor"
+        elif variant_key == "EPD_10in3":
+            variant.color_option = "SixteenGray"
+            variant.init_args = "self"
+            variant.init_returns_zero = True
         else:
             print(f"Unknown color: {variant_key} - {variant.display_function} -- {variant.display_arguments}" )
 
@@ -218,7 +235,7 @@ def write_waveshare_driver_nim(drivers: dict[str, Driver]) -> str:
 
 import {variant_folder}/DEV_Config as waveshareConfig
 import {variant_folder}/{variant.key} as waveshareDisplay
-from ./types import ColorOption
+import drivers/waveshare/types
 
 let width* = waveshareDisplay.{variant.prefix}_WIDTH
 let height* = waveshareDisplay.{variant.prefix}_HEIGHT
@@ -230,8 +247,8 @@ proc init*() =
   let resp = waveshareConfig.DEV_Module_Init()
   if resp != 0: raise newException(Exception, "Failed to initialize waveshare display")
 
-proc start*() =
-  {'discard ' if variant.init_returns_zero else ''}waveshareDisplay.{variant.init_function}()
+proc start*(self: Driver) =
+  {'discard ' if variant.init_returns_zero else ''}waveshareDisplay.{variant.init_function}({variant.init_args})
 
 proc clear*() =
   waveshareDisplay.{variant.clear_function}({variant.clear_args})

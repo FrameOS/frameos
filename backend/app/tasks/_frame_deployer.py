@@ -601,7 +601,12 @@ class FrameDeployer:
         if waveshare := drivers.get('waveshare'):
             if waveshare.variant:
                 variant_folder = get_variant_folder(waveshare.variant)
-                util_files = ["Debug.h", "DEV_Config.c", "DEV_Config.h"]
+
+                if variant_folder == "it8951":
+                    util_files = ["DEV_Config.c", "DEV_Config.h"]
+                else:
+                    util_files = ["Debug.h", "DEV_Config.c", "DEV_Config.h"]
+
                 for uf in util_files:
                     shutil.copy(
                         os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, uf),
@@ -616,6 +621,8 @@ class FrameDeployer:
                 ]:
                     c_file = re.sub(r'[bc]', 'bc', waveshare.variant)
                     variant_files = [f"{waveshare.variant}.nim", f"{c_file}.c", f"{c_file}.h"]
+                elif waveshare.variant == "EPD_10in3":
+                    variant_files = [f"{waveshare.variant}.nim", "IT8951.c", "IT8951.h", "IT8951.nim"]
                 else:
                     variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
 

@@ -1,4 +1,4 @@
-import os, osproc, httpclient, json, strformat, strutils, streams, times, threadpool, locks, tables
+import os, osproc, httpclient, json, strformat, strutils, streams, times, threadpool, locks
 import std/monotimes
 import frameos/config
 import frameos/types

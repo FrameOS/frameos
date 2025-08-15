@@ -19,6 +19,9 @@ export interface FrameType {
   width?: number
   height?: number
   device?: string
+  device_config?: {
+    vcom?: number
+  }
   color?: string
   interval: number
   metrics_interval: number
