@@ -17,6 +17,7 @@ DRIVERS = {
         name="inkyPython",
         import_path="inkyPython/inkyPython",
         vendor_folder="inkyPython",
+        can_png=False, # will be set to true for the frames that support this
         can_render=True,
     ),
     "gpioButton": Driver(

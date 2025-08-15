@@ -13,6 +13,8 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
         }
         if device == "pimoroni.inky_impression" or device == "pimoroni.inky_impression_7" or device == "pimoroni.inky_impression_13":
             device_drivers["gpioButton"] = DRIVERS["gpioButton"]
+        if device == "pimoroni.inky_impression_7" or device == "pimoroni.inky_impression_13":
+            device_drivers["inkyPython"].can_png = True
     elif device == "pimoroni.hyperpixel2r":
         device_drivers = {"inkyHyperPixel2r": DRIVERS["inkyHyperPixel2r"]}
     elif device == "framebuffer":

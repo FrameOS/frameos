@@ -1,6 +1,7 @@
-import osproc, os, streams, pixie, json, options, strutils, strformat
+import osproc, os, streams, pixie, json, options, strutils, strformat, locks
 import frameos/types
 import frameos/utils/dither
+import frameos/utils/image
 
 type ScreenInfo* = object
   width*: int
@@ -15,6 +16,25 @@ type Driver* = ref object of FrameOSDriver
   logger: Logger
   lastImageData: seq[ColorRGBX]
   debug: bool
+
+var
+  lastPixelsLock: Lock
+  lastPixels: seq[uint8] = @[]
+  lastWidth: int
+  lastHeight: int
+
+proc setLastPixels*(image: seq[uint8], width: int, height: int) =
+  withLock lastPixelsLock:
+    lastPixels = image
+    lastWidth = width
+    lastHeight = height
+
+proc getLastPixels*(): seq[uint8] =
+  withLock lastPixelsLock:
+    result = lastPixels
+
+proc notifyImageAvailable*(self: Driver) =
+  self.logger.log(%*{"event": "render:dither", "info": "Dithered image available"})
 
 proc safeLog(logger: Logger, message: string): JsonNode =
   try:
@@ -40,21 +60,6 @@ proc safeStartProcess*(cmd: string; args: seq[string] = @[];
 
 proc deviceArgs(dev: string): seq[string] =
   if dev.len > 0: @["--device", dev] else: @[]
-
-proc paletteArgs(p: PaletteConfig, device: string): seq[string] =
-  if p != nil and p.colors.len > 0:
-    let arr = newJArray()
-    for (r, g, b) in p.colors:
-      arr.add( %* [r, g, b])
-    @["--palette", $arr]
-  elif device == "pimoroni.inky_impression_7" or device == "pimoroni.inky_impression_13":
-    let arr = newJArray()
-    for (r, g, b) in spectra6ColorPalette:
-      if r < 256 and b < 256 and g < 256:
-        arr.add( %* [r, g, b])
-    @["--palette", $arr]
-  else:
-    @[]
 
 proc init*(frameOS: FrameOS): Driver =
   discard frameOS.logger.safeLog("Initializing Inky driver")
@@ -120,16 +125,39 @@ proc render*(self: Driver, image: Image) =
     discard self.logger.safeLog("Skipping render. Identical to last render.")
     return
   self.lastImageData = image.data
-  let imageData = image.encodeImage(BmpFormat)
+
+  var imageData: seq[uint8]
+  var extraArgs: seq[string] = @[]
+  if self.device == "pimoroni.inky_impression_7" or self.device == "pimoroni.inky_impression_13":
+    var palette: seq[(int, int, int)]
+    if self.palette != nil and self.palette.colors.len > 0:
+      let c = self.palette.colors
+      palette = @[
+        (c[0][0], c[0][1], c[0][2]),
+        (c[1][0], c[1][1], c[1][2]),
+        (c[2][0], c[2][1], c[2][2]),
+        (c[3][0], c[3][1], c[3][2]),
+        (999, 999, 999),
+        (c[4][0], c[4][1], c[4][2]),
+        (c[5][0], c[5][1], c[5][2]),
+      ]
+    else:
+      palette = spectra6ColorPalette
+    imageData = ditherPaletteIndexed(image, palette)
+    setLastPixels(imageData, image.width, image.height)
+    self.notifyImageAvailable()
+    extraArgs.add "--raw"
+  else:
+    imageData = cast[seq[uint8]](image.encodeImage(BmpFormat))
 
   let pOpt =
     if self.mode == "nixos":
       safeStartProcess("/nix/var/nix/profiles/system/sw/bin/inkyPython-run",
-                       deviceArgs(self.device) & paletteArgs(self.palette, self.device),
+                       deviceArgs(self.device) & extraArgs,
                        "/srv/frameos/vendor/inkyPython", self.logger)
     else:
       safeStartProcess("./env/bin/python3",
-                       @["run.py"] & deviceArgs(self.device) & paletteArgs(self.palette, self.device),
+                       @["run.py"] & deviceArgs(self.device) & extraArgs,
                        "/srv/frameos/vendor/inkyPython", self.logger)
 
   if pOpt.isNone:
@@ -186,3 +214,28 @@ proc render*(self: Driver, image: Image) =
     discard self.logger.safeLog(line)
 
   process.close()
+
+# Convert the rendered pixels to a PNG image. For accurate colors on the web.
+proc toPng*(rotate: int = 0): string =
+  let width = lastWidth
+  let height = lastHeight
+  var outputImage = newImage(width, height)
+
+  let pixels = getLastPixels()
+  if pixels.len == 0:
+    raise newException(Exception, "No render yet")
+  for y in 0 ..< height:
+    for x in 0 ..< width:
+      let index = y * width + x
+      let pixelIndex = index div 2
+      let pixelShift = (1 - (index mod 2)) * 4
+      let pixel = (pixels[pixelIndex] shr pixelShift) and 0x07
+      outputImage.data[index].r = spectra6ColorPalette[pixel][0].uint8
+      outputImage.data[index].g = spectra6ColorPalette[pixel][1].uint8
+      outputImage.data[index].b = spectra6ColorPalette[pixel][2].uint8
+      outputImage.data[index].a = 255
+
+  if rotate != 0:
+    return outputImage.rotateDegrees(rotate).encodeImage(PngFormat)
+
+  return outputImage.encodeImage(PngFormat)
