@@ -197,6 +197,13 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           >
             <Select name="device" options={mode === 'nixos' ? devicesNixOS : devices} />
           </Field>
+          {frameForm.device === 'waveshare.EPD_10in3' ? (
+            <Group name="device_config">
+              <Field name="vcom" label="VCOM">
+                <TextInput name="vcom" placeholder="-1.48" required />
+              </Field>
+            </Group>
+          ) : null}
           {frameForm.mode === 'nixos' ? (
             <Field
               name="nix.platform"

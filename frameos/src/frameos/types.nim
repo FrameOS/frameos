@@ -14,6 +14,7 @@ type
     width*: int
     height*: int
     device*: string
+    deviceConfig*: DeviceConfig
     metricsInterval*: float
     rotate*: int
     scalingMode*: string
@@ -63,6 +64,9 @@ type
 
   FrameSchedule* = ref object
     events*: seq[ScheduledEvent]
+
+  DeviceConfig* = ref object
+    vcom*: float # used for the 10.3" display
 
   ScheduledEvent* = ref object
     id*: string

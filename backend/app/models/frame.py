@@ -39,6 +39,7 @@ class Frame(Base):
     width = mapped_column(Integer, nullable=True)
     height = mapped_column(Integer, nullable=True)
     device = mapped_column(String(256), nullable=True)
+    device_config = mapped_column(JSON, nullable=True)
     color = mapped_column(String(256), nullable=True)
     interval = mapped_column(Double, default=300)
     metrics_interval = mapped_column(Double, default=60)
@@ -87,6 +88,7 @@ class Frame(Base):
             'width': self.width,
             'height': self.height,
             'device': self.device,
+            'device_config': self.device_config,
             'color': self.color,
             'interval': self.interval,
             'metrics_interval': self.metrics_interval,
@@ -239,6 +241,9 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "width": frame.width or 0,
         "height": frame.height or 0,
         "device": frame.device or "web_only",
+        "deviceConfig": {
+            **({"vcom": float(frame.device_config.get('vcom', '0'))} if frame.device_config.get('vcom') else {})
+        },
         "metricsInterval": frame.metrics_interval or 60.0,
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",

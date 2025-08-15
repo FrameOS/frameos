@@ -1,18 +1,11 @@
-import pixie, json, times, locks, options, sequtils
+import pixie, json, times, locks, options
 
 import frameos/types
 import frameos/utils/image
 import frameos/utils/dither
-import driver as waveshareDriver
-import ./types
-
-type Driver* = ref object of FrameOSDriver
-  logger: Logger
-  width: int
-  height: int
-  lastImageData: seq[ColorRGBX]
-  lastRenderAt: float
-  palette: Option[seq[(int, int, int)]]
+import drivers/waveshare/driver as waveshareDriver
+from drivers/waveshare/types import Driver, ColorOption
+export Driver
 
 var
   lastFloatImageLock: Lock
@@ -55,6 +48,7 @@ proc init*(frameOS: FrameOS): Driver =
       width: width,
       height: height,
       palette: none(seq[(int, int, int)]),
+      vcom: frameOS.frameConfig.deviceConfig.vcom
     )
 
     if waveshareDriver.colorOption == ColorOption.SpectraSixColor and len(frameOS.frameConfig.palette.colors) == 6:
@@ -188,7 +182,7 @@ proc render*(self: Driver, image: Image) =
   self.lastImageData = image.data
   self.lastRenderAt = epochTime()
   self.logger.log(%*{"event": "driver:waveshare", "render": "starting", "color": waveshareDriver.colorOption})
-  waveshareDriver.start()
+  waveshareDriver.start(self)
 
   case waveshareDriver.colorOption:
   of ColorOption.Black:

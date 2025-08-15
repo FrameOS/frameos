@@ -29,6 +29,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'height',
   'color',
   'device',
+  'device_config',
   'interval',
   'metrics_interval',
   'scaling_mode',

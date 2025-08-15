@@ -70,6 +70,14 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
       wifiHotspotTimeoutSeconds: data{"wifiHotspotTimeoutSeconds"}.getFloat(300),
     )
 
+proc loadDeviceConfig*(data: JsonNode): DeviceConfig =
+  if data == nil or data.kind != JObject:
+    result = DeviceConfig(vcom: 0)
+  else:
+    result = DeviceConfig(
+      vcom: data{"vcom"}.getFloat(0)
+    )
+
 proc loadPalette*(data: JsonNode): PaletteConfig =
   result = PaletteConfig(colors: @[])
   if data != nil and data.kind == JObject and data.contains("colors") and data["colors"] != nil and data[
@@ -118,6 +126,7 @@ proc loadConfig*(): FrameConfig =
     width: data{"width"}.getInt(),
     height: data{"height"}.getInt(),
     device: data{"device"}.getStr(),
+    deviceConfig: loadDeviceConfig(data{"deviceConfig"}),
     metricsInterval: data{"metricsInterval"}.getFloat(),
     rotate: data{"rotate"}.getInt(),
     scalingMode: data{"scalingMode"}.getStr(),

@@ -92,7 +92,12 @@ export function Terminal() {
         atBottomStateChange={(bottom) => setAtBottom(bottom)}
         increaseViewportBy={{ top: 0, bottom: 600 }}
         initialTopMostItemIndex={lines.length - 1}
-        itemContent={(_index, line) => <pre dangerouslySetInnerHTML={{ __html: ansiToHtml(line) || '&nbsp;' }} />}
+        itemContent={(_index, line) => (
+          <div
+            className="whitespace-pre-wrap break-words"
+            dangerouslySetInnerHTML={{ __html: ansiToHtml(line) || '&nbsp;' }}
+          />
+        )}
       />
       {!atBottom && (
         <Button
