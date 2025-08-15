@@ -1,12 +1,9 @@
 import sys
-import json
 import io
+import argparse
 import inspect
 import traceback
-
-def log(obj: dict):
-    print(json.dumps(obj))
-    sys.stdout.flush()
+from devices.util import log, init_inky, get_int_tuple
 
 def read_binary_data():
     binary_data = bytearray()
@@ -17,21 +14,20 @@ def read_binary_data():
         binary_data.extend(chunk)
     return binary_data
 
-def init():
-    try:
-        # TODO: we need i2c just for the auto switch. fix it for the nimos version or just ask the board beforehand
-        from inky.auto import auto
-        inky = auto()
-        return inky
-    except ImportError:
-        log({ "error": "inky python module not installed" })
-    except Exception as e:
-        log({ "error": str(e) })
-    sys.stdout.flush()
-
 if __name__ == "__main__":
-    inky = init()
-    log({ "inky": True, "width": inky.resolution[0], "height": inky.resolution[1], "color": inky.colour })
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--device", default="")
+    args, _ = parser.parse_known_args()
+
+    inky = init_inky(args.device)
+    if not inky:
+        sys.exit(1)
+
+    resolution = getattr(inky, "resolution", (getattr(inky, "width", 0), getattr(inky, "height", 0)))
+    width, height = get_int_tuple(resolution)
+    colour = getattr(inky, "colour", getattr(inky, "color", None))
+    log({ "inky": True, "width": width, "height": height, "color": colour })
+
     data = read_binary_data()
     log({ "bytesReceived": len(data), "message": "rendering on eink display" })
 
@@ -43,18 +39,33 @@ if __name__ == "__main__":
 
     try:
         image = Image.open(io.BytesIO(data))
-        signature = inspect.signature(inky.set_image)
-        num_parameters = len(signature.parameters)
-        if num_parameters == 2:
-            # TODO: make the saturation variable configurable when setting up the frame
-            inky.set_image(image, saturation=1)
-        elif num_parameters == 1:
-            inky.set_image(image)
-        else:
-            log({ "error": f"inky.set_image() requires {num_parameters} arguments, but we only support sending 1 or 2" })
+
+        set_image = getattr(inky, "set_image", None)
+        if not callable(set_image):
+            log({ "error": "inky.set_image() not available on this driver" })
             sys.exit(1)
 
-        inky.show()
+        # Try to match the signature len (1 or 2 params); fall back gracefully.
+        try:
+            signature = inspect.signature(set_image)
+            if len(signature.parameters) == 2:
+                set_image(image, saturation=1)
+            elif len(signature.parameters) == 1:
+                set_image(image)
+            else:
+                log({ "error": f"inky.set_image() expects {len(signature.parameters)} params; only 1 or 2 supported" })
+                sys.exit(1)
+        except (ValueError, TypeError):
+            try:
+                set_image(image, saturation=1)
+            except TypeError:
+                set_image(image)
+
+        show = getattr(inky, "show", None)
+        if not callable(show):
+            log({ "error": "inky.show() not available on this driver" })
+            sys.exit(1)
+        show()
     except Exception as e:
         log({ "error": str(e), "stack": traceback.format_exc() })
         sys.exit(1)

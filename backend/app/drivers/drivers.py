@@ -10,7 +10,7 @@ class Driver:
     can_render: bool = False # add render(image)
     can_png: bool = False # add toPng(rotate)
     can_turn_on_off: bool = False # add turnOn() and turnOff()
-    lines: list[str] = None # extra config lines for drivers
+    lines: Optional[list[str]] = None # extra config lines for drivers
 
 DRIVERS = {
     "inkyPython": Driver(

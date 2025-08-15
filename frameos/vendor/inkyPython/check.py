@@ -1,32 +1,28 @@
 import sys
-import json
-import traceback
-
-def log(obj: dict):
-    print(json.dumps(obj))
-    sys.stdout.flush()
-
-def init():
-    try:
-        # TODO: we need i2c just for the auto switch. fix it for the nimos version or just ask the board beforehand
-        from inky.auto import auto
-        inky = auto()
-        return inky
-    except ImportError:
-        log({ "error": "inky python module not installed" })
-    except Exception as e:
-        log({ "error": str(e), "stack": traceback.format_exc() })
-    sys.stdout.flush()
+import argparse
+from devices.util import log, init_inky, get_int_tuple
 
 if __name__ == "__main__":
-    inky = init()
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--device", default="")
+    args, _ = parser.parse_known_args()
+
+    inky = init_inky(args.device)
+    if not inky:
+        sys.exit(1)
+
+    resolution = getattr(inky, "resolution", (getattr(inky, "width", 0), getattr(inky, "height", 0)))
+    width, height = get_int_tuple(resolution)
+    colour = getattr(inky, "colour", getattr(inky, "color", None))
+    eeprom = getattr(inky, "eeprom", None)
+
     log({
         "inky": True,
-        "width": inky.resolution[0],
-        "height": inky.resolution[1],
-        "color": inky.colour,
-        "model": inky.eeprom.get_variant() if inky.eeprom else None,
-        "variant": inky.eeprom.display_variant if inky.eeprom else None,
-        "pcb": inky.eeprom.pcb_variant if inky.eeprom else None,
+        "width": width,
+        "height": height,
+        "color": colour,
+        "model": getattr(eeprom, "get_variant", lambda: None)() if eeprom else None,
+        "variant": getattr(eeprom, "display_variant", None) if eeprom else None,
+        "pcb": getattr(eeprom, "pcb_variant", None) if eeprom else None,
     })
     sys.exit(0)

@@ -9,6 +9,7 @@ type ScreenInfo* = object
 type Driver* = ref object of FrameOSDriver
   screenInfo: ScreenInfo
   mode*: string
+  device*: string
   logger: Logger
   lastImageData: seq[ColorRGBX]
   debug: bool
@@ -35,6 +36,9 @@ proc safeStartProcess*(cmd: string; args: seq[string] = @[];
     discard logger.safeLog(errorMsg)
     result = none(Process)
 
+proc deviceArgs(dev: string): seq[string] =
+  if dev.len > 0: @["--device", dev] else: @[]
+
 proc init*(frameOS: FrameOS): Driver =
   discard frameOS.logger.safeLog("Initializing Inky driver")
 
@@ -45,6 +49,7 @@ proc init*(frameOS: FrameOS): Driver =
       height: 0,
       color: ""
     ),
+    device: frameOS.frameConfig.device,
     mode: frameOS.frameConfig.mode,
     logger: frameOS.logger,
     debug: frameOS.frameConfig.debug,
@@ -52,10 +57,12 @@ proc init*(frameOS: FrameOS): Driver =
 
   let pOpt =
     if result.mode == "nixos":
-      safeStartProcess("/nix/var/nix/profiles/system/sw/bin/inkyPython-check", @[],
+      safeStartProcess("/nix/var/nix/profiles/system/sw/bin/inkyPython-check",
+                       deviceArgs(result.device),
                        "/srv/frameos/vendor/inkyPython", result.logger)
     else:
-      safeStartProcess("./env/bin/python3", @["check.py"],
+      safeStartProcess("./env/bin/python3",
+                       @["check.py"] & deviceArgs(result.device),
                        "/srv/frameos/vendor/inkyPython", result.logger)
 
   if pOpt.isNone:
@@ -99,10 +106,12 @@ proc render*(self: Driver, image: Image) =
 
   let pOpt =
     if self.mode == "nixos":
-      safeStartProcess("/nix/var/nix/profiles/system/sw/bin/inkyPython-run", @[],
+      safeStartProcess("/nix/var/nix/profiles/system/sw/bin/inkyPython-run",
+                       deviceArgs(self.device),
                        "/srv/frameos/vendor/inkyPython", self.logger)
     else:
-      safeStartProcess("./env/bin/python3", @["run.py"],
+      safeStartProcess("./env/bin/python3",
+                       @["run.py"] & deviceArgs(self.device),
                        "/srv/frameos/vendor/inkyPython", self.logger)
 
   if pOpt.isNone:
