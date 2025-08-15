@@ -1,4 +1,4 @@
-import { AppConfig, AppNodeData, DispatchNodeData, FrameEvent, FrameScene, FrameType } from '../types'
+import { AppConfig, AppNodeData, DispatchNodeData, FrameEvent, FrameScene, SceneNodeData } from '../types'
 import { v4 as uuidv4 } from 'uuid'
 
 import _events from '../../schema/events.json'
@@ -38,6 +38,8 @@ export function duplicateScenes(newScenes: FrameScene[]): FrameScene[] {
             }
           }
           return { ...node, data: { ...data, config: newConfig } }
+        } else if (node.type === 'scene') {
+          return { ...node, data: { ...node.data, keyword: getNewSceneId((node.data as SceneNodeData).keyword) } }
         } else if (node.type === 'source') {
           try {
             const data = node.data as AppNodeData

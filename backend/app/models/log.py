@@ -61,8 +61,14 @@ async def process_log(db: Session, redis: Redis, frame: Frame, log: dict | list)
 
     assert isinstance(log, dict), f"Log must be a dict, got {type(log)}"
 
-    changes: dict[str, Any] = {}
     event = log.get('event', 'log')
+
+    if event in ("render:scene", "render:sceneChange", "event:setCurrentScene"):
+        scene_id = log.get("sceneId") or log.get("scene") or log.get("id")
+        if scene_id:
+            await redis.set(f"frame:{frame.id}:active_scene", scene_id, ex=300)
+
+    changes: dict[str, Any] = {}
     if event == 'render':
         changes['status'] = 'preparing'
     if event == 'render:device':

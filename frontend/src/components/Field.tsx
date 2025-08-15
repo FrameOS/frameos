@@ -26,17 +26,20 @@ export function Field({
   ...props
 }: FieldProps): ReturnType<typeof KeaField> {
   const labelNode = label ? (
-    <Label>
+    <Label className={!labelRight ? '@md:w-1/3' : ''}>
       {label}
       {tooltip ? <Tooltip title={tooltip} /> : null}
     </Label>
   ) : null
   const template: KeaFieldProps['template'] = ({ label, kids, error }) => {
     return (
-      <div className={clsx('space-y-1', className)} {...(error ? { 'data-field-with-error': true } : {})}>
+      <div
+        className={clsx('space-y-1 @md:flex @md:gap-2', className)}
+        {...(error ? { 'data-field-with-error': true } : {})}
+      >
         <>
           {labelRight ? (
-            <div className="flex w-full justify-between items-center">
+            <div className="flex w-full justify-between items-center @md:w-1/3">
               {labelNode}
               {labelRight}
             </div>

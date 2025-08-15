@@ -5,7 +5,7 @@ FROM python:3.11-slim-bullseye
 WORKDIR /app
 
 # Install Node.js based on platform
-RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-server ca-certificates gnupg \
+RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-server ca-certificates gnupg openssh-client \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && NODE_MAJOR=18 \
@@ -18,7 +18,7 @@ RUN apt-get update && \
   apt-get install -y curl xz-utils gcc openssl ca-certificates git # &&
 
 RUN mkdir -p /opt/nim && \
-    curl -L https://nim-lang.org/download/nim-2.2.0.tar.xz | tar -xJf - -C /opt/nim --strip-components=1 && \
+    curl -L https://nim-lang.org/download/nim-2.2.4.tar.xz | tar -xJf - -C /opt/nim --strip-components=1 && \
     cd /opt/nim && \
     sh build.sh && \
     bin/nim c koch && \
@@ -29,6 +29,65 @@ ENV PATH="/opt/nim/bin:${PATH}"
 
 RUN nim --version \
     nimble --version
+
+# Install frameos nim deps
+WORKDIR /app/frameos
+
+COPY frameos/frameos.nimble ./
+COPY frameos/nimble.lock ./
+COPY frameos/nim.cfg ./
+
+RUN nimble install -d -y && nimble setup
+
+# Install frameos agent nim deps
+WORKDIR /app/frameos/agent
+
+COPY frameos/agent/frameos_agent.nimble ./
+COPY frameos/agent/nimble.lock ./
+
+# Cache nimble deps for when deploying on frame
+RUN nimble install -d -y && nimble setup
+
+# ─── Install Nix (single-user, root, flakes on) ──────────────────────
+ARG NIX_VERSION=2.30.2
+RUN set -eux; \
+    # helper tools + user/group utilities
+    apt-get update && apt-get install -y --no-install-recommends \
+        curl xz-utils gnupg procps sudo ; \
+    \
+    # 1. builder group *and* members that really appear in /etc/group
+    groupadd -r nixbld ; \
+    for i in $(seq 1 10); do \
+        useradd -r -m -s /usr/sbin/nologin \
+                -g nixbld        \
+                -G nixbld        \
+                nixbld$i ; \
+    done ; \
+    \
+    # 2. run the no-daemon installer
+    curl -L "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install" \
+      | sh -s -- --no-daemon --yes ; \
+    \
+    # 3. make nix usable in this layer
+    export USER=root ; \
+    . /root/.nix-profile/etc/profile.d/nix.sh ; \
+    nix-store --optimise ; \
+    nix --version
+# keep nix visible for later layers and at runtime
+ENV PATH="/root/.nix-profile/bin:/nix/var/nix/profiles/default/bin:${PATH}"
+RUN mkdir /etc/nix && printf '%s\n' \
+      "experimental-features = nix-command flakes" \
+      "build-users-group = nixbld" \
+    > /etc/nix/nix.conf
+ENV USER=root
+
+# Copy the requirements file and install using pip
+WORKDIR /app/frameos
+COPY frameos/ ./
+# Cache a build so that the nix libraries are already there
+# RUN make nix-bin
+# RUN make nix-update
+# RUN rm -rf /app/frameos/result
 
 # Copy the requirements file and install using pip
 WORKDIR /app/backend
@@ -53,23 +112,6 @@ RUN npm run build
 
 # Delete all files except the dist and schema folders
 RUN find . -maxdepth 1 ! -name 'dist' ! -name 'schema' ! -name '.' ! -name '..' -exec rm -rf {} \;
-
-# Cleanup node installations and build tools
-RUN apt-get remove -y nodejs curl build-essential libffi-dev ca-certificates gnupg \
-    && apt-get autoremove -y \
-    && apt-get clean \
-    && rm -rf /app/frontend/node_modules \
-    && rm -rf /var/lib/apt/lists/* /root/.npm
-
-# Change back to the main directory
-WORKDIR /app/frameos
-
-COPY frameos/frameos.nimble ./
-COPY frameos/nimble.lock ./
-COPY frameos/nim.cfg ./
-
-# Cache nimble deps for when deploying on frame
-RUN nimble install -d -y && nimble setup
 
 # Change back to the main directory
 WORKDIR /app

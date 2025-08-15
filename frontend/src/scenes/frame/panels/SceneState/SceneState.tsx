@@ -5,7 +5,7 @@ import { Form, Group } from 'kea-forms'
 import { Field } from '../../../../components/Field'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
-import { fieldTypes } from '../../../../types'
+import { appConfigFieldTypes } from '../../../../types'
 import { Button } from '../../../../components/Button'
 import { Tooltip } from '../../../../components/Tooltip'
 import { stateFieldAccess } from '../../../../utils/fieldTypes'
@@ -29,7 +29,7 @@ const ACCESS_OPTIONS = [
 
 export function SceneState(): JSX.Element {
   const { frameId } = useValues(frameLogic)
-  const { selectedStateSceneId: sceneId } = useValues(panelsLogic({ frameId }))
+  const { selectedSceneId: sceneId } = useValues(panelsLogic({ frameId }))
   const { sceneIndex, scene, editingFields, fieldsWithErrors } = useValues(sceneStateLogic({ frameId, sceneId }))
   const { setFields, addField, editField, closeField, removeField } = useActions(sceneStateLogic({ frameId, sceneId }))
 
@@ -114,7 +114,9 @@ export function SceneState(): JSX.Element {
                     <TextInput placeholder="e.g. search" />
                   </Field>
                   <Field name="type" label="Field type">
-                    <Select options={fieldTypes.filter((f) => f !== 'node').map((k) => ({ label: k, value: k }))} />
+                    <Select
+                      options={appConfigFieldTypes.filter((f) => f !== 'node').map((k) => ({ label: k, value: k }))}
+                    />
                   </Field>
                   {field.type === 'select' ? (
                     <Field name="options" label="Options (one per line)">
@@ -140,7 +142,12 @@ export function SceneState(): JSX.Element {
                   <Field
                     name="persist"
                     label="Perist"
-                    tooltip={<>Persisting to disk reduces the lifetime of your SD card</>}
+                    tooltip={
+                      <>
+                        Do not persist to disk values that change rapidly, as this will noticably impact the lifetime of
+                        your SD card.
+                      </>
+                    }
                   >
                     <Select options={PERSIST_OPTIONS} />
                   </Field>
@@ -149,8 +156,9 @@ export function SceneState(): JSX.Element {
                     label="Access"
                     tooltip={
                       <>
-                        Whether this field is just usable within the scene (private), or if it can also be controlled
-                        externally, for example from the frame's settings page.
+                        Private: The field is only accessible within the scene.
+                        <br />
+                        Public: The field becomes part of the scene's options that can be controlled externally.
                       </>
                     }
                   >

@@ -3,20 +3,11 @@ import lib/lgpio
 import frameos/types
 import frameos/channels
 
-# TODO: make this configurable in the UI
-let inputPins = [
-  # pin, line flags, edge, debounce
-  (5, LG_SET_PULL_UP, LG_FALLING_EDGE, 100000),
-  (6, LG_SET_PULL_UP, LG_FALLING_EDGE, 100000),
-  (16, LG_SET_PULL_UP, LG_FALLING_EDGE, 100000),
-  (24, LG_SET_PULL_UP, LG_FALLING_EDGE, 100000)
-]
-let pinLabels = {
-  5: "A",
-  6: "B",
-  16: "C",
-  24: "D"
-}.toTable
+const debounce = 100000
+const lineFlag = LG_SET_PULL_UP
+const edge = LG_FALLING_EDGE
+
+let pinLabels = newTable[int, string]()
 
 type Driver* = ref object of FrameOSDriver
   handler: int
@@ -42,6 +33,9 @@ proc determineGPIODevice(): int =
 
 proc init*(frameOS: FrameOS): Driver =
   log("Initializing GPIO button driver")
+  if frameOS.frameConfig.gpioButtons.len == 0:
+    log("No buttons configured")
+    return
   let gpioDevice = determineGPIODevice()
 
   let h = lgGpiochipOpen(gpioDevice.cint)
@@ -50,18 +44,23 @@ proc init*(frameOS: FrameOS): Driver =
     log(&"gpiochip{gpioDevice} open failed")
     return
 
-  for (pin, lineFlags, edge, debounce) in inputPins:
-    log(&"Listening on GPIO {pin}")
-    if lgGpioClaimInput(h, lineFlags.cint, pin.cint) < 0:
-      log(&"Unable to claim GPIO {pin} for input")
+  for button in frameOS.frameConfig.gpioButtons:
+    if button.pin < 0:
+      log(&"Invalid GPIO pin {button.pin} ({button.label})")
       continue
-    let res = lgGpioClaimAlert(h, 0, edge.cint, pin.cint, -1)
+    log(&"Listening on GPIO {button.pin} ({button.label})")
+    pinLabels[button.pin] = button.label
+
+    if lgGpioClaimInput(h, lineFlag.cint, button.pin.cint) < 0:
+      log(&"Unable to claim GPIO {button.pin} for input")
+      continue
+    let res = lgGpioClaimAlert(h, 0, edge.cint, button.pin.cint, -1)
     if res < 0:
-      log(&"Unable to claim GPIO {pin} for alerts: {lguErrorText(res)}")
+      log(&"Unable to claim GPIO {button.pin} for alerts: {lguErrorText(res)}")
       continue
-    if lgGpioSetAlertsFunc(h, pin.cint, alertsHandler, nil) < 0:
-      log(&"Unable to set alerts handler for GPIO {pin}")
+    if lgGpioSetAlertsFunc(h, button.pin.cint, alertsHandler, nil) < 0:
+      log(&"Unable to set alerts handler for GPIO {button.pin}")
       continue
-    if lgGpioSetDebounce(h, pin.cint, debounce.cint) < 0:
-      log(&"Unable to set debounce for GPIO {pin}")
+    if lgGpioSetDebounce(h, button.pin.cint, debounce.cint) < 0:
+      log(&"Unable to set debounce for GPIO {button.pin}")
       continue

@@ -1,4 +1,4 @@
-import { afterMount, connect, kea, key, path, props, selectors } from 'kea'
+import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
 import { AssetType } from '../../../../types'
 import { loaders } from 'kea-loaders'
@@ -48,8 +48,10 @@ function buildAssetTree(assets: AssetType[]): AssetNode {
       currentNode = currentNode.children[part]
     })
 
-    if (Object.keys(currentNode.children).length === 0) {
+    if (!asset.is_dir && Object.keys(currentNode.children).length === 0) {
       currentNode.isFolder = false
+    } else {
+      currentNode.isFolder = true
     }
 
     currentNode.size = asset.size
@@ -63,6 +65,18 @@ export const assetsLogic = kea<assetsLogicType>([
   props({} as AssetsLogicProps),
   connect(({ frameId }: AssetsLogicProps) => ({ logic: [socketLogic], values: [frameLogic({ frameId }), ['frame']] })),
   key((props) => props.frameId),
+  actions({
+    uploadAssets: (path: string) => ({ path }),
+    assetUploaded: (asset: AssetType) => ({ asset }),
+    filesToUpload: (files: string[]) => ({ files }),
+    uploadFailure: (path: string) => ({ path }),
+    syncAssets: true,
+    deleteAsset: (path: string) => ({ path }),
+    assetDeleted: (path: string) => ({ path }),
+    renameAsset: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
+    assetRenamed: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
+    createFolder: (path: string) => ({ path }),
+  }),
   loaders(({ props }) => ({
     assets: [
       [] as AssetType[],
@@ -122,7 +136,100 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     ],
   }),
-  afterMount(({ actions, cache }) => {
+  listeners(({ actions, props, values }) => ({
+    uploadAssets: async ({ path }) => {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.multiple = true
+      input.onchange = async () => {
+        const files = Array.from(input.files || [])
+        const uploadedFiles = files.map((file) => path + '/' + file.name)
+        actions.filesToUpload(uploadedFiles)
+        for (const file of files) {
+          const formData = new FormData()
+          formData.append('file', file)
+          formData.append('path', path)
+          try {
+            const response = await apiFetch(`/api/frames/${props.frameId}/assets/upload`, {
+              method: 'POST',
+              body: formData,
+            })
+            const asset = await response.json()
+            actions.assetUploaded(asset)
+          } catch (error) {
+            actions.uploadFailure(path + '/' + file.name)
+          }
+        }
+      }
+      input.click()
+    },
+    deleteAsset: async ({ path }) => {
+      try {
+        await apiFetch(`/api/frames/${props.frameId}/assets/delete`, {
+          method: 'POST',
+          body: new URLSearchParams({ path }),
+        })
+        const assetsPath = values.frame.assets_path ?? '/srv/assets'
+        actions.assetDeleted(assetsPath + '/' + path)
+      } catch (error) {
+        console.error(error)
+      }
+    },
+    renameAsset: async ({ oldPath, newPath }) => {
+      try {
+        await apiFetch(`/api/frames/${props.frameId}/assets/rename`, {
+          method: 'POST',
+          body: new URLSearchParams({ src: oldPath, dst: newPath }),
+        })
+        const assetsPath = values.frame.assets_path ?? '/srv/assets'
+        actions.assetRenamed(assetsPath + '/' + oldPath, assetsPath + '/' + newPath)
+      } catch (error) {
+        console.error(error)
+      }
+    },
+    createFolder: async ({ path }) => {
+      try {
+        await apiFetch(`/api/frames/${props.frameId}/assets/mkdir`, {
+          method: 'POST',
+          body: new URLSearchParams({ path }),
+        })
+        actions.loadAssets()
+      } catch (error) {
+        console.error(error)
+      }
+    },
+  })),
+  reducers({
+    assets: {
+      assetUploaded: (state, { asset }) =>
+        state.find((a) => a.path === asset.path)
+          ? state.map((a) => (a.path === asset.path ? asset : a))
+          : [...state, asset],
+      filesToUpload: (state, { files }) => {
+        const foundFiles: Set<string> = new Set()
+        const updatedFiles = state.map((asset) => {
+          if (files.includes(asset.path)) {
+            foundFiles.add(asset.path)
+            return { ...asset, size: -1, mtime: -1 }
+          }
+          return asset
+        })
+        for (const file of files) {
+          if (!foundFiles.has(file)) {
+            updatedFiles.push({ path: file, size: -1, mtime: -1 })
+          }
+        }
+        return updatedFiles
+      },
+      uploadFailure: (state, { path }) =>
+        state.map((asset) => (asset.path === path ? { ...asset, size: -2, mtime: -2 } : asset)),
+      assetDeleted: (state, { path }) => state.filter((a) => a.path !== path),
+      assetRenamed: (state, { oldPath, newPath }) => {
+        return state.map((a) => (a.path === oldPath ? { ...a, path: newPath } : a))
+      },
+    },
+  }),
+  afterMount(({ actions }) => {
     actions.loadAssets()
   }),
 ])

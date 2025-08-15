@@ -10,11 +10,15 @@ import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
 import { sceneLogic } from '../sceneLogic'
-import { Masonry } from '../../components/Masonry'
 import { TrashIcon } from '@heroicons/react/24/solid'
+import { NumberTextInput } from '../../components/NumberTextInput'
+import { Switch } from '../../components/Switch'
+import { Select } from '../../components/Select'
+import { timezoneOptions } from '../../decorators/timezones'
 
 export function Settings() {
   const {
+    settings,
     savedSettings,
     savedSettingsLoading,
     settingsChanged,
@@ -22,12 +26,12 @@ export function Settings() {
     isCustomFontsFormSubmitting,
     customFonts,
   } = useValues(settingsLogic)
-  const { submitSettings, newKey, deleteCustomFont } = useActions(settingsLogic)
+  const { submitSettings, newKey, newNixKey, deleteCustomFont, setSettingsValue } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
 
   return (
-    <div className="h-full w-full max-w-screen max-h-screen left-0 top-0 absolute">
+    <div className="h-full w-full overflow-hidden max-w-screen max-h-screen left-0 top-0 absolute">
       <div className="flex flex-col h-full max-h-full">
         <div className="h-[60px]">
           <Header
@@ -42,42 +46,108 @@ export function Settings() {
             }
           />
         </div>
-        <div
-          // id="frames"
-          className="h-full"
-        >
+        <div className="h-full w-full overflow-y-auto p-4 @container">
           {savedSettingsLoading ? (
             <Spinner />
           ) : (
-            <Masonry id="frames" className="p-4">
-              <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings}>
-                <Group name="frameOS">
-                  <Box className="p-2 mb-4 space-y-2">
-                    <H6>FrameOS Gallery</H6>
-                    <p>
-                      Sign up to the premium{' '}
-                      <a className="text-blue-400 hover:underline" target="_blank" href="https://gallery.frameos.net/">
-                        FrameOS galleries
-                      </a>{' '}
-                      and support this project.
+            <>
+              <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings} className="space-y-4">
+                <Group name="ssh_keys">
+                  <H6 className="pt-4">SSH Keys</H6>
+                  <Box className="p-2 space-y-2">
+                    <p className="text-sm leading-loose">
+                      This SSH key will be used on all frames that don't have a password set for SSH.
                     </p>
-                    <Field name="apiKey" label="API key" secret={!!savedSettings?.frameOS?.apiKey}>
-                      <TextInput autoFocus={!!savedSettings?.frameOS?.apiKey} />
+                    <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
+                      <TextArea />
+                    </Field>
+                    <Field
+                      name="default_public"
+                      label="Default public SSH key (use this in the RPi Imager)"
+                      secret={!!savedSettings?.ssh_keys?.default_public}
+                    >
+                      <TextArea />
+                    </Field>
+                    <Button
+                      onClick={newKey}
+                      color={savedSettings?.ssh_keys?.default ? 'secondary' : 'primary'}
+                      size="small"
+                    >
+                      Generate new keypair
+                    </Button>
+                  </Box>
+                </Group>
+                <Group name="defaults">
+                  <H6 className="pt-4">NixOS defaults for new frames</H6>
+                  <Box className="p-2 space-y-2">
+                    <p>
+                      These are all used for NixOS based frames. Raspberry Pi OS based frames set them via the RPi
+                      Imager.
+                    </p>
+                    <Field
+                      name="timezone"
+                      label={
+                        <>
+                          Timezone
+                          <Button
+                            size="small"
+                            color="secondary"
+                            onClick={() => {
+                              const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+                              setSettingsValue(['defaults', 'timezone'], timezone)
+                            }}
+                          >
+                            Detect
+                          </Button>
+                        </>
+                      }
+                    >
+                      <Select name="timezone" options={timezoneOptions} />
+                    </Field>
+                    <Field name="wifiSSID" label="Default WiFi SSID">
+                      <TextInput name="wifiSSID" placeholder="WiFi network name" />
+                    </Field>
+                    <Field
+                      name="wifiPassword"
+                      label="Default WiFi password"
+                      secret={!!savedSettings?.defaults?.wifiPassword}
+                    >
+                      <TextInput name="wifiPassword" placeholder="WiFi password" />
+                    </Field>
+                  </Box>
+                </Group>
+
+                <Group name="frameOS">
+                  <H6 className="pt-4">FrameOS Gallery</H6>
+                  <Box className="p-2 space-y-2">
+                    <p className="text-sm leading-loose">
+                      <a className="text-blue-400 hover:underline" target="_blank" href="https://gallery.frameos.net/">
+                        Premium AI slop
+                      </a>{' '}
+                      to get you started.
+                    </p>
+                    <Field
+                      name="apiKey"
+                      label="API key"
+                      secret={!!savedSettings?.frameOS?.apiKey}
+                      tooltip="Just use 2024 for now. We might add custom accounts in the future"
+                    >
+                      <TextInput />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="openAI">
-                  <Box className="p-2 mb-4 space-y-2">
-                    <H6>OpenAI</H6>
-                    The OpenAI API key is used within OpenAI apps, and for GPT4 coding assistance.
+                  <H6 className="pt-4">OpenAI</H6>
+                  <Box className="p-2 space-y-2">
+                    <p className="text-sm leading-loose">The OpenAI API key is used within OpenAI apps.</p>
                     <Field name="apiKey" label="API key" secret={!!savedSettings?.openAI?.apiKey}>
-                      <TextInput name="apiKey" autoFocus={!!savedSettings?.openAI?.apiKey} />
+                      <TextInput name="apiKey" />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="homeAssistant">
-                  <Box className="p-2 mb-4 space-y-2">
-                    <H6>Home Assistant</H6>
+                  <H6 className="pt-4">Home Assistant</H6>
+                  <Box className="p-2 space-y-2">
                     <Field name="url" label="Home assistant URL">
                       <TextInput placeholder="http://homeassistant.local:8123" />
                     </Field>
@@ -86,101 +156,123 @@ export function Settings() {
                       label="Access token (Profile -> Long-Lived Access Tokens)"
                       secret={!!savedSettings?.homeAssistant?.accessToken}
                     >
-                      <TextInput autoFocus={!!savedSettings?.homeAssistant?.accessToken} />
-                    </Field>
-                  </Box>
-                </Group>
-                <Group name="sentry">
-                  <Box className="p-2 mb-4 space-y-2">
-                    <H6>Sentry</H6>
-                    <p>Enable Sentry to monitor track errors and exceptions</p>
-                    <Field name="controller_dsn" label="Controller DSN">
-                      <TextInput autoFocus={!!savedSettings?.sentry?.controller_dsn} />
-                    </Field>
-                    <Field name="frame_dsn" label="Frame DSN">
-                      <TextInput autoFocus={!!savedSettings?.sentry?.frame_dsn} />
+                      <TextInput />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="github">
-                  <Box className="p-2 mb-4 space-y-2">
-                    <H6>Github</H6>
+                  <H6 className="pt-4">Github</H6>
+                  <Box className="p-2 space-y-2">
                     <Field name="api_key" label="API key" secret={!!savedSettings?.github?.api_key}>
-                      <TextInput autoFocus={!!savedSettings?.github?.api_key} />
+                      <TextInput />
                     </Field>
                   </Box>
                 </Group>
                 <Group name="unsplash">
-                  <Box className="p-2 mb-4 space-y-2">
-                    <H6>Unsplash API</H6>
+                  <H6 className="pt-4">Unsplash API</H6>
+                  <Box className="p-2 space-y-2">
                     <Field name="accessKey" label="Access key" secret={!!savedSettings?.unsplash?.accessKey}>
-                      <TextInput autoFocus={!!savedSettings?.unsplash?.accessKey} />
+                      <TextInput />
                     </Field>
                   </Box>
                 </Group>
-                <Group name="ssh_keys">
-                  <Box className="p-2 mb-4 space-y-2">
-                    <H6>SSH Keys</H6>
-                    <p className="text-sm leading-loose">
-                      This SSH key will be used on all frames that don't have a password set for SSH.
-                    </p>
-                    <Button
-                      onClick={newKey}
-                      color={savedSettings?.ssh_keys?.default ? 'secondary' : 'primary'}
-                      size="small"
+                <Group name="nix">
+                  <H6 className="pt-4">Nix settings</H6>
+                  <Box className="p-2 space-y-2">
+                    <Field name="buildExtraArgs" label="Extra args to build commands">
+                      <TextInput placeholder="-j0" />
+                    </Field>
+                    <Field
+                      name="buildServerEnabled"
+                      label="Enable remote build server"
+                      tooltip="These settings are used to build frames on a remote server. If you don't have a remote build
+                      server, you can leave these fields empty."
                     >
-                      Generate new keypair
-                    </Button>
-                    <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
-                      <TextArea autoFocus={!!savedSettings?.ssh_keys?.default} />
+                      <Switch fullWidth />
                     </Field>
-                    <Field name="default_public" label="Default public SSH key (use this in the RPi Imager)">
-                      <TextArea autoFocus={!!savedSettings?.ssh_keys?.default_public} />
-                    </Field>
+                    {settings?.nix?.buildServerEnabled ? (
+                      <>
+                        <Field name="buildServer" label="Build server address">
+                          <TextInput placeholder="build.frameos.net" />
+                        </Field>
+                        <Field name="buildServerPort" label="Build server port">
+                          <NumberTextInput placeholder="22" />
+                        </Field>
+                        <Field name="buildServerMaxParallelJobs" label="Max parallel jobs on build server">
+                          <NumberTextInput placeholder="8" />
+                        </Field>
+                        <Field name="buildServerUser" label="Build server user">
+                          <TextInput placeholder="frameos" />
+                        </Field>
+                        <Field
+                          name="buildServerPrivateKey"
+                          label="Build server private key"
+                          secret={!!savedSettings?.nix?.buildServerPrivateKey}
+                        >
+                          <TextArea />
+                        </Field>
+                        <Field
+                          name="buildServerPublicKey"
+                          label="Build server public key"
+                          secret={!!savedSettings?.nix?.buildServerPublicKey}
+                        >
+                          <TextArea />
+                        </Field>
+                        <Button
+                          onClick={newNixKey}
+                          color={savedSettings?.ssh_keys?.default ? 'secondary' : 'primary'}
+                          size="small"
+                        >
+                          Generate new keypair
+                        </Button>
+                      </>
+                    ) : null}
                   </Box>
                 </Group>
               </Form>
-              <Box className="p-2 mb-4 space-y-2">
-                <H6>Custom fonts</H6>
-                <p className="text-sm leading-loose">
-                  These fonts will be uploaded to all frames and can be used in the FrameOS editor.
-                </p>
-                <div className="space-y-1">
-                  {customFonts.map((font) => (
-                    <div key={font.id} className="flex items-center gap-2">
-                      <div className="flex-1">{font.path.substring(6)}</div>
-                      <Button size="tiny" color="secondary" onClick={() => deleteCustomFont(font)}>
-                        <TrashIcon className="w-5 h-5" />
+              <div className="space-y-4 mt-4">
+                <H6 className="pt-4">Custom fonts</H6>
+                <Box className="p-2 space-y-2">
+                  <p className="text-sm leading-loose">
+                    These fonts will be uploaded to all frames and can be used in the FrameOS editor.
+                  </p>
+                  <div className="space-y-1">
+                    {customFonts.map((font) => (
+                      <div key={font.id} className="flex items-center gap-2">
+                        <div className="flex-1">{font.path.substring(6)}</div>
+                        <Button size="tiny" color="secondary" onClick={() => deleteCustomFont(font)}>
+                          <TrashIcon className="w-5 h-5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  {customFontsLoading || isCustomFontsFormSubmitting ? <Spinner /> : <div className="flex gap-2"></div>}
+                  <Form logic={settingsLogic} formKey="customFontsForm" enableFormOnSubmit className="space-y-2">
+                    <Field label="" name="files">
+                      {({ onChange }) => (
+                        <input
+                          type="file"
+                          accept=".ttf"
+                          multiple
+                          className="w-full"
+                          onChange={(e: React.FormEvent<HTMLInputElement>) => {
+                            const target = e.target as HTMLInputElement & {
+                              files: FileList
+                            }
+                            onChange(target.files)
+                          }}
+                        />
+                      )}
+                    </Field>
+                    <div className="flex gap-2">
+                      <Button type="submit" size="small" color="primary">
+                        Upload fonts
                       </Button>
                     </div>
-                  ))}
-                </div>
-                {customFontsLoading || isCustomFontsFormSubmitting ? <Spinner /> : <div className="flex gap-2"></div>}
-                <Form logic={settingsLogic} formKey="customFontsForm" enableFormOnSubmit className="space-y-2">
-                  <Field label="" name="files">
-                    {({ onChange }) => (
-                      <input
-                        type="file"
-                        accept=".ttf"
-                        multiple
-                        className="w-full"
-                        onChange={(e: React.FormEvent<HTMLInputElement>) => {
-                          const target = e.target as HTMLInputElement & {
-                            files: FileList
-                          }
-                          onChange(target.files)
-                        }}
-                      />
-                    )}
-                  </Field>
-                  <div className="flex gap-2">
-                    <Button type="submit" size="small" color="primary">
-                      Upload fonts
-                    </Button>
-                  </div>
-                </Form>
-              </Box>
-            </Masonry>
+                  </Form>
+                </Box>
+              </div>
+            </>
           )}
         </div>
       </div>

@@ -3,8 +3,8 @@ import { clsx } from 'clsx'
 
 export function H4({ children, className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
   return (
-    <h5 className={clsx('text-4xl font-bold text-white', className)} {...props}>
+    <h4 className={clsx('text-3xl font-bold text-white', className)} {...props}>
       {children}
-    </h5>
+    </h4>
   )
 }

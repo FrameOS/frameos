@@ -2,11 +2,18 @@ import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { assetsLogic } from './assetsLogic'
 import { panelsLogic } from '../panelsLogic'
-import { CloudArrowDownIcon, DocumentArrowUpIcon } from '@heroicons/react/24/outline'
-import { useState } from 'react'
+import {
+  CloudArrowDownIcon,
+  DocumentArrowUpIcon,
+  PencilSquareIcon,
+  TrashIcon,
+  FolderPlusIcon,
+} from '@heroicons/react/24/solid'
+import { useEffect, useState } from 'react'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { Spinner } from '../../../../components/Spinner'
-import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { DropdownMenu, DropdownMenuItem } from '../../../../components/DropdownMenu'
+import { DeferredImage } from '../../../../components/DeferredImage'
 
 function humaniseSize(size: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -33,10 +40,20 @@ function TreeNode({
   node,
   frameId,
   openAsset,
+  uploadAssets,
+  deleteAsset,
+  renameAsset,
+  createFolder,
+  imageToken,
 }: {
   node: AssetNode
   frameId: number
   openAsset: (path: string) => void
+  uploadAssets: (path: string) => void
+  deleteAsset: (path: string) => void
+  renameAsset: (oldPath: string, newPath: string) => void
+  createFolder: (path: string) => void
+  imageToken: string | null
 }): JSX.Element {
   const [expanded, setExpanded] = useState(node.path === '')
   const [isDownloading, setIsDownloading] = useState(false)
@@ -45,13 +62,73 @@ function TreeNode({
   if (node.isFolder) {
     return (
       <div className="ml-1">
-        <div className="cursor-pointer" onClick={() => setExpanded(!expanded)}>
-          {expanded ? '📂' : '📁'} <span className="hover:underline text-blue-400">{node.name || '/'}</span>
+        <div className="flex items-center space-x-1">
+          <span className="cursor-pointer" onClick={() => setExpanded(!expanded)}>
+            {expanded ? '📂' : '📁'} <span className="hover:underline text-blue-400">{node.name || '/'}</span>
+          </span>
+          <span className="text-xs text-gray-400"> ({Object.keys(node.children).length} items)</span>
+          <DropdownMenu
+            horizontal
+            className="w-fit"
+            buttonColor="none"
+            items={
+              [
+                {
+                  label: 'Upload files',
+                  icon: <DocumentArrowUpIcon className="w-5 h-5" />,
+                  onClick: () => uploadAssets(node.path),
+                },
+                {
+                  label: 'New folder',
+                  icon: <FolderPlusIcon className="w-5 h-5" />,
+                  onClick: () => {
+                    const name = window.prompt('Folder name')
+                    if (name) {
+                      const newPath = (node.path ? node.path + '/' : '') + name
+                      createFolder(newPath)
+                    }
+                  },
+                },
+                node.path
+                  ? {
+                      label: 'Rename',
+                      icon: <PencilSquareIcon className="w-5 h-5" />,
+                      onClick: () => {
+                        const base = node.path.split('/').slice(0, -1).join('/')
+                        const newName = window.prompt('New name', node.name)
+                        if (newName) {
+                          const newPath = (base ? base + '/' : '') + newName
+                          renameAsset(node.path, newPath)
+                        }
+                      },
+                    }
+                  : null,
+                node.path
+                  ? {
+                      label: 'Delete',
+                      confirm: 'Are you sure?',
+                      icon: <TrashIcon className="w-5 h-5" />,
+                      onClick: () => deleteAsset(node.path),
+                    }
+                  : null,
+              ].filter(Boolean) as DropdownMenuItem[]
+            }
+          />
         </div>
         {expanded && (
           <div className="ml-2 border-l border-gray-600 pl-2">
             {Object.values(node.children).map((child) => (
-              <TreeNode key={child.path} node={child} frameId={frameId} openAsset={openAsset} />
+              <TreeNode
+                key={child.path}
+                node={child}
+                frameId={frameId}
+                openAsset={openAsset}
+                uploadAssets={uploadAssets}
+                deleteAsset={deleteAsset}
+                renameAsset={renameAsset}
+                createFolder={createFolder}
+                imageToken={imageToken}
+              />
             ))}
           </div>
         )}
@@ -59,40 +136,80 @@ function TreeNode({
     )
   } else {
     // This is a file
+    const isImage = node.name.match(/\.(png|jpe?g|gif|bmp|webp)$/i)
     return (
       <div className="ml-1 flex items-center space-x-2">
-        <div className="flex-1 cursor-pointer hover:underline text-white" onClick={() => openAsset(node.path)}>
-          {node.name}
+        {isImage && imageToken && !node.path.startsWith('.thumbs/') && !node.path.includes('/.thumbs/') && (
+          <div className="w-8 h-8">
+            <DeferredImage
+              url={`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}&thumb=1`}
+              token={imageToken}
+              className="w-8 h-8 object-cover border border-gray-600 rounded"
+              spinnerClassName="w-4 h-4"
+            />
+          </div>
+        )}
+        <div className="flex-1">
+          <span className="cursor-pointer hover:underline text-white" onClick={() => openAsset(node.path)}>
+            {node.name}
+          </span>
         </div>
-        {node.size != null && <span className="text-xs text-gray-400">{humaniseSize(node.size)}</span>}
-        {node.mtime && (
+        {node.size && node.size > 0 && <span className="text-xs text-gray-400">{humaniseSize(node.size)}</span>}
+        {node.mtime && node.mtime > 0 && (
           <span className="text-xs text-gray-500" title={new Date(node.mtime * 1000).toLocaleString()}>
             {new Date(node.mtime * 1000).toLocaleString()}
           </span>
         )}
-
-        <a
-          className="text-gray-300 hover:text-white cursor-pointer"
-          onClick={async (e) => {
-            e.preventDefault()
-            setIsDownloading(true)
-            const resource = await apiFetch(`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}`)
-            const blob = await resource.blob()
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = node.name
-            a.click()
-            URL.revokeObjectURL(url)
-            setIsDownloading(false)
-          }}
-        >
-          {isDownloading ? (
-            <Spinner className="w-4 h-4 inline-block" />
-          ) : (
-            <CloudArrowDownIcon className="w-4 h-4 inline-block" />
-          )}
-        </a>
+        {(node.size === -1 && node.mtime === -1) || isDownloading ? (
+          <Spinner className="w-4 h-4" color="white" />
+        ) : node.size === -2 && node.mtime === -2 ? (
+          <span className="text-red-500">Upload error</span>
+        ) : null}
+        <DropdownMenu
+          horizontal
+          className="w-fit"
+          buttonColor="none"
+          items={[
+            {
+              label: 'Download',
+              icon: isDownloading ? (
+                <Spinner className="w-4 h-4 inline-block" />
+              ) : (
+                <CloudArrowDownIcon className="w-4 h-4 inline-block" />
+              ),
+              onClick: async () => {
+                setIsDownloading(true)
+                const resource = await apiFetch(`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}`)
+                const blob = await resource.blob()
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = node.name
+                a.click()
+                URL.revokeObjectURL(url)
+                setIsDownloading(false)
+              },
+            },
+            {
+              label: 'Rename',
+              icon: <PencilSquareIcon className="w-4 h-4" />,
+              onClick: () => {
+                const base = node.path.split('/').slice(0, -1).join('/')
+                const newName = window.prompt('New name', node.name)
+                if (newName) {
+                  const newPath = (base ? base + '/' : '') + newName
+                  renameAsset(node.path, newPath)
+                }
+              },
+            },
+            {
+              label: 'Delete',
+              confirm: 'Are you sure?',
+              icon: <TrashIcon className="w-4 h-4" />,
+              onClick: () => deleteAsset(node.path),
+            },
+          ]}
+        />
       </div>
     )
   }
@@ -102,15 +219,37 @@ export function Assets(): JSX.Element {
   const { frame } = useValues(frameLogic)
   const { openLogs } = useActions(panelsLogic)
   const { assetsLoading, assetTree } = useValues(assetsLogic({ frameId: frame.id }))
-  const { syncAssets } = useActions(assetsLogic({ frameId: frame.id }))
+  const { loadAssets, syncAssets, uploadAssets, deleteAsset, renameAsset, createFolder } = useActions(
+    assetsLogic({ frameId: frame.id })
+  )
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
+  const [imageToken, setImageToken] = useState<string | null>(null)
+
+  useEffect(() => {
+    loadAssets()
+  }, [])
+
+  useEffect(() => {
+    async function fetchToken(): Promise<void> {
+      try {
+        const resp = await apiFetch(`/api/frames/${frame.id}/image_token`)
+        if (resp.ok) {
+          const data = await resp.json()
+          setImageToken(data.token)
+        }
+      } catch (error) {
+        console.error(error)
+      }
+    }
+    fetchToken()
+  }, [frame.id])
 
   return (
     <div className="space-y-2">
       <div className="float-right mt-[-8px]">
         <DropdownMenu
           className="w-fit"
-          buttonColor="none"
+          buttonColor="secondary"
           items={[
             {
               label: 'Sync fonts',
@@ -123,11 +262,30 @@ export function Assets(): JSX.Element {
           ]}
         />
       </div>
-      {assetsLoading ? (
-        <div>Loading assets...</div>
+      {assetsLoading && (!assetTree.children || Object.keys(assetTree.children).length === 0) ? (
+        <div>
+          <div className="float-right mr-2">
+            <Spinner />
+          </div>
+          <div>Loading assets...</div>
+        </div>
       ) : (
         <div>
-          <TreeNode node={assetTree} frameId={frame.id} openAsset={openAsset} />
+          {assetsLoading ? (
+            <div className="float-right mr-2">
+              <Spinner />
+            </div>
+          ) : null}
+          <TreeNode
+            node={assetTree}
+            frameId={frame.id}
+            openAsset={openAsset}
+            uploadAssets={uploadAssets}
+            deleteAsset={deleteAsset}
+            renameAsset={renameAsset}
+            createFolder={createFolder}
+            imageToken={imageToken}
+          />
         </div>
       )}
     </div>

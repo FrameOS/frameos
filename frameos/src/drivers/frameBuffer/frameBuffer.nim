@@ -16,12 +16,9 @@ type ScreenInfo* = object
   alphaOffset*: uint32
   alphaLength*: uint32
 
-type ColorBGRA = object
-  b, g, r, a: uint8
-
 type Driver* = ref object of FrameOSDriver
-  screenInfo: ScreenInfo
-  logger: Logger
+  screenInfo*: ScreenInfo
+  logger*: Logger
 
 proc tryToDisableCursorBlinking() =
   let status = execCmd("echo 0 | sudo tee /sys/class/graphics/fbcon/cursor_blink")
@@ -82,35 +79,36 @@ proc init*(frameOS: FrameOS): Driver =
 
 proc render*(self: Driver, image: Image) =
   let imageData = image.data
+  let bitsPerPixel = self.screenInfo.bitsPerPixel
   try:
     var fb = open(DEVICE, fmWrite, (self.screenInfo.width *
-          self.screenInfo.height * self.screenInfo.bitsPerPixel div 8).int)
-    if self.screenInfo.bitsPerPixel == 16:
+          self.screenInfo.height * bitsPerPixel div 8).int)
+    if bitsPerPixel == 16:
       var
         buffer: seq[uint16] = newSeq[uint16](len(imageData))
       for i, color in imageData:
         buffer[i] = ((uint16(color.r) shr 3) shl 11) or ((uint16(
             color.g) shr 2) shl 5) or (uint16(color.b) shr 3)
       discard fb.writeBuffer(addr buffer[0], buffer.len * sizeof(uint16))
-    elif self.screenInfo.bitsPerPixel == 32:
-      if self.screenInfo.blueOffset < self.screenInfo.greenOffset and
-          self.screenInfo.greenOffset < self.screenInfo.redOffset and
-          self.screenInfo.redOffset < self.screenInfo.alphaOffset:
-        var
-          buffer: seq[uint8] = newSeq[uint8](len(imageData) * sizeof(ColorBGRA))
-        for i, color in imageData:
-          let j = i * 4
-          buffer[j] = color.b
-          buffer[j + 1] = color.g
-          buffer[j + 2] = color.r
-          buffer[j + 3] = color.a
-        discard fb.writeBytes(buffer, 0, len(buffer))
-      else:
-        discard fb.writeBuffer(addr imageData[0], sizeof(imageData))
+    elif bitsPerPixel == 24 or bitsPerPixel == 32:
+      var bytesPerPixel = int(bitsPerPixel shr 3) # 24bpp = 3, 32bpp = 4
+      var buffer: seq[uint8] = newSeq[uint8](len(imageData) * bytesPerPixel)
+      for i, color in imageData:
+        let j = i * bytesPerPixel
+        buffer[j + int(self.screenInfo.redOffset) div 8] = color.r
+        buffer[j + int(self.screenInfo.greenOffset) div 8] = color.g
+        buffer[j + int(self.screenInfo.blueOffset) div 8] = color.b
+
+        # Framebuffer could be 32bpp with 0 length alpha (effectively 24bpp)
+        # or 24bpp with 0 length alpha
+        if self.screenInfo.alphaLength > 0:
+          buffer[j + int(self.screenInfo.alphaOffset) div 8] = color.a
+
+      discard fb.writeBytes(buffer, 0, len(buffer))
     else:
       self.logger.log(%*{"event": "driver:frameBuffer",
           "error": "Unsupported bits per pixel",
-          "bpp": self.screenInfo.bitsPerPixel})
+          "bpp": bitsPerPixel})
     fb.close()
   except:
     self.logger.log(%*{"event": "driver:frameBuffer",

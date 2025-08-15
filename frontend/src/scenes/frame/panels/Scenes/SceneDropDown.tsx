@@ -13,6 +13,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
 import { controlLogic } from './controlLogic'
+import { findConnectedScenes } from './utils'
 
 interface SceneDropDownProps {
   sceneId: string
@@ -38,13 +39,11 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
     <DropdownMenu
       buttonColor="secondary"
       items={[
-        context === 'scenes'
-          ? {
-              label: 'Activate',
-              onClick: () => setCurrentScene(scene.id),
-              icon: <PlayIcon className="w-5 h-5" />,
-            }
-          : null,
+        {
+          label: 'Activate',
+          onClick: () => setCurrentScene(scene.id),
+          icon: <PlayIcon className="w-5 h-5" />,
+        },
         context === 'scenes'
           ? {
               label: 'Edit scene',
@@ -59,12 +58,13 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
         },
         {
           label: 'Save to "My scenes"',
-          onClick: () => saveAsTemplate({ name: scene.name ?? '', exportScenes: [scene.id] }),
+          onClick: () =>
+            saveAsTemplate({ name: scene.name ?? '', exportScenes: findConnectedScenes(scenes, scene.id) }),
           icon: <FolderPlusIcon className="w-5 h-5" />,
         },
         {
           label: 'Download as .zip',
-          onClick: () => saveAsZip({ name: scene.name ?? '', exportScenes: [scene.id] }),
+          onClick: () => saveAsZip({ name: scene.name ?? '', exportScenes: findConnectedScenes(scenes, scene.id) }),
           icon: <CloudArrowDownIcon className="w-5 h-5" />,
         },
         context === 'scenes'

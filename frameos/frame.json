@@ -16,11 +16,61 @@
     "logToFile": "./tmp/frameos.log",
     "assetsPath": "./tmp",
     "saveAssets": false,
+    "timezone": "Europe/Brussels",
     "rotate": 0,
     "debug": true,
     "settings": {
-        "sentry": {
-            "frame_dsn": null
-        }
+    },
+    "schedule": {
+        "events": [
+            {
+                "id": "abcb20dc-9501-4302-bf56-1346762aed8a",
+                "hour": 19,
+                "minute": 52,
+                "weekday": 0,
+                "event": "setCurrentScene",
+                "payload": {
+                    "sceneId": "cbf8d3f0-fc8a-4642-851a-c5253828e951",
+                    "state": {}
+                }
+            },
+            {
+                "id": "2f056d69-f07c-4af1-b960-4b0af4954e4f",
+                "hour": 19,
+                "minute": 40,
+                "weekday": 1,
+                "event": "setCurrentScene",
+                "payload": {
+                    "sceneId": "c3901315-db97-4c85-a2ab-8dd867c4202b",
+                    "state": {}
+                }
+            },
+            {
+                "id": "5626efe7-3f1b-42b5-9fe0-f21677b83393",
+                "hour": 17,
+                "minute": 0,
+                "weekday": 8,
+                "event": "setCurrentScene",
+                "payload": {
+                    "sceneId": "3cc77a8e-3de2-41a6-853d-733c75035dc9",
+                    "state": {
+                        "text": "Keep at it!klkllk",
+                        "background": "naturenmj"
+                    }
+                }
+            }
+        ]
+    },
+    "controlCode": {
+        "enabled": true
+    },
+    "network": {
+        "networkCheck": true,
+        "networkCheckTimeoutSeconds": 30,
+        "networkCheckUrl": "https://networkcheck.frameos.net/",
+        "wifiHotspot": "disabled",
+        "wifiHotspotSsid": "FrameOS",
+        "wifiHotspotPassword": "frame1234",
+        "wifiHotspotTimeoutSeconds": 300
     }
 }

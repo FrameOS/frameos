@@ -1,7 +1,8 @@
 import asyncio
 import json
 import os
-import contextlib
+from contextlib import asynccontextmanager
+from httpx import AsyncClient, Limits
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.exceptions import RequestValidationError
@@ -11,17 +12,20 @@ from app.api.auth import get_current_user
 from app.api import api_no_auth, api_with_auth, api_public
 from fastapi.middleware.gzip import GZipMiddleware
 from app.middleware import GzipRequestMiddleware
-
+from app.ws.agent_ws import router as agent_ws_router
+from app.ws.terminal_ws import router as terminal_ws_router
 from app.websockets import register_ws_routes, redis_listener
 from app.config import config
-from app.utils.sentry import initialize_sentry
+from app.utils.posthog import initialize_posthog, capture_exception as posthog_capture_exception
 
-@contextlib.asynccontextmanager
+@asynccontextmanager
 async def lifespan(app: FastAPI):
-    initialize_sentry()
+    initialize_posthog()
+    app.state.http_client = AsyncClient(limits=Limits(max_connections=20, max_keepalive_connections=10))
+    app.state.http_semaphore = asyncio.Semaphore(10)
     task = asyncio.create_task(redis_listener())
     yield
-    # optionally do cleanup here
+    await app.state.http_client.aclose()
     task.cancel()
 
 app = FastAPI(lifespan=lifespan)
@@ -29,6 +33,8 @@ app.add_middleware(GZipMiddleware)
 app.add_middleware(GzipRequestMiddleware)
 
 register_ws_routes(app)
+app.include_router(agent_ws_router)
+app.include_router(terminal_ws_router)
 
 if config.HASSIO_RUN_MODE:
     if config.HASSIO_RUN_MODE == "public":
@@ -75,7 +81,7 @@ if serve_html:
 
     @app.exception_handler(StarletteHTTPException)
     async def custom_404_handler(request: Request, exc: StarletteHTTPException):
-        if os.environ.get("TEST") == "1" or exc.status_code != 404:
+        if os.environ.get("TEST") == "1" or exc.status_code != 404 or request.url.path.startswith("/api"):
             return JSONResponse(
                 status_code=exc.status_code,
                 content={"detail": exc.detail or f"Error {exc.status_code}"}
@@ -90,6 +96,11 @@ if serve_html:
                 content={"detail": exc.errors()}
             )
         return HTMLResponse(index_html)
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception):
+        posthog_capture_exception(exc, request)
+        return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 if __name__ == '__main__':
     # run migrations

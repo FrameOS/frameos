@@ -18,7 +18,7 @@ from arq import ArqRedis as Redis
 from app.models.template import Template
 from app.models.frame import Frame
 from app.schemas.templates import (
-    TemplateImageLinkResponse,
+    TemplateImageTokenResponse,
     TemplateResponse,
     TemplatesListResponse,
     CreateTemplateRequest,
@@ -239,8 +239,8 @@ async def get_template(template_id: str, db: Session = Depends(get_db)):
     d = template.to_dict()
     return d
 
-@api_with_auth.get("/templates/{template_id}/image_link", response_model=TemplateImageLinkResponse)
-async def get_image_link(template_id: str):
+@api_with_auth.get("/templates/{template_id}/image_token", response_model=TemplateImageTokenResponse)
+async def get_image_token(template_id: str):
     expire_minutes = 5
     now = datetime.utcnow()
     expire = now + timedelta(minutes=expire_minutes)
@@ -249,7 +249,7 @@ async def get_image_link(template_id: str):
     expires_in = int((expire - now).total_seconds())
 
     return {
-        "url": config.ingress_path + f"/api/templates/{template_id}/image?token={token}",
+        "token": token,
         "expires_in": expires_in
     }
 

@@ -1,11 +1,13 @@
-import json, asyncdispatch, pixie, strutils
+import json, asyncdispatch, pixie, strutils, times, os, httpclient, options
 import drivers/drivers as drivers
 import frameos/config
 import frameos/logger
 import frameos/metrics
 import frameos/runner
 import frameos/server
+import frameos/scheduler
 import frameos/types
+import frameos/portal as netportal
 import lib/tz
 
 proc newFrameOS*(): FrameOS =
@@ -17,11 +19,16 @@ proc newFrameOS*(): FrameOS =
   result = FrameOS(
     frameConfig: frameConfig,
     logger: logger,
-    metricsLogger: metricsLogger
+    metricsLogger: metricsLogger,
+    network: Network(
+      status: NetworkStatus.idle,
+      hotspotStatus: HotspotStatus.disabled,
+    ),
   )
   drivers.init(result)
   result.runner = newRunner(frameConfig)
   result.server = newServer(result)
+  startScheduler(result)
 
 proc start*(self: FrameOS) {.async.} =
   var message = %*{"event": "bootup", "config": {
@@ -39,10 +46,27 @@ proc start*(self: FrameOS) {.async.} =
     "logToFile": self.frameConfig.logToFile,
     "debug": self.frameConfig.debug,
     "timeZone": self.frameConfig.timeZone,
+    "gpioButtons": self.frameConfig.gpioButtons
   }}
   self.logger.log(message)
-  self.runner.start()
-  result = self.server.startServer()
+  netportal.setLogger(self.logger)
+
+  var firstSceneId: Option[SceneId] = none(SceneId)
+  if self.frameConfig.network.networkCheck:
+    let connected = checkNetwork(self)
+    if self.frameConfig.network.wifiHotspot == "bootOnly":
+      if connected:
+        netportal.stopAp(self)
+      else:
+        netportal.startAp(self)
+        firstSceneId = some("system/wifiHotspot".SceneId)
+  else:
+    self.logger.log(%*{"event": "networkCheck", "status": "skipped"})
+
+  self.runner.start(firstSceneId)
+
+  ## This call never returns
+  await self.server.startServer()
 
 proc startFrameOS*() {.async.} =
   var frameOS = newFrameOS()

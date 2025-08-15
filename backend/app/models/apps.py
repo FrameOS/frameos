@@ -1,4 +1,3 @@
-from typing import Optional
 import json
 import os
 
@@ -40,7 +39,7 @@ def get_local_frame_apps() -> list[str]:
 
 
 
-def get_one_app_sources(keyword: str) -> Optional[dict[str, str]]:
+def get_one_app_sources(keyword: str) -> dict[str, str]:
     sources: dict[str, str] = {}
     apps = get_local_frame_apps()
     if keyword in apps:

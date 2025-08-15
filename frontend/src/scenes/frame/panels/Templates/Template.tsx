@@ -25,7 +25,7 @@ export function Template({
   saveRemoteAsLocal,
 }: TemplateProps): JSX.Element {
   // I know the order of hooks is weird here, but the "if" should never change for this component
-  const imageUrl = template.id ? useEntityImage(`templates/${template.id}`).imageUrl : template.image
+  const imageUrl = template.id ? useEntityImage(`templates/${template.id}`, 'image').imageUrl : template.image
 
   return (
     <div
@@ -59,7 +59,7 @@ export function Template({
               title="Install scene"
             >
               <FolderPlusIcon className="w-5 h-5" />
-              Install
+              Install{(template.scenes || []).length > 1 ? ` (${(template.scenes || []).length})` : ''}
             </Button>
           ) : null}
           <DropdownMenu

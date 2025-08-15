@@ -1,11 +1,10 @@
 import sys
-import json
 import io
+import argparse
 import inspect
-
-def log(obj: dict):
-    print(json.dumps(obj))
-    sys.stdout.flush()
+import traceback
+import numpy
+from devices.util import log, init_inky, get_int_tuple
 
 def read_binary_data():
     binary_data = bytearray()
@@ -16,45 +15,81 @@ def read_binary_data():
         binary_data.extend(chunk)
     return binary_data
 
-def init():
-    try:
-        from inky.auto import auto
-        inky = auto()
-        return inky
-    except ImportError:
-        log({ "error": "inky python module not installed" })
-    except Exception as e:
-        log({ "error": str(e) })
-    sys.stdout.flush()
-
 if __name__ == "__main__":
-    inky = init()
-    log({ "inky": True, "width": inky.resolution[0], "height": inky.resolution[1], "color": inky.colour })
-    data = read_binary_data()
-    log({ "bytesReceived": len(data), "message": "rendering on eink display" })
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--device", default="")
+    parser.add_argument("--raw", action="store_true")
+    args, _ = parser.parse_known_args()
 
-    try:
-        from PIL import Image
-    except ImportError:
-        log({ "error": "PIL python module not installed" })
+    inky = init_inky(args.device)
+    if not inky:
         sys.exit(1)
 
-    try:
-        image = Image.open(io.BytesIO(data))
-        signature = inspect.signature(inky.set_image)
-        num_parameters = len(signature.parameters)
-        if num_parameters == 2:
-            # TODO: make the saturation variable configurable when setting up the frame
-            inky.set_image(image, saturation=1)
-        elif num_parameters == 1:
-            inky.set_image(image)
-        else:
-            log({ "error": f"inky.set_image() requires {num_parameters} arguments, but we only support sending 1 or 2" })
+    resolution = getattr(inky, "resolution", (getattr(inky, "width", 0), getattr(inky, "height", 0)))
+    width, height = get_int_tuple(resolution)
+    colour = getattr(inky, "colour", getattr(inky, "color", None))
+    log({ "inky": True, "width": width, "height": height, "color": colour })
+
+    data = read_binary_data()
+    log({ "bytesReceived": len(data), "format": "dithered" if args.raw else "rgb", "message": "rendering on eink display" })
+
+    if args.raw:
+        try:
+            expected = (width * height + 1) // 2
+            if len(data) != expected:
+                log({ "error": f"expected {expected} bytes, got {len(data)}" })
+                sys.exit(1)
+            arr = numpy.frombuffer(data, dtype=numpy.uint8)
+            buf = numpy.empty(width * height, dtype=numpy.uint8)
+            buf[0::2] = arr >> 4
+            buf[1::2] = arr & 0x0F
+            inky.buf = buf.reshape((height, width))
+            show = getattr(inky, "show", None)
+            if not callable(show):
+                log({ "error": "inky.show() not available on this driver" })
+                sys.exit(1)
+            show()
+        except Exception as e:
+            log({ "error": str(e), "stack": traceback.format_exc() })
+            sys.exit(1)
+    else:
+        try:
+            from PIL import Image
+        except ImportError:
+            log({ "error": "PIL python module not installed" })
             sys.exit(1)
 
-        inky.show()
-    except Exception as e:
-        log({ "error": str(e) })
-        sys.exit(1)
+        try:
+            image = Image.open(io.BytesIO(data))
+
+            set_image = getattr(inky, "set_image", None)
+            if not callable(set_image):
+                log({ "error": "inky.set_image() not available on this driver" })
+                sys.exit(1)
+
+            # Try to match the signature len (1 or 2 params); fall back gracefully.
+            try:
+                signature = inspect.signature(set_image)
+                if len(signature.parameters) == 2:
+                    set_image(image, saturation=1)
+                elif len(signature.parameters) == 1:
+                    set_image(image)
+                else:
+                    log({ "error": f"inky.set_image() expects {len(signature.parameters)} params; only 1 or 2 supported" })
+                    sys.exit(1)
+            except (ValueError, TypeError):
+                try:
+                    set_image(image, saturation=1)
+                except TypeError:
+                    set_image(image)
+
+            show = getattr(inky, "show", None)
+            if not callable(show):
+                log({ "error": "inky.show() not available on this driver" })
+                sys.exit(1)
+            show()
+        except Exception as e:
+            log({ "error": str(e), "stack": traceback.format_exc() })
+            sys.exit(1)
 
     sys.exit(0)

@@ -8,3 +8,12 @@ export function downloadJson(jsonObject: object, fileName: string): void {
   link.click()
   document.body.removeChild(link)
 }
+
+export function downloadZip(blob: Blob, fileName: string): void {
+  const link: HTMLAnchorElement = document.createElement('a')
+  link.download = fileName
+  link.href = URL.createObjectURL(blob)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}

@@ -14,6 +14,12 @@ interface FrameProps {
   frame: FrameType
 }
 
+export function FrameConnection({ frame }: FrameProps): JSX.Element | null {
+  return (frame?.active_connections ?? 0) > 0 ? (
+    <span title="FrameOS Agent connected">{frame?.agent?.agentRunCommands ? '🟢' : '🟠'}</span>
+  ) : null
+}
+
 export function Frame({ frame }: FrameProps): JSX.Element {
   const { deleteFrame } = useActions(framesModel)
   return (
@@ -40,7 +46,10 @@ export function Frame({ frame }: FrameProps): JSX.Element {
         </H5>
       </div>
       <div className="px-4 pb-4">
-        <div className="flex sm:text-lg text-gray-400 items-center">{frameStatus(frame)}</div>
+        <div className="flex sm:text-lg text-gray-400 items-center gap-1">
+          <FrameConnection frame={frame} />
+          <span>{frameStatus(frame)}</span>
+        </div>
       </div>
     </Box>
   )

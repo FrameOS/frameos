@@ -34,14 +34,14 @@ export function Signup() {
           <Field name="password2" label="Confirm Password">
             <TextInput name="password2" placeholder="" type="password" required autoComplete="new-password" />
           </Field>
-          <Field name="newsletter">
+          {/* <Field name="newsletter">
             {({ value, onChange }) => (
               <Label>
                 <input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} />
                 <span>Sign up to the newsletter</span>
               </Label>
             )}
-          </Field>
+          </Field> */}
           <div className="flex gap-2">
             <Button disabled={isSignupFormSubmitting} type="submit" className="w-full bg-[#5B5983] hover:bg-[#7A6D86]">
               Sign Up

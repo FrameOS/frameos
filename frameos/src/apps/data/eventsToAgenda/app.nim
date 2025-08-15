@@ -15,6 +15,7 @@ type
     textColor*: Color
     timeColor*: Color
     titleColor*: Color
+    startWithToday*: bool
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -36,17 +37,21 @@ proc get*(self: App, context: ExecutionContext): string =
   let time = &"^({self.appConfig.baseFontSize},{self.appConfig.timeColor.toHtmlHex()})"
   let events = self.appConfig.events
   let timezone = self.getTimezone(events)
-  let todayTs = epochTime().Timestamp
-  let today = format(todayTs, titleFormat, tzName = timezone)
 
   proc h1(text: string): string = &"{title}{text}\n{normal}\n"
   proc formatDay(day: string): string = format(parseTs("{year/4}-{month/2}-{day/2}", day), titleFormat)
 
-  var currentDay = format(todayTs, "{year/4}-{month/2}-{day/2}", tzName = timezone)
+  let noEvents = events == nil or events.kind != JArray or events.len == 0
 
-  result = h1(today)
+  result = ""
 
-  if events == nil or events.kind != JArray or events.len == 0:
+  var currentDay = ""
+  if self.appConfig.startWithToday or noEvents:
+    let todayTs = epochTime().Timestamp
+    result &= h1(format(todayTs, titleFormat, tzName = timezone))
+    currentDay = format(todayTs, "{year/4}-{month/2}-{day/2}", tzName = timezone)
+
+  if noEvents:
     result &= &"No events found\n"
     return
 
@@ -61,10 +66,9 @@ proc get*(self: App, context: ExecutionContext): string =
     let withTime = "T" in startDay
     let startDate = startDay.split("T")[0]
 
-    if startDate > currentDay:
-      if not hasAny:
+    if startDate != currentDay: # new day, past or future
+      if not hasAny and startDate != currentDay and self.appConfig.startWithToday:
         result &= "No events today\n"
-
       result &= "\n" & h1(formatDay(startDate))
       currentDay = startDate
 

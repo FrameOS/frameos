@@ -7,6 +7,7 @@ class FrameBase(BaseModel):
 
     id: int
     name: str
+    mode: Optional[str] = None
     frame_host: str
     frame_port: int
     frame_access_key: Optional[str]
@@ -37,6 +38,15 @@ class FrameBase(BaseModel):
     reboot: Any
     control_code: Any
     scenes: Optional[List[Dict[str, Any]]]
+    schedule: Optional[Dict[str, Any]]
+    gpio_buttons: Optional[List[Dict[str, Any]]]
+    network: Optional[Dict[str, Any]]
+    agent: Optional[Dict[str, Any]]
+    palette: Optional[Dict[str, Any]]
+    nix: Optional[Dict[str, Any]] = None
+    last_successful_deploy: Optional[Dict[str, Any]]
+    last_successful_deploy_at: Optional[datetime]
+    active_connections: Optional[int] = None
 
 class FrameResponse(BaseModel):
     frame: FrameBase
@@ -45,14 +55,17 @@ class FramesListResponse(BaseModel):
     frames: List[FrameBase]
 
 class FrameCreateRequest(BaseModel):
+    mode: Optional[str] = None
     name: str
     frame_host: str
     server_host: str
     interval: Optional[float] = None
     device: Optional[str] = None
+    platform: Optional[str] = None
 
 class FrameUpdateRequest(BaseModel):
     scenes: Optional[List[Any]] = None
+    mode: Optional[str] = None
     name: Optional[str] = None
     frame_host: Optional[str] = None
     frame_port: Optional[int] = None
@@ -79,6 +92,12 @@ class FrameUpdateRequest(BaseModel):
     debug: Optional[bool] = None
     reboot: Any = None
     control_code: Any = None
+    schedule: Optional[Dict[str, Any]] = None
+    gpio_buttons: Optional[List[Dict[str, Any]]] = None
+    network: Optional[Dict[str, Any]] = None
+    agent: Optional[Dict[str, Any]] = None
+    palette: Optional[Dict[str, Any]] = None
+    nix: Optional[Dict[str, Any]] = None
     next_action: Optional[str] = None
 
 class FrameLogsResponse(BaseModel):
@@ -88,7 +107,7 @@ class FrameMetricsResponse(BaseModel):
     metrics: List[Dict[str, Any]]
 
 class FrameImageLinkResponse(BaseModel):
-    url: str
+    token: str
     expires_in: int
 
 class FrameStateResponse(RootModel):

@@ -8,7 +8,9 @@ if __name__ == '__main__':
     list = [
         {"value": 'web_only', "label": 'Web only'},
         {"value": 'framebuffer', "label": 'HDMI / Framebuffer'},
-        {"value": 'pimoroni.inky_impression', "label": 'Pimoroni Inky Impression (Python driver + Buttons)'},
+        {"value": 'pimoroni.inky_impression_13', "label": 'Pimoroni Inky Impression - 13.3" 2025 edition'},
+        {"value": 'pimoroni.inky_impression_7', "label": 'Pimoroni Inky Impression - 7.3" 2025 edition'},
+        {"value": 'pimoroni.inky_impression', "label": 'Pimoroni Inky Impression - all others'},
         {"value": 'pimoroni.inky_python', "label": 'Pimoroni Inky other (Python driver)'},
         {"value": 'pimoroni.hyperpixel2r', "label": 'Pimoroni HyperPixel 2.1" Round'},
     ]
@@ -30,9 +32,10 @@ if __name__ == '__main__':
             "SpectraSixColor": "Spectra 6 Color",
         }.get(v.color_option, v.color_option)
         code = "" if v.code == "" else f" ({v.code.upper()})"
+        dim = f'{max(v.width or 0, v.height or 0)}x{min(v.width or 0, v.height or 0)}'
         output = {
             "value": f"waveshare.{v.key}",
-            "label": f'Waveshare {v.size}"{code} {max(v.width, v.height)}x{min(v.width, v.height)} {color}',
+            "label": f'Waveshare {v.size}"{code} {dim} {color}',
         }
         print(f"    {json.dumps(output)},")
 

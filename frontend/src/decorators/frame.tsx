@@ -20,6 +20,10 @@ export function frameStatus(frame: FrameType): JSX.Element {
     }
   }
 
+  if (frame.status === 'ready' && (frame?.active_connections ?? 0) > 0) {
+    status = 'connected'
+  }
+
   return (
     <div className="flex gap-2 items-center">
       {status}
@@ -44,4 +48,13 @@ export function frameControlUrl(frame: FrameType): string | null {
   } else {
     return `${url}?k=${frame.frame_access_key}`
   }
+}
+interface FrameConnectionProps {
+  frame: FrameType
+}
+
+export function FrameConnection({ frame }: FrameConnectionProps): JSX.Element | null {
+  return (frame?.active_connections ?? 0) > 0 ? (
+    <span title="FrameOS Agent connected">{frame?.agent?.agentRunCommands ? '🟢' : '🟠'}</span>
+  ) : null
 }

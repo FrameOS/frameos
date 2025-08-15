@@ -9,7 +9,7 @@ var eventChannel*: Channel[(Option[SceneId], string, JsonNode)]
 eventChannel.open()
 
 # Send an event to the current scene
-proc sendEvent*(event: string, payload: JsonNode) =
+proc sendEvent*(event: string, payload: JsonNode) {.gcsafe.} =
   eventChannel.send((none(SceneId), event, payload))
 
 # Send an event to a specific scene

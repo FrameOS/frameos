@@ -1,9 +1,9 @@
-# This is just an example to get you started. A typical binary package
-# uses this file as the main entry point of the application.
 import json
 import pixie
 import assets/web as webAssets
 import asyncdispatch
+import httpclient
+import threadpool
 import jester
 import locks
 import ws, ws/jester_extra
@@ -16,10 +16,12 @@ import frameos/types
 import frameos/channels
 import frameos/utils/image
 import frameos/utils/font
+import frameos/portal as netportal
 from net import Port
-from frameos/runner import getLastImagePng, getLastPublicState, getAllPublicStates
+from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates
 from scenes/scenes import sceneOptions
 
+var globalFrameOS: FrameOS
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
 let indexHtml = webAssets.getAsset("assets/compiled/web/index.html")
@@ -62,17 +64,41 @@ router myrouter:
         let paramsTable = request.params()
         return contains(paramsTable, "k") and paramsTable["k"] == accessKey
   get "/":
-    if not hasAccess(request, Read):
-      resp Http401, "Unauthorized"
-    {.gcsafe.}: # We're only reading static assets. It's fine.
-      let scalingMode = case globalFrameConfig.scalingMode:
-        of "cover", "center":
-          globalFrameConfig.scalingMode
-        of "stretch":
-          "100% 100%"
-        else:
-          "contain"
-      resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
+    {.gcsafe.}:
+      if netportal.isHotspotActive(globalFrameOS):
+        log(%*{"event": "portal:http", "get": request.pathInfo})
+        resp Http200, netportal.setupHtml(globalFrameOS)
+      elif not hasAccess(request, Read):
+        resp Http401, "Unauthorized"
+      else:
+        let scalingMode = case globalFrameConfig.scalingMode:
+          of "cover", "center": globalFrameConfig.scalingMode
+          of "stretch": "100% 100%"
+          else: "contain"
+        resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
+  post "/setup":
+    {.gcsafe.}:
+      if not netportal.isHotspotActive(globalFrameOS):
+        resp Http400, "Not in setup mode"
+      let params = request.params()
+      log(%*{"event": "portal:http", "post": request.pathInfo, "params": params})
+      spawn netportal.connectToWifi(
+        globalFrameOS,
+        params["ssid"],
+        params.getOrDefault("password", ""),
+        params.getOrDefault("serverHost", globalFrameOS.frameConfig.serverHost),
+        params.getOrDefault("serverPort", $globalFrameOS.frameConfig.serverPort),
+      )
+    resp Http200, netportal.confirmHtml()
+  get "/setup":
+    redirect "/"
+  get "/wifi":
+    {.gcsafe.}:
+      if not netportal.isHotspotActive(globalFrameOS):
+        resp Http400, "Not in setup mode"
+      else:
+        let nets = netportal.availableNetworks(globalFrameOS)
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"networks": nets})
   get "/ws":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"
@@ -97,17 +123,24 @@ router myrouter:
       resp Http401, "Unauthorized"
     log(%*{"event": "http", "get": request.pathInfo})
     {.gcsafe.}: # We're reading immutable globals and png data via a lock. It's fine.
+      let (sceneId, _, _) = getLastPublicState()
+      let headers = {
+        "Content-Type": "image/png",
+        "Content-Disposition": &"inline; filename=\"{sceneId}.png\"",
+        "X-Scene-Id": $sceneId,
+        "Access-Control-Expose-Headers": "X-Scene-Id"
+      }
       try:
         let image = drivers.toPng(360 - globalFrameConfig.rotate)
         if image != "":
-          resp Http200, {"Content-Type": "image/png"}, image
+          resp Http200, headers, image
         else:
           raise newException(Exception, "No image available")
       except Exception:
         try:
-          resp Http200, {"Content-Type": "image/png"}, getLastImagePng()
+          resp Http200, headers, getLastImagePng()
         except Exception as e:
-          resp Http200, {"Content-Type": "image/png"}, renderError(globalFrameConfig.renderWidth(),
+          resp Http200, headers, renderError(globalFrameConfig.renderWidth(),
             globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
   post "/event/@name":
     if not hasAccess(request, Write):
@@ -207,6 +240,7 @@ proc listenForRender*() {.async.} =
       await sleepAsync(100)
 
 proc newServer*(frameOS: FrameOS): Server =
+  globalFrameOS = frameOS
   globalFrameConfig = frameOS.frameConfig
   globalRunner = frameOS.runner
 

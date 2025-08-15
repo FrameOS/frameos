@@ -1,3 +1,4 @@
+aiofiles
 alembic
 arq
 asyncssh
@@ -10,6 +11,7 @@ jwt
 mypy
 pillow==9.5.0
 pip-tools
+posthog
 pre-commit
 pytest
 pytest-asyncio
@@ -17,9 +19,10 @@ python-jose
 redis
 requests
 ruff
-sentry-sdk[flask]
 sqlalchemy
 sqlmodel
 types-Pillow
 types-redis
 types-requests
+types-python-jose
+werkzeug

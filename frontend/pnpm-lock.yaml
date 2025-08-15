@@ -1,10 +1,11 @@
 lockfileVersion: 5.4
 
 specifiers:
-  '@headlessui/react': ^1.7.17
+  '@headlessui/react': ^1.7.19
   '@heroicons/react': ^2.0.18
   '@microlink/react-json-view': ^1.23.0
   '@monaco-editor/react': ^4.5.2
+  '@popperjs/core': ^2.11.8
   '@tailwindcss/container-queries': ^0.1.1
   '@types/react': ^18.0.18
   '@types/react-dom': ^18.0.6
@@ -65,6 +66,7 @@ dependencies:
   '@heroicons/react': 2.2.0_react@18.3.1
   '@microlink/react-json-view': 1.24.0_ck2ap7ofk76kidkkm4uczg65xi
   '@monaco-editor/react': 4.6.0_nnrd3gsncyragczmpvfhocinkq
+  '@popperjs/core': 2.11.8
   '@tailwindcss/container-queries': 0.1.1_tailwindcss@3.4.17
   '@visx/axis': 3.12.0_react@18.3.1
   '@visx/brush': 3.12.0_react@18.3.1
@@ -90,7 +92,7 @@ dependencies:
   react: 18.3.1
   react-dom: 18.3.1_react@18.3.1
   react-markdown: 9.0.3_x25zuu6u7xhdvbznsywf7wxevq
-  react-popper: 2.3.0_nnrd3gsncyragczmpvfhocinkq
+  react-popper: 2.3.0_k46i3rdtqabbepls5b256fuiee
   react-resizable-panels: 2.1.7_nnrd3gsncyragczmpvfhocinkq
   react-syntax-highlighter: 15.6.1_react@18.3.1
   react-virtuoso: 4.12.3_nnrd3gsncyragczmpvfhocinkq
@@ -2126,6 +2128,10 @@ packages:
     engines: {node: '>=14'}
     requiresBuild: true
     optional: true
+
+  /@popperjs/core/2.11.8:
+    resolution: {integrity: sha512-P1st0aksCrn9sGZhp8GMYwBnQsbvAWsZAX44oXNNvLHGqAOcoVxmjZiohstwQ7SqKnbR47akdNi+uleWD8+g6A==}
+    dev: false
 
   /@reactflow/background/11.3.14_ck2ap7ofk76kidkkm4uczg65xi:
     resolution: {integrity: sha512-Gewd7blEVT5Lh6jqrvOgd4G6Qk17eGKQfsDXgyRSqM+CTwDqRldG2LsWN4sNeno6sbqVIC2fZ+rAUBFA9ZEUDA==}
@@ -5890,13 +5896,14 @@ packages:
       - supports-color
     dev: false
 
-  /react-popper/2.3.0_nnrd3gsncyragczmpvfhocinkq:
+  /react-popper/2.3.0_k46i3rdtqabbepls5b256fuiee:
     resolution: {integrity: sha512-e1hj8lL3uM+sgSR4Lxzn5h1GxBlpa4CQz0XLF8kx4MDrDRWY0Ena4c97PUeSX9i5W3UAfDP0z0FXCTQkoXUl3Q==}
     peerDependencies:
       '@popperjs/core': ^2.0.0
       react: ^16.8.0 || ^17 || ^18
       react-dom: ^16.8.0 || ^17 || ^18
     dependencies:
+      '@popperjs/core': 2.11.8
       react: 18.3.1
       react-dom: 18.3.1_react@18.3.1
       react-fast-compare: 3.2.2

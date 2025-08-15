@@ -25,7 +25,7 @@ export function Tooltip({
 }: TooltipProps) {
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
-  const { styles, attributes } = usePopper(referenceElement, popperElement, { strategy: 'fixed' })
+  const { styles, attributes } = usePopper(referenceElement, popperElement, { strategy: 'absolute' })
 
   return (
     <Popover className={containerClassName}>

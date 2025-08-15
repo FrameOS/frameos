@@ -18,35 +18,13 @@ const saturated4ColorPalette* = @[
 
 # 6-color Spectra e-ink displays, measured on display and modulated
 const spectra6ColorPalette* = @[
-  (13, 0, 19),     # 0x0 - black
-  (220, 220, 215), # 0x1 - white
-  (242, 220, 0),   # 0x2 - yellow
-  (130, 0, 0),     # 0x3 - red
+  (25, 20, 38),    # 0x0 - black
+  (178, 193, 192), # 0x1 - white
+  (199, 187, 0),   # 0x2 - yellow
+  (107, 17, 25),   # 0x3 - red
   (999, 999, 999), # skips an index!
-  (19, 60, 160),   # 0x5 - blue
-  (51, 83, 38),    # 0x6 - green
-]
-
-# 6-color Spectra e-ink displays, as measured on a real display (Attempt 1)
-const spectra6ColorPaletteTry1* = @[
-  (50, 44, 52),    # 0x0 - black
-  (255, 255, 255), # 0x1 - white
-  (255, 248, 0),   # 0x2 - yellow
-  (223, 38, 27),   # 0x3 - red
-  (999, 999, 999), # skips an index!
-  (41, 112, 238),  # 0x5 - blue
-  (87, 161, 126),  # 0x6 - green
-]
-
-# 6-color Spectra e-ink displays, as presented by the manufacturer. These are not used.
-const spectra6ColorPaletteOrig* = @[
-  (0, 0, 0),       # 0x0 - black
-  (255, 255, 255), # 0x1 - white
-  (255, 255, 0),   # 0x2 - yellow
-  (255, 0, 0),     # 0x3 - red
-  (999, 999, 999), # skips an index!
-  (0, 0, 255),     # 0x5 - blue
-  (0, 255, 0),     # 0x6 - green
+  (24, 83, 154),   # 0x5 - blue
+  (42, 85, 49),    # 0x6 - green
 ]
 
 # 7-color screen colors, as presented by the manufacturer

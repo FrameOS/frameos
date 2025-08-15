@@ -1,4 +1,5 @@
 import json
+import copy
 import os
 from datetime import timezone
 from arq import ArqRedis as Redis
@@ -19,6 +20,7 @@ class Frame(Base):
     __tablename__ = 'frame'
     id = mapped_column(Integer, primary_key=True)
     name = mapped_column(String(256), nullable=False)
+    mode = mapped_column(String(32), nullable=True)
     # sending commands to frame
     frame_host = mapped_column(String(256), nullable=False)
     frame_port = mapped_column(Integer, default=8787)
@@ -53,6 +55,12 @@ class Frame(Base):
     scenes = mapped_column(JSON, nullable=True, default=list)
     last_successful_deploy = mapped_column(JSON, nullable=True) # contains frame.to_dict() of last successful deploy
     last_successful_deploy_at = mapped_column(DateTime, nullable=True)
+    schedule = mapped_column(JSON, nullable=True)
+    gpio_buttons = mapped_column(JSON, nullable=True)
+    network = mapped_column(JSON, nullable=True)
+    agent = mapped_column(JSON, nullable=True)
+    palette = mapped_column(JSON, nullable=True)
+    nix = mapped_column(JSON, nullable=True)
 
     # not used
     apps = mapped_column(JSON, nullable=True)
@@ -63,6 +71,7 @@ class Frame(Base):
         return {
             'id': self.id,
             'name': self.name,
+            'mode': self.mode,
             'frame_host': self.frame_host,
             'frame_port': self.frame_port,
             'frame_access_key': self.frame_access_key,
@@ -93,6 +102,14 @@ class Frame(Base):
             'upload_fonts': self.upload_fonts,
             'reboot': self.reboot,
             'control_code': self.control_code,
+            'schedule': self.schedule,
+            'gpio_buttons': self.gpio_buttons,
+            'network': self.network,
+            'agent': self.agent,
+            'palette': self.palette,
+            'nix': self.nix,
+            'last_successful_deploy': self.last_successful_deploy,
+            'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
 
 async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:
@@ -122,6 +139,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
 
     frame = Frame(
         name=name,
+        mode="rpios",
         ssh_user=user,
         ssh_pass=password,
         ssh_port=ssh_port,
@@ -142,8 +160,24 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         assets_path='/srv/assets',
         save_assets=True,
         upload_fonts='', # all
-        control_code={"enabled": "true", "position": "top-right"},
+        network={
+            "networkCheck": True,
+            "networkCheckTimeoutSeconds": 30,
+            "networkCheckUrl": "https://networkcheck.frameos.net/",
+            "wifiHotspot": "disabled",
+            "wifiHotspotSsid": "FrameOS-Setup",
+            "wifiHotspotPassword": "frame1234",
+            "wifiHotspotTimeoutSeconds": 300,
+        },
+        agent={
+            "agentEnabled": False,
+            "agentRunCommands": False,
+            "agentSharedSecret": secure_token(32)
+        },
+        control_code={"enabled": "false", "position": "top-right"},
+        schedule={"events": []},
         reboot={"enabled": "true", "crontab": "4 0 * * *"},
+        nix={}
     )
     db.add(frame)
     db.commit()
@@ -168,6 +202,8 @@ async def delete_frame(db: Session, redis: Redis, frame_id: int):
         db.query(Log).filter_by(frame_id=frame_id).delete()
         from .metrics import Metrics
         db.query(Metrics).filter_by(frame_id=frame_id).delete()
+        from .scene_image import SceneImage
+        db.query(SceneImage).filter_by(frame_id=frame_id).delete()
 
         cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
         await redis.delete(cache_key)
@@ -188,8 +224,11 @@ def get_templates_json() -> dict:
         return {}
 
 def get_frame_json(db: Session, frame: Frame) -> dict:
+    network = frame.network or {}
+    agent = frame.agent or {}
     frame_json: dict = {
         "name": frame.name,
+        "mode": frame.mode or 'rpios',
         "frameHost": frame.frame_host or "localhost",
         "framePort": frame.frame_port or 8787,
         "frameAccessKey": frame.frame_access_key,
@@ -197,8 +236,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "serverHost": frame.server_host or "localhost",
         "serverPort": frame.server_port or 8989,
         "serverApiKey": frame.server_api_key,
-        "width": frame.width,
-        "height": frame.height,
+        "width": frame.width or 0,
+        "height": frame.height or 0,
         "device": frame.device or "web_only",
         "metricsInterval": frame.metrics_interval or 60.0,
         "debug": frame.debug or False,
@@ -207,7 +246,56 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "logToFile": frame.log_to_file,
         "assetsPath": frame.assets_path,
         "saveAssets": frame.save_assets,
+        "schedule": frame.schedule,
+        "gpioButtons": [
+            {
+                "pin": int(button.get("pin", 0)),
+                "label": str(button.get("label", "Pin " + str(button.get("pin"))))
+            }
+            for button in (frame.gpio_buttons or [])
+            if int(button.get("pin", 0)) > 0
+        ],
+        "palette": frame.palette or {},
+        # "nix": frame.nix or {}, # We don't need this in the json. It's only used for building the system.
+        "controlCode": {
+            "enabled": frame.control_code.get('enabled', 'false') == 'true',
+            "position": frame.control_code.get('position', 'top-right'),
+            "size": float(frame.control_code.get('size', '2')),
+            "padding": int(frame.control_code.get('padding', '1')),
+            "offsetX": int(frame.control_code.get('offsetX', '0')),
+            "offsetY": int(frame.control_code.get('offsetY', '0')),
+            "qrCodeColor": frame.control_code.get('qrCodeColor', '#000000'),
+            "backgroundColor": frame.control_code.get('backgroundColor', '#ffffff'),
+        } if frame.control_code else {"enabled": False},
+        "network": {
+            "networkCheck": network.get('networkCheck', True),
+            "networkCheckTimeoutSeconds": int(network.get('networkCheckTimeoutSeconds', 30)),
+            "networkCheckUrl": network.get('networkCheckUrl', "https://networkcheck.frameos.net/"),
+            "wifiHotspot": network.get('wifiHotspot', "disabled"),
+            "wifiHotspotSsid": network.get('wifiHotspotSsid', "FrameOS-Setup"),
+            "wifiHotspotPassword": network.get('wifiHotspotPassword', "frame1234"),
+            "wifiHotspotTimeoutSeconds": int(network.get('wifiHotspotTimeoutSeconds', 300)),
+        },
+        "agent": {
+            "agentEnabled": bool(agent.get('agentEnabled', False)),
+            "agentRunCommands": bool(agent.get('agentRunCommands', False)),
+            "agentSharedSecret": agent.get('agentSharedSecret', secure_token(32)),
+        }
     }
+
+    schedule = frame.schedule
+    if schedule is not None:
+        schedule = copy.deepcopy(schedule)
+        if schedule.get('disabled', None):
+            schedule = None
+        else:
+            events = []
+            for event in schedule.get('events', []):
+                if event.get('disabled', None):
+                    continue
+                events.append(event)
+            schedule['events'] = events
+    frame_json["schedule"] = schedule
 
     setting_keys = set()
     app_configs = get_app_configs()

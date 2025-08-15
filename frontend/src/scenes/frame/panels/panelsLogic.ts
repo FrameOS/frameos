@@ -20,10 +20,10 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
     { panel: Panel.Apps, active: false, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
     { panel: Panel.Templates, active: false, hidden: false },
+    { panel: Panel.Schedule, active: false, hidden: false },
   ],
   [Area.BottomLeft]: [
     { panel: Panel.Logs, active: true, hidden: false },
-    { panel: Panel.FrameDetails, active: false, hidden: false },
     { panel: Panel.Metrics, active: false, hidden: false },
     { panel: Panel.Terminal, active: false, hidden: false },
     { panel: Panel.Debug, active: false, hidden: false },
@@ -58,7 +58,6 @@ export const panelsLogic = kea<panelsLogicType>([
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
     editScene: (sceneId: string) => ({ sceneId }),
     editSceneJSON: (sceneId: string) => ({ sceneId }),
-    editStateScene: (sceneId: string) => ({ sceneId }),
     openAsset: (path: string) => ({ path }),
     persistUntilClosed: (panel: PanelWithMetadata, logic: AnyBuiltLogic) => ({ panel, logic }),
     updateUrl: true,
@@ -195,18 +194,6 @@ export const panelsLogic = kea<panelsLogicType>([
         editSceneJSON: (_, { sceneId }) => sceneId,
       },
     ],
-    lastSelectedStateScene: [
-      null as string | null,
-      {
-        openPanel: (state, { panel }) =>
-          panel.panel === Panel.Diagram || panel.panel === Panel.SceneState ? panel.key ?? state : state,
-        setPanel: (state, { panel }) =>
-          panel.panel === Panel.Diagram || panel.panel === Panel.SceneState ? panel.key ?? state : state,
-        editScene: (_, { sceneId }) => sceneId,
-        editSceneJSON: (_, { sceneId }) => sceneId,
-        editStateScene: (_, { sceneId }) => sceneId,
-      },
-    ],
   }),
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
@@ -225,7 +212,7 @@ export const panelsLogic = kea<panelsLogicType>([
             ...panels,
             [Area.TopRight]: panels[Area.TopRight].filter((p) =>
               scenesOpen
-                ? [Panel.Templates].includes(p.panel)
+                ? [Panel.Templates, Panel.Schedule].includes(p.panel)
                 : [Panel.Apps, Panel.Events, Panel.SceneState].includes(p.panel)
             ),
             [Area.BottomLeft]: panels[Area.BottomLeft].filter((p) =>
@@ -255,19 +242,18 @@ export const panelsLogic = kea<panelsLogicType>([
       },
     ],
     selectedSceneId: [
-      (s) => [s.frameForm, s.lastSelectedScene],
-      (frameForm, lastSelectedScene): string | null =>
-        lastSelectedScene ?? frameForm?.scenes?.find((s) => s.default)?.id ?? frameForm?.scenes?.[0]?.id ?? null,
+      (s) => [s.frameForm, s.lastSelectedScene, s.panels],
+      (frameForm, lastSelectedScene, panels): string | null =>
+        lastSelectedScene ??
+        panels[Area.TopLeft].find((p) => p.active && (p.panel === Panel.Diagram || p.panel === Panel.SceneJSON))?.key ??
+        frameForm?.scenes?.find((s) => s.default)?.id ??
+        frameForm?.scenes?.[0]?.id ??
+        null,
     ],
     selectedSceneName: [
       (s) => [s.frameForm, s.selectedSceneId],
       (frameForm, selectedSceneId): string | null =>
         selectedSceneId ? frameForm?.scenes?.find((s) => s.id === selectedSceneId)?.name ?? null : null,
-    ],
-    selectedStateSceneId: [
-      (s) => [s.frameForm, s.lastSelectedStateScene],
-      (frameForm, lastSelectedStateScene): string | null =>
-        lastSelectedStateScene ?? frameForm?.scenes?.find((s) => s.default)?.id ?? frameForm?.scenes?.[0]?.id ?? null,
     ],
   })),
   listeners(({ actions, cache, values }) => ({

@@ -1,0 +1,64 @@
+{
+  "depends": [
+    {
+      "method": "fetchzip",
+      "path": "/nix/store/zd51j4dphs6h1hyhdbzdv840c8813ai8-source",
+      "rev": "9536bf99ddf5948db221ccb7bb3663aa238a8e21",
+      "sha256": "0j8z9jlvzb1h60v7rryvh2wx6vg99lra6i62whf3fknc53l641fz",
+      "url": "https://github.com/treeform/ws/archive/9536bf99ddf5948db221ccb7bb3663aa238a8e21.tar.gz",
+      "ref": "0.5.0",
+      "packages": [
+        "ws"
+      ],
+      "srcDir": "src"
+    },
+    {
+      "method": "fetchzip",
+      "path": "/nix/store/bzcq8q439rdsqhhihikzv3rsx4l4ybdm-source",
+      "rev": "ea811bec7fa50f5abd3088ba94cda74285e93f18",
+      "sha256": "1720iqsxjhqmhw1zhhs7d2ncdz25r8fqadls1p1iry1wfikjlnba",
+      "url": "https://github.com/treeform/jsony/archive/ea811bec7fa50f5abd3088ba94cda74285e93f18.tar.gz",
+      "ref": "1.1.5",
+      "packages": [
+        "jsony"
+      ],
+      "srcDir": "src"
+    },
+    {
+      "method": "fetchzip",
+      "path": "/nix/store/3n5viff8pl2615g4qvl6lgq59b9jg3xi-source",
+      "rev": "19c41d6be4c00b4a2c8000583bd30cf8ceb5f4b1",
+      "sha256": "1zz23sl8ayjaccv43zpvwlfka6arl7cmchfg1gnf7bwxs10j4nha",
+      "url": "https://github.com/cheatfate/nimcrypto/archive/19c41d6be4c00b4a2c8000583bd30cf8ceb5f4b1.tar.gz",
+      "ref": "v0.6.3^{}",
+      "packages": [
+        "nimcrypto"
+      ],
+      "srcDir": ""
+    },
+    {
+      "method": "fetchzip",
+      "path": "/nix/store/6aph9sfwcws7pd2725fwjnibdfrv7qmw-source",
+      "rev": "f8f6bd34bfa3fe12c64b919059ad856a96efcba0",
+      "sha256": "11m1rb6rzk70kvskppf97ddzgf5fnh9crjziqc6hib0jgsm5d615",
+      "url": "https://github.com/nim-lang/checksums/archive/f8f6bd34bfa3fe12c64b919059ad856a96efcba0.tar.gz",
+      "ref": "v0.2.1",
+      "packages": [
+        "checksums"
+      ],
+      "srcDir": "src"
+    },
+    {
+      "method": "fetchzip",
+      "path": "/nix/store/zcd2hmjxlkp1bpb7c9xrpg153ssj3w0b-source",
+      "rev": "a99f6a7d8a8e3e0213b3cad0daf0ea974bf58e3f",
+      "sha256": "16qdnyql8d7nm7nwwpq0maflm3p6cpbb2jfaqx6xkld9xkc9lsbv",
+      "url": "https://github.com/guzba/zippy/archive/a99f6a7d8a8e3e0213b3cad0daf0ea974bf58e3f.tar.gz",
+      "ref": "0.10.16",
+      "packages": [
+        "zippy"
+      ],
+      "srcDir": "src"
+    }
+  ]
+}

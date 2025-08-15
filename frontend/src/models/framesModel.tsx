@@ -8,10 +8,38 @@ import { sanitizeScene } from '../scenes/frame/frameLogic'
 import { apiFetch } from '../utils/apiFetch'
 import { entityImagesModel } from './entityImagesModel'
 import { urls } from '../urls'
+import streamSaver from 'streamsaver'
 
 export interface FrameImageInfo {
   url: string
   expiresAt: number
+}
+
+async function buildSDCard(id: number): Promise<void> {
+  const resp = await apiFetch(`/api/frames/${id}/build_sd_image`, { method: 'POST' })
+  if (!resp.ok) throw new Error(await resp.text())
+
+  const cd = resp.headers.get('content-disposition') ?? ''
+  const name = decodeURIComponent(
+    cd.match(/filename\*=UTF-8''([^;]+)|filename="([^"]+)"/)?.[1] ??
+      cd.match(/filename\*=UTF-8''([^;]+)|filename="([^"]+)"/)?.[2] ??
+      `frame_${id}.img.zst`
+  )
+
+  const size = Number(resp.headers.get('content-length')) || undefined
+  const fileStream = streamSaver.createWriteStream(name, { size })
+  const writer = fileStream.getWriter()
+  if (!resp.body) {
+    throw new Error('No response body received')
+  }
+  const reader = resp.body.getReader()
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    await writer.write(value) // chunk-by-chunk, zero extra copies
+  }
+  await writer.close()
 }
 
 export const framesModel = kea<framesModelType>([
@@ -20,11 +48,15 @@ export const framesModel = kea<framesModelType>([
   actions({
     addFrame: (frame: FrameType) => ({ frame }),
     loadFrame: (id: number) => ({ id }),
-    deployFrame: (id: number) => ({ id }),
+    deployFrame: (id: number, fastDeploy?: boolean) => ({ id, fastDeploy: fastDeploy || false }),
     stopFrame: (id: number) => ({ id }),
     restartFrame: (id: number) => ({ id }),
+    rebootFrame: (id: number) => ({ id }),
     renderFrame: (id: number) => ({ id }),
     deleteFrame: (id: number) => ({ id }),
+    deployAgent: (id: number) => ({ id }),
+    restartAgent: (id: number) => ({ id }),
+    buildSDCard: (id: number) => ({ id }),
   }),
   loaders(({ values }) => ({
     frames: [
@@ -79,8 +111,17 @@ export const framesModel = kea<framesModelType>([
     frames: [
       {} as Record<number, FrameType>,
       {
+        addFrame: (state, { frame }) => ({
+          ...state,
+          [frame.id]: {
+            ...frame,
+          },
+        }),
         [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
-        [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
+        [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({
+          ...state,
+          [frame.id]: { ...(state[frame.id] ?? {}), ...frame },
+        }),
         [socketLogic.actionTypes.deleteFrame]: (state, { id }) => {
           const newState = { ...state }
           delete newState[id]
@@ -105,14 +146,30 @@ export const framesModel = kea<framesModelType>([
     renderFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
     },
-    deployFrame: async ({ id }) => {
-      await apiFetch(`/api/frames/${id}/deploy`, { method: 'POST' })
+    deployFrame: async ({ id, fastDeploy }) => {
+      if (fastDeploy) {
+        await apiFetch(`/api/frames/${id}/fast_deploy`, { method: 'POST' })
+      } else {
+        await apiFetch(`/api/frames/${id}/deploy`, { method: 'POST' })
+      }
     },
     stopFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/stop`, { method: 'POST' })
     },
     restartFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
+    },
+    rebootFrame: async ({ id }) => {
+      await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
+    },
+    deployAgent: async ({ id }) => {
+      await apiFetch(`/api/frames/${id}/deploy_agent`, { method: 'POST' })
+    },
+    restartAgent: async ({ id }) => {
+      await apiFetch(`/api/frames/${id}/restart_agent`, { method: 'POST' })
+    },
+    buildSDCard: async ({ id }) => {
+      await buildSDCard(id)
     },
     deleteFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
@@ -124,7 +181,7 @@ export const framesModel = kea<framesModelType>([
       if (log.type === 'webhook') {
         const parsed = JSON.parse(log.line)
         if (parsed.event == 'render:dither' || parsed.event == 'render:done' || parsed.event == 'server:start') {
-          entityImagesModel.actions.updateEntityImage(`frames/${log.frame_id}`)
+          entityImagesModel.actions.updateEntityImage(`frames/${log.frame_id}`, 'image')
         }
       }
     },

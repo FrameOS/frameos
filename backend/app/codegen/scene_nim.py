@@ -114,7 +114,6 @@ class SceneWriter:
         self.run_node_lines = []
         self.after_node_lines = []
         self.run_event_lines = []
-        self.after_render_lines: list[str] = []
         self.event_nodes = {}
         self.next_nodes = {}
         self.prev_nodes = {}
@@ -137,45 +136,10 @@ class SceneWriter:
         return self.node_integer_map[node_id]
 
     def write_scene_nim(self) -> str:
-        self.apply_control_code()
         self.read_edges()
         self.read_nodes()
         return self.write_source()
 
-    def apply_control_code(self):
-        control_code = self.frame.control_code
-        if control_code and control_code.get("enabled") == "true":
-            self.scene_object_fields += ["controlCodeRender: render_imageApp.App"]
-            self.scene_object_fields += ["controlCodeData: data_qrApp.App"]
-            app_import = "import apps/render/image/app as render_imageApp"
-            if app_import not in self.imports:
-                self.imports += [app_import]
-            app_import = "import apps/data/qr/app as data_qrApp"
-            if app_import not in self.imports:
-                self.imports += [app_import]
-            self.init_apps += [
-                'scene.controlCodeRender = render_imageApp.App(nodeName: "render/image", nodeId: -1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(',
-                f'  offsetX: {int(control_code.get("offsetX", "0"))},',
-                f'  offsetY: {int(control_code.get("offsetY", "0"))},',
-                f'  placement: "{sanitize_nim_string(control_code.get("position", "top-right"))}",',
-                '))',
-                'scene.controlCodeData = data_qrApp.App(nodeName: "data/qr", nodeId: -1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_qrApp.AppConfig(',
-                f'  backgroundColor: parseHtmlColor("{sanitize_nim_string(control_code.get("backgroundColor", "#000000"))}"),',
-                f'  qrCodeColor: parseHtmlColor("{sanitize_nim_string(control_code.get("qrCodeColor", "#ffffff"))}"),',
-                f'  padding: {int(control_code.get("padding", "1"))},',
-                f'  size: {float(control_code.get("size", "2"))},',
-                '  codeType: "Frame Control URL",',
-                '  code: "",',
-                '  sizeUnit: "pixels per dot",',
-                '  alRad: 30.0,',
-                '  moRad: 0.0,',
-                '  moSep: 0.0',
-                '))',
-            ]
-            self.after_render_lines += [
-                "self.controlCodeRender.appConfig.image = self.controlCodeData.get(context)",
-                "self.controlCodeRender.run(context)"
-            ]
 
     def read_edges(self):
         for edge in self.edges:
@@ -196,7 +160,18 @@ class SceneWriter:
                     if code_node:
                         if not self.field_inputs.get(target):
                             self.field_inputs[target] = {}
-                        self.field_inputs[target][field] = code_node.get("data", {}).get("code", "")
+
+                        if code_node.get("type") == "state":
+                            keyword = code_node.get("data", {}).get("keyword", "")
+                            type = 'string'
+                            for scene_field in self.scene.get('fields', []):
+                                if scene_field.get('name') == keyword:
+                                    type = scene_field.get('type', 'string')
+                            self.field_inputs[target][field] = f"state{{\"{sanitize_nim_string(keyword)}\"}}{field_type_to_getter(type)}"
+                            if type == 'color':
+                                self.field_inputs[target][field] = f"parseHtmlColor({self.field_inputs[target][field]})"
+                        else:
+                            self.field_inputs[target][field] = code_node.get("data", {}).get("code", "")
                         if not self.code_field_source_nodes.get(target):
                             self.code_field_source_nodes[target] = {}
                         self.code_field_source_nodes[target][field] = source
@@ -367,17 +342,17 @@ class SceneWriter:
 
             app_config_pairs.append(
                 [f"  {x}" for x in self.sanitize_nim_field(
-                    node_id,
-                    key,
-                    type,
-                    value,
-                    field_inputs_for_node,
-                    node_fields_for_node,
-                    source_field_inputs_for_node,
-                    seq_fields_for_node,
-                    code_fields_for_node,
-                    required_fields_for_node,
-                    False,
+                    node_id=node_id,
+                    key=key,
+                    type=type,
+                    value=value,
+                    field_inputs_for_node=field_inputs_for_node,
+                    node_fields_for_node=node_fields_for_node,
+                    source_field_inputs_for_node=source_field_inputs_for_node,
+                    seq_fields_for_node=seq_fields_for_node,
+                    code_fields_for_node=code_fields_for_node,
+                    required_fields=required_fields_for_node,
+                    key_with_quotes=False,
                 )]
             )
 
@@ -526,27 +501,141 @@ class SceneWriter:
 
                                 event_payload_pairs.append(
                                     [f"  {x}" for x in self.sanitize_nim_field(
-                                        node_id,
-                                        key,
-                                        type,
-                                        value,
-                                        field_inputs_for_node,
-                                        node_fields_for_node,
-                                        source_field_inputs_for_node,
-                                        {},
-                                        True,
-                                        required_fields,
+                                        node_id=node_id,
+                                        key=key,
+                                        type=type,
+                                        value=value,
+                                        field_inputs_for_node=field_inputs_for_node,
+                                        node_fields_for_node=node_fields_for_node,
+                                        source_field_inputs_for_node=source_field_inputs_for_node,
+                                        seq_fields_for_node={},
+                                        code_fields_for_node={},
+                                        required_fields=required_fields,
+                                        key_with_quotes=False
                                     )]
                                 )
 
                         next_node_id = self.next_nodes.get(node_id, None)
-                        self.run_node_lines += [
-                            f"of {node_integer}.NodeId: # {event}",
-                            f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{'}",
-                            *[f"    {('    ' + newline).join(x)}," for x in event_payload_pairs],
-                            "})",
-                            f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
+
+                        if event_payload_pairs:
+                            self.run_node_lines += [
+                                f"of {node_integer}.NodeId: # {event}",
+                                f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{'}",
+                                *[f"    {('    ' + newline).join(x)}," for x in event_payload_pairs],
+                                "  })",
+                                f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
+                            ]
+                        else:
+                            self.run_node_lines += [
+                                f"of {node_integer}.NodeId: # {event}",
+                                f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{}'})",
+                                f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
+                            ]
+            elif node.get("type") == "scene":
+                scene_id = node.get("data", {}).get("keyword", None)
+                scene = next((scene for scene in self.frame.scenes if scene.get("id") == scene_id), None) if scene_id else None
+
+                if not scene:
+                    message = f'- ERROR: When generating scene {self.scene_id}. Scene "{scene_id}" for node "{node_id}" not found'
+                    try:
+                        from app.models.log import new_log as log
+                        log(self.frame.id, "stderr", message)
+                        return
+                    except Exception:
+                        raise ValueError(message)
+
+                # only if a target node (plus legacy support for using 'event' as a target node)
+                if node_id not in self.prev_nodes:
+                    continue
+                scene_app_id = "scene_" +  re.sub(r'\W+', '', scene_id)
+                app_import = f"import scenes/{scene_app_id} as {scene_app_id}"
+                node_integer = self.node_id_to_integer(node_id)
+                app_id = f"node{node_integer}"
+                self.scene_object_fields += [f"{app_id}: {scene_app_id}.Scene"]
+                if app_import not in self.imports:
+                    self.imports += [app_import]
+                config = node.get("data", {}).get("config", {}).copy()
+                field_inputs_for_node = self.field_inputs.get(node_id, {})
+                source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
+                node_fields_for_node = self.node_fields.get(node_id, {})
+                required_fields = {}
+
+                self.init_apps += [
+                    f"scene.{app_id} = {scene_app_id}.Scene({scene_app_id}.init(\"{sanitize_nim_string(scene_id)}\".SceneId, frameConfig, logger, %*({{",
+                ]
+                if len(scene.get("fields", [])) > 0:
+                    for field in scene.get("fields", []):
+                        key = field.get("name", None)
+                        if key not in config:
+                            config[key] = field.get("value", None)
+                        type = field.get("type", "string")
+                        value = config.get(key, None)
+                        if field.get("required", False):
+                            required_fields[key] = True
+
+                        self.init_apps += [
+                            f"  {x}" for x in self.sanitize_nim_field(
+                                node_id=node_id,
+                                key=key,
+                                type=type,
+                                value=value,
+                                field_inputs_for_node=field_inputs_for_node,
+                                node_fields_for_node=node_fields_for_node,
+                                source_field_inputs_for_node=source_field_inputs_for_node,
+                                seq_fields_for_node={},
+                                code_fields_for_node={},
+                                required_fields=required_fields,
+                                key_with_quotes=True,
+                            )
                         ]
+                        self.init_apps[-1] = self.init_apps[-1] + ","
+                    self.init_apps += ['})))']
+                else:
+                    self.init_apps[-1] = self.init_apps[-1] + '})))'
+
+                next_node_id = self.next_nodes.get(node_id, None)
+                self.run_node_lines += [
+                    f"of {node_integer}.NodeId: # {event}",
+                ]
+
+                if len(scene.get("fields", [])) > 0:
+                    for field in scene.get("fields", []):
+                        key = field.get("name", None)
+                        # only reset dynamically set state fields
+                        if key in field_inputs_for_node:
+                            if key not in config:
+                                config[key] = field.get("value", None)
+                            type = field.get("type", "string")
+                            value = config.get(key, None)
+                            if field.get("required", False):
+                                required_fields[key] = True
+
+                            field_lines = self.sanitize_nim_field(
+                                node_id=node_id,
+                                key=key,
+                                type=type,
+                                value=value,
+                                field_inputs_for_node=field_inputs_for_node,
+                                node_fields_for_node=node_fields_for_node,
+                                source_field_inputs_for_node=source_field_inputs_for_node,
+                                seq_fields_for_node={},
+                                code_fields_for_node={},
+                                required_fields=required_fields,
+                                no_key=True,
+                            )
+                            self.run_node_lines += [
+                                # TODO: this is very inefficient reserialization state["."] = %*(...getStr())
+                                f"  scene.{app_id}.state[\"{sanitize_nim_string(key)}\"] = %*({field_lines[0]})"
+                            ]
+                            for line in field_lines[1:]:
+                                self.run_node_lines += [
+                                    f"  {line}"
+                                ]
+
+                self.run_node_lines += [
+                    f"  {scene_app_id}.runEvent(self.{app_id}, context)",
+                    f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
+                ]
 
             elif node.get("type") == "app":
                 self.process_app_import(node)
@@ -654,7 +743,7 @@ class SceneWriter:
         open_event_in_init = ""
         if len(self.event_nodes.get("open", [])) > 0:
             open_event_in_init = """var openContext = ExecutionContext(scene: scene, event: "open", payload: %*{"sceneId": sceneId}, image: newImage(1, 1), loopIndex: 0, loopKey: ".")
-      runEvent(openContext)
+      runEvent(scene, openContext)
     """
 
         refresh_interval = float(
@@ -710,17 +799,18 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
     if DEBUG:
       self.logger.log(%*{{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
 
-proc runEvent*(context: var ExecutionContext) =
-  let self = Scene(context.scene)
+proc runEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:
   {(newline + "  ").join(self.run_event_lines)}
   else: discard
 
+proc runEvent*(self: FrameScene, context: var ExecutionContext) =
+    runEvent(Scene(self), context)
+
 proc render*(self: FrameScene, context: var ExecutionContext): Image =
   let self = Scene(self)
   context.image.fill(self.backgroundColor)
-  runEvent(context)
-  {(newline + "  ").join(self.after_render_lines)}
+  runEvent(self, context)
   return context.image
 
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
@@ -734,7 +824,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
   {(newline + "  ").join(self.init_apps)}
-  runEvent(context)
+  runEvent(self, context)
   {open_event_in_init}
 {{.pop.}}
 
@@ -894,12 +984,13 @@ var exportedScene* = ExportedScene(
         seq_fields_for_node,
         code_fields_for_node,
         required_fields,
-        key_with_quotes: bool,
+        key_with_quotes: bool = False,
+        no_key: bool = False,
     ) -> list[str]:
-        key_str = (
-            f'"{sanitize_nim_string(str(key))}"'
+        key_str = "" if no_key else (
+            f'"{sanitize_nim_string(str(key))}": '
             if key_with_quotes
-            else sanitize_nim_string(str(key))
+            else f"{sanitize_nim_string(str(key))}: "
         )
         value_list = self.sanitize_nim_value(
             node_id,
@@ -918,11 +1009,11 @@ var exportedScene* = ExportedScene(
             return []
         if len(value_list) > 1:
             return [
-                f"{key_str}: {value_list[0]}",
+                f"{key_str}{value_list[0]}",
                 *[f"{x}" for x in value_list[1:]],
             ]
         return [
-            f"{key_str}: {value_list[0]}"
+            f"{key_str}{value_list[0]}"
         ]
 
     def get_code_field_value(self, node_id, depth = 0) -> list[str]:
@@ -952,6 +1043,8 @@ var exportedScene* = ExportedScene(
                     if field.get('name') == keyword:
                         type = field.get('type', 'string')
                 result = [f"state{{\"{sanitize_nim_string(keyword)}\"}}{field_type_to_getter(type)}"]
+                if type == 'color':
+                    result[0] = f"parseHtmlColor({result[0]})"
             elif node.get("type") == "code":
                 code = [node.get("data", {}).get("code", "")]
                 code_args = node.get("data", {}).get("codeArgs", [])

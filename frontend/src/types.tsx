@@ -3,6 +3,7 @@ import { Edge, Node } from 'reactflow'
 export interface FrameType {
   id: number
   name: string
+  mode?: 'rpios' | 'nixos'
   frame_host: string
   frame_port: number
   frame_access_key: string
@@ -31,6 +32,8 @@ export interface FrameType {
   assets_path?: string
   save_assets?: boolean | Record<string, boolean>
   upload_fonts?: string
+  last_successful_deploy?: Record<string, any>
+  last_successful_deploy_at?: string
   reboot?: {
     enabled?: 'true' | 'false'
     crontab?: string
@@ -46,6 +49,56 @@ export interface FrameType {
     qrCodeColor?: string
     backgroundColor?: string
   }
+  schedule?: FrameSchedule
+  gpio_buttons?: GPIOButton[]
+  network?: {
+    wifiSSID?: string
+    wifiPassword?: string
+    networkCheck?: boolean
+    networkCheckTimeoutSeconds?: number
+    networkCheckUrl?: string
+    wifiHotspot?: string
+    wifiHotspotSsid?: string
+    wifiHotspotPassword?: string
+    wifiHotspotTimeoutSeconds?: number
+  }
+  agent?: {
+    agentEnabled?: boolean
+    agentRunCommands?: boolean
+    agentSharedSecret?: string
+  }
+  palette?: Palette
+  nix?: FrameNixConfig
+  active_connections?: number
+}
+
+export type FrameMode = 'rpios' | 'nixos' | 'import'
+export interface NewFrameFormType {
+  mode: FrameMode
+  name?: string | null
+  frame_host?: string | null
+  device?: string | null
+  server_host?: string | null
+}
+
+export interface GPIOButton {
+  pin: number
+  label: string
+}
+
+export interface FrameSchedule {
+  events: ScheduledEvent[]
+  disabled?: boolean
+}
+
+export interface ScheduledEvent {
+  id: string
+  minute: number
+  hour: number
+  weekday: number // undefined/null/''/0 for every day, 1-7 mon-sun, 8 for every weekday, 9 for every weekend
+  event: 'setCurrentScene'
+  payload: { sceneId: string; state: Record<string, any> }
+  disabled?: boolean
 }
 
 export interface TemplateType {
@@ -83,6 +136,7 @@ export interface AssetType {
   path: string
   size: number
   mtime: number
+  is_dir?: boolean
 }
 
 export interface MetricsType {
@@ -120,6 +174,9 @@ export const fieldTypes = [
 ] as const
 
 export type AppConfigFieldType = FieldType | 'select' | 'font'
+
+export const appConfigFieldTypes = [...fieldTypes, 'select'] as const
+
 export const toFieldType: (value: string | AppConfigFieldType) => FieldType = (value) =>
   fieldTypes.includes(value as any) ? (value as FieldType) : 'string'
 
@@ -191,6 +248,10 @@ export interface AppConfig {
   version?: string
   /** List of top level settings exported for this app */
   settings?: string[]
+  /** List of apt packages to install (mode=rpios) */
+  apt?: string[]
+  /** List of nix packages to install (mode=nixos) */
+  nixpkgs?: string[]
   /** Fields for app in diagram editor */
   fields?: (AppConfigField | MarkdownField)[]
   /** Returned fields */
@@ -232,7 +293,7 @@ export interface CacheConfig {
   expressionType?: FieldType
 }
 
-export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event' | 'state'
+export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event' | 'state' | 'scene'
 export type EdgeType = 'appNodeEdge' | 'codeNodeEdge'
 
 export interface AppNodeData {
@@ -268,7 +329,12 @@ export interface DispatchNodeData {
   config: Record<string, any>
 }
 
-export type NodeData = AppNodeData | CodeNodeData | EventNodeData | DispatchNodeData | StateNodeData
+export interface SceneNodeData {
+  keyword: string
+  config: Record<string, any>
+}
+
+export type NodeData = AppNodeData | CodeNodeData | EventNodeData | DispatchNodeData | StateNodeData | SceneNodeData
 
 export type DiagramNode = Node<NodeData, NodeType>
 export type DiagramEdge = Edge<any>
@@ -328,8 +394,8 @@ export interface EdgeConnectionType {
 export interface ConnectionAppNextPrev extends EdgeConnectionType {
   sourceHandle: NextNodeHandle
   targetHandle: PrevNodeHandle
-  sourceNodeType: 'app' | 'source' | 'event'
-  targetNodeType: 'app' | 'source'
+  sourceNodeType: 'app' | 'source' | 'scene' | 'event'
+  targetNodeType: 'app' | 'source' | 'scene'
 }
 
 export interface ConnectionAppNodeOutputPrev extends EdgeConnectionType {
@@ -405,7 +471,6 @@ export enum Panel {
   Diagram = 'Diagram',
   EditApp = 'EditApp',
   Events = 'Events',
-  FrameDetails = 'FrameDetails',
   FrameSettings = 'FrameSettings',
   Image = 'Image',
   Logs = 'Logs',
@@ -414,6 +479,7 @@ export enum Panel {
   Scenes = 'Scenes',
   SceneSource = 'SceneSource',
   SceneState = 'SceneState',
+  Schedule = 'Schedule',
   Templates = 'Templates',
   Terminal = 'Terminal',
 }
@@ -429,6 +495,11 @@ export type PanelWithMetadata = {
 }
 
 export interface FrameOSSettings {
+  defaults?: {
+    timezone?: string
+    wifiSSID?: string
+    wifiPassword?: string
+  }
   homeAssistant?: {
     url?: string
     accessToken?: string
@@ -438,10 +509,6 @@ export interface FrameOSSettings {
   }
   github?: {
     api_key?: string
-  }
-  sentry?: {
-    controller_dsn?: string
-    frame_dsn?: string
   }
   openAI?: {
     apiKey?: string
@@ -454,9 +521,32 @@ export interface FrameOSSettings {
   unsplash?: {
     accessKey?: string
   }
+  nix?: {
+    buildExtraArgs?: string
+    buildServerEnabled?: boolean
+    buildServer?: string
+    buildServerPort?: number
+    buildServerUser?: string
+    buildServerPrivateKey?: string
+    buildServerPublicKey?: string
+    buildServerMaxParallelJobs?: number
+  }
 }
 
 export interface FrameStateRecord {
   sceneId: string
   states: Record<string, Record<string, any>>
+}
+
+export interface Palette {
+  name?: string
+  colors: string[]
+  colorNames?: string[]
+}
+
+export interface FrameNixConfig {
+  hostname?: string
+  platform?: string
+  timezone?: string
+  customModule?: string
 }

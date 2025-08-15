@@ -1,0 +1,44 @@
+{
+    "name": "Browser snapshot",
+    "description": "Capture a snapshot of a website with playwright and headless chromium. Needs a 64-bit system.",
+    "category": "data",
+    "version": "1.0.0",
+    "apt": ["python3-pip", "python3-venv", "chromium-browser"],
+    "nixpkgs": [],
+    "fields": [
+      {
+        "name": "url",
+        "type": "text",
+        "value": "https://frameos.net/",
+        "required": true,
+        "label": "URL to capture",
+        "placeholder": ""
+      },
+      {
+        "name": "width",
+        "type": "integer",
+        "value": "",
+        "label": "Width (0=full width)",
+        "placeholder": "0"
+      },
+      {
+        "name": "height",
+        "type": "integer",
+        "value": "",
+        "label": "Height (0=full height)",
+        "placeholder": "0"
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "900"
+    }
+  }

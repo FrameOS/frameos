@@ -1,4 +1,4 @@
-import { actions, afterMount, beforeUnmount, kea, path } from 'kea'
+import { actions, afterMount, kea, path } from 'kea'
 import { FrameType, LogType } from '../types'
 
 import type { socketLogicType } from './socketLogicType'
@@ -10,6 +10,12 @@ export const socketLogic = kea<socketLogicType>([
   actions({
     newLog: (log: LogType) => ({ log }),
     newFrame: (frame: FrameType) => ({ frame }),
+    newSceneImage: (frameId: number, sceneId: string, width: number, height: number) => ({
+      frameId,
+      sceneId,
+      width,
+      height,
+    }),
     updateFrame: (frame: FrameType) => ({ frame }),
     deleteFrame: ({ id }: { id: number }) => ({ id }),
     updateSettings: (settings: Record<string, any>) => ({ settings }),
@@ -31,6 +37,7 @@ export const socketLogic = kea<socketLogicType>([
       cache.ws.onmessage = function (event: any) {
         try {
           const data = JSON.parse(event.data)
+          console.info('🟢 WebSocket message received:', data)
           switch (data.event) {
             case 'new_log':
               actions.newLog(data.data)
@@ -43,6 +50,9 @@ export const socketLogic = kea<socketLogicType>([
               break
             case 'delete_frame':
               actions.deleteFrame(data.data)
+              break
+            case 'new_scene_image':
+              actions.newSceneImage(data.data.frameId, data.data.sceneId, data.data.width, data.data.height)
               break
             case 'update_settings':
               actions.updateSettings(data.data)
@@ -77,5 +87,4 @@ export const socketLogic = kea<socketLogicType>([
 
     openConnection()
   }),
-  beforeUnmount(({ cache }) => {}),
 ])

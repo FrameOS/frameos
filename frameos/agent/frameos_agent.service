@@ -1,0 +1,20 @@
+# /etc/systemd/system/frameos_agent.service
+[Unit]
+Description=FrameOS Agent (auto-reconnect, hardened)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%I
+WorkingDirectory=/srv/frameos/agent/current
+ExecStart=/srv/frameos/agent/current/frameos_agent
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+PrivateTmp=yes
+ProtectSystem=full
+ReadWritePaths=/etc/systemd/system /etc/cron.d /boot /boot/firmware
+
+[Install]
+WantedBy=multi-user.target

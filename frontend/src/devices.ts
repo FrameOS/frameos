@@ -1,4 +1,5 @@
 import { Option } from './components/Select'
+import { Palette } from './types'
 
 // To generate a new version:
 // cd backend && python3 list_devices.py
@@ -6,7 +7,9 @@ import { Option } from './components/Select'
 export const devices: Option[] = [
   { value: 'web_only', label: 'Web only' },
   { value: 'framebuffer', label: 'HDMI / Framebuffer' },
-  { value: 'pimoroni.inky_impression', label: 'Pimoroni Inky Impression (Python driver + Buttons)' },
+  { value: 'pimoroni.inky_impression_7', label: 'Pimoroni Inky Impression - 7.3" 2025 edition' },
+  { value: 'pimoroni.inky_impression_13', label: 'Pimoroni Inky Impression - 13.3" 2025 edition' },
+  { value: 'pimoroni.inky_impression', label: 'Pimoroni Inky Impression - all others' },
   { value: 'pimoroni.inky_python', label: 'Pimoroni Inky other (Python driver)' },
   { value: 'pimoroni.hyperpixel2r', label: 'Pimoroni HyperPixel 2.1" Round' },
   { value: 'waveshare.EPD_1in02d', label: 'Waveshare 1.02" (D) 128x80 Black/White' },
@@ -97,4 +100,78 @@ export const devices: Option[] = [
   { value: 'waveshare.EPD_13in3b', label: 'Waveshare 13.3" (B) 960x680 Black/White/Red' },
   { value: 'waveshare.EPD_13in3k', label: 'Waveshare 13.3" (K) 960x680 Black/White' },
   { value: 'waveshare.EPD_13in3e', label: 'Waveshare 13.3" (E) 1600x1200 Spectra 6 Color' },
+]
+
+// TODO: make all of them work with NixOS
+const testedNixOs = ['waveshare.EPD_13in3e', 'waveshare.EPD_7in3e']
+export const devicesNixOS: Option[] = devices
+  .filter((device) => !device.value.startsWith('pimoroni'))
+  .map((device) => (testedNixOs.includes(device.value) ? { ...device, label: `${device.label} (tested)` } : device))
+
+const colorNames = ['Black', 'White', 'Yellow', 'Red', 'Blue', 'Green']
+export const spectraPalettes: Palette[] = [
+  {
+    name: 'FrameOS default',
+    colorNames,
+    colors: [
+      '#191426', // Black
+      '#b2c1c0', // White
+      '#c7bb00', // Yellow
+      '#6b1119', // Red
+      '#18539a', // Blue
+      '#2a5531', // Green
+    ],
+  },
+  {
+    name: 'Desaturated',
+    colorNames,
+    colors: [
+      '#000000', // Black
+      '#ffffff', // White
+      '#ffff00', // Yellow
+      '#ff0000', // Red
+      '#0000ff', // Blue
+      '#00ff00', // Green
+    ],
+  },
+  {
+    name: 'Pimoroni Saturated',
+    colorNames,
+    colors: [
+      '#000000', // Black
+      '#a1a4a5', // Gray
+      '#d0be47', // Yellow
+      '#9c484b', // Red
+      '#3d3b5e', // Blue
+      '#3a5b46', // Green
+    ],
+  },
+  {
+    name: 'Old default with more range',
+    colorNames,
+    colors: [
+      '#000000', // Black
+      '#ffffff', // White
+      '#fff338', // Yellow
+      '#bf0000', // Red
+      '#6440ff', // Blue
+      '#438a1c', // Green
+    ],
+  },
+]
+
+export const withCustomPalette: Record<string, Palette> = {
+  'waveshare.EPD_13in3e': spectraPalettes[0],
+  'waveshare.EPD_7in3e': spectraPalettes[0],
+  'waveshare.EPD_4in0e': spectraPalettes[0],
+  'pimoroni.inky_impression_7': spectraPalettes[0],
+  'pimoroni.inky_impression_13': spectraPalettes[0],
+}
+
+// TODO: add more platforms
+export const platforms: Option[] = [{ value: 'pi-zero2', label: 'Raspberry Pi Zero W2' }]
+
+export const modes: Option[] = [
+  { value: 'rpios', label: 'Raspberry Pi OS (default)' },
+  { value: 'nixos', label: 'NixOS (new, experimental)' },
 ]

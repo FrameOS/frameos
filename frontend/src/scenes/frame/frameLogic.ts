@@ -14,6 +14,7 @@ export interface FrameLogicProps {
 }
 const FRAME_KEYS: (keyof FrameType)[] = [
   'name',
+  'mode',
   'frame_host',
   'frame_port',
   'frame_access_key',
@@ -41,6 +42,27 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'upload_fonts',
   'reboot',
   'control_code',
+  'schedule',
+  'gpio_buttons',
+  'network',
+  'agent',
+  'palette',
+  'nix',
+]
+
+const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot']
+const FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS: (keyof FrameType)[] = [
+  'device',
+  'scenes',
+  'reboot',
+  'ssh_user',
+  'ssh_port',
+  'ssh_pass',
+  'log_to_file',
+  'assets_path',
+  'network',
+  'agent',
+  'nix',
 ]
 
 function cleanBackgroundColor(color: string): string {
@@ -130,14 +152,20 @@ export const frameLogic = kea<frameLogicType>([
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Record<string, any>) => ({ sceneId, nodeId, nodeData }),
     saveFrame: true,
     renderFrame: true,
+    rebootFrame: true,
     restartFrame: true,
     stopFrame: true,
     deployFrame: true,
+    fastDeployFrame: true,
+    fullDeployFrame: true,
+    deployAgent: true,
+    restartAgent: true,
     applyTemplate: (template: Partial<TemplateType>, replaceScenes?: boolean) => ({
       template,
       replaceScenes: replaceScenes ?? false,
     }),
     closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
+    sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
   }),
   forms(({ actions, values }) => ({
     frameForm: {
@@ -154,7 +182,7 @@ export const frameLogic = kea<frameLogicType>([
           })),
         })),
       }),
-      submit: async (frame, breakpoint) => {
+      submit: async (frame) => {
         const json: Record<string, any> = {}
         for (const key of FRAME_KEYS) {
           json[key] = frame[key as keyof typeof frame]
@@ -175,11 +203,12 @@ export const frameLogic = kea<frameLogicType>([
   })),
   reducers({
     nextAction: [
-      null as 'render' | 'restart' | 'stop' | 'deploy' | null,
+      null as 'render' | 'restart' | 'reboot' | 'stop' | 'deploy' | null,
       {
         saveFrame: () => null,
         renderFrame: () => 'render',
         restartFrame: () => 'restart',
+        rebootFrame: () => 'reboot',
         stopFrame: () => 'stop',
         deployFrame: () => 'deploy',
       },
@@ -188,10 +217,33 @@ export const frameLogic = kea<frameLogicType>([
   selectors(() => ({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
     frame: [(s) => [s.frames, s.frameId], (frames, frameId) => frames[frameId] || null],
-    frameChanged: [
+    mode: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm?.mode || frame?.mode || 'rpios'],
+    scenes: [
+      (s) => [s.frame, s.frameForm],
+      (frame, frameForm): FrameScene[] => frameForm?.scenes ?? frame.scenes ?? [],
+    ],
+    sortedScenes: [
+      (s) => [s.scenes],
+      (scenes): FrameScene[] => scenes.toSorted((a, b) => a.name.localeCompare(b.name)),
+    ],
+    unsavedChanges: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm) =>
         FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], frameForm?.[key as keyof FrameType])),
+    ],
+    lastDeploy: [(s) => [s.frame], (frame) => frame?.last_successful_deploy ?? null],
+    undeployedChanges: [
+      (s) => [s.frame, s.lastDeploy],
+      (frame, lastDeploy) =>
+        FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], lastDeploy?.[key as keyof FrameType])),
+    ],
+    requiresRecompilation: [
+      (s) => [s.frame, s.lastDeploy, s.mode],
+      (frame, lastDeploy, mode) =>
+        !lastDeploy ||
+        (mode === 'nixos' ? FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS).some(
+          (key) => !equal(lastDeploy?.[key as keyof FrameType], frame?.[key as keyof FrameType])
+        ),
     ],
     defaultScene: [
       (s) => [s.frame, s.frameForm],
@@ -221,8 +273,13 @@ export const frameLogic = kea<frameLogicType>([
     saveFrame: () => actions.submitFrameForm(),
     renderFrame: () => framesModel.actions.renderFrame(props.frameId),
     restartFrame: () => framesModel.actions.restartFrame(props.frameId),
+    rebootFrame: () => framesModel.actions.rebootFrame(props.frameId),
     stopFrame: () => framesModel.actions.stopFrame(props.frameId),
-    deployFrame: () => framesModel.actions.deployFrame(props.frameId),
+    deployFrame: () => framesModel.actions.deployFrame(props.frameId, !values.requiresRecompilation),
+    fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
+    fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
+    deployAgent: () => framesModel.actions.deployAgent(props.frameId),
+    restartAgent: () => framesModel.actions.restartAgent(props.frameId),
     updateScene: ({ sceneId, scene }) => {
       const { frameForm } = values
       const hasScene = frameForm.scenes?.some(({ id }) => id === sceneId)
@@ -276,6 +333,13 @@ export const frameLogic = kea<frameLogicType>([
           })
         }
       }
+    },
+    sendEvent: async ({ event, payload }) => {
+      await apiFetch(`/api/frames/${props.frameId}/event/${event}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
     },
   })),
   afterMount(({ actions, values }) => {
