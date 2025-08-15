@@ -16,10 +16,10 @@ def init_inky(device: str = "") -> Optional[Any]:
     try:
         if device == "pimoroni.inky_impression_7":
             from inky.inky_e673 import Inky
-            return Inky()
+            return Inky(resolution=(800, 480))
         elif device == "pimoroni.inky_impression_13":
             from inky.inky_el133uf1 import Inky
-            return Inky()
+            return Inky(resolution=(1600, 1200))
         else:
             from inky.auto import auto
             return auto()
