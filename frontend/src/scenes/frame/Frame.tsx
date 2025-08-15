@@ -11,6 +11,7 @@ import { assetsLogic } from './panels/Assets/assetsLogic'
 import { FrameConnection } from '../frames/Frame'
 import { sdCardModalLogic } from './sdcard/sdCardModalLogic'
 import { SDCardModal } from './sdcard/SDCardModal'
+import { terminalLogic } from './panels/Terminal/terminalLogic'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -36,6 +37,7 @@ export function Frame(props: FrameSceneProps) {
   } = useActions(frameLogic(frameLogicProps))
   const { openSDCardModal } = useActions(sdCardModalLogic(frameLogicProps))
   useMountedLogic(assetsLogic(frameLogicProps)) // Don't lose what we downloaded when navigating away from the tab
+  useMountedLogic(terminalLogic(frameLogicProps))
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
 
   const canDeployAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && mode === 'rpios'
