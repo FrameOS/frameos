@@ -57,6 +57,7 @@ export const framesModel = kea<framesModelType>([
     deployAgent: (id: number) => ({ id }),
     restartAgent: (id: number) => ({ id }),
     buildSDCard: (id: number) => ({ id }),
+    setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
   }),
   loaders(({ values }) => ({
     frames: [
@@ -117,6 +118,17 @@ export const framesModel = kea<framesModelType>([
             ...frame,
           },
         }),
+        setDeployWithAgent: (state, { id, deployWithAgent }) => {
+          const frame = state[id]
+          if (!frame) return state
+          return {
+            ...state,
+            [id]: {
+              ...frame,
+              agent: { ...frame.agent, deployWithAgent },
+            },
+          }
+        },
         [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
         [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({
           ...state,
@@ -167,6 +179,15 @@ export const framesModel = kea<framesModelType>([
     },
     restartAgent: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/restart_agent`, { method: 'POST' })
+    },
+    setDeployWithAgent: async ({ id, deployWithAgent }) => {
+      const frame = values.frames[id]
+      if (!frame) return
+      await apiFetch(`/api/frames/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: { ...frame?.agent, deployWithAgent } }),
+      })
     },
     buildSDCard: async ({ id }) => {
       await buildSDCard(id)

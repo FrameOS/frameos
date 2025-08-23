@@ -69,6 +69,7 @@ export interface FrameType {
     agentEnabled?: boolean
     agentRunCommands?: boolean
     agentSharedSecret?: string
+    deployWithAgent?: boolean
   }
   palette?: Palette
   nix?: FrameNixConfig
