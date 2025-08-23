@@ -9,15 +9,47 @@ import { useActions } from 'kea'
 import { framesModel } from '../../models/framesModel'
 import { FrameImage } from '../../components/FrameImage'
 import { urls } from '../../urls'
+import { Tooltip } from '../../components/Tooltip'
 
 interface FrameProps {
   frame: FrameType
 }
 
+function getTitleAndIcon(enabled: boolean, runCommands: boolean, activeConnections: number): [string, string] {
+  if (!enabled) {
+    if (activeConnections > 0) {
+      return ['FrameOS Agent not enabled, yet connected', '🔵']
+    }
+    return ['FrameOS Agent not enabled', '']
+  }
+  if (runCommands) {
+    if (activeConnections > 0) {
+      return ['FrameOS Agent connected and ready to run commands', '🟢']
+    }
+    return ['FrameOS Agent not connected', '⚪️']
+  }
+  if (activeConnections > 0) {
+    return ['FrameOS Agent connected, but not configured to run commands', '🟡']
+  }
+  return ['FrameOS Agent not connected', '⚪️']
+}
+
 export function FrameConnection({ frame }: FrameProps): JSX.Element | null {
-  return (frame?.active_connections ?? 0) > 0 ? (
-    <span title="FrameOS Agent connected">{frame?.agent?.agentRunCommands ? '🟢' : '🟠'}</span>
-  ) : null
+  const [title, icon] = getTitleAndIcon(
+    !!frame.agent?.agentEnabled,
+    !!frame.agent?.agentRunCommands,
+    frame?.active_connections ?? 0
+  )
+
+  if (!icon) {
+    return null
+  }
+
+  return (
+    <Tooltip title={title} className="cursor-help">
+      {icon}
+    </Tooltip>
+  )
 }
 
 export function Frame({ frame }: FrameProps): JSX.Element {

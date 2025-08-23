@@ -12,6 +12,8 @@ import { FrameConnection } from '../frames/Frame'
 import { sdCardModalLogic } from './sdcard/sdCardModalLogic'
 import { SDCardModal } from './sdcard/SDCardModal'
 import { terminalLogic } from './panels/Terminal/terminalLogic'
+import { Switch } from '../../components/Switch'
+import { useState } from 'react'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -39,6 +41,7 @@ export function Frame(props: FrameSceneProps) {
   useMountedLogic(assetsLogic(frameLogicProps)) // Don't lose what we downloaded when navigating away from the tab
   useMountedLogic(terminalLogic(frameLogicProps))
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
+  const [deployWithAgent, setDeployWithAgent] = useState<boolean>(false)
 
   const canDeployAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && mode === 'rpios'
   const canRestartAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret
@@ -67,6 +70,24 @@ export function Frame(props: FrameSceneProps) {
                   buttonColor="secondary"
                   className="items-center"
                   items={[
+                    {
+                      label: (
+                        <Switch
+                          leftLabel={<>Use: {!deployWithAgent ? <u>SSH</u> : 'SSH'}</>}
+                          label={
+                            <>
+                              {deployWithAgent ? <u>Agent</u> : 'Agent'} <FrameConnection frame={frame} />
+                            </>
+                          }
+                          alwaysActive
+                          value={deployWithAgent}
+                          onChange={setDeployWithAgent}
+                        />
+                      ),
+                    },
+                    {
+                      label: <div className="border-t border-white w-full" />,
+                    },
                     ...(mode === 'nixos' ? [{ label: 'Build SD card...', onClick: () => openSDCardModal() }] : []),
                     { label: 'Re-Render' + agentExtra, onClick: () => renderFrame() },
                     { label: 'Restart FrameOS' + agentExtra, onClick: () => restartFrame() },
