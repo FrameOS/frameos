@@ -126,7 +126,7 @@ export function sanitizeNodes(nodes: DiagramNode[]): DiagramNode[] {
   return changed ? newNodes : nodes
 }
 
-export function sanitizeScene(scene: Partial<FrameScene>, frame: FrameType): FrameScene {
+export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
   const settings = scene.settings ?? {}
   return {
     ...scene,
@@ -167,8 +167,9 @@ export const frameLogic = kea<frameLogicType>([
     }),
     closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
     sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
+    setDeployWithAgent: (deployWithAgent: boolean) => ({ deployWithAgent }),
   }),
-  forms(({ actions, values }) => ({
+  forms(({ values }) => ({
     frameForm: {
       options: {
         showErrorsOnTouch: true,
@@ -212,6 +213,19 @@ export const frameLogic = kea<frameLogicType>([
         rebootFrame: () => 'reboot',
         stopFrame: () => 'stop',
         deployFrame: () => 'deploy',
+      },
+    ],
+    frameForm: [
+      {} as Partial<FrameType>,
+      {
+        setDeployWithAgent: (state, { deployWithAgent }) => {
+          const frame = state
+          if (!frame) return state
+          return {
+            ...state,
+            agent: { ...frame.agent, deployWithAgent },
+          }
+        },
       },
     ],
   }),
@@ -262,6 +276,13 @@ export const frameLogic = kea<frameLogicType>([
       (frameForm) => (frameForm.rotate === 90 || frameForm.rotate === 270 ? frameForm.width : frameForm.height),
     ],
     defaultInterval: [(s) => [s.frameForm], (frameForm) => frameForm.interval ?? 300],
+    deployWithAgent: [
+      (s) => [s.frameForm, s.frame],
+      (frameForm, frame) => {
+        const agent = frameForm?.agent ?? frame?.agent
+        return agent?.deployWithAgent ?? (agent?.agentEnabled && agent?.agentRunCommands) ?? false
+      },
+    ],
   })),
   subscriptions(({ actions }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
@@ -281,6 +302,7 @@ export const frameLogic = kea<frameLogicType>([
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
     deployAgent: () => framesModel.actions.deployAgent(props.frameId),
     restartAgent: () => framesModel.actions.restartAgent(props.frameId),
+    setDeployWithAgent: ({ deployWithAgent }) => framesModel.actions.setDeployWithAgent(props.frameId, deployWithAgent),
     updateScene: ({ sceneId, scene }) => {
       const { frameForm } = values
       const hasScene = frameForm.scenes?.some(({ id }) => id === sceneId)

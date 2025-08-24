@@ -7,7 +7,7 @@ import clsx from 'clsx'
 import { ButtonProps, buttonColor } from './Button'
 
 export interface DropdownMenuItem {
-  label: string
+  label: React.ReactNode
   icon?: React.ReactNode
   confirm?: string
   title?: string
@@ -70,7 +70,7 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
                           href="#"
                           className={clsx(
                             `${
-                              active && !!item.onClick ? 'bg-[#4a4b8c] text-white' : 'text-white'
+                              active && !!item.onClick ? 'bg-[#2a2b50] text-white' : 'text-white'
                             } px-4 py-2 text-sm flex gap-2`
                           )}
                           title={item.title}

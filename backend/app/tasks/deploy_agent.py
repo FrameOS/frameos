@@ -3,10 +3,12 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+from http import HTTPStatus
 from typing import Any, Optional
 
 import asyncssh
 from arq import ArqRedis as Redis
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.frame import Frame
@@ -30,9 +32,19 @@ async def deploy_agent_task(ctx: dict[str, Any], id: int):  # noqa: N802
     if frame is None:  # keep the early-exit guard
         raise Exception("Frame not found")
 
-    deployer = AgentDeployer(db, redis, frame)
-    await deployer.run()
+    # Locate Nim (needed only for path checks inside helpers)
+    try:
+        nim_path = find_nim_v2()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Unable to locate Nim installation: {exc}",
+        )
 
+    # Workspace ────────────────────────────────────────────────────────────
+    with tempfile.TemporaryDirectory() as tmp:
+        deployer = AgentDeployer(db, redis, frame, nim_path, tmp)
+        await deployer.run()
 
 class AgentDeployer(FrameDeployer):
     ssh: Optional[asyncssh.SSHClientConnection] = None
@@ -128,7 +140,7 @@ class AgentDeployer(FrameDeployer):
         source_dir = os.path.join(self.temp_dir, "agent")
 
         os.makedirs(source_dir, exist_ok=True)
-        shutil.copytree("./agent", source_dir, dirs_exist_ok=True)  # idempotent copy
+        shutil.copytree("../frameos/agent", source_dir, dirs_exist_ok=True)  # idempotent copy
         os.makedirs(build_dir, exist_ok=True)
 
         return build_dir, source_dir
@@ -212,7 +224,7 @@ class AgentDeployer(FrameDeployer):
 
     async def _setup_agent_service(self) -> None:
         """Upload and install the systemd service file for the new release."""
-        with open("./agent/frameos_agent.service", "r", encoding="utf-8") as fh:
+        with open("../frameos/agent/frameos_agent.service", "r", encoding="utf-8") as fh:
             service_contents = fh.read().replace("%I", self.frame.ssh_user)
 
         # Local temp copy

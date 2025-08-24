@@ -341,13 +341,13 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
         </div>
 
         <H6>
-          Agent <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
+          Agent (beta) <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
         </H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Group name="agent">
             <Field
               name="agentEnabled"
-              label="Enable Agent (beta)"
+              label="Agent enabled"
               tooltip={
                 <div className="space-y-2">
                   <p>
@@ -359,6 +359,12 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                     This is still beta. Enable both toggles, then save. Download the SD card image, and deploy it to the
                     frame. The agent will then connect to the backend to await further commands.
                   </p>
+                  {frameForm.mode !== 'nixos' && (
+                    <p>
+                      Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy Agent"
+                      menu in the top.
+                    </p>
+                  )}
                 </div>
               }
             >
@@ -368,7 +374,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               <>
                 <Field
                   name="agentRunCommands"
-                  label="Reverse tunnel via the agent (beta)"
+                  label="Allow remote control"
                   tooltip={
                     <div className="space-y-2">
                       <p>Can the FrameOS agent actually run commands and execute updates?</p>

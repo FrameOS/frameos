@@ -12,6 +12,9 @@ import { FrameConnection } from '../frames/Frame'
 import { sdCardModalLogic } from './sdcard/sdCardModalLogic'
 import { SDCardModal } from './sdcard/SDCardModal'
 import { terminalLogic } from './panels/Terminal/terminalLogic'
+import { Switch } from '../../components/Switch'
+import { Form } from 'kea-forms'
+import { Field } from '../../components/Field'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -20,7 +23,7 @@ interface FrameSceneProps {
 export function Frame(props: FrameSceneProps) {
   const frameId = parseInt(props.id)
   const frameLogicProps = { frameId }
-  const { frame, mode, unsavedChanges, undeployedChanges, requiresRecompilation } = useValues(
+  const { frame, mode, unsavedChanges, undeployedChanges, requiresRecompilation, deployWithAgent } = useValues(
     frameLogic(frameLogicProps)
   )
   const {
@@ -34,6 +37,7 @@ export function Frame(props: FrameSceneProps) {
     fullDeployFrame,
     deployAgent,
     restartAgent,
+    setDeployWithAgent,
   } = useActions(frameLogic(frameLogicProps))
   const { openSDCardModal } = useActions(sdCardModalLogic(frameLogicProps))
   useMountedLogic(assetsLogic(frameLogicProps)) // Don't lose what we downloaded when navigating away from the tab
@@ -42,7 +46,8 @@ export function Frame(props: FrameSceneProps) {
 
   const canDeployAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && mode === 'rpios'
   const canRestartAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret
-  const agentExtra = canDeployAgent ? (frame?.agent?.agentRunCommands ? ' (via agent)' : ' (via ssh)') : ''
+  const canAgentRunCommands =
+    frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && frame.agent.agentRunCommands
   // TODO
   const firstEverForNixOS = false && frame.mode === 'nixos' && frame.status === 'uninitialized'
 
@@ -68,15 +73,15 @@ export function Frame(props: FrameSceneProps) {
                   className="items-center"
                   items={[
                     ...(mode === 'nixos' ? [{ label: 'Build SD card...', onClick: () => openSDCardModal() }] : []),
-                    { label: 'Re-Render' + agentExtra, onClick: () => renderFrame() },
-                    { label: 'Restart FrameOS' + agentExtra, onClick: () => restartFrame() },
-                    { label: 'Stop FrameOS' + agentExtra, onClick: () => stopFrame() },
-                    { label: 'Reboot device' + agentExtra, onClick: () => rebootFrame() },
+                    { label: 'Re-Render', onClick: () => renderFrame() },
+                    { label: 'Restart FrameOS', onClick: () => restartFrame() },
+                    { label: 'Stop FrameOS', onClick: () => stopFrame() },
+                    { label: 'Reboot device', onClick: () => rebootFrame() },
                     ...(requiresRecompilation
                       ? []
                       : [
                           {
-                            label: 'Fast deploy' + agentExtra,
+                            label: 'Fast deploy',
                             onClick: () => {
                               fastDeployFrame()
                               openLogs()
@@ -84,16 +89,17 @@ export function Frame(props: FrameSceneProps) {
                           },
                         ]),
                     {
-                      label: 'Full deploy' + agentExtra,
+                      label: 'Full deploy',
                       onClick: () => {
                         fullDeployFrame()
                         openLogs()
                       },
                     },
+                    ...(canRestartAgent ? [{ label: 'Restart agent', onClick: () => restartAgent() }] : []),
                     ...(canDeployAgent
                       ? [
                           {
-                            label: 'Deploy agent (via ssh)',
+                            label: 'Deploy agent',
                             onClick: () => {
                               deployAgent()
                               openLogs()
@@ -101,7 +107,34 @@ export function Frame(props: FrameSceneProps) {
                           },
                         ]
                       : []),
-                    ...(canRestartAgent ? [{ label: 'Restart agent (via ssh)', onClick: () => restartAgent() }] : []),
+                    ...(canAgentRunCommands
+                      ? [
+                          {
+                            label: <div className="border-t border-white w-full" />,
+                          },
+                          {
+                            label: (
+                              <Form formKey="frameForm" logic={frameLogic} props={{ frameId }} enableFormOnSubmit>
+                                <Field name={['agent', 'deployWithAgent']}>
+                                  {() => (
+                                    <Switch
+                                      leftLabel={<>Use: {!deployWithAgent ? <u>SSH</u> : 'SSH'}</>}
+                                      label={
+                                        <span className={'flex gap-1'}>
+                                          {deployWithAgent ? <u>Agent</u> : 'Agent'} <FrameConnection frame={frame} />
+                                        </span>
+                                      }
+                                      alwaysActive
+                                      value={deployWithAgent}
+                                      onChange={setDeployWithAgent}
+                                    />
+                                  )}
+                                </Field>
+                              </Form>
+                            ),
+                          },
+                        ]
+                      : []),
                   ]}
                 />
                 <div className="flex pl-2 space-x-2">
