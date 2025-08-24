@@ -51,7 +51,7 @@ async def _use_agent(frame: Frame, redis: Redis) -> bool:
         if agent.get("deployWithAgent") is False:
             return False
         if (await number_of_connections_for_frame(redis, frame.id)) <= 0:
-            raise RuntimeError(f"Frame {frame.id} agent disconnected.")
+            raise RuntimeError(f"Frame {frame.id} agent disconnected, can't run commands. Try running over SSH instead.")
         return True
     return False
 

@@ -48,7 +48,6 @@ export function Frame(props: FrameSceneProps) {
   const canRestartAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret
   const canAgentRunCommands =
     frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && frame.agent.agentRunCommands
-  const agentExtra = canDeployAgent ? (frame?.agent?.agentRunCommands ? ' (via agent)' : ' (via ssh)') : ''
   // TODO
   const firstEverForNixOS = false && frame.mode === 'nixos' && frame.status === 'uninitialized'
 
@@ -74,15 +73,15 @@ export function Frame(props: FrameSceneProps) {
                   className="items-center"
                   items={[
                     ...(mode === 'nixos' ? [{ label: 'Build SD card...', onClick: () => openSDCardModal() }] : []),
-                    { label: 'Re-Render' + agentExtra, onClick: () => renderFrame() },
-                    { label: 'Restart FrameOS' + agentExtra, onClick: () => restartFrame() },
-                    { label: 'Stop FrameOS' + agentExtra, onClick: () => stopFrame() },
-                    { label: 'Reboot device' + agentExtra, onClick: () => rebootFrame() },
+                    { label: 'Re-Render', onClick: () => renderFrame() },
+                    { label: 'Restart FrameOS', onClick: () => restartFrame() },
+                    { label: 'Stop FrameOS', onClick: () => stopFrame() },
+                    { label: 'Reboot device', onClick: () => rebootFrame() },
                     ...(requiresRecompilation
                       ? []
                       : [
                           {
-                            label: 'Fast deploy' + agentExtra,
+                            label: 'Fast deploy',
                             onClick: () => {
                               fastDeployFrame()
                               openLogs()
@@ -90,16 +89,17 @@ export function Frame(props: FrameSceneProps) {
                           },
                         ]),
                     {
-                      label: 'Full deploy' + agentExtra,
+                      label: 'Full deploy',
                       onClick: () => {
                         fullDeployFrame()
                         openLogs()
                       },
                     },
+                    ...(canRestartAgent ? [{ label: 'Restart agent', onClick: () => restartAgent() }] : []),
                     ...(canDeployAgent
                       ? [
                           {
-                            label: 'Deploy agent (via ssh)',
+                            label: 'Deploy agent',
                             onClick: () => {
                               deployAgent()
                               openLogs()
@@ -107,33 +107,34 @@ export function Frame(props: FrameSceneProps) {
                           },
                         ]
                       : []),
-                    ...(canRestartAgent ? [{ label: 'Restart agent', onClick: () => restartAgent() }] : []),
-                    {
-                      label: <div className="border-t border-white w-full" />,
-                    },
-                    {
-                      label: (
-                        <Form formKey="frameForm" logic={frameLogic} props={{ frameId }} enableFormOnSubmit>
-                          <Field name={['agent', 'deployWithAgent']}>
-                            {() => (
-                              <Switch
-                                leftLabel={<>Use: {!deployWithAgent || !canAgentRunCommands ? <u>SSH</u> : 'SSH'}</>}
-                                disabled={!canAgentRunCommands}
-                                label={
-                                  <span className={canAgentRunCommands ? 'flex gap-1' : 'flex gap-1 line-through'}>
-                                    {deployWithAgent && canAgentRunCommands ? <u>Agent</u> : 'Agent'}{' '}
-                                    <FrameConnection frame={frame} />
-                                  </span>
-                                }
-                                alwaysActive
-                                value={canAgentRunCommands ? deployWithAgent : false}
-                                onChange={setDeployWithAgent}
-                              />
-                            )}
-                          </Field>
-                        </Form>
-                      ),
-                    },
+                    ...(canAgentRunCommands
+                      ? [
+                          {
+                            label: <div className="border-t border-white w-full" />,
+                          },
+                          {
+                            label: (
+                              <Form formKey="frameForm" logic={frameLogic} props={{ frameId }} enableFormOnSubmit>
+                                <Field name={['agent', 'deployWithAgent']}>
+                                  {() => (
+                                    <Switch
+                                      leftLabel={<>Use: {!deployWithAgent ? <u>SSH</u> : 'SSH'}</>}
+                                      label={
+                                        <span className={'flex gap-1'}>
+                                          {deployWithAgent ? <u>Agent</u> : 'Agent'} <FrameConnection frame={frame} />
+                                        </span>
+                                      }
+                                      alwaysActive
+                                      value={deployWithAgent}
+                                      onChange={setDeployWithAgent}
+                                    />
+                                  )}
+                                </Field>
+                              </Form>
+                            ),
+                          },
+                        ]
+                      : []),
                   ]}
                 />
                 <div className="flex pl-2 space-x-2">

@@ -359,6 +359,12 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                     This is still beta. Enable both toggles, then save. Download the SD card image, and deploy it to the
                     frame. The agent will then connect to the backend to await further commands.
                   </p>
+                  {frameForm.mode !== 'nixos' && (
+                    <p>
+                      Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy Agent"
+                      menu in the top.
+                    </p>
+                  )}
                 </div>
               }
             >
