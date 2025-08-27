@@ -45,6 +45,7 @@ class Frame(Base):
     metrics_interval = mapped_column(Double, default=60)
     scaling_mode = mapped_column(String(64), nullable=True)  # contain (default), cover, stretch, center
     rotate = mapped_column(Integer, nullable=True)
+    flip = mapped_column(String(32), nullable=True)
     log_to_file = mapped_column(String(256), nullable=True)
     assets_path = mapped_column(String(256), nullable=True)
     save_assets = mapped_column(JSON, nullable=True)
@@ -94,6 +95,7 @@ class Frame(Base):
             'metrics_interval': self.metrics_interval,
             'scaling_mode': self.scaling_mode,
             'rotate': self.rotate,
+            'flip': self.flip,
             'background_color': self.background_color,
             'debug': self.debug,
             'scenes': self.scenes,
@@ -248,6 +250,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",
         "rotate": frame.rotate or 0,
+        "flip": frame.flip,
         "logToFile": frame.log_to_file,
         "assetsPath": frame.assets_path,
         "saveAssets": frame.save_assets,

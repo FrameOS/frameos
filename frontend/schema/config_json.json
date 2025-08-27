@@ -6,6 +6,13 @@
       "additionalProperties": false,
       "description": "config.json schema",
       "properties": {
+        "apt": {
+          "description": "List of apt packages to install (mode=rpios)",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "cache": {
           "$ref": "#/definitions/CacheConfig",
           "description": "Default cache settings"
@@ -36,6 +43,13 @@
           "description": "Name for this app",
           "type": "string"
         },
+        "nixpkgs": {
+          "description": "List of nix packages to install (mode=nixos)",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "output": {
           "description": "Returned fields",
           "items": {
@@ -61,6 +75,10 @@
     "AppConfigField": {
       "additionalProperties": false,
       "properties": {
+        "hint": {
+          "description": "Info tooltip contents (markdown)",
+          "type": "string"
+        },
         "label": {
           "description": "Human readable label",
           "type": "string"
@@ -143,11 +161,11 @@
           "$ref": "#/definitions/FieldType"
         },
         {
-          "const": "text",
+          "const": "select",
           "type": "string"
         },
         {
-          "const": "select",
+          "const": "font",
           "type": "string"
         }
       ]
@@ -211,7 +229,7 @@
       "type": "string"
     },
     "FieldType": {
-      "enum": ["string", "float", "integer", "boolean", "color", "json", "node", "scene", "image"],
+      "enum": ["string", "text", "float", "integer", "boolean", "color", "json", "node", "scene", "image", "font"],
       "type": "string"
     },
     "MarkdownField": {

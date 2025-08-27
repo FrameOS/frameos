@@ -232,6 +232,21 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               />
             )}
           </Field>
+          <Field name="flip" label="Flip">
+            {({ value, onChange }) => (
+              <Select
+                value={value || ''}
+                onChange={(v) => onChange(v)}
+                name="flip"
+                options={[
+                  { value: '', label: '-' },
+                  { value: 'horizontal', label: 'horizontal' },
+                  { value: 'vertical', label: 'vertical' },
+                  { value: 'both', label: 'both' },
+                ]}
+              />
+            )}
+          </Field>
         </div>
 
         {frameForm.mode == 'nixos' ? (

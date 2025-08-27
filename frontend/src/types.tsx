@@ -27,6 +27,7 @@ export interface FrameType {
   metrics_interval: number
   scaling_mode: string
   rotate?: number
+  flip?: 'horizontal' | 'vertical' | 'both' | ''
   background_color: string // deprecated, serves as fallback for scenes
   scenes?: FrameScene[]
   debug?: boolean

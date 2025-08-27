@@ -34,6 +34,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'metrics_interval',
   'scaling_mode',
   'rotate',
+  'flip',
   'background_color',
   'scenes',
   'debug',

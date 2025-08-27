@@ -17,6 +17,7 @@ type
     deviceConfig*: DeviceConfig
     metricsInterval*: float
     rotate*: int
+    flip*: string
     scalingMode*: string
     settings*: JsonNode
     assetsPath*: string

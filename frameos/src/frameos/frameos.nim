@@ -42,6 +42,7 @@ proc start*(self: FrameOS) {.async.} =
     "metricsInterval": self.frameConfig.metricsInterval,
     "scalingMode": self.frameConfig.scalingMode,
     "rotate": self.frameConfig.rotate,
+    "flip": self.frameConfig.flip,
     "assetsPath": self.frameConfig.assetsPath,
     "saveAssets": self.frameConfig.saveAssets,
     "logToFile": self.frameConfig.logToFile,
