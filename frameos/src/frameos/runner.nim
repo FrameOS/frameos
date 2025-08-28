@@ -54,6 +54,16 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     else:
       outImage = image
     setLastImage(outImage)
+    case self.frameConfig.flip:
+    of "horizontal":
+      outImage.flipHorizontal()
+    of "vertical":
+      outImage.flipVertical()
+    of "both":
+      outImage.flipHorizontal()
+      outImage.flipVertical()
+    else:
+      discard
     result = (outImage.rotateDegrees(self.frameConfig.rotate), context.nextSleep)
   except Exception as e:
     result = (renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}"), context.nextSleep)

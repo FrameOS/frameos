@@ -9,6 +9,7 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.device == "": config.device = "web_only"
   if config.metricsInterval == 0: config.metricsInterval = 60
   if config.rotate == 0: config.rotate = 0
+  if config.flip == "": config.flip = ""
   if config.scalingMode == "": config.scalingMode = "cover"
   if config.framePort == 0: config.framePort = 8787
   if config.frameHost == "": config.frameHost = "localhost"
@@ -129,6 +130,7 @@ proc loadConfig*(): FrameConfig =
     deviceConfig: loadDeviceConfig(data{"deviceConfig"}),
     metricsInterval: data{"metricsInterval"}.getFloat(),
     rotate: data{"rotate"}.getInt(),
+    flip: data{"flip"}.getStr(""),
     scalingMode: data{"scalingMode"}.getStr(),
     settings: data{"settings"},
     assetsPath: data{"assetsPath"}.getStr("/srv/assets"),

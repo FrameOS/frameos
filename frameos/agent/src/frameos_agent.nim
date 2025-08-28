@@ -43,6 +43,7 @@ type
     height*: int
     metricsInterval*: float
     rotate*: int
+    flip*: string
     scalingMode*: string
     assetsPath*: string
     logToFile*: string

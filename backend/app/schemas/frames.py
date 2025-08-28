@@ -29,6 +29,7 @@ class FrameBase(BaseModel):
     metrics_interval: float
     scaling_mode: Optional[str]
     rotate: Optional[int]
+    flip: Optional[str]
     background_color: Optional[str]
     debug: Optional[bool]
     last_log_at: Optional[datetime]
@@ -81,6 +82,7 @@ class FrameUpdateRequest(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
     rotate: Optional[int] = None
+    flip: Optional[str] = None
     color: Optional[str] = None
     interval: Optional[float] = None
     metrics_interval: Optional[float] = None
