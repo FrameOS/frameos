@@ -286,6 +286,10 @@ export const templatesLogic = kea<templatesLogicType>([
       (allRepositories, repositories) => allRepositories.length - repositories.length,
     ],
     isExpanded: [(s) => [s.expanded], (expanded) => (url: string) => expanded[url] ?? true],
+    installedTemplatesByName: [
+      (s) => [s.frameForm],
+      (frameForm) => Object.fromEntries(frameForm?.scenes?.map((s) => [s.name, true]) || []),
+    ],
   }),
   listeners(({ actions, values, props }) => ({
     saveRemoteAsLocal: async ({ template, repository }) => {

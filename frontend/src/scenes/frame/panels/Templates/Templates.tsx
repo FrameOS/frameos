@@ -5,7 +5,7 @@ import { frameLogic } from '../../frameLogic'
 import { Button } from '../../../../components/Button'
 import { templatesLogic } from './templatesLogic'
 import { templatesModel } from '../../../../models/templatesModel'
-import { Template } from './Template'
+import { TemplateRow } from './Template'
 import { Box } from '../../../../components/Box'
 import { Field } from '../../../../components/Field'
 import { TextInput } from '../../../../components/TextInput'
@@ -17,7 +17,6 @@ import copy from 'copy-to-clipboard'
 import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
 import { panelsLogic } from '../panelsLogic'
 import { TemplateType } from '../../../../types'
-import { Masonry } from '../../../../components/Masonry'
 
 export function Templates() {
   const { applyTemplate } = useActions(frameLogic)
@@ -45,8 +44,8 @@ export function Templates() {
     templates,
     isExpanded,
     search,
+    installedTemplatesByName,
   } = useValues(templatesLogic({ frameId }))
-  const { fullScreenPanel } = useValues(panelsLogic({ frameId }))
   const { disableFullscreenPanel } = useActions(panelsLogic({ frameId }))
   const { removeRepository, refreshRepository } = useActions(repositoriesModel)
 
@@ -138,9 +137,9 @@ export function Templates() {
           />
         </div>
         {isExpanded('') && (
-          <Masonry>
+          <div className="space-y-2">
             {templates.map((template, index) => (
-              <Template
+              <TemplateRow
                 key={template.id ?? -index}
                 template={template}
                 exportTemplate={exportTemplate}
@@ -150,9 +149,10 @@ export function Templates() {
                   disableFullscreenPanel()
                 }}
                 editTemplate={editLocalTemplate}
+                installedTemplatesByName={installedTemplatesByName}
               />
             ))}
-          </Masonry>
+          </div>
         )}
         {isExpanded('') && templates.length === 0 ? (
           <div className="text-muted">
@@ -200,21 +200,20 @@ export function Templates() {
           {isExpanded(repository.url) && repository.description ? (
             <div className="text-gray-400">{repository.description}</div>
           ) : null}
-          {isExpanded(repository.url) && (
-            <Masonry>
-              {(repository.templates || []).map((template, index) => (
-                <Template
-                  key={template.id ?? -index}
-                  template={template}
-                  saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
-                  applyTemplate={(template, replace) => {
-                    applyRemoteToFrame(repository, template, replace)
-                    disableFullscreenPanel()
-                  }}
-                />
-              ))}
-            </Masonry>
-          )}
+          <div className="space-y-2">
+            {(repository.templates || []).map((template, index) => (
+              <TemplateRow
+                key={template.id ?? -index}
+                template={template}
+                saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
+                applyTemplate={(template, replace) => {
+                  applyRemoteToFrame(repository, template, replace)
+                  disableFullscreenPanel()
+                }}
+                installedTemplatesByName={installedTemplatesByName}
+              />
+            ))}
+          </div>
           {isExpanded(repository.url) && repository.templates?.length === 0 ? (
             <div className="text-gray-400">This repository has no scenes.</div>
           ) : null}
