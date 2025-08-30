@@ -52,7 +52,7 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc groupEvents(self: App): Table[string, seq[string]] =
+proc groupEvents*(self: App): Table[string, seq[string]] =
   result = initTable[string, seq[string]]()
   let events = self.appConfig.events
   if events == nil or events.kind != JArray:
