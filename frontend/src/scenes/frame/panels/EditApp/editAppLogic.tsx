@@ -28,15 +28,16 @@ const SYSTEM_PROMPT = `
 You are editing a FrameOS app written in Nim. You have access to the Nim version 2.2 STL and the following nimble packages: 
 pixie v5, chrono 0.3.1, checksums 0.2.1, ws 0.5.0, psutil 0.6.0, QRGen 3.1.0, zippy 0.10, chroma 0.2.7, bumpy 1.1.2
 
-Make the requested changes and return the modified files in full with the changes inlined. Only modify what is necessary.
+Return the modified files in full with the changes inlined. Only modify what is necessary.
 
--------------
-The changes to make:
-`
+Make these changes: `
+
 const SYSTEM_PROMPT_2 = `
 
 -------------
-The files of the app:
+Here are the relevant files of the app:
+
+
 `
 
 export const editAppLogic = kea<editAppLogicType>([
@@ -102,6 +103,7 @@ export const editAppLogic = kea<editAppLogicType>([
     ],
     prompt: [
       DEFAULT_PROMPT as string,
+      { persist: true },
       {
         setPrompt: (_, { prompt }) => prompt,
       },
@@ -194,7 +196,7 @@ export const editAppLogic = kea<editAppLogicType>([
         const sourceEntries = Object.entries(sources)
         return (
           `${SYSTEM_PROMPT}${prompt}${SYSTEM_PROMPT_2}\n\n${sourceEntries
-            .map(([file, content]) => `File: ${file}\n${content}`)
+            .map(([file, content]) => `# ${file}\n\`\`\`\n${content}\n\`\`\``)
             .join('\n\n\n-------\n\n')}`.trim() + '\n'
         )
       },

@@ -159,7 +159,7 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
           <div className="p-4 bg-gray-700 text-md overflow-y-auto overflow-x-auto w-full space-y-4">
             <p>Enter your querstion/request, and copy a sources-included version to your favourite LLM.</p>
             <Label>Your question/request regarding this app</Label>
-            <TextArea value={prompt} onChange={setPrompt} rows={3} />
+            <TextArea value={prompt} autoFocus onChange={setPrompt} rows={3} />
             <Label>Preview of the final prompt we will copy</Label>
             <TextArea value={fullPrompt} disabled rows={3} />
             <Button onClick={copyFullPrompt}>{fullPromptCopied ? 'Copied!' : 'Copy to clipboard'}</Button>
