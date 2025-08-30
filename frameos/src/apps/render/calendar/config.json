@@ -1,0 +1,130 @@
+{
+  "name": "Calendar",
+  "description": "Render a monthly calendar with events",
+  "category": "render",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "inputImage",
+      "type": "image",
+      "value": "",
+      "required": false,
+      "label": "Background image"
+    },
+    {
+      "name": "events",
+      "type": "json",
+      "required": false,
+      "value": "[]",
+      "label": "Events array"
+    },
+    {
+      "name": "year",
+      "type": "integer",
+      "value": "0",
+      "required": false,
+      "label": "Year (0 for current)"
+    },
+    {
+      "name": "month",
+      "type": "integer",
+      "value": "0",
+      "required": false,
+      "label": "Month 1-12 (0 for current)"
+    },
+    {
+      "name": "startWeekOnMonday",
+      "type": "boolean",
+      "value": "true",
+      "required": true,
+      "label": "Week starts on Monday"
+    },
+    {
+      "name": "backgroundColor",
+      "type": "color",
+      "value": "#ffffff",
+      "required": true,
+      "label": "Background color"
+    },
+    {
+      "name": "gridColor",
+      "type": "color",
+      "value": "#000000",
+      "required": true,
+      "label": "Grid color"
+    },
+    {
+      "name": "headerBackgroundColor",
+      "type": "color",
+      "value": "#000000",
+      "required": true,
+      "label": "Header background color"
+    },
+    {
+      "name": "headerTextColor",
+      "type": "color",
+      "value": "#ffffff",
+      "required": true,
+      "label": "Header text color"
+    },
+    {
+      "name": "dateTextColor",
+      "type": "color",
+      "value": "#000000",
+      "required": true,
+      "label": "Date text color"
+    },
+    {
+      "name": "eventTextColor",
+      "type": "color",
+      "value": "#0000ff",
+      "required": true,
+      "label": "Event text color"
+    },
+    {
+      "name": "headerFont",
+      "type": "font",
+      "required": false,
+      "label": "Header font"
+    },
+    {
+      "name": "headerFontSize",
+      "type": "float",
+      "value": "32",
+      "required": true,
+      "label": "Header font size"
+    },
+    {
+      "name": "dateFont",
+      "type": "font",
+      "required": false,
+      "label": "Date font"
+    },
+    {
+      "name": "dateFontSize",
+      "type": "float",
+      "value": "24",
+      "required": true,
+      "label": "Date font size"
+    },
+    {
+      "name": "eventFont",
+      "type": "font",
+      "required": false,
+      "label": "Event font"
+    },
+    {
+      "name": "eventFontSize",
+      "type": "float",
+      "value": "14",
+      "required": true,
+      "label": "Event font size"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ]
+}

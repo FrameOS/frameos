@@ -24,7 +24,27 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc get*(self: App, context: ExecutionContext): JsonNode =
+# Parse "this/last/next day|week|month|year" into start/end of that period (in tz),
+# falling back to plain "YYYY-MM-DD" parsing if pattern doesn't match.
+proc parsePeriodBoundary*(value, tzName: string; isStart: bool): Timestamp =
+  let s = value.strip.toLowerAscii
+  if s.len == 0:
+    return epochTime().Timestamp
+
+  let parts = s.splitWhitespace
+  if parts.len == 2 and (parts[0] in ["this", "last", "next"]) and (parts[1] in ["day", "week", "month", "year"]):
+    var cal = calendar(epochTime().Timestamp, tzName)
+    let scale = parseTimeScale(parts[1]) # Day/Week/Month/Year
+    case parts[0]
+    of "last": cal.sub(scale, 1)
+    of "next": cal.add(scale, 1)
+    else: discard # "this"
+    if isStart: cal.toStartOf(scale) else: cal.toEndOf(scale)
+    return cal.ts
+
+  return parseTs("{year/4}-{month/2}-{day/2}", value, tzName)
+
+proc get*(self: App; context: ExecutionContext): JsonNode =
   result = %*[]
   if self.appConfig.iCal.startsWith("http"):
     self.logError "Pass in iCal data as a string, not a URL."
@@ -34,10 +54,18 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
     return
 
   let timezone = if self.frameConfig.timeZone != "": self.frameConfig.timeZone else: "UTC"
-  let startTs = if self.appConfig.exportFrom == "": epochTime().Timestamp
-                else: parseTs("{year/4}-{month/2}-{day/2}", self.appConfig.exportFrom, timezone)
-  let endTs = if self.appConfig.exportUntil == "": (epochTime() + 366 * 24 * 60 * 60).Timestamp
-              else: parseTs("{year/4}-{month/2}-{day/2}", self.appConfig.exportUntil, timezone)
+
+  let startTs =
+    if self.appConfig.exportFrom == "":
+      epochTime().Timestamp
+    else:
+      parsePeriodBoundary(self.appConfig.exportFrom, timezone, true)
+
+  let endTs =
+    if self.appConfig.exportUntil == "":
+      (epochTime() + 366.0 * 24.0 * 60.0 * 60.0).Timestamp
+    else:
+      parsePeriodBoundary(self.appConfig.exportUntil, timezone, false)
 
   var parsedCalendar: ParsedCalendar
   try:
