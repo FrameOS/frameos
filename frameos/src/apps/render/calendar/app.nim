@@ -42,12 +42,16 @@ type
     backgroundColor*: Color
     weekendBackgroundColor*: Color # NEW: background color for Saturday/Sunday day cells
     gridColor*: Color
-    headerBackgroundColor*: Color
-    headerTextColor*: Color
     dateTextColor*: Color
     eventTextColor*: Color
-    headerFont*: string
-    headerFontSize*: float
+    weekdayFont*: string
+    weekdayFontSize*: float
+    weekdayBackgroundColor*: Color
+    weekdayTextColor*: Color
+    titleFont*: string
+    titleFontSize*: float
+    titleBackgroundColor*: Color
+    titleTextColor*: Color
     dateFont*: string
     dateFontSize*: float
     eventFont*: string
@@ -158,20 +162,22 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
   let regionW = contentW - 2f*bw
   let regionH = contentH - 2f*bw
 
-  # Heights
-  let headerHeight = self.appConfig.headerFontSize.float32 * 1.8
+  # Heights (use split sizes)
+  let weekdayHeaderHeight = self.appConfig.weekdayFontSize.float32 * 1.5
   let titleShown = self.appConfig.showMonthYear and (self.appConfig.monthYearPosition.toLowerAscii() in ["top", "bottom"])
-  let titleHeight = if titleShown: self.appConfig.headerFontSize.float32 * 1.6 else: 0f
+  let titleHeight = if titleShown: self.appConfig.titleFontSize.float32 * 1.8 else: 0f
   let topTitle = if titleShown and self.appConfig.monthYearPosition.toLowerAscii() == "top": titleHeight else: 0f
   let bottomTitle = if titleShown and self.appConfig.monthYearPosition.toLowerAscii() == "bottom": titleHeight else: 0f
 
-  let gridHeight = regionH - headerHeight - topTitle - bottomTitle
+  let gridHeight = regionH - weekdayHeaderHeight - topTitle - bottomTitle
   let cellWidth = regionW / 7.0
   let cellHeight = gridHeight / rows.float32
 
   # Fonts
-  let headerTypeface = getTypeface(self.appConfig.headerFont, self.frameConfig.assetsPath)
-  let headerFont = newFont(headerTypeface, self.appConfig.headerFontSize, self.appConfig.headerTextColor)
+  let titleTypeface = getTypeface(self.appConfig.titleFont, self.frameConfig.assetsPath)
+  let titleFont = newFont(titleTypeface, self.appConfig.titleFontSize, self.appConfig.titleTextColor)
+  let weekdayTypeface = getTypeface(self.appConfig.weekdayFont, self.frameConfig.assetsPath)
+  let weekdayFont = newFont(weekdayTypeface, self.appConfig.weekdayFontSize, self.appConfig.weekdayTextColor)
   let dateTypeface = getTypeface(self.appConfig.dateFont, self.frameConfig.assetsPath)
   let dateFont = newFont(dateTypeface, self.appConfig.dateFontSize, self.appConfig.dateTextColor)
   let eventTypeface = getTypeface(self.appConfig.eventFont, self.frameConfig.assetsPath)
@@ -188,11 +194,11 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
     # Draw a background for the title
     let ty = if topTitle > 0: regionY else: regionY + regionH - bottomTitle
     var titleBg = newImage(regionW.int, titleHeight.int)
-    titleBg.fill(self.appConfig.headerBackgroundColor)
+    titleBg.fill(self.appConfig.titleBackgroundColor)
     image.draw(titleBg, translate(vec2(regionX, ty)))
 
     let types = typeset(
-      spans = [newSpan(titleText, headerFont)],
+      spans = [newSpan(titleText, titleFont)],
       bounds = vec2(regionW, titleHeight),
       hAlign = CenterAlign,
       vAlign = MiddleAlign,
@@ -200,8 +206,8 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
     image.fillText(types, translate(vec2(regionX, ty)))
 
   # Weekday header background
-  var headerImg = newImage(regionW.int, headerHeight.int)
-  headerImg.fill(self.appConfig.headerBackgroundColor)
+  var headerImg = newImage(regionW.int, weekdayHeaderHeight.int)
+  headerImg.fill(self.appConfig.weekdayBackgroundColor)
   image.draw(headerImg, translate(vec2(regionX, regionY + topTitle)))
 
   # Weekday labels
@@ -212,8 +218,8 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
 
   for i, dayName in weekdays:
     let types = typeset(
-      spans = [newSpan(dayName, headerFont)],
-      bounds = vec2(cellWidth, headerHeight),
+      spans = [newSpan(dayName, weekdayFont)],
+      bounds = vec2(cellWidth, weekdayHeaderHeight),
       hAlign = CenterAlign,
       vAlign = MiddleAlign,
     )
@@ -231,7 +237,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
         let wd = weekday(year, month, d) # 0=Sun .. 6=Sat
         if wd == 0 or wd == 6:
           let x = regionX + col.float32 * cellWidth
-          let y = regionY + topTitle + headerHeight + row.float32 * cellHeight
+          let y = regionY + topTitle + weekdayHeaderHeight + row.float32 * cellHeight
           var bg = newImage(cellWidth.int, cellHeight.int)
           bg.fill(self.appConfig.weekendBackgroundColor)
           image.draw(bg, translate(vec2(x, y)))
@@ -245,9 +251,9 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       let x = regionX + i.float32 * cellWidth
       var vLine = newImage(max(1, gridStroke.int), gridHeight.int)
       vLine.fill(self.appConfig.gridColor)
-      image.draw(vLine, translate(vec2(x, regionY + topTitle + headerHeight)))
+      image.draw(vLine, translate(vec2(x, regionY + topTitle + weekdayHeaderHeight)))
     for i in 0..rows:
-      let y = regionY + topTitle + headerHeight + i.float32 * cellHeight
+      let y = regionY + topTitle + weekdayHeaderHeight + i.float32 * cellHeight
       var hLine = newImage(regionW.int, max(1, gridStroke.int))
       hLine.fill(self.appConfig.gridColor)
       image.draw(hLine, translate(vec2(regionX, y)))
@@ -262,7 +268,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       if day > days:
         break
       let x = regionX + col.float32 * cellWidth
-      let y = regionY + topTitle + headerHeight + row.float32 * cellHeight
+      let y = regionY + topTitle + weekdayHeaderHeight + row.float32 * cellHeight
 
       # Highlight "today" with a stroke rectangle
       if isCurrentMonth and day == todayDay:
@@ -365,4 +371,3 @@ proc get*(self: App, context: ExecutionContext): Image =
   else:
     newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
   render(self, context, result)
-

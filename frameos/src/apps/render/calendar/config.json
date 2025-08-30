@@ -54,39 +54,11 @@
       "label": "Weekend day background color (Sat/Sun cells)"
     },
     {
-      "name": "gridColor",
-      "type": "color",
-      "value": "#999999",
-      "required": true,
-      "label": "Grid line color"
-    },
-    {
-      "name": "borderColor",
-      "type": "color",
-      "value": "#cccccc",
-      "required": true,
-      "label": "Border color"
-    },
-    {
       "name": "todayStrokeColor",
       "type": "color",
       "value": "#f59e0b",
       "required": true,
       "label": "Today's cell outline color"
-    },
-    {
-      "name": "headerBackgroundColor",
-      "type": "color",
-      "value": "#000000",
-      "required": true,
-      "label": "Header background"
-    },
-    {
-      "name": "headerTextColor",
-      "type": "color",
-      "value": "#ffffff",
-      "required": true,
-      "label": "Header text color"
     },
     {
       "name": "dateTextColor",
@@ -103,30 +75,71 @@
       "label": "Event text color"
     },
     {
-      "name": "headerFont",
+      "name": "titleFont",
       "type": "font",
       "required": false,
-      "label": "Weekday row font"
+      "label": "Title font (used for month & year)"
     },
     {
-      "name": "headerFontSize",
+      "name": "titleFontSize",
       "type": "float",
-      "value": "18",
+      "value": "28",
+      "required": true,
+      "label": "Month & year title font size"
+    },
+    {
+      "name": "titleTextColor",
+      "type": "color",
+      "value": "#000000",
+      "required": true,
+      "label": "Title text color"
+    },
+    {
+      "name": "titleBackgroundColor",
+      "type": "color",
+      "value": "#ffffff",
+      "required": true,
+      "label": "Title background"
+    },
+    {
+      "name": "weekdayFont",
+      "type": "font",
+      "required": false,
+      "label": "Weekday font (used for weekday row)"
+    },
+    {
+      "name": "weekdayFontSize",
+      "type": "float",
+      "value": "16",
       "required": true,
       "label": "Weekday row font size"
+    },
+    {
+      "name": "weekdayTextColor",
+      "type": "color",
+      "value": "#000000",
+      "required": true,
+      "label": "Weekday text color"
+    },
+    {
+      "name": "titleBackgroundColor",
+      "type": "color",
+      "value": "#ffffff",
+      "required": true,
+      "label": "Title background"
     },
     {
       "name": "dateFont",
       "type": "font",
       "required": false,
-      "label": "Date font"
+      "label": "Date number font"
     },
     {
       "name": "dateFontSize",
       "type": "float",
       "value": "18",
       "required": true,
-      "label": "Date font size"
+      "label": "Date number font size"
     },
     {
       "name": "eventFont",
@@ -159,9 +172,16 @@
     {
       "name": "borderWidth",
       "type": "float",
-      "value": "2",
+      "value": "0",
       "required": true,
       "label": "Border width (px)"
+    },
+    {
+      "name": "borderColor",
+      "type": "color",
+      "value": "#cccccc",
+      "required": true,
+      "label": "Border color"
     },
     {
       "name": "showMonthYear",
@@ -191,6 +211,13 @@
       "value": "1",
       "required": true,
       "label": "Grid stroke width (px)"
+    },
+    {
+      "name": "gridColor",
+      "type": "color",
+      "value": "#999999",
+      "required": true,
+      "label": "Grid line color"
     },
     {
       "name": "showEventTimes",
