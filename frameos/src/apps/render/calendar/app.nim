@@ -40,6 +40,7 @@ type
 
     # colors / fonts
     backgroundColor*: Color
+    weekendBackgroundColor*: Color # NEW: background color for Saturday/Sunday day cells
     gridColor*: Color
     headerBackgroundColor*: Color
     headerTextColor*: Color
@@ -50,21 +51,33 @@ type
     dateFont*: string
     dateFontSize*: float
     eventFont*: string
+    eventBoldFont*: string
     eventFontSize*: float
 
-    # NEW: layout / decoration
-    padding*: int              # outer padding (px)
-    borderColor*: Color        # border color around the calendar
-    borderWidth*: float        # border width (px)
-    showMonthYear*: bool       # show month + year
-    monthYearPosition*: string # "top", "bottom", or "none"
-    showGrid*: bool            # toggle grid on/off
-    gridWidth*: float          # grid stroke width (px)
-    todayStrokeColor*: Color   # outline color for today's cell
-                               # (fill is intentionally omitted to avoid covering text)
+    # layout / decoration
+    padding*: int                  # outer padding (px)
+    borderColor*: Color            # border color around the calendar
+    borderWidth*: float            # border width (px)
+    showMonthYear*: bool           # show month + year
+    monthYearPosition*: string     # "top", "bottom", or "none"
+    showGrid*: bool                # toggle grid on/off
+    gridWidth*: float              # grid stroke width (px)
+    todayStrokeColor*: Color       # outline color for today's cell
+                                   # (fill is intentionally omitted to avoid covering text)
+    showEventTimes*: bool          # show times next to non all-day events
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
+
+# quick-and-simple width-based truncation so each line stays on one row
+proc truncateToWidth(text: string, fontSize, maxWidth: float32): string =
+  # Average glyph width heuristic ~55% of font size
+  let avgChar = max(1.0'f32, fontSize * 0.55)
+  var maxChars = int(maxWidth / avgChar)
+  if maxChars < 1: maxChars = 1
+  if text.len <= maxChars: return text
+  if maxChars <= 1: return "…"
+  result = text[0 .. max(0, maxChars - 2)] & "…"
 
 proc groupEvents*(self: App): Table[string, seq[string]] =
   result = initTable[string, seq[string]]()
@@ -78,14 +91,26 @@ proc groupEvents*(self: App): Table[string, seq[string]] =
       let key = start[0..9]
       if not result.hasKey(key):
         result[key] = @[]
-      result[key].add(summary)
+
+      # Build display text, optionally prefixing time(s).
+      # Default: show ONLY the start time; ensure a space before the title.
+      var display = summary
+      let isAllDay = ev{"allDay"}.getBool(false)
+      if self.appConfig.showEventTimes and not isAllDay:
+        var timeStr = ""
+        if start.len >= 16:
+          timeStr = start[11..15] # HH:MM from ISO string
+        if timeStr.len > 0:
+          display = timeStr & " " & summary # <-- add a space between time and event name
+
+      result[key].add(display)
 
 proc render*(self: App, context: ExecutionContext, image: Image) =
-  # Current date/time
-  let nowTs = epochTime().Timestamp
-  let defaultYear = parseInt(format(nowTs, "{year/4}"))
-  let defaultMonth = parseInt(format(nowTs, "{month/2}"))
-  let todayDay = parseInt(format(nowTs, "{day/2}"))
+  # Current date/time (use LOCAL time zone; FrameOS sets TZ to the user's zone, e.g., Europe/Brussels)
+  let nowLocal = times.now()
+  let defaultYear = nowLocal.year
+  let defaultMonth = nowLocal.month.ord
+  let todayDay = nowLocal.monthday
   let year = if self.appConfig.year == 0: defaultYear else: self.appConfig.year
   let month = if self.appConfig.month == 0: defaultMonth else: self.appConfig.month
   let isCurrentMonth = (year == defaultYear) and (month == defaultMonth)
@@ -151,6 +176,8 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
   let dateFont = newFont(dateTypeface, self.appConfig.dateFontSize, self.appConfig.dateTextColor)
   let eventTypeface = getTypeface(self.appConfig.eventFont, self.frameConfig.assetsPath)
   let eventFont = newFont(eventTypeface, self.appConfig.eventFontSize, self.appConfig.eventTextColor)
+  let eventBoldTypeface = getTypeface(self.appConfig.eventBoldFont, self.frameConfig.assetsPath)
+  let eventBoldFont = newFont(eventBoldTypeface, self.appConfig.eventFontSize, self.appConfig.eventTextColor)
 
   # Title (Month Year) at top or bottom
   if titleShown:
@@ -191,6 +218,26 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       vAlign = MiddleAlign,
     )
     image.fillText(types, translate(vec2(regionX + i.float32 * cellWidth, regionY + topTitle)))
+
+  # Weekend backgrounds (draw BEFORE grid so grid stays visible)
+  block shadeWeekends:
+    var d = 1
+    for row in 0..<rows:
+      for col in 0..6:
+        if row == 0 and col < firstCol:
+          continue
+        if d > days:
+          break
+        let wd = weekday(year, month, d) # 0=Sun .. 6=Sat
+        if wd == 0 or wd == 6:
+          let x = regionX + col.float32 * cellWidth
+          let y = regionY + topTitle + headerHeight + row.float32 * cellHeight
+          var bg = newImage(cellWidth.int, cellHeight.int)
+          bg.fill(self.appConfig.weekendBackgroundColor)
+          image.draw(bg, translate(vec2(x, y)))
+        d += 1
+      if d > days:
+        break
 
   # Grid
   if self.appConfig.showGrid:
@@ -246,14 +293,63 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       # Events
       let key = &"{year:04}-{month:02}-{day:02}"
       if eventsByDay.hasKey(key):
-        let eventsText = eventsByDay[key].join("\n")
-        let eventsTypes = typeset(
-          spans = [newSpan(eventsText, eventFont)],
-          bounds = vec2(cellWidth - 6f, cellHeight - self.appConfig.dateFontSize.float32 - 9f),
-          hAlign = LeftAlign,
-          vAlign = TopAlign,
-        )
-        image.fillText(eventsTypes, translate(vec2(x + 4f, y + self.appConfig.dateFontSize.float32 + 6f)))
+        # Determine how many lines fit and truncate each line to stay on one row.
+        let availableH = cellHeight - self.appConfig.dateFontSize.float32 - 9f
+        let lineH = self.appConfig.eventFontSize.float32 + 2f
+        var maxLines = int(availableH / lineH)
+        if maxLines < 0: maxLines = 0
+
+        var visibleCount = 0
+        var needMoreLine = false
+        let total = eventsByDay[key].len
+        var linesToDraw: seq[string] = @[]
+
+        if total > maxLines and maxLines > 0:
+          visibleCount = max(0, maxLines - 1) # reserve last line for "+N more"
+          needMoreLine = true
+        else:
+          visibleCount = min(total, maxLines)
+
+        for i in 0 ..< visibleCount:
+          let raw = eventsByDay[key][i]
+          let trimmed = truncateToWidth(raw, self.appConfig.eventFontSize.float32, cellWidth - 6f)
+          linesToDraw.add(trimmed)
+
+        if needMoreLine and maxLines > 0:
+          let remaining = total - visibleCount
+          if remaining > 0:
+            let moreText = &"+{remaining} more"
+            # Truncate just in case (very narrow cells)
+            linesToDraw.add(truncateToWidth(moreText, self.appConfig.eventFontSize.float32, cellWidth - 6f))
+
+        if linesToDraw.len > 0:
+          # Build spans so that event NAMES are bold. Timed events look like "HH:MM Title".
+          var spans: seq[Span] = @[]
+          for li, line in linesToDraw:
+            if needMoreLine and (li == linesToDraw.high) and line.startsWith("+"):
+              # The "+N more" line should not be bolded.
+              spans.add(newSpan(line, eventFont))
+            else:
+              # If the line starts with "HH:MM ", split time and name. Otherwise, the whole line is the name.
+              var timePart = ""
+              var namePart = line
+              if line.len >= 6 and line[2] == ':' and line[5] == ' ':
+                timePart = line[0..4] & " "
+                namePart = line[6..^1]
+              if timePart.len > 0:
+                spans.add(newSpan(timePart, eventFont))
+              spans.add(newSpan(namePart, eventBoldFont))
+            # Add newline between lines (except after the last)
+            if li < linesToDraw.high:
+              spans.add(newSpan("\n", eventFont))
+
+          let eventsTypes = typeset(
+            spans = spans,
+            bounds = vec2(cellWidth - 6f, min(availableH, lineH * linesToDraw.len.float32)),
+            hAlign = LeftAlign,
+            vAlign = TopAlign,
+          )
+          image.fillText(eventsTypes, translate(vec2(x + 4f, y + self.appConfig.dateFontSize.float32 + 6f)))
       day += 1
     if day > days:
       break
@@ -269,3 +365,4 @@ proc get*(self: App, context: ExecutionContext): Image =
   else:
     newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
   render(self, context, result)
+

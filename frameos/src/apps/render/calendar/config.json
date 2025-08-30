@@ -2,7 +2,7 @@
   "name": "Calendar",
   "description": "Render a monthly calendar with events",
   "category": "render",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "fields": [
     {
       "name": "inputImage",
@@ -23,56 +23,77 @@
       "type": "integer",
       "value": "0",
       "required": false,
-      "label": "Year (0 for current)"
+      "label": "Year (0 = current)"
     },
     {
       "name": "month",
       "type": "integer",
       "value": "0",
       "required": false,
-      "label": "Month 1-12 (0 for current)"
+      "label": "Month (1–12; 0 = current)"
     },
     {
       "name": "startWeekOnMonday",
       "type": "boolean",
       "value": "true",
       "required": true,
-      "label": "Week starts on Monday"
+      "label": "Week starts on Monday (Mon–Sun order in weekday row)"
     },
     {
       "name": "backgroundColor",
       "type": "color",
       "value": "#ffffff",
       "required": true,
-      "label": "Background color"
+      "label": "Overall background color"
+    },
+    {
+      "name": "weekendBackgroundColor",
+      "type": "color",
+      "value": "#f7f7f7",
+      "required": true,
+      "label": "Weekend day background color (Sat/Sun cells)"
     },
     {
       "name": "gridColor",
       "type": "color",
       "value": "#999999",
       "required": true,
-      "label": "Grid color"
+      "label": "Grid line color"
+    },
+    {
+      "name": "borderColor",
+      "type": "color",
+      "value": "#cccccc",
+      "required": true,
+      "label": "Border color"
+    },
+    {
+      "name": "todayStrokeColor",
+      "type": "color",
+      "value": "#f59e0b",
+      "required": true,
+      "label": "Today's cell outline color"
     },
     {
       "name": "headerBackgroundColor",
       "type": "color",
       "value": "#000000",
       "required": true,
-      "label": "Header background color"
+      "label": "Weekday row & title background"
     },
     {
       "name": "headerTextColor",
       "type": "color",
       "value": "#ffffff",
       "required": true,
-      "label": "Header text color"
+      "label": "Weekday row & title text color"
     },
     {
       "name": "dateTextColor",
       "type": "color",
       "value": "#000000",
       "required": true,
-      "label": "Date text color"
+      "label": "Date number color"
     },
     {
       "name": "eventTextColor",
@@ -85,14 +106,14 @@
       "name": "headerFont",
       "type": "font",
       "required": false,
-      "label": "Header font"
+      "label": "Weekday row font"
     },
     {
       "name": "headerFontSize",
       "type": "float",
-      "value": "32",
+      "value": "18",
       "required": true,
-      "label": "Header font size"
+      "label": "Weekday row font size"
     },
     {
       "name": "dateFont",
@@ -103,7 +124,7 @@
     {
       "name": "dateFontSize",
       "type": "float",
-      "value": "24",
+      "value": "18",
       "required": true,
       "label": "Date font size"
     },
@@ -111,7 +132,15 @@
       "name": "eventFont",
       "type": "font",
       "required": false,
-      "label": "Event font"
+      "label": "Event font",
+      "value": "Ubuntu-Light.ttf"
+    },
+    {
+      "name": "eventBoldFont",
+      "type": "font",
+      "required": false,
+      "label": "Event bold font",
+      "value": "Ubuntu-Medium.ttf"
     },
     {
       "name": "eventFontSize",
@@ -123,16 +152,9 @@
     {
       "name": "padding",
       "type": "integer",
-      "value": "24",
+      "value": "18",
       "required": true,
       "label": "Outer padding (px)"
-    },
-    {
-      "name": "borderColor",
-      "type": "color",
-      "value": "#cccccc",
-      "required": true,
-      "label": "Border color"
     },
     {
       "name": "borderWidth",
@@ -154,7 +176,7 @@
       "options": ["top", "bottom", "none"],
       "value": "top",
       "required": true,
-      "label": "Title position"
+      "label": "Title position (ignored if hidden)"
     },
     {
       "name": "showGrid",
@@ -171,11 +193,11 @@
       "label": "Grid stroke width (px)"
     },
     {
-      "name": "todayStrokeColor",
-      "type": "color",
-      "value": "#f59e0b",
+      "name": "showEventTimes",
+      "type": "boolean",
+      "value": "true",
       "required": true,
-      "label": "Today outline color"
+      "label": "Show times for non all-day events"
     }
   ],
   "output": [
