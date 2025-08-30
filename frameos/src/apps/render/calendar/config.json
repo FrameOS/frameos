@@ -79,14 +79,14 @@
       "type": "color",
       "value": "#000000",
       "required": true,
-      "label": "Weekday row & title background"
+      "label": "Header background"
     },
     {
       "name": "headerTextColor",
       "type": "color",
       "value": "#ffffff",
       "required": true,
-      "label": "Weekday row & title text color"
+      "label": "Header text color"
     },
     {
       "name": "dateTextColor",
