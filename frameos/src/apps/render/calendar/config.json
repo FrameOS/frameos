@@ -56,7 +56,7 @@
     {
       "name": "todayStrokeColor",
       "type": "color",
-      "value": "#f59e0b",
+      "value": "#ff0000",
       "required": true,
       "label": "Today's cell outline color"
     },
