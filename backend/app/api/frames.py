@@ -36,6 +36,7 @@ from app.utils.ssh_utils import (
     exec_command,
     remove_ssh_connection,
 )
+from app.utils.image import render_line_of_text_png
 from app.schemas.frames import (
     FramesListResponse,
     FrameResponse,
@@ -709,11 +710,14 @@ async def api_frame_get_image(
         if last_image:
             return Response(content=last_image, media_type="image/png")
         else:
-            # When asking for the cached image, raise instead of trying to fetch a real one
-            # Somehow we get stuck when trying to fetch a lot of new images.
-            raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND, detail="No cached image available"
-            )
+            # Fallback image: black background with big gray "no iamge" (single line, no wrapping)
+            if not frame.width or not frame.height:
+                frame.width = 800
+                frame.height = 600
+
+            width, height = int(frame.width), int(frame.height)
+            body = render_line_of_text_png("no image", width, height)
+            return Response(content=body, media_type="image/png")
 
     # Use shared semaphore and client
     status = 0
@@ -733,7 +737,6 @@ async def api_frame_get_image(
                 width = height = None
                 try:
                     from PIL import Image
-                    import io
 
                     img = Image.open(io.BytesIO(body))
                     width, height = img.width, img.height
