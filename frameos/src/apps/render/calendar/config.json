@@ -68,11 +68,18 @@
       "label": "Date number color"
     },
     {
-      "name": "eventTextColor",
+      "name": "eventTimeColor",
       "type": "color",
       "value": "#333333",
       "required": true,
-      "label": "Event text color"
+      "label": "Event time color"
+    },
+    {
+      "name": "eventTitleColor",
+      "type": "color",
+      "value": "#333333",
+      "required": true,
+      "label": "Event title color"
     },
     {
       "name": "titleFont",
@@ -122,11 +129,11 @@
       "label": "Weekday text color"
     },
     {
-      "name": "titleBackgroundColor",
+      "name": "weekdayBackgroundColor",
       "type": "color",
       "value": "#ffffff",
       "required": true,
-      "label": "Title background"
+      "label": "Weekday background"
     },
     {
       "name": "dateFont",
@@ -142,18 +149,18 @@
       "label": "Date number font size"
     },
     {
-      "name": "eventFont",
+      "name": "eventTitleFont",
       "type": "font",
       "required": false,
-      "label": "Event font",
-      "value": "Ubuntu-Light.ttf"
+      "label": "Event title font",
+      "value": "Ubuntu-Medium.ttf"
     },
     {
-      "name": "eventBoldFont",
+      "name": "eventTimeFont",
       "type": "font",
       "required": false,
-      "label": "Event bold font",
-      "value": "Ubuntu-Medium.ttf"
+      "label": "Event time font",
+      "value": "Ubuntu-Light.ttf"
     },
     {
       "name": "eventFontSize",

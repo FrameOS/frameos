@@ -43,7 +43,8 @@ type
     weekendBackgroundColor*: Color # NEW: background color for Saturday/Sunday day cells
     gridColor*: Color
     dateTextColor*: Color
-    eventTextColor*: Color
+    eventTimeColor*: Color
+    eventTitleColor*: Color
     weekdayFont*: string
     weekdayFontSize*: float
     weekdayBackgroundColor*: Color
@@ -54,8 +55,8 @@ type
     titleTextColor*: Color
     dateFont*: string
     dateFontSize*: float
-    eventFont*: string
-    eventBoldFont*: string
+    eventTimeFont*: string
+    eventTitleFont*: string
     eventFontSize*: float
 
     # layout / decoration
@@ -180,10 +181,10 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
   let weekdayFont = newFont(weekdayTypeface, self.appConfig.weekdayFontSize, self.appConfig.weekdayTextColor)
   let dateTypeface = getTypeface(self.appConfig.dateFont, self.frameConfig.assetsPath)
   let dateFont = newFont(dateTypeface, self.appConfig.dateFontSize, self.appConfig.dateTextColor)
-  let eventTypeface = getTypeface(self.appConfig.eventFont, self.frameConfig.assetsPath)
-  let eventFont = newFont(eventTypeface, self.appConfig.eventFontSize, self.appConfig.eventTextColor)
-  let eventBoldTypeface = getTypeface(self.appConfig.eventBoldFont, self.frameConfig.assetsPath)
-  let eventBoldFont = newFont(eventBoldTypeface, self.appConfig.eventFontSize, self.appConfig.eventTextColor)
+  let eventTimeTypeface = getTypeface(self.appConfig.eventTimeFont, self.frameConfig.assetsPath)
+  let eventTimeFont = newFont(eventTimeTypeface, self.appConfig.eventFontSize, self.appConfig.eventTimeColor)
+  let eventTitleTypeface = getTypeface(self.appConfig.eventTitleFont, self.frameConfig.assetsPath)
+  let eventTitleFont = newFont(eventTitleTypeface, self.appConfig.eventFontSize, self.appConfig.eventTitleColor)
 
   # Title (Month Year) at top or bottom
   if titleShown:
@@ -334,7 +335,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
           for li, line in linesToDraw:
             if needMoreLine and (li == linesToDraw.high) and line.startsWith("+"):
               # The "+N more" line should not be bolded.
-              spans.add(newSpan(line, eventFont))
+              spans.add(newSpan(line, eventTimeFont))
             else:
               # If the line starts with "HH:MM ", split time and name. Otherwise, the whole line is the name.
               var timePart = ""
@@ -343,11 +344,11 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
                 timePart = line[0..4] & " "
                 namePart = line[6..^1]
               if timePart.len > 0:
-                spans.add(newSpan(timePart, eventFont))
-              spans.add(newSpan(namePart, eventBoldFont))
+                spans.add(newSpan(timePart, eventTimeFont))
+              spans.add(newSpan(namePart, eventTitleFont))
             # Add newline between lines (except after the last)
             if li < linesToDraw.high:
-              spans.add(newSpan("\n", eventFont))
+              spans.add(newSpan("\n", eventTimeFont))
 
           let eventsTypes = typeset(
             spans = spans,
