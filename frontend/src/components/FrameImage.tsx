@@ -72,8 +72,8 @@ export function FrameImage({
           src={imageUrl ? imageUrl + (thumb ? (imageUrl.includes('?') ? '&thumb=1' : '?thumb=1') : '') : undefined}
           onLoad={() => setIsLoading(false)}
           onError={() => setIsLoading(false)}
-          style={{
-            ...(frame.width && frame.height && !imageUrl
+          style={
+            frame.width && frame.height
               ? {
                   aspectRatio:
                     frame.rotate === 90 || frame.rotate === 270
@@ -82,8 +82,8 @@ export function FrameImage({
                   maxWidth: 'inherit',
                   maxHeight: 'inherit',
                 }
-              : {}),
-          }}
+              : {}
+          }
           alt=""
         />
       )}
