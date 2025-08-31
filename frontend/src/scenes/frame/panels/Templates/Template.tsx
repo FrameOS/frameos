@@ -112,7 +112,7 @@ export function TemplateRow({
                   ...(saveRemoteAsLocal
                     ? [
                         {
-                          label: 'Save template locally',
+                          label: 'Save to "My scenes"',
                           onClick: () => saveRemoteAsLocal(template),
                           icon: <ArrowDownTrayIcon className="w-5 h-5" />,
                         },

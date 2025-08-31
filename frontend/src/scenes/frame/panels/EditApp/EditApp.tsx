@@ -2,19 +2,18 @@ import { useActions, useValues } from 'kea'
 import { editAppLogic, EditAppLogicProps } from './editAppLogic'
 import { Button } from '../../../../components/Button'
 import Editor from '@monaco-editor/react'
-import { AppNodeData, PanelWithMetadata } from '../../../../types'
+import { PanelWithMetadata } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import schema from '../../../../../schema/config_json.json'
 import type { editor as importedEditor } from 'monaco-editor'
 import type { Monaco } from '@monaco-editor/react'
 import clsx from 'clsx'
-import { BeakerIcon, TrashIcon } from '@heroicons/react/24/solid'
-import { Spinner } from '../../../../components/Spinner'
+import { TrashIcon } from '@heroicons/react/24/solid'
 import { TextArea } from '../../../../components/TextArea'
-import { Markdown } from '../../../../components/Markdown'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { Label } from '../../../../components/Label'
 
 interface EditAppProps {
   panel: PanelWithMetadata
@@ -40,14 +39,13 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
     changedFiles,
     configJson,
     modelMarkers,
-    enhanceSuggestion,
-    enhanceSuggestionLoading,
     prompt,
+    fullPrompt,
+    fullPromptCopied,
     savedKeyword,
     savedSources,
-    title,
   } = useValues(logic)
-  const { saveChanges, setActiveFile, updateFile, enhance, addFile, deleteFile, setPrompt } = useActions(logic)
+  const { saveChanges, setActiveFile, updateFile, copyFullPrompt, addFile, deleteFile, setPrompt } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
@@ -112,16 +110,7 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
               {changedFiles[file] ? '* ' : ''}
               {file}
             </Button>
-            {file === 'app.nim' ? (
-              <Button
-                color={activeFile === 'app.nim/suggestion' ? 'primary' : 'gray'}
-                size="small"
-                title={'Talk to ChatGPT'}
-                onClick={() => setActiveFile('app.nim/suggestion')}
-              >
-                {enhanceSuggestionLoading ? <Spinner color="white" /> : <BeakerIcon className="w-5 h-5" />}
-              </Button>
-            ) : file === 'config.json' ? null : (
+            {file === 'app.nim' ? null : file === 'config.json' ? null : (
               <DropdownMenu
                 buttonColor="none"
                 items={[
@@ -141,10 +130,20 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
             + Add file
           </Button>
         </div>
+
+        <div>
+          <Button
+            color={activeFile === '__ask_a_llm' ? 'primary' : 'none'}
+            size="small"
+            onClick={() => setActiveFile('__ask_a_llm')}
+          >
+            ? Ask a LLM
+          </Button>
+        </div>
       </div>
 
       <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
-        {!savedSources && !hasChanges ? (
+        {!savedSources && !hasChanges && activeFile !== '__ask_a_llm' ? (
           <div className="bg-gray-950 p-2">
             You're editing a read-only system app <strong>{name}</strong>. Changes will be saved on a copy on the scene.
           </div>
@@ -156,24 +155,14 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
             </Button>
           </div>
         ) : null}
-        {activeFile === 'app.nim/suggestion' ? (
+        {activeFile === '__ask_a_llm' ? (
           <div className="p-4 bg-gray-700 text-md overflow-y-auto overflow-x-auto w-full space-y-4">
-            <p>
-              Ask a question about <code>app.nim</code> from GPT-4. Keep an eye on your{' '}
-              <a
-                href="https://platform.openai.com/account/usage"
-                className="text-blue-400 hover:underline"
-                rel="noreferrer noopener"
-              >
-                billing
-              </a>
-              !
-            </p>
-            <TextArea value={prompt} onChange={setPrompt} rows={3} />
-            <Button onClick={enhanceSuggestionLoading ? () => {} : enhance}>
-              {enhanceSuggestionLoading ? <Spinner color="white" /> : 'Ask'}
-            </Button>
-            <Markdown value={enhanceSuggestion ?? ''} />
+            <p>Enter your querstion/request, and copy a sources-included version to your favourite LLM.</p>
+            <Label>Your question/request regarding this app</Label>
+            <TextArea value={prompt} autoFocus onChange={setPrompt} rows={3} />
+            <Label>Preview of the final prompt we will copy</Label>
+            <TextArea value={fullPrompt} disabled rows={3} />
+            <Button onClick={copyFullPrompt}>{fullPromptCopied ? 'Copied!' : 'Copy to clipboard'}</Button>
           </div>
         ) : (
           <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full flex-1">

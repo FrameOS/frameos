@@ -23,6 +23,23 @@ export interface SourceError {
   error: string
 }
 
+const DEFAULT_PROMPT = 'Make this app better.'
+const SYSTEM_PROMPT = `
+You are editing a FrameOS app written in Nim. You have access to the Nim version 2.2 STL and the following nimble packages: 
+pixie v5, chrono 0.3.1, checksums 0.2.1, ws 0.5.0, psutil 0.6.0, QRGen 3.1.0, zippy 0.10, chroma 0.2.7, bumpy 1.1.2
+
+Return the modified files in full with the changes inlined. Only modify what is necessary.
+
+Make these changes: `
+
+const SYSTEM_PROMPT_2 = `
+
+-------------
+Here are the relevant files of the app:
+
+
+`
+
 export const editAppLogic = kea<editAppLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'EditApp', 'editAppLogic']),
   props({} as EditAppLogicProps),
@@ -38,11 +55,12 @@ export const editAppLogic = kea<editAppLogicType>([
     setInitialSources: (sources: Record<string, string>) => ({ sources }),
     validateSource: (file: string, source: string, initial: boolean = false) => ({ file, source, initial }),
     setSourceErrors: (file: string, errors: SourceError[]) => ({ file, errors }),
-    enhance: true,
     setPrompt: (prompt: string) => ({ prompt }),
     resetEnhanceSuggestion: true,
     addFile: true,
     deleteFile: (file: string) => ({ file }),
+    copyFullPrompt: true,
+    resetFullPromptCopied: true,
   }),
   selectors({
     app: [
@@ -73,25 +91,6 @@ export const editAppLogic = kea<editAppLogicType>([
         },
       },
     ],
-    enhanceSuggestion: [
-      null as string | null,
-      {
-        enhance: async () => {
-          const source = values.sources['app.nim']
-          const prompt = values.prompt
-          const response = await apiFetch(`/api/apps/enhance_source`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt, source }),
-          })
-          const { suggestion, error } = await response.json()
-          if (error) {
-            return error.message || String(error)
-          }
-          return suggestion
-        },
-      },
-    ],
   })),
   reducers(({ props }) => ({
     activeFile: [
@@ -103,7 +102,8 @@ export const editAppLogic = kea<editAppLogicType>([
       },
     ],
     prompt: [
-      'What can I improve here?' as string,
+      DEFAULT_PROMPT as string,
+      { persist: true },
       {
         setPrompt: (_, { prompt }) => prompt,
       },
@@ -116,12 +116,6 @@ export const editAppLogic = kea<editAppLogicType>([
         return newState
       },
     },
-    enhanceSuggestion: [
-      null as string | null,
-      {
-        resetEnhanceSuggestion: () => null,
-      },
-    ],
     initialSources: [
       {} as Record<string, string>,
       {
@@ -135,6 +129,7 @@ export const editAppLogic = kea<editAppLogicType>([
         setSourceErrors: (state, { file, errors }) => ({ ...state, [file]: errors }),
       },
     ],
+    fullPromptCopied: [false, { copyFullPrompt: () => true, resetFullPromptCopied: () => false }],
   })),
   selectors({
     hasChanges: [
@@ -195,6 +190,17 @@ export const editAppLogic = kea<editAppLogicType>([
         return [...first, ...rest]
       },
     ],
+    fullPrompt: [
+      (s) => [s.prompt, s.sources],
+      (prompt, sources) => {
+        const sourceEntries = Object.entries(sources)
+        return (
+          `${SYSTEM_PROMPT}${prompt}${SYSTEM_PROMPT_2}\n\n${sourceEntries
+            .map(([file, content]) => `# ${file}\n\`\`\`\n${content}\n\`\`\``)
+            .join('\n\n\n-------\n\n')}`.trim() + '\n'
+        )
+      },
+    ],
   }),
   listeners(({ actions, props, values }) => ({
     saveChanges: () => {
@@ -224,15 +230,18 @@ export const editAppLogic = kea<editAppLogicType>([
       }
       actions.setSourceErrors(file, errors || [])
     },
-    enhanceSuccess: () => {
-      actions.setActiveFile('app.nim/suggestion')
-    },
     addFile: () => {
       const fileName = window.prompt('Enter file name')
       if (fileName) {
         actions.updateFile(fileName, '')
         actions.setActiveFile(fileName)
       }
+    },
+    copyFullPrompt: async (_, breakpoint) => {
+      const fullPrompt = values.fullPrompt
+      navigator.clipboard.writeText(fullPrompt)
+      await breakpoint(3000)
+      actions.resetFullPromptCopied()
     },
   })),
   afterMount(({ actions, values }) => {

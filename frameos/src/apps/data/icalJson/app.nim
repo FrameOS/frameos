@@ -6,6 +6,7 @@ import strutils
 import frameos/apps
 import frameos/types
 import chrono
+import frameos/utils/period
 
 import ./ical
 
@@ -24,7 +25,7 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc get*(self: App, context: ExecutionContext): JsonNode =
+proc get*(self: App; context: ExecutionContext): JsonNode =
   result = %*[]
   if self.appConfig.iCal.startsWith("http"):
     self.logError "Pass in iCal data as a string, not a URL."
@@ -34,10 +35,18 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
     return
 
   let timezone = if self.frameConfig.timeZone != "": self.frameConfig.timeZone else: "UTC"
-  let startTs = if self.appConfig.exportFrom == "": epochTime().Timestamp
-                else: parseTs("{year/4}-{month/2}-{day/2}", self.appConfig.exportFrom, timezone)
-  let endTs = if self.appConfig.exportUntil == "": (epochTime() + 366 * 24 * 60 * 60).Timestamp
-              else: parseTs("{year/4}-{month/2}-{day/2}", self.appConfig.exportUntil, timezone)
+
+  let startTs =
+    if self.appConfig.exportFrom == "":
+      epochTime().Timestamp
+    else:
+      parsePeriodBoundary(self.appConfig.exportFrom, timezone, true)
+
+  let endTs =
+    if self.appConfig.exportUntil == "":
+      (epochTime() + 366.0 * 24.0 * 60.0 * 60.0).Timestamp
+    else:
+      parsePeriodBoundary(self.appConfig.exportUntil, timezone, false)
 
   var parsedCalendar: ParsedCalendar
   try:

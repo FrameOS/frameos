@@ -50,6 +50,14 @@ export function StateFieldEdit({
       value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
       onChange={onChange}
     />
+  ) : field.type === 'color' ? (
+    <TextInput
+      placeholder={field.placeholder}
+      value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
+      type="color"
+      onChange={onChange}
+      className="!p-0"
+    />
   ) : (
     <TextInput
       placeholder={field.placeholder}
