@@ -274,7 +274,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
           ? String(app?.name ?? configJson?.name ?? 'App')
           : scene
           ? String(scene?.name ?? 'Scene')
-          : 'Node'
+          : configJson?.name || 'Node'
       },
     ],
     isCustomApp: [
