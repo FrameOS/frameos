@@ -1,0 +1,20 @@
+{
+  "name": "Log JSON",
+  "description": "Log a JSON object",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "inputJson",
+      "type": "json",
+      "required": false,
+      "label": "Input JSON"
+    }
+  ],
+  "output": [
+    {
+      "name": "outputJson",
+      "type": "json"
+    }
+  ]
+}
