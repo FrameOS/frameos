@@ -75,28 +75,35 @@ export const editAppLogic = kea<editAppLogicType>([
     savedSources: [(s) => [s.appData], (appData): Record<string, string> | null => appData?.sources || null],
     savedKeyword: [(s) => [s.appData], (appData): string | null => appData?.keyword || null],
   }),
-  loaders(({ props, values }) => ({
+  loaders(({ actions, values }) => ({
     sources: [
       {} as Record<string, string>,
       {
         loadSources: async () => {
+          const files = ['README.md', 'app.nim', 'config.nim']
+          let sources: Record<string, string> = {}
           if (values.savedSources) {
-            return values.savedSources
-          }
-          if (values.savedKeyword) {
+            sources = values.savedSources
+          } else if (values.savedKeyword) {
             const response = await apiFetch(`/api/apps/source?keyword=${encodeURIComponent(values.savedKeyword)}`)
-            return await response.json()
+            sources = await response.json()
           }
-          return {}
+          for (const file of files) {
+            if (file in sources) {
+              actions.setActiveFile(file)
+              break
+            }
+          }
+          return sources
         },
       },
     ],
   })),
   reducers(({ props }) => ({
     activeFile: [
-      'app.nim' as string,
+      '' as string,
       {
-        setActiveFile: (state, { file }) => file,
+        setActiveFile: (_, { file }) => file,
         resetEnhanceSuggestion: (state) => (state === 'app.nim/suggestion' ? 'app.nim' : state),
         deleteFile: (state, { file }) => (state === file ? 'app.nim' : state),
       },
