@@ -74,6 +74,13 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
+# Small record describing one visual line inside a day cell
+type
+  EventLine = object
+    display*: string  # what we will draw on the line
+    isAllDay*: bool   # if true we draw a colored chip behind it
+    color*: ColorRGBA # base color for all-day chips
+
 # quick-and-simple width-based truncation so each line stays on one row
 proc truncateToWidth(text: string, fontSize, maxWidth: float32): string =
   # Average glyph width heuristic ~55% of font size
@@ -84,31 +91,136 @@ proc truncateToWidth(text: string, fontSize, maxWidth: float32): string =
   if maxChars <= 1: return "…"
   result = text[0 .. max(0, maxChars - 2)] & "…"
 
-proc groupEvents*(self: App): Table[string, seq[string]] =
-  result = initTable[string, seq[string]]()
+# --- Colors for all-day pills -------------------------------------------------
+# Google-ish palette; deterministic assignment by hashing event title.
+const palette: array[10, ColorRGBA] = [
+  rgba(66, 133, 244, 255), # blue
+  rgba(52, 168, 83, 255),  # green
+  rgba(251, 188, 5, 255),  # yellow/amber
+  rgba(234, 67, 53, 255),  # red
+  rgba(142, 36, 170, 255), # purple
+  rgba(0, 172, 193, 255),  # teal
+  rgba(244, 180, 0, 255),  # amber 600
+  rgba(171, 71, 188, 255), # purple 400
+  rgba(3, 155, 229, 255),  # light blue
+  rgba(255, 128, 171, 255) # pink
+]
+
+proc hashTitle(s: string): uint32 =
+  var h: uint32 = 5381
+  for ch in s:
+    h = ((h shl 5) + h) + uint32(ord(ch)) # djb2
+  h
+
+proc pickColor(title: string): ColorRGBA =
+  palette[int(hashTitle(title) mod uint32(palette.len))]
+
+# Create a translucent fill for the chip
+proc withAlpha(c: ColorRGBA, a: float32): ColorRGBA = rgba(c.r, c.g, c.b, (a * 255).uint8)
+
+# --- Helpers for robust all-day detection ------------------------------------
+
+proc getBoolLoose(n: JsonNode; defaultVal = false): bool =
+  ## Returns a boolean even if the JSON value is a string/int like "true"/1.
+  if n.isNil: return defaultVal
+  case n.kind
+  of JBool: n.getBool()
+  of JString:
+    let s = n.getStr().toLowerAscii()
+    (s in ["true", "1", "yes", "y"])
+  of JInt: n.getInt() != 0
+  of JFloat: n.getFloat() != 0.0
+  else: defaultVal
+
+proc looksLikeAllDay(startStr: string): bool =
+  ## Consider YYYY-MM-DD (length 10) as all-day.
+  ## Many feeds encode all-day starts without a time.
+  if startStr.len == 10: return true
+  # If we have a time part, treat "00:00" as possibly all-day
+  if startStr.len >= 16:
+    let hhmm = startStr[11..15]
+    if hhmm == "00:00": return true
+  false
+
+# Date utils for expanding multi-day events (no timezone assumptions needed)
+proc parseYMD(s: string; y, m, d: var int): bool =
+  if s.len < 10: return false
+  try:
+    y = parseInt(s[0..3])
+    m = parseInt(s[5..6])
+    d = parseInt(s[8..9])
+    return true
+  except CatchableError:
+    return false
+
+proc cmpYMD(aY, aM, aD, bY, bM, bD: int): int =
+  ## -1 if a<b, 0 if a=b, 1 if a>b
+  if aY != bY: return (if aY < bY: -1 else: 1)
+  if aM != bM: return (if aM < bM: -1 else: 1)
+  if aD != bD: return (if aD < bD: -1 else: 1)
+  0
+
+proc incOneDay(y, m, d: var int) =
+  var dd = d + 1
+  var mm = m
+  var yy = y
+  let dim = daysInMonth(yy, mm)
+  if dd > dim:
+    dd = 1
+    mm.inc
+    if mm > 12:
+      mm = 1
+      yy.inc
+  y = yy; m = mm; d = dd
+
+# -----------------------------------------------------------------------------
+
+# add these helpers (above `groupEvents`)
+proc makeLine(self: App; summary, start: string; isAllDay: bool): EventLine =
+  var display = summary
+  if self.appConfig.showEventTimes and not isAllDay and start.len >= 16:
+    let timeStr = start[11..15]
+    if timeStr.len > 0: display = timeStr & " " & summary
+  EventLine(display: display, isAllDay: isAllDay, color: pickColor(summary))
+
+proc addEventLine(t: var Table[string, seq[EventLine]], key: string, line: EventLine) =
+  if not t.hasKey(key): t[key] = @[]
+  t[key].add(line)
+
+proc groupEvents*(self: App): Table[string, seq[EventLine]] =
+  result = initTable[string, seq[EventLine]]()
   let events = self.appConfig.events
   if events == nil or events.kind != JArray:
     return
   for ev in events.items():
     let summary = ev{"summary"}.getStr()
     let start = ev{"startTime"}.getStr()
-    if start.len >= 10:
-      let key = start[0..9]
-      if not result.hasKey(key):
-        result[key] = @[]
+    let endStr = ev{"endTime"}.getStr("")
 
-      # Build display text, optionally prefixing time(s).
-      # Default: show ONLY the start time; ensure a space before the title.
-      var display = summary
-      let isAllDay = ev{"allDay"}.getBool(false)
-      if self.appConfig.showEventTimes and not isAllDay:
-        var timeStr = ""
-        if start.len >= 16:
-          timeStr = start[11..15] # HH:MM from ISO string
-        if timeStr.len > 0:
-          display = timeStr & " " & summary # <-- add a space between time and event name
+    # Robustly detect all-day across different payload styles.
+    var isAllDay =
+      getBoolLoose(ev{"allDay"}) or
+      getBoolLoose(ev{"all_day"}) or
+      getBoolLoose(ev{"isAllDay"}) or
+      getBoolLoose(ev{"allday"}) or
+      looksLikeAllDay(start)
 
-      result[key].add(display)
+    # If we have an endTime and the event is (or looks) all-day/date-only, expand across each day (inclusive)
+    var sy, sm, sd, ey, em, ed: int
+    if endStr.len >= 10 and parseYMD(start, sy, sm, sd) and parseYMD(endStr, ey, em, ed) and (isAllDay or start.len == 10):
+      # Ensure start <= end; if not, clamp to start
+      var y = sy; var m = sm; var d = sd
+      if cmpYMD(sy, sm, sd, ey, em, ed) > 0:
+        addEventLine(result, &"{y:04}-{m:02}-{d:02}", self.makeLine(summary, start, isAllDay))
+      else:
+        var guard = 0
+        while cmpYMD(y, m, d, ey, em, ed) <= 0 and guard < 1000:
+          addEventLine(result, &"{y:04}-{m:02}-{d:02}", self.makeLine(summary, start, isAllDay))
+          incOneDay(y, m, d)
+          inc guard
+    else:
+      if start.len >= 10:
+        addEventLine(result, start[0..9], self.makeLine(summary, start, isAllDay))
 
 proc render*(self: App, context: ExecutionContext, image: Image) =
   # Current date/time (use LOCAL time zone; FrameOS sets TZ to the user's zone, e.g., Europe/Brussels)
@@ -309,7 +421,6 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
         var visibleCount = 0
         var needMoreLine = false
         let total = eventsByDay[key].len
-        var linesToDraw: seq[string] = @[]
 
         if total > maxLines and maxLines > 0:
           visibleCount = max(0, maxLines - 1) # reserve last line for "+N more"
@@ -317,46 +428,71 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
         else:
           visibleCount = min(total, maxLines)
 
+        # Build the actual lines (possibly trimmed) we will draw
+        var linesToDraw: seq[EventLine] = @[]
         for i in 0 ..< visibleCount:
-          let raw = eventsByDay[key][i]
-          let trimmed = truncateToWidth(raw, self.appConfig.eventFontSize.float32, cellWidth - 6f)
-          linesToDraw.add(trimmed)
+          var ev = eventsByDay[key][i]
+          let trimW = if ev.isAllDay: (cellWidth - 12f) else: (cellWidth - 6f)
+          ev.display = truncateToWidth(ev.display, self.appConfig.eventFontSize.float32, trimW)
+          linesToDraw.add(ev)
 
         if needMoreLine and maxLines > 0:
           let remaining = total - visibleCount
           if remaining > 0:
-            let moreText = &"+{remaining} more"
-            # Truncate just in case (very narrow cells)
-            linesToDraw.add(truncateToWidth(moreText, self.appConfig.eventFontSize.float32, cellWidth - 6f))
+            linesToDraw.add(EventLine(display: &"+{remaining} more", isAllDay: false, color: rgba(0, 0, 0, 0)))
 
-        if linesToDraw.len > 0:
-          # Build spans so that event NAMES are bold. Timed events look like "HH:MM Title".
+        # Draw each line individually so we can paint chips for all-day events
+        let baseY = y + self.appConfig.dateFontSize.float32 + 6f
+        for li, line in linesToDraw:
+          let yLine = baseY + li.float32 * lineH
+
+          if line.isAllDay and not line.display.startsWith("+"):
+            # Chip background (fill + subtle border) similar to Google Calendar
+            let padX = 4f
+            let padY = 1f
+            let chipW = cellWidth - (padX * 2)
+            let chipH = lineH - (padY * 2)
+            let chipX = x + padX
+            let chipY = yLine + padY
+            var chip = newImage(chipW.int, chipH.int)
+            chip.fill(withAlpha(line.color, 0.18))
+            image.draw(chip, translate(vec2(chipX, chipY)))
+            # simple 1px inner border
+            var topB = newImage(chipW.int, 1)
+            topB.fill(withAlpha(line.color, 0.55))
+            image.draw(topB, translate(vec2(chipX, chipY)))
+            image.draw(topB, translate(vec2(chipX, chipY + chipH - 1)))
+            var sideB = newImage(1, chipH.int)
+            sideB.fill(withAlpha(line.color, 0.55))
+            image.draw(sideB, translate(vec2(chipX, chipY)))
+            image.draw(sideB, translate(vec2(chipX + chipW - 1, chipY)))
+
+          # Build text for the line (time part + bold title for timed events)
           var spans: seq[Span] = @[]
-          for li, line in linesToDraw:
-            if needMoreLine and (li == linesToDraw.high) and line.startsWith("+"):
-              # The "+N more" line should not be bolded.
-              spans.add(newSpan(line, eventTimeFont))
+          if line.display.len >= 6 and line.display[2] == ':' and line.display[5] == ' ':
+            let timePart = line.display[0..4] & " "
+            let namePart = line.display[6..^1]
+            spans.add(newSpan(timePart, eventTimeFont))
+            spans.add(newSpan(namePart, eventTitleFont))
+          else:
+            # Either an all-day event line or the "+N more" line
+            if line.display.startsWith("+"):
+              spans.add(newSpan(line.display, eventTimeFont))
             else:
-              # If the line starts with "HH:MM ", split time and name. Otherwise, the whole line is the name.
-              var timePart = ""
-              var namePart = line
-              if line.len >= 6 and line[2] == ':' and line[5] == ' ':
-                timePart = line[0..4] & " "
-                namePart = line[6..^1]
-              if timePart.len > 0:
-                spans.add(newSpan(timePart, eventTimeFont))
-              spans.add(newSpan(namePart, eventTitleFont))
-            # Add newline between lines (except after the last)
-            if li < linesToDraw.high:
-              spans.add(newSpan("\n", eventTimeFont))
+              spans.add(newSpan(line.display, eventTitleFont))
 
-          let eventsTypes = typeset(
+          let bx = x + (if line.isAllDay and not line.display.startsWith("+"): 8f else: 4f)
+          let bw = cellWidth - (if line.isAllDay and not line.display.startsWith("+"): 12f else: 6f)
+          let bH = if line.isAllDay and not line.display.startsWith("+"): (lineH - 2f) else: lineH
+
+          let types = typeset(
             spans = spans,
-            bounds = vec2(cellWidth - 6f, min(availableH, lineH * linesToDraw.len.float32)),
+            bounds = vec2(bw, bH),
             hAlign = LeftAlign,
-            vAlign = TopAlign,
+            vAlign = if line.isAllDay and not line.display.startsWith("+"): MiddleAlign else: TopAlign,
           )
-          image.fillText(eventsTypes, translate(vec2(x + 4f, y + self.appConfig.dateFontSize.float32 + 6f)))
+          image.fillText(types, translate(vec2(bx, yLine + (if line.isAllDay and not line.display.startsWith(
+              "+"): 1f else: 0f))))
       day += 1
     if day > days:
       break
