@@ -64,12 +64,12 @@ patterns=(
     # "frameos/src/frameos/config.nim"
     # "frameos/src/frameos/types.nim"
     # "frameos/src/frameos/*.nim"
-    # "frameos/src/frameos/utils/*.nim"
+    "frameos/src/frameos/utils/*.nim"
     # "frameos/src/scenes/*.nim"
     # "frameos/src/drivers/drivers.nim"
     # "frameos/src/apps/*/*/*"
-    "frameos/src/apps/render/calendar/*"
-    "frameos/src/apps/render/calendar/*/*.*"
+    "frameos/src/apps/render/text/*"
+    # "frameos/src/apps/render/text/*/*.*"
 )
 
 for pattern in "${patterns[@]}"; do
