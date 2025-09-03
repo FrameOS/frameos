@@ -71,6 +71,10 @@ type
                                    # (fill is intentionally omitted to avoid covering text)
     showEventTimes*: bool          # show times next to non all-day events
 
+    # new fields
+    scale*: int                    # scale percentage (100 = default)
+    palette*: string               # palette selector for all-day chips
+
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
@@ -91,9 +95,9 @@ proc truncateToWidth(text: string, fontSize, maxWidth: float32): string =
   if maxChars <= 1: return "…"
   result = text[0 .. max(0, maxChars - 2)] & "…"
 
-# --- Colors for all-day pills -------------------------------------------------
-# Google-ish palette; deterministic assignment by hashing event title.
-const palette: array[10, ColorRGBA] = [
+# --- Palettes for all-day pills ----------------------------------------------
+# Default (Google-ish) palette
+const paletteDefault: array[10, ColorRGBA] = [
   rgba(66, 133, 244, 255), # blue
   rgba(52, 168, 83, 255),  # green
   rgba(251, 188, 5, 255),  # yellow/amber
@@ -106,14 +110,87 @@ const palette: array[10, ColorRGBA] = [
   rgba(255, 128, 171, 255) # pink
 ]
 
+# a) Dark tones (muted/deep shades)
+const paletteDarkTones: array[10, ColorRGBA] = [
+  rgba(33, 47, 60, 255),  # dark blue-gray
+  rgba(27, 79, 114, 255), # deep blue
+  rgba(14, 98, 81, 255),  # deep teal
+  rgba(74, 35, 90, 255),  # deep purple
+  rgba(100, 30, 22, 255), # deep red
+  rgba(20, 90, 50, 255),  # forest
+  rgba(90, 66, 0, 255),   # dark amber
+  rgba(55, 71, 79, 255),  # blue gray
+  rgba(40, 55, 71, 255),  # steel
+  rgba(0, 51, 51, 255)    # dark cyan
+]
+
+# b) Red/Black/White only (for tri-color displays)
+const paletteRedBlackWhite: array[6, ColorRGBA] = [
+  rgba(255, 0, 0, 255),     # red
+  rgba(200, 0, 0, 255),     # dark red
+  rgba(120, 0, 0, 255),     # deeper red
+  rgba(0, 0, 0, 255),       # black
+  rgba(255, 255, 255, 255), # white
+  rgba(80, 80, 80, 255)     # gray (renders black on many tri-color panels)
+]
+
+# c) High contrast bright tones (saturated)
+const paletteBrightHighContrast: array[10, ColorRGBA] = [
+  rgba(0, 122, 255, 255),  # bright blue
+  rgba(52, 199, 89, 255),  # bright green
+  rgba(255, 149, 0, 255),  # orange
+  rgba(255, 59, 48, 255),  # bright red
+  rgba(175, 82, 222, 255), # violet
+  rgba(90, 200, 250, 255), # sky
+  rgba(255, 204, 0, 255),  # yellow
+  rgba(64, 156, 255, 255), # azure
+  rgba(255, 45, 85, 255),  # pink
+  rgba(48, 209, 88, 255)   # green 2
+]
+
+# d) High contrast overall (including extremes)
+const paletteHighContrast: array[8, ColorRGBA] = [
+  rgba(0, 0, 0, 255),       # black
+  rgba(255, 255, 255, 255), # white
+  rgba(255, 0, 0, 255),     # red
+  rgba(0, 255, 0, 255),     # green
+  rgba(0, 0, 255, 255),     # blue
+  rgba(255, 255, 0, 255),   # yellow
+  rgba(255, 0, 255, 255),   # magenta
+  rgba(0, 255, 255, 255)    # cyan
+]
+
+# e) Rainbow (ROYGBIV-ish)
+const paletteRainbow: array[8, ColorRGBA] = [
+  rgba(255, 0, 0, 255),   # red
+  rgba(255, 127, 0, 255), # orange
+  rgba(255, 255, 0, 255), # yellow
+  rgba(0, 200, 0, 255),   # green
+  rgba(0, 150, 255, 255), # blue
+  rgba(75, 0, 130, 255),  # indigo-esque
+  rgba(148, 0, 211, 255), # violet
+  rgba(0, 0, 0, 255)      # black separator
+]
+
+proc getPalette(self: App): seq[ColorRGBA] =
+  let key = self.appConfig.palette.toLowerAscii()
+  case key
+  of "darktones": @paletteDarkTones
+  of "redblackwhite": @paletteRedBlackWhite
+  of "brighthighcontrast": @paletteBrightHighContrast
+  of "highcontrast": @paletteHighContrast
+  of "rainbow": @paletteRainbow
+  else: @paletteDefault
+
 proc hashTitle(s: string): uint32 =
   var h: uint32 = 5381
   for ch in s:
     h = ((h shl 5) + h) + uint32(ord(ch)) # djb2
   h
 
-proc pickColor(title: string): ColorRGBA =
-  palette[int(hashTitle(title) mod uint32(palette.len))]
+proc pickColor(self: App, title: string): ColorRGBA =
+  let pal = self.getPalette()
+  pal[int(hashTitle(title) mod uint32(pal.len))]
 
 # Create a translucent fill for the chip
 proc withAlpha(c: ColorRGBA, a: float32): ColorRGBA = rgba(c.r, c.g, c.b, (a * 255).uint8)
@@ -181,7 +258,7 @@ proc makeLine(self: App; summary, start: string; isAllDay: bool): EventLine =
   if self.appConfig.showEventTimes and not isAllDay and start.len >= 16:
     let timeStr = start[11..15]
     if timeStr.len > 0: display = timeStr & " " & summary
-  EventLine(display: display, isAllDay: isAllDay, color: pickColor(summary))
+  EventLine(display: display, isAllDay: isAllDay, color: pickColor(self, summary))
 
 proc addEventLine(t: var Table[string, seq[EventLine]], key: string, line: EventLine) =
   if not t.hasKey(key): t[key] = @[]
@@ -232,6 +309,9 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
   let month = if self.appConfig.month == 0: defaultMonth else: self.appConfig.month
   let isCurrentMonth = (year == defaultYear) and (month == defaultMonth)
 
+  # Scale (percentage -> factor)
+  let s = max(0.01'f32, self.appConfig.scale.float32 / 100.0'f32)
+
   # Calendar structure
   let startMonday = self.appConfig.startWeekOnMonday
   let days = daysInMonth(year, month)
@@ -241,9 +321,9 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
   let rows = (totalCells + 6) div 7
 
   # Layout areas
-  let p = max(self.appConfig.padding, 0).float32
-  let bw = max(self.appConfig.borderWidth, 0.0).float32
-  let gridStroke = max(self.appConfig.gridWidth, 1.0).float32
+  let p = max(self.appConfig.padding, 0).float32 * s
+  let bw = max(self.appConfig.borderWidth, 0.0).float32 * s
+  let gridStroke = max(self.appConfig.gridWidth, 1.0).float32 * s
 
   image.fill(self.appConfig.backgroundColor)
 
@@ -276,9 +356,9 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
   let regionH = contentH - 2f*bw
 
   # Heights (use split sizes)
-  let weekdayHeaderHeight = self.appConfig.weekdayFontSize.float32 * 1.5
+  let weekdayHeaderHeight = self.appConfig.weekdayFontSize.float32 * s * 1.5
   let titleShown = self.appConfig.showMonthYear and (self.appConfig.monthYearPosition.toLowerAscii() in ["top", "bottom"])
-  let titleHeight = if titleShown: self.appConfig.titleFontSize.float32 * 1.8 else: 0f
+  let titleHeight = if titleShown: self.appConfig.titleFontSize.float32 * s * 1.8 else: 0f
   let topTitle = if titleShown and self.appConfig.monthYearPosition.toLowerAscii() == "top": titleHeight else: 0f
   let bottomTitle = if titleShown and self.appConfig.monthYearPosition.toLowerAscii() == "bottom": titleHeight else: 0f
 
@@ -286,17 +366,17 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
   let cellWidth = regionW / 7.0
   let cellHeight = gridHeight / rows.float32
 
-  # Fonts
+  # Fonts (apply scaling)
   let titleTypeface = getTypeface(self.appConfig.titleFont, self.frameConfig.assetsPath)
-  let titleFont = newFont(titleTypeface, self.appConfig.titleFontSize, self.appConfig.titleTextColor)
+  let titleFont = newFont(titleTypeface, self.appConfig.titleFontSize * s, self.appConfig.titleTextColor)
   let weekdayTypeface = getTypeface(self.appConfig.weekdayFont, self.frameConfig.assetsPath)
-  let weekdayFont = newFont(weekdayTypeface, self.appConfig.weekdayFontSize, self.appConfig.weekdayTextColor)
+  let weekdayFont = newFont(weekdayTypeface, self.appConfig.weekdayFontSize * s, self.appConfig.weekdayTextColor)
   let dateTypeface = getTypeface(self.appConfig.dateFont, self.frameConfig.assetsPath)
-  let dateFont = newFont(dateTypeface, self.appConfig.dateFontSize, self.appConfig.dateTextColor)
+  let dateFont = newFont(dateTypeface, self.appConfig.dateFontSize * s, self.appConfig.dateTextColor)
   let eventTimeTypeface = getTypeface(self.appConfig.eventTimeFont, self.frameConfig.assetsPath)
-  let eventTimeFont = newFont(eventTimeTypeface, self.appConfig.eventFontSize, self.appConfig.eventTimeColor)
+  let eventTimeFont = newFont(eventTimeTypeface, self.appConfig.eventFontSize * s, self.appConfig.eventTimeColor)
   let eventTitleTypeface = getTypeface(self.appConfig.eventTitleFont, self.frameConfig.assetsPath)
-  let eventTitleFont = newFont(eventTitleTypeface, self.appConfig.eventFontSize, self.appConfig.eventTitleColor)
+  let eventTitleFont = newFont(eventTitleTypeface, self.appConfig.eventFontSize * s, self.appConfig.eventTitleColor)
 
   # Title (Month Year) at top or bottom
   if titleShown:
@@ -385,7 +465,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
 
       # Highlight "today" with a stroke rectangle
       if isCurrentMonth and day == todayDay:
-        let stroke = max(2, (self.appConfig.gridWidth * 2).int)
+        let stroke = max(2, (self.appConfig.gridWidth * s * 2).int)
         # top
         var t = newImage(cellWidth.int, stroke)
         t.fill(self.appConfig.todayStrokeColor)
@@ -401,20 +481,23 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
 
       # Date number
       let dateText = $day
+      let datePadX = 4f * s
+      let datePadY = 3f * s
+      let dateBoundsH = self.appConfig.dateFontSize.float32 * s + 6f * s
       let dateTypes = typeset(
         spans = [newSpan(dateText, dateFont)],
-        bounds = vec2(cellWidth - 6f, self.appConfig.dateFontSize.float32 + 6f),
+        bounds = vec2(cellWidth - (datePadX + 2f*s), dateBoundsH),
         hAlign = LeftAlign,
         vAlign = TopAlign,
       )
-      image.fillText(dateTypes, translate(vec2(x + 4f, y + 3f)))
+      image.fillText(dateTypes, translate(vec2(x + datePadX, y + datePadY)))
 
       # Events
       let key = &"{year:04}-{month:02}-{day:02}"
       if eventsByDay.hasKey(key):
         # Determine how many lines fit and truncate each line to stay on one row.
-        let availableH = cellHeight - self.appConfig.dateFontSize.float32 - 9f
-        let lineH = self.appConfig.eventFontSize.float32 + 2f
+        let availableH = cellHeight - (self.appConfig.dateFontSize.float32 * s) - 9f*s
+        let lineH = (self.appConfig.eventFontSize.float32 * s) + 2f*s
         var maxLines = int(availableH / lineH)
         if maxLines < 0: maxLines = 0
 
@@ -432,8 +515,8 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
         var linesToDraw: seq[EventLine] = @[]
         for i in 0 ..< visibleCount:
           var ev = eventsByDay[key][i]
-          let trimW = if ev.isAllDay: (cellWidth - 12f) else: (cellWidth - 6f)
-          ev.display = truncateToWidth(ev.display, self.appConfig.eventFontSize.float32, trimW)
+          let trimW = if ev.isAllDay: (cellWidth - 12f*s) else: (cellWidth - 6f*s)
+          ev.display = truncateToWidth(ev.display, (self.appConfig.eventFontSize.float32 * s), trimW)
           linesToDraw.add(ev)
 
         if needMoreLine and maxLines > 0:
@@ -442,14 +525,14 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
             linesToDraw.add(EventLine(display: &"+{remaining} more", isAllDay: false, color: rgba(0, 0, 0, 0)))
 
         # Draw each line individually so we can paint chips for all-day events
-        let baseY = y + self.appConfig.dateFontSize.float32 + 6f
+        let baseY = y + (self.appConfig.dateFontSize.float32 * s) + 6f*s
         for li, line in linesToDraw:
           let yLine = baseY + li.float32 * lineH
 
           if line.isAllDay and not line.display.startsWith("+"):
             # Chip background (fill + subtle border) similar to Google Calendar
-            let padX = 4f
-            let padY = 1f
+            let padX = 4f * s
+            let padY = 1f * s
             let chipW = cellWidth - (padX * 2)
             let chipH = lineH - (padY * 2)
             let chipX = x + padX
@@ -481,9 +564,9 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
             else:
               spans.add(newSpan(line.display, eventTitleFont))
 
-          let bx = x + (if line.isAllDay and not line.display.startsWith("+"): 8f else: 4f)
-          let bw = cellWidth - (if line.isAllDay and not line.display.startsWith("+"): 12f else: 6f)
-          let bH = if line.isAllDay and not line.display.startsWith("+"): (lineH - 2f) else: lineH
+          let bx = x + (if line.isAllDay and not line.display.startsWith("+"): 8f*s else: 4f*s)
+          let bw = cellWidth - (if line.isAllDay and not line.display.startsWith("+"): 12f*s else: 6f*s)
+          let bH = if line.isAllDay and not line.display.startsWith("+"): (lineH - 2f*s) else: lineH
 
           let types = typeset(
             spans = spans,
@@ -492,7 +575,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
             vAlign = if line.isAllDay and not line.display.startsWith("+"): MiddleAlign else: TopAlign,
           )
           image.fillText(types, translate(vec2(bx, yLine + (if line.isAllDay and not line.display.startsWith(
-              "+"): 1f else: 0f))))
+              "+"): 1f*s else: 0f))))
       day += 1
     if day > days:
       break
@@ -508,3 +591,4 @@ proc get*(self: App, context: ExecutionContext): Image =
   else:
     newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
   render(self, context, result)
+
