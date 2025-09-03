@@ -46,6 +46,7 @@ export const scenesLogic = kea<scenesLogicType>([
     createNewScene: true,
     sync: true,
     expandScene: (sceneId: string) => ({ sceneId }),
+    copySceneJSON: (sceneId: string) => ({ sceneId }),
   }),
   forms(({ actions, values, props }) => ({
     newScene: {
@@ -230,6 +231,13 @@ export const scenesLogic = kea<scenesLogicType>([
       })
       actions.editScene(id)
       actions.resetNewScene()
+    },
+    copySceneJSON: ({ sceneId }) => {
+      const scene = values.scenes.find((s) => s.id === sceneId)
+      if (!scene) {
+        return
+      }
+      navigator.clipboard.writeText(JSON.stringify(scene))
     },
   })),
   afterMount(({ actions }) => {

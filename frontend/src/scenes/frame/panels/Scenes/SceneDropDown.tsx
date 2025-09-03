@@ -5,6 +5,7 @@ import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { PencilSquareIcon, TrashIcon, FlagIcon, FolderOpenIcon, PlayIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import {
+  ClipboardDocumentIcon,
   CloudArrowDownIcon,
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
@@ -28,7 +29,9 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
   const { editScene, editSceneJSON } = useActions(panelsLogic)
   const { scenes } = useValues(scenesLogic({ frameId }))
-  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault } = useActions(scenesLogic({ frameId }))
+  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON } = useActions(
+    scenesLogic({ frameId })
+  )
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
   const { setCurrentScene } = useActions(controlLogic({ frameId }))
   const scene = scenes.find((s) => s.id === sceneId)
@@ -52,9 +55,14 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
             }
           : null,
         {
-          label: 'Edit source JSON',
+          label: 'Edit scene JSON',
           onClick: () => editSceneJSON(scene.id),
           icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
+        },
+        {
+          label: 'Copy scene JSON',
+          onClick: () => copySceneJSON(scene.id),
+          icon: <ClipboardDocumentIcon className="w-5 h-5" />,
         },
         {
           label: 'Save to "My scenes"',
