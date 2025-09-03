@@ -71,7 +71,7 @@
     {
       "name": "weekendBackgroundColor",
       "type": "color",
-      "value": "#f7f7f7",
+      "value": "#9eafd6",
       "required": true,
       "label": "Weekend day background color (Sat/Sun cells)"
     },
@@ -85,7 +85,7 @@
     {
       "name": "todayBackgroundColor",
       "type": "color",
-      "value": "#e09b9b",
+      "value": "#e5afaf",
       "required": true,
       "label": "Today's cell background color"
     },
