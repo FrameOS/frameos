@@ -2,6 +2,7 @@ import pixie
 import json, options, strformat, strutils, tables
 import times, chrono
 import math
+import algorithm
 
 import frameos/apps
 import frameos/types
@@ -68,7 +69,8 @@ type
     showGrid*: bool                # toggle grid on/off
     gridWidth*: float              # grid stroke width (px)
     todayStrokeColor*: Color       # outline color for today's cell
-                                   # (fill is intentionally omitted to avoid covering text)
+    todayBackgroundColor*: Color   # NEW: background fill for today's cell
+    todayStrokeWidth*: float       # NEW: outline thickness (px, before scaling)
     showEventTimes*: bool          # show times next to non all-day events
 
     # new fields
@@ -84,6 +86,7 @@ type
     display*: string  # what we will draw on the line
     isAllDay*: bool   # if true we draw a colored chip behind it
     color*: ColorRGBA # base color for all-day chips
+    sortKey*: int     # minutes since midnight; all-day uses -1
 
 # quick-and-simple width-based truncation so each line stays on one row
 proc truncateToWidth(text: string, fontSize, maxWidth: float32): string =
@@ -252,13 +255,36 @@ proc incOneDay(y, m, d: var int) =
 
 # -----------------------------------------------------------------------------
 
-# add these helpers (above `groupEvents`)
+proc timeToMinutes(start: string): int =
+  ## Parse "YYYY-MM-DD[ T]HH:MM..." -> minutes since midnight.
+  ## Returns a large sentinel if parsing fails.
+  if start.len >= 16:
+    try:
+      let hh = parseInt(start[11..12])
+      let mm = parseInt(start[14..15])
+      return max(0, min(23, hh)) * 60 + max(0, min(59, mm))
+    except CatchableError:
+      discard
+  # Put unknown/invalid times after normal timed events
+  result = high(int) div 2
+
+proc dateOrdinalFromStart(start: string): int =
+  var y, m, d: int
+  if parseYMD(start, y, m, d):
+    return y * 10000 + m * 100 + d
+  0
+
 proc makeLine(self: App; summary, start: string; isAllDay: bool): EventLine =
   var display = summary
   if self.appConfig.showEventTimes and not isAllDay and start.len >= 16:
     let timeStr = start[11..15]
     if timeStr.len > 0: display = timeStr & " " & summary
-  EventLine(display: display, isAllDay: isAllDay, color: pickColor(self, summary))
+  let key =
+    if isAllDay:
+      dateOrdinalFromStart(start)        # earlier start date => smaller key
+    else:
+      100_000_000 + timeToMinutes(start) # ensure timed events come after all-day
+  EventLine(display: display, isAllDay: isAllDay, color: pickColor(self, summary), sortKey: key)
 
 proc addEventLine(t: var Table[string, seq[EventLine]], key: string, line: EventLine) =
   if not t.hasKey(key): t[key] = @[]
@@ -438,6 +464,19 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       if d > days:
         break
 
+  # Today's background (also BEFORE grid so lines remain visible)
+  block shadeToday:
+    if isCurrentMonth:
+      let d = todayDay
+      let idx = firstCol + (d - 1)
+      let row = idx div 7
+      let col = idx mod 7
+      let x = regionX + col.float32 * cellWidth
+      let y = regionY + topTitle + weekdayHeaderHeight + row.float32 * cellHeight
+      var bg = newImage(cellWidth.int, cellHeight.int)
+      bg.fill(self.appConfig.todayBackgroundColor)
+      image.draw(bg, translate(vec2(x, y)))
+
   # Grid
   if self.appConfig.showGrid:
     for i in 0..7:
@@ -452,7 +491,15 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       image.draw(hLine, translate(vec2(regionX, y)))
 
   # Events and dates
-  let eventsByDay = self.groupEvents()
+  var eventsByDay = self.groupEvents()
+
+  # Ensure events within each day are sorted (all-day first, then by start time)
+  for _, daySeq in eventsByDay.mpairs:
+    sort(daySeq, proc (a, b: EventLine): int =
+      let c = system.cmp(a.sortKey, b.sortKey)
+      if c != 0: c else: system.cmp(a.display, b.display)
+    )
+
   var day = 1
   for row in 0..<rows:
     for col in 0..6:
@@ -463,21 +510,23 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       let x = regionX + col.float32 * cellWidth
       let y = regionY + topTitle + weekdayHeaderHeight + row.float32 * cellHeight
 
-      # Highlight "today" with a stroke rectangle
+      # Highlight "today" with a configurable stroke rectangle
       if isCurrentMonth and day == todayDay:
-        let stroke = max(2, (self.appConfig.gridWidth * s * 2).int)
-        # top
-        var t = newImage(cellWidth.int, stroke)
-        t.fill(self.appConfig.todayStrokeColor)
-        image.draw(t, translate(vec2(x, y)))
-        # bottom
-        image.draw(t, translate(vec2(x, y + cellHeight - stroke.float32)))
-        # left
-        var l = newImage(stroke, cellHeight.int)
-        l.fill(self.appConfig.todayStrokeColor)
-        image.draw(l, translate(vec2(x, y)))
-        # right
-        image.draw(l, translate(vec2(x + cellWidth - stroke.float32, y)))
+        let strokeF = max(0.0'f32, self.appConfig.todayStrokeWidth.float32 * s)
+        let stroke = max(0, strokeF.int)
+        if stroke > 0:
+          # top
+          var t = newImage(cellWidth.int, stroke)
+          t.fill(self.appConfig.todayStrokeColor)
+          image.draw(t, translate(vec2(x, y)))
+          # bottom
+          image.draw(t, translate(vec2(x, y + cellHeight - stroke.float32)))
+          # left
+          var l = newImage(stroke, cellHeight.int)
+          l.fill(self.appConfig.todayStrokeColor)
+          image.draw(l, translate(vec2(x, y)))
+          # right
+          image.draw(l, translate(vec2(x + cellWidth - stroke.float32, y)))
 
       # Date number
       let dateText = $day
@@ -522,7 +571,8 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
         if needMoreLine and maxLines > 0:
           let remaining = total - visibleCount
           if remaining > 0:
-            linesToDraw.add(EventLine(display: &"+{remaining} more", isAllDay: false, color: rgba(0, 0, 0, 0)))
+            linesToDraw.add(EventLine(display: &"+{remaining} more", isAllDay: false, color: rgba(0, 0, 0, 0),
+                sortKey: high(int)))
 
         # Draw each line individually so we can paint chips for all-day events
         let baseY = y + (self.appConfig.dateFontSize.float32 * s) + 6f*s
@@ -591,4 +641,3 @@ proc get*(self: App, context: ExecutionContext): Image =
   else:
     newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
   render(self, context, result)
-

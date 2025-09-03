@@ -83,6 +83,20 @@
       "label": "Today's cell outline color"
     },
     {
+      "name": "todayBackgroundColor",
+      "type": "color",
+      "value": "#e09b9b",
+      "required": true,
+      "label": "Today's cell background color"
+    },
+    {
+      "name": "todayStrokeWidth",
+      "type": "float",
+      "value": "2",
+      "required": true,
+      "label": "Today's cell outline thickness"
+    },
+    {
       "name": "dateTextColor",
       "type": "color",
       "value": "#000000",
