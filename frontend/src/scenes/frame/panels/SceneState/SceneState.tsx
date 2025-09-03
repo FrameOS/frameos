@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import { useState, DragEvent as ReactDragEvent } from 'react'
 import { frameLogic } from '../../frameLogic'
 import { sceneStateLogic } from './sceneStateLogic'
 import { Form, Group } from 'kea-forms'
@@ -32,14 +33,32 @@ export function SceneState(): JSX.Element {
   const { selectedSceneId: sceneId } = useValues(panelsLogic({ frameId }))
   const { sceneIndex, scene, editingFields, fieldsWithErrors } = useValues(sceneStateLogic({ frameId, sceneId }))
   const { setFields, addField, editField, closeField, removeField } = useActions(sceneStateLogic({ frameId, sceneId }))
+  const [draggedField, setDraggedField] = useState<number | null>(null)
 
   if (!scene || !sceneId) {
     return <div>Add a scene first</div>
   }
 
-  const onDragStart = (event: any, type: 'state', keyword: string) => {
+  const onDragStart = (event: any, type: 'state', keyword: string, index: number) => {
+    setDraggedField(index)
     event.dataTransfer.setData('application/reactflow', JSON.stringify({ type, keyword }))
     event.dataTransfer.effectAllowed = 'move'
+  }
+
+  const onDropField = (event: ReactDragEvent, index: number) => {
+    event.preventDefault()
+    if (draggedField === null || draggedField === index) {
+      return
+    }
+    const fields = [...(scene?.fields ?? [])]
+    const [removed] = fields.splice(draggedField, 1)
+    fields.splice(index, 0, removed)
+    setFields(fields)
+    setDraggedField(null)
+  }
+
+  const onDragOverField = (event: ReactDragEvent) => {
+    event.preventDefault()
   }
 
   return (
@@ -189,7 +208,10 @@ export function SceneState(): JSX.Element {
                 <div
                   className="bg-gray-900 p-2 dndnode cursor-move"
                   draggable
-                  onDragStart={(event) => onDragStart(event, 'state', field.name)}
+                  onDragStart={(event) => onDragStart(event, 'state', field.name, index)}
+                  onDragOver={onDragOverField}
+                  onDrop={(event) => onDropField(event, index)}
+                  onDragEnd={() => setDraggedField(null)}
                 >
                   <div className="flex items-center gap-1 justify-between max-w-full w-full">
                     <div className="flex items-center gap-1 max-w-full w-full overflow-hidden">
