@@ -449,16 +449,18 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
 
   // sticky hue: only change when user edits Hue (slider or H input) or when a brand new color is set (hex/swatch/prop/RGB edits)
   const lastHueRef = useRef<number>(hsva.h)
+  const lastEmitHexRef = useRef<string | null>(null)
+  const normHue = (h: number) => ((h % 360) + 360) % 360
 
   // --- central state propagation ---
   type HueSource = 'hue' | 'other'
+
   const propagate = (nextHsva: HsvaColor, source: HueSource) => {
-    // only allow hue to change when source is 'hue'
     let hue = lastHueRef.current
     if (source === 'hue') {
-      hue = ((nextHsva.h % 360) + 360) % 360
-      lastHueRef.current = hue
+      hue = lastHueRef.current = normHue(nextHsva.h)
     }
+
     const fixedHsva: HsvaColor = { ...nextHsva, h: hue }
     const hslaRaw = hsvaToHsla(fixedHsva)
     const fixedHsla: HslaColor = { ...hslaRaw, h: hue }
@@ -467,19 +469,32 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
     setHsva(fixedHsva)
     setHslaState(fixedHsla)
     setRgbaState(fixedRgba)
+
+    // remember what we just told the parent (canonicalized)
+    const emittedHex = hsvaToHex(fixedHsva).toLowerCase()
+    lastEmitHexRef.current = emittedHex
+
     onChange?.(handleColor(fixedHsva))
   }
 
-  // external color prop -> adopt its hue as the new sticky hue
   useEffect(() => {
     if (color == null) return
+
     let next: HsvaColor | null = null
     if (typeof color === 'string' && validHex(color)) next = hexToHsva(color)
     else if (typeof color === 'object') next = color as HsvaColor
     if (!next) return
-    lastHueRef.current = ((next.h % 360) + 360) % 360
+
+    const canonicalIncoming = hsvaToHex(next).toLowerCase()
+
+    if (canonicalIncoming === lastEmitHexRef.current) {
+      // Just our own echo — keep sticky hue
+      propagate({ ...next, h: lastHueRef.current }, 'other')
+      return
+    }
+
+    // Truly external change.
     propagate(next, 'hue')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [color])
 
   // --- conversions from editors ---
@@ -488,7 +503,13 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
   const updateFromHSLA = (nextHSLA: HslaColor, changed: 'h' | 's' | 'l' | 'a') => {
     setHslaState(nextHSLA)
     const next = hslaToHsva(nextHSLA)
-    propagate({ ...next, h: changed === 'h' ? next.h : lastHueRef.current }, changed === 'h' ? 'hue' : 'other')
+
+    // don’t let conversions reset hue — enforce sticky
+    if (changed === 'h') {
+      propagate({ ...next, h: next.h }, 'hue')
+    } else {
+      propagate({ ...next, h: lastHueRef.current }, 'other')
+    }
   }
 
   // RGBA editor -> ADOPT the hue derived from RGB (do NOT force sticky hue here), so R/G/B edits don't mutate other channels
