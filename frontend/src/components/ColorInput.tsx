@@ -44,6 +44,7 @@ const PRESET_COLORS = [
   '#9B9B9B',
   '#FFFFFF',
 ]
+const validHex = (hex: string): boolean => /^#?([A-Fa-f0-9]{3,4}){1,2}$/.test(hex)
 const getNumberValue = (value: string) => Number(String(value).replace(/%/g, ''))
 
 export interface EditableInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> {
@@ -75,7 +76,14 @@ const EditableInput = React.forwardRef<HTMLInputElement, EditableInputProps>(fun
     renderInput,
     ...other
   } = props
-  const value = props.value ?? ''
+  const [value, setValue] = useState<string | number | undefined>(initValue)
+  const isFocus = useRef(false)
+
+  useEffect(() => {
+    if (props.value !== value) {
+      setValue(props.value)
+    }
+  }, [props.value])
 
   function handleChange(evn: React.FocusEvent<HTMLInputElement>, valInit?: string) {
     const value = (valInit || evn.target.value).trim().replace(/^#/, '')
@@ -86,8 +94,11 @@ const EditableInput = React.forwardRef<HTMLInputElement, EditableInputProps>(fun
     if (!isNaN(val)) {
       onChange && onChange(evn, val)
     }
+    setValue(value)
   }
   function handleBlur(evn: React.FocusEvent<HTMLInputElement>) {
+    isFocus.current = false
+    setValue(props.value)
     onBlur && onBlur(evn)
   }
   const placementStyle: CSS.Properties<string | number> = {}
@@ -133,6 +144,7 @@ const EditableInput = React.forwardRef<HTMLInputElement, EditableInputProps>(fun
     onChange: handleChange,
     onBlur: handleBlur,
     autoComplete: 'off',
+    onFocus: () => (isFocus.current = true),
     ...other,
     style: editableStyle,
   }
@@ -517,10 +529,12 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
     const input = e.currentTarget
     input.value = val
     // Keep cursor at end
-    console.log({ val })
     const end = val.endsWith('%') ? val.length - 1 : val.length
     try {
       input.setSelectionRange(end, end)
+      window.setTimeout(() => {
+        input.setSelectionRange(end, end)
+      }, 1)
     } catch {}
   }
 
