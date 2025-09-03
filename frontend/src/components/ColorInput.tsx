@@ -1,4 +1,4 @@
-import React, { useState, Fragment, forwardRef, useMemo } from 'react'
+import React, { useState, useRef, Fragment, forwardRef, useMemo } from 'react'
 import { clsx } from 'clsx'
 import { Tooltip } from './Tooltip'
 import { frameLogic } from '../scenes/frame/frameLogic'
@@ -7,7 +7,6 @@ import { withCustomPalette } from '../devices'
 import type * as CSS from 'csstype'
 import Saturation from '@uiw/react-color-saturation'
 import Alpha, { PointerProps } from '@uiw/react-color-alpha'
-import EditableInput from '@uiw/react-color-editable-input'
 import Hue from '@uiw/react-color-hue'
 import {
   validHex,
@@ -27,7 +26,6 @@ import {
 import Swatch, { SwatchPresetColor } from '@uiw/react-color-swatch'
 import { useEffect } from 'react'
 import { Select } from './Select'
-import { type EditableInputProps } from '@uiw/react-color-editable-input'
 
 const PRESET_COLORS = [
   '#D0021B',
@@ -46,6 +44,115 @@ const PRESET_COLORS = [
   '#9B9B9B',
   '#FFFFFF',
 ]
+const getNumberValue = (value: string) => Number(String(value).replace(/%/g, ''))
+
+export interface EditableInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> {
+  prefixCls?: string
+  value?: string | number
+  label?: React.ReactNode
+  labelStyle?: CSS.Properties<string | number>
+  placement?: 'top' | 'left' | 'bottom' | 'right'
+  inputStyle?: CSS.Properties<string | number>
+  onChange?: (evn: React.ChangeEvent<HTMLInputElement>, value: string | number) => void
+  renderInput?: (
+    props: React.InputHTMLAttributes<HTMLInputElement>,
+    ref: React.Ref<HTMLInputElement>
+  ) => React.ReactNode
+}
+
+const EditableInput = React.forwardRef<HTMLInputElement, EditableInputProps>(function EditableInput(props, ref) {
+  const {
+    prefixCls = 'w-color-editable-input',
+    placement = 'bottom',
+    label,
+    value: initValue,
+    className,
+    style,
+    labelStyle,
+    inputStyle,
+    onChange,
+    onBlur,
+    renderInput,
+    ...other
+  } = props
+  const value = props.value ?? ''
+
+  function handleChange(evn: React.FocusEvent<HTMLInputElement>, valInit?: string) {
+    const value = (valInit || evn.target.value).trim().replace(/^#/, '')
+    if (validHex(value)) {
+      onChange && onChange(evn, value)
+    }
+    const val = getNumberValue(value)
+    if (!isNaN(val)) {
+      onChange && onChange(evn, val)
+    }
+  }
+  function handleBlur(evn: React.FocusEvent<HTMLInputElement>) {
+    onBlur && onBlur(evn)
+  }
+  const placementStyle: CSS.Properties<string | number> = {}
+  if (placement === 'bottom') {
+    placementStyle['flexDirection'] = 'column'
+  }
+  if (placement === 'top') {
+    placementStyle['flexDirection'] = 'column-reverse'
+  }
+  if (placement === 'left') {
+    placementStyle['flexDirection'] = 'row-reverse'
+  }
+
+  const wrapperStyle: CSS.Properties<string | number> = {
+    '--editable-input-label-color': 'rgb(153, 153, 153)',
+    '--editable-input-box-shadow': 'rgb(204 204 204) 0px 0px 0px 1px inset',
+    '--editable-input-color': '#666',
+    position: 'relative',
+    alignItems: 'center',
+    display: 'flex',
+    fontSize: 11,
+    ...placementStyle,
+    ...style,
+  } as CSS.Properties<string | number>
+
+  const editableStyle: CSS.Properties<string | number> = {
+    width: '100%',
+    paddingTop: 2,
+    paddingBottom: 2,
+    paddingLeft: 3,
+    paddingRight: 3,
+    fontSize: 11,
+    background: 'transparent',
+    boxSizing: 'border-box',
+    border: 'none',
+    color: 'var(--editable-input-color)',
+    boxShadow: 'var(--editable-input-box-shadow)',
+    ...inputStyle,
+  } as CSS.Properties<string | number>
+
+  const inputProps: React.InputHTMLAttributes<HTMLInputElement> = {
+    value,
+    onChange: handleChange,
+    onBlur: handleBlur,
+    autoComplete: 'off',
+    ...other,
+    style: editableStyle,
+  }
+  return (
+    <div className={[prefixCls, className || ''].filter(Boolean).join(' ')} style={wrapperStyle}>
+      {renderInput ? renderInput(inputProps, ref) : <input ref={ref} {...inputProps} />}
+      {label && (
+        <span
+          style={{
+            color: 'var(--editable-input-label-color)',
+            textTransform: 'capitalize',
+            ...labelStyle,
+          }}
+          children={label}
+        />
+      )}
+    </div>
+  )
+})
+
 export interface EditableInputRGBAProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange'> {
   prefixCls?: string
   hsva: HsvaColor
@@ -81,36 +188,47 @@ const EditableInputRGBA = React.forwardRef<HTMLDivElement, EditableInputRGBAProp
       evn.target.value = '0'
     }
   }
+  const coerceNumber = (val: string | number) => {
+    if (typeof val === 'number') return val
+    const cleaned = String(val)
+      .replace(',', '.')
+      .replace(/[^\d.]+/g, '')
+    const num = parseFloat(cleaned)
+    return Number.isNaN(num) ? null : num
+  }
+
   const handleChange = (
     value: string | number,
     type: 'r' | 'g' | 'b' | 'a',
     evn: React.ChangeEvent<HTMLInputElement>
   ) => {
-    if (typeof value === 'number') {
-      if (type === 'a') {
-        if (value < 0) value = 0
-        if (value > 100) value = 100
-        onChange && onChange(handleColor(rgbaToHsva({ ...rgba, a: value / 100 })))
-      }
-      if (value > 255) {
-        value = 255
-        evn.target.value = '255'
-      }
-      if (value < 0) {
-        value = 0
-        evn.target.value = '0'
-      }
-      if (type === 'r') {
-        onChange && onChange(handleColor(rgbaToHsva({ ...rgba, r: value })))
-      }
-      if (type === 'g') {
-        onChange && onChange(handleColor(rgbaToHsva({ ...rgba, g: value })))
-      }
-      if (type === 'b') {
-        onChange && onChange(handleColor(rgbaToHsva({ ...rgba, b: value })))
-      }
+    const num0 = coerceNumber(value)
+    if (num0 === null) return
+    let num = num0
+
+    if (type === 'a') {
+      // A in RGBA is 0–1 in this component -> accept 0–100 too just in case
+      if (num > 1) num = Math.min(100, num) / 100
+      num = Math.max(0, Math.min(1, num))
+      onChange?.(handleColor(rgbaToHsva({ ...rgba, a: num })))
+      return
     }
+
+    // r/g/b 0–255
+    if (num > 255) {
+      num = 255
+      evn.target.value = '255'
+    }
+    if (num < 0) {
+      num = 0
+      evn.target.value = '0'
+    }
+
+    if (type === 'r') onChange?.(handleColor(rgbaToHsva({ ...rgba, r: num })))
+    if (type === 'g') onChange?.(handleColor(rgbaToHsva({ ...rgba, g: num })))
+    if (type === 'b') onChange?.(handleColor(rgbaToHsva({ ...rgba, b: num })))
   }
+
   return (
     <div
       ref={ref}
@@ -138,7 +256,7 @@ const EditableInputRGBA = React.forwardRef<HTMLDivElement, EditableInputRGBAProp
         placement={placement}
         onChange={(evn, val) => handleChange(val, 'g', evn)}
         {...gProps}
-        style={{ marginLeft: 5, ...rProps.style }}
+        style={{ marginLeft: 5, ...gProps.style }}
       />
       <EditableInput
         label="B"
@@ -189,34 +307,49 @@ const EditableInputHSLA = React.forwardRef<HTMLDivElement, EditableInputHSLAProp
     ...other
   } = props
   const hsla = (hsva ? hsvaToHsla(hsva) : { h: 0, s: 0, l: 0, a: 0 }) as HslaColor
+
+  // Accept both numbers and strings (like "39%") from EditableInput.
+  const coerceNumber = (val: string | number) => {
+    if (typeof val === 'number') return val
+    const cleaned = String(val)
+      .replace(',', '.')
+      .replace(/[^\d.]+/g, '')
+    const num = parseFloat(cleaned)
+    return Number.isNaN(num) ? null : num
+  }
+
   const handleChange = (
     value: string | number,
     type: 'h' | 's' | 'l' | 'a',
-    evn: React.ChangeEvent<HTMLInputElement>
+    _evn: React.ChangeEvent<HTMLInputElement>
   ) => {
-    if (typeof value === 'number') {
-      if (type === 'h') {
-        if (value < 0) value = 0
-        if (value > 360) value = 360
-        onChange && onChange(handleColor(hslaToHsva({ ...hsla, h: value })))
-      }
-      if (type === 's') {
-        if (value < 0) value = 0
-        if (value > 100) value = 100
-        onChange && onChange(handleColor(hslaToHsva({ ...hsla, s: value })))
-      }
-      if (type === 'l') {
-        if (value < 0) value = 0
-        if (value > 100) value = 100
-        onChange && onChange(handleColor(hslaToHsva({ ...hsla, l: value })))
-      }
-      if (type === 'a') {
-        if (value < 0) value = 0
-        if (value > 1) value = 1
-        onChange && onChange(handleColor(hslaToHsva({ ...hsla, a: value })))
-      }
+    const num = coerceNumber(value)
+    if (num === null) return
+
+    if (type === 'h') {
+      const h = Math.max(0, Math.min(360, num))
+      onChange && onChange(handleColor(hslaToHsva({ ...hsla, h })))
+      return
+    }
+    if (type === 's') {
+      const s = Math.max(0, Math.min(100, num))
+      onChange && onChange(handleColor(hslaToHsva({ ...hsla, s })))
+      return
+    }
+    if (type === 'l') {
+      const l = Math.max(0, Math.min(100, num))
+      onChange && onChange(handleColor(hslaToHsva({ ...hsla, l })))
+      return
+    }
+    if (type === 'a') {
+      // Support both 0–1 and 0–100% style input just in case.
+      let a = num
+      if (a > 1) a = Math.min(100, a) / 100
+      a = Math.max(0, Math.min(1, a))
+      onChange && onChange(handleColor(hslaToHsva({ ...hsla, a })))
     }
   }
+
   let aPropsObj: false | EditableInputProps =
     aProps == false
       ? false
@@ -382,10 +515,10 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
     const { hsla } = nudgeHSLA(channel, dir * base)
     const val = formatHSLA(channel, hsla)
     const input = e.currentTarget
-    debugger
     input.value = val
     // Keep cursor at end
-    const end = val.length
+    console.log({ val })
+    const end = val.endsWith('%') ? val.length - 1 : val.length
     try {
       input.setSelectionRange(end, end)
     } catch {}
