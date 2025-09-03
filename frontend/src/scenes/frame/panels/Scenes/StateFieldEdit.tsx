@@ -1,3 +1,4 @@
+import { ColorInput } from '../../../../components/ColorInput'
 import { FontSelect } from '../../../../components/FontSelect'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Select } from '../../../../components/Select'
@@ -51,10 +52,9 @@ export function StateFieldEdit({
       onChange={onChange}
     />
   ) : field.type === 'color' ? (
-    <TextInput
+    <ColorInput
       placeholder={field.placeholder}
       value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
-      type="color"
       onChange={onChange}
       className="!p-0"
     />
