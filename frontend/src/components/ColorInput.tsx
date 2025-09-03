@@ -1,4 +1,4 @@
-import React, { useState, useRef, Fragment, forwardRef, useMemo } from 'react'
+import React, { useState, useRef, Fragment, forwardRef, useMemo, useEffect } from 'react'
 import { clsx } from 'clsx'
 import { Tooltip } from './Tooltip'
 import { frameLogic } from '../scenes/frame/frameLogic'
@@ -24,7 +24,6 @@ import {
   type HslaColor,
 } from '@uiw/color-convert'
 import Swatch, { SwatchPresetColor } from '@uiw/react-color-swatch'
-import { useEffect } from 'react'
 import { Select } from './Select'
 
 const PRESET_COLORS = [
@@ -44,7 +43,6 @@ const PRESET_COLORS = [
   '#9B9B9B',
   '#FFFFFF',
 ]
-const validHex = (hex: string): boolean => /^#?([A-Fa-f0-9]{3,4}){1,2}$/.test(hex)
 const getNumberValue = (value: string) => Number(String(value).replace(/%/g, ''))
 
 export interface EditableInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> {
@@ -83,10 +81,11 @@ const EditableInput = React.forwardRef<HTMLInputElement, EditableInputProps>(fun
     if (props.value !== value) {
       setValue(props.value)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.value])
 
-  function handleChange(evn: React.FocusEvent<HTMLInputElement>, valInit?: string) {
-    const value = (valInit || evn.target.value).trim().replace(/^#/, '')
+  function handleChange(evn: React.ChangeEvent<HTMLInputElement>, valInit?: string) {
+    const value = (valInit ?? evn.target.value).trim().replace(/^#/, '')
     if (validHex(value)) {
       onChange && onChange(evn, value)
     }
@@ -168,6 +167,7 @@ const EditableInput = React.forwardRef<HTMLInputElement, EditableInputProps>(fun
 export interface EditableInputRGBAProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange'> {
   prefixCls?: string
   hsva: HsvaColor
+  rgba?: RgbaColor
   placement?: 'top' | 'left' | 'bottom' | 'right'
   rProps?: EditableInputProps
   gProps?: EditableInputProps
@@ -180,6 +180,7 @@ const EditableInputRGBA = React.forwardRef<HTMLDivElement, EditableInputRGBAProp
   const {
     prefixCls = 'w-color-editable-input-rgba',
     hsva,
+    rgba: rgbaProp,
     placement = 'bottom',
     rProps = {},
     gProps = {},
@@ -190,7 +191,7 @@ const EditableInputRGBA = React.forwardRef<HTMLDivElement, EditableInputRGBAProp
     onChange,
     ...other
   } = props
-  const rgba = (hsva ? hsvaToRgba(hsva) : {}) as RgbaColor
+  const rgba = (rgbaProp ?? (hsva ? hsvaToRgba(hsva) : {})) as RgbaColor
   function handleBlur(evn: React.FocusEvent<HTMLInputElement>) {
     const value = Number(evn.target.value)
     if (value && value > 255) {
@@ -297,12 +298,13 @@ const EditableInputRGBA = React.forwardRef<HTMLDivElement, EditableInputRGBAProp
 EditableInputRGBA.displayName = 'EditableInputRGBA'
 
 export interface EditableInputHSLAProps extends Omit<EditableInputRGBAProps, 'rProps' | 'gProps' | 'bProps'> {
+  hsla?: HslaColor
   hProps?: EditableInputRGBAProps['gProps']
   sProps?: EditableInputRGBAProps['gProps']
   lProps?: EditableInputRGBAProps['gProps']
   aProps?: false | EditableInputRGBAProps['aProps']
+  onChangeHSLA?: (next: HslaColor, changed: 'h' | 's' | 'l' | 'a') => void
 }
-
 const EditableInputHSLA = React.forwardRef<HTMLDivElement, EditableInputHSLAProps>(function EditableInputHSLA(
   props,
   ref
@@ -310,17 +312,18 @@ const EditableInputHSLA = React.forwardRef<HTMLDivElement, EditableInputHSLAProp
   const {
     prefixCls = 'w-color-editable-input-hsla',
     hsva,
+    hsla: hslaProp,
     hProps = {},
     sProps = {},
     lProps = {},
     aProps = {},
     className,
     onChange,
+    onChangeHSLA,
     ...other
   } = props
-  const hsla = (hsva ? hsvaToHsla(hsva) : { h: 0, s: 0, l: 0, a: 0 }) as HslaColor
+  const hsla = (hslaProp ?? (hsva ? hsvaToHsla(hsva) : { h: 0, s: 0, l: 0, a: 0 })) as HslaColor
 
-  // Accept both numbers and strings (like "39%") from EditableInput.
   const coerceNumber = (val: string | number) => {
     if (typeof val === 'number') return val
     const cleaned = String(val)
@@ -340,25 +343,24 @@ const EditableInputHSLA = React.forwardRef<HTMLDivElement, EditableInputHSLAProp
 
     if (type === 'h') {
       const h = Math.max(0, Math.min(360, num))
-      onChange && onChange(handleColor(hslaToHsva({ ...hsla, h })))
+      onChangeHSLA?.({ ...hsla, h }, 'h')
       return
     }
     if (type === 's') {
       const s = Math.max(0, Math.min(100, num))
-      onChange && onChange(handleColor(hslaToHsva({ ...hsla, s })))
+      onChangeHSLA?.({ ...hsla, s }, 's')
       return
     }
     if (type === 'l') {
       const l = Math.max(0, Math.min(100, num))
-      onChange && onChange(handleColor(hslaToHsva({ ...hsla, l })))
+      onChangeHSLA?.({ ...hsla, l }, 'l')
       return
     }
     if (type === 'a') {
-      // Support both 0–1 and 0–100% style input just in case.
       let a = num
       if (a > 1) a = Math.min(100, a) / 100
       a = Math.max(0, Math.min(1, a))
-      onChange && onChange(handleColor(hslaToHsva({ ...hsla, a })))
+      onChangeHSLA?.({ ...hsla, a }, 'a')
     }
   }
 
@@ -441,32 +443,84 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
     ...other
   } = props
   const [mode, setMode] = useState<'hex' | 'rgba' | 'hsla'>('hex')
-  const [hsva, setHsva] = useState({ h: 209, s: 36, v: 90, a: 1 })
+  const [hsva, setHsva] = useState<HsvaColor>({ h: 209, s: 36, v: 90, a: 1 })
+  const [hslaState, setHslaState] = useState<HslaColor>(hsvaToHsla(hsva))
+  const [rgbaState, setRgbaState] = useState<RgbaColor>(hsvaToRgba(hsva))
+
+  // sticky hue: only change when user edits Hue (slider or H input) or when a brand new color is set (hex/swatch/prop/RGB edits)
+  const lastHueRef = useRef<number>(hsva.h)
+
+  // --- central state propagation ---
+  type HueSource = 'hue' | 'other'
+  const propagate = (nextHsva: HsvaColor, source: HueSource) => {
+    // only allow hue to change when source is 'hue'
+    let hue = lastHueRef.current
+    if (source === 'hue') {
+      hue = ((nextHsva.h % 360) + 360) % 360
+      lastHueRef.current = hue
+    }
+    const fixedHsva: HsvaColor = { ...nextHsva, h: hue }
+    const hslaRaw = hsvaToHsla(fixedHsva)
+    const fixedHsla: HslaColor = { ...hslaRaw, h: hue }
+    const fixedRgba = hsvaToRgba(fixedHsva)
+
+    setHsva(fixedHsva)
+    setHslaState(fixedHsla)
+    setRgbaState(fixedRgba)
+    onChange?.(handleColor(fixedHsva))
+  }
+
+  // external color prop -> adopt its hue as the new sticky hue
   useEffect(() => {
-    if (typeof color === 'string' && validHex(color)) {
-      setHsva(hexToHsva(color))
-    }
-    if (typeof color === 'object') {
-      setHsva(color)
-    }
+    if (color == null) return
+    let next: HsvaColor | null = null
+    if (typeof color === 'string' && validHex(color)) next = hexToHsva(color)
+    else if (typeof color === 'object') next = color as HsvaColor
+    if (!next) return
+    lastHueRef.current = ((next.h % 360) + 360) % 360
+    propagate(next, 'hue')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [color])
 
-  const handleChange = (hsv: HsvaColor) => {
-    setHsva(hsv)
-    onChange && onChange(handleColor(hsv))
+  // --- conversions from editors ---
+
+  // HSLA editor -> keep sticky hue unless user changed 'h'
+  const updateFromHSLA = (nextHSLA: HslaColor, changed: 'h' | 's' | 'l' | 'a') => {
+    setHslaState(nextHSLA)
+    const next = hslaToHsva(nextHSLA)
+    propagate({ ...next, h: changed === 'h' ? next.h : lastHueRef.current }, changed === 'h' ? 'hue' : 'other')
   }
 
+  // RGBA editor -> ADOPT the hue derived from RGB (do NOT force sticky hue here), so R/G/B edits don't mutate other channels
+  const updateFromRGBA = (nextRGBA: RgbaColor) => {
+    setRgbaState(nextRGBA)
+    const next = rgbaToHsva(nextRGBA)
+    // treat this like a direct hue change: accept next.h and update sticky hue
+    propagate(next, 'hue')
+  }
+
+  // Hex editor
   const handleHex = (value: string | number) => {
     if (typeof value === 'string' && validHex(value) && /(3|6)/.test(String(value.length))) {
-      handleChange(hexToHsva(value))
+      const next = hexToHsva(value)
+      propagate(next, 'hue') // new color => adopt its hue
     }
   }
-  const handleAlphaChange = (newAlpha: { a: number }) => handleChange({ ...hsva, ...{ a: newAlpha.a } })
-  const handleSaturationChange = (newColor: HsvaColor) => handleChange({ ...hsva, ...newColor, a: hsva.a })
 
-  // ---- Arrow-key nudging helpers that RETURN the new values (so we can update the focused field immediately) ----
+  // Saturation square (HSV-based): keep sticky hue unless user moves the Hue bar
+  const handleSaturationChange = (newColor: HsvaColor) => {
+    propagate({ ...hsva, ...newColor, h: lastHueRef.current, a: hsva.a }, 'other')
+  }
+
+  // Alpha slider: does not affect hue
+  const handleAlphaChange = (newAlpha: { a: number }) => {
+    propagate({ ...hsva, a: newAlpha.a, h: lastHueRef.current }, 'other')
+  }
+
+  // ---- Arrow-key nudging helpers ----
   const nudgeHSLA = (channel: 'h' | 's' | 'l' | 'a', delta: number) => {
-    const hsla = { ...hsvaToHsla(hsva) } as { h: number; s: number; l: number; a: number }
+    const cur = hslaState
+    const hsla = { ...cur }
     if (channel === 'h') {
       hsla.h = (((hsla.h + delta) % 360) + 360) % 360
     } else if (channel === 's') {
@@ -476,20 +530,18 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
     } else if (channel === 'a') {
       hsla.a = clamp(parseFloat((hsla.a + delta).toFixed(3)), 0, 1)
     }
-    const nextHsva = hslaToHsva(hsla)
-    handleChange(nextHsva)
-    return { hsla, hsva: nextHsva }
+    updateFromHSLA(hsla, channel)
+    return { hsla }
   }
 
   const nudgeRGBA = (channel: 'r' | 'g' | 'b' | 'a', delta: number) => {
-    const rgba = { ...hsvaToRgba(hsva) } as { r: number; g: number; b: number; a: number }
+    const rgba = { ...rgbaState } as { r: number; g: number; b: number; a: number }
     if (channel === 'r') rgba.r = clamp(Math.round(rgba.r + delta), 0, 255)
     else if (channel === 'g') rgba.g = clamp(Math.round(rgba.g + delta), 0, 255)
     else if (channel === 'b') rgba.b = clamp(Math.round(rgba.b + delta), 0, 255)
     else if (channel === 'a') rgba.a = clamp(parseFloat((rgba.a + delta).toFixed(3)), 0, 1)
-    const nextHsva = rgbaToHsva(rgba)
-    handleChange(nextHsva)
-    return { rgba, hsva: nextHsva }
+    updateFromRGBA(rgba)
+    return { rgba }
   }
 
   // Formatters so the focused input value changes right away (even while focused).
@@ -504,8 +556,7 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
     return String(channel === 'r' ? rgba.r : channel === 'g' ? rgba.g : rgba.b)
   }
 
-  // Per-field key handlers. They (1) prevent default, (2) compute delta incl. shift/alt & direction,
-  // (3) update color state, and (4) immediately patch the focused input's visible value (with % when needed).
+  // Per-field key handlers.
   const handleHSLAKey = (channel: 'h' | 's' | 'l' | 'a') => (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
     e.preventDefault()
@@ -528,7 +579,6 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
     const val = formatHSLA(channel, hsla)
     const input = e.currentTarget
     input.value = val
-    // Keep cursor at end
     const end = val.endsWith('%') ? val.length - 1 : val.length
     try {
       input.setSelectionRange(end, end)
@@ -581,21 +631,26 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
     borderRadius: 3,
     boxShadow: 'var(--sketch-swatch-box-shadow)',
   }
+
   return (
     <div {...other} className={`${prefixCls} ${className || ''}`} ref={ref} style={styleMain}>
       <div style={{ padding: '10px 10px 8px' }}>
+        {/* The Saturation square is HSV-based; we feed it our derived hsva with sticky hue */}
         <Saturation hsva={hsva} style={{ width: 'auto', height: 150 }} onChange={handleSaturationChange} />
         <div style={{ display: 'flex', marginTop: 4 }}>
           <div style={{ flex: 1 }}>
             <Hue
               width="auto"
               height={10}
-              hue={hsva.h}
+              hue={lastHueRef.current /* slider reflects sticky hue */}
               pointer={Bar}
               innerProps={{
                 style: { marginLeft: 1, marginRight: 5 },
               }}
-              onChange={(newHue) => handleChange({ ...hsva, ...newHue })}
+              onChange={(newHue) => {
+                // user explicitly changed hue
+                propagate({ ...hsva, ...newHue }, 'hue')
+              }}
             />
             {!disableAlpha && (
               <Alpha
@@ -641,46 +696,26 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
           ) : mode === 'hsla' ? (
             <EditableInputHSLA
               hsva={hsva}
+              hsla={hslaState}
               style={{ marginRight: 6 }}
-              aProps={
-                !disableAlpha
-                  ? {
-                      onKeyDown: handleHSLAKey('a'),
-                    }
-                  : false
-              }
-              hProps={{
-                onKeyDown: handleHSLAKey('h'),
-              }}
-              sProps={{
-                onKeyDown: handleHSLAKey('s'),
-              }}
-              lProps={{
-                onKeyDown: handleHSLAKey('l'),
-              }}
-              onChange={(result) => handleChange(result.hsva)}
+              aProps={!disableAlpha ? { onKeyDown: handleHSLAKey('a') } : false}
+              hProps={{ onKeyDown: handleHSLAKey('h') }}
+              sProps={{ onKeyDown: handleHSLAKey('s') }}
+              lProps={{ onKeyDown: handleHSLAKey('l') }}
+              onChangeHSLA={(next, changed) => updateFromHSLA(next, changed)}
             />
           ) : (
             <EditableInputRGBA
               hsva={hsva}
+              rgba={rgbaState}
               style={{ marginRight: 6 }}
-              aProps={
-                !disableAlpha
-                  ? {
-                      onKeyDown: handleRGBAKey('a'),
-                    }
-                  : false
-              }
-              rProps={{
-                onKeyDown: handleRGBAKey('r'),
+              aProps={!disableAlpha ? { onKeyDown: handleRGBAKey('a') } : false}
+              rProps={{ onKeyDown: handleRGBAKey('r') }}
+              gProps={{ onKeyDown: handleRGBAKey('g') }}
+              bProps={{ onKeyDown: handleRGBAKey('b') }}
+              onChange={(result) => {
+                updateFromRGBA((result as ColorResult).rgba!)
               }}
-              gProps={{
-                onKeyDown: handleRGBAKey('g'),
-              }}
-              bProps={{
-                onKeyDown: handleRGBAKey('b'),
-              }}
-              onChange={(result) => handleChange(result.hsva)}
             />
           )}
           <div className="w-16 min-w-16 flex-grow">
@@ -703,7 +738,10 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
           style={styleSwatch}
           colors={presetColors}
           color={hsvaToHex(hsva)}
-          onChange={(hsvColor) => handleChange(hsvColor)}
+          onChange={(hsvColor) => {
+            // a swatch is a fresh color: adopt its hue
+            propagate(hsvColor, 'hue')
+          }}
           rectProps={{
             style: styleSwatchRect,
           }}
