@@ -82,7 +82,7 @@ type
 
 # Small record describing one visual line inside a day cell
 type
-  EventLine = object
+  EventLine* = object
     display*: string  # what we will draw on the line
     isAllDay*: bool   # if true we draw a colored chip behind it
     color*: ColorRGBA # base color for all-day chips
@@ -185,7 +185,7 @@ proc hashTitle(s: string): uint32 =
     h = ((h shl 5) + h) + uint32(ord(ch)) # djb2
   h
 
-proc pickColor(self: App, title: string): ColorRGBA =
+proc pickColor*(self: App, title: string): ColorRGBA =
   let colorIndex = int(hashTitle(title) mod uint32(self.appConfig.eventColorCount))
   return self.appConfig.eventColorBackground[colorIndex].to(ColorRGBA)
 
