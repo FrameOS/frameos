@@ -2,7 +2,7 @@
   "name": "Calendar",
   "description": "Render a monthly calendar with events",
   "category": "render",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "fields": [
     {
       "name": "inputImage",
@@ -16,7 +16,7 @@
       "type": "json",
       "required": false,
       "value": "[]",
-      "label": "Events array"
+      "label": "Events JSON"
     },
     {
       "name": "year",
@@ -37,165 +37,352 @@
       "type": "boolean",
       "value": "true",
       "required": true,
-      "label": "Week starts on Monday (Mon–Sun order in weekday row)"
+      "label": "Week starts on Monday"
+    },
+    {
+      "name": "scale",
+      "type": "integer",
+      "value": "100",
+      "required": true,
+      "label": "Scale (%) — scales fonts, paddings, strokes"
+    },
+    {
+      "name": "theme",
+      "type": "select",
+      "options": [
+        "light",
+        "dark",
+        "custom"
+      ],
+      "value": "light",
+      "required": true,
+      "label": "Calendar theme"
+    },
+    {
+      "name": "transparentBackground",
+      "type": "boolean",
+      "value": false,
+      "required": true,
+      "label": "Transparent background"
     },
     {
       "name": "backgroundColor",
       "type": "color",
       "value": "#ffffff",
       "required": true,
-      "label": "Overall background color"
+      "label": "Overall background color",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "weekendBackgroundColor",
       "type": "color",
-      "value": "#f7f7f7",
+      "value": "#9eafd6",
       "required": true,
-      "label": "Weekend day background color (Sat/Sun cells)"
+      "label": "Weekend day background color (Sat/Sun cells)",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "todayStrokeColor",
       "type": "color",
       "value": "#ff0000",
       "required": true,
-      "label": "Today's cell outline color"
+      "label": "Today's cell outline color",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
+    },
+    {
+      "name": "todayBackgroundColor",
+      "type": "color",
+      "value": "#e5afaf",
+      "required": true,
+      "label": "Today's cell background color",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
+    },
+    {
+      "name": "todayStrokeWidth",
+      "type": "float",
+      "value": "2",
+      "required": true,
+      "label": "Today's cell outline thickness",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "dateTextColor",
       "type": "color",
       "value": "#000000",
       "required": true,
-      "label": "Date number color"
+      "label": "Date number color",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "eventTimeColor",
       "type": "color",
       "value": "#333333",
       "required": true,
-      "label": "Event time color"
+      "label": "Event time color",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "eventTitleColor",
       "type": "color",
       "value": "#333333",
       "required": true,
-      "label": "Event title color"
+      "label": "Event title color",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "titleFont",
       "type": "font",
       "required": false,
-      "label": "Title font (used for month & year)"
+      "label": "Title font (used for month & year)",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "titleFontSize",
       "type": "float",
       "value": "28",
       "required": true,
-      "label": "Month & year title font size"
+      "label": "Month & year title font size",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "titleTextColor",
       "type": "color",
       "value": "#000000",
       "required": true,
-      "label": "Title text color"
+      "label": "Title text color",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "titleBackgroundColor",
       "type": "color",
       "value": "#ffffff",
       "required": true,
-      "label": "Title background"
+      "label": "Title background",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "weekdayFont",
       "type": "font",
       "required": false,
-      "label": "Weekday font (used for weekday row)"
+      "label": "Weekday font (used for weekday row)",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "weekdayFontSize",
       "type": "float",
       "value": "16",
       "required": true,
-      "label": "Weekday row font size"
+      "label": "Weekday row font size",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "weekdayTextColor",
       "type": "color",
       "value": "#000000",
       "required": true,
-      "label": "Weekday text color"
+      "label": "Weekday text color",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "weekdayBackgroundColor",
       "type": "color",
       "value": "#ffffff",
       "required": true,
-      "label": "Weekday background"
+      "label": "Weekday background",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "dateFont",
       "type": "font",
       "required": false,
-      "label": "Date number font"
+      "label": "Date number font",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "dateFontSize",
       "type": "float",
       "value": "18",
       "required": true,
-      "label": "Date number font size"
+      "label": "Date number font size",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "eventTitleFont",
       "type": "font",
       "required": false,
       "label": "Event title font",
-      "value": "Ubuntu-Medium.ttf"
+      "value": "Ubuntu-Medium.ttf",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "eventTimeFont",
       "type": "font",
       "required": false,
       "label": "Event time font",
-      "value": "Ubuntu-Light.ttf"
+      "value": "Ubuntu-Light.ttf",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "eventFontSize",
       "type": "float",
       "value": "14",
       "required": true,
-      "label": "Event font size"
+      "label": "Event font size",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "padding",
       "type": "integer",
       "value": "18",
       "required": true,
-      "label": "Outer padding (px)"
-    },
-    {
-      "name": "borderWidth",
-      "type": "float",
-      "value": "0",
-      "required": true,
-      "label": "Border width (px)"
-    },
-    {
-      "name": "borderColor",
-      "type": "color",
-      "value": "#cccccc",
-      "required": true,
-      "label": "Border color"
+      "label": "Outer padding (px)",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "showMonthYear",
       "type": "boolean",
       "value": "true",
       "required": true,
-      "label": "Show month & year title"
+      "label": "Show month & year title",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "monthYearPosition",
@@ -203,35 +390,116 @@
       "options": ["top", "bottom", "none"],
       "value": "top",
       "required": true,
-      "label": "Title position (ignored if hidden)"
+      "label": "Title position (ignored if hidden)",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "showGrid",
       "type": "boolean",
       "value": "true",
       "required": true,
-      "label": "Show grid lines"
+      "label": "Show grid lines",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "gridWidth",
       "type": "float",
       "value": "1",
       "required": true,
-      "label": "Grid stroke width (px)"
+      "label": "Grid stroke width (px)",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "gridColor",
       "type": "color",
       "value": "#999999",
       "required": true,
-      "label": "Grid line color"
+      "label": "Grid line color",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     },
     {
       "name": "showEventTimes",
       "type": "boolean",
       "value": "true",
       "required": true,
-      "label": "Show times for non all-day events"
+      "label": "Show times for non all-day events",
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
+    },
+    {
+      "label": "All day event color count",
+      "name": "eventColorCount",
+      "value": "1",
+      "type": "integer",
+      "required": true,
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
+    },
+    {
+      "label": "All day event foreground #{color}",
+      "name": "eventColorForeground",
+      "type": "color",
+      "value": "#000000",
+      "seq": [
+        ["color", 1, "eventColorCount"]
+      ],
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
+    },
+    {
+      "label": "All day event background #{color}",
+      "name": "eventColorBackground",
+      "type": "color",
+      "value": "#ffffff",
+      "seq": [
+        ["color", 1, "eventColorCount"]
+      ],
+      "showIf": [
+        {
+          "field": "theme",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
     }
   ],
   "output": [

@@ -200,20 +200,22 @@ export function Templates() {
           {isExpanded(repository.url) && repository.description ? (
             <div className="text-gray-400">{repository.description}</div>
           ) : null}
-          <div className="space-y-2">
-            {(repository.templates || []).map((template, index) => (
-              <TemplateRow
-                key={template.id ?? -index}
-                template={template}
-                saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
-                applyTemplate={(template, replace) => {
-                  applyRemoteToFrame(repository, template, replace)
-                  disableFullscreenPanel()
-                }}
-                installedTemplatesByName={installedTemplatesByName}
-              />
-            ))}
-          </div>
+          {isExpanded(repository.url) && repository.templates ? (
+            <div className="space-y-2">
+              {repository.templates.map((template, index) => (
+                <TemplateRow
+                  key={template.id ?? -index}
+                  template={template}
+                  saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
+                  applyTemplate={(template, replace) => {
+                    applyRemoteToFrame(repository, template, replace)
+                    disableFullscreenPanel()
+                  }}
+                  installedTemplatesByName={installedTemplatesByName}
+                />
+              ))}
+            </div>
+          ) : null}
           {isExpanded(repository.url) && repository.templates?.length === 0 ? (
             <div className="text-gray-400">This repository has no scenes.</div>
           ) : null}

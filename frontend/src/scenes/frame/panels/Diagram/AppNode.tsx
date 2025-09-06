@@ -19,6 +19,7 @@ import { newNodePickerLogic } from './newNodePickerLogic'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { Tooltip } from '../../../../components/Tooltip'
 import { FontSelect } from '../../../../components/FontSelect'
+import { ColorInput } from '../../../../components/ColorInput'
 
 export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
   const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
@@ -381,6 +382,16 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                     updateNodeConfig(id, field.name, e.target.checked ? 'true' : 'false')
                                   }
                                 />
+                              ) : field.type === 'color' ? (
+                                <ColorInput
+                                  theme="node"
+                                  placeholder={field.placeholder}
+                                  value={String(
+                                    (field.name in data.config ? data.config[field.name] : field.value) ?? ''
+                                  )}
+                                  onChange={(value) => updateNodeConfig(id, field.name, value)}
+                                  className="!min-w-[50px]"
+                                />
                               ) : (
                                 <TextInput
                                   theme="node"
@@ -389,14 +400,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                     (field.name in data.config ? data.config[field.name] : field.value) ?? ''
                                   )}
                                   onChange={(value) => updateNodeConfig(id, field.name, value)}
-                                  className={field.type === 'color' ? '!min-w-[50px]' : ''}
-                                  type={
-                                    field.type === 'integer' || field.type === 'float'
-                                      ? 'tel'
-                                      : field.type === 'color'
-                                      ? 'color'
-                                      : 'text'
-                                  }
+                                  type={field.type === 'integer' || field.type === 'float' ? 'tel' : 'text'}
                                 />
                               )}
                             </td>

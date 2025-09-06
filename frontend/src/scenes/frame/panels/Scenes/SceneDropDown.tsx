@@ -2,18 +2,22 @@ import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { scenesLogic } from './scenesLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { PencilSquareIcon, TrashIcon, FlagIcon, FolderOpenIcon, PlayIcon } from '@heroicons/react/24/solid'
+import { PencilSquareIcon, TrashIcon, FlagIcon, PlayIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import {
+  ClipboardDocumentIcon,
   CloudArrowDownIcon,
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
   FolderPlusIcon,
   TagIcon,
+  ArrowsPointingInIcon,
+  ArrowsPointingOutIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
 import { controlLogic } from './controlLogic'
 import { findConnectedScenes } from './utils'
+import { Panel } from '../../../../types'
 
 interface SceneDropDownProps {
   sceneId: string
@@ -26,11 +30,15 @@ function isNotNull<T>(value: T | null): value is T {
 
 export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
-  const { editScene, editSceneJSON } = useActions(panelsLogic)
+  const { editScene, editSceneJSON, toggleFullScreenPanel } = useActions(panelsLogic)
+  const { fullScreenPanel } = useValues(panelsLogic)
   const { scenes } = useValues(scenesLogic({ frameId }))
-  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault } = useActions(scenesLogic({ frameId }))
+  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON } = useActions(
+    scenesLogic({ frameId })
+  )
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
   const { setCurrentScene } = useActions(controlLogic({ frameId }))
+  const isFullScreen = fullScreenPanel?.panel === Panel.Diagram && fullScreenPanel?.key === sceneId
   const scene = scenes.find((s) => s.id === sceneId)
   if (!scene) {
     return null
@@ -39,6 +47,17 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
     <DropdownMenu
       buttonColor="secondary"
       items={[
+        context === 'editDiagram'
+          ? {
+              label: isFullScreen ? 'Collapse panel' : 'Expand panel',
+              onClick: () => toggleFullScreenPanel({ panel: Panel.Diagram, key: scene.id }),
+              icon: isFullScreen ? (
+                <ArrowsPointingInIcon className="w-5 h-5" />
+              ) : (
+                <ArrowsPointingOutIcon className="w-5 h-5" />
+              ),
+            }
+          : null,
         {
           label: 'Activate',
           onClick: () => setCurrentScene(scene.id),
@@ -52,9 +71,14 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
             }
           : null,
         {
-          label: 'Edit source JSON',
+          label: 'Edit scene JSON',
           onClick: () => editSceneJSON(scene.id),
           icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
+        },
+        {
+          label: 'Copy scene JSON',
+          onClick: () => copySceneJSON(scene.id),
+          icon: <ClipboardDocumentIcon className="w-5 h-5" />,
         },
         {
           label: 'Save to "My scenes"',

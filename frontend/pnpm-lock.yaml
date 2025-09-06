@@ -10,7 +10,9 @@ specifiers:
   '@types/react': ^18.0.18
   '@types/react-dom': ^18.0.6
   '@types/react-syntax-highlighter': ^15.5.9
+  '@types/streamsaver': ^2.0.5
   '@types/uuid': ^9.0.3
+  '@uiw/react-color-sketch': ^2.8.0
   '@visx/axis': ^3.5.0
   '@visx/brush': ^3.6.1
   '@visx/curve': ^3.3.0
@@ -35,12 +37,12 @@ specifiers:
   fast-deep-equal: ^3.1.3
   fs-extra: ^11.2.0
   fuse.js: ^7.0.0
-  kea: ^3.1.6
+  kea: ^3.1.7
   kea-forms: ^3.2.0
-  kea-loaders: ^3.0.1
+  kea-loaders: ^3.1.1
   kea-localstorage: ^3.1.0
-  kea-router: ^3.1.4
-  kea-subscriptions: ^3.0.0
+  kea-router: ^3.4.1
+  kea-subscriptions: ^3.0.1
   kea-test-utils: ^0.2.2
   kea-typegen: ^3.3.4
   postcss: ^8.4.27
@@ -56,6 +58,7 @@ specifiers:
   reactflow: ^11.8.3
   remark-gfm: ^4.0.0
   sass: ^1.64.2
+  streamsaver: ^2.0.6
   tailwindcss: ^3.4.1
   ts-json-schema-generator: ^1.3.0
   typescript: ^5.7.3
@@ -68,6 +71,7 @@ dependencies:
   '@monaco-editor/react': 4.6.0_nnrd3gsncyragczmpvfhocinkq
   '@popperjs/core': 2.11.8
   '@tailwindcss/container-queries': 0.1.1_tailwindcss@3.4.17
+  '@uiw/react-color-sketch': 2.8.0_nnrd3gsncyragczmpvfhocinkq
   '@visx/axis': 3.12.0_react@18.3.1
   '@visx/brush': 3.12.0_react@18.3.1
   '@visx/curve': 3.12.0
@@ -83,12 +87,12 @@ dependencies:
   copy-to-clipboard: 3.3.3
   fast-deep-equal: 3.1.3
   fuse.js: 7.0.0
-  kea: 3.1.6_react@18.3.1
-  kea-forms: 3.2.0_kea@3.1.6
-  kea-loaders: 3.0.1_kea@3.1.6
-  kea-localstorage: 3.1.0_kea@3.1.6
-  kea-router: 3.2.0_kea@3.1.6
-  kea-subscriptions: 3.0.1_kea@3.1.6
+  kea: 3.1.7_react@18.3.1
+  kea-forms: 3.2.0_kea@3.1.7
+  kea-loaders: 3.1.1_kea@3.1.7
+  kea-localstorage: 3.1.0_kea@3.1.7
+  kea-router: 3.4.1_kea@3.1.7
+  kea-subscriptions: 3.0.1_kea@3.1.7
   react: 18.3.1
   react-dom: 18.3.1_react@18.3.1
   react-markdown: 9.0.3_x25zuu6u7xhdvbznsywf7wxevq
@@ -98,12 +102,14 @@ dependencies:
   react-virtuoso: 4.12.3_nnrd3gsncyragczmpvfhocinkq
   reactflow: 11.11.4_ck2ap7ofk76kidkkm4uczg65xi
   remark-gfm: 4.0.0
+  streamsaver: 2.0.6
   uuid: 9.0.1
 
 devDependencies:
   '@types/react': 18.3.18
   '@types/react-dom': 18.3.5_@types+react@18.3.18
   '@types/react-syntax-highlighter': 15.5.13
+  '@types/streamsaver': 2.0.5
   '@types/uuid': 9.0.8
   autoprefixer: 10.4.20_postcss@8.4.49
   concurrently: 7.6.0
@@ -114,7 +120,7 @@ devDependencies:
   esbuild-sass-plugin: 3.3.1_esbuild@0.21.5
   express: 4.21.2
   fs-extra: 11.2.0
-  kea-test-utils: 0.2.4_kea@3.1.6
+  kea-test-utils: 0.2.4_kea@3.1.7
   kea-typegen: 3.3.5_typescript@5.7.3
   postcss: 8.4.49
   postcss-preset-env: 9.6.0_postcss@8.4.49
@@ -2579,6 +2585,10 @@ packages:
       '@types/prop-types': 15.7.14
       csstype: 3.1.3
 
+  /@types/streamsaver/2.0.5:
+    resolution: {integrity: sha512-93o0zjV8swEhR2YI57h/2ytbJF8bJh7sI9GNB02TLJHdM4fWDxZuChwfWhyD8vt2ub4kw4rsfZ0C0yAUX+3gcg==}
+    dev: true
+
   /@types/unist/2.0.11:
     resolution: {integrity: sha512-CmBKiL6NNo/OqgmMn95Fk9Whlp2mtvIv+KNpQKN2F4SjvrEesubTRWGYSg+BnWZOnlCaSTU1sMpsBOzgbYhnsA==}
     dev: false
@@ -2590,6 +2600,116 @@ packages:
   /@types/uuid/9.0.8:
     resolution: {integrity: sha512-jg+97EGIcY9AGHJJRaaPVgetKDsrTgbRjQ5Msgjh/DQKEFl0DtyRr/VCOyD1T2R1MNeWPK/u7JoGhlDZnKBAfA==}
     dev: true
+
+  /@uiw/color-convert/2.8.0:
+    resolution: {integrity: sha512-eRErVaYCkhtd+lltuGykQSwmxvFU7gTjF3AHHWsTQNa3o+sEBeRNY4urjpvRZRhsV6XgAbwsKe/IAZzuBBLx7g==}
+    peerDependencies:
+      '@babel/runtime': '>=7.19.0'
+    dev: false
+
+  /@uiw/react-color-alpha/2.8.0_nnrd3gsncyragczmpvfhocinkq:
+    resolution: {integrity: sha512-AZlPF6j+I1XftKt4FZ5VUQ7Au0W1BR/PZvgwKTI+bCb7bbRA2l/2am7aInpvaRAav46o13KneQ06Mgqg4jaDzw==}
+    peerDependencies:
+      '@babel/runtime': '>=7.19.0'
+      react: '>=16.9.0'
+      react-dom: '>=16.9.0'
+    dependencies:
+      '@uiw/color-convert': 2.8.0
+      '@uiw/react-drag-event-interactive': 2.8.0_nnrd3gsncyragczmpvfhocinkq
+      react: 18.3.1
+      react-dom: 18.3.1_react@18.3.1
+    dev: false
+
+  /@uiw/react-color-editable-input-rgba/2.8.0_nnrd3gsncyragczmpvfhocinkq:
+    resolution: {integrity: sha512-Y0SWSU0hApJs4TvklTx+x+1y8e/gvNAtfsedzTfspk2pMjF3kPS5B/8tE+jowkBdTXEwQhziihK0LUWY19RydA==}
+    peerDependencies:
+      '@babel/runtime': '>=7.19.0'
+      react: '>=16.9.0'
+      react-dom: '>=16.9.0'
+    dependencies:
+      '@uiw/color-convert': 2.8.0
+      '@uiw/react-color-editable-input': 2.8.0_nnrd3gsncyragczmpvfhocinkq
+      react: 18.3.1
+      react-dom: 18.3.1_react@18.3.1
+    dev: false
+
+  /@uiw/react-color-editable-input/2.8.0_nnrd3gsncyragczmpvfhocinkq:
+    resolution: {integrity: sha512-wChSbI57NLOmJNzMBlQdwAQPi1CzERImEmK0gsczu7AlV/Zt9i5AdN0a1h5lPtIck5KRSiGUlbNK3e5AnVgRsg==}
+    peerDependencies:
+      '@babel/runtime': '>=7.19.0'
+      react: '>=16.9.0'
+      react-dom: '>=16.9.0'
+    dependencies:
+      react: 18.3.1
+      react-dom: 18.3.1_react@18.3.1
+    dev: false
+
+  /@uiw/react-color-hue/2.8.0_nnrd3gsncyragczmpvfhocinkq:
+    resolution: {integrity: sha512-4/oCVaD9gsqnqfjM2LMiyVx1YbM6l9G+HqrOZRBuBqL+UirLmNLSLZTMbhbezzvjxu+5cJMzt8ezT+jxkRqBbA==}
+    peerDependencies:
+      '@babel/runtime': '>=7.19.0'
+      react: '>=16.9.0'
+      react-dom: '>=16.9.0'
+    dependencies:
+      '@uiw/color-convert': 2.8.0
+      '@uiw/react-color-alpha': 2.8.0_nnrd3gsncyragczmpvfhocinkq
+      react: 18.3.1
+      react-dom: 18.3.1_react@18.3.1
+    dev: false
+
+  /@uiw/react-color-saturation/2.8.0_nnrd3gsncyragczmpvfhocinkq:
+    resolution: {integrity: sha512-zpo7P+93Nu2VoBj9Mo3Ipn3ppjEl5SkdM/UDfn3PVdup9K67T451iyLMTgyUvHOegW9rBhyS7X1j68PmX/xd0w==}
+    peerDependencies:
+      '@babel/runtime': '>=7.19.0'
+      react: '>=16.9.0'
+      react-dom: '>=16.9.0'
+    dependencies:
+      '@uiw/color-convert': 2.8.0
+      '@uiw/react-drag-event-interactive': 2.8.0_nnrd3gsncyragczmpvfhocinkq
+      react: 18.3.1
+      react-dom: 18.3.1_react@18.3.1
+    dev: false
+
+  /@uiw/react-color-sketch/2.8.0_nnrd3gsncyragczmpvfhocinkq:
+    resolution: {integrity: sha512-qLRRmDKhdFrRil4xYBum31SRdWbdh1F5diP0PbCB8XdP5O0fBVuV5g2EvEvCqoiMecYhMwVicmZIrzhrmyjr+Q==}
+    peerDependencies:
+      '@babel/runtime': '>=7.19.0'
+      react: '>=16.9.0'
+      react-dom: '>=16.9.0'
+    dependencies:
+      '@uiw/color-convert': 2.8.0
+      '@uiw/react-color-alpha': 2.8.0_nnrd3gsncyragczmpvfhocinkq
+      '@uiw/react-color-editable-input': 2.8.0_nnrd3gsncyragczmpvfhocinkq
+      '@uiw/react-color-editable-input-rgba': 2.8.0_nnrd3gsncyragczmpvfhocinkq
+      '@uiw/react-color-hue': 2.8.0_nnrd3gsncyragczmpvfhocinkq
+      '@uiw/react-color-saturation': 2.8.0_nnrd3gsncyragczmpvfhocinkq
+      '@uiw/react-color-swatch': 2.8.0_nnrd3gsncyragczmpvfhocinkq
+      react: 18.3.1
+      react-dom: 18.3.1_react@18.3.1
+    dev: false
+
+  /@uiw/react-color-swatch/2.8.0_nnrd3gsncyragczmpvfhocinkq:
+    resolution: {integrity: sha512-88X9iSQEqTu609BcGnbgc2Oeq+/UHPv6uL1lGGPMVxjKm9WO7z8PlizmkWSGaLL1ELHEKMfufFbFQ4BJktuWrw==}
+    peerDependencies:
+      '@babel/runtime': '>=7.19.0'
+      react: '>=16.9.0'
+      react-dom: '>=16.9.0'
+    dependencies:
+      '@uiw/color-convert': 2.8.0
+      react: 18.3.1
+      react-dom: 18.3.1_react@18.3.1
+    dev: false
+
+  /@uiw/react-drag-event-interactive/2.8.0_nnrd3gsncyragczmpvfhocinkq:
+    resolution: {integrity: sha512-BE9eakoBxGtIk267weYvFm13NrGa+4k/6Iv5e3XxW6gToCGVc4QODQBoRFSNpR28W7JIekgqVjlNyvBUAmRwMg==}
+    peerDependencies:
+      '@babel/runtime': '>=7.19.0'
+      react: '>=16.9.0'
+      react-dom: '>=16.9.0'
+    dependencies:
+      react: 18.3.1
+      react-dom: 18.3.1_react@18.3.1
+    dev: false
 
   /@ungap/structured-clone/1.2.1:
     resolution: {integrity: sha512-fEzPV3hSkSMltkw152tJKNARhOupqbH96MZWyRjNaYZOMIzbrTeQDG+MTc6Mr2pgzFQzFxAfmhGDNP5QK++2ZA==}
@@ -4239,54 +4359,54 @@ packages:
       graceful-fs: 4.2.11
     dev: true
 
-  /kea-forms/3.2.0_kea@3.1.6:
+  /kea-forms/3.2.0_kea@3.1.7:
     resolution: {integrity: sha512-R/ECGx6FxOZ2TEJv2GcFNLcQJePUK5Qd4Km81rN/7lBHd2hG4CAJglODVpcolWZ0RtcLcvMhHeTg/iqNz5pynw==}
     peerDependencies:
       kea: '>= 3.0.1'
     dependencies:
-      kea: 3.1.6_react@18.3.1
+      kea: 3.1.7_react@18.3.1
     dev: false
 
-  /kea-loaders/3.0.1_kea@3.1.6:
-    resolution: {integrity: sha512-2mCGTMH9nmPQxg7DrBP7e9ycXU4cOQORkxK0Bdb3QWEAZQJUFTuz8oBHbUijXCaEV8UYe9l8yxBmiSgSosAUzg==}
+  /kea-loaders/3.1.1_kea@3.1.7:
+    resolution: {integrity: sha512-FZcOh5PSTIh5+Of5kZno7bXENmY4rCcRYnTB4e709Mbkc7KzriEZ6b/mIWvYx2vkDEgilIsvibUsGOADZ6wqPw==}
     peerDependencies:
       kea: '>= 3'
     dependencies:
-      kea: 3.1.6_react@18.3.1
+      kea: 3.1.7_react@18.3.1
     dev: false
 
-  /kea-localstorage/3.1.0_kea@3.1.6:
+  /kea-localstorage/3.1.0_kea@3.1.7:
     resolution: {integrity: sha512-OFByJwu88Ro9C9A1bqY5n8v1JYl6ArXX1zC75qpN8HorrReoM9Kf0gZdVspyExsRuX5en9ga64vsk54+jW4Kvw==}
     peerDependencies:
       kea: '>= 3'
     dependencies:
-      kea: 3.1.6_react@18.3.1
+      kea: 3.1.7_react@18.3.1
     dev: false
 
-  /kea-router/3.2.0_kea@3.1.6:
-    resolution: {integrity: sha512-TZVHrQQNhD7tSL05xEXoNCeYu/vwwvxBc316pgwi5z8cH61MtCcUBUEZnWr2Nd7jSBDgxA/GRHpqai0YXq0T8w==}
+  /kea-router/3.4.1_kea@3.1.7:
+    resolution: {integrity: sha512-cqhsoBkWtZdp4ZJBZVo27kRbFD2ilZ4ozNe632hLwK4KwtqiaYT7NsbbGbyjbsvCQGi3ClDkNxvpjbcTvx9Pbw==}
     peerDependencies:
       kea: '>= 3'
     dependencies:
-      kea: 3.1.6_react@18.3.1
+      kea: 3.1.7_react@18.3.1
       url-pattern: 1.0.3
     dev: false
 
-  /kea-subscriptions/3.0.1_kea@3.1.6:
+  /kea-subscriptions/3.0.1_kea@3.1.7:
     resolution: {integrity: sha512-uBJ0L+oPlthV2FBPpB+gUmZj8p0tdFH6cSLWTEBRkDgruOTmQjKXWsSRN5cxL8MUq2naihMBL8MSqK8IY6f8/g==}
     peerDependencies:
       kea: '>= 3'
     dependencies:
-      kea: 3.1.6_react@18.3.1
+      kea: 3.1.7_react@18.3.1
     dev: false
 
-  /kea-test-utils/0.2.4_kea@3.1.6:
+  /kea-test-utils/0.2.4_kea@3.1.7:
     resolution: {integrity: sha512-iUDQjIX5+D4BjxfGckY9BM7VOwGTKJK71zJ/KPsEmOHZh8KQeJPiamP9UCPSldg3m8Zr6pSH/qPklY6+w9Rcbg==}
     peerDependencies:
       kea: '>= 3'
     dependencies:
-      kea: 3.1.6_react@18.3.1
-      kea-waitfor: 0.2.1_kea@3.1.6
+      kea: 3.1.7_react@18.3.1
+      kea-waitfor: 0.2.1_kea@3.1.7
     dev: true
 
   /kea-typegen/3.3.5_typescript@5.7.3:
@@ -4307,16 +4427,16 @@ packages:
       - supports-color
     dev: true
 
-  /kea-waitfor/0.2.1_kea@3.1.6:
+  /kea-waitfor/0.2.1_kea@3.1.7:
     resolution: {integrity: sha512-oXZ42wZl46+KShuPORgAHKFQr1ewrNJ1ZVBUFLDyn4J3XTndQqCvN0GaFrSCIR0qeBzGHtNu/WwPgVGsmDH8DA==}
     peerDependencies:
       kea: '>= 2.2.1'
     dependencies:
-      kea: 3.1.6_react@18.3.1
+      kea: 3.1.7_react@18.3.1
     dev: true
 
-  /kea/3.1.6_react@18.3.1:
-    resolution: {integrity: sha512-EftYkqGyI8hdC8Eo9r6jGtUSxdykNe1L+Cpu+7t/SEWc9f3OPFtNFPF+hdxdYBeZp2Je3EY6BAEQfWhP4mbUPA==}
+  /kea/3.1.7_react@18.3.1:
+    resolution: {integrity: sha512-BN9bS4NMI57TwJRANL55H5Cl2Px0ciyv58wtnzzfwH7d2R9fEmcuRREpLfp3blglSrgfGUWM4b+Pz6CwxJxjzQ==}
     peerDependencies:
       react: '>= 16.8'
     dependencies:
@@ -6341,6 +6461,10 @@ packages:
     resolution: {integrity: sha512-RwNA9Z/7PrK06rYLIzFMlaF+l73iwpzsqRIFgbMLbTcLD6cOao82TaWefPXQvB2fOC4AjuYSEndS7N/mTCbkdQ==}
     engines: {node: '>= 0.8'}
     dev: true
+
+  /streamsaver/2.0.6:
+    resolution: {integrity: sha512-LK4e7TfCV8HzuM0PKXuVUfKyCB1FtT9L0EGxsFk5Up8njj0bXK8pJM9+Wq2Nya7/jslmCQwRK39LFm55h7NBTw==}
+    dev: false
 
   /string-width/4.2.3:
     resolution: {integrity: sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g==}

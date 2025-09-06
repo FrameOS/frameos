@@ -1,13 +1,11 @@
-import { useActions, useValues } from 'kea'
+import { useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { sceneSettingsLogic } from './sceneSettingsLogic'
 import { Form, Group } from 'kea-forms'
 import { Field } from '../../../../components/Field'
-import { TextInput } from '../../../../components/TextInput'
-import { panelsLogic } from '../panelsLogic'
-import { H6 } from '../../../../components/H6'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Button } from '../../../../components/Button'
+import { ColorInput } from '../../../../components/ColorInput'
 
 export interface SceneSettingsProps {
   sceneId: string
@@ -49,13 +47,7 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
               name="backgroundColor"
               label="Background color"
             >
-              <TextInput
-                type="color"
-                name="backgroundColor"
-                className="!p-0"
-                style={{ width: 70 }}
-                placeholder="#ffffff"
-              />
+              <ColorInput name="backgroundColor" className="!p-0" style={{ width: 70 }} placeholder="#ffffff" />
             </Field>
           </Group>
           {onClose ? (

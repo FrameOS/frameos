@@ -14,6 +14,7 @@ import {
   ArrowPathIcon,
   CloudArrowDownIcon,
   FolderArrowDownIcon,
+  FolderOpenIcon,
   PencilSquareIcon,
   PlusIcon,
   SparklesIcon,
@@ -33,6 +34,7 @@ import { FrameImage } from '../../../../components/FrameImage'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
+  const { applyTemplate } = useActions(frameLogic)
   const { editScene, openTemplates } = useActions(panelsLogic)
   const {
     scenes,
@@ -106,6 +108,25 @@ export function Scenes() {
                     label: 'Download as .zip',
                     onClick: () => saveAsZip({ name: frameForm.name || 'Exported scenes' }),
                     icon: <CloudArrowDownIcon className="w-5 h-5" />,
+                  },
+                  {
+                    label: 'Paste scene JSON',
+                    onClick: () => {
+                      const json = prompt('Paste your scene JSON here:')
+                      if (json) {
+                        try {
+                          const scene = JSON.parse(json)
+                          if (Array.isArray(scene)) {
+                            applyTemplate({ scenes: scene })
+                          } else {
+                            applyTemplate({ scenes: [scene] })
+                          }
+                        } catch (error) {
+                          alert('Invalid JSON')
+                        }
+                      }
+                    },
+                    icon: <FolderOpenIcon className="w-5 h-5" />,
                   },
                 ]}
               />

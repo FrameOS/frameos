@@ -24,6 +24,7 @@ import { Palette } from '../../../../types'
 import { A } from 'kea-router'
 import { timezoneOptions } from '../../../../decorators/timezones'
 import { TextArea } from '../../../../components/TextArea'
+import { ColorInput } from '../../../../components/ColorInput'
 
 export interface FrameSettingsProps {
   className?: string
@@ -754,9 +755,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   </div>
                   {palette?.colors.map((color, index) => (
                     <div className="flex items-center gap-2" key={index}>
-                      <TextInput
-                        type="color"
-                        theme="node"
+                      <ColorInput
                         className="!w-24"
                         name={`colors.${index}`}
                         value={value?.colors?.[index] ?? color}
@@ -833,16 +832,14 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   <TextInput name="offsetY" placeholder="0" />
                 </Field>
                 <Field name="qrCodeColor" label="QR code color">
-                  <TextInput
-                    type="color"
+                  <ColorInput
                     name="qrCodeColor"
                     value={frameForm.control_code?.qrCodeColor ?? '#000000'}
                     placeholder="#000000"
                   />
                 </Field>
                 <Field name="backgroundColor" label="Background color">
-                  <TextInput
-                    type="color"
+                  <ColorInput
                     name="backgroundColor"
                     value={frameForm.control_code?.backgroundColor ?? '#ffffff'}
                     placeholder="#ffffff"

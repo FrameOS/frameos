@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import { useState, DragEvent as ReactDragEvent } from 'react'
 import { frameLogic } from '../../frameLogic'
 import { sceneStateLogic } from './sceneStateLogic'
 import { Form, Group } from 'kea-forms'
@@ -32,14 +33,32 @@ export function SceneState(): JSX.Element {
   const { selectedSceneId: sceneId } = useValues(panelsLogic({ frameId }))
   const { sceneIndex, scene, editingFields, fieldsWithErrors } = useValues(sceneStateLogic({ frameId, sceneId }))
   const { setFields, addField, editField, closeField, removeField } = useActions(sceneStateLogic({ frameId, sceneId }))
+  const [draggedField, setDraggedField] = useState<number | null>(null)
 
   if (!scene || !sceneId) {
     return <div>Add a scene first</div>
   }
 
-  const onDragStart = (event: any, type: 'state', keyword: string) => {
+  const onDragStart = (event: any, type: 'state', keyword: string, index: number) => {
+    setDraggedField(index)
     event.dataTransfer.setData('application/reactflow', JSON.stringify({ type, keyword }))
     event.dataTransfer.effectAllowed = 'move'
+  }
+
+  const onDropField = (event: ReactDragEvent, index: number) => {
+    event.preventDefault()
+    if (draggedField === null || draggedField === index) {
+      return
+    }
+    const fields = [...(scene?.fields ?? [])]
+    const [removed] = fields.splice(draggedField, 1)
+    fields.splice(index, 0, removed)
+    setFields(fields)
+    setDraggedField(null)
+  }
+
+  const onDragOverField = (event: ReactDragEvent) => {
+    event.preventDefault()
   }
 
   return (
@@ -189,19 +208,49 @@ export function SceneState(): JSX.Element {
                 <div
                   className="bg-gray-900 p-2 dndnode cursor-move"
                   draggable
-                  onDragStart={(event) => onDragStart(event, 'state', field.name)}
+                  onDragStart={(event) => onDragStart(event, 'state', field.name, index)}
+                  onDragOver={onDragOverField}
+                  onDrop={(event) => onDropField(event, index)}
+                  onDragEnd={() => setDraggedField(null)}
                 >
                   <div className="flex items-center gap-1 justify-between max-w-full w-full">
                     <div className="flex items-center gap-1 max-w-full w-full overflow-hidden">
                       {field.label || field.name || 'Unnamed field'}
                     </div>
-                    <Button
-                      onClick={editingFields[index] ? () => closeField(index) : () => editField(index)}
-                      size="small"
-                      color={'secondary'}
-                    >
-                      {editingFields[index] ? 'Close' : 'Edit'}
-                    </Button>
+                    <div className="flex gap-1">
+                      <Tooltip
+                        title={
+                          field.persist === 'disk' ? (
+                            <>Changes to this field are persisted and restored after a reboot.</>
+                          ) : (
+                            <>Changes to this field are kept in memory. The default value is restored after a reboot.</>
+                          )
+                        }
+                      >
+                        <Tag color={field.persist === 'disk' ? 'blue' : 'gray'}>{field.persist}</Tag>
+                      </Tooltip>
+                      <Tooltip
+                        title={
+                          field.access === 'public' ? (
+                            <>This field can be set externally.</>
+                          ) : (
+                            <>
+                              This field is not visible to nor controllable from anywhere. It is only accessible inside
+                              the scene.
+                            </>
+                          )
+                        }
+                      >
+                        <Tag color={field.access === 'private' ? 'gray' : 'blue'}>{field.access}</Tag>
+                      </Tooltip>
+                      <Button
+                        onClick={editingFields[index] ? () => closeField(index) : () => editField(index)}
+                        size="small"
+                        color={'secondary'}
+                      >
+                        {editingFields[index] ? 'Close' : 'Edit'}
+                      </Button>
+                    </div>
                   </div>
                   <div className="flex items-center gap-1 max-w-full w-full overflow-hidden">
                     <ClipboardDocumentIcon
@@ -209,33 +258,6 @@ export function SceneState(): JSX.Element {
                       onClick={() => copy(stateFieldAccess(field))}
                     />
                     <code className="text-sm text-gray-400 break-words truncate">{stateFieldAccess(field)}</code>
-                  </div>
-                  <div className="flex gap-2 mt-1">
-                    <Tooltip
-                      title={
-                        field.persist === 'disk' ? (
-                          <>Changes to this field are persisted and restored after a reboot.</>
-                        ) : (
-                          <>Changes to this field are kept in memory. The default value is restored after a reboot.</>
-                        )
-                      }
-                    >
-                      <Tag color={field.persist === 'disk' ? 'blue' : 'gray'}>{field.persist}</Tag>
-                    </Tooltip>
-                    <Tooltip
-                      title={
-                        field.access === 'public' ? (
-                          <>This field can be modified with the frame's Control URL.</>
-                        ) : (
-                          <>
-                            This field is not visible to nor controllable from the frame's Control URL. It is only
-                            accessible inside the scene.
-                          </>
-                        )
-                      }
-                    >
-                      <Tag color={field.access === 'private' ? 'gray' : 'blue'}>{field.access}</Tag>
-                    </Tooltip>
                   </div>
                 </div>
               )}

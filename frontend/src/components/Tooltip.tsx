@@ -13,6 +13,7 @@ export interface TooltipProps {
   className?: string
   containerClassName?: string
   tooltipColor?: ButtonProps['color']
+  noPadding?: boolean
 }
 
 export function Tooltip({
@@ -22,6 +23,7 @@ export function Tooltip({
   className,
   containerClassName,
   tooltipColor,
+  noPadding,
 }: TooltipProps) {
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
@@ -53,16 +55,17 @@ export function Tooltip({
               <Popover.Panel
                 static
                 className={clsx(
-                  'absolute right-0 w-56 mt-2 origin-top-right divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none',
+                  'absolute right-0 mt-2 origin-top-right divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none',
+                  noPadding ? '' : 'w-56',
                   buttonColor(tooltipColor || 'light-gray'),
-                  titleClassName ? titleClassName : 'w-56'
+                  titleClassName ? titleClassName : ''
                 )}
                 ref={setPopperElement}
                 style={styles.popper}
                 {...attributes.popper}
               >
-                <div className="py-1">
-                  <div className="px-4 py-2 text-sm text-gray-100">{title}</div>
+                <div className={noPadding ? '' : 'py-1'}>
+                  <div className={noPadding ? 'text-sm text-gray-100' : 'px-4 py-2 text-sm text-gray-100'}>{title}</div>
                 </div>
               </Popover.Panel>
             </Transition>,
