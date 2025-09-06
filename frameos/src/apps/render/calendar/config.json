@@ -470,10 +470,10 @@
       ]
     },
     {
-      "label": "All day event foreground #{color}",
-      "name": "eventColorForeground",
+      "label": "All day event background #{color}",
+      "name": "eventColorBackground",
       "type": "color",
-      "value": "#000000",
+      "value": "#ffffff",
       "seq": [
         ["color", 1, "eventColorCount"]
       ],
@@ -486,10 +486,10 @@
       ]
     },
     {
-      "label": "All day event background #{color}",
-      "name": "eventColorBackground",
+      "label": "All day event foreground #{color}",
+      "name": "eventColorForeground",
       "type": "color",
-      "value": "#ffffff",
+      "value": "#000000",
       "seq": [
         ["color", 1, "eventColorCount"]
       ],

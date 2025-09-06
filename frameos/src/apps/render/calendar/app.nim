@@ -83,10 +83,10 @@ type
 # Small record describing one visual line inside a day cell
 type
   EventLine* = object
-    display*: string  # what we will draw on the line
-    isAllDay*: bool   # if true we draw a colored chip behind it
-    color*: ColorRGBA # base color for all-day chips
-    sortKey*: int     # minutes since midnight; all-day uses -1
+    display*: string                # what we will draw on the line
+    isAllDay*: bool                 # if true we draw a colored chip behind it
+    colors*: Option[(Color, Color)] # (bg, fg) - colors used if isAllDay
+    sortKey*: int                   # minutes since midnight; all-day uses -1
 
 proc setCommonThemeFonts*(self: App) =
   self.appConfig.weekdayFont = "Ubuntu-Medium.ttf"
@@ -104,9 +104,9 @@ proc setTheme*(self: App) =
     self.appConfig.lastTheme = "light"
     self.setCommonThemeFonts()
     self.appConfig.backgroundColor = rgb(255, 255, 255).to(Color)
-    self.appConfig.weekendBackgroundColor = rgba(174, 190, 229, 1).to(Color)
+    self.appConfig.weekendBackgroundColor = rgb(191, 204, 237).to(Color)
     self.appConfig.todayStrokeColor = rgb(255, 0, 0).to(Color)
-    self.appConfig.todayBackgroundColor = rgba(239, 189, 189, 1).to(Color)
+    self.appConfig.todayBackgroundColor = rgb(239, 189, 189).to(Color)
     self.appConfig.dateTextColor = rgb(0, 0, 0).to(Color)
     self.appConfig.eventTimeColor = rgb(51, 51, 51).to(Color)
     self.appConfig.eventTitleColor = rgb(51, 51, 51).to(Color)
@@ -126,13 +126,13 @@ proc setTheme*(self: App) =
       rgb(0, 0, 0).to(Color)
     ]
     self.appConfig.eventColorBackground = @[
-      rgb(0, 122, 255).to(Color), # bright blue
-      rgb(52, 199, 89).to(Color), # bright green
-      rgb(255, 149, 0).to(Color), # orange
-      rgb(255, 59, 48).to(Color), # bright red
-      rgb(175, 82, 222).to(Color), # violet
-      rgb(90, 200, 250).to(Color), # sky
-      rgb(255, 204, 0).to(Color), # yellow
+      rgb(166, 181, 249).to(Color), # bright blue
+      rgb(135, 241, 162).to(Color), # bright green
+      rgb(237, 196, 138).to(Color), # orange
+      rgb(248, 168, 164).to(Color), # bright red
+      rgb(230, 181, 255).to(Color), # violet
+      rgb(160, 211, 241).to(Color), # sky
+      rgb(255, 245, 160).to(Color), # yellow
     ]
   elif self.appConfig.theme == "dark" and self.appConfig.lastTheme != "dark":
     self.appConfig.lastTheme = "dark"
@@ -185,12 +185,12 @@ proc hashTitle(s: string): uint32 =
     h = ((h shl 5) + h) + uint32(ord(ch)) # djb2
   h
 
-proc pickColor*(self: App, title: string): ColorRGBA =
+proc pickColors*(self: App, title: string): (Color, Color) =
   let colorIndex = int(hashTitle(title) mod uint32(self.appConfig.eventColorCount))
-  return self.appConfig.eventColorBackground[colorIndex].to(ColorRGBA)
-
-# Create a translucent fill for the chip
-proc withAlpha(c: ColorRGBA, a: float32): ColorRGBA = rgba(c.r, c.g, c.b, (a * 255).uint8)
+  return (
+    self.appConfig.eventColorBackground[colorIndex],
+    self.appConfig.eventColorForeground[colorIndex],
+  )
 
 # --- Helpers for robust all-day detection ------------------------------------
 
@@ -278,7 +278,7 @@ proc makeLine(self: App; summary, start: string; isAllDay: bool): EventLine =
       dateOrdinalFromStart(start)        # earlier start date => smaller key
     else:
       100_000_000 + timeToMinutes(start) # ensure timed events come after all-day
-  EventLine(display: display, isAllDay: isAllDay, color: pickColor(self, summary), sortKey: key)
+  EventLine(display: display, isAllDay: isAllDay, colors: some(pickColors(self, summary)), sortKey: key)
 
 proc addEventLine(t: var Table[string, seq[EventLine]], key: string, line: EventLine) =
   if not t.hasKey(key): t[key] = @[]
@@ -544,7 +544,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
         if needMoreLine and maxLines > 0:
           let remaining = total - visibleCount
           if remaining > 0:
-            linesToDraw.add(EventLine(display: &"+{remaining} more", isAllDay: false, color: rgba(0, 0, 0, 0),
+            linesToDraw.add(EventLine(display: &"+{remaining} more", isAllDay: false, colors: none((Color, Color)),
                 sortKey: high(int)))
 
         # Draw each line individually so we can paint chips for all-day events
@@ -554,6 +554,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
 
           if line.isAllDay and not line.display.startsWith("+"):
             # Chip background (fill + subtle border) similar to Google Calendar
+            let bg = if line.colors.isSome(): line.colors.get()[0] else: self.appConfig.backgroundColor
             let padX = 4f * s
             let padY = 1f * s
             let chipW = cellWidth - (padX * 2)
@@ -561,17 +562,8 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
             let chipX = x + padX
             let chipY = yLine + padY
             var chip = newImage(chipW.int, chipH.int)
-            chip.fill(withAlpha(line.color, 0.18))
+            chip.fill(bg)
             image.draw(chip, translate(vec2(chipX, chipY)))
-            # simple 1px inner border
-            var topB = newImage(chipW.int, 1)
-            topB.fill(withAlpha(line.color, 0.55))
-            image.draw(topB, translate(vec2(chipX, chipY)))
-            image.draw(topB, translate(vec2(chipX, chipY + chipH - 1)))
-            var sideB = newImage(1, chipH.int)
-            sideB.fill(withAlpha(line.color, 0.55))
-            image.draw(sideB, translate(vec2(chipX, chipY)))
-            image.draw(sideB, translate(vec2(chipX + chipW - 1, chipY)))
 
           # Build text for the line (time part + bold title for timed events)
           var spans: seq[Span] = @[]
@@ -585,7 +577,12 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
             if line.display.startsWith("+"):
               spans.add(newSpan(line.display, eventTimeFont))
             else:
-              spans.add(newSpan(line.display, eventTitleFont))
+              let fg = if line.colors.isSome(): line.colors.get()[1] else: self.appConfig.eventTitleColor
+              if fg != eventTitleFont.paint.color:
+                let font = cloneFontWithColor(eventTitleFont, fg)
+                spans.add(newSpan(line.display, font))
+              else:
+                spans.add(newSpan(line.display, eventTitleFont))
 
           let bx = x + (if line.isAllDay and not line.display.startsWith("+"): 8f*s else: 4f*s)
           let bw = cellWidth - (if line.isAllDay and not line.display.startsWith("+"): 12f*s else: 6f*s)

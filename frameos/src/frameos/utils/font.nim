@@ -36,6 +36,10 @@ proc newFont*(typeface: Typeface, size: float, color: Color): Font =
   result.size = size
   result.paint.color = color
 
+proc cloneFontWithColor*(f: Font, color: Color): Font =
+  result = f.copy()
+  result.paint.color = color
+
 proc getAvailableFonts*(assetsPath: string): seq[string] =
   var fonts = @[""]
   if not dirExists(assetsPath & "/fonts"):
