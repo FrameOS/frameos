@@ -138,7 +138,7 @@ proc setTheme*(self: App) =
     self.appConfig.lastTheme = "dark"
     self.setCommonThemeFonts()
     self.appConfig.backgroundColor = rgb(34, 34, 34).to(Color)
-    self.appConfig.weekendBackgroundColor = rgb(34, 26, 51).to(Color)
+    self.appConfig.weekendBackgroundColor = rgb(45, 45, 45).to(Color)
     self.appConfig.todayStrokeColor = rgb(255, 0, 0).to(Color)
     self.appConfig.todayBackgroundColor = rgb(47, 1, 1).to(Color)
     self.appConfig.dateTextColor = rgb(255, 255, 255).to(Color)
