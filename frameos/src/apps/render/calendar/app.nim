@@ -1,7 +1,6 @@
 import pixie
 import json, options, strformat, strutils, tables
-import times, chrono
-import math
+import times, chroma
 import algorithm
 
 import frameos/apps
@@ -40,6 +39,9 @@ type
     startWeekOnMonday*: bool
 
     # colors / fonts
+    lastTheme*: string
+    theme*: string
+    transparentBackground*: bool
     backgroundColor*: Color
     weekendBackgroundColor*: Color # NEW: background color for Saturday/Sunday day cells
     gridColor*: Color
@@ -59,11 +61,12 @@ type
     eventTimeFont*: string
     eventTitleFont*: string
     eventFontSize*: float
+    eventColorCount*: int
+    eventColorForeground*: seq[Color]
+    eventColorBackground*: seq[Color]
 
     # layout / decoration
     padding*: int                  # outer padding (px)
-    borderColor*: Color            # border color around the calendar
-    borderWidth*: float            # border width (px)
     showMonthYear*: bool           # show month + year
     monthYearPosition*: string     # "top", "bottom", or "none"
     showGrid*: bool                # toggle grid on/off
@@ -72,10 +75,7 @@ type
     todayBackgroundColor*: Color   # NEW: background fill for today's cell
     todayStrokeWidth*: float       # NEW: outline thickness (px, before scaling)
     showEventTimes*: bool          # show times next to non all-day events
-
-    # new fields
     scale*: int                    # scale percentage (100 = default)
-    palette*: string               # palette selector for all-day chips
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -88,6 +88,87 @@ type
     color*: ColorRGBA # base color for all-day chips
     sortKey*: int     # minutes since midnight; all-day uses -1
 
+proc setCommonThemeFonts*(self: App) =
+  self.appConfig.weekdayFont = "Ubuntu-Medium.ttf"
+  self.appConfig.titleFont = "Ubuntu-Bold.ttf"
+  self.appConfig.dateFont = "Ubuntu-Medium.ttf"
+  self.appConfig.eventTimeFont = "Ubuntu-Light.ttf"
+  self.appConfig.eventTitleFont = "Ubuntu-Medium.ttf"
+  self.appConfig.weekdayFontSize = 16
+  self.appConfig.titleFontSize = 28
+  self.appConfig.dateFontSize = 18
+  self.appConfig.eventFontSize = 14
+
+proc setTheme*(self: App) =
+  if self.appConfig.theme == "light" and self.appConfig.lastTheme != "light":
+    self.appConfig.lastTheme = "light"
+    self.setCommonThemeFonts()
+    self.appConfig.backgroundColor = rgb(255, 255, 255).to(Color)
+    self.appConfig.weekendBackgroundColor = rgba(174, 190, 229, 1).to(Color)
+    self.appConfig.todayStrokeColor = rgb(255, 0, 0).to(Color)
+    self.appConfig.todayBackgroundColor = rgba(239, 189, 189, 1).to(Color)
+    self.appConfig.dateTextColor = rgb(0, 0, 0).to(Color)
+    self.appConfig.eventTimeColor = rgb(51, 51, 51).to(Color)
+    self.appConfig.eventTitleColor = rgb(51, 51, 51).to(Color)
+    self.appConfig.titleTextColor = rgb(0, 0, 0).to(Color)
+    self.appConfig.titleBackgroundColor = rgb(255, 255, 255).to(Color)
+    self.appConfig.weekdayTextColor = rgb(0, 0, 0).to(Color)
+    self.appConfig.weekdayBackgroundColor = rgb(240, 240, 240).to(Color)
+    self.appConfig.gridColor = rgb(220, 220, 220).to(Color)
+    self.appConfig.eventColorCount = 7
+    self.appConfig.eventColorForeground = @[
+      rgb(0, 0, 0).to(Color),
+      rgb(0, 0, 0).to(Color),
+      rgb(0, 0, 0).to(Color),
+      rgb(0, 0, 0).to(Color),
+      rgb(0, 0, 0).to(Color),
+      rgb(0, 0, 0).to(Color),
+      rgb(0, 0, 0).to(Color)
+    ]
+    self.appConfig.eventColorBackground = @[
+      rgb(0, 122, 255).to(Color), # bright blue
+      rgb(52, 199, 89).to(Color), # bright green
+      rgb(255, 149, 0).to(Color), # orange
+      rgb(255, 59, 48).to(Color), # bright red
+      rgb(175, 82, 222).to(Color), # violet
+      rgb(90, 200, 250).to(Color), # sky
+      rgb(255, 204, 0).to(Color), # yellow
+    ]
+  elif self.appConfig.theme == "dark" and self.appConfig.lastTheme != "dark":
+    self.appConfig.lastTheme = "dark"
+    self.setCommonThemeFonts()
+    self.appConfig.backgroundColor = rgb(34, 34, 34).to(Color)
+    self.appConfig.weekendBackgroundColor = rgb(34, 26, 51).to(Color)
+    self.appConfig.todayStrokeColor = rgb(255, 0, 0).to(Color)
+    self.appConfig.todayBackgroundColor = rgb(47, 1, 1).to(Color)
+    self.appConfig.dateTextColor = rgb(255, 255, 255).to(Color)
+    self.appConfig.eventTimeColor = rgb(255, 255, 255).to(Color)
+    self.appConfig.eventTitleColor = rgb(255, 255, 255).to(Color)
+    self.appConfig.titleTextColor = rgb(255, 255, 255).to(Color)
+    self.appConfig.titleBackgroundColor = rgb(34, 34, 34).to(Color)
+    self.appConfig.weekdayTextColor = rgb(255, 255, 255).to(Color)
+    self.appConfig.weekdayBackgroundColor = rgb(30, 30, 30).to(Color)
+    self.appConfig.gridColor = rgb(40, 40, 40).to(Color)
+    self.appConfig.eventColorCount = 7
+    self.appConfig.eventColorForeground = @[
+      rgb(255, 255, 255).to(Color),
+      rgb(255, 255, 255).to(Color),
+      rgb(255, 255, 255).to(Color),
+      rgb(255, 255, 255).to(Color),
+      rgb(255, 255, 255).to(Color),
+      rgb(255, 255, 255).to(Color),
+      rgb(255, 255, 255).to(Color),
+    ]
+    self.appConfig.eventColorBackground = @[
+      rgb(36, 89, 175).to(Color),
+      rgb(15, 105, 39).to(Color),
+      rgb(148, 101, 15).to(Color),
+      rgb(136, 28, 18).to(Color),
+      rgb(127, 18, 158).to(Color),
+      rgb(15, 106, 149).to(Color),
+      rgb(116, 128, 24).to(Color),
+    ]
+
 # quick-and-simple width-based truncation so each line stays on one row
 proc truncateToWidth(text: string, fontSize, maxWidth: float32): string =
   # Average glyph width heuristic ~55% of font size
@@ -98,93 +179,6 @@ proc truncateToWidth(text: string, fontSize, maxWidth: float32): string =
   if maxChars <= 1: return "…"
   result = text[0 .. max(0, maxChars - 2)] & "…"
 
-# --- Palettes for all-day pills ----------------------------------------------
-# Default (Google-ish) palette
-const paletteDefault: array[10, ColorRGBA] = [
-  rgba(66, 133, 244, 255), # blue
-  rgba(52, 168, 83, 255),  # green
-  rgba(251, 188, 5, 255),  # yellow/amber
-  rgba(234, 67, 53, 255),  # red
-  rgba(142, 36, 170, 255), # purple
-  rgba(0, 172, 193, 255),  # teal
-  rgba(244, 180, 0, 255),  # amber 600
-  rgba(171, 71, 188, 255), # purple 400
-  rgba(3, 155, 229, 255),  # light blue
-  rgba(255, 128, 171, 255) # pink
-]
-
-# a) Dark tones (muted/deep shades)
-const paletteDarkTones: array[10, ColorRGBA] = [
-  rgba(33, 47, 60, 255),  # dark blue-gray
-  rgba(27, 79, 114, 255), # deep blue
-  rgba(14, 98, 81, 255),  # deep teal
-  rgba(74, 35, 90, 255),  # deep purple
-  rgba(100, 30, 22, 255), # deep red
-  rgba(20, 90, 50, 255),  # forest
-  rgba(90, 66, 0, 255),   # dark amber
-  rgba(55, 71, 79, 255),  # blue gray
-  rgba(40, 55, 71, 255),  # steel
-  rgba(0, 51, 51, 255)    # dark cyan
-]
-
-# b) Red/Black/White only (for tri-color displays)
-const paletteRedBlackWhite: array[6, ColorRGBA] = [
-  rgba(255, 0, 0, 255),     # red
-  rgba(200, 0, 0, 255),     # dark red
-  rgba(120, 0, 0, 255),     # deeper red
-  rgba(0, 0, 0, 255),       # black
-  rgba(255, 255, 255, 255), # white
-  rgba(80, 80, 80, 255)     # gray (renders black on many tri-color panels)
-]
-
-# c) High contrast bright tones (saturated)
-const paletteBrightHighContrast: array[10, ColorRGBA] = [
-  rgba(0, 122, 255, 255),  # bright blue
-  rgba(52, 199, 89, 255),  # bright green
-  rgba(255, 149, 0, 255),  # orange
-  rgba(255, 59, 48, 255),  # bright red
-  rgba(175, 82, 222, 255), # violet
-  rgba(90, 200, 250, 255), # sky
-  rgba(255, 204, 0, 255),  # yellow
-  rgba(64, 156, 255, 255), # azure
-  rgba(255, 45, 85, 255),  # pink
-  rgba(48, 209, 88, 255)   # green 2
-]
-
-# d) High contrast overall (including extremes)
-const paletteHighContrast: array[8, ColorRGBA] = [
-  rgba(0, 0, 0, 255),       # black
-  rgba(255, 255, 255, 255), # white
-  rgba(255, 0, 0, 255),     # red
-  rgba(0, 255, 0, 255),     # green
-  rgba(0, 0, 255, 255),     # blue
-  rgba(255, 255, 0, 255),   # yellow
-  rgba(255, 0, 255, 255),   # magenta
-  rgba(0, 255, 255, 255)    # cyan
-]
-
-# e) Rainbow (ROYGBIV-ish)
-const paletteRainbow: array[8, ColorRGBA] = [
-  rgba(255, 0, 0, 255),   # red
-  rgba(255, 127, 0, 255), # orange
-  rgba(255, 255, 0, 255), # yellow
-  rgba(0, 200, 0, 255),   # green
-  rgba(0, 150, 255, 255), # blue
-  rgba(75, 0, 130, 255),  # indigo-esque
-  rgba(148, 0, 211, 255), # violet
-  rgba(0, 0, 0, 255)      # black separator
-]
-
-proc getPalette(self: App): seq[ColorRGBA] =
-  let key = self.appConfig.palette.toLowerAscii()
-  case key
-  of "darktones": @paletteDarkTones
-  of "redblackwhite": @paletteRedBlackWhite
-  of "brighthighcontrast": @paletteBrightHighContrast
-  of "highcontrast": @paletteHighContrast
-  of "rainbow": @paletteRainbow
-  else: @paletteDefault
-
 proc hashTitle(s: string): uint32 =
   var h: uint32 = 5381
   for ch in s:
@@ -192,8 +186,8 @@ proc hashTitle(s: string): uint32 =
   h
 
 proc pickColor(self: App, title: string): ColorRGBA =
-  let pal = self.getPalette()
-  pal[int(hashTitle(title) mod uint32(pal.len))]
+  let colorIndex = int(hashTitle(title) mod uint32(self.appConfig.eventColorCount))
+  return self.appConfig.eventColorBackground[colorIndex].to(ColorRGBA)
 
 # Create a translucent fill for the chip
 proc withAlpha(c: ColorRGBA, a: float32): ColorRGBA = rgba(c.r, c.g, c.b, (a * 255).uint8)
@@ -326,6 +320,7 @@ proc groupEvents*(self: App): Table[string, seq[EventLine]] =
         addEventLine(result, start[0..9], self.makeLine(summary, start, isAllDay))
 
 proc render*(self: App, context: ExecutionContext, image: Image) =
+  self.setTheme()
   # Current date/time (use LOCAL time zone; FrameOS sets TZ to the user's zone, e.g., Europe/Brussels)
   let nowLocal = times.now()
   let defaultYear = nowLocal.year
@@ -348,38 +343,16 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
 
   # Layout areas
   let p = max(self.appConfig.padding, 0).float32 * s
-  let bw = max(self.appConfig.borderWidth, 0.0).float32 * s
-  let gridStroke = max(self.appConfig.gridWidth, 1.0).float32 * s
+  let gridStroke = round(max(self.appConfig.gridWidth, 1.0).float32 * s)
 
-  image.fill(self.appConfig.backgroundColor)
+  if not self.appConfig.transparentBackground:
+    image.fill(self.appConfig.backgroundColor)
 
   # Content region (inside padding)
   let contentX = p
   let contentY = p
   let contentW = image.width.float32 - 2f*p
   let contentH = image.height.float32 - 2f*p
-
-  # Border (drawn at the content edge)
-  if bw > 0:
-    let w = max(1, bw.int)
-    # top
-    var line = newImage(contentW.int, w)
-    line.fill(self.appConfig.borderColor)
-    image.draw(line, translate(vec2(contentX, contentY)))
-    # bottom
-    image.draw(line, translate(vec2(contentX, contentY + contentH - bw)))
-    # left
-    var vline = newImage(w, contentH.int)
-    vline.fill(self.appConfig.borderColor)
-    image.draw(vline, translate(vec2(contentX, contentY)))
-    # right
-    image.draw(vline, translate(vec2(contentX + contentW - bw, contentY)))
-
-  # Inner region (inside border)
-  let regionX = contentX + bw
-  let regionY = contentY + bw
-  let regionW = contentW - 2f*bw
-  let regionH = contentH - 2f*bw
 
   # Heights (use split sizes)
   let weekdayHeaderHeight = self.appConfig.weekdayFontSize.float32 * s * 1.5
@@ -388,8 +361,8 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
   let topTitle = if titleShown and self.appConfig.monthYearPosition.toLowerAscii() == "top": titleHeight else: 0f
   let bottomTitle = if titleShown and self.appConfig.monthYearPosition.toLowerAscii() == "bottom": titleHeight else: 0f
 
-  let gridHeight = regionH - weekdayHeaderHeight - topTitle - bottomTitle
-  let cellWidth = regionW / 7.0
+  let gridHeight = contentH - weekdayHeaderHeight - topTitle - bottomTitle
+  let cellWidth = contentW / 7.0
   let cellHeight = gridHeight / rows.float32
 
   # Fonts (apply scaling)
@@ -411,23 +384,23 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
     let titleText = &"{monthNames[month-1]} {year}"
 
     # Draw a background for the title
-    let ty = if topTitle > 0: regionY else: regionY + regionH - bottomTitle
-    var titleBg = newImage(regionW.int, titleHeight.int)
+    let ty = if topTitle > 0: contentY else: contentY + contentH - bottomTitle
+    var titleBg = newImage(contentW.int, titleHeight.int)
     titleBg.fill(self.appConfig.titleBackgroundColor)
-    image.draw(titleBg, translate(vec2(regionX, ty)))
+    image.draw(titleBg, translate(vec2(contentX, ty)))
 
     let types = typeset(
       spans = [newSpan(titleText, titleFont)],
-      bounds = vec2(regionW, titleHeight),
+      bounds = vec2(contentW, titleHeight),
       hAlign = CenterAlign,
       vAlign = MiddleAlign,
     )
-    image.fillText(types, translate(vec2(regionX, ty)))
+    image.fillText(types, translate(vec2(contentX, ty)))
 
   # Weekday header background
-  var headerImg = newImage(regionW.int, weekdayHeaderHeight.int)
+  var headerImg = newImage(contentW.int, weekdayHeaderHeight.int)
   headerImg.fill(self.appConfig.weekdayBackgroundColor)
-  image.draw(headerImg, translate(vec2(regionX, regionY + topTitle)))
+  image.draw(headerImg, translate(vec2(contentX, contentY + topTitle)))
 
   # Weekday labels
   let weekdays = if startMonday:
@@ -442,7 +415,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       hAlign = CenterAlign,
       vAlign = MiddleAlign,
     )
-    image.fillText(types, translate(vec2(regionX + i.float32 * cellWidth, regionY + topTitle)))
+    image.fillText(types, translate(vec2(contentX + i.float32 * cellWidth, contentY + topTitle)))
 
   # Weekend backgrounds (draw BEFORE grid so grid stays visible)
   block shadeWeekends:
@@ -455,8 +428,8 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
           break
         let wd = weekday(year, month, d) # 0=Sun .. 6=Sat
         if wd == 0 or wd == 6:
-          let x = regionX + col.float32 * cellWidth
-          let y = regionY + topTitle + weekdayHeaderHeight + row.float32 * cellHeight
+          let x = contentX + col.float32 * cellWidth
+          let y = contentY + topTitle + weekdayHeaderHeight + row.float32 * cellHeight
           var bg = newImage(cellWidth.int, cellHeight.int)
           bg.fill(self.appConfig.weekendBackgroundColor)
           image.draw(bg, translate(vec2(x, y)))
@@ -471,8 +444,8 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       let idx = firstCol + (d - 1)
       let row = idx div 7
       let col = idx mod 7
-      let x = regionX + col.float32 * cellWidth
-      let y = regionY + topTitle + weekdayHeaderHeight + row.float32 * cellHeight
+      let x = contentX + col.float32 * cellWidth
+      let y = contentY + topTitle + weekdayHeaderHeight + row.float32 * cellHeight
       var bg = newImage(cellWidth.int, cellHeight.int)
       bg.fill(self.appConfig.todayBackgroundColor)
       image.draw(bg, translate(vec2(x, y)))
@@ -480,15 +453,15 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
   # Grid
   if self.appConfig.showGrid:
     for i in 0..7:
-      let x = regionX + i.float32 * cellWidth
+      let x = contentX + i.float32 * cellWidth
       var vLine = newImage(max(1, gridStroke.int), gridHeight.int)
       vLine.fill(self.appConfig.gridColor)
-      image.draw(vLine, translate(vec2(x, regionY + topTitle + weekdayHeaderHeight)))
+      image.draw(vLine, translate(vec2(x, contentY + topTitle + weekdayHeaderHeight)))
     for i in 0..rows:
-      let y = regionY + topTitle + weekdayHeaderHeight + i.float32 * cellHeight
-      var hLine = newImage(regionW.int, max(1, gridStroke.int))
+      let y = contentY + topTitle + weekdayHeaderHeight + i.float32 * cellHeight
+      var hLine = newImage(contentW.int, max(1, gridStroke.int))
       hLine.fill(self.appConfig.gridColor)
-      image.draw(hLine, translate(vec2(regionX, y)))
+      image.draw(hLine, translate(vec2(contentX, y)))
 
   # Events and dates
   var eventsByDay = self.groupEvents()
@@ -507,8 +480,8 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
         continue
       if day > days:
         break
-      let x = regionX + col.float32 * cellWidth
-      let y = regionY + topTitle + weekdayHeaderHeight + row.float32 * cellHeight
+      let x = contentX + col.float32 * cellWidth
+      let y = contentY + topTitle + weekdayHeaderHeight + row.float32 * cellHeight
 
       # Highlight "today" with a configurable stroke rectangle
       if isCurrentMonth and day == todayDay:

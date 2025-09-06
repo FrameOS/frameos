@@ -1,5 +1,5 @@
 {
-  "name": "iCal to JSON",
+  "name": "iCal to Events JSON",
   "description": "Convert an iCal file into a JSON event list",
   "category": "data",
   "version": "1.0.0",
