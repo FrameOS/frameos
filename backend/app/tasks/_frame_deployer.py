@@ -11,12 +11,13 @@ import shutil
 import string
 import tempfile
 from typing import Optional
+from gzip import compress
 
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.models.apps import get_one_app_sources
-from app.models.frame import Frame, get_frame_json
+from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
 from app.utils.remote_exec import upload_file, run_command
@@ -90,6 +91,13 @@ class FrameDeployer:
     async def _upload_frame_json(self, path: str) -> None:
         """Upload the release-specific `frame.json`."""
         json_data = json.dumps(get_frame_json(self.db, self.frame), indent=4).encode() + b"\n"
+        await upload_file(self.db, self.redis, self.frame, path, json_data)
+
+    async def _upload_scenes_json(self, path: str, gzip: bool = False) -> None:
+        """Upload the release-specific `scenes.json`."""
+        json_data = json.dumps(get_interpreted_scenes_json(self.frame), indent=4).encode() + b"\n"
+        if gzip:
+            json_data = compress(json_data)
         await upload_file(self.db, self.redis, self.frame, path, json_data)
 
     async def nix_upload_path_and_deps(
@@ -273,9 +281,13 @@ class FrameDeployer:
                     f.write(code)
 
         for scene in frame.scenes:
+            execution = scene.get("settings", {}).get("execution", "auto")
+            safe_id = re.sub(r'\W+', '', scene.get('id', 'default'))
+            if execution == "interpreted":
+                # We're writing them to scenes.json post build
+                continue
             try:
                 scene_source = write_scene_nim(frame, scene)
-                safe_id = re.sub(r'\W+', '', scene.get('id', 'default'))
                 with open(os.path.join(source_dir, "src", "scenes", f"scene_{safe_id}.nim"), "w") as f:
                     f.write(scene_source)
             except Exception as e:

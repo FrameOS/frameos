@@ -107,6 +107,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
                 updated_count = await self.nix_upload_path_and_deps(result_path)
 
+                await self._upload_scenes_json("/var/lib/frameos/scenes.json", gzip=True)
                 await self._upload_frame_json("/var/lib/frameos/frame.json")
                 await sync_assets(db, redis, frame)
 
@@ -229,7 +230,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 f"/srv/frameos/releases/release_{build_id}/frameos"
             )
 
-            # 4. Upload frame.json
+            # 4. Upload scenes.json.gz and frame.json
+            await self._upload_scenes_json(f"/srv/frameos/releases/release_{build_id}/scenes.json.gz", gzip=True)
             await self._upload_frame_json(f"/srv/frameos/releases/release_{build_id}/frame.json")
 
             # Driver-specific vendor steps

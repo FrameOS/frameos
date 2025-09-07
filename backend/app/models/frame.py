@@ -336,3 +336,11 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
 
     frame_json['settings'] = final_settings
     return frame_json
+
+def get_interpreted_scenes_json(frame: Frame) -> list[dict]:
+    interpreted_scenes = []
+    for scene in frame.scenes:
+        execution = scene.get("settings", {}).get("execution", "auto")
+        if execution == "interpreted":
+            interpreted_scenes.append(scene)
+    return interpreted_scenes
