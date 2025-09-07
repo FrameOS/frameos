@@ -427,6 +427,7 @@ export interface ConnectionCodeOutputAppInput extends EdgeConnectionType {
 export interface FrameSceneSettings {
   refreshInterval?: number
   backgroundColor?: string
+  execution?: 'auto' | 'compiled' | 'interpreted'
 }
 
 export interface FrameScene {

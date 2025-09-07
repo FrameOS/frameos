@@ -1188,6 +1188,9 @@ def write_scenes_nim(frame: Frame) -> str:
     sceneOptionTuples = []
     default_scene = None
     for scene in frame.scenes:
+        execution = scene.get("settings", {}).get("execution", "auto")
+        if execution == "interpreted":
+            continue
         if scene.get("default", False):
             default_scene = scene
 
