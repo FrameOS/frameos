@@ -353,6 +353,7 @@ class SceneWriter:
                     code_fields_for_node=code_fields_for_node,
                     required_fields=required_fields_for_node,
                     key_with_quotes=False,
+                    app_config=app_config
                 )]
             )
 
@@ -511,7 +512,8 @@ class SceneWriter:
                                         seq_fields_for_node={},
                                         code_fields_for_node={},
                                         required_fields=required_fields,
-                                        key_with_quotes=False
+                                        key_with_quotes=False,
+                                        app_config={},
                                     )]
                                 )
 
@@ -586,6 +588,7 @@ class SceneWriter:
                                 code_fields_for_node={},
                                 required_fields=required_fields,
                                 key_with_quotes=True,
+                                app_config={},
                             )
                         ]
                         self.init_apps[-1] = self.init_apps[-1] + ","
@@ -622,6 +625,7 @@ class SceneWriter:
                                 code_fields_for_node={},
                                 required_fields=required_fields,
                                 no_key=True,
+                                app_config={},
                             )
                             self.run_node_lines += [
                                 # TODO: this is very inefficient reserialization state["."] = %*(...getStr())
@@ -851,6 +855,7 @@ var exportedScene* = ExportedScene(
         seq_fields_for_node,
         code_fields_for_node,
         required_fields,
+        app_config,
     ) -> list[str]:
         if key in seq_fields_for_node:
             sequences = seq_fields_for_node[key]
@@ -867,6 +872,7 @@ var exportedScene* = ExportedScene(
                 seq_fields_for_node,
                 code_fields_for_node,
                 required_fields,
+                app_config,
             )
 
         if key in field_inputs_for_node:
@@ -923,11 +929,14 @@ var exportedScene* = ExportedScene(
         seq_fields_for_node,
         code_fields_for_node,
         required_fields,
+        app_config,
     ) -> list[str]:
         seq_start = sequences[index][1]
         seq_end = sequences[index][2]
         response = []
         for i in range(seq_start, seq_end + 1):
+            if type not in ["node"]:
+                value = app_config.get(f"{key}[{i}]")
             if index == len(sequences) - 1:
                 response.append(
                     self.sanitize_nim_value(
@@ -941,6 +950,7 @@ var exportedScene* = ExportedScene(
                         seq_fields_for_node,
                         code_fields_for_node,
                         required_fields,
+                        app_config,
                     )
                 )
             else:
@@ -957,7 +967,8 @@ var exportedScene* = ExportedScene(
                         source_field_inputs_for_node,
                         seq_fields_for_node,
                         code_fields_for_node,
-                        required_fields
+                        required_fields,
+                        app_config,
                     )
                 )
 
@@ -984,6 +995,7 @@ var exportedScene* = ExportedScene(
         seq_fields_for_node,
         code_fields_for_node,
         required_fields,
+        app_config: dict,
         key_with_quotes: bool = False,
         no_key: bool = False,
     ) -> list[str]:
@@ -1003,6 +1015,7 @@ var exportedScene* = ExportedScene(
             seq_fields_for_node,
             code_fields_for_node,
             required_fields,
+            app_config,
         )
 
         if len(value_list) == 0:
