@@ -520,7 +520,8 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
         # Determine how many lines fit and truncate each line to stay on one row.
         let availableH = cellHeight - (self.appConfig.dateFontSize.float32 * s) - 9f*s
         let lineH = (self.appConfig.eventFontSize.float32 * s) + 2f*s
-        var maxLines = int(availableH / lineH)
+        let lineGap = 1f * s
+        var maxLines = int((availableH + lineGap) / (lineH + lineGap))
         if maxLines < 0: maxLines = 0
 
         var visibleCount = 0
@@ -550,17 +551,16 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
         # Draw each line individually so we can paint chips for all-day events
         let baseY = y + (self.appConfig.dateFontSize.float32 * s) + 6f*s
         for li, line in linesToDraw:
-          let yLine = baseY + li.float32 * lineH
+          let yLine = baseY + li.float32 * (lineH + lineGap)
 
           if line.isAllDay and not line.display.startsWith("+"):
-            # Chip background (fill + subtle border) similar to Google Calendar
+            # Chip background
             let bg = if line.colors.isSome(): line.colors.get()[0] else: self.appConfig.backgroundColor
             let padX = 4f * s
-            let padY = 1f * s
             let chipW = cellWidth - (padX * 2)
-            let chipH = lineH - (padY * 2)
+            let chipH = lineH
             let chipX = x + padX
-            let chipY = yLine + padY
+            let chipY = yLine
             var chip = newImage(chipW.int, chipH.int)
             chip.fill(bg)
             image.draw(chip, translate(vec2(chipX, chipY)))
