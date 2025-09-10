@@ -129,6 +129,40 @@ type
     render*: proc (self: FrameScene, context: var ExecutionContext): Image
     init*: proc (sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene
 
+  ExportedInterpretedScene* = ref object of ExportedScene
+    backgroundColor*: Color
+    refreshInterval*: float
+
+  DiagramNode* = ref object of RootObj
+    id*: NodeId
+    data*: JsonNode
+    nodeType*: string
+
+  DiagramEdge* = ref object of RootObj
+    id*: NodeId
+    source*: NodeId
+    sourceHandle*: string
+    target*: NodeId
+    targetHandle*: string
+    data*: JsonNode
+    edgeType*: string
+
+  FrameSceneSettings* = ref object
+    backgroundColor*: Color
+    refreshInterval*: float
+
+  FrameSceneInput* = ref object of RootObj
+    id*: SceneId
+    name*: string
+    nodes*: seq[DiagramNode]
+    edges*: seq[DiagramEdge]
+    fields*: seq[StateField]
+    settings*: FrameSceneSettings
+
+  InterpretedFrameScene* = ref object of FrameScene
+    nodes*: Table[NodeId, DiagramNode]
+    edges*: seq[DiagramEdge]
+
   ExecutionContext* = ref object
     scene*: FrameScene
     image*: Image

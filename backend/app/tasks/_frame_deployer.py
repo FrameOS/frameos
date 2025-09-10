@@ -302,6 +302,11 @@ class FrameDeployer:
             if frame.debug:
                 await self.log("stdout", f"Generated scenes.nim (showing because debug=true):\n{source}")
 
+        with open(os.path.join(source_dir, "src", "scenes", "interpreted.nim"), "w") as f:
+            with open("../frameos/src/scenes/interpreted.nim", "r") as of:
+                source = of.read()
+            f.write(source)
+
         drivers = drivers_for_frame(frame)
         with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
             source = write_drivers_nim(drivers)

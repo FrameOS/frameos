@@ -1,6 +1,7 @@
 import json, pixie, times, options, strformat, strutils, locks, tables
 import pixie/fileformats/png
 import scenes/scenes
+import scenes/interpreted
 import system/scenes
 import frameos/types
 
@@ -9,12 +10,15 @@ const SCENE_STATE_JSON_FOLDER = "./state"
 
 # All scenes that are compiled into the FrameOS binary
 var systemScenes*: Table[SceneId, ExportedScene] = getSystemScenes()
-var userScenes*: Table[SceneId, ExportedScene] = getExportedScenes()
+var compiledScenes*: Table[SceneId, ExportedScene] = getExportedScenes()
+var interpretedScenes*: Table[SceneId, ExportedInterpretedScene] = getInterpretedScenes()
 
 var exportedScenes*: Table[SceneId, ExportedScene] = initTable[SceneId, ExportedScene]()
 for sceneId, scene in systemScenes:
   exportedScenes[sceneId] = scene
-for sceneId, scene in userScenes:
+for sceneId, scene in interpretedScenes:
+  exportedScenes[sceneId] = scene.ExportedScene
+for sceneId, scene in compiledScenes:
   exportedScenes[sceneId] = scene
 
 var
@@ -126,8 +130,8 @@ proc getFirstSceneId*(): SceneId =
     if lastSceneId.isSome() and exportedScenes.hasKey(lastSceneId.get()):
       return lastSceneId.get()
     # This array never changes and is read only
-    if len(userScenes) > 0:
-      for key in keys(userScenes):
+    if len(compiledScenes) > 0:
+      for key in keys(compiledScenes):
         return key
     if len(systemScenes) > 0:
       for key in keys(systemScenes):

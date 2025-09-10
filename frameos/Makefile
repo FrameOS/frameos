@@ -4,10 +4,10 @@ run: build
 	./build/frameos --verbose
 
 build:
-	nimble build -y --verbose --lineTrace:on
+	nimble build -y --verbose --lineTrace:on --stackTrace:on
 
 debug:
-	nimble build -y --verbose --debugger:native --lineTrace:on
+	nimble build -y --verbose --debugger:native --lineTrace:on --stackTrace:on
 	lldb ./build/frameos
 
 test:
