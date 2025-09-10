@@ -1,6 +1,7 @@
 import json, jester, pixie, hashes, locks
 
 type
+  # Parsed config.json
   FrameConfig* = ref object
     name*: string
     mode*: string
@@ -32,10 +33,12 @@ type
     agent*: AgentConfig
     palette*: PaletteConfig
 
+  # Part of FrameConfig
   GPIOButton* = ref object
     pin*: int
     label*: string
 
+  # Part of FrameConfig
   ControlCode* = ref object
     enabled*: bool
     position*: string
@@ -46,6 +49,7 @@ type
     qrCodeColor*: Color
     backgroundColor*: Color
 
+  # Part of FrameConfig
   NetworkConfig* = ref object
     networkCheck*: bool
     networkCheckTimeoutSeconds*: float
@@ -55,20 +59,21 @@ type
     wifiHotspotPassword*: string
     wifiHotspotTimeoutSeconds*: float
 
+  # Part of FrameConfig
   AgentConfig* = ref object
     agentEnabled*: bool
     agentRunCommands*: bool
     agentSharedSecret*: string
 
+  # Part of FrameConfig
   PaletteConfig* = ref object
     colors*: seq[(int, int, int)]
 
+  # Part of FrameConfig
   FrameSchedule* = ref object
     events*: seq[ScheduledEvent]
 
-  DeviceConfig* = ref object
-    vcom*: float # used for the 10.3" display
-
+  # Part of FrameConfig/FrameSchedule
   ScheduledEvent* = ref object
     id*: string
     minute*: int  # must be set 0-59
@@ -76,6 +81,10 @@ type
     weekday*: int # 0 for every day, 1-7 mon-sun, 8 for every weekday, 9 for every weekend
     event*: string
     payload*: JsonNode
+
+  # Part of FrameConfig
+  DeviceConfig* = ref object
+    vcom*: float # used for the 10.3" display
 
   Logger* = ref object
     frameConfig*: FrameConfig
@@ -94,6 +103,7 @@ type
   NodeId* = distinct int
   SceneId* = distinct string
 
+  # Runtime state while running the scene (for compiled frames)
   FrameScene* = ref object of RootObj
     id*: SceneId
     isRendering*: bool
@@ -122,6 +132,7 @@ type
     scene*: FrameScene
     frameConfig*: FrameConfig
 
+  # Exported data/functions for compiled scenes
   ExportedScene* = ref object of RootObj
     publicStateFields*: seq[StateField]
     persistedStateKeys*: seq[string]
@@ -129,15 +140,18 @@ type
     render*: proc (self: FrameScene, context: var ExecutionContext): Image
     init*: proc (sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene
 
+  # Exported data/functions for interpreted scenes, adds some local state that's normally compiled into the scene
   ExportedInterpretedScene* = ref object of ExportedScene
     backgroundColor*: Color
     refreshInterval*: float
 
+  # Imported node from scenes.json
   DiagramNode* = ref object of RootObj
     id*: NodeId
     data*: JsonNode
     nodeType*: string
 
+  # Imported edge from scenes.json
   DiagramEdge* = ref object of RootObj
     id*: NodeId
     source*: NodeId
@@ -147,10 +161,12 @@ type
     data*: JsonNode
     edgeType*: string
 
+  # Imported settings from scenes.json
   FrameSceneSettings* = ref object
     backgroundColor*: Color
     refreshInterval*: float
 
+  # Imported scene from scenes.json
   FrameSceneInput* = ref object of RootObj
     id*: SceneId
     name*: string
@@ -159,10 +175,12 @@ type
     fields*: seq[StateField]
     settings*: FrameSceneSettings
 
+  # Runtime state while running the scene (for interpreted frames), adds cached nodes/edges
   InterpretedFrameScene* = ref object of FrameScene
     nodes*: Table[NodeId, DiagramNode]
     edges*: seq[DiagramEdge]
 
+  # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object
     scene*: FrameScene
     image*: Image
@@ -174,6 +192,7 @@ type
     loopKey*: string
     nextSleep*: float
 
+  # State field definitions. Used in interpreted scenes, and to show the right form to the user
   StateField* = ref object
     name*: string
     label*: string
