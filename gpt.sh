@@ -44,6 +44,8 @@ patterns=(
     # "frontend/src/scenes/scenes.tsx"
     # "frontend/src/scenes/sceneLogic.tsx"
     # "frameos/src/apps/*/*/config.json"
+    "frameos/src/apps/render/image/*"
+    "frameos/src/apps/data/frameOSGallery/*"
     # "frameos/frame.json"
     # "frameos/frameos.nimble"
     # "frameos/frameos.service"

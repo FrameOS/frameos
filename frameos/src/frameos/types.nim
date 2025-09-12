@@ -144,6 +144,9 @@ type
   ExportedInterpretedScene* = ref object of ExportedScene
     backgroundColor*: Color
     refreshInterval*: float
+    nodes*: seq[DiagramNode]
+    edges*: seq[DiagramEdge]
+    # TODO: add private state fields
 
   # Imported node from scenes.json
   DiagramNode* = ref object of RootObj
@@ -179,6 +182,9 @@ type
   InterpretedFrameScene* = ref object of FrameScene
     nodes*: Table[NodeId, DiagramNode]
     edges*: seq[DiagramEdge]
+    nextNodeIds*: Table[NodeId, NodeId]         # mapping from current node id to next node id for quick lookup
+    eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
+    appsByNodeId*: Table[NodeId, AppRoot]       # mapping from node id to instantiated app for quick lookup
 
   # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object
