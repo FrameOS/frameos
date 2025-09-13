@@ -2,6 +2,8 @@
 
 import frameos/types
 import tables, options
+import scenes/scene_black as scene_black
+import scenes/scene_blue as scene_blue
 import scenes/scene_dataDownloadImage as scene_dataDownloadImage
 import scenes/scene_dataDownloadUrl as scene_dataDownloadUrl
 import scenes/scene_dataLocalImage as scene_dataLocalImage
@@ -29,9 +31,11 @@ import scenes/scene_renderTextRichOver as scene_renderTextRichOver
 import scenes/scene_renderTextSplit as scene_renderTextSplit
 import scenes/scene_sceneNodes as scene_sceneNodes
 
-let defaultSceneId* = some("dataDownloadImage".SceneId)
+let defaultSceneId* = some("black".SceneId)
 
 const sceneOptions* = [
+  ("black".SceneId, "Black"),
+  ("blue".SceneId, "Blue"),
   ("dataDownloadImage".SceneId, "Download Image"),
   ("dataDownloadUrl".SceneId, "Download URL"),
   ("dataLocalImage".SceneId, "Local Image"),
@@ -62,6 +66,8 @@ const sceneOptions* = [
 
 proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result = initTable[SceneId, ExportedScene]()
+  result["black".SceneId] = scene_black.exportedScene
+  result["blue".SceneId] = scene_blue.exportedScene
   result["dataDownloadImage".SceneId] = scene_dataDownloadImage.exportedScene
   result["dataDownloadUrl".SceneId] = scene_dataDownloadUrl.exportedScene
   result["dataLocalImage".SceneId] = scene_dataLocalImage.exportedScene
