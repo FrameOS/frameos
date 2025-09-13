@@ -45,7 +45,7 @@ def main():
         for scene_file in files:
             base_id = scene_file.stem
             for scene_id in (base_id, base_id + '_interpreted'):
-                print(f"Processing scene: {scene_id}")
+                print(f"🍿 Processing scene: {scene_id}")
 
                 r = requests.post(f'http://localhost:{port}/event/setCurrentScene', json={'sceneId': 'black'})
                 if r.status_code != 200:

@@ -6,6 +6,7 @@ import scenes/scene_black as scene_black
 import scenes/scene_blue as scene_blue
 import scenes/scene_dataDownloadImage as scene_dataDownloadImage
 import scenes/scene_dataDownloadUrl as scene_dataDownloadUrl
+import scenes/scene_dataGradient as scene_dataGradient
 import scenes/scene_dataLocalImage as scene_dataLocalImage
 import scenes/scene_dataNewImage as scene_dataNewImage
 import scenes/scene_dataNewImageNext as scene_dataNewImageNext
@@ -38,6 +39,7 @@ const sceneOptions* = [
   ("blue".SceneId, "Blue"),
   ("dataDownloadImage".SceneId, "Download Image"),
   ("dataDownloadUrl".SceneId, "Download URL"),
+  ("dataGradient".SceneId, "dataGradient"),
   ("dataLocalImage".SceneId, "Local Image"),
   ("dataNewImage".SceneId, "New Image"),
   ("dataNewImageNext".SceneId, "Data Image Next"),
@@ -70,6 +72,7 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result["blue".SceneId] = scene_blue.exportedScene
   result["dataDownloadImage".SceneId] = scene_dataDownloadImage.exportedScene
   result["dataDownloadUrl".SceneId] = scene_dataDownloadUrl.exportedScene
+  result["dataGradient".SceneId] = scene_dataGradient.exportedScene
   result["dataLocalImage".SceneId] = scene_dataLocalImage.exportedScene
   result["dataNewImage".SceneId] = scene_dataNewImage.exportedScene
   result["dataNewImageNext".SceneId] = scene_dataNewImageNext.exportedScene
