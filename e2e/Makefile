@@ -13,7 +13,6 @@ snapshots:
 	rm -rf "$$tmpdir/src/scenes" && \
 	cp -r ./generated "$$tmpdir/src/scenes" && \
 	cp -r ./generated/scenes.json "$$tmpdir/" && \
-	cp -r ../frameos/src/scenes/interpreted.nim "$$tmpdir"/src/scenes/ && \
 	(cd "$$tmpdir" && make build) && \
 	cp "$$tmpdir/build/frameos" ./tmp/frameos && \
 	cp "$$tmpdir/scenes.json" ./tmp/scenes.json && \

@@ -1,4 +1,5 @@
 import json, jester, pixie, hashes, locks
+import ./values
 
 type
   # Parsed config.json
@@ -131,6 +132,11 @@ type
     nodeName*: string # used mainly for logging and saving assets
     scene*: FrameScene
     frameConfig*: FrameConfig
+
+  AppExport* = ref object of RootObj
+    build*: proc (params: Table[string, Value]): AppRoot
+    run*: proc (self: AppRoot, context: var ExecutionContext): void
+    get*: proc (self: AppRoot, key: string): Value
 
   # Exported data/functions for compiled scenes
   ExportedScene* = ref object of RootObj

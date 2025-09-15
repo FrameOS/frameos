@@ -1,6 +1,5 @@
 import frameos/types
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils
-import std/monotimes
 import apps/render/image/app as render_imageApp
 import apps/render/gradient/app as render_gradientApp
 
@@ -13,11 +12,6 @@ var nodeMappingTable = initTable[string, NodeId]()
 proc runNode*(self: FrameScene, nodeId: NodeId, context: var ExecutionContext) =
   let self = InterpretedFrameScene(self)
   var currentNodeId: NodeId = nodeId
-  # let timer = getMonoTime()
-  # if (getMonoTime() - startedAt) >= initDuration(milliseconds = int(timeoutSec * 1000)):
-  # let timer = epochTime()
-  # case currentNode:
-
   while currentNodeId != -1.NodeId:
     if not self.nodes.hasKey(currentNodeId):
       self.logger.log(%*{"event": "interpreter:nodeNotFound", "sceneId": self.id, "nodeId": currentNodeId.int})

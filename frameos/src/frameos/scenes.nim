@@ -1,9 +1,9 @@
 import json, pixie, times, options, strformat, strutils, locks, tables
 import pixie/fileformats/png
 import scenes/scenes
-import scenes/interpreted
 import system/scenes
 import frameos/types
+import frameos/interpreter
 
 # Where to store the persisted states
 const SCENE_STATE_JSON_FOLDER = "./state"
