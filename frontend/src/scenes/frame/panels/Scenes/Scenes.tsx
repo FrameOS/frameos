@@ -166,6 +166,11 @@ export function Scenes() {
                     <div className="flex-1">
                       <H6 onClick={() => expandScene(scene.id)} className="cursor-pointer">
                         <span className="cursor-pointer">{scene.name || scene.id}</span>
+                        {scene.settings?.execution === 'interpreted' ? (
+                          <Tag className="ml-2" color="teal">
+                            interpreted
+                          </Tag>
+                        ) : null}
                         {scene.default ? (
                           <Tag className="ml-2" color="primary">
                             start on boot
