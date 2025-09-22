@@ -672,7 +672,7 @@ class SceneWriter:
             for node in nodes:
                 next_node = self.next_nodes.get(node["id"], "-1")
                 self.run_event_lines += [
-                    f"  try: self.runNode({self.node_id_to_integer(next_node)}.NodeId, context)",
+                    f"  try: discard self.runNode({self.node_id_to_integer(next_node)}.NodeId, context)",
                     f'  except Exception as e: self.logger.log(%*{{"event": "{sanitize_nim_string(event)}:error", ' +
                     f'"node": {self.node_id_to_integer(next_node)}, "error": $e.msg, "stacktrace": e.getStackTrace()}})'
                 ]
@@ -769,6 +769,7 @@ class SceneWriter:
 {{.warning[UnusedImport]: off.}}
 import pixie, json, times, strformat, strutils, sequtils, options, algorithm
 
+import frameos/values
 import frameos/types
 import frameos/channels
 import frameos/utils/image
@@ -785,7 +786,8 @@ type Scene* = ref object of FrameScene
 {{.push hint[XDeclaredButNotUsed]: off.}}
 {newline.join(self.cache_fields)}
 
-proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
+proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext, asDataNode = false): Value =
+  result = VNone()
   let scene = self
   let frameConfig = scene.frameConfig
   let state = scene.state
@@ -826,7 +828,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
-  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
+  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = discard scene.runNode(nodeId, context))
+  scene.getDataNode = (proc(nodeId: NodeId, context: var ExecutionContext): Value = scene.getDataNode(nodeId, context))
   {(newline + "  ").join(self.init_apps)}
   runEvent(self, context)
   {open_event_in_init}

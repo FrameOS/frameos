@@ -3,6 +3,7 @@
 {.warning[UnusedImport]: off.}
 import pixie, json, times, strformat, strutils, sequtils, options, algorithm
 
+import frameos/values
 import frameos/types
 import frameos/channels
 import frameos/utils/image
@@ -26,7 +27,8 @@ type Scene* = ref object of FrameScene
 {.push hint[XDeclaredButNotUsed]: off.}
 var cache0: Option[Image] = none(Image)
 
-proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
+proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext, asDataNode = false): Value =
+  result = VNone()
   let scene = self
   let frameConfig = scene.frameConfig
   let state = scene.state
@@ -63,7 +65,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
 proc runEvent*(self: Scene, context: var ExecutionContext) =
   case context.event:
   of "render":
-    try: self.runNode(1.NodeId, context)
+    try: discard self.runNode(1.NodeId, context)
     except Exception as e: self.logger.log(%*{"event": "render:error", "node": 1, "error": $e.msg, "stacktrace": e.getStackTrace()})
   of "setSceneState":
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
@@ -101,7 +103,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
-  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
+  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = discard scene.runNode(nodeId, context))
+  scene.getDataNode = (proc(nodeId: NodeId, context: var ExecutionContext): Value = scene.getDataNode(nodeId, context))
   scene.node1 = render_imageApp.App(nodeName: "render/image", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     inputImage: none(Image),
     placement: "cover",

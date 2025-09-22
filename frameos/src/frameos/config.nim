@@ -111,6 +111,11 @@ proc getConfigFilename*(): string =
   if result == "":
     result = "./frame.json"
 
+proc getScenesJsonFilename*(): string =
+  result = getEnv("SCENES_JSON")
+  if result == "":
+    result = "./scenes.json"
+
 proc loadConfig*(): FrameConfig =
   let data = parseFile(getConfigFilename())
   # TODO: switch to jsony

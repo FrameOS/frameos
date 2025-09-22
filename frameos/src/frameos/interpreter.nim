@@ -1,5 +1,6 @@
 import frameos/types
-import tables, json, os, zippy, chroma, pixie, jsony, sequtils
+import frameos/values
+import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils
 import apps/render/image/app as render_imageApp
 import apps/render/gradient/app as render_gradientApp
 
@@ -9,7 +10,7 @@ var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var globalNodeCounter = 0
 var nodeMappingTable = initTable[string, NodeId]()
 
-proc runNode*(self: FrameScene, nodeId: NodeId, context: var ExecutionContext) =
+proc runNode*(self: FrameScene, nodeId: NodeId, context: var ExecutionContext, asDataNode = false): Value =
   let self = InterpretedFrameScene(self)
   var currentNodeId: NodeId = nodeId
   while currentNodeId != -1.NodeId:
@@ -31,8 +32,42 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: var ExecutionContext) =
       if not self.appsByNodeId.hasKey(currentNodeId):
         raise newException(Exception, "App not initialized for node id: " & $currentNode.id & ", keyword: " & keyword)
 
-      let app = render_gradientApp.App(self.appsByNodeId[currentNodeId])
-      render_gradientApp.run(app, context)
+      case keyword:
+      of "render/gradient":
+        let app = render_gradientApp.App(self.appsByNodeId[currentNodeId])
+        if asDataNode:
+          result = toValue(render_gradientApp.get(app, context))
+        else:
+          render_gradientApp.run(app, context)
+      of "render/image":
+        let app = render_imageApp.App(self.appsByNodeId[currentNodeId])
+        if self.appInputsForNodeId.hasKey(currentNodeId):
+          let connectedNodeIds = self.appInputsForNodeId[currentNodeId]
+          for (inputName, connectedNodeId) in connectedNodeIds.pairs:
+            if self.nodes.hasKey(connectedNodeId):
+              let value = runNode(self, connectedNodeId, context, asDataNode = true)
+              if inputName == "inputImage":
+                if value.kind == fkImage:
+                  app.appConfig.inputImage = some(value.asImage)
+                elif value.kind == fkNone:
+                  app.appConfig.inputImage = none(Image)
+                else:
+                  raise newException(Exception, "Input node did not return an image or none for inputImage")
+              elif inputName == "image":
+                self.logger.log(%*{"event": "interpreter:runAppInput", "sceneId": self.id, "nodeId": currentNodeId.int,
+                    "inputName": inputName, "connectedNodeId": connectedNodeId.int, "valueKind": $value.kind})
+                if value.kind == fkImage:
+                  app.appConfig.image = value.asImage
+                else:
+                  raise newException(Exception, "Input node did not return an image for image")
+              else:
+                raise newException(Exception, "Unknown input name for render/image app: " & inputName)
+        if asDataNode:
+          result = toValue(render_imageApp.get(app, context))
+        else:
+          render_imageApp.run(app, context)
+      else:
+        raise newException(Exception, "Unknown app keyword: " & keyword)
 
     of "source":
       raise newException(Exception, "Source nodes not implemented in interpreted scenes yet")
@@ -73,9 +108,15 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     state: %*{},
     nodes: initTable[NodeId, DiagramNode](),
     edges: @[],
-    nextNodeIds: initTable[NodeId, NodeId]()
+    nextNodeIds: initTable[NodeId, NodeId](),
+    appsByNodeId: initTable[NodeId, AppRoot](),
+    eventListeners: initTable[string, seq[NodeId]](),
+    appInputsForNodeId: initTable[NodeId, Table[string, NodeId]]()
   )
-  scene.execNode = proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context)
+  scene.execNode = proc(nodeId: NodeId, context: var ExecutionContext) =
+    discard scene.runNode(nodeId, context)
+  scene.getDataNode = proc(nodeId: NodeId, context: var ExecutionContext): Value =
+    scene.runNode(nodeId, context, asDataNode = true)
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       scene.state[key] = persistedState[key]
@@ -99,16 +140,35 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
           "nodeId": node.id.int, "appKeyword": keyword})
       case keyword
       of "render/gradient":
+        let appConfig = render_gradientApp.AppConfig(
+            startColor: parseHtmlColor(node.data["config"]{"startColor"}.getStr()),
+            endColor: parseHtmlColor(node.data["config"]{"endColor"}.getStr()),
+            angle: node.data["config"]{"angle"}.getFloat()
+          )
         app = render_gradientApp.App(
           nodeName: node.data{"name"}.getStr(),
           nodeId: node.id,
           scene: scene.FrameScene,
           frameConfig: scene.frameConfig,
-          appConfig: render_gradientApp.AppConfig(
-            startColor: parseHtmlColor(node.data["config"]{"startColor"}.getStr()),
-            endColor: parseHtmlColor(node.data["config"]{"endColor"}.getStr()),
-            angle: node.data["config"]{"angle"}.getFloat()
-          )
+          appConfig: appConfig
+        )
+      of "render/image":
+        let appConfig = render_imageApp.AppConfig(
+          # Option[Image]
+          inputImage: none(Image),
+          # Image
+          image: nil,
+          placement: node.data["config"]{"placement"}.getStr(),
+          offsetX: node.data["config"]{"offsetX"}.getInt(),
+          offsetY: node.data["config"]{"offsetY"}.getInt(),
+          blendMode: node.data["config"]{"blendMode"}.getStr(),
+        )
+        app = render_imageApp.App(
+          nodeName: node.data{"name"}.getStr(),
+          nodeId: node.id,
+          scene: scene.FrameScene,
+          frameConfig: scene.frameConfig,
+          appConfig: appConfig
         )
       else:
         raise newException(Exception, "Unknown app type: " & keyword)
@@ -118,9 +178,16 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     logger.log(%*{"event": "initInterpretedEdge", "sceneId": scene.id, "edgeId": edge.id.int,
         "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
         "targetHandle": edge.targetHandle})
+    scene.edges.add(edge)
     if edge.sourceHandle == "next" and edge.targetHandle == "prev":
       scene.nextNodeIds[edge.source] = edge.target
-    scene.edges.add(edge)
+    if edge.sourceHandle == "fieldOutput" and edge.targetHandle.startsWith("fieldInput/"):
+      let fieldName = edge.targetHandle.split("/")[1]
+      if not scene.appInputsForNodeId.hasKey(edge.target):
+        scene.appInputsForNodeId[edge.target] = initTable[string, NodeId]()
+      scene.appInputsForNodeId[edge.target][fieldName] = edge.source
+      scene.logger.log(%*{"event": "initInterpretedAppInput", "sceneId": scene.id, "appNodeId": edge.target.int,
+          "inputField": fieldName, "connectedNodeId": edge.source.int})
 
   logger.log(%*{"event": "initInterpretedDone", "sceneId": sceneId.string, "nodes": scene.nodes.len,
       "edges": scene.edges.len, "eventListeners": scene.eventListeners.len, "apps": scene.appsByNodeId.len})
@@ -141,7 +208,7 @@ proc runEvent*(self: FrameScene, context: var ExecutionContext) =
         self.logger.log(%*{"event": "runEventInterpreted3", "sceneId": self.id, "contextEvent": context.event,
             "nodeId": nodeId.int, "nextNode": nextNode.int})
         self.logger.log(%*{"event": "runEventInterpreted:node", "sceneId": self.id, "nodeId": nextNode.int})
-        scene.runNode(nextNode, context)
+        discard scene.runNode(nextNode, context)
 
 proc render*(self: FrameScene, context: var ExecutionContext): Image =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
@@ -192,6 +259,7 @@ proc parseInterpretedScenes*(data: string): void =
   let scenes = data.fromJson(seq[FrameSceneInput])
   for scene in scenes:
     try:
+      echo "Loading interpreted scene: ", scene.id
       let exported = ExportedInterpretedScene(
         nodes: scene.nodes,
         edges: scene.edges,
@@ -211,9 +279,12 @@ proc getInterpretedScenes*(): Table[SceneId, ExportedInterpretedScene] =
   if allScenesLoaded:
     return loadedScenes
 
-  let file = getEnv("FRAMEOS_SCENES")
+  let file = getEnv("FRAMEOS_SCENES_JSON")
   if file != "":
-    parseInterpretedScenes(readFile(file))
+    if file.endsWith(".gz") and fileExists(file):
+      parseInterpretedScenes(uncompress(readFile(file)))
+    elif fileExists(file):
+      parseInterpretedScenes(readFile(file))
 
   elif fileExists("./scenes.json.gz"):
     parseInterpretedScenes(uncompress(readFile("./scenes.json.gz")))

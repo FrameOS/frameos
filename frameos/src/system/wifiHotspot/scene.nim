@@ -3,6 +3,7 @@
 {.warning[UnusedImport]: off.}
 import pixie, json, times, strformat, strutils, sequtils, options, algorithm
 
+import frameos/values
 import frameos/types
 import frameos/channels
 import frameos/utils/image
@@ -129,6 +130,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
+  scene.getDataNode = (proc(nodeId: NodeId, context: var ExecutionContext): Value = scene.getDataNode(nodeId, context))
   scene.node1 = render_splitApp.App(nodeName: "render/split", nodeId: 1.NodeId, scene: scene.FrameScene,
     frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 2,

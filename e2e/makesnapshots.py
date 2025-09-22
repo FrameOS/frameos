@@ -19,7 +19,7 @@ def main():
     # filter from env or argv (argv optional)
     filter_str = os.environ.get("SCENE_FILTER") or (sys.argv[1] if len(sys.argv) > 1 else "")
     filter_str = filter_str.strip().lower()
-
+    os.environ["FRAMEOS_SCENES_JSON"] = Path('./tmp/scenes.json').resolve().as_posix()
     # Start the frameos binary in the background
     process = subprocess.Popen(['./tmp/frameos', '--debug'])
     print(f"Started frameos with PID {process.pid}")
@@ -66,12 +66,12 @@ def main():
                         temp_path = snapshot_path.with_suffix('.temp.png')
                         with open(temp_path, 'wb') as temp_file:
                             temp_file.write(image_response.content)
-                        if not is_similar_image(snapshot_path, temp_path):
-                            with open(snapshot_path, 'wb') as f:
-                                f.write(image_response.content)
-                            print(f"Snapshot updated: {snapshot_path}")
-                        else:
-                            print(f"Snapshot unchanged due to similarity: {snapshot_path}")
+                        # if not is_similar_image(snapshot_path, temp_path):
+                        with open(snapshot_path, 'wb') as f:
+                            f.write(image_response.content)
+                        print(f"Snapshot updated: {snapshot_path}")
+                        # else:
+                            # print(f"Snapshot unchanged due to similarity: {snapshot_path}")
                         temp_path.unlink()
                     else:
                         with open(snapshot_path, 'wb') as f:
@@ -80,6 +80,7 @@ def main():
                 else:
                     print(f"Failed to get snapshot for scene {scene_id}")
     finally:
+        time.sleep(10)
         os.kill(process.pid, signal.SIGTERM)
         print(f"frameos process with PID {process.pid} has been terminated")
 

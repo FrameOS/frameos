@@ -410,7 +410,7 @@ export interface ConnectionAppNodeOutputPrev extends EdgeConnectionType {
   targetNodeType: 'app' | 'source'
 }
 
-export interface ConnectionCodeInputOutput extends EdgeConnectionType {
+export interface F extends EdgeConnectionType {
   sourceHandle: CodeOutputHandle
   targetHandle: CodeInputHandle
   sourceNodeType: 'app' | 'source' | 'event'
@@ -421,6 +421,13 @@ export interface ConnectionCodeOutputAppInput extends EdgeConnectionType {
   sourceHandle: CodeOutputHandle
   targetHandle: AppInputHandle
   sourceNodeType: 'app' | 'source' | 'event'
+  targetNodeType: 'app' | 'source'
+}
+
+export interface ConnectionAppOutputAppInput extends EdgeConnectionType {
+  sourceHandle: AppNodeOutputHandle
+  targetHandle: AppInputHandle
+  sourceNodeType: 'app' | 'source'
   targetNodeType: 'app' | 'source'
 }
 

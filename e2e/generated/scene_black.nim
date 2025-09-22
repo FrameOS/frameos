@@ -3,6 +3,7 @@
 {.warning[UnusedImport]: off.}
 import pixie, json, times, strformat, strutils, sequtils, options, algorithm
 
+import frameos/values
 import frameos/types
 import frameos/channels
 import frameos/utils/image
@@ -19,7 +20,8 @@ type Scene* = ref object of FrameScene
 {.push hint[XDeclaredButNotUsed]: off.}
 
 
-proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
+proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext, asDataNode = false): Value =
+  result = VNone()
   let scene = self
   let frameConfig = scene.frameConfig
   let state = scene.state
@@ -75,7 +77,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
-  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
+  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = discard scene.runNode(nodeId, context))
+  scene.getDataNode = (proc(nodeId: NodeId, context: var ExecutionContext): Value = scene.getDataNode(nodeId, context))
   
   runEvent(self, context)
   

@@ -1,7 +1,13 @@
 import tables, json, chroma
 import ../frameos/types
+
+import render/calendar/app as render_calendarApp
+import render/color/app as render_colorApp
 import render/image/app as render_imageApp
 import render/gradient/app as render_gradientApp
+import render/split/app as render_splitApp
+import render/opacity/app as render_opacityApp
+import render/text/app as render_textApp
 
 type AppExport* = ref object of RootObj
   build*: proc (params: JsonNode): AppRoot

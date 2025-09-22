@@ -114,6 +114,7 @@ type
     refreshInterval*: float
     backgroundColor*: Color
     execNode*: proc(nodeId: NodeId, context: var ExecutionContext)
+    getDataNode*: proc(nodeId: NodeId, context: var ExecutionContext): Value
     lastPublicStateUpdate*: float
     lastPersistedStateUpdate*: float
 
@@ -191,6 +192,7 @@ type
     nextNodeIds*: Table[NodeId, NodeId]         # mapping from current node id to next node id for quick lookup
     eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
     appsByNodeId*: Table[NodeId, AppRoot]       # mapping from node id to instantiated app for quick lookup
+    appInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from node id to app input name to connected node id
 
   # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object
