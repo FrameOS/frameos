@@ -8,3 +8,6 @@ nimble.develop
 nimble.paths
 scene.json
 */__loader.nim
+*/*/__loader.nim
+*/*/*/__loader.nim
+*/*/*/*/__loader.nim
