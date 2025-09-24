@@ -135,7 +135,7 @@ type
     frameConfig*: FrameConfig
 
   AppExport* = ref object of RootObj
-    build*: proc (params: Table[string, Value]): AppRoot
+    init*: proc (params: Table[string, Value]): AppRoot
     run*: proc (self: AppRoot, context: var ExecutionContext): void
     get*: proc (self: AppRoot, key: string): Value
 

@@ -3,16 +3,16 @@
 import frameos/types
 import tables, options
 import scenes/scene_black as scene_black
-import scenes/scene_dataLocalImage as scene_dataLocalImage
+import scenes/scene_dataGradient as scene_dataGradient
 
 let defaultSceneId* = some("black".SceneId)
 
 const sceneOptions* = [
   ("black".SceneId, "Black"),
-  ("dataLocalImage".SceneId, "Local Image"),
+  ("dataGradient".SceneId, "dataGradient"),
 ]
 
 proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result = initTable[SceneId, ExportedScene]()
   result["black".SceneId] = scene_black.exportedScene
-  result["dataLocalImage".SceneId] = scene_dataLocalImage.exportedScene
+  result["dataGradient".SceneId] = scene_dataGradient.exportedScene

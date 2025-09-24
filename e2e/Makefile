@@ -19,4 +19,5 @@ snapshots:
 	cp "$$tmpdir/scenes.json" ./tmp/scenes.json
 
 	ls -l ./tmp/frameos
+	DEBUG=1 python3 ./makeapploaders.py
 	DEBUG=1 SCENE_FILTER="$(SCENE_FILTER)" python3 ./makesnapshots.py

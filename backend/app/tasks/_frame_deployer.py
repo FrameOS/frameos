@@ -1,4 +1,5 @@
 from datetime import datetime
+from glob import glob
 import hashlib
 import json
 import math
@@ -28,6 +29,8 @@ from app.codegen.drivers_nim import write_drivers_nim
 from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.tasks.utils import find_nimbase_file
 from app.models.settings import get_settings_dict
+from app.codegen.apps_nim import write_apps_nim
+from app.codegen.app_loader_nim import write_app_loader_nim
 
 BYTES_PER_MB   = 1_048_576
 DEFAULT_CHUNK  = 25 * BYTES_PER_MB
@@ -272,6 +275,19 @@ class FrameDeployer:
         shutil.rmtree(os.path.join(source_dir, "src", "scenes"), ignore_errors=True)
         os.makedirs(os.path.join(source_dir, "src", "scenes"), exist_ok=True)
 
+        # find all apps
+        all_apps = {}
+        os.makedirs(os.path.join(source_dir, "src", "apps"), exist_ok=True)
+        for app_dir in glob(os.path.join(source_dir, "src", "apps", "*", "*")):
+            config_path = os.path.join(app_dir, "config.json")
+            if os.path.exists(config_path):
+                with open(config_path, "r") as f:
+                    config = json.load(f)
+                    app_loader_nim = write_app_loader_nim(app_dir, config)
+                    with open(os.path.join(app_dir, "__loader.nim"), "w") as lf:
+                        lf.write(app_loader_nim)
+                    all_apps[config["id"]] = config
+
         for node_id, sources in get_apps_from_scenes(list(frame.scenes)).items():
             app_id = "nodeapp_" + node_id.replace('-', '_')
             app_dir = os.path.join(source_dir, "src", "apps", app_id)
@@ -279,6 +295,16 @@ class FrameDeployer:
             for filename, code in sources.items():
                 with open(os.path.join(app_dir, filename), "w") as f:
                     f.write(code)
+            config_json = sources["config.json"] if "config.json" in sources else '{}'
+            config = json.loads(config_json)
+            app_loader_nim = write_app_loader_nim(app_dir, config)
+            with open(os.path.join(app_dir, "__loader.nim"), "w") as lf:
+                lf.write(app_loader_nim)
+            all_apps[app_id] = config
+
+        # write apps.nim
+        with open(os.path.join(source_dir, "src", "apps", "apps.nim"), "w") as f:
+            f.write(write_apps_nim(all_apps))
 
         for scene in frame.scenes:
             execution = scene.get("settings", {}).get("execution", "auto")

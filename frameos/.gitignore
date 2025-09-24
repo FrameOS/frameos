@@ -7,3 +7,4 @@ testresults
 nimble.develop
 nimble.paths
 scene.json
+*/__loader.nim
