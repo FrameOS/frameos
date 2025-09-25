@@ -19,7 +19,7 @@ def main():
         config_path = os.path.join(app_dir, "config.json")
         if os.path.exists(config_path):
             app_loader_nim = write_app_loader_nim(app_dir)
-            with open(os.path.join(app_dir, "__loader.nim"), "w") as lf:
+            with open(os.path.join(app_dir, "app_loader.nim"), "w") as lf:
                 lf.write(app_loader_nim)
 
 if __name__ == "__main__":

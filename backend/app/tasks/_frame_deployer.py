@@ -284,7 +284,7 @@ class FrameDeployer:
                 with open(config_path, "r") as f:
                     config = json.load(f)
                     app_loader_nim = write_app_loader_nim(app_dir, config)
-                    with open(os.path.join(app_dir, "__loader.nim"), "w") as lf:
+                    with open(os.path.join(app_dir, "app_loader.nim"), "w") as lf:
                         lf.write(app_loader_nim)
                     all_apps[config["id"]] = config
 
@@ -298,7 +298,7 @@ class FrameDeployer:
             config_json = sources["config.json"] if "config.json" in sources else '{}'
             config = json.loads(config_json)
             app_loader_nim = write_app_loader_nim(app_dir, config)
-            with open(os.path.join(app_dir, "__loader.nim"), "w") as lf:
+            with open(os.path.join(app_dir, "app_loader.nim"), "w") as lf:
                 lf.write(app_loader_nim)
             all_apps[app_id] = config
 

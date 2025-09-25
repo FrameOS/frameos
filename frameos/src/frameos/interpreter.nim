@@ -2,7 +2,10 @@ import frameos/types
 import frameos/values
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils
 import apps/render/image/app as render_imageApp
+import apps/render/image/app_loader as render_image_loader
 import apps/render/gradient/app as render_gradientApp
+import apps/render/gradient/app_loader as render_gradient_loader
+import apps/render/split/app as render_splitApp
 
 var allScenesLoaded = false
 var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
@@ -66,6 +69,14 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: var ExecutionContext, a
           result = toValue(render_imageApp.get(app, context))
         else:
           render_imageApp.run(app, context)
+      # of "render/split":
+      #   let app = render_splitApp.App(self.appsByNodeId[currentNodeId])
+      #   if self.appInputsForNodeId.hasKey(currentNodeId):
+      #     let connectedNodeIds = self.appInputsForNodeId[currentNodeId]
+      #     for (inputName, connectedNodeId) in connectedNodeIds.pairs:
+      #       if self.nodes.hasKey(connectedNodeId):
+      #         let value = runNode(self, connectedNodeId, context, asDataNode = true
+
       else:
         raise newException(Exception, "Unknown app keyword: " & keyword)
 
@@ -140,36 +151,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
           "nodeId": node.id.int, "appKeyword": keyword})
       case keyword
       of "render/gradient":
-        let appConfig = render_gradientApp.AppConfig(
-            startColor: parseHtmlColor(node.data["config"]{"startColor"}.getStr()),
-            endColor: parseHtmlColor(node.data["config"]{"endColor"}.getStr()),
-            angle: node.data["config"]{"angle"}.getFloat()
-          )
-        app = render_gradientApp.App(
-          nodeName: node.data{"name"}.getStr(),
-          nodeId: node.id,
-          scene: scene.FrameScene,
-          frameConfig: scene.frameConfig,
-          appConfig: appConfig
-        )
+        app = render_gradient_loader.init(node, scene)
       of "render/image":
-        let appConfig = render_imageApp.AppConfig(
-          # Option[Image]
-          inputImage: none(Image),
-          # Image
-          image: nil,
-          placement: node.data["config"]{"placement"}.getStr(),
-          offsetX: node.data["config"]{"offsetX"}.getInt(),
-          offsetY: node.data["config"]{"offsetY"}.getInt(),
-          blendMode: node.data["config"]{"blendMode"}.getStr(),
-        )
-        app = render_imageApp.App(
-          nodeName: node.data{"name"}.getStr(),
-          nodeId: node.id,
-          scene: scene.FrameScene,
-          frameConfig: scene.frameConfig,
-          appConfig: appConfig
-        )
+        app = render_image_loader.init(node, scene)
       else:
         raise newException(Exception, "Unknown app type: " & keyword)
       scene.appsByNodeId[node.id] = app

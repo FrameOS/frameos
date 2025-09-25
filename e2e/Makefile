@@ -9,7 +9,11 @@ snapshots:
 	mkdir -p ./tmp && \
 	mkdir -p ./tmp/state && \
 	mkdir -p ./tmp/e2e-temp-frameos && \
+	mkdir -p ./tmp/e2e && \
+	mkdir -p ./tmp/backend/app/codegen && \
 	tmpdir=./tmp/e2e-temp-frameos && \
+	cp -r ../e2e/*.py ./tmp/e2e && \
+	cp -r ../backend/app/codegen/*.py ./tmp/backend/app/codegen && \
 	cp -r ../frameos/* "$$tmpdir" && \
 	rm -rf "$$tmpdir/src/scenes" && \
 	cp -r ./generated "$$tmpdir/src/scenes" && \

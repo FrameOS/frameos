@@ -1,5 +1,4 @@
 import json, jester, pixie, hashes, locks
-import ./values
 
 type
   # Parsed config.json
@@ -103,6 +102,33 @@ type
 
   NodeId* = distinct int
   SceneId* = distinct string
+
+  FieldKind* = enum
+    fkString, fkText, fkFloat, fkInteger, fkBoolean, fkColor, fkJson, fkImage, fkNode, fkScene, fkNone
+
+  ## A compact tagged union for interpreter values.
+  Value* = object
+    case kind*: FieldKind
+    of fkString, fkText:
+      s*: string    ## same storage, different semantics via kind
+    of fkFloat:
+      f*: float64
+    of fkInteger:
+      i*: int64
+    of fkBoolean:
+      b*: bool
+    of fkColor:
+      col*: Color
+    of fkJson:
+      j*: JsonNode  ## std/json node (ref object)
+    of fkImage:
+      img*: Image   ## pixie image (ref object)
+    of fkNode:
+      nId*: NodeId  ## custom node type (ref object)
+    of fkScene:
+      sId*: SceneId ## custom scene type (ref object)
+    of fkNone:
+      discard
 
   # Runtime state while running the scene (for compiled frames)
   FrameScene* = ref object of RootObj
