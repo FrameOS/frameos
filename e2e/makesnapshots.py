@@ -44,7 +44,10 @@ def main():
 
         for scene_file in files:
             base_id = scene_file.stem
-            for scene_id in (base_id, base_id + '_interpreted'):
+            for (scene_id, filename) in [
+                (base_id, base_id + '_compiled'), 
+                (base_id + '_interpreted', base_id + '_interpreted')
+            ]:
                 print(f"🍿 Processing scene: {scene_id}")
 
                 r = requests.post(f'http://localhost:{port}/event/setCurrentScene', json={'sceneId': 'black'})
@@ -61,7 +64,7 @@ def main():
 
                 image_response = requests.get(f'http://localhost:{port}/image')
                 if image_response.status_code == 200:
-                    snapshot_path = snapshots_dir / f"{scene_id}.png"
+                    snapshot_path = snapshots_dir / f"{filename}.png"
                     if snapshot_path.exists():
                         temp_path = snapshot_path.with_suffix('.temp.png')
                         with open(temp_path, 'wb') as temp_file:
@@ -79,8 +82,22 @@ def main():
                         print(f"Snapshot saved: {snapshot_path}")
                 else:
                     print(f"Failed to get snapshot for scene {scene_id}")
+            # compare files: base_id + '_compiled' and base_id + '_interpreted'
+            compiled_path = snapshots_dir / f"{base_id}_compiled.png"
+            interpreted_path = snapshots_dir / f"{base_id}_interpreted.png"
+            if compiled_path.exists() and interpreted_path.exists():
+                if is_similar_image(compiled_path, interpreted_path):
+                    print(f"✅ Snapshots are similar for scene {base_id}")
+                    # rename to base_id.png
+                    final_path = snapshots_dir / f"{base_id}.png"
+                    compiled_path.rename(final_path)
+                    interpreted_path.unlink()
+                else:
+                    print(f"❌ Snapshots differ for scene {base_id}")
+                    final_path = snapshots_dir / f"{base_id}.png"
+                    final_path.unlink(missing_ok=True)
     finally:
-        time.sleep(10)
+        time.sleep(2)
         os.kill(process.pid, signal.SIGTERM)
         print(f"frameos process with PID {process.pid} has been terminated")
 

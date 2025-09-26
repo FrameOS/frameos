@@ -5,7 +5,13 @@ import apps/render/image/app as render_imageApp
 import apps/render/image/app_loader as render_image_loader
 import apps/render/gradient/app as render_gradientApp
 import apps/render/gradient/app_loader as render_gradient_loader
-import apps/render/split/app as render_splitApp
+import apps/render/text/app as render_textApp
+import apps/render/text/app_loader as render_text_loader
+# import apps/render/split/app as render_splitApp
+# import apps/render/split/app_loader as render_split_loader
+import apps/data/newImage/app as data_newImageApp
+import apps/data/newImage/app_loader as data_newImage_loader
+import apps/apps
 
 var allScenesLoaded = false
 var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
@@ -42,40 +48,33 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: var ExecutionContext, a
           result = toValue(render_gradientApp.get(app, context))
         else:
           render_gradientApp.run(app, context)
+      of "data/newImage":
+        let app = data_newImageApp.App(self.appsByNodeId[currentNodeId])
+        if asDataNode:
+          result = toValue(data_newImageApp.get(app, context))
+        else:
+          raise newException(Exception, "data/newImage app cannot be run, only get")
+      of "render/text":
+        let app = render_textApp.App(self.appsByNodeId[currentNodeId])
+        if asDataNode:
+          result = toValue(render_textApp.get(app, context))
+        else:
+          render_textApp.run(app, context)
       of "render/image":
         let app = render_imageApp.App(self.appsByNodeId[currentNodeId])
+
         if self.appInputsForNodeId.hasKey(currentNodeId):
           let connectedNodeIds = self.appInputsForNodeId[currentNodeId]
           for (inputName, connectedNodeId) in connectedNodeIds.pairs:
+
             if self.nodes.hasKey(connectedNodeId):
               let value = runNode(self, connectedNodeId, context, asDataNode = true)
-              if inputName == "inputImage":
-                if value.kind == fkImage:
-                  app.appConfig.inputImage = some(value.asImage)
-                elif value.kind == fkNone:
-                  app.appConfig.inputImage = none(Image)
-                else:
-                  raise newException(Exception, "Input node did not return an image or none for inputImage")
-              elif inputName == "image":
-                self.logger.log(%*{"event": "interpreter:runAppInput", "sceneId": self.id, "nodeId": currentNodeId.int,
-                    "inputName": inputName, "connectedNodeId": connectedNodeId.int, "valueKind": $value.kind})
-                if value.kind == fkImage:
-                  app.appConfig.image = value.asImage
-                else:
-                  raise newException(Exception, "Input node did not return an image for image")
-              else:
-                raise newException(Exception, "Unknown input name for render/image app: " & inputName)
+              render_image_loader.setField(app.AppRoot, inputName, value)
+
         if asDataNode:
           result = toValue(render_imageApp.get(app, context))
         else:
           render_imageApp.run(app, context)
-      # of "render/split":
-      #   let app = render_splitApp.App(self.appsByNodeId[currentNodeId])
-      #   if self.appInputsForNodeId.hasKey(currentNodeId):
-      #     let connectedNodeIds = self.appInputsForNodeId[currentNodeId]
-      #     for (inputName, connectedNodeId) in connectedNodeIds.pairs:
-      #       if self.nodes.hasKey(connectedNodeId):
-      #         let value = runNode(self, connectedNodeId, context, asDataNode = true
 
       else:
         raise newException(Exception, "Unknown app keyword: " & keyword)
@@ -146,17 +145,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
 
     elif node.nodeType == "app":
       let keyword = node.data{"keyword"}.getStr()
-      var app: AppRoot
       scene.logger.log(%*{"event": "initInterpretedApp", "sceneId": scene.id, "nodeType": node.nodeType,
           "nodeId": node.id.int, "appKeyword": keyword})
-      case keyword
-      of "render/gradient":
-        app = render_gradient_loader.init(node, scene)
-      of "render/image":
-        app = render_image_loader.init(node, scene)
-      else:
-        raise newException(Exception, "Unknown app type: " & keyword)
-      scene.appsByNodeId[node.id] = app
+      scene.appsByNodeId[node.id] = initApp(keyword, node, scene)
 
   for edge in exportedScene.edges:
     logger.log(%*{"event": "initInterpretedEdge", "sceneId": scene.id, "edgeId": edge.id.int,
