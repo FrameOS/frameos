@@ -68,17 +68,23 @@ proc processQueue(self: LoggerThread): int =
 
 
 proc run(self: LoggerThread) =
+  var run = 2
   while true:
     let processedLogs = self.processQueue()
     if processedLogs == 0:
-      sleep(250)
+      sleep(run)
+      if run < 1000:
+        run += 2
     let (success, payload) = logChannel.tryRecv()
     if success:
       echo payload # print to stdout / journal
       self.logs.add(payload)
       logToFile(self.frameConfig.logToFile, payload[1])
+      run = 2
     else:
-      sleep(100)
+      sleep(run)
+      if run < 1000:
+        run += 2
 
 proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
   let protocol = if frameConfig.serverPort mod 1000 == 443: "https" else: "http"
