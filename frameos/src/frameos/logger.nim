@@ -73,7 +73,7 @@ proc run(self: LoggerThread) =
     let processedLogs = self.processQueue()
     if processedLogs == 0:
       sleep(run)
-      if run < 1000:
+      if run < 250:
         run += 2
     let (success, payload) = logChannel.tryRecv()
     if success:
@@ -83,7 +83,7 @@ proc run(self: LoggerThread) =
       run = 2
     else:
       sleep(run)
-      if run < 1000:
+      if run < 250:
         run += 2
 
 proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
