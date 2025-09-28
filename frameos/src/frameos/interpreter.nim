@@ -148,6 +148,24 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: var ExecutionContext, a
     else:
       currentNodeId = -1.NodeId
 
+proc ensureConfig*(scene: InterpretedFrameScene, node: DiagramNode): JsonNode =
+  ## Make sure node.data["config"] exists and is an object; return it.
+  if node.data.isNil:
+    node.data = %*{}
+  if not node.data.hasKey("config") or node.data["config"].kind != JObject:
+    node.data["config"] = %*{}
+  node.data["config"]
+
+proc setNodeFieldFromEdge*(scene: InterpretedFrameScene, edge: DiagramEdge) =
+  ## Map edges of the form:
+  ##   sourceHandle: "field/<fieldName>[idx][idx]..."
+  ##   targetHandle: "prev"
+  ## into node.config["<fieldName>[idx][idx]"] = target NodeId (int).
+  if not edge.sourceHandle.startsWith("field/"): return
+  if edge.targetHandle != "prev": return
+  if not scene.nodes.hasKey(edge.source): return
+  let fieldPath = edge.sourceHandle.substr("field/".len) # keep full path inc. [i][j]
+  scene.ensureConfig(scene.nodes[edge.source])[fieldPath] = %(edge.target.int)
 
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     persistedState: JsonNode): FrameScene =
@@ -180,6 +198,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     for key in persistedState.keys:
       scene.state[key] = persistedState[key]
 
+  ## Pass 1: register nodes & event listeners (do not init apps yet)
   for node in exportedScene.nodes:
     scene.nodes[node.id] = node
     scene.logger.log(%*{"event": "initInterpretedNode", "sceneId": scene.id, "nodeType": node.nodeType,
@@ -192,12 +211,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         scene.eventListeners[eventName] = @[]
       scene.eventListeners[eventName].add(node.id)
 
-    elif node.nodeType == "app":
-      let keyword = node.data{"keyword"}.getStr()
-      scene.logger.log(%*{"event": "initInterpretedApp", "sceneId": scene.id, "nodeType": node.nodeType,
-          "nodeId": node.id.int, "appKeyword": keyword})
-      scene.appsByNodeId[node.id] = initApp(keyword, node, scene)
-
+  ## Pass 2: process edges (next/prev, app inputs, and node-field wiring)
   for edge in exportedScene.edges:
     logger.log(%*{"event": "initInterpretedEdge", "sceneId": scene.id, "edgeId": edge.id.int,
         "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
@@ -205,6 +219,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     scene.edges.add(edge)
     if edge.sourceHandle == "next" and edge.targetHandle == "prev":
       scene.nextNodeIds[edge.source] = edge.target
+    ## value edges (app/code output -> app input)
     if edge.sourceHandle == "fieldOutput" and edge.targetHandle.startsWith("fieldInput/"):
       let fieldName = edge.targetHandle.split("/")[1]
       if not scene.appInputsForNodeId.hasKey(edge.target):
@@ -212,6 +227,33 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       scene.appInputsForNodeId[edge.target][fieldName] = edge.source
       scene.logger.log(%*{"event": "initInterpretedAppInput", "sceneId": scene.id, "appNodeId": edge.target.int,
           "inputField": fieldName, "connectedNodeId": edge.source.int})
+    ## node-field edges (app field -> prev of target node)
+    if edge.sourceHandle.startsWith("field/") and edge.targetHandle == "prev":
+      scene.setNodeFieldFromEdge(edge)
+      scene.logger.log(%*{
+        "event": "initInterpretedAppField",
+        "sceneId": scene.id,
+        "appNodeId": edge.source.int,
+        "fieldPath": edge.sourceHandle.substr("field/".len),
+        "targetNodeId": edge.target.int
+      })
+
+  ## Pass 3: initialize apps AFTER we've wired fields via edges
+  for node in exportedScene.nodes:
+    if node.nodeType == "app":
+      let keyword = node.data{"keyword"}.getStr()
+      scene.logger.log(%*{
+        "event": "initInterpretedApp",
+        "sceneId": scene.id,
+        "nodeType": node.nodeType,
+        "nodeId": node.id.int,
+        "appKeyword": keyword,
+        "configKeys": (if node.data.hasKey("config") and node.data["config"].kind == JObject:
+        node.data["config"].keys.toSeq()
+      else:
+        @[])
+      })
+      scene.appsByNodeId[node.id] = initApp(keyword, node, scene)
 
   logger.log(%*{"event": "initInterpretedDone", "sceneId": sceneId.string, "nodes": scene.nodes.len,
       "edges": scene.edges.len, "eventListeners": scene.eventListeners.len, "apps": scene.appsByNodeId.len})
