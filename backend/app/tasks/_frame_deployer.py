@@ -29,7 +29,7 @@ from app.codegen.drivers_nim import write_drivers_nim
 from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.tasks.utils import find_nimbase_file
 from app.models.settings import get_settings_dict
-# from app.codegen.apps_nim import write_apps_nim
+from app.codegen.apps_nim import write_apps_nim
 from app.codegen.app_loader_nim import write_app_loader_nim
 
 BYTES_PER_MB   = 1_048_576
@@ -276,7 +276,6 @@ class FrameDeployer:
         os.makedirs(os.path.join(source_dir, "src", "scenes"), exist_ok=True)
 
         # find all apps
-        all_apps = {}
         os.makedirs(os.path.join(source_dir, "src", "apps"), exist_ok=True)
         for app_dir in glob(os.path.join(source_dir, "src", "apps", "*", "*")):
             config_path = os.path.join(app_dir, "config.json")
@@ -286,7 +285,6 @@ class FrameDeployer:
                     app_loader_nim = write_app_loader_nim(app_dir, config)
                     with open(os.path.join(app_dir, "app_loader.nim"), "w") as lf:
                         lf.write(app_loader_nim)
-                    all_apps[config["id"]] = config
 
         for node_id, sources in get_apps_from_scenes(list(frame.scenes)).items():
             app_id = "nodeapp_" + node_id.replace('-', '_')
@@ -300,11 +298,10 @@ class FrameDeployer:
             app_loader_nim = write_app_loader_nim(app_dir, config)
             with open(os.path.join(app_dir, "app_loader.nim"), "w") as lf:
                 lf.write(app_loader_nim)
-            all_apps[app_id] = config
 
         # write apps.nim
-        # with open(os.path.join(source_dir, "src", "apps", "apps.nim"), "w") as f:
-        #     f.write(write_apps_nim(all_apps))
+        with open(os.path.join(source_dir, "src", "apps", "apps.nim"), "w") as f:
+            f.write(write_apps_nim())
 
         for scene in frame.scenes:
             execution = scene.get("settings", {}).get("execution", "auto")

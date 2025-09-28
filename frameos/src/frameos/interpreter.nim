@@ -1,22 +1,6 @@
 import frameos/types
 import frameos/values
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils
-import apps/render/image/app as render_imageApp
-import apps/render/image/app_loader as render_image_loader
-import apps/render/calendar/app as render_calendarApp
-import apps/render/calendar/app_loader as render_calendar_loader
-import apps/render/color/app as render_colorApp
-import apps/render/color/app_loader as render_color_loader
-import apps/render/gradient/app as render_gradientApp
-import apps/render/gradient/app_loader as render_gradient_loader
-import apps/render/text/app as render_textApp
-import apps/render/text/app_loader as render_text_loader
-import apps/render/split/app as render_splitApp
-import apps/render/split/app_loader as render_split_loader
-import apps/render/opacity/app as render_opacityApp
-import apps/render/opacity/app_loader as render_opacity_loader
-import apps/data/newImage/app as data_newImageApp
-import apps/data/newImage/app_loader as data_newImage_loader
 import apps/apps
 
 var allScenesLoaded = false
@@ -25,7 +9,7 @@ var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var globalNodeCounter = 0
 var nodeMappingTable = initTable[string, NodeId]()
 
-proc runNode*(self: FrameScene, nodeId: NodeId, context: var ExecutionContext, asDataNode = false): Value =
+proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
   let self = InterpretedFrameScene(self)
   var currentNodeId: NodeId = nodeId
   while currentNodeId != -1.NodeId:
@@ -41,92 +25,28 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: var ExecutionContext, a
     case nodeType:
     of "app":
       let keyword = currentNode.data{"keyword"}.getStr()
-      self.logger.log(%*{"event": "interpreter:runApp", "sceneId": self.id, "nodeId": currentNodeId.int,
-          "keyword": keyword})
-
+      self.logger.log(%*{
+        "event": "interpreter:runApp",
+        "sceneId": self.id, "nodeId": currentNodeId.int, "keyword": keyword
+      })
       if not self.appsByNodeId.hasKey(currentNodeId):
-        raise newException(Exception, "App not initialized for node id: " & $currentNode.id & ", keyword: " & keyword)
+        raise newException(Exception,
+          "App not initialized for node id: " & $currentNode.id & ", keyword: " & keyword)
 
-      case keyword:
-      of "data/newImage":
-        let app = data_newImageApp.App(self.appsByNodeId[currentNodeId])
-        if asDataNode:
-          result = toValue(data_newImageApp.get(app, context))
-        else:
-          raise newException(Exception, "data/newImage app cannot be run, only get")
-      of "render/calendar":
-        let app = render_calendarApp.App(self.appsByNodeId[currentNodeId])
+      let app = self.appsByNodeId[currentNodeId]
 
-        if self.appInputsForNodeId.hasKey(currentNodeId):
-          let connectedNodeIds = self.appInputsForNodeId[currentNodeId]
-          for (inputName, connectedNodeId) in connectedNodeIds.pairs:
+      # Wire any connected app inputs generically (output -> fieldInput/<name>)
+      if self.appInputsForNodeId.hasKey(currentNodeId):
+        let connected = self.appInputsForNodeId[currentNodeId]
+        for (inputName, producerNodeId) in connected.pairs:
+          if self.nodes.hasKey(producerNodeId):
+            let v = runNode(self, producerNodeId, context, asDataNode = true)
+            apps.setAppField(keyword, app, inputName, v)
 
-            if self.nodes.hasKey(connectedNodeId):
-              let value = runNode(self, connectedNodeId, context, asDataNode = true)
-              render_calendar_loader.setField(app.AppRoot, inputName, value)
-
-        if asDataNode:
-          result = toValue(render_calendarApp.get(app, context))
-        else:
-          render_calendarApp.run(app, context)
-      of "render/color":
-        let app = render_colorApp.App(self.appsByNodeId[currentNodeId])
-        if asDataNode:
-          result = toValue(render_colorApp.get(app, context))
-        else:
-          render_colorApp.run(app, context)
-      of "render/gradient":
-        let app = render_gradientApp.App(self.appsByNodeId[currentNodeId])
-        if asDataNode:
-          result = toValue(render_gradientApp.get(app, context))
-        else:
-          render_gradientApp.run(app, context)
-      of "render/image":
-        let app = render_imageApp.App(self.appsByNodeId[currentNodeId])
-
-        if self.appInputsForNodeId.hasKey(currentNodeId):
-          let connectedNodeIds = self.appInputsForNodeId[currentNodeId]
-          for (inputName, connectedNodeId) in connectedNodeIds.pairs:
-
-            if self.nodes.hasKey(connectedNodeId):
-              let value = runNode(self, connectedNodeId, context, asDataNode = true)
-              render_image_loader.setField(app.AppRoot, inputName, value)
-
-        if asDataNode:
-          result = toValue(render_imageApp.get(app, context))
-        else:
-          render_imageApp.run(app, context)
-      of "render/opacity":
-        let app = render_opacityApp.App(self.appsByNodeId[currentNodeId])
-        if asDataNode:
-          result = toValue(render_opacityApp.get(app, context))
-        else:
-          render_opacityApp.run(app, context)
-
-      of "render/split":
-        let app = render_splitApp.App(self.appsByNodeId[currentNodeId])
-
-        if self.appInputsForNodeId.hasKey(currentNodeId):
-          let connectedNodeIds = self.appInputsForNodeId[currentNodeId]
-          for (inputName, connectedNodeId) in connectedNodeIds.pairs:
-
-            if self.nodes.hasKey(connectedNodeId):
-              let value = runNode(self, connectedNodeId, context, asDataNode = true)
-              render_split_loader.setField(app.AppRoot, inputName, value)
-
-        if asDataNode:
-          result = toValue(render_splitApp.get(app, context))
-        else:
-          render_splitApp.run(app, context)
-      of "render/text":
-        let app = render_textApp.App(self.appsByNodeId[currentNodeId])
-        if asDataNode:
-          result = toValue(render_textApp.get(app, context))
-        else:
-          render_textApp.run(app, context)
-
+      if asDataNode:
+        result = apps.getApp(keyword, app, context)
       else:
-        raise newException(Exception, "Unknown app keyword: " & keyword)
+        apps.runApp(keyword, app, context)
 
     of "source":
       raise newException(Exception, "Source nodes not implemented in interpreted scenes yet")
@@ -190,9 +110,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     eventListeners: initTable[string, seq[NodeId]](),
     appInputsForNodeId: initTable[NodeId, Table[string, NodeId]]()
   )
-  scene.execNode = proc(nodeId: NodeId, context: var ExecutionContext) =
+  scene.execNode = proc(nodeId: NodeId, context: ExecutionContext) =
     discard scene.runNode(nodeId, context)
-  scene.getDataNode = proc(nodeId: NodeId, context: var ExecutionContext): Value =
+  scene.getDataNode = proc(nodeId: NodeId, context: ExecutionContext): Value =
     scene.runNode(nodeId, context, asDataNode = true)
   if persistedState.kind == JObject:
     for key in persistedState.keys:
@@ -260,7 +180,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
 
   return scene
 
-proc runEvent*(self: FrameScene, context: var ExecutionContext) =
+proc runEvent*(self: FrameScene, context: ExecutionContext) =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
   self.logger.log(%*{"event": "runEventInterpreted", "sceneId": self.id, "contextEvent": context.event})
 
@@ -276,7 +196,7 @@ proc runEvent*(self: FrameScene, context: var ExecutionContext) =
         self.logger.log(%*{"event": "runEventInterpreted:node", "sceneId": self.id, "nodeId": nextNode.int})
         discard scene.runNode(nextNode, context)
 
-proc render*(self: FrameScene, context: var ExecutionContext): Image =
+proc render*(self: FrameScene, context: ExecutionContext): Image =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
   self.logger.log(%*{
     "event": "renderInterpreted",

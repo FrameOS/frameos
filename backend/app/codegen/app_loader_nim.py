@@ -592,7 +592,8 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
                 app_set_lines.append(f'    raise newException(ValueError, "Unsupported field type for set: {field_type}")')
 
     newline = os.linesep
-    nim_code = f"""import json
+    nim_code = f"""{{.warning[UnusedImport]: off.}}
+import json
 import options
 import strutils
 import pixie
@@ -624,7 +625,7 @@ proc init*(
     scene: scene,
     frameConfig: scene.frameConfig,
   )
-  echo "result done"
+  echo "app init done"
 
 proc setField*(self: AppRoot, field: string, value: Value) =
   let app = app_module.App(self)
@@ -632,11 +633,16 @@ proc setField*(self: AppRoot, field: string, value: Value) =
 {newline.join(app_set_lines)}
   else:
     raise newException(ValueError, "Unknown field: " & field)
-
-proc run*(self: AppRoot, context: ExecutionContext) =
-  self.run(context)
-
-proc get*(self: AppRoot, context: ExecutionContext): Value =
-  return self.get(context)
 """
+    if config.get("category") in ("data", "render"):
+        nim_code += """
+proc get*(self: AppRoot, context: ExecutionContext): Value =
+  return app_module.get(app_module.App(self), context)
+"""
+    if config.get("category") in ("render", "logic"):
+        nim_code += """
+proc run*(self: AppRoot, context: ExecutionContext) =
+  app_module.run(app_module.App(self), context)
+"""
+
     return nim_code

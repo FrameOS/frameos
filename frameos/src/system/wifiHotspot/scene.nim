@@ -32,7 +32,7 @@ var cache0Fields: string # code
 var cache1: Option[Image] = none(Image)
 var cache1Fields: string # code
 
-proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
+proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext) =
   let scene = self
   let frameConfig = scene.frameConfig
   let state = scene.state
@@ -86,7 +86,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
     if DEBUG:
       self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
-proc runEvent*(self: Scene, context: var ExecutionContext) =
+proc runEvent*(self: Scene, context: ExecutionContext) =
   case context.event:
   of "render":
     try: self.runNode(1.NodeId, context)
@@ -110,10 +110,10 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
           self.state[key] = copy(payload[key])
   else: discard
 
-proc runEvent*(self: FrameScene, context: var ExecutionContext) =
+proc runEvent*(self: FrameScene, context: ExecutionContext) =
   runEvent(Scene(self), context)
 
-proc render*(self: FrameScene, context: var ExecutionContext): Image =
+proc render*(self: FrameScene, context: ExecutionContext): Image =
   let self = Scene(self)
   context.image.fill(self.backgroundColor)
   runEvent(self, context)
@@ -129,8 +129,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
-  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
-  scene.getDataNode = (proc(nodeId: NodeId, context: var ExecutionContext): Value = scene.getDataNode(nodeId, context))
+  scene.execNode = (proc(nodeId: NodeId, context: ExecutionContext) = scene.runNode(nodeId, context))
+  scene.getDataNode = (proc(nodeId: NodeId, context: ExecutionContext): Value = scene.getDataNode(nodeId, context))
   scene.node1 = render_splitApp.App(nodeName: "render/split", nodeId: 1.NodeId, scene: scene.FrameScene,
     frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 2,

@@ -48,6 +48,7 @@ patterns=(
     "frameos/src/apps/render/split/*"
     "frameos/src/apps/render/calendar/*"
     "frameos/src/apps/data/frameOSGallery/*"
+    "frameos/src/apps/apps.nim"
     # "frameos/frame.json"
     # "frameos/frameos.nimble"
     # "frameos/frameos.service"

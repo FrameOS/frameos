@@ -139,8 +139,8 @@ type
     state*: JsonNode
     refreshInterval*: float
     backgroundColor*: Color
-    execNode*: proc(nodeId: NodeId, context: var ExecutionContext)
-    getDataNode*: proc(nodeId: NodeId, context: var ExecutionContext): Value
+    execNode*: proc(nodeId: NodeId, context: ExecutionContext)
+    getDataNode*: proc(nodeId: NodeId, context: ExecutionContext): Value
     lastPublicStateUpdate*: float
     lastPersistedStateUpdate*: float
 
@@ -162,15 +162,15 @@ type
 
   AppExport* = ref object of RootObj
     init*: proc (params: Table[string, Value]): AppRoot
-    run*: proc (self: AppRoot, context: var ExecutionContext): void
+    run*: proc (self: AppRoot, context: ExecutionContext): void
     get*: proc (self: AppRoot, key: string): Value
 
   # Exported data/functions for compiled scenes
   ExportedScene* = ref object of RootObj
     publicStateFields*: seq[StateField]
     persistedStateKeys*: seq[string]
-    runEvent*: proc (self: FrameScene, context: var ExecutionContext): void
-    render*: proc (self: FrameScene, context: var ExecutionContext): Image
+    runEvent*: proc (self: FrameScene, context: ExecutionContext): void
+    render*: proc (self: FrameScene, context: ExecutionContext): Image
     init*: proc (sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene
 
   # Exported data/functions for interpreted scenes, adds some local state that's normally compiled into the scene

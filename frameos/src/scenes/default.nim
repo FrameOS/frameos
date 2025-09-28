@@ -29,7 +29,7 @@ type Scene* = ref object of FrameScene
 var cache0: Option[Image] = none(Image)
 var cache0Time: float = 0
 
-proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
+proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext) =
   let scene = self
   let frameConfig = scene.frameConfig
   let state = scene.state
@@ -102,7 +102,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
-  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
+  scene.execNode = (proc(nodeId: NodeId, context: ExecutionContext) = scene.runNode(nodeId, context))
   scene.node1 = render_opacityApp.App(nodeName: "render/opacity", nodeId: 1.NodeId, scene: scene.FrameScene,
     frameConfig: scene.frameConfig, appConfig: render_opacityApp.AppConfig(
     opacity: 0.5,
