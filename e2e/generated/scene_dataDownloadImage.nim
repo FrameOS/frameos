@@ -31,7 +31,7 @@ var cache0Time: float = 0
 var cache1: Option[Image] = none(Image)
 var cache1Time: float = 0
 
-proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext, asDataNode = false): Value =
+proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
   result = VNone()
   let scene = self
   let frameConfig = scene.frameConfig
@@ -73,7 +73,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext, asData
     if DEBUG:
       self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
-proc runEvent*(self: Scene, context: var ExecutionContext) =
+proc runEvent*(self: Scene, context: ExecutionContext) =
   case context.event:
   of "render":
     try: discard self.runNode(3.NodeId, context)
@@ -96,10 +96,10 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
           self.state[key] = copy(payload[key])
   else: discard
 
-proc runEvent*(self: FrameScene, context: var ExecutionContext) =
+proc runEvent*(self: FrameScene, context: ExecutionContext) =
     runEvent(Scene(self), context)
 
-proc render*(self: FrameScene, context: var ExecutionContext): Image =
+proc render*(self: FrameScene, context: ExecutionContext): Image =
   let self = Scene(self)
   context.image.fill(self.backgroundColor)
   runEvent(self, context)
@@ -114,8 +114,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
-  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = discard scene.runNode(nodeId, context))
-  scene.getDataNode = (proc(nodeId: NodeId, context: var ExecutionContext): Value = scene.getDataNode(nodeId, context))
+  scene.execNode = (proc(nodeId: NodeId, context: ExecutionContext) = discard scene.runNode(nodeId, context))
+  scene.getDataNode = (proc(nodeId: NodeId, context: ExecutionContext): Value = scene.getDataNode(nodeId, context))
   scene.node1 = render_imageApp.App(nodeName: "render/image", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
     placement: "center",
     inputImage: none(Image),

@@ -138,8 +138,18 @@ def _scalar_getter(field_name: str, field_type: str, default_expr: str, required
         return k  # hand over the raw JsonNode
 
     if field_type == "color":
-        return f'parseHtmlColor({k}.getStr("#000000"))'
-
+        # Respect the field's default from config (default_expr) instead of forcing black.
+        return f"""block:
+  var v: Color = {default_expr}
+  if params.hasKey("{field_name}"):
+    let n = {k}
+    if n.kind == JString:
+      let s = n.getStr()
+      try:
+        v = parseHtmlColor(s)
+      except CatchableError:
+        discard
+  v"""
     raise ValueError(f"Unsupported field type: {field_type}")
 
 def _field_elem_nim_type(field_type: str, required: bool) -> str:
