@@ -191,15 +191,16 @@ def _size_expr(bound: Union[int, str], all_fields: Dict[str, Dict[str, Any]], de
 
     k = f'params{{"{ref}"}}'
     return f"""block:
-  let n = {k}
   var v = {dflt}
-  if n.kind == JInt:
-    v = n.getInt()
-  elif n.kind == JFloat:
-    v = int(n.getFloat())
-  elif n.kind == JString:
-    try: v = parseInt(n.getStr())
-    except CatchableError: discard
+  if params.hasKey("{ref}"):
+    let n = {k}
+    if n.kind == JInt:
+      v = n.getInt()
+    elif n.kind == JFloat:
+      v = int(n.getFloat())
+    elif n.kind == JString:
+      try: v = parseInt(n.getStr())
+      except CatchableError: discard
   v"""
 
 def _seq_init_expr(field: Dict[str, Any], all_fields: Dict[str, Dict[str, Any]]) -> list[str]:

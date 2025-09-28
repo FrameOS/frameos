@@ -40,8 +40,20 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         let connected = self.appInputsForNodeId[currentNodeId]
         for (inputName, producerNodeId) in connected.pairs:
           if self.nodes.hasKey(producerNodeId):
-            let v = runNode(self, producerNodeId, context, asDataNode = true)
-            apps.setAppField(keyword, app, inputName, v)
+            try:
+              let v = runNode(self, producerNodeId, context, asDataNode = true)
+              apps.setAppField(keyword, app, inputName, v)
+            except Exception as e:
+              self.logger.log(%*{
+                "event": "interpreter:setField:error",
+                "sceneId": self.id,
+                "nodeId": currentNodeId.int,
+                "input": inputName,
+                "producer": producerNodeId.int,
+                "error": $e.msg,
+                "stacktrace": e.getStackTrace()
+              })
+              # Leave field at its default and continue.
 
       if asDataNode:
         result = apps.getApp(keyword, app, context)
@@ -139,7 +151,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     scene.edges.add(edge)
     if edge.sourceHandle == "next" and edge.targetHandle == "prev":
       scene.nextNodeIds[edge.source] = edge.target
+      continue
     ## value edges (app/code output -> app input)
+
     if edge.sourceHandle == "fieldOutput" and edge.targetHandle.startsWith("fieldInput/"):
       let fieldName = edge.targetHandle.split("/")[1]
       if not scene.appInputsForNodeId.hasKey(edge.target):
@@ -147,6 +161,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       scene.appInputsForNodeId[edge.target][fieldName] = edge.source
       scene.logger.log(%*{"event": "initInterpretedAppInput", "sceneId": scene.id, "appNodeId": edge.target.int,
           "inputField": fieldName, "connectedNodeId": edge.source.int})
+      continue
+
     ## node-field edges (app field -> prev of target node)
     if edge.sourceHandle.startsWith("field/") and edge.targetHandle == "prev":
       scene.setNodeFieldFromEdge(edge)
@@ -157,6 +173,17 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         "fieldPath": edge.sourceHandle.substr("field/".len),
         "targetNodeId": edge.target.int
       })
+      continue
+
+    if edge.edgeType == "codeNodeEdge":
+      logger.log(%*{"event": "initInterpretedEdge:error:codeNodeEdge", "sceneId": scene.id, "edgeId": edge.id.int,
+          "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
+          "targetHandle": edge.targetHandle})
+      raise newException(Exception, "Code node edges not implemented in interpreted scenes yet")
+
+    logger.log(%*{"event": "initInterpretedEdge:ignored", "sceneId": scene.id, "edgeId": edge.id.int,
+        "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
+        "targetHandle": edge.targetHandle})
 
   ## Pass 3: initialize apps AFTER we've wired fields via edges
   for node in exportedScene.nodes:
@@ -194,7 +221,17 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
         self.logger.log(%*{"event": "runEventInterpreted3", "sceneId": self.id, "contextEvent": context.event,
             "nodeId": nodeId.int, "nextNode": nextNode.int})
         self.logger.log(%*{"event": "runEventInterpreted:node", "sceneId": self.id, "nodeId": nextNode.int})
-        discard scene.runNode(nextNode, context)
+        try:
+          discard scene.runNode(nextNode, context)
+        except Exception as e:
+          self.logger.log(%*{
+            "event": "runEventInterpreted:error",
+            "sceneId": self.id,
+            "contextEvent": context.event,
+            "nodeId": nextNode.int,
+            "error": $e.msg,
+            "stacktrace": e.getStackTrace()
+          })
 
 proc render*(self: FrameScene, context: ExecutionContext): Image =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
