@@ -4,6 +4,7 @@ import json
 import os
 import re
 from glob import glob
+from typing import Optional
 
 # from ..models.frame import Frame
 # from ..models.apps import get_apps_from_scenes
@@ -24,7 +25,7 @@ def _module_from_id(app_id: str) -> str:
     """
     return f"apps/{app_id}/app_loader"
 
-def write_apps_nim() -> str:
+def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     """
     Generate src/apps/apps.nim with a registry covering all discovered apps.
 
@@ -32,7 +33,8 @@ def write_apps_nim() -> str:
               app_id is typically the keyword (e.g., 'render/image', 'data/newImage'),
               or 'nodeapp_<uuid>' for per-scene generated apps.
     """
-    tmp_dir = os.environ.get("FRAMEOS_ROOT_DIR", "frameos")
+    if not tmp_dir:
+        tmp_dir = os.environ.get("FRAMEOS_ROOT_DIR", "frameos")
     source_dir = os.path.abspath(tmp_dir)
 
     # find all apps

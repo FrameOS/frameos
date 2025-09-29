@@ -8,6 +8,9 @@ var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 
 var globalNodeCounter = 0
 var nodeMappingTable = initTable[string, NodeId]()
+var stateFieldTypesByScene = initTable[SceneId, Table[string, string]]()
+
+proc runEvent*(self: FrameScene, context: ExecutionContext)
 
 proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
   let self = InterpretedFrameScene(self)
@@ -68,10 +71,65 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       raise newException(Exception, "Code nodes not implemented in interpreted scenes yet")
     of "event":
       raise newException(Exception, "Event nodes not implemented in interpreted scenes yet")
+
     of "state":
-      raise newException(Exception, "State nodes not implemented in interpreted scenes yet")
+      let key = currentNode.data{"keyword"}.getStr()
+      var fieldType = "string"
+      if stateFieldTypesByScene.hasKey(self.id):
+        let m = stateFieldTypesByScene[self.id]
+        if m.hasKey(key): fieldType = m[key]
+      let j =
+        if self.state.hasKey(key): self.state[key]
+        else: %*"" # fallback if state missing
+      result = valueFromJsonByType(j, fieldType)
+
     of "scene":
-      raise newException(Exception, "Scene nodes not implemented in interpreted scenes yet")
+      let childSceneId = currentNode.data{"keyword"}.getStr().SceneId
+      self.logger.log(%*{
+        "event": "interpreter:runScene",
+        "sceneId": self.id,
+        "nodeId": currentNodeId.int,
+        "childSceneId": childSceneId.string
+      })
+
+      # Prefer the instance created in init; lazily create only if missing (defensive)
+      if not self.sceneNodes.hasKey(currentNodeId):
+        if not loadedScenes.hasKey(childSceneId):
+          raise newException(Exception,
+            "Scene node references unknown scene id: " & childSceneId.string)
+        var persisted = %*{}
+        if currentNode.data.hasKey("config") and currentNode.data["config"].kind == JObject:
+          persisted = currentNode.data["config"]
+        let child = loadedScenes[childSceneId].init(childSceneId, self.frameConfig, self.logger, persisted)
+        self.sceneNodes[currentNodeId] = child
+        # Optional: fire child's init here too, to keep behavior identical if we had to fallback
+        var initCtx = ExecutionContext(scene: self.sceneNodes[currentNodeId], event: "init",
+                                      payload: self.sceneNodes[currentNodeId].state, hasImage: false,
+                                      loopIndex: 0, loopKey: ".")
+        runEvent(self.sceneNodes[currentNodeId], initCtx)
+
+      let childScene = self.sceneNodes[currentNodeId]
+
+      # Apply dynamic inputs (fieldOutput -> fieldInput/<name>) into child's state before running
+      if self.appInputsForNodeId.hasKey(currentNodeId):
+        let connected = self.appInputsForNodeId[currentNodeId]
+        for (inputName, producerNodeId) in connected.pairs:
+          try:
+            let v = runNode(self, producerNodeId, context, asDataNode = true)
+            childScene.state[inputName] = valueToJson(v)
+          except Exception as e:
+            self.logger.log(%*{
+              "event": "interpreter:setChildState:error",
+              "parentSceneId": self.id,
+              "nodeId": currentNodeId.int,
+              "input": inputName,
+              "producer": producerNodeId.int,
+              "error": $e.msg,
+              "stacktrace": e.getStackTrace()
+            })
+
+      # Delegate handling of the current event to the child scene.
+      runEvent(childScene, context)
     else:
       raise newException(Exception, "Unknown node type: " & nodeType)
 
@@ -120,7 +178,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     nextNodeIds: initTable[NodeId, NodeId](),
     appsByNodeId: initTable[NodeId, AppRoot](),
     eventListeners: initTable[string, seq[NodeId]](),
-    appInputsForNodeId: initTable[NodeId, Table[string, NodeId]]()
+    appInputsForNodeId: initTable[NodeId, Table[string, NodeId]](),
+    sceneNodes: initTable[NodeId, FrameScene]()
   )
   scene.execNode = proc(nodeId: NodeId, context: ExecutionContext) =
     discard scene.runNode(nodeId, context)
@@ -129,6 +188,11 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       scene.state[key] = persistedState[key]
+
+  var typeMap = initTable[string, string]()
+  for fld in exportedScene.publicStateFields:
+    typeMap[fld.name] = fld.fieldType
+  stateFieldTypesByScene[sceneId] = typeMap
 
   ## Pass 1: register nodes & event listeners (do not init apps yet)
   for node in exportedScene.nodes:
@@ -160,6 +224,15 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         scene.appInputsForNodeId[edge.target] = initTable[string, NodeId]()
       scene.appInputsForNodeId[edge.target][fieldName] = edge.source
       scene.logger.log(%*{"event": "initInterpretedAppInput", "sceneId": scene.id, "appNodeId": edge.target.int,
+          "inputField": fieldName, "connectedNodeId": edge.source.int})
+      continue
+
+    if edge.sourceHandle == "stateOutput" and edge.targetHandle.startsWith("fieldInput/"):
+      let fieldName = edge.targetHandle.split("/")[1]
+      if not scene.appInputsForNodeId.hasKey(edge.target):
+        scene.appInputsForNodeId[edge.target] = initTable[string, NodeId]()
+      scene.appInputsForNodeId[edge.target][fieldName] = edge.source
+      scene.logger.log(%*{"event": "initInterpretedStateInput", "sceneId": scene.id, "appNodeId": edge.target.int,
           "inputField": fieldName, "connectedNodeId": edge.source.int})
       continue
 
@@ -201,6 +274,38 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         @[])
       })
       scene.appsByNodeId[node.id] = initApp(keyword, node, scene)
+
+    elif node.nodeType == "scene":
+      let childSceneId = node.data{"keyword"}.getStr().SceneId
+      if not loadedScenes.hasKey(childSceneId):
+        raise newException(Exception,
+          "Scene node references unknown scene id: " & childSceneId.string)
+
+      # Use node.data.config as the initial state for the child scene (mirrors compiled behavior)
+      var persisted = %*{}
+      if node.data.hasKey("config") and node.data["config"].kind == JObject:
+        persisted = node.data["config"]
+
+      let exportedChild = loadedScenes[childSceneId]
+      let child = exportedChild.init(childSceneId, frameConfig, logger, persisted)
+      scene.sceneNodes[node.id] = child
+      scene.logger.log(%*{
+        "event": "initInterpretedChildScene",
+        "parentSceneId": scene.id,
+        "nodeId": node.id.int,
+        "childSceneId": childSceneId.string
+      })
+
+      # Fire child's init event once (compiled scenes do this inside their init)
+      var initCtx = ExecutionContext(
+        scene: child,
+        event: "init",
+        payload: child.state,
+        hasImage: false,
+        loopIndex: 0,
+        loopKey: "."
+      )
+      runEvent(child, initCtx)
 
   logger.log(%*{"event": "initInterpretedDone", "sceneId": sceneId.string, "nodes": scene.nodes.len,
       "edges": scene.edges.len, "eventListeners": scene.eventListeners.len, "apps": scene.appsByNodeId.len})

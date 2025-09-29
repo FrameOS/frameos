@@ -1,5 +1,6 @@
 # values.nim
 import std/[json]
+import strutils
 import pixie
 import frameos/types
 
@@ -60,3 +61,91 @@ proc `$`*(v: Value): string =
   of fkNode: "node(" & $v.nId & ")"
   of fkScene: "scene(" & $v.sId & ")"
   of fkNone: "none"
+
+proc valueToJson*(v: Value): JsonNode =
+  ## Convert interpreter Value -> JsonNode so we can write into scene.state.
+  case v.kind
+  of fkString, fkText: %* v.s
+  of fkFloat: %* v.f
+  of fkInteger: %* v.i
+  of fkBoolean: %* v.b
+  of fkColor: %* v.col.toHtmlHex # store colors as "#RRGGBB"
+  of fkJson: v.j
+  of fkNode: %* v.nId.int # store node ids as ints
+  of fkScene: %* v.sId.string # store scene ids as strings
+  of fkImage: # images cannot be serialized to json; log and drop
+    newJNull()
+  of fkNone:
+    newJNull()
+
+proc parseBoolish*(s: string): bool =
+  let t = s.toLowerAscii()
+  result = (t in ["true", "1", "yes", "y"])
+
+proc valueFromJsonByType*(j: JsonNode; fieldType: string): Value =
+  case fieldType
+  of "integer":
+    var v = 0
+    if j.kind == JInt:
+      v = j.getInt()
+    elif j.kind == JFloat:
+      v = int(j.getFloat())
+    elif j.kind == JString:
+      try: v = parseInt(j.getStr())
+      except CatchableError: discard
+    return VInt(v)
+
+  of "float":
+    var v = 0.0
+    if j.kind == JFloat:
+      v = j.getFloat()
+    elif j.kind == JInt:
+      v = j.getInt().float
+    elif j.kind == JString:
+      try: v = parseFloat(j.getStr())
+      except CatchableError: discard
+    return VFloat(v)
+
+  of "boolean":
+    var v = false
+    if j.kind == JBool:
+      v = j.getBool()
+    elif j.kind == JString:
+      v = parseBoolish(j.getStr())
+    return VBool(v)
+
+  of "color":
+    var c: Color
+    if j.kind == JString:
+      try: c = parseHtmlColor(j.getStr())
+      except CatchableError: c = parseHtmlColor("#000000")
+    else:
+      c = parseHtmlColor("#000000")
+    return VColor(c)
+
+  of "json":
+    if j.isNil:
+      return VJson(%*{})
+    return VJson(j)
+
+  of "node":
+    var nid = 0
+    if j.kind == JInt:
+      nid = j.getInt()
+    elif j.kind == JFloat:
+      nid = int(j.getFloat())
+    elif j.kind == JString:
+      try: nid = parseInt(j.getStr())
+      except CatchableError: discard
+    return VNode(NodeId(nid))
+
+  of "scene":
+    var sid = ""
+    if j.kind == JString:
+      sid = j.getStr()
+    return VScene(SceneId(sid))
+
+  # default: treat as string (string, text, select, anything unknown)
+  else:
+    let s = if j.kind == JString: j.getStr() else: $j
+    return VString(s)

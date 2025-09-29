@@ -286,7 +286,8 @@ class FrameDeployer:
                     with open(os.path.join(app_dir, "app_loader.nim"), "w") as lf:
                         lf.write(app_loader_nim)
 
-        for node_id, sources in get_apps_from_scenes(list(frame.scenes)).items():
+        scenes = list(frame.scenes)
+        for node_id, sources in get_apps_from_scenes(scenes).items():
             app_id = "nodeapp_" + node_id.replace('-', '_')
             app_dir = os.path.join(source_dir, "src", "apps", app_id)
             os.makedirs(app_dir, exist_ok=True)
@@ -301,7 +302,7 @@ class FrameDeployer:
 
         # write apps.nim
         with open(os.path.join(source_dir, "src", "apps", "apps.nim"), "w") as f:
-            f.write(write_apps_nim())
+            f.write(write_apps_nim("../frameos"))
 
         for scene in frame.scenes:
             execution = scene.get("settings", {}).get("execution", "auto")

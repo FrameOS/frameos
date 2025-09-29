@@ -219,6 +219,7 @@ type
     eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
     appsByNodeId*: Table[NodeId, AppRoot]       # mapping from node id to instantiated app for quick lookup
     appInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from node id to app input name to connected node id
+    sceneNodes*: Table[NodeId, FrameScene]      # cache of instantiated child scenes
 
   # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object
