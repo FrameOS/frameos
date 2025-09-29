@@ -1,15 +1,57 @@
 import frameos/types
 import frameos/values
 import frameos/channels
-import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils
+import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times
 import apps/apps
-
-var allScenesLoaded = false
-var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 
 var globalNodeCounter = 0
 var nodeMappingTable = initTable[string, NodeId]()
 var stateFieldTypesByScene = initTable[SceneId, Table[string, string]]()
+var allScenesLoaded = false
+var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
+
+# Per (sceneId -> nodeId) caches for interpreted runs
+var cacheValuesByScene = initTable[SceneId, Table[NodeId, Value]]()
+var cacheTimesByScene = initTable[SceneId, Table[NodeId, float]]()
+var cacheKeysByScene = initTable[SceneId, Table[NodeId, JsonNode]]()     # derived from connected inputs
+
+# ---- Helpers to read cache config from node.data["cache"] ----
+proc jBoolOr(j: JsonNode, key: string, default: bool): bool =
+  if j.isNil or j.kind != JObject or not j.hasKey(key): return default
+  let n = j[key]
+  case n.kind
+  of JBool: n.getBool()
+  of JString: parseBoolish(n.getStr())
+  of JInt: n.getInt() != 0
+  of JFloat: n.getFloat() != 0.0
+  else: default
+
+proc jFloatOr(j: JsonNode, key: string, default: float): float =
+  if j.isNil or j.kind != JObject or not j.hasKey(key): return default
+  let n = j[key]
+  case n.kind
+  of JFloat: n.getFloat()
+  of JInt: n.getInt().float
+  of JString:
+    try: parseFloat(n.getStr())
+    except CatchableError: default
+  else: default
+
+# Turn an interpreter Value into a stable JSON "key" snippet for cache-keying.
+proc valueToKeyJson(v: Value): JsonNode =
+  case v.kind
+  of fkImage:
+    # Images aren't JSON; key by dimensions (pointer identity would be fragile).
+    let im = v.asImage()
+    result = %* {"__image": {"w": im.width, "h": im.height}}
+  of fkColor:
+    result = %* v.asColor().toHtmlHex
+  of fkJson:
+    if v.asJson().isNil: result = %* {}
+    else: result = v.asJson()
+  else:
+    # string/text/float/int/bool/node/scene/none
+    result = valueToJson(v)
 
 proc runEvent*(self: FrameScene, context: ExecutionContext)
 
@@ -39,14 +81,35 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
       let app = self.appsByNodeId[currentNodeId]
 
-      # Wire any connected app inputs generically (output -> fieldInput/<name>)
+      # ---- Read per-node cache config (from node.data["cache"]) ----
+      var cacheEnabled = false
+      var cacheInputEnabled = false
+      var cacheDurationEnabled = false
+      var cacheDurationSec = 0.0
+
+      if currentNode.data.hasKey("cache") and currentNode.data["cache"].kind == JObject:
+        let cc = currentNode.data["cache"]
+        cacheEnabled = jBoolOr(cc, "enabled", false)
+        if cacheEnabled:
+          cacheInputEnabled = jBoolOr(cc, "inputEnabled", false)
+          cacheDurationEnabled = jBoolOr(cc, "durationEnabled", false)
+          if cacheDurationEnabled:
+            cacheDurationSec = jFloatOr(cc, "duration", 0.0)
+
+      # ---- Wire inputs AND (if enabled) build an input-key JSON alongside ----
+      var builtInputKey = %*{} # JObject; only meaningful when cacheInputEnabled = true and there are inputs
+      var builtAnyInput = false
+
       if self.appInputsForNodeId.hasKey(currentNodeId):
         let connected = self.appInputsForNodeId[currentNodeId]
         for (inputName, producerNodeId) in connected.pairs:
           if self.nodes.hasKey(producerNodeId):
             try:
-              let v = runNode(self, producerNodeId, context, asDataNode = true)
-              apps.setAppField(keyword, app, inputName, v)
+              let vIn = runNode(self, producerNodeId, context, asDataNode = true)
+              apps.setAppField(keyword, app, inputName, vIn)
+              if cacheEnabled and cacheInputEnabled:
+                builtInputKey[inputName] = valueToKeyJson(vIn)
+                builtAnyInput = true
             except Exception as e:
               self.logger.log(%*{
                 "event": "interpreter:setField:error",
@@ -57,12 +120,67 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                 "error": $e.msg,
                 "stacktrace": e.getStackTrace()
               })
-              # Leave field at its default and continue.
+              # Leave field at default; still proceed.
 
-      if asDataNode:
-        result = apps.getApp(keyword, app, context)
+      if asDataNode and cacheEnabled:
+        # Ensure scene sub-tables exist
+        if not cacheValuesByScene.hasKey(self.id):
+          cacheValuesByScene[self.id] = initTable[NodeId, Value]()
+        if not cacheTimesByScene.hasKey(self.id):
+          cacheTimesByScene[self.id] = initTable[NodeId, float]()
+        if not cacheKeysByScene.hasKey(self.id):
+          cacheKeysByScene[self.id] = initTable[NodeId, JsonNode]()
+
+        var valTab = cacheValuesByScene[self.id]
+        var timeTab = cacheTimesByScene[self.id]
+        var keyTab = cacheKeysByScene[self.id]
+
+        var useCached = valTab.hasKey(currentNodeId)
+        if useCached and cacheDurationEnabled:
+          if not timeTab.hasKey(currentNodeId):
+            useCached = false
+          else:
+            let last = timeTab[currentNodeId]
+            if epochTime() > last + cacheDurationSec:
+              useCached = false
+
+        if useCached and cacheInputEnabled and builtAnyInput:
+          if not keyTab.hasKey(currentNodeId):
+            useCached = false
+          else:
+            if keyTab[currentNodeId] != builtInputKey:
+              useCached = false
+
+        if useCached:
+          self.logger.log(%*{
+            "event": "interpreter:cache:hit",
+            "sceneId": self.id,
+            "nodeId": currentNodeId.int,
+            "keyword": keyword
+          })
+          result = valTab[currentNodeId]
+        else:
+          self.logger.log(%*{
+            "event": "interpreter:cache:miss",
+            "sceneId": self.id,
+            "nodeId": currentNodeId.int,
+            "keyword": keyword
+          })
+          let fresh = apps.getApp(keyword, app, context)
+          result = fresh
+          valTab[currentNodeId] = fresh
+          cacheValuesByScene[self.id] = valTab # write-back
+          if cacheDurationEnabled:
+            timeTab[currentNodeId] = epochTime()
+            cacheTimesByScene[self.id] = timeTab
+          if cacheInputEnabled and builtAnyInput:
+            keyTab[currentNodeId] = builtInputKey
+            cacheKeysByScene[self.id] = keyTab
       else:
-        apps.runApp(keyword, app, context)
+        if asDataNode:
+          result = apps.getApp(keyword, app, context)
+        else:
+          apps.runApp(keyword, app, context)
 
     of "source":
       raise newException(Exception, "Source nodes not implemented in interpreted scenes yet")
