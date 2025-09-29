@@ -1,5 +1,6 @@
 import frameos/types
 import frameos/values
+import frameos/channels
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils
 import apps/apps
 
@@ -179,7 +180,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     appsByNodeId: initTable[NodeId, AppRoot](),
     eventListeners: initTable[string, seq[NodeId]](),
     appInputsForNodeId: initTable[NodeId, Table[string, NodeId]](),
-    sceneNodes: initTable[NodeId, FrameScene]()
+    sceneNodes: initTable[NodeId, FrameScene](),
+    publicStateFields: exportedScene.publicStateFields
   )
   scene.execNode = proc(nodeId: NodeId, context: ExecutionContext) =
     discard scene.runNode(nodeId, context)
@@ -190,8 +192,11 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       scene.state[key] = persistedState[key]
 
   var typeMap = initTable[string, string]()
-  for fld in exportedScene.publicStateFields:
-    typeMap[fld.name] = fld.fieldType
+  for field in exportedScene.publicStateFields:
+    typeMap[field.name] = field.fieldType
+    if not scene.state.hasKey(field.name) and field.value.len > 0:
+      # TODO: better string to value parser - no need to go via json
+      scene.state[field.name] = valueToJson(valueFromJsonByType(%*(field.value), field.fieldType))
   stateFieldTypesByScene[sceneId] = typeMap
 
   ## Pass 1: register nodes & event listeners (do not init apps yet)
@@ -316,6 +321,25 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
   self.logger.log(%*{"event": "runEventInterpreted", "sceneId": self.id, "contextEvent": context.event})
 
+  case context.event:
+  of "setSceneState":
+    if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
+      let payload = context.payload["state"]
+      for field in scene.publicStateFields:
+        let key = field.name
+        if payload.hasKey(key) and payload[key] != self.state{key}:
+          self.state[key] = copy(payload[key])
+    if context.payload.hasKey("render"):
+      sendEvent("render", %*{})
+  of "setCurrentScene":
+    if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
+      let payload = context.payload["state"]
+      for field in scene.publicStateFields:
+        let key = field.name
+        if payload.hasKey(key) and payload[key] != self.state{key}:
+          self.state[key] = copy(payload[key])
+  else: discard
+
   if scene.eventListeners.hasKey(context.event):
     self.logger.log(%*{"event": "runEventInterpreted1", "sceneId": self.id, "contextEvent": context.event})
     for nodeId in scene.eventListeners[context.event]:
@@ -362,6 +386,10 @@ proc renameHook*(v: var DiagramNode, fieldName: var string) =
 proc renameHook*(v: var DiagramEdge, fieldName: var string) =
   if fieldName == "type":
     fieldName = "edgeType"
+
+proc renameHook*(v: var StateField, fieldName: var string) =
+  if fieldName == "type":
+    fieldName = "fieldType"
 
 proc parseHook*(s: string, i: var int, v: var NodeId) =
   var str: string
