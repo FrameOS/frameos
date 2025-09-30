@@ -31,7 +31,21 @@ import { ExpandedScene } from './ExpandedScene'
 import { controlLogic } from './controlLogic'
 import { Tooltip } from '../../../../components/Tooltip'
 import { FrameImage } from '../../../../components/FrameImage'
+import { canRunInInterpreter } from '../../../../utils/canRunInInterpreter'
+import { FrameScene } from '../../../../types'
 
+export function Interpretable({ scene }: { scene: FrameScene }) {
+  const result = canRunInInterpreter(scene)
+  return result.ok ? (
+    <Tag className="ml-2" color="blue">
+      interpretable
+    </Tag>
+  ) : (
+    <Tag className="ml-2" color="secondary">
+      not interpretable
+    </Tag>
+  )
+}
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
   const { applyTemplate } = useActions(frameLogic)
@@ -166,6 +180,7 @@ export function Scenes() {
                     <div className="flex-1">
                       <H6 onClick={() => expandScene(scene.id)} className="cursor-pointer">
                         <span className="cursor-pointer">{scene.name || scene.id}</span>
+                        <Interpretable scene={scene} />
                         {scene.settings?.execution === 'interpreted' ? (
                           <Tag className="ml-2" color="teal">
                             interpreted

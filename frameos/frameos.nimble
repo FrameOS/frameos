@@ -13,7 +13,7 @@ bin           = @["frameos"]
 
 requires "chrono >= 0.3.1"
 requires "checksums >= 0.2.1"
-requires "nim >= 2.0.0"
+requires "nim >= 2.2.4"
 requires "pixie >= 5.0.7"
 requires "jester >= 0.6.0"
 requires "linuxfb >= 0.1.0"
@@ -21,6 +21,7 @@ requires "psutil >= 0.6.0"
 requires "ws >= 0.5.0"
 requires "QRgen >= 3.1.0"
 requires "jsony >= 1.1.5"
+requires "burrito >= 0.3.0"
 
 taskRequires "assets", "nimassets >= 0.2.4"
 
@@ -31,6 +32,16 @@ task assets, "Create assets":
 
 before build:
   exec "nimble assets"
+  # If burrito is present locally, ensure its native bits exist (dev-mode safety).
+  if dirExists("burrito"):
+    if not dirExists("burrito/quickjs"):
+      exec "cd burrito && nimble get_quickjs --silent"
+    if not fileExists("burrito/quickjs/libquickjs.a"):
+      exec "cd burrito && nimble build_quickjs --silent"
+    if not fileExists("burrito/build/qjs/src/repl_bytecode.nim"):
+      exec "cd burrito && nimble compile_repl_bytecode --silent"
+  # link burrito/quickjs to ./quickjso
+  exec "rm -rf ./quickjs && ln -s ./burrito/quickjs ./quickjs"
 
 task test, "Run tests":
   exec "testament pattern './src/**/tests/*.nim' --lineTrace:on"

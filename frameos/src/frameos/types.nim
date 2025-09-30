@@ -219,6 +219,9 @@ type
     eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
     appsByNodeId*: Table[NodeId, AppRoot]       # mapping from node id to instantiated app for quick lookup
     appInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from node id to app input name to connected node id
+    appInlineInputsForNodeId*: Table[NodeId, Table[string, string]] # mapping from node id to app input name to inline code
+    codeInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from code node id to code arg name to connected node id
+    codeInlineInputsForNodeId*: Table[NodeId, Table[string, string]] # mapping from code node id to code arg name to inline code
     sceneNodes*: Table[NodeId, FrameScene]      # cache of instantiated child scenes
     publicStateFields*: seq[StateField]
 

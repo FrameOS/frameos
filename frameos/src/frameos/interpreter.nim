@@ -4,6 +4,58 @@ import frameos/channels
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times
 import apps/apps
 
+{.passC: "-I./burrito".}
+import burrito
+
+var currentEvalScene: InterpretedFrameScene = nil
+var currentEvalContext: ExecutionContext = nil
+var currentEvalNodeId: NodeId = NodeId(0)
+var currentEvalArgs: Table[string, Value] = initTable[string, Value]()
+var currentEvalArgTypes: Table[string, string] = initTable[string, string]()
+var currentEvalOutputTypes: Table[string, string] = initTable[string, string]()
+var currentEvalTargetField: string = ""
+
+proc evalWithEnv(scene: InterpretedFrameScene, context: ExecutionContext, nodeId: NodeId,
+                 code: string, args: Table[string, Value], argTypes: Table[string, string],
+                 outputTypes: Table[string, string], targetField: string): Value =
+  currentEvalScene = scene
+  currentEvalContext = context # TODO
+  currentEvalNodeId = nodeId
+  currentEvalArgs = args
+  currentEvalArgTypes = argTypes
+  currentEvalOutputTypes = outputTypes
+  currentEvalTargetField = targetField
+  try:
+    echo "🔥 🔥 🔥 ", code
+    echo args
+    echo argTypes
+    echo outputTypes
+    echo targetField
+
+    var js = newQuickJS()
+    js.registerFunction("getState") do (ctx: ptr JSContext, k: JSValue) -> JSValue:
+      let key = toNimString(ctx, k)
+      echo "🔥 🔥 🔥 🔥 🔥 accessing state key: ", key
+      if currentEvalScene.state.hasKey(key):
+        let msg = currentEvalScene.state[key].getStr()
+        echo "🔥 🔥 🔥 🔥 🔥 response as a string: ", msg
+        return nimStringToJS(ctx, msg)
+      return nimStringToJS(ctx, "No state for key: " & key)
+
+    echo js.eval("const state = new Proxy({}, { get(_, k) { return getState(k) } });")
+
+    result = toValue(js.eval(code))
+    echo "🔥 🔥 🍀 result: ", result
+    js.close()
+  finally:
+    currentEvalScene = nil
+    currentEvalContext = nil
+    currentEvalNodeId = NodeId(0)
+    currentEvalArgs = initTable[string, Value]()
+    currentEvalArgTypes = initTable[string, string]()
+    currentEvalOutputTypes = initTable[string, string]()
+    currentEvalTargetField = ""
+
 var globalNodeCounter = 0
 var nodeMappingTable = initTable[string, NodeId]()
 var stateFieldTypesByScene = initTable[SceneId, Table[string, string]]()
@@ -122,6 +174,29 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               })
               # Leave field at default; still proceed.
 
+      if self.appInlineInputsForNodeId.hasKey(currentNodeId):
+        let inlineConnected = self.appInlineInputsForNodeId[currentNodeId]
+        for (inputName, codeSnippet) in inlineConnected.pairs:
+          try:
+            let emptyArgs = initTable[string, Value]()
+            let emptyArgTypes = initTable[string, string]()
+            let emptyOutputs = initTable[string, string]()
+            let vIn = evalWithEnv(self, context, currentNodeId, codeSnippet, emptyArgs, emptyArgTypes, emptyOutputs, inputName)
+            apps.setAppField(keyword, app, inputName, vIn)
+            if cacheEnabled and cacheInputEnabled:
+              builtInputKey[inputName] = valueToKeyJson(vIn)
+              builtAnyInput = true
+          except Exception as e:
+            self.logger.log(%*{
+              "event": "interpreter:setField:error:inlineCode",
+              "sceneId": self.id,
+              "nodeId": currentNodeId.int,
+              "input": inputName,
+              "code": codeSnippet,
+              "error": $e.msg,
+              "stacktrace": e.getStackTrace()
+            })
+
       if asDataNode and cacheEnabled:
         # Ensure scene sub-tables exist
         if not cacheValuesByScene.hasKey(self.id):
@@ -187,7 +262,161 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     of "dispatch":
       raise newException(Exception, "Dispatch nodes not implemented in interpreted scenes yet")
     of "code":
-      raise newException(Exception, "Code nodes not implemented in interpreted scenes yet")
+      var codeSnippet = ""
+      if currentNode.data.hasKey("codeJS") and currentNode.data["codeJS"].kind == JString:
+        codeSnippet = currentNode.data["codeJS"].getStr()
+      elif currentNode.data.hasKey("code") and currentNode.data["code"].kind == JString:
+        codeSnippet = currentNode.data["code"].getStr()
+
+      var outputTypes = initTable[string, string]()
+      var defaultOutputName = ""
+      if currentNode.data.hasKey("codeOutputs") and currentNode.data["codeOutputs"].kind == JArray:
+        for outputDef in currentNode.data["codeOutputs"]:
+          if outputDef.kind == JObject:
+            let name = outputDef{"name"}.getStr()
+            let typ = outputDef{"type"}.getStr()
+            if name.len > 0:
+              outputTypes[name] = typ
+              if defaultOutputName.len == 0:
+                defaultOutputName = name
+
+      var argTypes = initTable[string, string]()
+      if currentNode.data.hasKey("codeArgs") and currentNode.data["codeArgs"].kind == JArray:
+        for argDef in currentNode.data["codeArgs"]:
+          if argDef.kind == JObject:
+            let name = argDef{"name"}.getStr()
+            let typ = argDef{"type"}.getStr()
+            if name.len > 0:
+              argTypes[name] = typ
+
+      var args = initTable[string, Value]()
+      var builtInputKey = %*{}
+      var builtAnyInput = false
+
+      var cacheEnabled = false
+      var cacheInputEnabled = false
+      var cacheDurationEnabled = false
+      var cacheDurationSec = 0.0
+
+      if currentNode.data.hasKey("cache") and currentNode.data["cache"].kind == JObject:
+        let cc = currentNode.data["cache"]
+        cacheEnabled = jBoolOr(cc, "enabled", false)
+        if cacheEnabled:
+          cacheInputEnabled = jBoolOr(cc, "inputEnabled", false)
+          cacheDurationEnabled = jBoolOr(cc, "durationEnabled", false)
+          if cacheDurationEnabled:
+            cacheDurationSec = jFloatOr(cc, "duration", 0.0)
+
+      if self.codeInputsForNodeId.hasKey(currentNodeId):
+        echo "!!! HAD codeInputsForNodeId !!!"
+        let connectedArgs = self.codeInputsForNodeId[currentNodeId]
+        for (argName, producerNodeId) in connectedArgs.pairs:
+          if self.nodes.hasKey(producerNodeId):
+            try:
+              let vIn = runNode(self, producerNodeId, context, asDataNode = true)
+              args[argName] = vIn
+              if not argTypes.hasKey(argName):
+                argTypes[argName] = ""
+              if cacheEnabled and cacheInputEnabled:
+                builtInputKey[argName] = valueToKeyJson(vIn)
+                builtAnyInput = true
+            except Exception as e:
+              self.logger.log(%*{
+                "event": "interpreter:codeArg:error",
+                "sceneId": self.id,
+                "nodeId": currentNodeId.int,
+                "arg": argName,
+                "producer": producerNodeId.int,
+                "error": $e.msg,
+                "stacktrace": e.getStackTrace()
+              })
+
+      if self.codeInlineInputsForNodeId.hasKey(currentNodeId):
+        echo "!!! HAD codeInlineInputsForNodeId !!!"
+        let inlineArgs = self.codeInlineInputsForNodeId[currentNodeId]
+        for (argName, snippet) in inlineArgs.pairs:
+          try:
+            let emptyArgs = initTable[string, Value]()
+            let emptyArgTypes = initTable[string, string]()
+            let emptyOutputs = initTable[string, string]()
+            let vIn = evalWithEnv(self, context, currentNodeId, snippet, emptyArgs, emptyArgTypes, emptyOutputs, argName)
+            args[argName] = vIn
+            if not argTypes.hasKey(argName):
+              argTypes[argName] = ""
+            if cacheEnabled and cacheInputEnabled:
+              builtInputKey[argName] = valueToKeyJson(vIn)
+              builtAnyInput = true
+          except Exception as e:
+            self.logger.log(%*{
+              "event": "interpreter:codeArg:error:inlineCode",
+              "sceneId": self.id,
+              "nodeId": currentNodeId.int,
+              "arg": argName,
+              "code": snippet,
+              "error": $e.msg,
+              "stacktrace": e.getStackTrace()
+            })
+
+      let targetField = if defaultOutputName.len > 0: defaultOutputName else: ""
+
+      if asDataNode and cacheEnabled:
+        # TODO: why by scene? store the cache objects on the scene itself
+        if not cacheValuesByScene.hasKey(self.id):
+          cacheValuesByScene[self.id] = initTable[NodeId, Value]()
+        if not cacheTimesByScene.hasKey(self.id):
+          cacheTimesByScene[self.id] = initTable[NodeId, float]()
+        if not cacheKeysByScene.hasKey(self.id):
+          cacheKeysByScene[self.id] = initTable[NodeId, JsonNode]()
+
+        var valTab = cacheValuesByScene[self.id]
+        var timeTab = cacheTimesByScene[self.id]
+        var keyTab = cacheKeysByScene[self.id]
+
+        var useCached = valTab.hasKey(currentNodeId)
+        if useCached and cacheDurationEnabled:
+          if not timeTab.hasKey(currentNodeId):
+            useCached = false
+          else:
+            let last = timeTab[currentNodeId]
+            if epochTime() > last + cacheDurationSec:
+              useCached = false
+
+        if useCached and cacheInputEnabled and builtAnyInput:
+          if not keyTab.hasKey(currentNodeId):
+            useCached = false
+          else:
+            if keyTab[currentNodeId] != builtInputKey:
+              useCached = false
+
+        if useCached:
+          self.logger.log(%*{
+            "event": "interpreter:cache:hit",
+            "sceneId": self.id,
+            "nodeId": currentNodeId.int,
+            "nodeType": "code"
+          })
+          result = valTab[currentNodeId]
+        else:
+          self.logger.log(%*{
+            "event": "interpreter:cache:miss",
+            "sceneId": self.id,
+            "nodeId": currentNodeId.int,
+            "nodeType": "code"
+          })
+          let fresh = evalWithEnv(self, context, currentNodeId, codeSnippet, args, argTypes, outputTypes, targetField)
+          result = fresh
+          valTab[currentNodeId] = fresh
+          cacheValuesByScene[self.id] = valTab
+          if cacheDurationEnabled:
+            timeTab[currentNodeId] = epochTime()
+            cacheTimesByScene[self.id] = timeTab
+          if cacheInputEnabled and builtAnyInput:
+            keyTab[currentNodeId] = builtInputKey
+            cacheKeysByScene[self.id] = keyTab
+      else:
+        let fresh = evalWithEnv(self, context, currentNodeId, codeSnippet, args, argTypes, outputTypes, targetField)
+        if asDataNode:
+          result = fresh
     of "event":
       raise newException(Exception, "Event nodes not implemented in interpreted scenes yet")
 
@@ -247,6 +476,26 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               "stacktrace": e.getStackTrace()
             })
 
+      if self.appInlineInputsForNodeId.hasKey(currentNodeId):
+        let inlineConnected = self.appInlineInputsForNodeId[currentNodeId]
+        for (inputName, codeSnippet) in inlineConnected.pairs:
+          try:
+            let emptyArgs = initTable[string, Value]()
+            let emptyArgTypes = initTable[string, string]()
+            let emptyOutputs = initTable[string, string]()
+            let v = evalWithEnv(self, context, currentNodeId, codeSnippet, emptyArgs, emptyArgTypes, emptyOutputs, inputName)
+            childScene.state[inputName] = valueToJson(v)
+          except Exception as e:
+            self.logger.log(%*{
+              "event": "interpreter:setChildState:error:inlineCode",
+              "parentSceneId": self.id,
+              "nodeId": currentNodeId.int,
+              "input": inputName,
+              "code": codeSnippet,
+              "error": $e.msg,
+              "stacktrace": e.getStackTrace()
+            })
+
       # Delegate handling of the current event to the child scene.
       runEvent(childScene, context)
     else:
@@ -298,6 +547,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     appsByNodeId: initTable[NodeId, AppRoot](),
     eventListeners: initTable[string, seq[NodeId]](),
     appInputsForNodeId: initTable[NodeId, Table[string, NodeId]](),
+    appInlineInputsForNodeId: initTable[NodeId, Table[string, string]](),
+    codeInputsForNodeId: initTable[NodeId, Table[string, NodeId]](),
+    codeInlineInputsForNodeId: initTable[NodeId, Table[string, string]](),
     sceneNodes: initTable[NodeId, FrameScene](),
     publicStateFields: exportedScene.publicStateFields
   )
@@ -359,6 +611,48 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
           "inputField": fieldName, "connectedNodeId": edge.source.int})
       continue
 
+    # TODO: these should probably be deprecated
+    if edge.sourceHandle.startsWith("code/") and edge.targetHandle.startsWith("fieldInput/"):
+      let fieldName = edge.targetHandle.split("/")[1]
+      if not scene.appInlineInputsForNodeId.hasKey(edge.target):
+        scene.appInlineInputsForNodeId[edge.target] = initTable[string, string]()
+      scene.appInlineInputsForNodeId[edge.target][fieldName] = edge.sourceHandle.substr("code/".len)
+      scene.logger.log(%*{
+        "event": "initInterpretedInlineInput",
+        "sceneId": scene.id,
+        "appNodeId": edge.target.int,
+        "inputField": fieldName,
+        "code": edge.sourceHandle.substr("code/".len)
+      })
+      continue
+
+    if edge.targetHandle.startsWith("codeField/"):
+      let fieldName = edge.targetHandle.split("/")[1]
+      if edge.sourceHandle == "fieldOutput" or edge.sourceHandle == "stateOutput":
+        if not scene.codeInputsForNodeId.hasKey(edge.target):
+          scene.codeInputsForNodeId[edge.target] = initTable[string, NodeId]()
+        scene.codeInputsForNodeId[edge.target][fieldName] = edge.source
+        scene.logger.log(%*{
+          "event": "initInterpretedCodeInput",
+          "sceneId": scene.id,
+          "codeNodeId": edge.target.int,
+          "arg": fieldName,
+          "connectedNodeId": edge.source.int
+        })
+        continue
+      elif edge.sourceHandle.startsWith("code/"):
+        if not scene.codeInlineInputsForNodeId.hasKey(edge.target):
+          scene.codeInlineInputsForNodeId[edge.target] = initTable[string, string]()
+        scene.codeInlineInputsForNodeId[edge.target][fieldName] = edge.sourceHandle.substr("code/".len)
+        scene.logger.log(%*{
+          "event": "initInterpretedCodeInlineInput",
+          "sceneId": scene.id,
+          "codeNodeId": edge.target.int,
+          "arg": fieldName,
+          "code": edge.sourceHandle.substr("code/".len)
+        })
+        continue
+
     ## node-field edges (app field -> prev of target node)
     if edge.sourceHandle.startsWith("field/") and edge.targetHandle == "prev":
       scene.setNodeFieldFromEdge(edge)
@@ -372,10 +666,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       continue
 
     if edge.edgeType == "codeNodeEdge":
-      logger.log(%*{"event": "initInterpretedEdge:error:codeNodeEdge", "sceneId": scene.id, "edgeId": edge.id.int,
+      logger.log(%*{"event": "initInterpretedEdge:codeNodeEdge:ignored", "sceneId": scene.id, "edgeId": edge.id.int,
           "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
           "targetHandle": edge.targetHandle})
-      raise newException(Exception, "Code node edges not implemented in interpreted scenes yet")
+      continue
 
     logger.log(%*{"event": "initInterpretedEdge:ignored", "sceneId": scene.id, "edgeId": edge.id.int,
         "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,

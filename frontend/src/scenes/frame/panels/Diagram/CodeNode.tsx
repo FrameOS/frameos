@@ -16,7 +16,7 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
   const { frameId, sceneId } = useValues(diagramLogic)
   const { updateNodeData, updateEdge, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { isSelected, node, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
+  const { isSelected, node, nodeEdges, codeNodeLanguage } = useValues(appNodeLogic(appNodeLogicProps))
   const data: CodeNodeData = (node?.data as CodeNodeData) ?? ({ code: '' } satisfies CodeNodeData)
   const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
@@ -131,14 +131,25 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
           />
         </div>
         <div className="p-1 h-full">
-          <TextArea
-            theme="node"
-            className="w-full h-full font-mono resize-none"
-            placeholder={`e.g: state{"magic3"}.getStr()`}
-            value={data.code ?? ''}
-            rows={2}
-            onChange={(value) => updateNodeData(id, { code: value.replaceAll('\n', '') })}
-          />
+          {codeNodeLanguage === 'js' ? (
+            <TextArea
+              theme="node"
+              className="w-full h-full font-mono resize-none"
+              placeholder={data.code ? 'Rewrite to JS: ' + data.code : `e.g: state.magic3`}
+              value={data.codeJS ?? ''}
+              rows={2}
+              onChange={(value) => updateNodeData(id, { codeJS: value })}
+            />
+          ) : (
+            <TextArea
+              theme="node"
+              className="w-full h-full font-mono resize-none"
+              placeholder={`e.g: state{"magic3"}.getStr()`}
+              value={data.code ?? ''}
+              rows={2}
+              onChange={(value) => updateNodeData(id, { code: value.replaceAll('\n', '') })}
+            />
+          )}
         </div>
         <div
           className={clsx(

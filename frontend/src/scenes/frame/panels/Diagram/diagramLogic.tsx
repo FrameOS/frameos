@@ -230,6 +230,10 @@ export const diagramLogic = kea<diagramLogicType>([
       ],
       { resultEqualityCheck: equal },
     ],
+    codeNodeLanguage: [
+      (s) => [s.scene],
+      (scene: FrameScene | null): 'js' | 'nim' => (scene?.settings?.execution === 'interpreted' ? 'js' : 'nim'),
+    ],
   }),
   sharedListeners(({ selectors, actions, values, props }) => ({
     nodesChanged: (_, __, ___, previousState) => {

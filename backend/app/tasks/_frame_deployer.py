@@ -634,6 +634,11 @@ class FrameDeployer:
 
         shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
 
+        # # copy frameos/burrito/quickjs/*.h
+        # os.makedirs(os.path.join(build_dir, "quickjs"), exist_ok=True)
+        # for file in glob(os.path.join(source_dir, "burrito", "quickjs", "quickjs*.*")):
+        #     shutil.copy(file, os.path.join(build_dir, "quickjs", os.path.basename(file)))
+
         if waveshare := drivers.get('waveshare'):
             if waveshare.variant:
                 variant_folder = get_variant_folder(waveshare.variant)

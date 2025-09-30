@@ -315,7 +315,8 @@ export interface CodeArg {
 }
 
 export interface CodeNodeData {
-  code: string
+  code?: string
+  codeJS?: string
   codeArgs?: CodeArg[]
   codeOutputs?: CodeArg[]
   cache?: CacheConfig
