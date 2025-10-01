@@ -16,7 +16,6 @@ apploaders:
 test:
 	nimble test
 
-
 nix-sdcard:
 	nix --extra-experimental-features 'nix-command flakes' \
 		build .#packages.aarch64-linux.sdImage \

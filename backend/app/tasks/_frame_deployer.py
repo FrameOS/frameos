@@ -634,11 +634,6 @@ class FrameDeployer:
 
         shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
 
-        # # copy frameos/burrito/quickjs/*.h
-        # os.makedirs(os.path.join(build_dir, "quickjs"), exist_ok=True)
-        # for file in glob(os.path.join(source_dir, "burrito", "quickjs", "quickjs*.*")):
-        #     shutil.copy(file, os.path.join(build_dir, "quickjs", os.path.basename(file)))
-
         if waveshare := drivers.get('waveshare'):
             if waveshare.variant:
                 variant_folder = get_variant_folder(waveshare.variant)
@@ -675,7 +670,7 @@ class FrameDeployer:
 
         with open(os.path.join(build_dir, "Makefile"), "w") as mk:
             script_path = os.path.join(build_dir, "compile_frameos.sh")
-            linker_flags = ["-pthread", "-lm", "-lrt", "-ldl"]
+            linker_flags = ["-pthread", "-lm", "-lrt", "-ldl"] # Defaults just in case, Will be overridden before
             compiler_flags: list[str] = []
             with open(script_path, "r") as sc:
                 lines_sc = sc.readlines()
@@ -691,6 +686,9 @@ class FrameDeployer:
                         if fl.startswith('-') and not fl.startswith('-I')
                         and fl not in ['-o', '-c', '-D']
                     ]
+
+            # add quickjs lib. this was just removed in the step above, but we know it's needed
+            linker_flags += ["quickjs/libquickjs.a"]
 
             with open(os.path.join(source_dir, "tools", "nimc.Makefile"), "r") as mf_in:
                 lines_make = mf_in.readlines()
