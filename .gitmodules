@@ -1,0 +1,3 @@
+[submodule "frameos/burrito"]
+	path = frameos/burrito
+	url = https://github.com/tapsterbot/burrito
