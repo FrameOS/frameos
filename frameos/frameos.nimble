@@ -21,6 +21,8 @@ requires "psutil >= 0.6.0"
 requires "ws >= 0.5.0"
 requires "QRgen >= 3.1.0"
 requires "jsony >= 1.1.5"
+requires "noise >= 0.1.10"
+# burrito is locally under ./burrito, but we add it here so it could be found
 requires "burrito >= 0.3.0"
 
 taskRequires "assets", "nimassets >= 0.2.4"
