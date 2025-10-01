@@ -10,6 +10,13 @@ Python >= 3.12
 `nim >=2.0.0` (https://nim-lang.org/install.html)
 (Note that Debian distros have only packaged `1.6.x` as of Jan 2024)
 
+Clonging from git
+
+```bash
+git clone https://github.com/FrameOS/frameos/
+git submodule update --init --recursive
+```
+
 ## FrameOS Backend
 
 Start a redis server if not running
