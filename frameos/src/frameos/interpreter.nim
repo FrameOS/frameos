@@ -823,6 +823,8 @@ proc parseHook*(s: string, i: var int, v: var Color) =
   v = parseHtmlColor(tmp)
 
 proc parseInterpretedScenes*(data: string): void =
+  if data == "":
+    return
   let scenes = data.fromJson(seq[FrameSceneInput])
   for scene in scenes:
     try:

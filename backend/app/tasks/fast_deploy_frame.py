@@ -38,7 +38,7 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
         distro = await self.get_distro()
         if distro == 'nixos':
             await self._upload_frame_json("/var/lib/frameos/frame.json")
-            await self._upload_scenes_json("var/lib/frameos/scenes.json.gz", gzip=True)
+            await self._upload_scenes_json("/var/lib/frameos/scenes.json.gz", gzip=True)
         else:
             await self._upload_frame_json("/srv/frameos/current/frame.json")
             await self._upload_scenes_json("/srv/frameos/current/scenes.json.gz", gzip=True)
