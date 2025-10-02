@@ -21,29 +21,29 @@ requires "psutil >= 0.6.0"
 requires "ws >= 0.5.0"
 requires "QRgen >= 3.1.0"
 requires "jsony >= 1.1.5"
-requires "noise >= 0.1.10"
-# burrito is locally under ./burrito, but we add it here so it could be found
-requires "burrito >= 0.3.0"
 
 taskRequires "assets", "nimassets >= 0.2.4"
+
+before build:
+  exec "nimble assets"
+  if not dirExists("quickjs"):
+    exec "nimble build_quickjs --silent"
 
 task assets, "Create assets":
   exec "mkdir -p src/assets"
   exec "~/.nimble/bin/nimassets -d=assets/compiled/web -o=src/assets/web.nim"
   exec "~/.nimble/bin/nimassets -f=assets/compiled/fonts/Ubuntu-Regular.ttf -o=src/assets/fonts.nim"
 
-before build:
-  exec "nimble assets"
-  # If burrito is present locally, ensure its native bits exist (dev-mode safety).
-  if dirExists("burrito"):
-    if not dirExists("burrito/quickjs"):
-      exec "cd burrito && nimble get_quickjs --silent"
-    if not fileExists("burrito/quickjs/libquickjs.a"):
-      exec "cd burrito && nimble build_quickjs --silent"
-    if not fileExists("burrito/build/qjs/src/repl_bytecode.nim"):
-      exec "cd burrito && nimble compile_repl_bytecode --silent"
-  # link burrito/quickjs to ./quickjso
-  exec "rm -rf ./quickjs && ln -s ./burrito/quickjs ./quickjs"
+task build_quickjs, "Build QuickJS":
+  echo "Downloading and building QuickJS..."
+  if dirExists("quickjs"):
+    echo "QuickJS directory already exists, skipping download and build."
+    return
+  exec "curl -L -o quickjs.tar.xz https://bellard.org/quickjs/quickjs-2025-04-26.tar.xz"
+  exec "tar -xf quickjs.tar.xz"
+  exec "rm quickjs.tar.xz"
+  exec "mv quickjs-2025-04-26 quickjs"
+  exec "cd quickjs && make"
 
 task test, "Run tests":
   exec "testament pattern './src/**/tests/*.nim' --lineTrace:on"

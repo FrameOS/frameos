@@ -43,28 +43,6 @@
         "sha1": "acc789c4e31b3ee969a13dd0c238d808f39b19c7"
       }
     },
-    "noise": {
-      "version": "0.1.10",
-      "vcsRevision": "1062d35d38fcd4d8a3bcdee3003381e639786edf",
-      "url": "https://github.com/jangko/nim-noise",
-      "downloadMethod": "git",
-      "dependencies": [],
-      "checksums": {
-        "sha1": "c0cbecd0917a5c13cab331cb959a5280acd3401e"
-      }
-    },
-    "burrito": {
-      "version": "0.3.0",
-      "vcsRevision": "9535f09fdcc7f9d3a6ef2339b03670472b4e7ee0",
-      "url": "",
-      "downloadMethod": "git",
-      "dependencies": [
-        "noise"
-      ],
-      "checksums": {
-        "sha1": "c828469ad48ca60c2322d1ca7995b97de2ca8bec"
-      }
-    },
     "checksums": {
       "version": "0.2.1",
       "vcsRevision": "f8f6bd34bfa3fe12c64b919059ad856a96efcba0",

@@ -1,6 +1,7 @@
 src/codegen/
 build/
 tmp/
+quickjs/
 frameos.deps
 nimcache
 testresults

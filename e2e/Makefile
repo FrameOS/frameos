@@ -6,7 +6,6 @@ nim_scenes:
 	PYTHONPATH="../backend:${PYTHONPATH}" DEBUG=1 SCENE_FILTER="$(SCENE_FILTER)" python3 ./makescenes.py
 
 snapshots:
-	rm -rf ./tmp/e2e-temp-frameos/burrito \
 	mkdir -p ./tmp && \
 	mkdir -p ./tmp/state && \
 	mkdir -p ./tmp/e2e-temp-frameos && \

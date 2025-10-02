@@ -4,8 +4,7 @@ import frameos/channels
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times
 import apps/apps
 
-{.passC: "-I./burrito".}
-import burrito
+import lib/burrito
 
 var currentEvalScene: InterpretedFrameScene = nil
 var currentEvalContext: ExecutionContext = nil
