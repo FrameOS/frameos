@@ -47,6 +47,7 @@ export const scenesLogic = kea<scenesLogicType>([
     sync: true,
     expandScene: (sceneId: string) => ({ sceneId }),
     copySceneJSON: (sceneId: string) => ({ sceneId }),
+    setSearch: (search: string) => ({ search }),
   }),
   forms(({ actions, values, props }) => ({
     newScene: {
@@ -94,6 +95,12 @@ export const scenesLogic = kea<scenesLogicType>([
     },
   })),
   reducers({
+    search: [
+      '',
+      {
+        setSearch: (_, { search }) => search,
+      },
+    ],
     showNewSceneForm: [
       false,
       {
@@ -120,6 +127,19 @@ export const scenesLogic = kea<scenesLogicType>([
     editingFrame: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm || frame || null],
     rawScenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame.scenes ?? []],
     scenes: [(s) => [s.rawScenes], (rawScenes) => rawScenes.toSorted((a, b) => a.name.localeCompare(b.name))],
+    filteredScenes: [
+      (s) => [s.scenes, s.search],
+      (scenes, search) => {
+        const searchPieces = search
+          .toLowerCase()
+          .split(' ')
+          .filter((s) => s)
+        if (searchPieces.length === 0) {
+          return scenes
+        }
+        return scenes.filter((scene) => searchPieces.every((piece) => scene.name.toLowerCase().includes(piece)))
+      },
+    ],
     sceneTitles: [(s) => [s.scenes], (scenes) => Object.fromEntries(scenes.map((scene) => [scene.id, scene.name]))],
     linksToOtherScenes: [
       (s) => [s.scenes],

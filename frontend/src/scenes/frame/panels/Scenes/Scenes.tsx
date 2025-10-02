@@ -51,7 +51,9 @@ export function Scenes() {
   const { applyTemplate } = useActions(frameLogic)
   const { editScene, openTemplates } = useActions(panelsLogic)
   const {
+    filteredScenes,
     scenes,
+    search,
     showNewSceneForm,
     isNewSceneSubmitting,
     showingSettings,
@@ -60,9 +62,8 @@ export function Scenes() {
     linksToOtherScenes,
     sceneTitles,
   } = useValues(scenesLogic({ frameId }))
-  const { toggleSettings, submitNewScene, toggleNewScene, createNewScene, closeNewScene, expandScene } = useActions(
-    scenesLogic({ frameId })
-  )
+  const { setSearch, toggleSettings, submitNewScene, toggleNewScene, createNewScene, closeNewScene, expandScene } =
+    useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
   const { sceneId, sceneChanging, loading } = useValues(controlLogic({ frameId }))
   const { setCurrentScene, sync } = useActions(controlLogic({ frameId }))
@@ -99,7 +100,7 @@ export function Scenes() {
       <div className="space-y-2">
         {scenes.length > 0 ? (
           <div className="flex justify-between w-full items-center">
-            <H6>Installed on frame</H6>
+            <TextInput placeholder="Filter scenes..." className="flex-1 mr-2" onChange={setSearch} value={search} />
             <div className="flex gap-1">
               <Button size="small" color="secondary" onClick={() => sync()} title="Sync active scene">
                 {loading ? <Spinner color="white" /> : <ArrowPathIcon className="w-5 h-5" />}
@@ -147,7 +148,10 @@ export function Scenes() {
             </div>
           </div>
         ) : null}
-        {scenes.map((scene) => (
+        {filteredScenes.length === 0 && search ? (
+          <div className="text-center text-gray-400">No scenes matching "{search}"</div>
+        ) : null}
+        {filteredScenes.map((scene) => (
           <React.Fragment key={scene.id}>
             <div
               className={clsx(
