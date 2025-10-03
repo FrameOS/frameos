@@ -17,9 +17,103 @@ type
     targetField: string
 
 var evalEnvByCtx = initTable[ptr JSContext, EvalEnv]()
+proc isJsIdentStart(c: char): bool =
+  result = (c in {'a'..'z', 'A'..'Z', '_', '$'})
+
+proc isJsIdentPart(c: char): bool =
+  result = isJsIdentStart(c) or (c in {'0'..'9'})
+
+proc toJsIdent(name: string): string =
+  if name.len == 0: return "_"
+  var output = newStringOfCap(name.len + 2)
+  var i = 0
+  for ch in name:
+    if i == 0:
+      if not isJsIdentStart(ch): output.add('_')
+      output.add(if isJsIdentStart(ch): ch else: '_')
+    else:
+      output.add(if isJsIdentPart(ch): ch else: '_')
+    inc i
+  result = output
+
+proc jsQuote(s: string): string =
+  result = s
+  result = result.replace("\\", "\\\\").replace("\"", "\\\"")
+  result = result.replace("\n", "\\n").replace("\r", "\\r")
+
+proc buildEnvelopeSource(code: string, argNames: seq[string]): string =
+  ## Wrap user code, return a BigInt-safe JSON envelope and capture errors.
+  ## Also inject local const bindings for each declared/provided arg name.
+  var decls = newSeq[string]()
+  for rawName in argNames:
+    # Don't shadow special names used by the wrapper/function parameters
+    let lc = rawName.toLowerAscii
+    if lc in ["state", "args", "context", "console", "getargor"]: continue
+    let ident = toJsIdent(rawName)
+    decls.add("const " & ident & " = __args[\"" & jsQuote(rawName) & "\"];")
+  let declBlock = decls.join("\n")
+
+  result = """
+(() => {
+  "use strict";
+  // BigInt-safe stringify for values and console payloads
+  const __replacer = (k, v) => (typeof v === 'bigint' ? {__bigint: v.toString()} : v);
+
+  // Console -> Nim logger (implemented via jsLog below)
+  const console = {
+    log: (...a) => jsLog("log", JSON.stringify(a, __replacer)),
+    warn: (...a) => jsLog("warn", JSON.stringify(a, __replacer)),
+    error: (...a) => jsLog("error", JSON.stringify(a, __replacer)),
+  };
+
+  // Handy helper (kept for backwards compatibility)
+  const getArgOr = (k, defVal) => {
+    const v = args[k];
+    return (typeof v === 'undefined') ? defVal : v;
+  };
+
+  const __state   = new Proxy({}, { get(_, k) { return getState(k) } });
+  const __args    = new Proxy({}, { get(_, k) { return getArg(k) } });
+  const __context = new Proxy({}, { get(_, k) { return getContext(k) } });
+
+  // Locals for declared/provided code args (so user can write `arg`, not `args.arg`)
+  """ & declBlock & """
+
+  try {
+    const __v = ((state, args, context) => (""" & code & """))(__state, __args, __context);
+    const __k = (__v === null) ? "null" : (Array.isArray(__v) ? "array" : typeof __v);
+    const json = JSON.stringify({ k: __k, v: __v }, __replacer);
+    return json === undefined ? JSON.stringify({ k: __k }) : json;
+  } catch (e) {
+    const msg = (e && e.stack) ? e.stack : String(e);
+    return JSON.stringify({ k: "error", v: { message: String(e && e.message || e), stack: msg } });
+  }
+})()
+"""
 
 proc env(ctx: ptr JSContext): EvalEnv =
   if evalEnvByCtx.hasKey(ctx): evalEnvByCtx[ctx] else: nil
+
+proc jsLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue {.nimcall.} =
+  ## level: "log" | "warn" | "error"; payloadJson: a JSON string created in JS
+  let lvl = toNimString(ctx, level)
+  let payloadStr = toNimString(ctx, payloadJson)
+  var argsJ: JsonNode
+  try:
+    argsJ = if payloadStr.len > 0: parseJson(payloadStr) else: %* []
+  except CatchableError:
+    argsJ = %* payloadStr
+
+  let e = env(ctx)
+  if e != nil:
+    e.scene.logger.log(%*{
+      "event": "interpreter:jsConsole",
+      "level": lvl,
+      "sceneId": e.scene.id.string,
+      "nodeId": e.nodeId.int,
+      "args": argsJ
+    })
+  return jsUndefined(ctx)
 
 # Convert Nim JsonNode -> JSValue (objects/arrays included).
 proc jsonToJS(ctx: ptr JSContext, j: JsonNode): JSValue =
@@ -77,41 +171,34 @@ proc jsGetContext(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
   of "loopKey":
     return nimStringToJS(ctx, e.context.loopKey)
   of "event":
-    # Return the event name as a JS string
     return nimStringToJS(ctx, e.context.event)
+  of "payload":
+    if e.context.payload.isNil:
+      return jsNull(ctx)
+    else:
+      return jsonToJS(ctx, e.context.payload)
+  of "hasImage":
+    return nimBoolToJS(ctx, e.context.hasImage)
   else:
     return jsUndefined(ctx)
 
-# Convert the JSON envelope we get back from JS into a Value.
 proc envelopeToValue(env: JsonNode, expectedType: string): Value =
-  ## env is { k: <kind>, v: <json value or missing for undefined> }
   if env.isNil or env.kind != JObject:
-    # Fallback: treat whole thing as string just to be safe
     return Value(kind: fkString, s: $env)
 
   let kind = env{"k"}.getStr()
   var jval: JsonNode
 
   if kind == "undefined":
-    # If the node declares an expected output type, try to use it with null;
-    # otherwise, represent absence as fkNone.
     if expectedType.len > 0:
-      jval = newJNull()
-      return valueFromJsonByType(jval, expectedType)
-    else:
-      return Value(kind: fkNone)
+      return valueFromJsonByType(newJNull(), expectedType)
+    return Value(kind: fkNone)
 
-  # value may be null, array, object, number, string, boolean, etc.
-  if env.hasKey("v"):
-    jval = env["v"]
-  else:
-    jval = newJNull()
+  jval = (if env.hasKey("v"): env["v"] else: newJNull())
 
-  # If a concrete output type was declared on the node output, honor it strictly.
   if expectedType.len > 0:
     return valueFromJsonByType(jval, expectedType)
 
-  # Otherwise, auto-detect sensibly from the JS kind + JSON node kind.
   case kind
   of "string":
     return valueFromJsonByType(jval, "string")
@@ -119,24 +206,30 @@ proc envelopeToValue(env: JsonNode, expectedType: string): Value =
     case jval.kind
     of JInt: return valueFromJsonByType(jval, "integer")
     of JFloat: return valueFromJsonByType(jval, "float")
-    else: return valueFromJsonByType(%*0, "integer") # very defensive fallback
+    else: return valueFromJsonByType(%*0, "integer")
   of "boolean":
     return valueFromJsonByType(jval, "boolean")
+  of "bigint":
+    var s = ""
+    if jval.kind == JObject and jval.hasKey("__bigint"):
+      s = jval["__bigint"].getStr()
+    # Try to fit into int64; otherwise, return as string
+    try:
+      let maybe = parseBiggestInt(s) # int64 in-range or throws
+      return Value(kind: fkInteger, i: maybe.int64)
+    except CatchableError:
+      return Value(kind: fkString, s: s)
   of "array", "object", "null":
-    # Hand off full structure directly as JSON
     return Value(kind: fkJson, j: jval)
   else:
-    # Symbols/functions/etc. are not representable => none
     return Value(kind: fkNone)
 
 proc evalWithEnv(scene: InterpretedFrameScene, context: ExecutionContext, nodeId: NodeId,
                  code: string, args: Table[string, Value], argTypes: Table[string, string],
                  outputTypes: Table[string, string], targetField: string): Value =
-  echo "🔥 🔥 🔥 ", code
-  echo args
-  echo argTypes
-  echo outputTypes
-  echo targetField
+  when defined(debug):
+    if scene.frameConfig.debug:
+      echo "JS snippet (node ", nodeId.int, "): ", code
 
   var js: QuickJS
   var installed = false
@@ -144,7 +237,7 @@ proc evalWithEnv(scene: InterpretedFrameScene, context: ExecutionContext, nodeId
   try:
     js = newQuickJS()
 
-    # Install per-context environment for callbacks
+    # Attach per-call environment
     let e = EvalEnv(
       scene: scene,
       context: context,
@@ -157,60 +250,63 @@ proc evalWithEnv(scene: InterpretedFrameScene, context: ExecutionContext, nodeId
     evalEnvByCtx[js.context] = e
     installed = true
 
-    # Register non-capturing functions (no closure => {.nimcall.})
+    # Register bridge functions
     js.registerFunction("getState", jsGetState)
     js.registerFunction("getArg", jsGetArg)
     js.registerFunction("getContext", jsGetContext)
+    js.registerFunction("jsLog", jsLog)
+    echo "!!! evalWithEnv code: ", code
 
-    # JS shims: property accessors into our callbacks
-    discard js.eval("const state = new Proxy({}, { get(_, k) { return getState(k) } });")
-    discard js.eval("const args  = new Proxy({}, { get(_, k) { return getArg(k) } });")
-    discard js.eval("const context = new Proxy({}, { get(_, k) { return getContext(k) } });")
+    # Evaluate compiled envelope (BigInt-safe + error-aware)
+    var argNames: seq[string] = @[]
+    for k, _ in argTypes: argNames.add(k)
+    for k, _ in args:
+      if k notin argNames: argNames.add(k)
 
-    # Evaluate user code once and produce a JSON "envelope"
-    var prelude = ""
-    for name, _ in argTypes.pairs:
-      if name.len > 0:
-        prelude.add "const " & name & " = args[\"" & name & "\"];\n"
-    # also cover runtime args that weren't declared in codeArgs (defensive)
-    for name, _ in args.pairs:
-      if not argTypes.hasKey(name) and name.len > 0:
-        prelude.add "const " & name & " = args[\"" & name & "\"];\n"
+    # Evaluate compiled envelope (BigInt-safe + error-aware)
+    let src = buildEnvelopeSource(code, argNames)
+    let envelopeJson = js.eval(src)
+    echo "!!! evalWithEnv envelopeJson: ", envelopeJson
 
-    # Evaluate user code once and produce a JSON "envelope"
-    let envelopeJson = js.eval("""
-      (() => {
-        """ & prelude & """
-        const __v = (""" & code & """);
-        const __k = (__v === null) ? "null" : (Array.isArray(__v) ? "array" : typeof __v);
-        const json = JSON.stringify({ k: __k, v: __v }, (key, val) => (
-          typeof val === 'bigint' ? Number(val) : val
-        ));
-        return json === undefined ? JSON.stringify({ k: __k }) : json;
-      })()
-    """)
-    echo "🔥 🔥 🍀 envelopeJson: "
-    echo envelopeJson
-
-    # Use the node's declared output type, if any
+    # Decide expected type (if node has an explicit target/output type)
     var expectedType = ""
     if targetField.len > 0 and outputTypes.hasKey(targetField):
       expectedType = outputTypes[targetField]
 
-    # Parse and convert to Value
+    # Parse the envelope
     var parsed: JsonNode
     try:
       parsed = parseJson(envelopeJson)
     except CatchableError:
-      result = Value(kind: fkString, s: envelopeJson)
-      echo "🔥 🔥 🍀 result (fallback as string): ", result
-      return
+      # Extremely defensive: if JSON parsing fails, bubble as string
+      return Value(kind: fkString, s: envelopeJson)
 
+    # If the JS side reported an error, log and return a safe default
+    let kind = parsed{"k"}.getStr()
+    if kind == "error":
+      if expectedType.len > 0:
+        if expectedType == "string":
+          return Value(kind: fkString, s: "") # nicer fallback than "null"
+        return valueFromJsonByType(newJNull(), expectedType)
+
+      let msg = parsed{"v"}{"message"}.getStr()
+      let stk = parsed{"v"}{"stack"}.getStr()
+      scene.logger.log(%*{
+        "event": "interpreter:jsError",
+        "sceneId": scene.id.string,
+        "nodeId": nodeId.int,
+        "message": msg,
+        "stack": stk
+      })
+      # Respect explicit expected type with null, or otherwise "none"
+      if expectedType.len > 0:
+        return valueFromJsonByType(newJNull(), expectedType)
+      return Value(kind: fkNone)
+
+    # Normal conversion path
     result = envelopeToValue(parsed, expectedType)
-    echo "🔥 🔥 🍀 result: ", result
 
   finally:
-    # Always remove env and close QuickJS cleanly
     if installed and evalEnvByCtx.hasKey(js.context):
       evalEnvByCtx.del(js.context)
     if js.runtime != nil or js.context != nil:
@@ -270,7 +366,33 @@ proc runEvent*(self: FrameScene, context: ExecutionContext)
 proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
   let self = InterpretedFrameScene(self)
   var currentNodeId: NodeId = nodeId
+
+  # Safety: cycle detection + hop budget
+  var visited = initTable[NodeId, bool]()
+  var hops = 0
+  const maxHops = 1000
+
   while currentNodeId != -1.NodeId:
+    inc hops
+    if hops > maxHops:
+      self.logger.log(%*{
+        "event": "interpreter:graph:hopLimit",
+        "sceneId": self.id.string,
+        "startNodeId": nodeId.int,
+        "atNodeId": currentNodeId.int,
+        "limit": maxHops
+      })
+      break
+    if visited.hasKey(currentNodeId):
+      self.logger.log(%*{
+        "event": "interpreter:graph:cycle",
+        "sceneId": self.id.string,
+        "startNodeId": nodeId.int,
+        "atNodeId": currentNodeId.int
+      })
+      break
+    visited[currentNodeId] = true
+
     if not self.nodes.hasKey(currentNodeId):
       self.logger.log(%*{"event": "interpreter:nodeNotFound", "sceneId": self.id, "nodeId": currentNodeId.int})
       break
@@ -712,9 +834,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     codeInlineInputsForNodeId: initTable[NodeId, Table[string, string]](),
     sceneNodes: initTable[NodeId, FrameScene](),
     publicStateFields: exportedScene.publicStateFields,
-    # jsByCodeNodeId: initTable[NodeId, QuickJS](),
-      # jsByInlineApp: initTable[NodeId, Table[string, QuickJS]](),
-      # jsByInlineCode: initTable[NodeId, Table[string, QuickJS]]()
   )
   echo "🚀 🚀 Initialized interpreted scene: ", sceneId.string
   scene.execNode = proc(nodeId: NodeId, context: ExecutionContext) =
