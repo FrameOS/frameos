@@ -77,20 +77,10 @@ function """ & fnName & """() {
   "use strict";
   const __replacer = (k, v) => (typeof v === 'bigint' ? {__bigint: v.toString()} : v);
 
-  const console = {
-    log: (...a) => jsLog("log", JSON.stringify(a, __replacer)),
-    warn: (...a) => jsLog("warn", JSON.stringify(a, __replacer)),
-    error: (...a) => jsLog("error", JSON.stringify(a, __replacer)),
-  };
-
   const getArgOr = (k, defVal) => {
     const v = __args[k];
     return (typeof v === 'undefined') ? defVal : v;
   };
-
-  const __state   = new Proxy({}, { get(_, k) { return getState(k) } });
-  const __args    = new Proxy({}, { get(_, k) { return getArg(k) } });
-  const __context = new Proxy({}, { get(_, k) { return getContext(k) } });
 
   """ & declBlock & """
 
@@ -259,7 +249,18 @@ proc ensureSceneJs(scene: InterpretedFrameScene) =
   scene.js.registerFunction("getArg", jsGetArg)
   scene.js.registerFunction("getContext", jsGetContext)
   scene.js.registerFunction("jsLog", jsLog)
-
+  discard scene.js.eval("""
+  "use strict";
+  const __jsReplacer = (k, v) => (typeof v === 'bigint' ? {__bigint: v.toString()} : v);
+  const console = {
+    log: (...a) => jsLog("log", JSON.stringify(a, __jsReplacer)),
+    warn: (...a) => jsLog("warn", JSON.stringify(a, __jsReplacer)),
+    error: (...a) => jsLog("error", JSON.stringify(a, __jsReplacer)),
+  };
+  const __state   = new Proxy({}, { get(_, k) { return getState(k) } });
+  const __args    = new Proxy({}, { get(_, k) { return getArg(k) } });
+  const __context = new Proxy({}, { get(_, k) { return getContext(k) } });
+  """)
   # Initialize registries
   scene.jsFuncNameByNode = initTable[NodeId, string]()
   scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
