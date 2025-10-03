@@ -6,13 +6,20 @@ import apps/apps
 
 import lib/burrito
 
-var currentEvalScene: InterpretedFrameScene = nil
-var currentEvalContext: ExecutionContext = nil
-var currentEvalNodeId: NodeId = NodeId(0)
-var currentEvalArgs: Table[string, Value] = initTable[string, Value]()
-var currentEvalArgTypes: Table[string, string] = initTable[string, string]()
-var currentEvalOutputTypes: Table[string, string] = initTable[string, string]()
-var currentEvalTargetField: string = ""
+type
+  EvalEnv = ref object
+    scene: InterpretedFrameScene
+    context: ExecutionContext
+    nodeId: NodeId
+    args: Table[string, Value]
+    argTypes: Table[string, string]
+    outputTypes: Table[string, string]
+    targetField: string
+
+var evalEnvByCtx = initTable[ptr JSContext, EvalEnv]()
+
+proc env(ctx: ptr JSContext): EvalEnv =
+  if evalEnvByCtx.hasKey(ctx): evalEnvByCtx[ctx] else: nil
 
 # Convert Nim JsonNode -> JSValue (objects/arrays included).
 proc jsonToJS(ctx: ptr JSContext, j: JsonNode): JSValue =
@@ -43,9 +50,37 @@ proc jsonToJS(ctx: ptr JSContext, j: JsonNode): JSValue =
       inc idx
     return arr
 
-# Convert a Nim Value into a JSValue by round-tripping through JSON.
 proc valueToJS(ctx: ptr JSContext, v: Value): JSValue =
   jsonToJS(ctx, valueToJson(v))
+
+proc jsGetState(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
+  let key = toNimString(ctx, k)
+  let e = env(ctx)
+  if e != nil and e.scene.state.hasKey(key):
+    return jsonToJS(ctx, e.scene.state[key])
+  return jsUndefined(ctx)
+
+proc jsGetArg(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
+  let key = toNimString(ctx, k)
+  let e = env(ctx)
+  if e != nil and e.args.hasKey(key):
+    return valueToJS(ctx, e.args[key])
+  return jsUndefined(ctx)
+
+proc jsGetContext(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
+  let key = toNimString(ctx, k)
+  let e = env(ctx)
+  if e == nil: return jsUndefined(ctx)
+  case key
+  of "loopIndex":
+    return nimIntToJS(ctx, e.context.loopIndex.int32)
+  of "loopKey":
+    return nimStringToJS(ctx, e.context.loopKey)
+  of "event":
+    # Return the event name as a JS string
+    return nimStringToJS(ctx, e.context.event)
+  else:
+    return jsUndefined(ctx)
 
 # Convert the JSON envelope we get back from JS into a Value.
 proc envelopeToValue(env: JsonNode, expectedType: string): Value =
@@ -97,99 +132,78 @@ proc envelopeToValue(env: JsonNode, expectedType: string): Value =
 proc evalWithEnv(scene: InterpretedFrameScene, context: ExecutionContext, nodeId: NodeId,
                  code: string, args: Table[string, Value], argTypes: Table[string, string],
                  outputTypes: Table[string, string], targetField: string): Value =
-  currentEvalScene = scene
-  currentEvalContext = context
-  currentEvalNodeId = nodeId
-  currentEvalArgs = args
-  currentEvalArgTypes = argTypes
-  currentEvalOutputTypes = outputTypes
-  currentEvalTargetField = targetField
+  echo "🔥 🔥 🔥 ", code
+  echo args
+  echo argTypes
+  echo outputTypes
+  echo targetField
+
+  var js: QuickJS
+  var installed = false
+
   try:
-    echo "🔥 🔥 🔥 ", code
-    echo args
-    echo argTypes
-    echo outputTypes
-    echo targetField
+    js = newQuickJS()
 
-    var js = newQuickJS()
+    # Install per-context environment for callbacks
+    let e = EvalEnv(
+      scene: scene,
+      context: context,
+      nodeId: nodeId,
+      args: args,
+      argTypes: argTypes,
+      outputTypes: outputTypes,
+      targetField: targetField
+    )
+    evalEnvByCtx[js.context] = e
+    installed = true
 
-    # state[key] -> Nim JsonNode
-    js.registerFunction("getState") do (ctx: ptr JSContext, k: JSValue) -> JSValue:
-      let key = toNimString(ctx, k)
-      if currentEvalScene.state.hasKey(key):
-        return jsonToJS(ctx, currentEvalScene.state[key])
-      return jsNull(ctx)
+    # Register non-capturing functions (no closure => {.nimcall.})
+    js.registerFunction("getState", jsGetState)
+    js.registerFunction("getArg", jsGetArg)
+    js.registerFunction("getContext", jsGetContext)
 
-    # args[name] -> Nim Value (as JS via JSON)
-    js.registerFunction("getArg") do (ctx: ptr JSContext, k: JSValue) -> JSValue:
-      let key = toNimString(ctx, k)
-      if currentEvalArgs.hasKey(key):
-        return valueToJS(ctx, currentEvalArgs[key])
-      # Undefined when arg missing
-      return jsUndefined(ctx)
-
-    # context[name] -> Nim Value (as JS via JSON)
-    js.registerFunction("getContext") do (ctx: ptr JSContext, k: JSValue) -> JSValue:
-      let key = toNimString(ctx, k)
-      case key
-      of "loopIndex":
-        return nimIntToJS(ctx, currentEvalContext.loopIndex.int32)
-      of "loopKey":
-        return nimStringToJS(ctx, currentEvalContext.loopKey)
-      of "event":
-        return valueToJS(ctx, currentEvalContext.event)
-      else:
-        return jsUndefined(ctx)
-
+    # JS shims: property accessors into our callbacks
     discard js.eval("const state = new Proxy({}, { get(_, k) { return getState(k) } });")
     discard js.eval("const args  = new Proxy({}, { get(_, k) { return getArg(k) } });")
     discard js.eval("const context = new Proxy({}, { get(_, k) { return getContext(k) } });")
 
-    # Evaluate user code exactly once and capture both kind + value as a JSON string.
-    # We wrap it so we always return a *string* that is valid JSON describing the value,
-    # regardless of the original type (incl. objects/arrays).
+    # Evaluate user code once and produce a JSON "envelope"
     let envelopeJson = js.eval("""
       (() => {
         const __v = (""" & code & """);
         const __k = (__v === null) ? "null" : (Array.isArray(__v) ? "array" : typeof __v);
-        // Convert BigInt to Number (QuickJS supports BigInt; we coerce to Number for now)
         const json = JSON.stringify({ k: __k, v: __v }, (key, val) => (
           typeof val === 'bigint' ? Number(val) : val
         ));
         return json === undefined ? JSON.stringify({ k: __k }) : json;
       })()
     """)
+    echo "🔥 🔥 🍀 envelopeJson: "
+    echo envelopeJson
 
-    # Resolve expected output type for this output (if any),
-    # e.g. "string", "text", "float", "integer", "boolean", "color", "json", "image", "scene", "node", "none"
+    # Use the node's declared output type, if any
     var expectedType = ""
-    if currentEvalTargetField.len > 0 and currentEvalOutputTypes.hasKey(currentEvalTargetField):
-      expectedType = currentEvalOutputTypes[currentEvalTargetField]
+    if targetField.len > 0 and outputTypes.hasKey(targetField):
+      expectedType = outputTypes[targetField]
 
-    # Parse JSON envelope and convert to our Value union
+    # Parse and convert to Value
     var parsed: JsonNode
     try:
       parsed = parseJson(envelopeJson)
     except CatchableError:
-      # If it wasn't valid JSON (e.g. user returned a raw string that isn't JSON),
-      # fallback to "string" value using the raw representation.
       result = Value(kind: fkString, s: envelopeJson)
       echo "🔥 🔥 🍀 result (fallback as string): ", result
-      js.close()
       return
 
     result = envelopeToValue(parsed, expectedType)
     echo "🔥 🔥 🍀 result: ", result
 
-    js.close()
   finally:
-    currentEvalScene = nil
-    currentEvalContext = nil
-    currentEvalNodeId = NodeId(0)
-    currentEvalArgs = initTable[string, Value]()
-    currentEvalArgTypes = initTable[string, string]()
-    currentEvalOutputTypes = initTable[string, string]()
-    currentEvalTargetField = ""
+    # Always remove env and close QuickJS cleanly
+    if installed and evalEnvByCtx.hasKey(js.context):
+      evalEnvByCtx.del(js.context)
+    if js.runtime != nil or js.context != nil:
+      js.close()
 
 var globalNodeCounter = 0
 var nodeMappingTable = initTable[string, NodeId]()
