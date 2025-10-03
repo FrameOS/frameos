@@ -230,6 +230,9 @@ type
     jsFuncNameByNode*: Table[NodeId, string]                                   # code-node -> function name
     codeInlineFuncNameByNodeArg*: Table[NodeId, Table[string, string]]         # code-node arg -> function name
     appInlineFuncNameByNodeArg*: Table[NodeId, Table[string, string]]          # app/scene field inline -> function name
+    cacheValues*: Table[NodeId, Value]
+    cacheTimes*: Table[NodeId, float]
+    cacheKeys*: Table[NodeId, JsonNode]
 
   # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object

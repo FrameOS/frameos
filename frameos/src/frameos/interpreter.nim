@@ -6,6 +6,10 @@ import apps/apps
 
 import lib/burrito
 
+# -------------------------
+# Internal evaluation scope
+# -------------------------
+
 type
   EvalEnv = ref object
     scene: InterpretedFrameScene
@@ -17,6 +21,11 @@ type
     targetField: string
 
 var evalEnvByCtx = initTable[ptr JSContext, EvalEnv]()
+
+# -------------------------
+# Small string/JS helpers
+# -------------------------
+
 proc isJsIdentStart(c: char): bool =
   result = (c in {'a'..'z', 'A'..'Z', '_', '$'})
 
@@ -41,9 +50,20 @@ proc jsQuote(s: string): string =
   result = result.replace("\\", "\\\\").replace("\"", "\\\"")
   result = result.replace("\n", "\\n").replace("\r", "\\r")
 
+proc getCodeSnippet(node: DiagramNode): string =
+  ## Prefer codeJS, fall back to code; empty string if none.
+  if node.data.hasKey("codeJS") and node.data["codeJS"].kind == JString:
+    return node.data["codeJS"].getStr()
+  elif node.data.hasKey("code") and node.data["code"].kind == JString:
+    return node.data["code"].getStr()
+  ""
+
+# -------------------------
+# Build JS envelope function
+# -------------------------
+
 proc buildEnvelopeFunction(code: string, argNames: seq[string], fnName: string): string =
-  ## Create a named function that returns the same BigInt-safe JSON envelope as buildEnvelopeSource,
-  ## but without re-parsing on every invocation.
+  ## Create a named function returning a BigInt-safe JSON envelope (no re-parsing each call).
   var decls = newSeq[string]()
   for rawName in argNames:
     let lc = rawName.toLowerAscii
@@ -64,7 +84,7 @@ function """ & fnName & """() {
   };
 
   const getArgOr = (k, defVal) => {
-    const v = args[k];
+    const v = __args[k];
     return (typeof v === 'undefined') ? defVal : v;
   };
 
@@ -85,6 +105,10 @@ function """ & fnName & """() {
   }
 }
 """
+
+# -------------------------
+# QuickJS bridge utilities
+# -------------------------
 
 proc env(ctx: ptr JSContext): EvalEnv =
   if evalEnvByCtx.hasKey(ctx): evalEnvByCtx[ctx] else: nil
@@ -177,6 +201,10 @@ proc jsGetContext(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
   else:
     return jsUndefined(ctx)
 
+# -------------------------
+# Envelope <-> Value
+# -------------------------
+
 proc envelopeToValue(env: JsonNode, expectedType: string): Value =
   if env.isNil or env.kind != JObject:
     return Value(kind: fkString, s: $env)
@@ -218,6 +246,11 @@ proc envelopeToValue(env: JsonNode, expectedType: string): Value =
     return Value(kind: fkJson, j: jval)
   else:
     return Value(kind: fkNone)
+
+# -------------------------
+# Scene JS context
+# -------------------------
+
 proc ensureSceneJs(scene: InterpretedFrameScene) =
   if scene.jsReady: return
   scene.js = newQuickJS()
@@ -233,6 +266,10 @@ proc ensureSceneJs(scene: InterpretedFrameScene) =
   scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
   scene.jsReady = true
 
+# -------------------------
+# Code function naming
+# -------------------------
+
 proc uniqueCodeFnName(scene: InterpretedFrameScene, nodeId: NodeId): string =
   "__frameos_code_" & $(nodeId.int)
 
@@ -242,15 +279,39 @@ proc uniqueCodeInlineFnName(scene: InterpretedFrameScene, nodeId: NodeId, argNam
 proc uniqueAppInlineFnName(scene: InterpretedFrameScene, nodeId: NodeId, fieldName: string): string =
   "__frameos_app_inline_" & $(nodeId.int) & "_" & toJsIdent(fieldName)
 
+# -------------------------
+# Compile code & inline snippets
+# -------------------------
+
+type
+  InlineNameProc = proc (scene: InterpretedFrameScene, nodeId: NodeId, fieldOrArg: string): string
+  InlineCompileProc = proc (scene: InterpretedFrameScene, nodeId: NodeId, name: string, snippet: string)
+
+proc compileInlineFn(scene: InterpretedFrameScene,
+                     nodeId: NodeId,
+                     name: string,
+                     snippet: string,
+                     mappingRef: var Table[NodeId, Table[string, string]],
+                     nameBuilder: InlineNameProc) =
+  ensureSceneJs(scene)
+  let fnName = nameBuilder(scene, nodeId, name)
+  let src = buildEnvelopeFunction(snippet, @[], fnName)
+  discard scene.js.eval(src)
+  if not mappingRef.hasKey(nodeId):
+    mappingRef[nodeId] = initTable[string, string]()
+  mappingRef[nodeId][name] = fnName
+
+proc compileCodeInlineFn(scene: InterpretedFrameScene, nodeId: NodeId, argName: string, snippet: string) =
+  compileInlineFn(scene, nodeId, argName, snippet, scene.codeInlineFuncNameByNodeArg, uniqueCodeInlineFnName)
+
+proc compileAppInlineFn(scene: InterpretedFrameScene, nodeId: NodeId, fieldName: string, snippet: string) =
+  compileInlineFn(scene, nodeId, fieldName, snippet, scene.appInlineFuncNameByNodeArg, uniqueAppInlineFnName)
+
 proc compileCodeFn(scene: InterpretedFrameScene, node: DiagramNode) =
   ensureSceneJs(scene)
 
   # Gather code snippet
-  var codeSnippet = ""
-  if node.data.hasKey("codeJS") and node.data["codeJS"].kind == JString:
-    codeSnippet = node.data["codeJS"].getStr()
-  elif node.data.hasKey("code") and node.data["code"].kind == JString:
-    codeSnippet = node.data["code"].getStr()
+  let codeSnippet = getCodeSnippet(node)
 
   # Compute a *superset* of possible arg names so bare-ident args get local consts.
   var argNames: seq[string] = @[]
@@ -273,23 +334,15 @@ proc compileCodeFn(scene: InterpretedFrameScene, node: DiagramNode) =
   discard scene.js.eval(src)
   scene.jsFuncNameByNode[node.id] = fnName
 
-proc compileCodeInlineFn(scene: InterpretedFrameScene, nodeId: NodeId, argName: string, snippet: string) =
-  ensureSceneJs(scene)
-  let fnName = uniqueCodeInlineFnName(scene, nodeId, argName)
-  let src = buildEnvelopeFunction(snippet, @[], fnName)
-  discard scene.js.eval(src)
-  if not scene.codeInlineFuncNameByNodeArg.hasKey(nodeId):
-    scene.codeInlineFuncNameByNodeArg[nodeId] = initTable[string, string]()
-  scene.codeInlineFuncNameByNodeArg[nodeId][argName] = fnName
+proc getOrCompileCodeFn(scene: InterpretedFrameScene, node: DiagramNode): string =
+  if scene.jsFuncNameByNode.hasKey(node.id):
+    return scene.jsFuncNameByNode[node.id]
+  compileCodeFn(scene, node)
+  scene.jsFuncNameByNode[node.id]
 
-proc compileAppInlineFn(scene: InterpretedFrameScene, nodeId: NodeId, fieldName: string, snippet: string) =
-  ensureSceneJs(scene)
-  let fnName = uniqueAppInlineFnName(scene, nodeId, fieldName)
-  let src = buildEnvelopeFunction(snippet, @[], fnName)
-  discard scene.js.eval(src)
-  if not scene.appInlineFuncNameByNodeArg.hasKey(nodeId):
-    scene.appInlineFuncNameByNodeArg[nodeId] = initTable[string, string]()
-  scene.appInlineFuncNameByNodeArg[nodeId][fieldName] = fnName
+# -------------------------
+# Call compiled JS function
+# -------------------------
 
 proc callCompiledFn(scene: InterpretedFrameScene,
                     context: ExecutionContext,
@@ -347,18 +400,33 @@ proc callCompiledFn(scene: InterpretedFrameScene,
 
   return envelopeToValue(parsed, expectedType)
 
-var globalNodeCounter = 0
-var nodeMappingTable = initTable[string, NodeId]()
-var stateFieldTypesByScene = initTable[SceneId, Table[string, string]]()
-var allScenesLoaded = false
-var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
+# -------------------------
+# Inline evaluation helper
+# -------------------------
 
-# Per (sceneId -> nodeId) caches for interpreted runs
-var cacheValuesByScene = initTable[SceneId, Table[NodeId, Value]]()
-var cacheTimesByScene = initTable[SceneId, Table[NodeId, float]]()
-var cacheKeysByScene = initTable[SceneId, Table[NodeId, JsonNode]]()     # derived from connected inputs
+proc evalInline(scene: InterpretedFrameScene,
+                context: ExecutionContext,
+                nodeId: NodeId,
+                name: string,
+                snippet: string,
+                mapping: var Table[NodeId, Table[string, string]],
+                ensureCompiled: InlineCompileProc,
+                targetField: string): Value =
+  let emptyArgs = initTable[string, Value]()
+  let emptyArgTypes = initTable[string, string]()
+  let emptyOutputs = initTable[string, string]()
+  var fnName = ""
+  if mapping.hasKey(nodeId) and mapping[nodeId].hasKey(name):
+    fnName = mapping[nodeId][name]
+  else:
+    ensureCompiled(scene, nodeId, name, snippet)
+    fnName = mapping[nodeId][name]
+  callCompiledFn(scene, context, nodeId, fnName, emptyArgs, emptyArgTypes, emptyOutputs, targetField)
 
-# ---- Helpers to read cache config from node.data["cache"] ----
+# -------------------------
+# Cache utilities
+# -------------------------
+
 proc jBoolOr(j: JsonNode, key: string, default: bool): bool =
   if j.isNil or j.kind != JObject or not j.hasKey(key): return default
   let n = j[key]
@@ -380,6 +448,21 @@ proc jFloatOr(j: JsonNode, key: string, default: float): float =
     except CatchableError: default
   else: default
 
+proc readCacheConfig(node: DiagramNode): tuple[enabled, inputEnabled, durationEnabled: bool, durationSec: float] =
+  var enabled = false
+  var inputEnabled = false
+  var durationEnabled = false
+  var durationSec = 0.0
+  if node.data.hasKey("cache") and node.data["cache"].kind == JObject:
+    let cc = node.data["cache"]
+    enabled = jBoolOr(cc, "enabled", false)
+    if enabled:
+      inputEnabled = jBoolOr(cc, "inputEnabled", false)
+      durationEnabled = jBoolOr(cc, "durationEnabled", false)
+      if durationEnabled:
+        durationSec = jFloatOr(cc, "duration", 0.0)
+  (enabled, inputEnabled, durationEnabled, durationSec)
+
 # Turn an interpreter Value into a stable JSON "key" snippet for cache-keying.
 proc valueToKeyJson(v: Value): JsonNode =
   case v.kind
@@ -396,7 +479,81 @@ proc valueToKeyJson(v: Value): JsonNode =
     # string/text/float/int/bool/node/scene/none
     result = valueToJson(v)
 
+proc withCache(scene: InterpretedFrameScene,
+               nodeId: NodeId,
+               cacheEnabled, cacheInputEnabled, cacheDurationEnabled: bool, cacheDurationSec: float,
+               builtAnyInput: bool, builtInputKey: JsonNode,
+               extraLog: JsonNode,
+               compute: proc (): Value): Value =
+  ## Generic cache handler shared by app/code data nodes.
+  if not cacheEnabled:
+    return compute()
+
+  var useCached = scene.cacheValues.hasKey(nodeId)
+
+  if useCached and cacheDurationEnabled:
+    if not scene.cacheTimes.hasKey(nodeId):
+      useCached = false
+    else:
+      let last = scene.cacheTimes[nodeId]
+      if epochTime() > last + cacheDurationSec:
+        useCached = false
+
+  if useCached and cacheInputEnabled and builtAnyInput:
+    if not scene.cacheKeys.hasKey(nodeId):
+      useCached = false
+    else:
+      if scene.cacheKeys[nodeId] != builtInputKey:
+        useCached = false
+
+  if useCached:
+    var payload = %*{
+      "event": "interpreter:cache:hit",
+      "sceneId": scene.id.string,
+      "nodeId": nodeId.int
+    }
+    if extraLog.kind == JObject:
+      for k in extraLog.keys: payload[k] = extraLog[k]
+    scene.logger.log(payload)
+    return scene.cacheValues[nodeId]
+
+  # Miss -> compute and write-back
+  var payload = %*{
+    "event": "interpreter:cache:miss",
+    "sceneId": scene.id.string,
+    "nodeId": nodeId.int
+  }
+  if extraLog.kind == JObject:
+    for k in extraLog.keys: payload[k] = extraLog[k]
+  scene.logger.log(payload)
+
+  let fresh = compute()
+  scene.cacheValues[nodeId] = fresh
+  if cacheDurationEnabled:
+    scene.cacheTimes[nodeId] = epochTime()
+  if cacheInputEnabled and builtAnyInput:
+    scene.cacheKeys[nodeId] = builtInputKey
+  fresh
+
+# -------------------------
+# Global registries/state
+# -------------------------
+
+var globalNodeCounter = 0
+var nodeMappingTable = initTable[string, NodeId]()
+var stateFieldTypesByScene = initTable[SceneId, Table[string, string]]()
+var allScenesLoaded = false
+var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
+
+# -------------------------
+# Forward decl
+# -------------------------
+
 proc runEvent*(self: FrameScene, context: ExecutionContext)
+
+# -------------------------
+# Core node runner
+# -------------------------
 
 proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
   let self = InterpretedFrameScene(self)
@@ -450,20 +607,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
       let app = self.appsByNodeId[currentNodeId]
 
-      # ---- Read per-node cache config (from node.data["cache"]) ----
-      var cacheEnabled = false
-      var cacheInputEnabled = false
-      var cacheDurationEnabled = false
-      var cacheDurationSec = 0.0
-
-      if currentNode.data.hasKey("cache") and currentNode.data["cache"].kind == JObject:
-        let cc = currentNode.data["cache"]
-        cacheEnabled = jBoolOr(cc, "enabled", false)
-        if cacheEnabled:
-          cacheInputEnabled = jBoolOr(cc, "inputEnabled", false)
-          cacheDurationEnabled = jBoolOr(cc, "durationEnabled", false)
-          if cacheDurationEnabled:
-            cacheDurationSec = jFloatOr(cc, "duration", 0.0)
+      # ---- Read per-node cache config ----
+      let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec) = readCacheConfig(currentNode)
 
       # ---- Wire inputs AND (if enabled) build an input-key JSON alongside ----
       var builtInputKey = %*{} # JObject; only meaningful when cacheInputEnabled = true and there are inputs
@@ -495,20 +640,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         let inlineConnected = self.appInlineInputsForNodeId[currentNodeId]
         for (inputName, codeSnippet) in inlineConnected.pairs:
           try:
-            let emptyArgs = initTable[string, Value]()
-            let emptyArgTypes = initTable[string, string]()
-            let emptyOutputs = initTable[string, string]()
-            var fnName = ""
-            if self.appInlineFuncNameByNodeArg.hasKey(currentNodeId) and
-              self.appInlineFuncNameByNodeArg[currentNodeId].hasKey(inputName):
-              fnName = self.appInlineFuncNameByNodeArg[currentNodeId][inputName]
-            else:
-              # defensive: compile on demand (should be precompiled already)
-              compileAppInlineFn(self, currentNodeId, inputName, codeSnippet)
-              fnName = self.appInlineFuncNameByNodeArg[currentNodeId][inputName]
-
-            let vIn = callCompiledFn(self, context, currentNodeId, fnName,
-                                    emptyArgs, emptyArgTypes, emptyOutputs, inputName)
+            let vIn = evalInline(self, context, currentNodeId,
+                                 inputName, codeSnippet,
+                                 self.appInlineFuncNameByNodeArg, compileAppInlineFn,
+                                 inputName)
             apps.setAppField(keyword, app, inputName, vIn)
             if cacheEnabled and cacheInputEnabled:
               builtInputKey[inputName] = valueToKeyJson(vIn)
@@ -525,59 +660,13 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
             })
 
       if asDataNode and cacheEnabled:
-        # Ensure scene sub-tables exist
-        if not cacheValuesByScene.hasKey(self.id):
-          cacheValuesByScene[self.id] = initTable[NodeId, Value]()
-        if not cacheTimesByScene.hasKey(self.id):
-          cacheTimesByScene[self.id] = initTable[NodeId, float]()
-        if not cacheKeysByScene.hasKey(self.id):
-          cacheKeysByScene[self.id] = initTable[NodeId, JsonNode]()
-
-        var valTab = cacheValuesByScene[self.id]
-        var timeTab = cacheTimesByScene[self.id]
-        var keyTab = cacheKeysByScene[self.id]
-
-        var useCached = valTab.hasKey(currentNodeId)
-        if useCached and cacheDurationEnabled:
-          if not timeTab.hasKey(currentNodeId):
-            useCached = false
-          else:
-            let last = timeTab[currentNodeId]
-            if epochTime() > last + cacheDurationSec:
-              useCached = false
-
-        if useCached and cacheInputEnabled and builtAnyInput:
-          if not keyTab.hasKey(currentNodeId):
-            useCached = false
-          else:
-            if keyTab[currentNodeId] != builtInputKey:
-              useCached = false
-
-        if useCached:
-          self.logger.log(%*{
-            "event": "interpreter:cache:hit",
-            "sceneId": self.id,
-            "nodeId": currentNodeId.int,
-            "keyword": keyword
-          })
-          result = valTab[currentNodeId]
-        else:
-          self.logger.log(%*{
-            "event": "interpreter:cache:miss",
-            "sceneId": self.id,
-            "nodeId": currentNodeId.int,
-            "keyword": keyword
-          })
-          let fresh = apps.getApp(keyword, app, context)
-          result = fresh
-          valTab[currentNodeId] = fresh
-          cacheValuesByScene[self.id] = valTab # write-back
-          if cacheDurationEnabled:
-            timeTab[currentNodeId] = epochTime()
-            cacheTimesByScene[self.id] = timeTab
-          if cacheInputEnabled and builtAnyInput:
-            keyTab[currentNodeId] = builtInputKey
-            cacheKeysByScene[self.id] = keyTab
+        result = withCache(self, currentNodeId,
+                           cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
+                           builtAnyInput, builtInputKey,
+                           %*{"keyword": keyword}):
+          (proc (): Value =
+            apps.getApp(keyword, app, context)
+          )
       else:
         if asDataNode:
           result = apps.getApp(keyword, app, context)
@@ -589,12 +678,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     of "dispatch":
       raise newException(Exception, "Dispatch nodes not implemented in interpreted scenes yet")
     of "code":
-      var codeSnippet = ""
-      if currentNode.data.hasKey("codeJS") and currentNode.data["codeJS"].kind == JString:
-        codeSnippet = currentNode.data["codeJS"].getStr()
-      elif currentNode.data.hasKey("code") and currentNode.data["code"].kind == JString:
-        codeSnippet = currentNode.data["code"].getStr()
-
+      # Parse outputs (types and default target)
       var outputTypes = initTable[string, string]()
       var defaultOutputName = ""
       if currentNode.data.hasKey("codeOutputs") and currentNode.data["codeOutputs"].kind == JArray:
@@ -607,6 +691,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               if defaultOutputName.len == 0:
                 defaultOutputName = name
 
+      # Parse arg types
       var argTypes = initTable[string, string]()
       if currentNode.data.hasKey("codeArgs") and currentNode.data["codeArgs"].kind == JArray:
         for argDef in currentNode.data["codeArgs"]:
@@ -616,26 +701,14 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
             if name.len > 0:
               argTypes[name] = typ
 
+      # Build args (connected + inline); also build cache input key if enabled
       var args = initTable[string, Value]()
       var builtInputKey = %*{}
       var builtAnyInput = false
 
-      var cacheEnabled = false
-      var cacheInputEnabled = false
-      var cacheDurationEnabled = false
-      var cacheDurationSec = 0.0
-
-      if currentNode.data.hasKey("cache") and currentNode.data["cache"].kind == JObject:
-        let cc = currentNode.data["cache"]
-        cacheEnabled = jBoolOr(cc, "enabled", false)
-        if cacheEnabled:
-          cacheInputEnabled = jBoolOr(cc, "inputEnabled", false)
-          cacheDurationEnabled = jBoolOr(cc, "durationEnabled", false)
-          if cacheDurationEnabled:
-            cacheDurationSec = jFloatOr(cc, "duration", 0.0)
+      let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec) = readCacheConfig(currentNode)
 
       if self.codeInputsForNodeId.hasKey(currentNodeId):
-        echo "!!! HAD codeInputsForNodeId !!!"
         let connectedArgs = self.codeInputsForNodeId[currentNodeId]
         for (argName, producerNodeId) in connectedArgs.pairs:
           if self.nodes.hasKey(producerNodeId):
@@ -659,23 +732,13 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               })
 
       if self.codeInlineInputsForNodeId.hasKey(currentNodeId):
-        echo "!!! HAD codeInlineInputsForNodeId !!!"
         let inlineArgs = self.codeInlineInputsForNodeId[currentNodeId]
         for (argName, snippet) in inlineArgs.pairs:
           try:
-            let emptyArgs = initTable[string, Value]()
-            let emptyArgTypes = initTable[string, string]()
-            let emptyOutputs = initTable[string, string]()
-            var fnName = ""
-            if self.codeInlineFuncNameByNodeArg.hasKey(currentNodeId) and
-              self.codeInlineFuncNameByNodeArg[currentNodeId].hasKey(argName):
-              fnName = self.codeInlineFuncNameByNodeArg[currentNodeId][argName]
-            else:
-              compileCodeInlineFn(self, currentNodeId, argName, snippet)
-              fnName = self.codeInlineFuncNameByNodeArg[currentNodeId][argName]
-
-            let vIn = callCompiledFn(self, context, currentNodeId, fnName,
-                                    emptyArgs, emptyArgTypes, emptyOutputs, argName)
+            let vIn = evalInline(self, context, currentNodeId,
+                                 argName, snippet,
+                                 self.codeInlineFuncNameByNodeArg, compileCodeInlineFn,
+                                 argName)
             args[argName] = vIn
             if not argTypes.hasKey(argName):
               argTypes[argName] = ""
@@ -695,80 +758,22 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
       let targetField = if defaultOutputName.len > 0: defaultOutputName else: ""
 
+      # Compute (with optional caching)
+      let computeFresh = proc (): Value =
+        var fnName = getOrCompileCodeFn(self, currentNode)
+        callCompiledFn(self, context, currentNodeId, fnName, args, argTypes, outputTypes, targetField)
+
       if asDataNode and cacheEnabled:
-        # TODO: why by scene? store the cache objects on the scene itself
-        if not cacheValuesByScene.hasKey(self.id):
-          cacheValuesByScene[self.id] = initTable[NodeId, Value]()
-        if not cacheTimesByScene.hasKey(self.id):
-          cacheTimesByScene[self.id] = initTable[NodeId, float]()
-        if not cacheKeysByScene.hasKey(self.id):
-          cacheKeysByScene[self.id] = initTable[NodeId, JsonNode]()
-
-        var valTab = cacheValuesByScene[self.id]
-        var timeTab = cacheTimesByScene[self.id]
-        var keyTab = cacheKeysByScene[self.id]
-
-        var useCached = valTab.hasKey(currentNodeId)
-        if useCached and cacheDurationEnabled:
-          if not timeTab.hasKey(currentNodeId):
-            useCached = false
-          else:
-            let last = timeTab[currentNodeId]
-            if epochTime() > last + cacheDurationSec:
-              useCached = false
-
-        if useCached and cacheInputEnabled and builtAnyInput:
-          if not keyTab.hasKey(currentNodeId):
-            useCached = false
-          else:
-            if keyTab[currentNodeId] != builtInputKey:
-              useCached = false
-
-        if useCached:
-          self.logger.log(%*{
-            "event": "interpreter:cache:hit",
-            "sceneId": self.id,
-            "nodeId": currentNodeId.int,
-            "nodeType": "code"
-          })
-          result = valTab[currentNodeId]
-        else:
-          self.logger.log(%*{
-            "event": "interpreter:cache:miss",
-            "sceneId": self.id,
-            "nodeId": currentNodeId.int,
-            "nodeType": "code"
-          })
-          var fnName = ""
-          if self.jsFuncNameByNode.hasKey(currentNodeId):
-            fnName = self.jsFuncNameByNode[currentNodeId]
-          else:
-            # defensive: compile on demand (should be precompiled already)
-            compileCodeFn(self, currentNode)
-            fnName = self.jsFuncNameByNode[currentNodeId]
-
-          let fresh = callCompiledFn(self, context, currentNodeId, fnName, args, argTypes, outputTypes, targetField)
-          result = fresh
-          valTab[currentNodeId] = fresh
-          cacheValuesByScene[self.id] = valTab
-          if cacheDurationEnabled:
-            timeTab[currentNodeId] = epochTime()
-            cacheTimesByScene[self.id] = timeTab
-          if cacheInputEnabled and builtAnyInput:
-            keyTab[currentNodeId] = builtInputKey
-            cacheKeysByScene[self.id] = keyTab
+        result = withCache(self, currentNodeId,
+                           cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
+                           builtAnyInput, builtInputKey,
+                           %*{"nodeType": "code"},
+                           computeFresh)
       else:
-        var fnName = ""
-        if self.jsFuncNameByNode.hasKey(currentNodeId):
-          fnName = self.jsFuncNameByNode[currentNodeId]
-        else:
-          # defensive: compile on demand (should be precompiled already)
-          compileCodeFn(self, currentNode)
-          fnName = self.jsFuncNameByNode[currentNodeId]
-
-        let fresh = callCompiledFn(self, context, currentNodeId, fnName, args, argTypes, outputTypes, targetField)
+        let fresh = computeFresh()
         if asDataNode:
           result = fresh
+
     of "event":
       raise newException(Exception, "Event nodes not implemented in interpreted scenes yet")
 
@@ -832,19 +837,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         let inlineConnected = self.appInlineInputsForNodeId[currentNodeId]
         for (inputName, codeSnippet) in inlineConnected.pairs:
           try:
-            let emptyArgs = initTable[string, Value]()
-            let emptyArgTypes = initTable[string, string]()
-            let emptyOutputs = initTable[string, string]()
-            var fnName = ""
-            if self.appInlineFuncNameByNodeArg.hasKey(currentNodeId) and
-              self.appInlineFuncNameByNodeArg[currentNodeId].hasKey(inputName):
-              fnName = self.appInlineFuncNameByNodeArg[currentNodeId][inputName]
-            else:
-              compileAppInlineFn(self, currentNodeId, inputName, codeSnippet)
-              fnName = self.appInlineFuncNameByNodeArg[currentNodeId][inputName]
-
-            let v = callCompiledFn(self, context, currentNodeId, fnName,
-                                  emptyArgs, emptyArgTypes, emptyOutputs, inputName)
+            let v = evalInline(self, context, currentNodeId,
+                               inputName, codeSnippet,
+                               self.appInlineFuncNameByNodeArg, compileAppInlineFn,
+                               inputName)
             childScene.state[inputName] = valueToJson(v)
           except Exception as e:
             self.logger.log(%*{
@@ -867,6 +863,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     else:
       currentNodeId = -1.NodeId
 
+# -------------------------
+# Scene wiring helpers
+# -------------------------
+
 proc ensureConfig*(scene: InterpretedFrameScene, node: DiagramNode): JsonNode =
   ## Make sure node.data["config"] exists and is an object; return it.
   if node.data.isNil:
@@ -885,6 +885,10 @@ proc setNodeFieldFromEdge*(scene: InterpretedFrameScene, edge: DiagramEdge) =
   if not scene.nodes.hasKey(edge.source): return
   let fieldPath = edge.sourceHandle.substr("field/".len) # keep full path inc. [i][j]
   scene.ensureConfig(scene.nodes[edge.source])[fieldPath] = %(edge.target.int)
+
+# -------------------------
+# Scene lifecycle
+# -------------------------
 
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     persistedState: JsonNode): FrameScene =
@@ -916,7 +920,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     jsReady: false,
     jsFuncNameByNode: initTable[NodeId, string](),
     codeInlineFuncNameByNodeArg: initTable[NodeId, Table[string, string]](),
-    appInlineFuncNameByNodeArg: initTable[NodeId, Table[string, string]]()
+    appInlineFuncNameByNodeArg: initTable[NodeId, Table[string, string]](),
+    cacheValues: initTable[NodeId, Value](),
+    cacheTimes: initTable[NodeId, float](),
+    cacheKeys: initTable[NodeId, JsonNode](),
   )
   echo "🚀 🚀 Initialized interpreted scene: ", sceneId.string
   scene.execNode = proc(nodeId: NodeId, context: ExecutionContext) =
@@ -1044,6 +1051,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     logger.log(%*{"event": "initInterpretedEdge:ignored", "sceneId": scene.id, "edgeId": edge.id.int,
         "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
         "targetHandle": edge.targetHandle})
+
   ## Ensure one JS context per scene and precompile functions
   ensureSceneJs(scene)
 
@@ -1116,6 +1124,17 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
 
   return scene
 
+# -------------------------
+# Events / rendering
+# -------------------------
+
+proc applyPublicStateFromPayload(scene: InterpretedFrameScene, payload: JsonNode) =
+  if payload.isNil or payload.kind != JObject: return
+  for field in scene.publicStateFields:
+    let key = field.name
+    if payload.hasKey(key) and payload[key] != scene.state{key}:
+      scene.state[key] = copy(payload[key])
+
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
   self.logger.log(%*{"event": "runEventInterpreted", "sceneId": self.id, "contextEvent": context.event})
@@ -1123,20 +1142,12 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
   case context.event:
   of "setSceneState":
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
-      let payload = context.payload["state"]
-      for field in scene.publicStateFields:
-        let key = field.name
-        if payload.hasKey(key) and payload[key] != self.state{key}:
-          self.state[key] = copy(payload[key])
+      applyPublicStateFromPayload(scene, context.payload["state"])
     if context.payload.hasKey("render"):
       sendEvent("render", %*{})
   of "setCurrentScene":
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
-      let payload = context.payload["state"]
-      for field in scene.publicStateFields:
-        let key = field.name
-        if payload.hasKey(key) and payload[key] != self.state{key}:
-          self.state[key] = copy(payload[key])
+      applyPublicStateFromPayload(scene, context.payload["state"])
   else: discard
 
   if scene.eventListeners.hasKey(context.event):
@@ -1178,6 +1189,10 @@ proc render*(self: FrameScene, context: ExecutionContext): Image =
   runEvent(self, context)
   result = context.image
 
+# -------------------------
+# Serialization hooks
+# -------------------------
+
 proc renameHook*(v: var DiagramNode, fieldName: var string) =
   if fieldName == "type":
     fieldName = "nodeType"
@@ -1209,6 +1224,10 @@ proc parseHook*(s: string, i: var int, v: var Color) =
   var tmp: string
   parseHook(s, i, tmp)
   v = parseHtmlColor(tmp)
+
+# -------------------------
+# Scene registry (loader)
+# -------------------------
 
 proc parseInterpretedScenes*(data: string): void =
   if data == "":
