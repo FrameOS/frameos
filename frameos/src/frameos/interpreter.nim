@@ -168,8 +168,19 @@ proc evalWithEnv(scene: InterpretedFrameScene, context: ExecutionContext, nodeId
     discard js.eval("const context = new Proxy({}, { get(_, k) { return getContext(k) } });")
 
     # Evaluate user code once and produce a JSON "envelope"
+    var prelude = ""
+    for name, _ in argTypes.pairs:
+      if name.len > 0:
+        prelude.add "const " & name & " = args[\"" & name & "\"];\n"
+    # also cover runtime args that weren't declared in codeArgs (defensive)
+    for name, _ in args.pairs:
+      if not argTypes.hasKey(name) and name.len > 0:
+        prelude.add "const " & name & " = args[\"" & name & "\"];\n"
+
+    # Evaluate user code once and produce a JSON "envelope"
     let envelopeJson = js.eval("""
       (() => {
+        """ & prelude & """
         const __v = (""" & code & """);
         const __k = (__v === null) ? "null" : (Array.isArray(__v) ? "array" : typeof __v);
         const json = JSON.stringify({ k: __k, v: __v }, (key, val) => (
