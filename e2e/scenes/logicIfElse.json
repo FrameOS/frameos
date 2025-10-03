@@ -71,6 +71,7 @@
         },
         "data": {
           "code": "context.loopIndex mod 2 == 0",
+          "codeJS": "context.loopIndex % 2 === 0",
           "codeArgs": [],
           "codeOutputs": [
             {
@@ -196,6 +197,7 @@
         },
         "data": {
           "code": "context.loopIndex mod 3 == 0",
+          "codeJS": "context.loopIndex % 3 === 0",
           "codeArgs": [],
           "codeOutputs": [
             {

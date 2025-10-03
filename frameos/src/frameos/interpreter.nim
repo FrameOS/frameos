@@ -43,11 +43,62 @@ proc jsonToJS(ctx: ptr JSContext, j: JsonNode): JSValue =
       inc idx
     return arr
 
+# Convert a Nim Value into a JSValue by round-tripping through JSON.
+proc valueToJS(ctx: ptr JSContext, v: Value): JSValue =
+  jsonToJS(ctx, valueToJson(v))
+
+# Convert the JSON envelope we get back from JS into a Value.
+proc envelopeToValue(env: JsonNode, expectedType: string): Value =
+  ## env is { k: <kind>, v: <json value or missing for undefined> }
+  if env.isNil or env.kind != JObject:
+    # Fallback: treat whole thing as string just to be safe
+    return Value(kind: fkString, s: $env)
+
+  let kind = env{"k"}.getStr()
+  var jval: JsonNode
+
+  if kind == "undefined":
+    # If the node declares an expected output type, try to use it with null;
+    # otherwise, represent absence as fkNone.
+    if expectedType.len > 0:
+      jval = newJNull()
+      return valueFromJsonByType(jval, expectedType)
+    else:
+      return Value(kind: fkNone)
+
+  # value may be null, array, object, number, string, boolean, etc.
+  if env.hasKey("v"):
+    jval = env["v"]
+  else:
+    jval = newJNull()
+
+  # If a concrete output type was declared on the node output, honor it strictly.
+  if expectedType.len > 0:
+    return valueFromJsonByType(jval, expectedType)
+
+  # Otherwise, auto-detect sensibly from the JS kind + JSON node kind.
+  case kind
+  of "string":
+    return valueFromJsonByType(jval, "string")
+  of "number":
+    case jval.kind
+    of JInt: return valueFromJsonByType(jval, "integer")
+    of JFloat: return valueFromJsonByType(jval, "float")
+    else: return valueFromJsonByType(%*0, "integer") # very defensive fallback
+  of "boolean":
+    return valueFromJsonByType(jval, "boolean")
+  of "array", "object", "null":
+    # Hand off full structure directly as JSON
+    return Value(kind: fkJson, j: jval)
+  else:
+    # Symbols/functions/etc. are not representable => none
+    return Value(kind: fkNone)
+
 proc evalWithEnv(scene: InterpretedFrameScene, context: ExecutionContext, nodeId: NodeId,
                  code: string, args: Table[string, Value], argTypes: Table[string, string],
                  outputTypes: Table[string, string], targetField: string): Value =
   currentEvalScene = scene
-  currentEvalContext = context # TODO
+  currentEvalContext = context
   currentEvalNodeId = nodeId
   currentEvalArgs = args
   currentEvalArgTypes = argTypes
@@ -61,16 +112,75 @@ proc evalWithEnv(scene: InterpretedFrameScene, context: ExecutionContext, nodeId
     echo targetField
 
     var js = newQuickJS()
+
+    # state[key] -> Nim JsonNode
     js.registerFunction("getState") do (ctx: ptr JSContext, k: JSValue) -> JSValue:
       let key = toNimString(ctx, k)
       if currentEvalScene.state.hasKey(key):
         return jsonToJS(ctx, currentEvalScene.state[key])
       return jsNull(ctx)
 
-    echo js.eval("const state = new Proxy({}, { get(_, k) { return getState(k) } });")
+    # args[name] -> Nim Value (as JS via JSON)
+    js.registerFunction("getArg") do (ctx: ptr JSContext, k: JSValue) -> JSValue:
+      let key = toNimString(ctx, k)
+      if currentEvalArgs.hasKey(key):
+        return valueToJS(ctx, currentEvalArgs[key])
+      # Undefined when arg missing
+      return jsUndefined(ctx)
 
-    result = toValue(js.eval(code))
+    # context[name] -> Nim Value (as JS via JSON)
+    js.registerFunction("getContext") do (ctx: ptr JSContext, k: JSValue) -> JSValue:
+      let key = toNimString(ctx, k)
+      case key
+      of "loopIndex":
+        return nimIntToJS(ctx, currentEvalContext.loopIndex.int32)
+      of "loopKey":
+        return nimStringToJS(ctx, currentEvalContext.loopKey)
+      of "event":
+        return valueToJS(ctx, currentEvalContext.event)
+      else:
+        return jsUndefined(ctx)
+
+    discard js.eval("const state = new Proxy({}, { get(_, k) { return getState(k) } });")
+    discard js.eval("const args  = new Proxy({}, { get(_, k) { return getArg(k) } });")
+    discard js.eval("const context = new Proxy({}, { get(_, k) { return getContext(k) } });")
+
+    # Evaluate user code exactly once and capture both kind + value as a JSON string.
+    # We wrap it so we always return a *string* that is valid JSON describing the value,
+    # regardless of the original type (incl. objects/arrays).
+    let envelopeJson = js.eval("""
+      (() => {
+        const __v = (""" & code & """);
+        const __k = (__v === null) ? "null" : (Array.isArray(__v) ? "array" : typeof __v);
+        // Convert BigInt to Number (QuickJS supports BigInt; we coerce to Number for now)
+        const json = JSON.stringify({ k: __k, v: __v }, (key, val) => (
+          typeof val === 'bigint' ? Number(val) : val
+        ));
+        return json === undefined ? JSON.stringify({ k: __k }) : json;
+      })()
+    """)
+
+    # Resolve expected output type for this output (if any),
+    # e.g. "string", "text", "float", "integer", "boolean", "color", "json", "image", "scene", "node", "none"
+    var expectedType = ""
+    if currentEvalTargetField.len > 0 and currentEvalOutputTypes.hasKey(currentEvalTargetField):
+      expectedType = currentEvalOutputTypes[currentEvalTargetField]
+
+    # Parse JSON envelope and convert to our Value union
+    var parsed: JsonNode
+    try:
+      parsed = parseJson(envelopeJson)
+    except CatchableError:
+      # If it wasn't valid JSON (e.g. user returned a raw string that isn't JSON),
+      # fallback to "string" value using the raw representation.
+      result = Value(kind: fkString, s: envelopeJson)
+      echo "🔥 🔥 🍀 result (fallback as string): ", result
+      js.close()
+      return
+
+    result = envelopeToValue(parsed, expectedType)
     echo "🔥 🔥 🍀 result: ", result
+
     js.close()
   finally:
     currentEvalScene = nil
@@ -578,8 +688,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     sceneNodes: initTable[NodeId, FrameScene](),
     publicStateFields: exportedScene.publicStateFields,
     # jsByCodeNodeId: initTable[NodeId, QuickJS](),
-    # jsByInlineApp: initTable[NodeId, Table[string, QuickJS]](),
-    # jsByInlineCode: initTable[NodeId, Table[string, QuickJS]]()
+      # jsByInlineApp: initTable[NodeId, Table[string, QuickJS]](),
+      # jsByInlineCode: initTable[NodeId, Table[string, QuickJS]]()
   )
   echo "🚀 🚀 Initialized interpreted scene: ", sceneId.string
   scene.execNode = proc(nodeId: NodeId, context: ExecutionContext) =
