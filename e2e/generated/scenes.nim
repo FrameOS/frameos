@@ -4,6 +4,7 @@ import frameos/types
 import tables, options
 import scenes/scene_black as scene_black
 import scenes/scene_blue as scene_blue
+import scenes/scene_dataCodeFloat as scene_dataCodeFloat
 import scenes/scene_dataDownloadImage as scene_dataDownloadImage
 import scenes/scene_dataDownloadUrl as scene_dataDownloadUrl
 import scenes/scene_dataGradient as scene_dataGradient
@@ -13,7 +14,6 @@ import scenes/scene_dataNewImageNext as scene_dataNewImageNext
 import scenes/scene_dataQR as scene_dataQR
 import scenes/scene_dataResize as scene_dataResize
 import scenes/scene_logicIfElse as scene_logicIfElse
-import scenes/scene_logicSetAsState as scene_logicSetAsState
 import scenes/scene_renderColorFlow as scene_renderColorFlow
 import scenes/scene_renderColorImage as scene_renderColorImage
 import scenes/scene_renderColorSplit as scene_renderColorSplit
@@ -37,6 +37,7 @@ let defaultSceneId* = some("black".SceneId)
 const sceneOptions* = [
   ("black".SceneId, "Black"),
   ("blue".SceneId, "Blue"),
+  ("dataCodeFloat".SceneId, "Numeric Code Nodes"),
   ("dataDownloadImage".SceneId, "Download Image"),
   ("dataDownloadUrl".SceneId, "Download URL"),
   ("dataGradient".SceneId, "dataGradient"),
@@ -46,7 +47,6 @@ const sceneOptions* = [
   ("dataQR".SceneId, "QR"),
   ("dataResize".SceneId, "Resize image"),
   ("logicIfElse".SceneId, "If Else"),
-  ("logicSetAsState".SceneId, "Set as State"),
   ("renderColorFlow".SceneId, "Color"),
   ("renderColorImage".SceneId, "Color"),
   ("renderColorSplit".SceneId, "Color"),
@@ -70,6 +70,7 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result = initTable[SceneId, ExportedScene]()
   result["black".SceneId] = scene_black.exportedScene
   result["blue".SceneId] = scene_blue.exportedScene
+  result["dataCodeFloat".SceneId] = scene_dataCodeFloat.exportedScene
   result["dataDownloadImage".SceneId] = scene_dataDownloadImage.exportedScene
   result["dataDownloadUrl".SceneId] = scene_dataDownloadUrl.exportedScene
   result["dataGradient".SceneId] = scene_dataGradient.exportedScene
@@ -79,7 +80,6 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result["dataQR".SceneId] = scene_dataQR.exportedScene
   result["dataResize".SceneId] = scene_dataResize.exportedScene
   result["logicIfElse".SceneId] = scene_logicIfElse.exportedScene
-  result["logicSetAsState".SceneId] = scene_logicSetAsState.exportedScene
   result["renderColorFlow".SceneId] = scene_renderColorFlow.exportedScene
   result["renderColorImage".SceneId] = scene_renderColorImage.exportedScene
   result["renderColorSplit".SceneId] = scene_renderColorSplit.exportedScene

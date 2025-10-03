@@ -41,12 +41,11 @@ proc jsQuote(s: string): string =
   result = result.replace("\\", "\\\\").replace("\"", "\\\"")
   result = result.replace("\n", "\\n").replace("\r", "\\r")
 
-proc buildEnvelopeSource(code: string, argNames: seq[string]): string =
-  ## Wrap user code, return a BigInt-safe JSON envelope and capture errors.
-  ## Also inject local const bindings for each declared/provided arg name.
+proc buildEnvelopeFunction(code: string, argNames: seq[string], fnName: string): string =
+  ## Create a named function that returns the same BigInt-safe JSON envelope as buildEnvelopeSource,
+  ## but without re-parsing on every invocation.
   var decls = newSeq[string]()
   for rawName in argNames:
-    # Don't shadow special names used by the wrapper/function parameters
     let lc = rawName.toLowerAscii
     if lc in ["state", "args", "context", "console", "getargor"]: continue
     let ident = toJsIdent(rawName)
@@ -54,19 +53,16 @@ proc buildEnvelopeSource(code: string, argNames: seq[string]): string =
   let declBlock = decls.join("\n")
 
   result = """
-(() => {
+function """ & fnName & """() {
   "use strict";
-  // BigInt-safe stringify for values and console payloads
   const __replacer = (k, v) => (typeof v === 'bigint' ? {__bigint: v.toString()} : v);
 
-  // Console -> Nim logger (implemented via jsLog below)
   const console = {
     log: (...a) => jsLog("log", JSON.stringify(a, __replacer)),
     warn: (...a) => jsLog("warn", JSON.stringify(a, __replacer)),
     error: (...a) => jsLog("error", JSON.stringify(a, __replacer)),
   };
 
-  // Handy helper (kept for backwards compatibility)
   const getArgOr = (k, defVal) => {
     const v = args[k];
     return (typeof v === 'undefined') ? defVal : v;
@@ -76,7 +72,6 @@ proc buildEnvelopeSource(code: string, argNames: seq[string]): string =
   const __args    = new Proxy({}, { get(_, k) { return getArg(k) } });
   const __context = new Proxy({}, { get(_, k) { return getContext(k) } });
 
-  // Locals for declared/provided code args (so user can write `arg`, not `args.arg`)
   """ & declBlock & """
 
   try {
@@ -88,7 +83,7 @@ proc buildEnvelopeSource(code: string, argNames: seq[string]): string =
     const msg = (e && e.stack) ? e.stack : String(e);
     return JSON.stringify({ k: "error", v: { message: String(e && e.message || e), stack: msg } });
   }
-})()
+}
 """
 
 proc env(ctx: ptr JSContext): EvalEnv =
@@ -223,94 +218,134 @@ proc envelopeToValue(env: JsonNode, expectedType: string): Value =
     return Value(kind: fkJson, j: jval)
   else:
     return Value(kind: fkNone)
+proc ensureSceneJs(scene: InterpretedFrameScene) =
+  if scene.jsReady: return
+  scene.js = newQuickJS()
+  # Register bridge functions ONCE per scene/context
+  scene.js.registerFunction("getState", jsGetState)
+  scene.js.registerFunction("getArg", jsGetArg)
+  scene.js.registerFunction("getContext", jsGetContext)
+  scene.js.registerFunction("jsLog", jsLog)
 
-proc evalWithEnv(scene: InterpretedFrameScene, context: ExecutionContext, nodeId: NodeId,
-                 code: string, args: Table[string, Value], argTypes: Table[string, string],
-                 outputTypes: Table[string, string], targetField: string): Value =
-  when defined(debug):
-    if scene.frameConfig.debug:
-      echo "JS snippet (node ", nodeId.int, "): ", code
+  # Initialize registries
+  scene.jsFuncNameByNode = initTable[NodeId, string]()
+  scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+  scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+  scene.jsReady = true
 
-  var js: QuickJS
-  var installed = false
+proc uniqueCodeFnName(scene: InterpretedFrameScene, nodeId: NodeId): string =
+  "__frameos_code_" & $(nodeId.int)
 
-  try:
-    js = newQuickJS()
+proc uniqueCodeInlineFnName(scene: InterpretedFrameScene, nodeId: NodeId, argName: string): string =
+  "__frameos_code_inline_" & $(nodeId.int) & "_" & toJsIdent(argName)
 
-    # Attach per-call environment
-    let e = EvalEnv(
-      scene: scene,
-      context: context,
-      nodeId: nodeId,
-      args: args,
-      argTypes: argTypes,
-      outputTypes: outputTypes,
-      targetField: targetField
-    )
-    evalEnvByCtx[js.context] = e
-    installed = true
+proc uniqueAppInlineFnName(scene: InterpretedFrameScene, nodeId: NodeId, fieldName: string): string =
+  "__frameos_app_inline_" & $(nodeId.int) & "_" & toJsIdent(fieldName)
 
-    # Register bridge functions
-    js.registerFunction("getState", jsGetState)
-    js.registerFunction("getArg", jsGetArg)
-    js.registerFunction("getContext", jsGetContext)
-    js.registerFunction("jsLog", jsLog)
-    echo "!!! evalWithEnv code: ", code
+proc compileCodeFn(scene: InterpretedFrameScene, node: DiagramNode) =
+  ensureSceneJs(scene)
 
-    # Evaluate compiled envelope (BigInt-safe + error-aware)
-    var argNames: seq[string] = @[]
-    for k, _ in argTypes: argNames.add(k)
-    for k, _ in args:
+  # Gather code snippet
+  var codeSnippet = ""
+  if node.data.hasKey("codeJS") and node.data["codeJS"].kind == JString:
+    codeSnippet = node.data["codeJS"].getStr()
+  elif node.data.hasKey("code") and node.data["code"].kind == JString:
+    codeSnippet = node.data["code"].getStr()
+
+  # Compute a *superset* of possible arg names so bare-ident args get local consts.
+  var argNames: seq[string] = @[]
+  if node.data.hasKey("codeArgs") and node.data["codeArgs"].kind == JArray:
+    for argDef in node.data["codeArgs"]:
+      if argDef.kind == JObject:
+        let nm = argDef{"name"}.getStr()
+        if nm.len > 0 and nm notin argNames: argNames.add(nm)
+
+  if scene.codeInputsForNodeId.hasKey(node.id):
+    for k, _ in scene.codeInputsForNodeId[node.id]:
       if k notin argNames: argNames.add(k)
 
-    # Evaluate compiled envelope (BigInt-safe + error-aware)
-    let src = buildEnvelopeSource(code, argNames)
-    let envelopeJson = js.eval(src)
-    echo "!!! evalWithEnv envelopeJson: ", envelopeJson
+  if scene.codeInlineInputsForNodeId.hasKey(node.id):
+    for k, _ in scene.codeInlineInputsForNodeId[node.id]:
+      if k notin argNames: argNames.add(k)
 
-    # Decide expected type (if node has an explicit target/output type)
-    var expectedType = ""
-    if targetField.len > 0 and outputTypes.hasKey(targetField):
-      expectedType = outputTypes[targetField]
+  let fnName = uniqueCodeFnName(scene, node.id)
+  let src = buildEnvelopeFunction(codeSnippet, argNames, fnName)
+  discard scene.js.eval(src)
+  scene.jsFuncNameByNode[node.id] = fnName
 
-    # Parse the envelope
-    var parsed: JsonNode
-    try:
-      parsed = parseJson(envelopeJson)
-    except CatchableError:
-      # Extremely defensive: if JSON parsing fails, bubble as string
-      return Value(kind: fkString, s: envelopeJson)
+proc compileCodeInlineFn(scene: InterpretedFrameScene, nodeId: NodeId, argName: string, snippet: string) =
+  ensureSceneJs(scene)
+  let fnName = uniqueCodeInlineFnName(scene, nodeId, argName)
+  let src = buildEnvelopeFunction(snippet, @[], fnName)
+  discard scene.js.eval(src)
+  if not scene.codeInlineFuncNameByNodeArg.hasKey(nodeId):
+    scene.codeInlineFuncNameByNodeArg[nodeId] = initTable[string, string]()
+  scene.codeInlineFuncNameByNodeArg[nodeId][argName] = fnName
 
-    # If the JS side reported an error, log and return a safe default
-    let kind = parsed{"k"}.getStr()
-    if kind == "error":
-      if expectedType.len > 0:
-        if expectedType == "string":
-          return Value(kind: fkString, s: "") # nicer fallback than "null"
-        return valueFromJsonByType(newJNull(), expectedType)
+proc compileAppInlineFn(scene: InterpretedFrameScene, nodeId: NodeId, fieldName: string, snippet: string) =
+  ensureSceneJs(scene)
+  let fnName = uniqueAppInlineFnName(scene, nodeId, fieldName)
+  let src = buildEnvelopeFunction(snippet, @[], fnName)
+  discard scene.js.eval(src)
+  if not scene.appInlineFuncNameByNodeArg.hasKey(nodeId):
+    scene.appInlineFuncNameByNodeArg[nodeId] = initTable[string, string]()
+  scene.appInlineFuncNameByNodeArg[nodeId][fieldName] = fnName
 
-      let msg = parsed{"v"}{"message"}.getStr()
-      let stk = parsed{"v"}{"stack"}.getStr()
-      scene.logger.log(%*{
-        "event": "interpreter:jsError",
-        "sceneId": scene.id.string,
-        "nodeId": nodeId.int,
-        "message": msg,
-        "stack": stk
-      })
-      # Respect explicit expected type with null, or otherwise "none"
-      if expectedType.len > 0:
-        return valueFromJsonByType(newJNull(), expectedType)
-      return Value(kind: fkNone)
+proc callCompiledFn(scene: InterpretedFrameScene,
+                    context: ExecutionContext,
+                    nodeId: NodeId,
+                    fnName: string,
+                    args: Table[string, Value],
+                    argTypes: Table[string, string],
+                    outputTypes: Table[string, string],
+                    targetField: string): Value =
+  ## Set EvalEnv for this scene context, call fnName(), parse envelope, coerce.
+  var expectedType = ""
+  if targetField.len > 0 and outputTypes.hasKey(targetField):
+    expectedType = outputTypes[targetField]
 
-    # Normal conversion path
-    result = envelopeToValue(parsed, expectedType)
+  let e = EvalEnv(
+    scene: scene,
+    context: context,
+    nodeId: nodeId,
+    args: args,
+    argTypes: argTypes,
+    outputTypes: outputTypes,
+    targetField: targetField
+  )
 
+  evalEnvByCtx[scene.js.context] = e
+  var envelopeJson = ""
+  try:
+    envelopeJson = scene.js.eval(fnName & "()")
   finally:
-    if installed and evalEnvByCtx.hasKey(js.context):
-      evalEnvByCtx.del(js.context)
-    if js.runtime != nil or js.context != nil:
-      js.close()
+    if evalEnvByCtx.hasKey(scene.js.context):
+      evalEnvByCtx.del(scene.js.context)
+
+  var parsed: JsonNode
+  try:
+    parsed = parseJson(envelopeJson)
+  except CatchableError:
+    return Value(kind: fkString, s: envelopeJson)
+
+  let kind = parsed{"k"}.getStr()
+  if kind == "error":
+    if expectedType.len > 0:
+      if expectedType == "string": return Value(kind: fkString, s: "")
+      return valueFromJsonByType(newJNull(), expectedType)
+
+    scene.logger.log(%*{
+      "event": "interpreter:jsError",
+      "sceneId": scene.id.string,
+      "nodeId": nodeId.int,
+      "message": parsed{"v"}{"message"}.getStr(),
+      "stack": parsed{"v"}{"stack"}.getStr()
+    })
+    if expectedType.len > 0:
+      return valueFromJsonByType(newJNull(), expectedType)
+    return Value(kind: fkNone)
+
+  return envelopeToValue(parsed, expectedType)
 
 var globalNodeCounter = 0
 var nodeMappingTable = initTable[string, NodeId]()
@@ -463,7 +498,17 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
             let emptyArgs = initTable[string, Value]()
             let emptyArgTypes = initTable[string, string]()
             let emptyOutputs = initTable[string, string]()
-            let vIn = evalWithEnv(self, context, currentNodeId, codeSnippet, emptyArgs, emptyArgTypes, emptyOutputs, inputName)
+            var fnName = ""
+            if self.appInlineFuncNameByNodeArg.hasKey(currentNodeId) and
+              self.appInlineFuncNameByNodeArg[currentNodeId].hasKey(inputName):
+              fnName = self.appInlineFuncNameByNodeArg[currentNodeId][inputName]
+            else:
+              # defensive: compile on demand (should be precompiled already)
+              compileAppInlineFn(self, currentNodeId, inputName, codeSnippet)
+              fnName = self.appInlineFuncNameByNodeArg[currentNodeId][inputName]
+
+            let vIn = callCompiledFn(self, context, currentNodeId, fnName,
+                                    emptyArgs, emptyArgTypes, emptyOutputs, inputName)
             apps.setAppField(keyword, app, inputName, vIn)
             if cacheEnabled and cacheInputEnabled:
               builtInputKey[inputName] = valueToKeyJson(vIn)
@@ -621,7 +666,16 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
             let emptyArgs = initTable[string, Value]()
             let emptyArgTypes = initTable[string, string]()
             let emptyOutputs = initTable[string, string]()
-            let vIn = evalWithEnv(self, context, currentNodeId, snippet, emptyArgs, emptyArgTypes, emptyOutputs, argName)
+            var fnName = ""
+            if self.codeInlineFuncNameByNodeArg.hasKey(currentNodeId) and
+              self.codeInlineFuncNameByNodeArg[currentNodeId].hasKey(argName):
+              fnName = self.codeInlineFuncNameByNodeArg[currentNodeId][argName]
+            else:
+              compileCodeInlineFn(self, currentNodeId, argName, snippet)
+              fnName = self.codeInlineFuncNameByNodeArg[currentNodeId][argName]
+
+            let vIn = callCompiledFn(self, context, currentNodeId, fnName,
+                                    emptyArgs, emptyArgTypes, emptyOutputs, argName)
             args[argName] = vIn
             if not argTypes.hasKey(argName):
               argTypes[argName] = ""
@@ -685,7 +739,15 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
             "nodeId": currentNodeId.int,
             "nodeType": "code"
           })
-          let fresh = evalWithEnv(self, context, currentNodeId, codeSnippet, args, argTypes, outputTypes, targetField)
+          var fnName = ""
+          if self.jsFuncNameByNode.hasKey(currentNodeId):
+            fnName = self.jsFuncNameByNode[currentNodeId]
+          else:
+            # defensive: compile on demand (should be precompiled already)
+            compileCodeFn(self, currentNode)
+            fnName = self.jsFuncNameByNode[currentNodeId]
+
+          let fresh = callCompiledFn(self, context, currentNodeId, fnName, args, argTypes, outputTypes, targetField)
           result = fresh
           valTab[currentNodeId] = fresh
           cacheValuesByScene[self.id] = valTab
@@ -696,7 +758,15 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
             keyTab[currentNodeId] = builtInputKey
             cacheKeysByScene[self.id] = keyTab
       else:
-        let fresh = evalWithEnv(self, context, currentNodeId, codeSnippet, args, argTypes, outputTypes, targetField)
+        var fnName = ""
+        if self.jsFuncNameByNode.hasKey(currentNodeId):
+          fnName = self.jsFuncNameByNode[currentNodeId]
+        else:
+          # defensive: compile on demand (should be precompiled already)
+          compileCodeFn(self, currentNode)
+          fnName = self.jsFuncNameByNode[currentNodeId]
+
+        let fresh = callCompiledFn(self, context, currentNodeId, fnName, args, argTypes, outputTypes, targetField)
         if asDataNode:
           result = fresh
     of "event":
@@ -765,7 +835,16 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
             let emptyArgs = initTable[string, Value]()
             let emptyArgTypes = initTable[string, string]()
             let emptyOutputs = initTable[string, string]()
-            let v = evalWithEnv(self, context, currentNodeId, codeSnippet, emptyArgs, emptyArgTypes, emptyOutputs, inputName)
+            var fnName = ""
+            if self.appInlineFuncNameByNodeArg.hasKey(currentNodeId) and
+              self.appInlineFuncNameByNodeArg[currentNodeId].hasKey(inputName):
+              fnName = self.appInlineFuncNameByNodeArg[currentNodeId][inputName]
+            else:
+              compileAppInlineFn(self, currentNodeId, inputName, codeSnippet)
+              fnName = self.appInlineFuncNameByNodeArg[currentNodeId][inputName]
+
+            let v = callCompiledFn(self, context, currentNodeId, fnName,
+                                  emptyArgs, emptyArgTypes, emptyOutputs, inputName)
             childScene.state[inputName] = valueToJson(v)
           except Exception as e:
             self.logger.log(%*{
@@ -834,6 +913,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     codeInlineInputsForNodeId: initTable[NodeId, Table[string, string]](),
     sceneNodes: initTable[NodeId, FrameScene](),
     publicStateFields: exportedScene.publicStateFields,
+    jsReady: false,
+    jsFuncNameByNode: initTable[NodeId, string](),
+    codeInlineFuncNameByNodeArg: initTable[NodeId, Table[string, string]](),
+    appInlineFuncNameByNodeArg: initTable[NodeId, Table[string, string]]()
   )
   echo "🚀 🚀 Initialized interpreted scene: ", sceneId.string
   scene.execNode = proc(nodeId: NodeId, context: ExecutionContext) =
@@ -961,6 +1044,21 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     logger.log(%*{"event": "initInterpretedEdge:ignored", "sceneId": scene.id, "edgeId": edge.id.int,
         "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
         "targetHandle": edge.targetHandle})
+  ## Ensure one JS context per scene and precompile functions
+  ensureSceneJs(scene)
+
+  # Precompile functions for inline app/scene inputs (for all nodes that have them)
+  for nodeId, inlineMap in scene.appInlineInputsForNodeId:
+    for inputName, snippet in inlineMap.pairs:
+      compileAppInlineFn(scene, nodeId, inputName, snippet)
+
+  # Precompile functions for code nodes and their inline args
+  for node in exportedScene.nodes:
+    if node.nodeType == "code":
+      compileCodeFn(scene, node)
+      if scene.codeInlineInputsForNodeId.hasKey(node.id):
+        for argName, snippet in scene.codeInlineInputsForNodeId[node.id].pairs:
+          compileCodeInlineFn(scene, node.id, argName, snippet)
 
   ## Pass 3: initialize apps AFTER we've wired fields via edges
   for node in exportedScene.nodes:

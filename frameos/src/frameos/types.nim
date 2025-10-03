@@ -216,15 +216,20 @@ type
   InterpretedFrameScene* = ref object of FrameScene
     nodes*: Table[NodeId, DiagramNode]
     edges*: seq[DiagramEdge]
-    nextNodeIds*: Table[NodeId, NodeId]         # mapping from current node id to next node id for quick lookup
+    nextNodeIds*: Table[NodeId, NodeId] # mapping from current node id to next node id for quick lookup
     eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
-    appsByNodeId*: Table[NodeId, AppRoot]       # mapping from node id to instantiated app for quick lookup
+    appsByNodeId*: Table[NodeId, AppRoot] # mapping from node id to instantiated app for quick lookup
     appInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from node id to app input name to connected node id
-    appInlineInputsForNodeId*: Table[NodeId, Table[string, string]] # mapping from node id to app input name to inline code
+    appInlineInputsForNodeId*: Table[NodeId, Table[string, string]]            # mapping from node id to app input name to inline code
     codeInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from code node id to code arg name to connected node id
     codeInlineInputsForNodeId*: Table[NodeId, Table[string, string]] # mapping from code node id to code arg name to inline code
-    sceneNodes*: Table[NodeId, FrameScene]      # cache of instantiated child scenes
+    sceneNodes*: Table[NodeId, FrameScene]                                     # cache of instantiated child scenes
     publicStateFields*: seq[StateField]
+    js*: QuickJS
+    jsReady*: bool
+    jsFuncNameByNode*: Table[NodeId, string]                                   # code-node -> function name
+    codeInlineFuncNameByNodeArg*: Table[NodeId, Table[string, string]]         # code-node arg -> function name
+    appInlineFuncNameByNodeArg*: Table[NodeId, Table[string, string]]          # app/scene field inline -> function name
 
   # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object
