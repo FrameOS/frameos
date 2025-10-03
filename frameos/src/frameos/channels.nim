@@ -22,6 +22,7 @@ var logChannel*: Channel[(float, JsonNode)]
 logChannel.open()
 
 proc log*(event: JsonNode) =
+  echo "📝 Log event: ", event
   logChannel.send((epochTime(), event))
 
 proc debug*(message: string) =

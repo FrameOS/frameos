@@ -1,4 +1,5 @@
 import json, jester, pixie, hashes, locks
+import lib/burrito
 
 type
   # Parsed config.json
@@ -224,6 +225,9 @@ type
     codeInlineInputsForNodeId*: Table[NodeId, Table[string, string]] # mapping from code node id to code arg name to inline code
     sceneNodes*: Table[NodeId, FrameScene]      # cache of instantiated child scenes
     publicStateFields*: seq[StateField]
+    # jsByCodeNodeId*: Table[NodeId, QuickJS]
+    # jsByInlineApp*: Table[NodeId, Table[string, QuickJS]]  # app node id -> inputName -> ctx
+    # jsByInlineCode*: Table[NodeId, Table[string, QuickJS]] # code node id -> argName -> ctx
 
   # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object

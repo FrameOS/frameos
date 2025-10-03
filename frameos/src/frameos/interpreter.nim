@@ -14,6 +14,35 @@ var currentEvalArgTypes: Table[string, string] = initTable[string, string]()
 var currentEvalOutputTypes: Table[string, string] = initTable[string, string]()
 var currentEvalTargetField: string = ""
 
+# Convert Nim JsonNode -> JSValue (objects/arrays included).
+proc jsonToJS(ctx: ptr JSContext, j: JsonNode): JSValue =
+  if j.isNil: return jsNull(ctx)
+  case j.kind
+  of JNull: return jsNull(ctx)
+  of JBool: return nimBoolToJS(ctx, j.getBool())
+  of JInt:
+    let v = j.getInt()
+    if v >= low(int32).int64 and v <= high(int32).int64:
+      return nimIntToJS(ctx, v.int32)
+    else:
+      return nimFloatToJS(ctx, v.float64) # QuickJS has no public int64 binding here
+  of JFloat: return nimFloatToJS(ctx, j.getFloat())
+  of JString: return nimStringToJS(ctx, j.getStr())
+  of JObject:
+    let obj = JS_NewObject(ctx)
+    for k in j.keys:
+      let child = jsonToJS(ctx, j[k]) # consumed by SetProperty
+      discard JS_SetPropertyStr(ctx, obj, k.cstring, child)
+    return obj
+  of JArray:
+    let arr = JS_NewArray(ctx)
+    var idx: uint32 = 0
+    for el in j.elems:
+      let child = jsonToJS(ctx, el) # consumed by SetPropertyUint32
+      discard JS_SetPropertyUint32(ctx, arr, idx, child)
+      inc idx
+    return arr
+
 proc evalWithEnv(scene: InterpretedFrameScene, context: ExecutionContext, nodeId: NodeId,
                  code: string, args: Table[string, Value], argTypes: Table[string, string],
                  outputTypes: Table[string, string], targetField: string): Value =
@@ -34,12 +63,9 @@ proc evalWithEnv(scene: InterpretedFrameScene, context: ExecutionContext, nodeId
     var js = newQuickJS()
     js.registerFunction("getState") do (ctx: ptr JSContext, k: JSValue) -> JSValue:
       let key = toNimString(ctx, k)
-      echo "🔥 🔥 🔥 🔥 🔥 accessing state key: ", key
       if currentEvalScene.state.hasKey(key):
-        let msg = currentEvalScene.state[key].getStr()
-        echo "🔥 🔥 🔥 🔥 🔥 response as a string: ", msg
-        return nimStringToJS(ctx, msg)
-      return nimStringToJS(ctx, "No state for key: " & key)
+        return jsonToJS(ctx, currentEvalScene.state[key])
+      return jsNull(ctx)
 
     echo js.eval("const state = new Proxy({}, { get(_, k) { return getState(k) } });")
 
@@ -550,8 +576,12 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     codeInputsForNodeId: initTable[NodeId, Table[string, NodeId]](),
     codeInlineInputsForNodeId: initTable[NodeId, Table[string, string]](),
     sceneNodes: initTable[NodeId, FrameScene](),
-    publicStateFields: exportedScene.publicStateFields
+    publicStateFields: exportedScene.publicStateFields,
+    # jsByCodeNodeId: initTable[NodeId, QuickJS](),
+    # jsByInlineApp: initTable[NodeId, Table[string, QuickJS]](),
+    # jsByInlineCode: initTable[NodeId, Table[string, QuickJS]]()
   )
+  echo "🚀 🚀 Initialized interpreted scene: ", sceneId.string
   scene.execNode = proc(nodeId: NodeId, context: ExecutionContext) =
     discard scene.runNode(nodeId, context)
   scene.getDataNode = proc(nodeId: NodeId, context: ExecutionContext): Value =
@@ -568,6 +598,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       scene.state[field.name] = valueToJson(valueFromJsonByType(%*(field.value), field.fieldType))
   stateFieldTypesByScene[sceneId] = typeMap
 
+  echo "🎯 🎯 Scene initial state: ", scene.state
+
   ## Pass 1: register nodes & event listeners (do not init apps yet)
   for node in exportedScene.nodes:
     scene.nodes[node.id] = node
@@ -580,6 +612,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       if not scene.eventListeners.hasKey(eventName):
         scene.eventListeners[eventName] = @[]
       scene.eventListeners[eventName].add(node.id)
+
+  echo "🎯 🎯 Scene nodes registered: ", scene.nodes.len
 
   ## Pass 2: process edges (next/prev, app inputs, and node-field wiring)
   for edge in exportedScene.edges:
@@ -722,6 +756,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         loopKey: "."
       )
       runEvent(child, initCtx)
+
+  echo "🎯 🎯 Scene apps initialized: ", scene.appsByNodeId.len
 
   logger.log(%*{"event": "initInterpretedDone", "sceneId": sceneId.string, "nodes": scene.nodes.len,
       "edges": scene.edges.len, "eventListeners": scene.eventListeners.len, "apps": scene.appsByNodeId.len})
