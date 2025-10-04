@@ -1,12 +1,11 @@
-# packages/vendor/quickjs.nix
 { pkgs }:
 pkgs.stdenv.mkDerivation rec {
   pname = "quickjs";
-  version = "2025-04-26";
+  version = "2025-09-13";
 
   src = pkgs.fetchurl {
     url  = "https://bellard.org/quickjs/quickjs-${version}.tar.xz";
-    hash = "sha256-LyAHTCUWbvb3gfOBxQ1XtQLLhdRw1jmrzOu+95VMg78=";
+    hash = "sha256-bx8yKuo7s6kIWNuFyf5xcBP95N99/K/i9X549btLSgw=";
   };
 
   nativeBuildInputs = [ pkgs.gnumake pkgs.pkg-config ];

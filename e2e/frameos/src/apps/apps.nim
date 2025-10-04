@@ -1,5 +1,4 @@
 import frameos/types
-import frameos/values
 
 proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   case keyword:
