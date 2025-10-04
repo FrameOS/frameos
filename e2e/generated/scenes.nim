@@ -14,6 +14,7 @@ import scenes/scene_dataNewImageNext as scene_dataNewImageNext
 import scenes/scene_dataQR as scene_dataQR
 import scenes/scene_dataResize as scene_dataResize
 import scenes/scene_logicIfElse as scene_logicIfElse
+import scenes/scene_logicSetAsState as scene_logicSetAsState
 import scenes/scene_renderColorFlow as scene_renderColorFlow
 import scenes/scene_renderColorImage as scene_renderColorImage
 import scenes/scene_renderColorSplit as scene_renderColorSplit
@@ -47,6 +48,7 @@ const sceneOptions* = [
   ("dataQR".SceneId, "QR"),
   ("dataResize".SceneId, "Resize image"),
   ("logicIfElse".SceneId, "If Else"),
+  ("logicSetAsState".SceneId, "Set as State"),
   ("renderColorFlow".SceneId, "Color"),
   ("renderColorImage".SceneId, "Color"),
   ("renderColorSplit".SceneId, "Color"),
@@ -80,6 +82,7 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result["dataQR".SceneId] = scene_dataQR.exportedScene
   result["dataResize".SceneId] = scene_dataResize.exportedScene
   result["logicIfElse".SceneId] = scene_logicIfElse.exportedScene
+  result["logicSetAsState".SceneId] = scene_logicSetAsState.exportedScene
   result["renderColorFlow".SceneId] = scene_renderColorFlow.exportedScene
   result["renderColorImage".SceneId] = scene_renderColorImage.exportedScene
   result["renderColorSplit".SceneId] = scene_renderColorSplit.exportedScene
