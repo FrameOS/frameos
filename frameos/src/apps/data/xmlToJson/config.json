@@ -1,0 +1,20 @@
+{
+  "name": "XML to JSON",
+  "description": "Convert XML into a JSON tree using Nim's xmlparser",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "xml",
+      "type": "string",
+      "required": true,
+      "label": "XML"
+    }
+  ],
+  "output": [
+    {
+      "name": "json",
+      "type": "json"
+    }
+  ]
+}
