@@ -683,7 +683,93 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     of "source":
       raise newException(Exception, "Source nodes not implemented in interpreted scenes yet")
     of "dispatch":
-      raise newException(Exception, "Dispatch nodes not implemented in interpreted scenes yet")
+      let eventName = currentNode.data{"keyword"}.getStr()
+      self.logger.log(%*{
+        "event": "interpreter:dispatch:run",
+        "sceneId": self.id,
+        "nodeId": currentNodeId.int,
+        "eventName": eventName
+      })
+
+      var payload =
+        if currentNode.data.hasKey("config") and currentNode.data["config"].kind == JObject:
+          copy(currentNode.data["config"])
+        else:
+          %*{}
+
+      if payload.isNil or payload.kind != JObject:
+        payload = %*{}
+
+      if self.appInputsForNodeId.hasKey(currentNodeId):
+        let connected = self.appInputsForNodeId[currentNodeId]
+        for (inputName, producerNodeId) in connected.pairs:
+          if self.nodes.hasKey(producerNodeId):
+            try:
+              let vIn = runNode(self, producerNodeId, context, asDataNode = true)
+              payload[inputName] = valueToJson(vIn)
+            except Exception as e:
+              self.logger.log(%*{
+                "event": "interpreter:dispatch:setField:error",
+                "sceneId": self.id,
+                "nodeId": currentNodeId.int,
+                "input": inputName,
+                "producer": producerNodeId.int,
+                "error": $e.msg,
+                "stacktrace": e.getStackTrace()
+              })
+
+      if self.appInlineInputsForNodeId.hasKey(currentNodeId):
+        let inlineConnected = self.appInlineInputsForNodeId[currentNodeId]
+        for (inputName, codeSnippet) in inlineConnected.pairs:
+          try:
+            let vIn = evalInline(self, context, currentNodeId,
+                                 inputName, codeSnippet,
+                                 self.appInlineFuncNameByNodeArg, compileAppInlineFn,
+                                 inputName)
+            payload[inputName] = valueToJson(vIn)
+          except Exception as e:
+            self.logger.log(%*{
+              "event": "interpreter:dispatch:setField:error:inlineCode",
+              "sceneId": self.id,
+              "nodeId": currentNodeId.int,
+              "input": inputName,
+              "code": codeSnippet,
+              "error": $e.msg,
+              "stacktrace": e.getStackTrace()
+            })
+
+      var finalPayload = payload
+      if eventName == "setSceneState":
+        var statePayload = %*{}
+        var rootPayload = %*{}
+        var typeMap = initTable[string, string]()
+        if stateFieldTypesByScene.hasKey(self.id):
+          typeMap = stateFieldTypesByScene[self.id]
+        for key in payload.keys:
+          let valueNode = payload[key]
+          if typeMap.hasKey(key):
+            let typedValue = valueFromJsonByType(valueNode, typeMap[key])
+            statePayload[key] = valueToJson(typedValue)
+          else:
+            if key == "render":
+              let typedValue = valueFromJsonByType(valueNode, "boolean")
+              rootPayload[key] = valueToJson(typedValue)
+            else:
+              statePayload[key] = copy(valueNode)
+        if statePayload.len > 0:
+          rootPayload["state"] = statePayload
+        finalPayload = rootPayload
+
+      self.logger.log(%*{
+        "event": "interpreter:dispatch:send",
+        "sceneId": self.id,
+        "nodeId": currentNodeId.int,
+        "eventName": eventName,
+        "payload": finalPayload
+      })
+      sendEvent(eventName, finalPayload)
+      if asDataNode:
+        result = VJson(copy(finalPayload))
     of "code":
       # Parse outputs (types and default target)
       var outputTypes = initTable[string, string]()
