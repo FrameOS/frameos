@@ -43,6 +43,8 @@ jobs:
           cd frameos
           nimble install -d
           nimble setup
+          cd ../e2e
+          python makeapploaders.py
 
       - name: FrameOS nim tests
         run: |

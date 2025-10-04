@@ -64,7 +64,6 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     # 1) Imports
     imports: list[str] = [
         "import frameos/types",
-        "import frameos/values",
     ]
     used_aliases: set[str] = set()
     items = []

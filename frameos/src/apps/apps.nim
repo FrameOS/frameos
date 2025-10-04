@@ -1,5 +1,4 @@
 import frameos/types
-import frameos/values
 import apps/data/beRecycle/app_loader as data_beRecycle_loader
 import apps/data/browserSnapshot/app_loader as data_browserSnapshot_loader
 import apps/data/clock/app_loader as data_clock_loader
