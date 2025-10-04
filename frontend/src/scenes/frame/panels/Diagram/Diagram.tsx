@@ -15,6 +15,7 @@ import { frameLogic } from '../../frameLogic'
 import {
   MouseEvent as ReactMouseEvent,
   TouchEvent as ReactTouchEvent,
+  WheelEvent as ReactWheelEvent,
   useCallback,
   useEffect,
   useRef,
@@ -161,6 +162,14 @@ function Diagram_({ sceneId }: DiagramProps) {
     [reactFlowInstance, nodes, edges, setNodes, addEdge]
   )
 
+  const onWheelCapture = useCallback((event: ReactWheelEvent) => {
+    const target = event.target as HTMLElement | null
+    const focusedTextarea = target?.closest('textarea')
+    if (focusedTextarea && focusedTextarea === document.activeElement) {
+      event.stopPropagation()
+    }
+  }, [])
+
   useEffect(() => {
     if (fitViewCounter > 0) {
       reactFlowInstance?.fitView({ maxZoom: 1, padding: 0.2 })
@@ -181,6 +190,7 @@ function Diagram_({ sceneId }: DiagramProps) {
           onConnectEnd={onConnectEnd}
           onDrop={onDrop}
           onDragOver={onDragOver}
+          onWheelCapture={onWheelCapture}
           minZoom={0.2}
           maxZoom={4}
           proOptions={{ hideAttribution: true }}
