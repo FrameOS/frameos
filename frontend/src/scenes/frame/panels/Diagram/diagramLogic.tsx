@@ -54,6 +54,8 @@ export interface NewNodePicker {
   nodeId: string
 }
 
+export type CodeNodeLanguage = 'js' | 'nim'
+
 export const diagramLogic = kea<diagramLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Diagram', 'diagramLogic']),
   props({} as DiagramLogicProps),
@@ -232,7 +234,7 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
     codeNodeLanguage: [
       (s) => [s.scene],
-      (scene: FrameScene | null): 'js' | 'nim' => (scene?.settings?.execution === 'interpreted' ? 'js' : 'nim'),
+      (scene: FrameScene | null): CodeNodeLanguage => (scene?.settings?.execution === 'interpreted' ? 'js' : 'nim'),
     ],
   }),
   sharedListeners(({ selectors, actions, values, props }) => ({
