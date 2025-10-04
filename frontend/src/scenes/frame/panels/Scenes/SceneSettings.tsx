@@ -49,13 +49,8 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
             >
               <ColorInput name="backgroundColor" className="!p-0" style={{ width: 70 }} placeholder="#ffffff" />
             </Field>
-            <Field
-              className="flex flex-row gap-2 w-full justify-between"
-              name="execution"
-              label="Execution"
-            >
+            <Field className="flex flex-row gap-2 w-full justify-between" name="execution" label="Execution">
               <select name="execution" className="border rounded px-1 py-0.5">
-                <option value="auto">auto</option>
                 <option value="compiled">compiled</option>
                 <option value="interpreted">interpreted</option>
               </select>

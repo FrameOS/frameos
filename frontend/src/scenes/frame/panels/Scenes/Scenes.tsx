@@ -171,9 +171,14 @@ export function Scenes() {
                       <H6 onClick={() => expandScene(scene.id)} className="cursor-pointer">
                         <span className="cursor-pointer">{scene.name || scene.id}</span>
                         {scene.settings?.execution === 'interpreted' ? (
-                          <Tag className="ml-2" color="teal">
-                            ⚡ fast deploy
-                          </Tag>
+                          <Tooltip
+                            containerClassName="inline-block"
+                            title="This scene is interpreted. It can be deployed without recompilation."
+                          >
+                            <Tag className="ml-2" color="teal">
+                              ⚡
+                            </Tag>
+                          </Tooltip>
                         ) : null}
                         {scene.default ? (
                           <Tag className="ml-2" color="primary">

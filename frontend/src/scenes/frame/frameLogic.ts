@@ -255,11 +255,40 @@ export const frameLogic = kea<frameLogicType>([
     ],
     requiresRecompilation: [
       (s) => [s.frame, s.lastDeploy, s.mode],
-      (frame, lastDeploy, mode) =>
-        !lastDeploy ||
-        (mode === 'nixos' ? FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS).some(
-          (key) => !equal(lastDeploy?.[key as keyof FrameType], frame?.[key as keyof FrameType])
-        ),
+      (frame, lastDeploy, mode) => {
+        if (!lastDeploy) {
+          return true
+        }
+        const fields = (
+          mode === 'nixos' ? FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
+        ).filter((k) => k !== 'scenes')
+        const resp = fields.some((key) => !equal(lastDeploy?.[key as keyof FrameType], frame?.[key as keyof FrameType]))
+        if (resp) {
+          return true
+        }
+        // check scenes separately
+        const currentScenes: FrameScene[] = frame?.scenes ?? []
+        const deployedScenes: FrameScene[] = lastDeploy?.scenes ?? []
+
+        const needRedeploy = currentScenes.filter((scene) => {
+          const deployed = deployedScenes.find((s) => s.id === scene.id)
+          const mode = scene.settings?.execution ?? 'compiled'
+          const deployedMode = deployed?.settings?.execution ?? 'compiled'
+          if (mode === 'interpreted') {
+            return deployed && deployedMode !== 'interpreted'
+          }
+          return !deployed || !equal(scene, deployed)
+        })
+        const needRemoval = deployedScenes.filter((scene) => {
+          return (
+            !currentScenes.find((s) => s.id === scene.id) && (scene.settings?.execution ?? 'compiled') !== 'interpreted'
+          )
+        })
+        if (needRedeploy.length > 0 || needRemoval.length > 0) {
+          return true
+        }
+        return false
+      },
     ],
     defaultScene: [
       (s) => [s.frame, s.frameForm],

@@ -52,5 +52,5 @@
       "dragging": false
     }
   ],
-  "settings": { "backgroundColor": "#149280", "refreshInterval": 3600, "execution": "auto" }
+  "settings": { "backgroundColor": "#149280", "refreshInterval": 3600 }
 }

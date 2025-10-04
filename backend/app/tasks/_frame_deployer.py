@@ -305,7 +305,7 @@ class FrameDeployer:
             f.write(write_apps_nim("../frameos"))
 
         for scene in frame.scenes:
-            execution = scene.get("settings", {}).get("execution", "auto")
+            execution = scene.get("settings", {}).get("execution", "compiled")
             safe_id = re.sub(r'\W+', '', scene.get('id', 'default'))
             if execution == "interpreted":
                 # We're writing them to scenes.json post build
