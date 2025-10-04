@@ -38,11 +38,15 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: FrameOS nim tests
+      - name: FrameOS nim build
         run: |
           cd frameos
           nimble install -d
           nimble setup
+
+      - name: FrameOS nim tests
+        run: |
+          cd frameos
           nimble build
           nimble test
   
