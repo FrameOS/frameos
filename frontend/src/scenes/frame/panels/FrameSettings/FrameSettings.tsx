@@ -4,7 +4,7 @@ import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
-import { frameControlUrl, frameUrl } from '../../../../decorators/frame'
+import { frameControlUrl, frameImageUrl, frameUrl } from '../../../../decorators/frame'
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
@@ -45,6 +45,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const { openLogs } = useActions(panelsLogic({ frameId }))
   const url = frameUrl(frame)
   const controlUrl = frameControlUrl(frame)
+  const imageUrl = frameImageUrl(frame)
 
   const palette = withCustomPalette[frame.device || '']
 
@@ -574,6 +575,10 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   className="text-blue-400 hover:underline"
                 >
                   Control URL
+                </A>
+                {', '}
+                <A href={imageUrl} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
+                  Image URL
                 </A>
               </div>
             </Field>

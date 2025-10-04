@@ -49,6 +49,16 @@ export function frameControlUrl(frame: FrameType): string | null {
     return `${url}?k=${frame.frame_access_key}`
   }
 }
+
+export function frameImageUrl(frame: FrameType): string | null {
+  const url = `http${frame.frame_port % 1000 === 443 ? 's' : ''}://${frame.frame_host}:${frame.frame_port}/image`
+  if (frame.frame_access === 'public' || frame.frame_access === 'protected') {
+    return url
+  } else {
+    return `${url}?k=${frame.frame_access_key}`
+  }
+}
+
 interface FrameConnectionProps {
   frame: FrameType
 }
