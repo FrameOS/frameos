@@ -43,13 +43,12 @@ jobs:
           cd frameos
           nimble install -d
           nimble setup
-          cd ../e2e
-          python makeapploaders.py
+          FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
+          nimble build
 
       - name: FrameOS nim tests
         run: |
           cd frameos
-          nimble build
           nimble test
   
       - name: Visual regression tests

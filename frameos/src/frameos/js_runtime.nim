@@ -4,8 +4,10 @@
 
 import frameos/types
 import frameos/values
+import lib/tz
 import lib/burrito
 import tables, json, strutils
+import chrono, times
 
 # -------------------------
 # Internal evaluation scope
@@ -22,6 +24,7 @@ type
     targetField: string
 
 var evalEnvByCtx = initTable[ptr JSContext, EvalEnv]()
+var tzName = ""
 
 # -------------------------
 # Small string/JS helpers
@@ -68,7 +71,9 @@ proc buildEnvelopeFunction(code: string, argNames: seq[string], fnName: string):
   var decls = newSeq[string]()
   for rawName in argNames:
     let lc = rawName.toLowerAscii
-    if lc in ["state", "args", "context", "console", "getargor"]: continue
+    if lc in ["state", "args", "context", "console", "getargor",
+          "parsets", "format", "now"]:
+      continue
     let ident = toJsIdent(rawName)
     decls.add("const " & ident & " = __args[\"" & jsQuote(rawName) & "\"];")
   let declBlock = decls.join("\n")
@@ -193,6 +198,37 @@ proc jsGetContext(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
     return jsUndefSentinel(ctx)
 
 # -------------------------
+# Chrono proxies exposed to JS
+# -------------------------
+
+proc jsChronoParseTs(ctx: ptr JSContext, fmt: JSValue, text: JSValue): JSValue {.nimcall.} =
+  let fmtStr = toNimString(ctx, fmt)
+  let txtStr = toNimString(ctx, text)
+  try:
+    let ts = chrono.parseTs(fmtStr, txtStr) # chrono timestamp
+    return nimFloatToJS(ctx, ts.float64)
+  except CatchableError as e:
+    raise newException(ValueError, "parseTs failed: " & e.msg)
+
+proc jsChronoFormat(ctx: ptr JSContext, tsVal: JSValue, fmt: JSValue): JSValue {.nimcall.} =
+  let ts = toNimFloat(ctx, tsVal).Timestamp
+  let fmtStr = toNimString(ctx, fmt)
+  if tzName.len == 0:
+    tzName = detectSystemTimeZone()
+  try:
+    let output = format(ts, fmtStr, tzName = tzName)
+    return nimStringToJS(ctx, output)
+  except CatchableError as e:
+    raise newException(ValueError, "format failed: " & e.msg)
+
+proc jsChronoNow(ctx: ptr JSContext): JSValue {.nimcall.} =
+  try:
+    let ts = epochTime()
+    return nimFloatToJS(ctx, ts)
+  except CatchableError as e:
+    raise newException(ValueError, "now failed: " & e.msg)
+
+# -------------------------
 # Envelope <-> Value
 # -------------------------
 
@@ -250,6 +286,9 @@ proc ensureSceneJs*(scene: InterpretedFrameScene) =
   scene.js.registerFunction("getArg", jsGetArg)
   scene.js.registerFunction("getContext", jsGetContext)
   scene.js.registerFunction("jsLog", jsLog)
+  scene.js.registerFunction("parseTs", jsChronoParseTs)
+  scene.js.registerFunction("format", jsChronoFormat)
+  scene.js.registerFunction("now", jsChronoNow)
   discard scene.js.eval("""
   "use strict";
   const __jsReplacer = (k, v) =>

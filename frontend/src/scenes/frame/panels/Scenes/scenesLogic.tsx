@@ -84,6 +84,7 @@ export const scenesLogic = kea<scenesLogicType>([
                 ],
                 edges: [],
                 fields: [],
+                settings: { execution: 'interpreted' },
               },
               values.frameForm
             ),

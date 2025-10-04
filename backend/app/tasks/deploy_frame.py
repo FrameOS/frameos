@@ -217,7 +217,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 await self.log("stdout", "- Finished downloading quickjs")
             # build it
             await self.exec_command(
-                'cd /srv/frameos/vendor/quickjs/quickjs-2025-09-13 && make'
+                'cd /srv/frameos/vendor/quickjs/quickjs-2025-09-13 && make libquickjs.a'
             )
 
             await self.exec_command("mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
