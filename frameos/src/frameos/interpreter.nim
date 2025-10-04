@@ -75,20 +75,14 @@ proc buildEnvelopeFunction(code: string, argNames: seq[string], fnName: string):
   result = """
 function """ & fnName & """() {
   "use strict";
-  const __replacer = (k, v) => (typeof v === 'bigint' ? {__bigint: v.toString()} : v);
-
-  const getArgOr = (k, defVal) => {
-    const v = __args[k];
-    return (typeof v === 'undefined') ? defVal : v;
-  };
-
   """ & declBlock & """
-
   try {
     const __v = ((state, args, context) => (""" & code & """))(__state, __args, __context);
     const __k = (__v === null) ? "null" : (Array.isArray(__v) ? "array" : typeof __v);
-    const json = JSON.stringify({ k: __k, v: __v }, __replacer);
-    return json === undefined ? JSON.stringify({ k: __k }) : json;
+    const json = (typeof __v === 'undefined')
+      ? JSON.stringify({ k: __k })
+      : JSON.stringify({ k: __k, v: __v  }, __jsReplacer);
+    return json;
   } catch (e) {
     const msg = (e && e.stack) ? e.stack : String(e);
     return JSON.stringify({ k: "error", v: { message: String(e && e.message || e), stack: msg } });
@@ -102,6 +96,12 @@ function """ & fnName & """() {
 
 proc env(ctx: ptr JSContext): EvalEnv =
   if evalEnvByCtx.hasKey(ctx): evalEnvByCtx[ctx] else: nil
+
+# Return an object sentinel to represent "undefined" without using JS_UNDEFINED across the C boundary.
+proc jsUndefSentinel(ctx: ptr JSContext): JSValue {.inline.} =
+  let obj = JS_NewObject(ctx)
+  discard JS_SetPropertyStr(ctx, obj, "__frameosUndef", nimBoolToJS(ctx, true))
+  return obj
 
 proc jsLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue {.nimcall.} =
   ## level: "log" | "warn" | "error"; payloadJson: a JSON string created in JS
@@ -122,7 +122,7 @@ proc jsLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue {.
       "nodeId": e.nodeId.int,
       "args": argsJ
     })
-  return jsUndefined(ctx)
+  return jsUndefSentinel(ctx)
 
 # Convert Nim JsonNode -> JSValue (objects/arrays included).
 proc jsonToJS(ctx: ptr JSContext, j: JsonNode): JSValue =
@@ -159,21 +159,26 @@ proc valueToJS(ctx: ptr JSContext, v: Value): JSValue =
 proc jsGetState(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
   let key = toNimString(ctx, k)
   let e = env(ctx)
+  echo "! jsGetState: key='", key, "'"
   if e != nil and e.scene.state.hasKey(key):
+    echo "! jsGetState: found"
     return jsonToJS(ctx, e.scene.state[key])
-  return jsUndefined(ctx)
+  echo "! jsGetState: not found"
+  return jsUndefSentinel(ctx)
+  # this works but is not the right thing
+  # return nimStringToJS(ctx, "")
 
 proc jsGetArg(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
   let key = toNimString(ctx, k)
   let e = env(ctx)
   if e != nil and e.args.hasKey(key):
     return valueToJS(ctx, e.args[key])
-  return jsUndefined(ctx)
+  return jsUndefSentinel(ctx)
 
 proc jsGetContext(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
   let key = toNimString(ctx, k)
   let e = env(ctx)
-  if e == nil: return jsUndefined(ctx)
+  if e == nil: return jsUndefSentinel(ctx)
   case key
   of "loopIndex":
     return nimIntToJS(ctx, e.context.loopIndex.int32)
@@ -189,7 +194,7 @@ proc jsGetContext(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
   of "hasImage":
     return nimBoolToJS(ctx, e.context.hasImage)
   else:
-    return jsUndefined(ctx)
+    return jsUndefSentinel(ctx)
 
 # -------------------------
 # Envelope <-> Value
@@ -251,15 +256,18 @@ proc ensureSceneJs(scene: InterpretedFrameScene) =
   scene.js.registerFunction("jsLog", jsLog)
   discard scene.js.eval("""
   "use strict";
-  const __jsReplacer = (k, v) => (typeof v === 'bigint' ? {__bigint: v.toString()} : v);
+  const __jsReplacer = (k, v) =>
+    (typeof v === 'bigint') ? { __bigint: v.toString() }
+    : (v === undefined ? null : v);
   const console = {
     log: (...a) => jsLog("log", JSON.stringify(a, __jsReplacer)),
     warn: (...a) => jsLog("warn", JSON.stringify(a, __jsReplacer)),
     error: (...a) => jsLog("error", JSON.stringify(a, __jsReplacer)),
   };
-  const __state   = new Proxy({}, { get(_, k) { return getState(k) } });
-  const __args    = new Proxy({}, { get(_, k) { return getArg(k) } });
-  const __context = new Proxy({}, { get(_, k) { return getContext(k) } });
+  const __frameosUnwrap = (v) => (v && v.__frameosUndef === true) ? undefined : v;
+  const __state   = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getState(k))   : undefined; } });
+  const __args    = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getArg(k))     : undefined; } });
+  const __context = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getContext(k)) : undefined; } });
   """)
   # Initialize registries
   scene.jsFuncNameByNode = initTable[NodeId, string]()
@@ -297,6 +305,7 @@ proc compileInlineFn(scene: InterpretedFrameScene,
   ensureSceneJs(scene)
   let fnName = nameBuilder(scene, nodeId, name)
   let src = buildEnvelopeFunction(snippet, @[], fnName)
+  echo "! compileInlineFn: ", src
   discard scene.js.eval(src)
   if not mappingRef.hasKey(nodeId):
     mappingRef[nodeId] = initTable[string, string]()
@@ -332,6 +341,7 @@ proc compileCodeFn(scene: InterpretedFrameScene, node: DiagramNode) =
 
   let fnName = uniqueCodeFnName(scene, node.id)
   let src = buildEnvelopeFunction(codeSnippet, argNames, fnName)
+  echo "! compileCodeFn: ", src
   discard scene.js.eval(src)
   scene.jsFuncNameByNode[node.id] = fnName
 
@@ -371,7 +381,9 @@ proc callCompiledFn(scene: InterpretedFrameScene,
   evalEnvByCtx[scene.js.context] = e
   var envelopeJson = ""
   try:
+    echo "! callCompiledFn: ", fnName
     envelopeJson = scene.js.eval(fnName & "()")
+    echo "! callCompiledFn done"
   finally:
     if evalEnvByCtx.hasKey(scene.js.context):
       evalEnvByCtx.del(scene.js.context)
@@ -566,6 +578,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
   const maxHops = 1000
 
   while currentNodeId != -1.NodeId:
+    echo "! runNode loop at node ", currentNodeId.int, " (hops=", hops, ", asDataNode=", asDataNode, ")"
     inc hops
     if hops > maxHops:
       self.logger.log(%*{
@@ -594,7 +607,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     let nodeType = currentNode.nodeType
     self.logger.log(%*{"event": "interpreter:runNode", "sceneId": self.id, "nodeId": currentNodeId.int,
         "nodeType": nodeType})
-
+    echo "  nodeType: ", nodeType
     case nodeType:
     of "app":
       let keyword = currentNode.data{"keyword"}.getStr()
@@ -679,6 +692,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     of "dispatch":
       raise newException(Exception, "Dispatch nodes not implemented in interpreted scenes yet")
     of "code":
+      echo "! code: ", getCodeSnippet(currentNode)
       # Parse outputs (types and default target)
       var outputTypes = initTable[string, string]()
       var defaultOutputName = ""
@@ -714,7 +728,9 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         for (argName, producerNodeId) in connectedArgs.pairs:
           if self.nodes.hasKey(producerNodeId):
             try:
+              echo "! codeInputsForNodeId: arg ", argName, " from node ", producerNodeId.int
               let vIn = runNode(self, producerNodeId, context, asDataNode = true)
+              echo "! codeInputsForNodeId: got value: ", vIn.repr
               args[argName] = vIn
               if not argTypes.hasKey(argName):
                 argTypes[argName] = ""
@@ -736,10 +752,12 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         let inlineArgs = self.codeInlineInputsForNodeId[currentNodeId]
         for (argName, snippet) in inlineArgs.pairs:
           try:
+            echo "! codeInlineInputsForNodeId: arg ", argName, " with snippet ", snippet
             let vIn = evalInline(self, context, currentNodeId,
                                  argName, snippet,
                                  self.codeInlineFuncNameByNodeArg, compileCodeInlineFn,
                                  argName)
+            echo "! codeInlineInputsForNodeId: got value: ", vIn.repr
             args[argName] = vIn
             if not argTypes.hasKey(argName):
               argTypes[argName] = ""
@@ -765,13 +783,17 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         callCompiledFn(self, context, currentNodeId, fnName, args, argTypes, outputTypes, targetField)
 
       if asDataNode and cacheEnabled:
+        echo "! code: withCache"
         result = withCache(self, currentNodeId,
                            cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
                            builtAnyInput, builtInputKey,
                            %*{"nodeType": "code"},
                            computeFresh)
+        echo "! code: got value: ", result.repr
       else:
+        echo "! code: direct compute"
         let fresh = computeFresh()
+        echo "! code: got value: ", fresh.repr
         if asDataNode:
           result = fresh
 
@@ -863,6 +885,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       currentNodeId = self.nextNodeIds[currentNodeId]
     else:
       currentNodeId = -1.NodeId
+
+    echo "  -> next nodeId: ", currentNodeId.int
 
 # -------------------------
 # Scene wiring helpers
