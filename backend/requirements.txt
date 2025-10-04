@@ -125,7 +125,7 @@ packaging==23.2
     # via
     #   build
     #   pytest
-pillow==9.5.0
+pillow==11.3.0
     # via
     #   -r requirements.in
     #   imagehash

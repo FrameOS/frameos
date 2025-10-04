@@ -9,7 +9,7 @@ honcho
 imagehash
 jwt
 mypy
-pillow==9.5.0
+pillow
 pip-tools
 posthog
 pre-commit
