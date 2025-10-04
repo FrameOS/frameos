@@ -43,6 +43,7 @@ jobs:
           cd frameos
           nimble install -d
           nimble setup
+          nimble build
           nimble test
   
       - name: Visual regression tests
