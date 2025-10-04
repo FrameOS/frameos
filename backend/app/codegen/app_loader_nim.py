@@ -56,7 +56,7 @@ def _default_literal(field_type: str, default: Scalar, required: bool) -> str:
         return "true" if _as_bool(default, False) else "false"
     if field_type == "image":
         # For config defaults, use Option(Image) unless required
-        return "newImage(1,1)" if required else "none(Image)"
+        return "nil" if required else "none(Image)"
     if field_type == "node":
         return "0.NodeId"
     if field_type == "json":

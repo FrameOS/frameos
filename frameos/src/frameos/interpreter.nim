@@ -159,14 +159,9 @@ proc valueToJS(ctx: ptr JSContext, v: Value): JSValue =
 proc jsGetState(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
   let key = toNimString(ctx, k)
   let e = env(ctx)
-  echo "! jsGetState: key='", key, "'"
   if e != nil and e.scene.state.hasKey(key):
-    echo "! jsGetState: found"
     return jsonToJS(ctx, e.scene.state[key])
-  echo "! jsGetState: not found"
   return jsUndefSentinel(ctx)
-  # this works but is not the right thing
-  # return nimStringToJS(ctx, "")
 
 proc jsGetArg(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
   let key = toNimString(ctx, k)
@@ -578,7 +573,6 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
   const maxHops = 1000
 
   while currentNodeId != -1.NodeId:
-    echo "! runNode loop at node ", currentNodeId.int, " (hops=", hops, ", asDataNode=", asDataNode, ")"
     inc hops
     if hops > maxHops:
       self.logger.log(%*{
@@ -607,7 +601,6 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     let nodeType = currentNode.nodeType
     self.logger.log(%*{"event": "interpreter:runNode", "sceneId": self.id, "nodeId": currentNodeId.int,
         "nodeType": nodeType})
-    echo "  nodeType: ", nodeType
     case nodeType:
     of "app":
       let keyword = currentNode.data{"keyword"}.getStr()
@@ -692,7 +685,6 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     of "dispatch":
       raise newException(Exception, "Dispatch nodes not implemented in interpreted scenes yet")
     of "code":
-      echo "! code: ", getCodeSnippet(currentNode)
       # Parse outputs (types and default target)
       var outputTypes = initTable[string, string]()
       var defaultOutputName = ""
@@ -728,9 +720,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         for (argName, producerNodeId) in connectedArgs.pairs:
           if self.nodes.hasKey(producerNodeId):
             try:
-              echo "! codeInputsForNodeId: arg ", argName, " from node ", producerNodeId.int
               let vIn = runNode(self, producerNodeId, context, asDataNode = true)
-              echo "! codeInputsForNodeId: got value: ", vIn.repr
               args[argName] = vIn
               if not argTypes.hasKey(argName):
                 argTypes[argName] = ""
@@ -752,12 +742,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         let inlineArgs = self.codeInlineInputsForNodeId[currentNodeId]
         for (argName, snippet) in inlineArgs.pairs:
           try:
-            echo "! codeInlineInputsForNodeId: arg ", argName, " with snippet ", snippet
             let vIn = evalInline(self, context, currentNodeId,
                                  argName, snippet,
                                  self.codeInlineFuncNameByNodeArg, compileCodeInlineFn,
                                  argName)
-            echo "! codeInlineInputsForNodeId: got value: ", vIn.repr
             args[argName] = vIn
             if not argTypes.hasKey(argName):
               argTypes[argName] = ""
@@ -783,17 +771,13 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         callCompiledFn(self, context, currentNodeId, fnName, args, argTypes, outputTypes, targetField)
 
       if asDataNode and cacheEnabled:
-        echo "! code: withCache"
         result = withCache(self, currentNodeId,
                            cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
                            builtAnyInput, builtInputKey,
                            %*{"nodeType": "code"},
                            computeFresh)
-        echo "! code: got value: ", result.repr
       else:
-        echo "! code: direct compute"
         let fresh = computeFresh()
-        echo "! code: got value: ", fresh.repr
         if asDataNode:
           result = fresh
 
@@ -886,7 +870,6 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     else:
       currentNodeId = -1.NodeId
 
-    echo "  -> next nodeId: ", currentNodeId.int
 
 # -------------------------
 # Scene wiring helpers
@@ -1271,7 +1254,7 @@ proc parseInterpretedScenes*(data: string): void =
         init: init,
         render: render,
         runEvent: runEvent,
-        refreshInterval: refreshInterval,
+        refreshInterval: if refreshInterval > 0.0: refreshInterval else: 300.0,
         backgroundColor: backgroundColor
       )
       loadedScenes[scene.id] = exported
