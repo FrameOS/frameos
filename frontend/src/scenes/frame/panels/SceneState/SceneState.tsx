@@ -255,9 +255,9 @@ export function SceneState(): JSX.Element {
                   <div className="flex items-center gap-1 max-w-full w-full overflow-hidden">
                     <ClipboardDocumentIcon
                       className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block"
-                      onClick={() => copy(stateFieldAccess(field))}
+                      onClick={() => copy(stateFieldAccess(scene, field))}
                     />
-                    <code className="text-sm text-gray-400 break-words truncate">{stateFieldAccess(field)}</code>
+                    <code className="text-sm text-gray-400 break-words truncate">{stateFieldAccess(scene, field)}</code>
                   </div>
                 </div>
               )}
