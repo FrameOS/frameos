@@ -809,11 +809,11 @@ export interface ColorInputProps
 }
 
 export const ColorInput = forwardRef<HTMLInputElement, ColorInputProps>(function ColorInput(
-  { className, onChange, theme, ...props }: ColorInputProps,
+  { className, onChange, theme, value, placeholder, ...props }: ColorInputProps,
   ref
 ) {
   return (
-    <Tooltip noPadding title={<ColorPicker value={props.value} onChange={onChange} />}>
+    <Tooltip noPadding title={<ColorPicker value={value} onChange={onChange} />}>
       <div
         className={clsx(
           (!theme || theme === 'full') &&
@@ -824,11 +824,11 @@ export const ColorInput = forwardRef<HTMLInputElement, ColorInputProps>(function
         )}
         size={theme === 'node' ? 15 : 20}
         ref={ref}
+        {...props}
         style={{
-          backgroundColor: props.value || props.placeholder || '#ffffff',
+          backgroundColor: value || placeholder || '#ffffff',
           ...props.style,
         }}
-        {...props}
       />
     </Tooltip>
   )
