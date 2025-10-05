@@ -169,6 +169,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   ))
   scene.node6 = logic_setAsStateApp.App(nodeName: "logic/setAsState", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: logic_setAsStateApp.AppConfig(
     stateKey: "text",
+    debugLog: false,
   ))
   runEvent(self, context)
   
