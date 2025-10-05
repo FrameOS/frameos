@@ -1,4 +1,3 @@
-# app_codegen/apps_nim.py
 from __future__ import annotations
 import json
 import os
@@ -48,18 +47,6 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
                     continue
                 config = json.load(f)
                 all_apps[id] = config
-
-    # if frame:
-    #     for node_id, sources in get_apps_from_scenes(list(frame.scenes)).items():
-    #         app_id = "nodeapp_" + node_id.replace('-', '_')
-    #         app_dir = os.path.join(source_dir, "src", "apps", app_id)
-    #         os.makedirs(app_dir, exist_ok=True)
-    #         for filename, code in sources.items():
-    #             with open(os.path.join(app_dir, filename), "w") as f:
-    #                 f.write(code)
-    #         config_json = sources["config.json"] if "config.json" in sources else '{}'
-    #         config = json.loads(config_json)
-    #         all_apps[app_id] = config
 
     # 1) Imports
     imports: list[str] = [
