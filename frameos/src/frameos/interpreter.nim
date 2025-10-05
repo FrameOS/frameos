@@ -457,6 +457,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                            computeFresh)
       else:
         let fresh = computeFresh()
+        if jBoolOr(currentNode.data, "logOutput", false):
+          logCodeNodeOutput(FrameScene(self), currentNodeId, fresh)
         if asDataNode:
           result = fresh
 

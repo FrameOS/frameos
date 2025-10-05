@@ -1093,7 +1093,27 @@ var exportedScene* = ExportedScene(
             else:
                 raise NotImplementedError(f"Unknown node type, can't fetch fields for node {node_id}")
 
+            if node.get("type") == "code" and node.get("data", {}).get("logOutput"):
+                result = self.wrap_code_with_logging(node_id, result)
+
         return result
+
+    def wrap_code_with_logging(self, node_id: str, code_lines: list[str]) -> list[str]:
+        node_integer = self.node_id_to_integer(node_id)
+        wrapped = [
+            "block:",
+            "  let __frameosCodeValue = block:",
+        ]
+
+        for line in code_lines:
+            wrapped.append(f"    {line}")
+
+        wrapped.append(
+            f"  logCodeNodeOutput(self.FrameScene, {node_integer}.NodeId, __frameosCodeValue)"
+        )
+        wrapped.append("  __frameosCodeValue")
+
+        return wrapped
 
     def wrap_with_cache(self, node_id: str, value_list: list[str], data: dict):
         duration_enabled = data.get('cache', {}).get('durationEnabled', False)

@@ -2,6 +2,7 @@
 import std/[json]
 import strutils
 import pixie
+import options
 import frameos/types
 
 # ---------- Constructors ----------
@@ -149,3 +150,31 @@ proc valueFromJsonByType*(j: JsonNode; fieldType: string): Value =
   else:
     let s = if j.kind == JString: j.getStr() else: $j
     return VString(s)
+
+proc logCodeNodeOutput*(scene: FrameScene; nodeId: NodeId; value: Value) =
+  ## Log the output of a code node if it's not an image.
+  let value = if value.kind == fkImage:
+                %*("<image " & $value.img.width & "x" & $value.img.height & ">")
+              else:
+                valueToJson(value)
+
+  let payload = %*{
+    "event": "codeNode:output",
+    "sceneId": scene.id.string,
+    "nodeId": nodeId.int,
+    "valueKind": $value.kind,
+    "value": valueToJson(value)
+  }
+
+  scene.logger.log(payload)
+
+proc logCodeNodeOutput*[T](scene: FrameScene; nodeId: NodeId; rawValue: T) =
+  ## Generic overload to convert common Nim types to Value before logging.
+  when compiles(rawValue.isSome()):
+    if rawValue.isSome():
+      logCodeNodeOutput(scene, nodeId, rawValue.get())
+    else:
+      logCodeNodeOutput(scene, nodeId, VNone())
+  else:
+    let value: Value = rawValue
+    logCodeNodeOutput(scene, nodeId, value)
