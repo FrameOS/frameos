@@ -320,6 +320,7 @@ export interface CodeNodeData {
   codeArgs?: CodeArg[]
   codeOutputs?: CodeArg[]
   cache?: CacheConfig
+  logOutput?: boolean
 }
 
 export interface StateNodeData {

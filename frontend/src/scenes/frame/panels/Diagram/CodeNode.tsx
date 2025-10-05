@@ -5,7 +5,7 @@ import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import { TextArea } from '../../../../components/TextArea'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { CheckIcon, ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
 import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
@@ -126,6 +126,12 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
                 label: 'Delete Node',
                 onClick: () => deleteApp(id),
                 icon: <TrashIcon className="w-5 h-5" />,
+              },
+              {
+                label: `Log output (${data.logOutput ? 'enabled' : 'disabled'})`,
+                keepOpen: true,
+                onClick: () => updateNodeData(id, { logOutput: !(data.logOutput ?? false) }),
+                icon: <CheckIcon className={clsx('w-5 h-5', data.logOutput ? 'opacity-100' : 'opacity-0')} />,
               },
             ]}
           />
