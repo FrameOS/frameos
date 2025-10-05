@@ -16,10 +16,12 @@ var interpretedScenes*: Table[SceneId, ExportedInterpretedScene] = getInterprete
 var exportedScenes*: Table[SceneId, ExportedScene] = initTable[SceneId, ExportedScene]()
 for sceneId, scene in systemScenes:
   exportedScenes[sceneId] = scene
+  registerCompiledScene(sceneId, scene)
 for sceneId, scene in interpretedScenes:
   exportedScenes[sceneId] = scene.ExportedScene
 for sceneId, scene in compiledScenes:
   exportedScenes[sceneId] = scene
+  registerCompiledScene(sceneId, scene)
 
 var
   lastImageLock: Lock

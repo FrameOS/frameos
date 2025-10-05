@@ -224,6 +224,7 @@ type
     codeInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from code node id to code arg name to connected node id
     codeInlineInputsForNodeId*: Table[NodeId, Table[string, string]] # mapping from code node id to code arg name to inline code
     sceneNodes*: Table[NodeId, FrameScene]                                     # cache of instantiated child scenes
+    sceneExportByNodeId*: Table[NodeId, ExportedScene]                         # exported metadata for cached child scenes
     publicStateFields*: seq[StateField]
     js*: QuickJS
     jsReady*: bool

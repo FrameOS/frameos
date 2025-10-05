@@ -553,17 +553,33 @@ class SceneWriter:
                 app_import = f"import scenes/{scene_app_id} as {scene_app_id}"
                 node_integer = self.node_id_to_integer(node_id)
                 app_id = f"node{node_integer}"
-                self.scene_object_fields += [f"{app_id}: {scene_app_id}.Scene"]
-                if app_import not in self.imports:
-                    self.imports += [app_import]
+                execution_mode = scene.get("settings", {}).get("execution", "compiled")
+                is_interpreted_child = execution_mode == "interpreted"
+
+                if is_interpreted_child:
+                    interpreter_import = "import frameos/interpreter as interpreter"
+                    if interpreter_import not in self.imports:
+                        self.imports += [interpreter_import]
+                    self.scene_object_fields += [f"{app_id}: FrameScene"]
+                else:
+                    self.scene_object_fields += [f"{app_id}: {scene_app_id}.Scene"]
+                    if app_import not in self.imports:
+                        self.imports += [app_import]
                 config = node.get("data", {}).get("config", {}).copy()
                 field_inputs_for_node = self.field_inputs.get(node_id, {})
                 source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
                 node_fields_for_node = self.node_fields.get(node_id, {})
                 required_fields = {}
 
+                if is_interpreted_child:
+                    init_prefix = f"scene.{app_id} = interpreter.init(\"{sanitize_nim_string(scene_id)}\".SceneId, frameConfig, logger, %*({{"
+                    init_suffix = '}))'
+                else:
+                    init_prefix = f"scene.{app_id} = {scene_app_id}.Scene({scene_app_id}.init(\"{sanitize_nim_string(scene_id)}\".SceneId, frameConfig, logger, %*({{"
+                    init_suffix = '})))'
+
                 self.init_apps += [
-                    f"scene.{app_id} = {scene_app_id}.Scene({scene_app_id}.init(\"{sanitize_nim_string(scene_id)}\".SceneId, frameConfig, logger, %*({{",
+                    init_prefix,
                 ]
                 if len(scene.get("fields", [])) > 0:
                     for field in scene.get("fields", []):
@@ -592,9 +608,9 @@ class SceneWriter:
                             )
                         ]
                         self.init_apps[-1] = self.init_apps[-1] + ","
-                    self.init_apps += ['})))']
+                    self.init_apps += [init_suffix]
                 else:
-                    self.init_apps[-1] = self.init_apps[-1] + '})))'
+                    self.init_apps[-1] = self.init_apps[-1] + init_suffix
 
                 next_node_id = self.next_nodes.get(node_id, None)
                 self.run_node_lines += [
@@ -636,8 +652,14 @@ class SceneWriter:
                                     f"  {line}"
                                 ]
 
+                run_event_line = (
+                    f"  interpreter.runEvent(self.{app_id}, context)"
+                    if is_interpreted_child
+                    else f"  {scene_app_id}.runEvent(self.{app_id}, context)"
+                )
+
                 self.run_node_lines += [
-                    f"  {scene_app_id}.runEvent(self.{app_id}, context)",
+                    run_event_line,
                     f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
                 ]
 
