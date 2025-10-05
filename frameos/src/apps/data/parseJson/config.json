@@ -1,0 +1,20 @@
+{
+  "name": "Parse JSON",
+  "description": "Parse a text string and convert to JSON",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "text",
+      "type": "text",
+      "required": true,
+      "label": "Text"
+    }
+  ],
+  "output": [
+    {
+      "name": "json",
+      "type": "json"
+    }
+  ]
+}
