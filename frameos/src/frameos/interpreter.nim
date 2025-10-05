@@ -614,7 +614,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     cacheTimes: initTable[NodeId, float](),
     cacheKeys: initTable[NodeId, JsonNode](),
   )
-  echo "🚀 🚀 Initialized interpreted scene: ", sceneId.string
   scene.execNode = proc(nodeId: NodeId, context: ExecutionContext) =
     discard scene.runNode(nodeId, context)
   scene.getDataNode = proc(nodeId: NodeId, context: ExecutionContext): Value =
@@ -631,8 +630,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       scene.state[field.name] = valueToJson(valueFromJsonByType(%*(field.value), field.fieldType))
   stateFieldTypesByScene[sceneId] = typeMap
 
-  echo "🎯 🎯 Scene initial state: ", scene.state
-
   ## Pass 1: register nodes & event listeners (do not init apps yet)
   for node in exportedScene.nodes:
     scene.nodes[node.id] = node
@@ -645,8 +642,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       if not scene.eventListeners.hasKey(eventName):
         scene.eventListeners[eventName] = @[]
       scene.eventListeners[eventName].add(node.id)
-
-  echo "🎯 🎯 Scene nodes registered: ", scene.nodes.len
 
   ## Pass 2: process edges (next/prev, app inputs, and node-field wiring)
   for edge in exportedScene.edges:
@@ -806,8 +801,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       )
       runEvent(child, initCtx)
 
-  echo "🎯 🎯 Scene apps initialized: ", scene.appsByNodeId.len
-
   logger.log(%*{"event": "initInterpretedDone", "sceneId": sceneId.string, "nodes": scene.nodes.len,
       "edges": scene.edges.len, "eventListeners": scene.eventListeners.len, "apps": scene.appsByNodeId.len})
 
@@ -918,7 +911,6 @@ proc parseInterpretedScenes*(data: string): void =
   let scenes = data.fromJson(seq[FrameSceneInput])
   for scene in scenes:
     try:
-      echo "Loading interpreted scene: ", scene.id
       let refreshInterval = if scene.settings != nil: scene.settings.refreshInterval else: 300.0
       let backgroundColor = if scene.settings != nil: scene.settings.backgroundColor else: parseHtmlColor("#000000")
       let exported = ExportedInterpretedScene(
