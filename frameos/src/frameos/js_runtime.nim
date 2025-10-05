@@ -340,7 +340,6 @@ proc compileInlineFn(scene: InterpretedFrameScene,
   ensureSceneJs(scene)
   let fnName = nameBuilder(scene, nodeId, name)
   let src = buildEnvelopeFunction(snippet, @[], fnName)
-  echo "! compileInlineFn: ", src
   discard scene.js.eval(src)
   if not mappingRef.hasKey(nodeId):
     mappingRef[nodeId] = initTable[string, string]()
@@ -376,7 +375,6 @@ proc compileCodeFn*(scene: InterpretedFrameScene, node: DiagramNode) =
 
   let fnName = uniqueCodeFnName(scene, node.id)
   let src = buildEnvelopeFunction(codeSnippet, argNames, fnName)
-  echo "! compileCodeFn: ", src
   discard scene.js.eval(src)
   scene.jsFuncNameByNode[node.id] = fnName
 
@@ -416,9 +414,7 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
   evalEnvByCtx[scene.js.context] = e
   var envelopeJson = ""
   try:
-    echo "! callCompiledFn: ", fnName
     envelopeJson = scene.js.eval(fnName & "()")
-    echo "! callCompiledFn done"
   finally:
     if evalEnvByCtx.hasKey(scene.js.context):
       evalEnvByCtx.del(scene.js.context)
