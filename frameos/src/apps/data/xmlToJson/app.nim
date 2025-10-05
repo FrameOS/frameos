@@ -57,10 +57,9 @@ proc toJsonTree(xml: string): JsonNode =
   if jsonDoc.kind == JNull:
     return newJNull()
 
-  var result = newJObject()
+  result = newJObject()
   result["type"] = newJString("document")
   result["root"] = jsonDoc
-  return result
 
 type
   AppConfig* = object
