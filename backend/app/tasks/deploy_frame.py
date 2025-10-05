@@ -200,24 +200,24 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 "fi"
             )
 
-            # 1. check if /srv/frameos/vendor/quickjs/quickjs-2025-09-13 exists
+            # 1. check if /srv/frameos/vendor/quickjs/quickjs-2025-04-26 exists
             check_quickjs = await self.exec_command(
-                '[[ -d "/srv/frameos/vendor/quickjs/quickjs-2025-09-13" ]] && exit 0 || exit 1',
+                '[[ -d "/srv/frameos/vendor/quickjs/quickjs-2025-04-26" ]] && exit 0 || exit 1',
                 raise_on_error=False
             )
             if check_quickjs != 0:
-                # download  https://bellard.org/quickjs/quickjs-2025-09-13.tar.xz
+                # download  https://bellard.org/quickjs/quickjs-2025-04-26.tar.xz
                 await self.log("stdout", "- Downloading quickjs")
                 await self.exec_command(
                     "mkdir -p /srv/frameos/vendor/quickjs/ && "
-                    "wget -q -O quickjs-2025-09-13.tar.xz https://bellard.org/quickjs/quickjs-2025-09-13.tar.xz && "
-                    "tar -xJf quickjs-2025-09-13.tar.xz -C /srv/frameos/vendor/quickjs/ && " \
-                    "rm quickjs-2025-09-13.tar.xz"
+                    "wget -q -O quickjs-2025-04-26.tar.xz https://bellard.org/quickjs/quickjs-2025-04-26.tar.xz && "
+                    "tar -xJf quickjs-2025-04-26.tar.xz -C /srv/frameos/vendor/quickjs/ && " \
+                    "rm quickjs-2025-04-26.tar.xz"
                 )
                 await self.log("stdout", "- Finished downloading quickjs")
             # build it
             await self.exec_command(
-                'cd /srv/frameos/vendor/quickjs/quickjs-2025-09-13 && make libquickjs.a'
+                'cd /srv/frameos/vendor/quickjs/quickjs-2025-04-26 && make libquickjs.a'
             )
 
             await self.exec_command("mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
@@ -237,7 +237,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             # Unpack & compile on device
             await self.exec_command(f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz")
             await self.exec_command(
-                f"ln -s /srv/frameos/vendor/quickjs/quickjs-2025-09-13 /srv/frameos/build/build_{build_id}/quickjs",
+                f"ln -s /srv/frameos/vendor/quickjs/quickjs-2025-04-26 /srv/frameos/build/build_{build_id}/quickjs",
             )
             await self.exec_command(
                 f"cd /srv/frameos/build/build_{build_id} && "

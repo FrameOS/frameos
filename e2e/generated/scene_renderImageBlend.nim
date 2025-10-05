@@ -146,7 +146,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.node2.init()
   scene.node4 = logic_setAsStateApp.App(nodeName: "logic/setAsState", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: logic_setAsStateApp.AppConfig(
     stateKey: "mode",
-    debugLog: false,
   ))
   scene.node6 = render_gradientApp.App(nodeName: "render/gradient", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_gradientApp.AppConfig(
     startColor: parseHtmlColor("#ffffff"),
