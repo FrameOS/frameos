@@ -183,6 +183,7 @@ export const panelsLogic = kea<panelsLogicType>([
         disableFullscreenPanel: () => null,
         openTemplates: () => null,
         openAsset: () => null,
+        editApp: () => null,
       },
     ],
     lastSelectedScene: [
