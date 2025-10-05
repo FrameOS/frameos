@@ -40,7 +40,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
       appsModel,
       ['apps'],
       diagramLogic({ frameId, sceneId }),
-      ['nodes', 'edges', 'selectedNodeId', 'scene as currentScene'],
+      ['nodes', 'edges', 'selectedNodeId', 'scene as currentScene', 'codeNodeLanguage'],
       frameLogic({ frameId }),
       ['scenes'],
     ],

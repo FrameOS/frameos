@@ -23,6 +23,13 @@
       "label": "State key",
       "value": "",
       "placeholder": ""
+    },
+    {
+      "name": "debugLog",
+      "type": "boolean",
+      "required": false,
+      "label": "Log to console",
+      "value": false
     }
   ]
 }

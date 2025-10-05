@@ -553,17 +553,33 @@ class SceneWriter:
                 app_import = f"import scenes/{scene_app_id} as {scene_app_id}"
                 node_integer = self.node_id_to_integer(node_id)
                 app_id = f"node{node_integer}"
-                self.scene_object_fields += [f"{app_id}: {scene_app_id}.Scene"]
-                if app_import not in self.imports:
-                    self.imports += [app_import]
+                execution_mode = scene.get("settings", {}).get("execution", "compiled")
+                is_interpreted_child = execution_mode == "interpreted"
+
+                if is_interpreted_child:
+                    interpreter_import = "import frameos/interpreter as interpreter"
+                    if interpreter_import not in self.imports:
+                        self.imports += [interpreter_import]
+                    self.scene_object_fields += [f"{app_id}: FrameScene"]
+                else:
+                    self.scene_object_fields += [f"{app_id}: {scene_app_id}.Scene"]
+                    if app_import not in self.imports:
+                        self.imports += [app_import]
                 config = node.get("data", {}).get("config", {}).copy()
                 field_inputs_for_node = self.field_inputs.get(node_id, {})
                 source_field_inputs_for_node = self.source_field_inputs.get(node_id, {})
                 node_fields_for_node = self.node_fields.get(node_id, {})
                 required_fields = {}
 
+                if is_interpreted_child:
+                    init_prefix = f"scene.{app_id} = interpreter.init(\"{sanitize_nim_string(scene_id)}\".SceneId, frameConfig, logger, %*({{"
+                    init_suffix = '}))'
+                else:
+                    init_prefix = f"scene.{app_id} = {scene_app_id}.Scene({scene_app_id}.init(\"{sanitize_nim_string(scene_id)}\".SceneId, frameConfig, logger, %*({{"
+                    init_suffix = '})))'
+
                 self.init_apps += [
-                    f"scene.{app_id} = {scene_app_id}.Scene({scene_app_id}.init(\"{sanitize_nim_string(scene_id)}\".SceneId, frameConfig, logger, %*({{",
+                    init_prefix,
                 ]
                 if len(scene.get("fields", [])) > 0:
                     for field in scene.get("fields", []):
@@ -592,9 +608,9 @@ class SceneWriter:
                             )
                         ]
                         self.init_apps[-1] = self.init_apps[-1] + ","
-                    self.init_apps += ['})))']
+                    self.init_apps += [init_suffix]
                 else:
-                    self.init_apps[-1] = self.init_apps[-1] + '})))'
+                    self.init_apps[-1] = self.init_apps[-1] + init_suffix
 
                 next_node_id = self.next_nodes.get(node_id, None)
                 self.run_node_lines += [
@@ -636,8 +652,14 @@ class SceneWriter:
                                     f"  {line}"
                                 ]
 
+                run_event_line = (
+                    f"  interpreter.runEvent(self.{app_id}, context)"
+                    if is_interpreted_child
+                    else f"  {scene_app_id}.runEvent(self.{app_id}, context)"
+                )
+
                 self.run_node_lines += [
-                    f"  {scene_app_id}.runEvent(self.{app_id}, context)",
+                    run_event_line,
                     f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
                 ]
 
@@ -669,13 +691,23 @@ class SceneWriter:
                 self.run_event_lines += set_scene_state_lines
             if event == "setCurrentScene":
                 self.run_event_lines += set_current_scene_lines
+            if event == "render":
+                self.run_event_lines += [
+                    "  context.image.fill(Scene(self).backgroundColor)"
+                ]
+
             for node in nodes:
                 next_node = self.next_nodes.get(node["id"], "-1")
                 self.run_event_lines += [
-                    f"  try: self.runNode({self.node_id_to_integer(next_node)}.NodeId, context)",
+                    f"  try: discard self.runNode({self.node_id_to_integer(next_node)}.NodeId, context)",
                     f'  except Exception as e: self.logger.log(%*{{"event": "{sanitize_nim_string(event)}:error", ' +
                     f'"node": {self.node_id_to_integer(next_node)}, "error": $e.msg, "stacktrace": e.getStackTrace()}})'
                 ]
+        if not self.event_nodes.get("render", None):
+            self.run_event_lines += [
+                'of "render":',
+                "  context.image.fill(Scene(self).backgroundColor)"
+            ]
         if not self.event_nodes.get("setSceneState", None):
             self.run_event_lines += ['of "setSceneState":']
             self.run_event_lines += set_scene_state_lines
@@ -769,6 +801,7 @@ class SceneWriter:
 {{.warning[UnusedImport]: off.}}
 import pixie, json, times, strformat, strutils, sequtils, options, algorithm
 
+import frameos/values
 import frameos/types
 import frameos/channels
 import frameos/utils/image
@@ -785,7 +818,8 @@ type Scene* = ref object of FrameScene
 {{.push hint[XDeclaredButNotUsed]: off.}}
 {newline.join(self.cache_fields)}
 
-proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
+proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
+  result = VNone()
   let scene = self
   let frameConfig = scene.frameConfig
   let state = scene.state
@@ -803,17 +837,15 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
     if DEBUG:
       self.logger.log(%*{{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000}})
 
-proc runEvent*(self: Scene, context: var ExecutionContext) =
+proc runEvent*(self: Scene, context: ExecutionContext) =
   case context.event:
   {(newline + "  ").join(self.run_event_lines)}
   else: discard
 
-proc runEvent*(self: FrameScene, context: var ExecutionContext) =
-    runEvent(Scene(self), context)
+proc runEvent*(self: FrameScene, context: ExecutionContext) =
+  runEvent(Scene(self), context)
 
-proc render*(self: FrameScene, context: var ExecutionContext): Image =
-  let self = Scene(self)
-  context.image.fill(self.backgroundColor)
+proc render*(self: FrameScene, context: ExecutionContext): Image =
   runEvent(self, context)
   return context.image
 
@@ -826,7 +858,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
-  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
+  scene.execNode = (proc(nodeId: NodeId, context: ExecutionContext) = discard scene.runNode(nodeId, context))
+  scene.getDataNode = (proc(nodeId: NodeId, context: ExecutionContext): Value = scene.getDataNode(nodeId, context))
   {(newline + "  ").join(self.init_apps)}
   runEvent(self, context)
   {open_event_in_init}
@@ -1090,7 +1123,27 @@ var exportedScene* = ExportedScene(
             else:
                 raise NotImplementedError(f"Unknown node type, can't fetch fields for node {node_id}")
 
+            if node.get("type") == "code" and node.get("data", {}).get("logOutput"):
+                result = self.wrap_code_with_logging(node_id, result)
+
         return result
+
+    def wrap_code_with_logging(self, node_id: str, code_lines: list[str]) -> list[str]:
+        node_integer = self.node_id_to_integer(node_id)
+        wrapped = [
+            "block:",
+            "  let __frameosCodeValue = block:",
+        ]
+
+        for line in code_lines:
+            wrapped.append(f"    {line}")
+
+        wrapped.append(
+            f"  logCodeNodeOutput(self.FrameScene, {node_integer}.NodeId, __frameosCodeValue)"
+        )
+        wrapped.append("  __frameosCodeValue")
+
+        return wrapped
 
     def wrap_with_cache(self, node_id: str, value_list: list[str], data: dict):
         duration_enabled = data.get('cache', {}).get('durationEnabled', False)
@@ -1188,6 +1241,9 @@ def write_scenes_nim(frame: Frame) -> str:
     sceneOptionTuples = []
     default_scene = None
     for scene in frame.scenes:
+        execution = scene.get("settings", {}).get("execution", "compiled")
+        if execution == "interpreted":
+            continue
         if scene.get("default", False):
             default_scene = scene
 

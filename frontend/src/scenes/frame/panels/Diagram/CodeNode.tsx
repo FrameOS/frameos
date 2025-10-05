@@ -5,7 +5,7 @@ import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import { TextArea } from '../../../../components/TextArea'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { CheckIcon, ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
 import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
@@ -16,7 +16,7 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
   const { frameId, sceneId } = useValues(diagramLogic)
   const { updateNodeData, updateEdge, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { isSelected, node, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
+  const { isSelected, node, nodeEdges, codeNodeLanguage } = useValues(appNodeLogic(appNodeLogicProps))
   const data: CodeNodeData = (node?.data as CodeNodeData) ?? ({ code: '' } satisfies CodeNodeData)
   const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
@@ -127,18 +127,35 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
                 onClick: () => deleteApp(id),
                 icon: <TrashIcon className="w-5 h-5" />,
               },
+              {
+                label: `Log output (${data.logOutput ? 'enabled' : 'disabled'})`,
+                keepOpen: true,
+                onClick: () => updateNodeData(id, { logOutput: !(data.logOutput ?? false) }),
+                icon: <CheckIcon className={clsx('w-5 h-5', data.logOutput ? 'opacity-100' : 'opacity-0')} />,
+              },
             ]}
           />
         </div>
         <div className="p-1 h-full">
-          <TextArea
-            theme="node"
-            className="w-full h-full font-mono resize-none"
-            placeholder={`e.g: state{"magic3"}.getStr()`}
-            value={data.code ?? ''}
-            rows={2}
-            onChange={(value) => updateNodeData(id, { code: value.replaceAll('\n', '') })}
-          />
+          {codeNodeLanguage === 'js' ? (
+            <TextArea
+              theme="node"
+              className="w-full h-full font-mono resize-none"
+              placeholder={data.code ? 'Rewrite to JS: ' + data.code : `e.g: state.magic3 (JavaScript)`}
+              value={data.codeJS ?? ''}
+              rows={2}
+              onChange={(value) => updateNodeData(id, { codeJS: value })}
+            />
+          ) : (
+            <TextArea
+              theme="node"
+              className="w-full h-full font-mono resize-none"
+              placeholder={data.codeJS ? 'Rewrite to Nim: ' + data.codeJS : `e.g: state{"magic3"}.getStr()`}
+              value={data.code ?? ''}
+              rows={2}
+              onChange={(value) => updateNodeData(id, { code: value.replaceAll('\n', '') })}
+            />
+          )}
         </div>
         <div
           className={clsx(

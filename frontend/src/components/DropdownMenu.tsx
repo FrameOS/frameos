@@ -11,7 +11,8 @@ export interface DropdownMenuItem {
   icon?: React.ReactNode
   confirm?: string
   title?: string
-  onClick?: () => void
+  keepOpen?: boolean
+  onClick?: (e: React.MouseEvent) => void
 }
 
 export interface DropdownMenuProps {
@@ -81,12 +82,14 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
                                   e.stopPropagation()
                                   if (item.confirm) {
                                     if (confirm(item.confirm)) {
-                                      item.onClick?.()
+                                      item.onClick?.(e)
                                     }
                                   } else {
-                                    item.onClick?.()
+                                    item.onClick?.(e)
                                   }
-                                  close()
+                                  if (!item.keepOpen) {
+                                    close()
+                                  }
                                 }
                               : undefined
                           }

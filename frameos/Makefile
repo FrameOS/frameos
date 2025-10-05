@@ -3,16 +3,18 @@
 run: build
 	./build/frameos --verbose
 
-build:
-	nimble build -y --verbose --lineTrace:on
+build: apploaders
+	nimble build -y --verbose --lineTrace:on --stackTrace:on
 
-debug:
-	nimble build -y --verbose --debugger:native --lineTrace:on
+debug: apploaders
+	nimble build -y --verbose --debugger:native --lineTrace:on --stackTrace:on
 	lldb ./build/frameos
+
+apploaders:
+	FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
 
 test:
 	nimble test
-
 
 nix-sdcard:
 	nix --extra-experimental-features 'nix-command flakes' \

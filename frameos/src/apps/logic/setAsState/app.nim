@@ -7,6 +7,7 @@ type
     valueString*: string
     valueJson*: JsonNode
     stateKey*: string
+    debugLog*: bool
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -19,3 +20,10 @@ proc run*(self: App, context: ExecutionContext) =
     self.scene.state[self.appConfig.stateKey] = self.appConfig.valueJson
   elif self.appConfig.valueString != "":
     self.scene.state[self.appConfig.stateKey] = %*(self.appConfig.valueString)
+
+  if self.appConfig.debugLog:
+    let value = if self.scene.state.hasKey(self.appConfig.stateKey) and self.scene.state[self.appConfig.stateKey] != nil:
+      self.scene.state[self.appConfig.stateKey]
+    else:
+      newJNull()
+    self.log(%*{"event": "setAsState", "key": self.appConfig.stateKey, "value": value})

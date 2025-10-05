@@ -39,8 +39,8 @@ export function EventNode(props: NodeProps): JSX.Element {
   // these fields are deprecated, but keep showing nodes that are connected
   const sourceFieldsToShow = fields.filter((field) => {
     const fieldValue = isEventWithStateFields
-      ? stateFieldAccess(field, 'state')
-      : stateFieldAccess(field, 'context.payload')
+      ? stateFieldAccess(scene, field, 'state')
+      : stateFieldAccess(scene, field, 'context.payload')
     return nodeEdges.some((edge) => edge.sourceHandle === `code/${fieldValue}`)
   })
 
@@ -133,8 +133,8 @@ export function EventNode(props: NodeProps): JSX.Element {
         <div className="p-1">
           {sourceFieldsToShow.map((field: StateField, i) => {
             const fieldValue = isEventWithStateFields
-              ? stateFieldAccess(field, 'state')
-              : stateFieldAccess(field, 'context.payload')
+              ? stateFieldAccess(scene, field, 'state')
+              : stateFieldAccess(scene, field, 'context.payload')
             return (
               <div key={i} className="flex items-center justify-end space-x-1 w-full">
                 <code className="text-xs mr-2 text-gray-400 flex-1">{field.type}</code>
@@ -144,8 +144,8 @@ export function EventNode(props: NodeProps): JSX.Element {
                   onClick={() =>
                     copy(
                       isEventWithStateFields
-                        ? stateFieldAccess(field, 'state')
-                        : stateFieldAccess(field, 'context.payload')
+                        ? stateFieldAccess(scene, field, 'state')
+                        : stateFieldAccess(scene, field, 'context.payload')
                     )
                   }
                 />

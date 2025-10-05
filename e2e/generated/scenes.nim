@@ -2,8 +2,12 @@
 
 import frameos/types
 import tables, options
+import scenes/scene_black as scene_black
+import scenes/scene_blue as scene_blue
+import scenes/scene_dataCodeFloat as scene_dataCodeFloat
 import scenes/scene_dataDownloadImage as scene_dataDownloadImage
 import scenes/scene_dataDownloadUrl as scene_dataDownloadUrl
+import scenes/scene_dataGradient as scene_dataGradient
 import scenes/scene_dataLocalImage as scene_dataLocalImage
 import scenes/scene_dataNewImage as scene_dataNewImage
 import scenes/scene_dataNewImageNext as scene_dataNewImageNext
@@ -29,11 +33,15 @@ import scenes/scene_renderTextRichOver as scene_renderTextRichOver
 import scenes/scene_renderTextSplit as scene_renderTextSplit
 import scenes/scene_sceneNodes as scene_sceneNodes
 
-let defaultSceneId* = some("dataDownloadImage".SceneId)
+let defaultSceneId* = some("black".SceneId)
 
 const sceneOptions* = [
+  ("black".SceneId, "Black"),
+  ("blue".SceneId, "Blue"),
+  ("dataCodeFloat".SceneId, "Numeric Code Nodes"),
   ("dataDownloadImage".SceneId, "Download Image"),
   ("dataDownloadUrl".SceneId, "Download URL"),
+  ("dataGradient".SceneId, "dataGradient"),
   ("dataLocalImage".SceneId, "Local Image"),
   ("dataNewImage".SceneId, "New Image"),
   ("dataNewImageNext".SceneId, "Data Image Next"),
@@ -62,8 +70,12 @@ const sceneOptions* = [
 
 proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result = initTable[SceneId, ExportedScene]()
+  result["black".SceneId] = scene_black.exportedScene
+  result["blue".SceneId] = scene_blue.exportedScene
+  result["dataCodeFloat".SceneId] = scene_dataCodeFloat.exportedScene
   result["dataDownloadImage".SceneId] = scene_dataDownloadImage.exportedScene
   result["dataDownloadUrl".SceneId] = scene_dataDownloadUrl.exportedScene
+  result["dataGradient".SceneId] = scene_dataGradient.exportedScene
   result["dataLocalImage".SceneId] = scene_dataLocalImage.exportedScene
   result["dataNewImage".SceneId] = scene_dataNewImage.exportedScene
   result["dataNewImageNext".SceneId] = scene_dataNewImageNext.exportedScene

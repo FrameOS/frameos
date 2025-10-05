@@ -3,6 +3,7 @@
 {.warning[UnusedImport]: off.}
 import pixie, json, times, strformat, strutils, sequtils, options, algorithm
 
+import frameos/values
 import frameos/types
 import frameos/channels
 import frameos/utils/image
@@ -49,7 +50,8 @@ var cache1: Option[Image] = none(Image)
 var cache1Time: float = 0
 var cache2: Option[Image] = none(Image)
 
-proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
+proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
+  result = VNone()
   let scene = self
   let frameConfig = scene.frameConfig
   let state = scene.state
@@ -193,10 +195,11 @@ proc runNode*(self: Scene, nodeId: NodeId, context: var ExecutionContext) =
     if DEBUG:
       self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
 
-proc runEvent*(self: Scene, context: var ExecutionContext) =
+proc runEvent*(self: Scene, context: ExecutionContext) =
   case context.event:
   of "render":
-    try: self.runNode(19.NodeId, context)
+    context.image.fill(Scene(self).backgroundColor)
+    try: discard self.runNode(19.NodeId, context)
     except Exception as e: self.logger.log(%*{"event": "render:error", "node": 19, "error": $e.msg, "stacktrace": e.getStackTrace()})
   of "setSceneState":
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
@@ -216,12 +219,10 @@ proc runEvent*(self: Scene, context: var ExecutionContext) =
           self.state[key] = copy(payload[key])
   else: discard
 
-proc runEvent*(self: FrameScene, context: var ExecutionContext) =
-    runEvent(Scene(self), context)
+proc runEvent*(self: FrameScene, context: ExecutionContext) =
+  runEvent(Scene(self), context)
 
-proc render*(self: FrameScene, context: var ExecutionContext): Image =
-  let self = Scene(self)
-  context.image.fill(self.backgroundColor)
+proc render*(self: FrameScene, context: ExecutionContext): Image =
   runEvent(self, context)
   return context.image
 
@@ -234,7 +235,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
-  scene.execNode = (proc(nodeId: NodeId, context: var ExecutionContext) = scene.runNode(nodeId, context))
+  scene.execNode = (proc(nodeId: NodeId, context: ExecutionContext) = discard scene.runNode(nodeId, context))
+  scene.getDataNode = (proc(nodeId: NodeId, context: ExecutionContext): Value = scene.getDataNode(nodeId, context))
   scene.node1 = render_splitApp.App(nodeName: "render/split", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 3,
     columns: 2,

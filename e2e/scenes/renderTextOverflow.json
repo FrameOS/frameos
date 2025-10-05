@@ -169,6 +169,7 @@
         },
         "data": {
           "code": "\"this is a frame in which \".repeat(100)",
+          "codeJS": "Array(100).fill(\"this is a frame in which \").join(\"\")",
           "codeArgs": [],
           "codeOutputs": [
             {
@@ -194,6 +195,7 @@
         },
         "data": {
           "code": "state{\"text\"}.getStr()",
+          "codeJS": "state.text",
           "codeArgs": [],
           "codeOutputs": [
             {

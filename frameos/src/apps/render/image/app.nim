@@ -19,7 +19,7 @@ type
 
 proc render*(self: App, context: ExecutionContext, image: Image) =
   try:
-    if self.appConfig.image == nil:
+    if self.appConfig.image.isNil:
       raise newException(Exception, "No image provided.")
     let blendMode = case self.appConfig.blendMode:
       of "normal": NormalBlend

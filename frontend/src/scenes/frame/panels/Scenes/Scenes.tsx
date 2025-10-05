@@ -11,8 +11,10 @@ import { Field } from '../../../../components/Field'
 import { H6 } from '../../../../components/H6'
 import { Tag } from '../../../../components/Tag'
 import {
+  AdjustmentsHorizontalIcon,
   ArrowPathIcon,
   CloudArrowDownIcon,
+  ExclamationTriangleIcon,
   FolderArrowDownIcon,
   FolderOpenIcon,
   PencilSquareIcon,
@@ -37,7 +39,9 @@ export function Scenes() {
   const { applyTemplate } = useActions(frameLogic)
   const { editScene, openTemplates } = useActions(panelsLogic)
   const {
+    filteredScenes,
     scenes,
+    search,
     showNewSceneForm,
     isNewSceneSubmitting,
     showingSettings,
@@ -45,10 +49,11 @@ export function Scenes() {
     otherScenesLinkingToScene,
     linksToOtherScenes,
     sceneTitles,
+    undeployedSceneIds,
+    unsavedSceneIds,
   } = useValues(scenesLogic({ frameId }))
-  const { toggleSettings, submitNewScene, toggleNewScene, createNewScene, closeNewScene, expandScene } = useActions(
-    scenesLogic({ frameId })
-  )
+  const { setSearch, toggleSettings, submitNewScene, toggleNewScene, createNewScene, closeNewScene, expandScene } =
+    useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
   const { sceneId, sceneChanging, loading } = useValues(controlLogic({ frameId }))
   const { setCurrentScene, sync } = useActions(controlLogic({ frameId }))
@@ -85,7 +90,7 @@ export function Scenes() {
       <div className="space-y-2">
         {scenes.length > 0 ? (
           <div className="flex justify-between w-full items-center">
-            <H6>Installed on frame</H6>
+            <TextInput placeholder="Filter scenes..." className="flex-1 mr-2" onChange={setSearch} value={search} />
             <div className="flex gap-1">
               <Button size="small" color="secondary" onClick={() => sync()} title="Sync active scene">
                 {loading ? <Spinner color="white" /> : <ArrowPathIcon className="w-5 h-5" />}
@@ -133,7 +138,10 @@ export function Scenes() {
             </div>
           </div>
         ) : null}
-        {scenes.map((scene) => (
+        {filteredScenes.length === 0 && search ? (
+          <div className="text-center text-gray-400">No scenes matching "{search}"</div>
+        ) : null}
+        {filteredScenes.map((scene) => (
           <React.Fragment key={scene.id}>
             <div
               className={clsx(
@@ -165,7 +173,34 @@ export function Scenes() {
                     </div>
                     <div className="flex-1">
                       <H6 onClick={() => expandScene(scene.id)} className="cursor-pointer">
+                        {unsavedSceneIds.has(scene.id) ? '* ' : null}
                         <span className="cursor-pointer">{scene.name || scene.id}</span>
+                        {undeployedSceneIds.has(scene.id) ? (
+                          <Tooltip
+                            containerClassName="inline-block align-middle"
+                            title="This scene has saved changes that haven't been deployed to the frame yet."
+                          >
+                            <Tag className="ml-2" color="yellow">
+                              <ExclamationTriangleIcon className="w-4 h-4 inline-block" />
+                            </Tag>
+                          </Tooltip>
+                        ) : null}
+                        {scene.settings?.execution !== 'interpreted' ? (
+                          <Tooltip
+                            containerClassName="inline-block align-middle"
+                            title={
+                              <>
+                                This is a compiled scene. All changes require a full redeploy. Click{' '}
+                                <PencilSquareIcon className="w-5 h-5 inline-block" /> and then
+                                <AdjustmentsHorizontalIcon className="w-5 h-5 inline-block" /> in to change.
+                              </>
+                            }
+                          >
+                            <Tag className="ml-2" color="none">
+                              🕖 COMPILED
+                            </Tag>
+                          </Tooltip>
+                        ) : null}
                         {scene.default ? (
                           <Tag className="ml-2" color="primary">
                             start on boot

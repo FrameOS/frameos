@@ -1,4 +1,6 @@
 import logging
+import asyncio
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from fastapi import Depends, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
@@ -71,6 +73,13 @@ async def get_repositories(db: Session = Depends(get_db)):
             db.commit()
 
         repositories = db.query(Repository).all()
+
+        for r in repositories:
+            # if haven't refreshed in a day
+            if not r.last_updated_at or r.last_updated_at < datetime.utcnow() - timedelta(seconds=86400):
+                # schedule updates in the background
+                asyncio.create_task(r.update_templates())
+
         return [r.to_dict() for r in repositories]
     except SQLAlchemyError as e:
         logging.error(f'Database error: {e}')

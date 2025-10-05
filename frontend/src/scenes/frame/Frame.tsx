@@ -77,19 +77,15 @@ export function Frame(props: FrameSceneProps) {
                     { label: 'Restart FrameOS', onClick: () => restartFrame() },
                     { label: 'Stop FrameOS', onClick: () => stopFrame() },
                     { label: 'Reboot device', onClick: () => rebootFrame() },
-                    ...(requiresRecompilation
-                      ? []
-                      : [
-                          {
-                            label: 'Fast deploy',
-                            onClick: () => {
-                              fastDeployFrame()
-                              openLogs()
-                            },
-                          },
-                        ]),
                     {
-                      label: 'Full deploy',
+                      label: 'Fast deploy',
+                      onClick: () => {
+                        fastDeployFrame()
+                        openLogs()
+                      },
+                    },
+                    {
+                      label: 'Full deploy (recompile)',
                       onClick: () => {
                         fullDeployFrame()
                         openLogs()

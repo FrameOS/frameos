@@ -1,4 +1,3 @@
-import options
 import httpclient
 import frameos/apps
 import frameos/types

@@ -6,6 +6,7 @@ import { Field } from '../../../../components/Field'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Button } from '../../../../components/Button'
 import { ColorInput } from '../../../../components/ColorInput'
+import { Select } from '../../../../components/Select'
 
 export interface SceneSettingsProps {
   sceneId: string
@@ -48,6 +49,37 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
               label="Background color"
             >
               <ColorInput name="backgroundColor" className="!p-0" style={{ width: 70 }} placeholder="#ffffff" />
+            </Field>
+            <Field
+              className="flex flex-row gap-2 w-full justify-between"
+              name="execution"
+              label="Execution"
+              tooltip={
+                <div className="space-y-2">
+                  <p>Choose between compiled and interpreted execution modes.</p>
+                  <p>
+                    <strong>Compiled</strong> scenes are optimized for performance. They require a full redeploy
+                    whenever changes are made. If you edit the nim code for apps on the scene, you must use this mode.
+                    All inline code nodes must also be written in Nim.
+                  </p>
+                  <p>
+                    <strong>Interpreted</strong> scenes are executed as-is, allowing for fast deploys without the need
+                    for recompilation. This mode is slower, but when your frame takes 20 seconds to render, it doesn't
+                    matter much. You must use JavaScript in inline code nodes. You can't edit the nim source of apps in
+                    this mode.
+                  </p>
+                  <p>A full deploy is needed if switching between modes.</p>
+                </div>
+              }
+            >
+              <Select
+                name="execution"
+                className="border rounded px-1 py-0.5"
+                options={[
+                  { value: 'compiled', label: 'compiled' },
+                  { value: 'interpreted', label: 'interpreted' },
+                ]}
+              />
             </Field>
           </Group>
           {onClose ? (

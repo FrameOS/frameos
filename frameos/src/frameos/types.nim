@@ -1,6 +1,8 @@
 import json, jester, pixie, hashes, locks
+import lib/burrito
 
 type
+  # Parsed config.json
   FrameConfig* = ref object
     name*: string
     mode*: string
@@ -32,10 +34,12 @@ type
     agent*: AgentConfig
     palette*: PaletteConfig
 
+  # Part of FrameConfig
   GPIOButton* = ref object
     pin*: int
     label*: string
 
+  # Part of FrameConfig
   ControlCode* = ref object
     enabled*: bool
     position*: string
@@ -46,6 +50,7 @@ type
     qrCodeColor*: Color
     backgroundColor*: Color
 
+  # Part of FrameConfig
   NetworkConfig* = ref object
     networkCheck*: bool
     networkCheckTimeoutSeconds*: float
@@ -55,20 +60,21 @@ type
     wifiHotspotPassword*: string
     wifiHotspotTimeoutSeconds*: float
 
+  # Part of FrameConfig
   AgentConfig* = ref object
     agentEnabled*: bool
     agentRunCommands*: bool
     agentSharedSecret*: string
 
+  # Part of FrameConfig
   PaletteConfig* = ref object
     colors*: seq[(int, int, int)]
 
+  # Part of FrameConfig
   FrameSchedule* = ref object
     events*: seq[ScheduledEvent]
 
-  DeviceConfig* = ref object
-    vcom*: float # used for the 10.3" display
-
+  # Part of FrameConfig/FrameSchedule
   ScheduledEvent* = ref object
     id*: string
     minute*: int  # must be set 0-59
@@ -76,6 +82,10 @@ type
     weekday*: int # 0 for every day, 1-7 mon-sun, 8 for every weekday, 9 for every weekend
     event*: string
     payload*: JsonNode
+
+  # Part of FrameConfig
+  DeviceConfig* = ref object
+    vcom*: float # used for the 10.3" display
 
   Logger* = ref object
     frameConfig*: FrameConfig
@@ -94,6 +104,34 @@ type
   NodeId* = distinct int
   SceneId* = distinct string
 
+  FieldKind* = enum
+    fkString, fkText, fkFloat, fkInteger, fkBoolean, fkColor, fkJson, fkImage, fkNode, fkScene, fkNone
+
+  ## A compact tagged union for interpreter values.
+  Value* = object
+    case kind*: FieldKind
+    of fkString, fkText:
+      s*: string    ## same storage, different semantics via kind
+    of fkFloat:
+      f*: float64
+    of fkInteger:
+      i*: int64
+    of fkBoolean:
+      b*: bool
+    of fkColor:
+      col*: Color
+    of fkJson:
+      j*: JsonNode  ## std/json node (ref object)
+    of fkImage:
+      img*: Image   ## pixie image (ref object)
+    of fkNode:
+      nId*: NodeId  ## custom node type (ref object)
+    of fkScene:
+      sId*: SceneId ## custom scene type (ref object)
+    of fkNone:
+      discard
+
+  # Runtime state while running the scene (for compiled frames)
   FrameScene* = ref object of RootObj
     id*: SceneId
     isRendering*: bool
@@ -102,7 +140,8 @@ type
     state*: JsonNode
     refreshInterval*: float
     backgroundColor*: Color
-    execNode*: proc(nodeId: NodeId, context: var ExecutionContext)
+    execNode*: proc(nodeId: NodeId, context: ExecutionContext)
+    getDataNode*: proc(nodeId: NodeId, context: ExecutionContext): Value
     lastPublicStateUpdate*: float
     lastPersistedStateUpdate*: float
 
@@ -122,13 +161,81 @@ type
     scene*: FrameScene
     frameConfig*: FrameConfig
 
+  AppExport* = ref object of RootObj
+    init*: proc (params: Table[string, Value]): AppRoot
+    run*: proc (self: AppRoot, context: ExecutionContext): void
+    get*: proc (self: AppRoot, key: string): Value
+
+  # Exported data/functions for compiled scenes
   ExportedScene* = ref object of RootObj
     publicStateFields*: seq[StateField]
     persistedStateKeys*: seq[string]
-    runEvent*: proc (self: FrameScene, context: var ExecutionContext): void
-    render*: proc (self: FrameScene, context: var ExecutionContext): Image
+    runEvent*: proc (self: FrameScene, context: ExecutionContext): void
+    render*: proc (self: FrameScene, context: ExecutionContext): Image
     init*: proc (sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene
 
+  # Exported data/functions for interpreted scenes, adds some local state that's normally compiled into the scene
+  ExportedInterpretedScene* = ref object of ExportedScene
+    backgroundColor*: Color
+    refreshInterval*: float
+    nodes*: seq[DiagramNode]
+    edges*: seq[DiagramEdge]
+    # TODO: add private state fields
+
+  # Imported node from scenes.json
+  DiagramNode* = ref object of RootObj
+    id*: NodeId
+    data*: JsonNode
+    nodeType*: string
+
+  # Imported edge from scenes.json
+  DiagramEdge* = ref object of RootObj
+    id*: NodeId
+    source*: NodeId
+    sourceHandle*: string
+    target*: NodeId
+    targetHandle*: string
+    data*: JsonNode
+    edgeType*: string
+
+  # Imported settings from scenes.json
+  FrameSceneSettings* = ref object
+    backgroundColor*: Color
+    refreshInterval*: float
+
+  # Imported scene from scenes.json
+  FrameSceneInput* = ref object of RootObj
+    id*: SceneId
+    name*: string
+    nodes*: seq[DiagramNode]
+    edges*: seq[DiagramEdge]
+    fields*: seq[StateField]
+    settings*: FrameSceneSettings
+
+  # Runtime state while running the scene (for interpreted frames), adds cached nodes/edges
+  InterpretedFrameScene* = ref object of FrameScene
+    nodes*: Table[NodeId, DiagramNode]
+    edges*: seq[DiagramEdge]
+    nextNodeIds*: Table[NodeId, NodeId] # mapping from current node id to next node id for quick lookup
+    eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
+    appsByNodeId*: Table[NodeId, AppRoot] # mapping from node id to instantiated app for quick lookup
+    appInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from node id to app input name to connected node id
+    appInlineInputsForNodeId*: Table[NodeId, Table[string, string]]            # mapping from node id to app input name to inline code
+    codeInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from code node id to code arg name to connected node id
+    codeInlineInputsForNodeId*: Table[NodeId, Table[string, string]] # mapping from code node id to code arg name to inline code
+    sceneNodes*: Table[NodeId, FrameScene]                                     # cache of instantiated child scenes
+    sceneExportByNodeId*: Table[NodeId, ExportedScene]                         # exported metadata for cached child scenes
+    publicStateFields*: seq[StateField]
+    js*: QuickJS
+    jsReady*: bool
+    jsFuncNameByNode*: Table[NodeId, string]                                   # code-node -> function name
+    codeInlineFuncNameByNodeArg*: Table[NodeId, Table[string, string]]         # code-node arg -> function name
+    appInlineFuncNameByNodeArg*: Table[NodeId, Table[string, string]]          # app/scene field inline -> function name
+    cacheValues*: Table[NodeId, Value]
+    cacheTimes*: Table[NodeId, float]
+    cacheKeys*: Table[NodeId, JsonNode]
+
+  # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object
     scene*: FrameScene
     image*: Image
@@ -140,10 +247,12 @@ type
     loopKey*: string
     nextSleep*: float
 
+  # State field definitions. Used in interpreted scenes, and to show the right form to the user
   StateField* = ref object
     name*: string
     label*: string
     fieldType*: string
+    value*: string
     options*: seq[string]
     placeholder*: string
     required*: bool

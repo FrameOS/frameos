@@ -32,6 +32,7 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
   }
   const logic = editAppLogic(logicProps)
   const {
+    isInterpreted,
     sources,
     filenames,
     sourcesLoading,
@@ -146,10 +147,24 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
       <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
         {hasChanges ? (
           <div className="bg-gray-900 p-2">
-            You have changes.{' '}
-            <Button size="small" onClick={saveChanges}>
-              Click here to {!savedSources ? 'fork the app' : 'save them'}
-            </Button>
+            {isInterpreted ? (
+              <>
+                You have made changes to this app. If you save them, we will have to change the scene's execution model
+                from "interpreted" to "compiled". Thereafter, any changes to the scene will require a full frame
+                recompilation. If you have used any inline code nodes, you will also have to rewrite them from
+                JavaScript to Nim.
+                <Button size="small" onClick={saveChanges}>
+                  I understand. Save the changes
+                </Button>
+              </>
+            ) : (
+              <>
+                You have changes.{' '}
+                <Button size="small" onClick={saveChanges}>
+                  Click here to {!savedSources ? 'fork the app' : 'save them'}
+                </Button>
+              </>
+            )}
           </div>
         ) : null}
         {activeFile === '::ask_a_llm' ? (

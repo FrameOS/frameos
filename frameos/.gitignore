@@ -1,9 +1,14 @@
 src/codegen/
 build/
 tmp/
+quickjs/
 frameos.deps
 nimcache
 testresults
 nimble.develop
 nimble.paths
 scene.json
+*/app_loader.nim
+*/*/app_loader.nim
+*/*/*/app_loader.nim
+*/*/*/*/app_loader.nim

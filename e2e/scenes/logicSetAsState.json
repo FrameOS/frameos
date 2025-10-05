@@ -56,6 +56,7 @@
         },
         "data": {
           "code": "state{\"setField\"}.getStr()",
+          "codeJS": "state.setField",
           "codeArgs": [],
           "codeOutputs": [
             {
@@ -104,6 +105,7 @@
         },
         "data": {
           "code": "state{\"unknown\"}.getStr()",
+          "codeJS": "state.unknown",
           "codeArgs": [],
           "codeOutputs": [
             {
@@ -164,6 +166,7 @@
         },
         "data": {
           "code": "state{\"setField\"}.getStr()",
+          "codeJS": "state.setField",
           "codeArgs": [],
           "codeOutputs": [
             {
@@ -211,6 +214,7 @@
         },
         "data": {
           "code": "state{\"unknown\"}.getStr()",
+          "codeJS": "state.unknown",
           "codeArgs": [],
           "codeOutputs": [
             {
@@ -304,6 +308,7 @@
         },
         "data": {
           "code": "%*{\"key\": \"value\"}",
+          "codeJS": "({ key: 'value' })",
           "codeArgs": [],
           "codeOutputs": [
             {
@@ -334,6 +339,7 @@
         },
         "data": {
           "code": "state{\"misc\"}{\"key\"}.getStr()",
+          "codeJS": "state.misc.key",
           "codeArgs": [],
           "codeOutputs": [
             {

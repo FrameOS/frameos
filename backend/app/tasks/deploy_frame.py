@@ -107,6 +107,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
                 updated_count = await self.nix_upload_path_and_deps(result_path)
 
+                await self._upload_scenes_json("/var/lib/frameos/scenes.json.gz", gzip=True)
                 await self._upload_frame_json("/var/lib/frameos/frame.json")
                 await sync_assets(db, redis, frame)
 
@@ -199,6 +200,26 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 "fi"
             )
 
+            # 1. check if /srv/frameos/vendor/quickjs/quickjs-2025-04-26 exists
+            check_quickjs = await self.exec_command(
+                '[[ -d "/srv/frameos/vendor/quickjs/quickjs-2025-04-26" ]] && exit 0 || exit 1',
+                raise_on_error=False
+            )
+            if check_quickjs != 0:
+                # download  https://bellard.org/quickjs/quickjs-2025-04-26.tar.xz
+                await self.log("stdout", "- Downloading quickjs")
+                await self.exec_command(
+                    "mkdir -p /srv/frameos/vendor/quickjs/ && "
+                    "wget -q -O quickjs-2025-04-26.tar.xz https://bellard.org/quickjs/quickjs-2025-04-26.tar.xz && "
+                    "tar -xJf quickjs-2025-04-26.tar.xz -C /srv/frameos/vendor/quickjs/ && " \
+                    "rm quickjs-2025-04-26.tar.xz"
+                )
+                await self.log("stdout", "- Finished downloading quickjs")
+            # build it
+            await self.exec_command(
+                'cd /srv/frameos/vendor/quickjs/quickjs-2025-04-26 && make libquickjs.a'
+            )
+
             await self.exec_command("mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
             await self.log("stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
 
@@ -216,6 +237,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             # Unpack & compile on device
             await self.exec_command(f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz")
             await self.exec_command(
+                f"ln -s /srv/frameos/vendor/quickjs/quickjs-2025-04-26 /srv/frameos/build/build_{build_id}/quickjs",
+            )
+            await self.exec_command(
                 f"cd /srv/frameos/build/build_{build_id} && "
                 "PARALLEL_MEM=$(awk '/MemTotal/{printf \"%.0f\\n\", $2/1024/250}' /proc/meminfo) && "
                 "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
@@ -229,7 +253,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 f"/srv/frameos/releases/release_{build_id}/frameos"
             )
 
-            # 4. Upload frame.json
+            # 4. Upload scenes.json.gz and frame.json
+            await self._upload_scenes_json(f"/srv/frameos/releases/release_{build_id}/scenes.json.gz", gzip=True)
             await self._upload_frame_json(f"/srv/frameos/releases/release_{build_id}/frame.json")
 
             # Driver-specific vendor steps

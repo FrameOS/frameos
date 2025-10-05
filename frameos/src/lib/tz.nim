@@ -30,9 +30,13 @@ proc detectSystemTimeZone*(): string =
 
   # Last-ditch: stay explicit
   if result.len == 0:
-    result = "UTC"
+    return "UTC"
+
+  let lc = result.toLowerAscii()
+  if lc in ["etc/utc", "utc", "uct", "universal", "zulu", "z"]:
+    return "UTC"
 
   # check if result is a valid timezone
   if not valid(findTimeZone(result)):
     echo "Warning: Detected timezone is not valid: ", result
-    result = "UTC"
+    return "UTC"

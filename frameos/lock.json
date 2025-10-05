@@ -26,11 +26,11 @@
     },
     {
       "method": "fetchzip",
-      "path": "/nix/store/nxf3rwqc8m8sap3s18830shl2v532wc3-source",
-      "rev": "3b65ca5605a1156987041bf0295449e4c56128cf",
-      "sha256": "05j569qaswkyyd7qjyr3rdl4jvp056w3860dhi8sr7rh2yfvp1ld",
-      "url": "https://github.com/treeform/pixie/archive/3b65ca5605a1156987041bf0295449e4c56128cf.tar.gz",
-      "ref": "5.0.7",
+      "path": "/nix/store/f666hlv8mgvgingghbmgz5h0z876slwl-source",
+      "rev": "f05c89f547006a76816254c8bf06ff7ad176543c",
+      "sha256": "00dr6bkfliawgphvrs41v6n7rymqjga7bl91i0262knyzy1wb16v",
+      "url": "https://github.com/treeform/pixie/archive/f05c89f547006a76816254c8bf06ff7ad176543c.tar.gz",
+      "ref": "5.1.0",
       "packages": [
         "pixie"
       ],
@@ -98,6 +98,18 @@
     },
     {
       "method": "fetchzip",
+      "path": "/nix/store/bzcq8q439rdsqhhihikzv3rsx4l4ybdm-source",
+      "rev": "ea811bec7fa50f5abd3088ba94cda74285e93f18",
+      "sha256": "1720iqsxjhqmhw1zhhs7d2ncdz25r8fqadls1p1iry1wfikjlnba",
+      "url": "https://github.com/treeform/jsony/archive/ea811bec7fa50f5abd3088ba94cda74285e93f18.tar.gz",
+      "ref": "1.1.5",
+      "packages": [
+        "jsony"
+      ],
+      "srcDir": "src"
+    },
+    {
+      "method": "fetchzip",
       "path": "/nix/store/f9dp6njaay5rf32f6l9gkw0dm25gim47-source",
       "rev": "7282ae1247f2f384ebeaec3826d7fa38fd0e1df1",
       "sha256": "1plw9lfrm42qar01rnjhm0d9mkzsc7c3b8kz43w5pb8j8drx1lyn",
@@ -158,11 +170,11 @@
     },
     {
       "method": "fetchzip",
-      "path": "/nix/store/rpa0bv740i3yagp0ldkb68jp6scw4i5l-source",
-      "rev": "d7eaf00c24820ad0317c9926737402e62431e931",
-      "sha256": "0wrvdpvbwv4ysjsqc6hhvd97vql4k0m5l0zdrsrjlljd1n5g2haq",
-      "url": "https://github.com/treeform/bumpy/archive/d7eaf00c24820ad0317c9926737402e62431e931.tar.gz",
-      "ref": "1.1.2",
+      "path": "/nix/store/z2mfal6xlhn5plnh0qg3g3q1dpw2jk5y-source",
+      "rev": "edc6e19ddbe6b9e46c3384e9a4131d7063a3f610",
+      "sha256": "09h075sfr8c0lsgdzdm1qz18lwhw6njk5bwrv4g0rnnhv93sb6db",
+      "url": "https://github.com/treeform/bumpy/archive/edc6e19ddbe6b9e46c3384e9a4131d7063a3f610.tar.gz",
+      "ref": "1.1.3",
       "packages": [
         "bumpy"
       ],

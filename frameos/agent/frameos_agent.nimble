@@ -11,7 +11,7 @@ bin           = @["frameos_agent"]
 
 # Dependencies
 
-requires "nim >= 2.0.0"
+requires "nim >= 2.2.4"
 requires "ws >= 0.5.0"
 requires "jsony >= 1.1.5"
 requires "nimcrypto >= 0.6.0"

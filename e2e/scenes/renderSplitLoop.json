@@ -62,6 +62,7 @@
     {
       "data": {
         "code": "hsl(context.loopIndex.float / 256 * 360, 50, 50).color()",
+        "codeJS": "(()=>{let h=context.loopIndex/256*360,s=.5,l=.5,f=n=>{let k=(n+h/30)%12,a=s*Math.min(l,1-l);return l-a*Math.max(-1,Math.min(k-3,9-k,1))},x=n=>Math.round(n*255).toString(16).padStart(2,'0');return'#'+x(f(0))+x(f(8))+x(f(4));})()",
         "codeArgs": [],
         "codeOutputs": [
           {

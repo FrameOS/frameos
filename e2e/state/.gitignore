@@ -1,2 +1,3 @@
 # This changes too unpredictably in CI
 scene.json
+*.json

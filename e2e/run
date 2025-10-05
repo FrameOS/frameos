@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Use "./run blue" to render all scenes with "blue" in the name
+
+# Everything you pass to ./run becomes the filter (e.g. "blue", "menu", etc.)
+export SCENE_FILTER="${*:-}"
+
+# Hand off to the Makefile as-is
+make nim_scenes snapshots
+

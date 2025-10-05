@@ -1,4 +1,5 @@
 from datetime import datetime
+from glob import glob
 import hashlib
 import json
 import math
@@ -11,12 +12,13 @@ import shutil
 import string
 import tempfile
 from typing import Optional
+from gzip import compress
 
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.models.apps import get_one_app_sources
-from app.models.frame import Frame, get_frame_json
+from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
 from app.utils.remote_exec import upload_file, run_command
@@ -27,6 +29,8 @@ from app.codegen.drivers_nim import write_drivers_nim
 from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.tasks.utils import find_nimbase_file
 from app.models.settings import get_settings_dict
+from app.codegen.apps_nim import write_apps_nim
+from app.codegen.app_loader_nim import write_app_loader_nim
 
 BYTES_PER_MB   = 1_048_576
 DEFAULT_CHUNK  = 25 * BYTES_PER_MB
@@ -90,6 +94,13 @@ class FrameDeployer:
     async def _upload_frame_json(self, path: str) -> None:
         """Upload the release-specific `frame.json`."""
         json_data = json.dumps(get_frame_json(self.db, self.frame), indent=4).encode() + b"\n"
+        await upload_file(self.db, self.redis, self.frame, path, json_data)
+
+    async def _upload_scenes_json(self, path: str, gzip: bool = False) -> None:
+        """Upload the release-specific `scenes.json`."""
+        json_data = json.dumps(get_interpreted_scenes_json(self.frame), indent=4).encode() + b"\n"
+        if gzip:
+            json_data = compress(json_data)
         await upload_file(self.db, self.redis, self.frame, path, json_data)
 
     async def nix_upload_path_and_deps(
@@ -264,18 +275,43 @@ class FrameDeployer:
         shutil.rmtree(os.path.join(source_dir, "src", "scenes"), ignore_errors=True)
         os.makedirs(os.path.join(source_dir, "src", "scenes"), exist_ok=True)
 
-        for node_id, sources in get_apps_from_scenes(list(frame.scenes)).items():
+        # find all apps
+        os.makedirs(os.path.join(source_dir, "src", "apps"), exist_ok=True)
+        for app_dir in glob(os.path.join(source_dir, "src", "apps", "*", "*")):
+            config_path = os.path.join(app_dir, "config.json")
+            if os.path.exists(config_path):
+                with open(config_path, "r") as f:
+                    config = json.load(f)
+                    app_loader_nim = write_app_loader_nim(app_dir, config)
+                    with open(os.path.join(app_dir, "app_loader.nim"), "w") as lf:
+                        lf.write(app_loader_nim)
+
+        scenes = list(frame.scenes)
+        for node_id, sources in get_apps_from_scenes(scenes).items():
             app_id = "nodeapp_" + node_id.replace('-', '_')
             app_dir = os.path.join(source_dir, "src", "apps", app_id)
             os.makedirs(app_dir, exist_ok=True)
             for filename, code in sources.items():
                 with open(os.path.join(app_dir, filename), "w") as f:
                     f.write(code)
+            config_json = sources["config.json"] if "config.json" in sources else '{}'
+            config = json.loads(config_json)
+            app_loader_nim = write_app_loader_nim(app_dir, config)
+            with open(os.path.join(app_dir, "app_loader.nim"), "w") as lf:
+                lf.write(app_loader_nim)
+
+        # write apps.nim
+        with open(os.path.join(source_dir, "src", "apps", "apps.nim"), "w") as f:
+            f.write(write_apps_nim("../frameos"))
 
         for scene in frame.scenes:
+            execution = scene.get("settings", {}).get("execution", "compiled")
+            safe_id = re.sub(r'\W+', '', scene.get('id', 'default'))
+            if execution == "interpreted":
+                # We're writing them to scenes.json post build
+                continue
             try:
                 scene_source = write_scene_nim(frame, scene)
-                safe_id = re.sub(r'\W+', '', scene.get('id', 'default'))
                 with open(os.path.join(source_dir, "src", "scenes", f"scene_{safe_id}.nim"), "w") as f:
                     f.write(scene_source)
             except Exception as e:
@@ -634,7 +670,7 @@ class FrameDeployer:
 
         with open(os.path.join(build_dir, "Makefile"), "w") as mk:
             script_path = os.path.join(build_dir, "compile_frameos.sh")
-            linker_flags = ["-pthread", "-lm", "-lrt", "-ldl"]
+            linker_flags = ["-pthread", "-lm", "-lrt", "-ldl"] # Defaults just in case, Will be overridden before
             compiler_flags: list[str] = []
             with open(script_path, "r") as sc:
                 lines_sc = sc.readlines()
@@ -650,6 +686,9 @@ class FrameDeployer:
                         if fl.startswith('-') and not fl.startswith('-I')
                         and fl not in ['-o', '-c', '-D']
                     ]
+
+            # add quickjs lib. this was just removed in the step above, but we know it's needed
+            linker_flags += ["quickjs/libquickjs.a"]
 
             with open(os.path.join(source_dir, "tools", "nimc.Makefile"), "r") as mf_in:
                 lines_make = mf_in.readlines()

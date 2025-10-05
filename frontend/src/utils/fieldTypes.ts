@@ -1,4 +1,4 @@
-import { StateField } from '../types'
+import { FrameScene, StateField } from '../types'
 
 export const fieldTypeToGetter: Record<string, string> = {
   integer: '.getInt()',
@@ -10,6 +10,16 @@ export const fieldTypeToGetter: Record<string, string> = {
   json: '',
 }
 
-export function stateFieldAccess(field: StateField, objectName = 'state'): string {
-  return `${objectName}{"${field.name}"}${fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'}`
+export function stateFieldAccess(scene: FrameScene | null, field: StateField, objectName = 'state'): string {
+  const isInterpreted = scene?.settings?.execution === 'interpreted'
+  if (isInterpreted) {
+    // if the field name is a simple stirng, do dot access
+    if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(field.name)) {
+      return `${objectName}.${field.name}`
+    }
+    return `${objectName}[${JSON.stringify(field.name)}]`
+  }
+  return `${objectName}{${JSON.stringify(field.name)}}${
+    fieldTypeToGetter[String(field.type ?? 'string')] ?? '.getStr()'
+  }`
 }

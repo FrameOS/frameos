@@ -9,7 +9,7 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc run*(self: App, context: var ExecutionContext) =
+proc run*(self: App, context: ExecutionContext) =
   if self.appConfig.condition:
     if self.appConfig.thenNode != 0:
       self.scene.execNode(self.appConfig.thenNode, context)

@@ -4,7 +4,7 @@
 ## Prerequisites
 
 You'll need to install:
-Python >= 3.11
+Python >= 3.12
 `Node.js` and `npm`
 `redis-server`
 `nim >=2.0.0` (https://nim-lang.org/install.html)

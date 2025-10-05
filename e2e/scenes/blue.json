@@ -1,0 +1,25 @@
+{
+  "id": "blue",
+  "name": "Blue",
+  "nodes": [
+    {
+      "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "type": "event",
+      "position": {
+        "x": 121,
+        "y": 113
+      },
+      "data": {
+        "keyword": "render"
+      },
+      "width": 251,
+      "height": 182
+    }
+  ],
+  "edges": [],
+  "fields": [],
+  "settings": {
+    "refreshInterval": 3600,
+    "backgroundColor": "#0000FF"
+  }
+}

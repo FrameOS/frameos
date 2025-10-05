@@ -256,7 +256,9 @@ export const templatesLogic = kea<templatesLogicType>([
       (s) => [s.allTemplates, s.search],
       (allTemplates, search) => {
         if (search !== '') {
-          return allTemplates.filter((template) => searchInText(search, template.name))
+          return allTemplates
+            .filter((template) => searchInText(search, template.name))
+            .sort((a, b) => a.name.localeCompare(b.name))
         }
         return allTemplates
       },
@@ -265,7 +267,10 @@ export const templatesLogic = kea<templatesLogicType>([
       (s) => [s.allRepositories, s.search],
       (allRepositories, search): RepositoryType[] => {
         if (search === '') {
-          return allRepositories
+          return allRepositories.map((repository) => ({
+            ...repository,
+            templates: repository.templates?.sort((a, b) => a.name.localeCompare(b.name)),
+          }))
         }
         return allRepositories
           .filter(
@@ -275,9 +280,9 @@ export const templatesLogic = kea<templatesLogicType>([
           )
           .map((repository) => ({
             ...repository,
-            templates: repository.templates?.filter(
-              (t) => searchInText(search, t.name) || searchInText(search, t.description)
-            ),
+            templates: repository.templates
+              ?.filter((t) => searchInText(search, t.name) || searchInText(search, t.description))
+              .sort((a, b) => a.name.localeCompare(b.name)),
           }))
       },
     ],
