@@ -72,7 +72,7 @@ def _generate_thumbnail(image_bytes: bytes) -> tuple[bytes, int, int]:
         new_width  = int(round(orig_width  * scale))
         new_height = int(round(orig_height * scale))
 
-        img = img.resize((new_width, new_height), Image.ANTIALIAS)
+        img = img.resize((new_width, new_height), Image.Resampling.BICUBIC)
 
         buf = io.BytesIO()
         img.save(buf, format="JPEG")

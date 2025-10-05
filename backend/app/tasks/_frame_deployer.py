@@ -52,7 +52,7 @@ class FrameDeployer:
         log_output: bool = True,
         log_command: str | bool = True,
         raise_on_error: bool = True,
-        timeout: int = 600 # 10 minutes default timeout
+        timeout: int = 1800 # 30 minutes default timeout. Some commands can be really slow...
     ) -> int:
         status, stdout, stderr = await run_command(
             self.db, self.redis, self.frame, command, log_output=log_output, log_command=log_command, timeout=timeout
