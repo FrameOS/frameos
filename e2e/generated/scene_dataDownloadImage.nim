@@ -76,6 +76,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode
 proc runEvent*(self: Scene, context: ExecutionContext) =
   case context.event:
   of "render":
+    context.image.fill(Scene(self).backgroundColor)
     try: discard self.runNode(3.NodeId, context)
     except Exception as e: self.logger.log(%*{"event": "render:error", "node": 3, "error": $e.msg, "stacktrace": e.getStackTrace()})
   of "setSceneState":
@@ -97,11 +98,9 @@ proc runEvent*(self: Scene, context: ExecutionContext) =
   else: discard
 
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
-    runEvent(Scene(self), context)
+  runEvent(Scene(self), context)
 
 proc render*(self: FrameScene, context: ExecutionContext): Image =
-  let self = Scene(self)
-  context.image.fill(self.backgroundColor)
   runEvent(self, context)
   return context.image
 

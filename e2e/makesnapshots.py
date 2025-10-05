@@ -4,16 +4,44 @@ import sys
 import requests
 import time
 from pathlib import Path
-from PIL import Image
-import imagehash
+from PIL import Image, ImageChops, ImageStat
 import subprocess
 import signal
 
-def is_similar_image(img_path1, img_content2):
-    hash0 = imagehash.dhash(Image.open(img_path1))
-    hash1 = imagehash.dhash(Image.open(img_content2))
-    cutoff = 5
-    return hash0 - hash1 < cutoff
+DEFAULT_DIFF_THRESHOLD = float(os.environ.get("SNAPSHOT_DIFF_THRESHOLD", "0.01"))
+RESAMPLE_FILTER = getattr(Image, "Resampling", Image).LANCZOS
+
+def compare_images(img_path1, img_path2, threshold=DEFAULT_DIFF_THRESHOLD):
+    """Return similarity information between two images.
+
+    The function computes the mean absolute pixel difference normalised to the
+    range [0, 1] and considers the images similar when the mean is less than or
+    equal to ``threshold``. The maximum pixel delta is reported for additional
+    insight.
+    """
+
+    with Image.open(img_path1).convert("RGBA") as img1, Image.open(img_path2).convert("RGBA") as img2:
+        if img1.size != img2.size:
+            img2 = img2.resize(img1.size, RESAMPLE_FILTER)
+
+        diff = ImageChops.difference(img1, img2)
+        stat = ImageStat.Stat(diff)
+
+    mean_diff = sum(stat.mean) / len(stat.mean)
+    max_diff = max(channel_max for _, channel_max in stat.extrema)
+
+    normalised_mean = mean_diff / 255.0
+    normalised_max = max_diff / 255.0
+
+    return {
+        "similar": normalised_mean <= threshold,
+        "mean_diff": normalised_mean,
+        "max_diff": normalised_max,
+    }
+
+def is_similar_image(img_path1, img_path2, threshold=DEFAULT_DIFF_THRESHOLD):
+    result = compare_images(img_path1, img_path2, threshold)
+    return result["similar"]
 
 def main():
     # filter from env or argv (argv optional)
@@ -65,21 +93,9 @@ def main():
                 image_response = requests.get(f'http://localhost:{port}/image')
                 if image_response.status_code == 200:
                     snapshot_path = snapshots_dir / f"{filename}.png"
-                    if snapshot_path.exists():
-                        temp_path = snapshot_path.with_suffix('.temp.png')
-                        with open(temp_path, 'wb') as temp_file:
-                            temp_file.write(image_response.content)
-                        # if not is_similar_image(snapshot_path, temp_path):
-                        with open(snapshot_path, 'wb') as f:
-                            f.write(image_response.content)
-                        print(f"Snapshot updated: {snapshot_path}")
-                        # else:
-                            # print(f"Snapshot unchanged due to similarity: {snapshot_path}")
-                        temp_path.unlink()
-                    else:
-                        with open(snapshot_path, 'wb') as f:
-                            f.write(image_response.content)
-                        print(f"Snapshot saved: {snapshot_path}")
+                    with open(snapshot_path, 'wb') as f:
+                        f.write(image_response.content)
+                    print(f"Snapshot captured: {snapshot_path}")
                 else:
                     print(f"Failed to get snapshot for scene {scene_id}")
             # compare files: base_id + '_compiled' and base_id + '_interpreted'
@@ -90,8 +106,15 @@ def main():
                     print(f"✅ Snapshots are similar for scene {base_id}")
                     # rename to base_id.png
                     final_path = snapshots_dir / f"{base_id}.png"
-                    compiled_path.rename(final_path)
                     interpreted_path.unlink()
+                    if final_path.exists():
+                        if is_similar_image(final_path, compiled_path):
+                            compiled_path.unlink()
+                        else:
+                            final_path.unlink()
+                            compiled_path.rename(final_path)
+                    else:
+                        compiled_path.rename(final_path)
                 else:
                     print(f"❌ Snapshots differ for scene {base_id}")
                     final_path = snapshots_dir / f"{base_id}.png"

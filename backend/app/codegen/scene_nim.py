@@ -703,6 +703,11 @@ class SceneWriter:
                     f'  except Exception as e: self.logger.log(%*{{"event": "{sanitize_nim_string(event)}:error", ' +
                     f'"node": {self.node_id_to_integer(next_node)}, "error": $e.msg, "stacktrace": e.getStackTrace()}})'
                 ]
+        if not self.event_nodes.get("render", None):
+            self.run_event_lines += [
+                'of "render":',
+                "  context.image.fill(Scene(self).backgroundColor)"
+            ]
         if not self.event_nodes.get("setSceneState", None):
             self.run_event_lines += ['of "setSceneState":']
             self.run_event_lines += set_scene_state_lines
@@ -838,7 +843,7 @@ proc runEvent*(self: Scene, context: ExecutionContext) =
   else: discard
 
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
-    runEvent(Scene(self), context)
+  runEvent(Scene(self), context)
 
 proc render*(self: FrameScene, context: ExecutionContext): Image =
   runEvent(self, context)

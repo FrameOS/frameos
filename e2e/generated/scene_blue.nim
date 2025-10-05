@@ -41,6 +41,8 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode
 
 proc runEvent*(self: Scene, context: ExecutionContext) =
   case context.event:
+  of "render":
+    context.image.fill(Scene(self).backgroundColor)
   of "setSceneState":
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
       let payload = context.payload["state"]
@@ -60,11 +62,9 @@ proc runEvent*(self: Scene, context: ExecutionContext) =
   else: discard
 
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
-    runEvent(Scene(self), context)
+  runEvent(Scene(self), context)
 
 proc render*(self: FrameScene, context: ExecutionContext): Image =
-  let self = Scene(self)
-  context.image.fill(self.backgroundColor)
   runEvent(self, context)
   return context.image
 

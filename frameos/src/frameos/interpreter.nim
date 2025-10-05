@@ -855,7 +855,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         )
         exportedChild.runEvent(child, initCtx)
 
-  echo "🎯 🎯 Scene apps initialized: ", scene.appsByNodeId.len
 
   logger.log(%*{"event": "initInterpretedDone", "sceneId": sceneId.string, "nodes": scene.nodes.len,
       "edges": scene.edges.len, "eventListeners": scene.eventListeners.len, "apps": scene.appsByNodeId.len})

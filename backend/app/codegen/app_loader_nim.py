@@ -616,18 +616,12 @@ proc init*(
     node: DiagramNode,
     scene: FrameScene,
 ): AppRoot =
-  echo "init"
   let params = node.data["config"]
   if params.kind != JObject:
     raise newException(Exception, "Invalid config format")
-  echo "config"
-  echo params
-  echo node.data
   let config = app_module.AppConfig(
 {newline.join(app_config_lines)}
   )
-  echo "/config"
-  echo config
 
   result = app_module.App(
     appConfig: config,
@@ -636,7 +630,6 @@ proc init*(
     scene: scene,
     frameConfig: scene.frameConfig,
   )
-  echo "app init done"
 
 proc setField*(self: AppRoot, field: string, value: Value) =
   let app = app_module.App(self)
