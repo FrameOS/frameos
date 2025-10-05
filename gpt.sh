@@ -78,6 +78,7 @@ patterns=(
     # "frameos/src/frameos/scenes.nim"
     # "frameos/src/frameos/values.nim"
     "frameos/src/frameos/interpreter.nim"
+    "frameos/src/frameos/js_runtime.nim"
     "frameos/src/lib/burrito.nim"
     # "frameos/src/frameos/utils/*.nim"
     # "frameos/src/scenes/*.nim"

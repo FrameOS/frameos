@@ -8,6 +8,7 @@ import { editor, MarkerSeverity } from 'monaco-editor'
 import { AppNodeData } from '../../../../types'
 import { appsLogic } from '../Apps/appsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { diagramLogic } from '../Diagram/diagramLogic'
 
 export interface ModelMarker extends editor.IMarkerData {}
 
@@ -44,9 +45,16 @@ export const editAppLogic = kea<editAppLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'EditApp', 'editAppLogic']),
   props({} as EditAppLogicProps),
   key((props) => `${props.frameId}:${props.sceneId}.${props.nodeId}`),
-  connect(({ frameId }: EditAppLogicProps) => ({
-    actions: [frameLogic({ frameId }), ['updateNodeData']],
-    values: [frameLogic({ frameId }), ['frameForm'], appsLogic, ['apps']],
+  connect(({ frameId, sceneId }: EditAppLogicProps) => ({
+    actions: [frameLogic({ frameId }), ['updateNodeData', 'updateScene']],
+    values: [
+      frameLogic({ frameId }),
+      ['frameForm'],
+      appsLogic,
+      ['apps'],
+      diagramLogic({ frameId, sceneId }),
+      ['scene'],
+    ],
   })),
   actions({
     setActiveFile: (file: string) => ({ file }),
@@ -74,6 +82,7 @@ export const editAppLogic = kea<editAppLogicType>([
     appData: [(s) => [s.app], (app): AppNodeData | null => app?.data || null],
     savedSources: [(s) => [s.appData], (appData): Record<string, string> | null => appData?.sources || null],
     savedKeyword: [(s) => [s.appData], (appData): string | null => appData?.keyword || null],
+    isInterpreted: [(s) => [s.scene], (scene): boolean => scene?.settings?.execution === 'interpreted'],
   }),
   loaders(({ actions, values }) => ({
     sources: [
@@ -211,6 +220,9 @@ export const editAppLogic = kea<editAppLogicType>([
   }),
   listeners(({ actions, props, values }) => ({
     saveChanges: () => {
+      if (values.isInterpreted) {
+        actions.updateScene(props.sceneId, { settings: { ...values.scene?.settings, execution: 'compiled' } })
+      }
       actions.updateNodeData(props.sceneId, props.nodeId, { sources: values.sources })
       actions.setInitialSources(values.sources)
     },
