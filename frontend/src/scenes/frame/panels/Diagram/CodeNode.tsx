@@ -141,7 +141,7 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
             <TextArea
               theme="node"
               className="w-full h-full font-mono resize-none"
-              placeholder={data.code ? 'Rewrite to JS: ' + data.code : `e.g: state.magic3`}
+              placeholder={data.code ? 'Rewrite to JS: ' + data.code : `e.g: state.magic3 (JavaScript)`}
               value={data.codeJS ?? ''}
               rows={2}
               onChange={(value) => updateNodeData(id, { codeJS: value })}
