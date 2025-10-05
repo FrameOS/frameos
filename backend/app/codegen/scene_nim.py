@@ -691,6 +691,11 @@ class SceneWriter:
                 self.run_event_lines += set_scene_state_lines
             if event == "setCurrentScene":
                 self.run_event_lines += set_current_scene_lines
+            if event == "render":
+                self.run_event_lines += [
+                    "  context.image.fill(Scene(self).backgroundColor)"
+                ]
+
             for node in nodes:
                 next_node = self.next_nodes.get(node["id"], "-1")
                 self.run_event_lines += [
@@ -836,8 +841,6 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
     runEvent(Scene(self), context)
 
 proc render*(self: FrameScene, context: ExecutionContext): Image =
-  let self = Scene(self)
-  context.image.fill(self.backgroundColor)
   runEvent(self, context)
   return context.image
 

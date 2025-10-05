@@ -5,6 +5,8 @@ import frameos/channels
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times
 import apps/apps
 
+const TRACING = false
+
 proc evalInline(scene: InterpretedFrameScene,
                 context: ExecutionContext,
                 nodeId: NodeId,
@@ -115,7 +117,8 @@ proc withCache(scene: InterpretedFrameScene,
     }
     if extraLog.kind == JObject:
       for k in extraLog.keys: payload[k] = extraLog[k]
-    # scene.logger.log(payload)
+    if TRACING:
+      scene.logger.log(payload)
     return scene.cacheValues[nodeId]
 
   # Miss -> compute and write-back
@@ -126,7 +129,8 @@ proc withCache(scene: InterpretedFrameScene,
   }
   if extraLog.kind == JObject:
     for k in extraLog.keys: payload[k] = extraLog[k]
-  # scene.logger.log(payload)
+  if TRACING:
+    scene.logger.log(payload)
 
   let fresh = compute()
   scene.cacheValues[nodeId] = fresh
@@ -196,15 +200,17 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
     let currentNode = self.nodes[currentNodeId]
     let nodeType = currentNode.nodeType
-    # self.logger.log(%*{"event": "interpreter:runNode", "sceneId": self.id, "nodeId": currentNodeId.int,
-    #     "nodeType": nodeType})
+    if TRACING:
+      self.logger.log(%*{"event": "interpreter:runNode", "sceneId": self.id, "nodeId": currentNodeId.int,
+        "nodeType": nodeType})
     case nodeType:
     of "app":
       let keyword = currentNode.data{"keyword"}.getStr()
-      # self.logger.log(%*{
-      #   "event": "interpreter:runApp",
-      #   "sceneId": self.id, "nodeId": currentNodeId.int, "keyword": keyword
-      # })
+      if TRACING:
+        self.logger.log(%*{
+          "event": "interpreter:runApp",
+          "sceneId": self.id, "nodeId": currentNodeId.int, "keyword": keyword
+        })
       if not self.appsByNodeId.hasKey(currentNodeId):
         raise newException(Exception,
           "App not initialized for node id: " & $currentNode.id & ", keyword: " & keyword)
@@ -278,15 +284,16 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           apps.runApp(keyword, app, context)
 
     of "source":
-      raise newException(Exception, "Source nodes not implemented in interpreted scenes yet")
+      raise newException(Exception, "Source nodes are not implemented for interpreted scenes")
     of "dispatch":
       let eventName = currentNode.data{"keyword"}.getStr()
-      # self.logger.log(%*{
-      #   "event": "interpreter:dispatch:run",
-      #   "sceneId": self.id,
-      #   "nodeId": currentNodeId.int,
-      #   "eventName": eventName
-      # })
+      if TRACING:
+        self.logger.log(%*{
+          "event": "interpreter:dispatch:run",
+          "sceneId": self.id,
+          "nodeId": currentNodeId.int,
+          "eventName": eventName
+        })
 
       var payload =
         if currentNode.data.hasKey("config") and currentNode.data["config"].kind == JObject:
@@ -357,13 +364,14 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           rootPayload["state"] = statePayload
         finalPayload = rootPayload
 
-      self.logger.log(%*{
-        "event": "interpreter:dispatch:send",
-        "sceneId": self.id,
-        "nodeId": currentNodeId.int,
-        "eventName": eventName,
-        "payload": finalPayload
-      })
+      if TRACING:
+        self.logger.log(%*{
+          "event": "interpreter:dispatch:send",
+          "sceneId": self.id,
+          "nodeId": currentNodeId.int,
+          "eventName": eventName,
+          "payload": finalPayload
+        })
       sendEvent(eventName, finalPayload)
       if asDataNode:
         result = VJson(copy(finalPayload))
@@ -482,12 +490,13 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
     of "scene":
       let childSceneId = currentNode.data{"keyword"}.getStr().SceneId
-      # self.logger.log(%*{
-      #   "event": "interpreter:runScene",
-      #   "sceneId": self.id,
-      #   "nodeId": currentNodeId.int,
-      #   "childSceneId": childSceneId.string
-      # })
+      if TRACING:
+        self.logger.log(%*{
+          "event": "interpreter:runScene",
+          "sceneId": self.id,
+          "nodeId": currentNodeId.int,
+          "childSceneId": childSceneId.string
+        })
 
       var exportedChild: ExportedScene
       var needsInitEvent = false
@@ -602,7 +611,8 @@ proc setNodeFieldFromEdge*(scene: InterpretedFrameScene, edge: DiagramEdge) =
 
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     persistedState: JsonNode): FrameScene =
-  # logger.log(%*{"event": "initInterpreted", "sceneId": sceneId.string})
+  if TRACING:
+    logger.log(%*{"event": "initInterpreted", "sceneId": sceneId.string})
 
   let exportedScene = loadedScenes[sceneId]
   if exportedScene == nil:
@@ -655,21 +665,24 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
   ## Pass 1: register nodes & event listeners (do not init apps yet)
   for node in exportedScene.nodes:
     scene.nodes[node.id] = node
-    # scene.logger.log(%*{"event": "initInterpretedNode", "sceneId": scene.id, "nodeType": node.nodeType,
-    #     "nodeId": node.id.int})
+    if TRACING:
+      scene.logger.log(%*{"event": "initInterpretedNode", "sceneId": scene.id, "nodeType": node.nodeType,
+          "nodeId": node.id.int})
     if node.nodeType == "event":
       let eventName = node.data{"keyword"}.getStr()
-      # scene.logger.log(%*{"event": "initInterpretedEvent", "sceneId": scene.id, "nodeEvent": eventName,
-      #     "nodeId": node.id.int})
+      if TRACING:
+        scene.logger.log(%*{"event": "initInterpretedEvent", "sceneId": scene.id, "nodeEvent": eventName,
+            "nodeId": node.id.int})
       if not scene.eventListeners.hasKey(eventName):
         scene.eventListeners[eventName] = @[]
       scene.eventListeners[eventName].add(node.id)
 
   ## Pass 2: process edges (next/prev, app inputs, and node-field wiring)
   for edge in exportedScene.edges:
-    # logger.log(%*{"event": "initInterpretedEdge", "sceneId": scene.id, "edgeId": edge.id.int,
-    #     "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
-    #     "targetHandle": edge.targetHandle})
+    if TRACING:
+      scene.logger.log(%*{"event": "initInterpretedEdge", "sceneId": scene.id, "edgeId": edge.id.int,
+          "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
+          "targetHandle": edge.targetHandle})
     scene.edges.add(edge)
     if edge.sourceHandle == "next" and edge.targetHandle == "prev":
       scene.nextNodeIds[edge.source] = edge.target
@@ -681,8 +694,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       if not scene.appInputsForNodeId.hasKey(edge.target):
         scene.appInputsForNodeId[edge.target] = initTable[string, NodeId]()
       scene.appInputsForNodeId[edge.target][fieldName] = edge.source
-      # scene.logger.log(%*{"event": "initInterpretedAppInput", "sceneId": scene.id, "appNodeId": edge.target.int,
-      #     "inputField": fieldName, "connectedNodeId": edge.source.int})
+      if TRACING:
+        scene.logger.log(%*{"event": "initInterpretedAppInput", "sceneId": scene.id, "appNodeId": edge.target.int,
+            "inputField": fieldName, "connectedNodeId": edge.source.int})
       continue
 
     if edge.sourceHandle == "stateOutput" and edge.targetHandle.startsWith("fieldInput/"):
@@ -690,8 +704,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       if not scene.appInputsForNodeId.hasKey(edge.target):
         scene.appInputsForNodeId[edge.target] = initTable[string, NodeId]()
       scene.appInputsForNodeId[edge.target][fieldName] = edge.source
-      # scene.logger.log(%*{"event": "initInterpretedStateInput", "sceneId": scene.id, "appNodeId": edge.target.int,
-      #     "inputField": fieldName, "connectedNodeId": edge.source.int})
+      if TRACING:
+        scene.logger.log(%*{"event": "initInterpretedStateInput", "sceneId": scene.id, "appNodeId": edge.target.int,
+            "inputField": fieldName, "connectedNodeId": edge.source.int})
       continue
 
     # TODO: these should probably be deprecated
@@ -700,13 +715,14 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       if not scene.appInlineInputsForNodeId.hasKey(edge.target):
         scene.appInlineInputsForNodeId[edge.target] = initTable[string, string]()
       scene.appInlineInputsForNodeId[edge.target][fieldName] = edge.sourceHandle.substr("code/".len)
-      # scene.logger.log(%*{
-      #   "event": "initInterpretedInlineInput",
-      #   "sceneId": scene.id,
-      #   "appNodeId": edge.target.int,
-      #   "inputField": fieldName,
-      #   "code": edge.sourceHandle.substr("code/".len)
-      # })
+      if TRACING:
+        scene.logger.log(%*{
+          "event": "initInterpretedInlineInput",
+          "sceneId": scene.id,
+          "appNodeId": edge.target.int,
+          "inputField": fieldName,
+          "code": edge.sourceHandle.substr("code/".len)
+        })
       continue
 
     if edge.targetHandle.startsWith("codeField/"):
@@ -715,43 +731,47 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         if not scene.codeInputsForNodeId.hasKey(edge.target):
           scene.codeInputsForNodeId[edge.target] = initTable[string, NodeId]()
         scene.codeInputsForNodeId[edge.target][fieldName] = edge.source
-        # scene.logger.log(%*{
-        #   "event": "initInterpretedCodeInput",
-        #   "sceneId": scene.id,
-        #   "codeNodeId": edge.target.int,
-        #   "arg": fieldName,
-        #   "connectedNodeId": edge.source.int
-        # })
+        if TRACING:
+          scene.logger.log(%*{
+            "event": "initInterpretedCodeInput",
+            "sceneId": scene.id,
+            "codeNodeId": edge.target.int,
+            "arg": fieldName,
+            "connectedNodeId": edge.source.int
+          })
         continue
       elif edge.sourceHandle.startsWith("code/"):
         if not scene.codeInlineInputsForNodeId.hasKey(edge.target):
           scene.codeInlineInputsForNodeId[edge.target] = initTable[string, string]()
         scene.codeInlineInputsForNodeId[edge.target][fieldName] = edge.sourceHandle.substr("code/".len)
-        # scene.logger.log(%*{
-        #   "event": "initInterpretedCodeInlineInput",
-        #   "sceneId": scene.id,
-        #   "codeNodeId": edge.target.int,
-        #   "arg": fieldName,
-        #   "code": edge.sourceHandle.substr("code/".len)
-        # })
+        if TRACING:
+          scene.logger.log(%*{
+            "event": "initInterpretedCodeInlineInput",
+            "sceneId": scene.id,
+            "codeNodeId": edge.target.int,
+            "arg": fieldName,
+            "code": edge.sourceHandle.substr("code/".len)
+          })
         continue
 
     ## node-field edges (app field -> prev of target node)
     if edge.sourceHandle.startsWith("field/") and edge.targetHandle == "prev":
       scene.setNodeFieldFromEdge(edge)
-      # scene.logger.log(%*{
-      #   "event": "initInterpretedAppField",
-      #   "sceneId": scene.id,
-      #   "appNodeId": edge.source.int,
-      #   "fieldPath": edge.sourceHandle.substr("field/".len),
-      #   "targetNodeId": edge.target.int
-      # })
+      if TRACING:
+        scene.logger.log(%*{
+          "event": "initInterpretedAppField",
+          "sceneId": scene.id,
+          "appNodeId": edge.source.int,
+          "fieldPath": edge.sourceHandle.substr("field/".len),
+          "targetNodeId": edge.target.int
+        })
       continue
 
     if edge.edgeType == "codeNodeEdge":
-      # logger.log(%*{"event": "initInterpretedEdge:codeNodeEdge:ignored", "sceneId": scene.id, "edgeId": edge.id.int,
-      #     "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
-      #     "targetHandle": edge.targetHandle})
+      if TRACING:
+        logger.log(%*{"event": "initInterpretedEdge:codeNodeEdge:ignored", "sceneId": scene.id, "edgeId": edge.id.int,
+            "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
+            "targetHandle": edge.targetHandle})
       continue
 
     logger.log(%*{"event": "initInterpretedEdge:ignored", "sceneId": scene.id, "edgeId": edge.id.int,
@@ -778,17 +798,18 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
   for node in exportedScene.nodes:
     if node.nodeType == "app":
       let keyword = node.data{"keyword"}.getStr()
-      # scene.logger.log(%*{
-      #   "event": "initInterpretedApp",
-      #   "sceneId": scene.id,
-      #   "nodeType": node.nodeType,
-      #   "nodeId": node.id.int,
-      #   "appKeyword": keyword,
-      #   "configKeys": (if node.data.hasKey("config") and node.data["config"].kind == JObject:
-      #   node.data["config"].keys.toSeq()
-      # else:
-      #   @[])
-      # })
+      if TRACING:
+        scene.logger.log(%*{
+          "event": "initInterpretedApp",
+          "sceneId": scene.id,
+          "nodeType": node.nodeType,
+          "nodeId": node.id.int,
+          "appKeyword": keyword,
+          "configKeys": (if node.data.hasKey("config") and node.data["config"].kind == JObject:
+          node.data["config"].keys.toSeq()
+        else:
+          @[])
+        })
       scene.appsByNodeId[node.id] = initApp(keyword, node, scene)
 
     elif node.nodeType == "scene":
@@ -865,7 +886,13 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
   of "setCurrentScene":
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
       applyPublicStateFromPayload(scene, context.payload["state"])
-  else: discard
+  of "render":
+    if not context.hasImage or context.image.isNil:
+      context.image = newImage(self.frameConfig.width, self.frameConfig.height)
+      context.hasImage = true
+    context.image.fill(scene.backgroundColor)
+  else:
+    discard
 
   if scene.eventListeners.hasKey(context.event):
     for nodeId in scene.eventListeners[context.event]:
@@ -884,19 +911,13 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
           })
 
 proc render*(self: FrameScene, context: ExecutionContext): Image =
-  var scene: InterpretedFrameScene = InterpretedFrameScene(self)
-  self.logger.log(%*{
-    "event": "renderInterpreted",
-    "sceneId": self.id,
-    "width": self.frameConfig.width,
-    "height": self.frameConfig.height
-  })
-
-  if not context.hasImage or context.image.isNil:
-    context.image = newImage(self.frameConfig.width, self.frameConfig.height)
-    context.hasImage = true
-
-  context.image.fill(scene.backgroundColor)
+  if TRACING:
+    self.logger.log(%*{
+      "event": "renderInterpreted",
+      "sceneId": self.id,
+      "width": self.frameConfig.width,
+      "height": self.frameConfig.height
+    })
   runEvent(self, context)
   result = context.image
 
