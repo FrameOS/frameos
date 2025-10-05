@@ -14,6 +14,7 @@ import {
   AdjustmentsHorizontalIcon,
   ArrowPathIcon,
   CloudArrowDownIcon,
+  ExclamationTriangleIcon,
   FolderArrowDownIcon,
   FolderOpenIcon,
   PencilSquareIcon,
@@ -48,6 +49,8 @@ export function Scenes() {
     otherScenesLinkingToScene,
     linksToOtherScenes,
     sceneTitles,
+    undeployedSceneIds,
+    unsavedSceneIds,
   } = useValues(scenesLogic({ frameId }))
   const { setSearch, toggleSettings, submitNewScene, toggleNewScene, createNewScene, closeNewScene, expandScene } =
     useActions(scenesLogic({ frameId }))
@@ -170,10 +173,21 @@ export function Scenes() {
                     </div>
                     <div className="flex-1">
                       <H6 onClick={() => expandScene(scene.id)} className="cursor-pointer">
+                        {unsavedSceneIds.has(scene.id) ? '* ' : null}
                         <span className="cursor-pointer">{scene.name || scene.id}</span>
+                        {undeployedSceneIds.has(scene.id) ? (
+                          <Tooltip
+                            containerClassName="inline-block align-middle"
+                            title="This scene has saved changes that haven't been deployed to the frame yet."
+                          >
+                            <Tag className="ml-2" color="yellow">
+                              <ExclamationTriangleIcon className="w-4 h-4 inline-block" />
+                            </Tag>
+                          </Tooltip>
+                        ) : null}
                         {scene.settings?.execution !== 'interpreted' ? (
                           <Tooltip
-                            containerClassName="inline-block"
+                            containerClassName="inline-block align-middle"
                             title={
                               <>
                                 This is a compiled scene. All changes require a full redeploy. Click{' '}

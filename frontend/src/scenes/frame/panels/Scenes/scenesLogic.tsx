@@ -1,12 +1,13 @@
 import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import type { scenesLogicType } from './scenesLogicType'
-import { FrameScene, Panel, SceneNodeData } from '../../../../types'
+import { FrameScene, FrameType, Panel, SceneNodeData } from '../../../../types'
 import { frameLogic, sanitizeScene } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { forms } from 'kea-forms'
 import { v4 as uuidv4 } from 'uuid'
 import { panelsLogic } from '../panelsLogic'
 import { controlLogic } from './controlLogic'
+import equal from 'fast-deep-equal'
 
 export interface ScenesLogicProps {
   frameId: number
@@ -19,7 +20,7 @@ export const scenesLogic = kea<scenesLogicType>([
   connect(({ frameId }: ScenesLogicProps) => ({
     values: [
       frameLogic({ frameId }),
-      ['frame', 'frameForm'],
+      ['frame', 'frameForm', 'lastDeploy'],
       appsModel,
       ['apps'],
       controlLogic({ frameId }),
@@ -142,6 +143,37 @@ export const scenesLogic = kea<scenesLogicType>([
       },
     ],
     sceneTitles: [(s) => [s.scenes], (scenes) => Object.fromEntries(scenes.map((scene) => [scene.id, scene.name]))],
+    undeployedSceneIds: [
+      (s) => [s.scenes, s.frame],
+      (scenes, frame): Set<string> => {
+        const deployedScenes: FrameScene[] = frame?.last_successful_deploy?.scenes ?? []
+        const undeployed = new Set<string>()
+
+        scenes.forEach((scene) => {
+          const deployed = deployedScenes.find((deployedScene) => deployedScene.id === scene.id)
+          if (!deployed || !equal(scene, deployed)) {
+            undeployed.add(scene.id)
+          }
+        })
+
+        return undeployed
+      },
+    ],
+    unsavedSceneIds: [
+      (s) => [s.frame, s.frameForm],
+      (frame, frameForm): Set<string> => {
+        const frameScenes = frame.scenes || []
+        const unsavedScenes = frameForm?.scenes || frame.scenes || []
+        const unsaved = new Set<string>()
+        unsavedScenes.forEach((scene) => {
+          const original = frameScenes.find((s) => s.id === scene.id)
+          if (!original || !equal(original, scene)) {
+            unsaved.add(scene.id)
+          }
+        })
+        return unsaved
+      },
+    ],
     linksToOtherScenes: [
       (s) => [s.scenes],
       (scenes): Record<string, Set<string>> => {
