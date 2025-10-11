@@ -61,7 +61,7 @@ class PooledConnection:
         if not self.in_use and self.expired():
             # Actually close the underlying SSH connection
             self.ssh.close()
-            await log(db, redis, frame_id, "stdinfo", f"SSH connection closed ({IDLE_TIMEOUT_SECONDS}s idle timeout)")
+            await log(db, redis, frame_id, "stdinfo", f"SSH connection idle for {IDLE_TIMEOUT_SECONDS}s, closing until further commands")
             try:
                 await self.ssh.wait_closed()
             except asyncio.CancelledError:

@@ -1277,7 +1277,7 @@ import tables, options
 
 {default_scene_line}
 
-const sceneOptions* = [
+const sceneOptions*: array[{len(sceneOptionTuples)}, tuple[id: SceneId, name: string]] = [
 {newline.join(sorted(sceneOptionTuples))}
 ]
 

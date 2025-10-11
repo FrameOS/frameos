@@ -13,6 +13,7 @@ import apps/data/log/app_loader as data_log_loader
 import apps/data/newImage/app_loader as data_newImage_loader
 import apps/data/openaiImage/app_loader as data_openaiImage_loader
 import apps/data/openaiText/app_loader as data_openaiText_loader
+import apps/data/parseJson/app_loader as data_parseJson_loader
 import apps/data/prettyJson/app_loader as data_prettyJson_loader
 import apps/data/qr/app_loader as data_qr_loader
 import apps/data/resizeImage/app_loader as data_resizeImage_loader
@@ -48,6 +49,7 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   of "data/newImage": data_newImage_loader.init(node, scene)
   of "data/openaiImage": data_openaiImage_loader.init(node, scene)
   of "data/openaiText": data_openaiText_loader.init(node, scene)
+  of "data/parseJson": data_parseJson_loader.init(node, scene)
   of "data/prettyJson": data_prettyJson_loader.init(node, scene)
   of "data/qr": data_qr_loader.init(node, scene)
   of "data/resizeImage": data_resizeImage_loader.init(node, scene)
@@ -84,6 +86,7 @@ proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   of "data/newImage": data_newImage_loader.setField(app, field, value)
   of "data/openaiImage": data_openaiImage_loader.setField(app, field, value)
   of "data/openaiText": data_openaiText_loader.setField(app, field, value)
+  of "data/parseJson": data_parseJson_loader.setField(app, field, value)
   of "data/prettyJson": data_prettyJson_loader.setField(app, field, value)
   of "data/qr": data_qr_loader.setField(app, field, value)
   of "data/resizeImage": data_resizeImage_loader.setField(app, field, value)
@@ -135,6 +138,7 @@ proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   of "data/newImage": data_newImage_loader.get(app, context)
   of "data/openaiImage": data_openaiImage_loader.get(app, context)
   of "data/openaiText": data_openaiText_loader.get(app, context)
+  of "data/parseJson": data_parseJson_loader.get(app, context)
   of "data/prettyJson": data_prettyJson_loader.get(app, context)
   of "data/qr": data_qr_loader.get(app, context)
   of "data/resizeImage": data_resizeImage_loader.get(app, context)

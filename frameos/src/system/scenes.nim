@@ -2,7 +2,7 @@ import ./wifiHotspot/scene as wifiHotspotScene
 import frameos/types
 import tables
 
-const sceneOptions* = [
+const sceneOptions*: array[1, tuple[id: SceneId, name: string]] = [
   ("system/wifiHotspot".SceneId, "Wifi Captive Portal"),
 ]
 
