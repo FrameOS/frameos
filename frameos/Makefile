@@ -1,4 +1,4 @@
-.PHONY: run build test debug
+.PHONY: run build test debug drivers drivers-list
 
 run: build
 	./build/frameos --verbose
@@ -9,6 +9,12 @@ build: apploaders
 debug: apploaders
 	nimble build -y --verbose --debugger:native --lineTrace:on --stackTrace:on
 	lldb ./build/frameos
+
+drivers:
+	python3 tools/build_drivers.py
+
+drivers-list:
+	python3 tools/build_drivers.py --list
 
 apploaders:
 	FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py

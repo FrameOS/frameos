@@ -23,6 +23,7 @@ type
     scalingMode*: string
     settings*: JsonNode
     assetsPath*: string
+    driversManifest*: string
     saveAssets*: JsonNode
     logToFile*: string
     debug*: bool

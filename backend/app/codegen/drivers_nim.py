@@ -1,50 +1,39 @@
+import json
+
 from app.drivers.drivers import Driver
 
 
+def _default_library_path(driver: Driver) -> str:
+    if driver.name == "waveshare" and driver.variant:
+        return f"drivers/waveshare/lib{driver.name}_{driver.variant}.so"
+    return f"drivers/lib{driver.name}.so"
+
+
 def write_drivers_nim(drivers: dict[str, Driver]) -> str:
-    imports = []
-    vars = []
-    init_drivers = []
-    render_drivers = []
-    png_drivers: list[str] = []
-    on_drivers = []
-    off_drivers = []
+    manifest: dict[str, list[dict]] = {"drivers": []}
 
     for driver in drivers.values():
-        if driver.import_path:
-            imports.append(f"import {driver.import_path} as {driver.name}Driver")
-            vars.append(f"var {driver.name}DriverInstance: {driver.name}Driver.Driver")
-            init_drivers.append(f"{driver.name}DriverInstance = {driver.name}Driver.init(frameOS)")
-            if driver.can_render:
-                render_drivers.append(f"{driver.name}DriverInstance.render(image)")
-            if driver.can_png and len(png_drivers) == 0:
-                png_drivers.append(f"return {driver.name}Driver.toPng(rotate)")
-            if driver.can_turn_on_off:
-                on_drivers.append(f"{driver.name}DriverInstance.turnOn()")
-                off_drivers.append(f"{driver.name}DriverInstance.turnOff()")
+        if not driver.import_path:
+            continue
 
-    newline = "\n"
+        entry: dict[str, object] = {
+            "name": driver.name,
+            "library": _default_library_path(driver),
+            "capabilities": [],
+        }
 
-    code = f"""
-import pixie
-import frameos/types
-{newline.join(imports)}
-{newline.join(vars)}
+        capabilities: list[str] = entry["capabilities"]  # type: ignore[assignment]
+        if driver.can_render:
+            capabilities.append("render")
+        if driver.can_png:
+            capabilities.append("png")
+        if driver.can_turn_on_off:
+            capabilities.append("turnOn")
+            capabilities.append("turnOff")
 
-proc init*(frameOS: FrameOS) =
-  {(newline + '  ').join(init_drivers or ["discard"])}
+        if driver.variant:
+            entry["config"] = {"variant": driver.variant}
 
-proc render*(image: Image) =
-  {(newline + '  ').join(render_drivers or ["discard"])}
+        manifest["drivers"].append(entry)
 
-proc toPng*(rotate: int): string =
-  {(newline + '  ').join(png_drivers or ['result = ""'])}
-
-proc turnOn*() =
-  {(newline + '  ').join(on_drivers or ["discard"])}
-
-proc turnOff*() =
-  {(newline + '  ').join(off_drivers or ["discard"])}
-    """
-
-    return code
+    return json.dumps(manifest, indent=2, sort_keys=True)

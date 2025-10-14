@@ -73,3 +73,37 @@ SECRET_KEY=$(openssl rand -base64 32)
 docker build -t frameos .
 docker run -d -p 8989:8989 -v ./db:/app/db --name frameos --restart always -e SECRET_KEY="$SECRET_KEY" frameos
 ```
+
+## Building FrameOS driver libraries
+
+FrameOS now loads hardware drivers at runtime from shared libraries. You can build the
+current set of driver plugins directly from the `frameos/` workspace:
+
+```bash
+cd frameos
+make drivers
+```
+
+The command above invokes `tools/build_drivers.py`, which discovers every `entry.nim`
+module under `src/drivers/` and compiles it as a shared object in `build/drivers/`.
+
+Use the helper to inspect the list of driver targets without compiling:
+
+```bash
+cd frameos
+make drivers-list
+```
+
+For cross compilation you can pass the desired Nim flags through the script. For
+example, to build ARM64 Linux libraries suitable for Raspberry Pi deployments:
+
+```bash
+cd frameos
+python3 tools/build_drivers.py --os linux --cpu arm64
+```
+
+Use `--flag` to forward any additional options directly to `nim` if you need to
+customize the build (for example `--flag=-d:release`). The script automatically
+chooses the correct shared-library extension for the requested operating system and
+places the results in `frameos/build/drivers/` ready for packaging alongside your
+FrameOS binary.

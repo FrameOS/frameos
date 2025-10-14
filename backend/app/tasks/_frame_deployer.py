@@ -327,11 +327,13 @@ class FrameDeployer:
                 await self.log("stdout", f"Generated scenes.nim (showing because debug=true):\n{source}")
 
         drivers = drivers_for_frame(frame)
-        with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
-            source = write_drivers_nim(drivers)
-            f.write(source)
+        manifest_path = os.path.join(source_dir, "state", "drivers.json")
+        os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+        with open(manifest_path, "w") as f:
+            manifest = write_drivers_nim(drivers)
+            f.write(manifest)
             if frame.debug:
-                await self.log("stdout", f"Generated drivers.nim:\n{source}")
+                await self.log("stdout", f"Generated drivers manifest:\n{manifest}")
 
         if drivers.get("waveshare"):
             with open(os.path.join(source_dir, "src", "drivers", "waveshare", "driver.nim"), "w") as wf:

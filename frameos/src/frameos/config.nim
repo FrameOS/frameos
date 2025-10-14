@@ -112,7 +112,10 @@ proc getConfigFilename*(): string =
     result = "./frame.json"
 
 proc loadConfig*(): FrameConfig =
-  let data = parseFile(getConfigFilename())
+  let configFilename = getConfigFilename()
+  let absoluteConfigPath = absolutePath(configFilename)
+  let configDir = parentDir(absoluteConfigPath)
+  let data = parseFile(configFilename)
   # TODO: switch to jsony
   result = FrameConfig(
     name: data{"name"}.getStr(),
@@ -134,6 +137,7 @@ proc loadConfig*(): FrameConfig =
     scalingMode: data{"scalingMode"}.getStr(),
     settings: data{"settings"},
     assetsPath: data{"assetsPath"}.getStr("/srv/assets"),
+    driversManifest: data{"driversManifest"}.getStr("state/drivers.json"),
     saveAssets: if data{"saveAssets"} == nil: %*(false) else: data{"saveAssets"},
     logToFile: data{"logToFile"}.getStr(),
     debug: data{"debug"}.getBool() or commandLineParams().contains("--debug"),
@@ -144,6 +148,14 @@ proc loadConfig*(): FrameConfig =
     network: loadNetwork(data{"network"}),
     palette: loadPalette(data{"palette"}),
   )
+  var manifestPath = result.driversManifest
+  if manifestPath.len == 0:
+    manifestPath = "state/drivers.json"
+  if not isAbsolute(manifestPath):
+    manifestPath = joinPath(configDir, manifestPath)
+  normalizePath(manifestPath)
+  result.driversManifest = manifestPath
+
   if result.assetsPath.endswith("/"):
     result.assetsPath = result.assetsPath.strip(leading = false, trailing = true, chars = {'/'})
   setConfigDefaults(result)
