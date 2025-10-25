@@ -80,7 +80,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install redis
-        run: sudo apt-get install -y redis-server
+        run: sudo apt-get -y update && sudo apt-get install -y redis-server
 
       - name: Cache pip packages
         uses: actions/cache@v4
