@@ -142,38 +142,12 @@ proc epd7in3eReadBusyH() =
 
   var observedLow = initialState == UBYTE(0)
   var lowStartTime = if observedLow: startTime else: 0.0
-  var waitForLowMs = if observedLow: 0.0 else: 0.0
+  var waitForLowMs = 0.0
   var waitForHighMs = 0.0
   var timedOutWaitingForHigh = false
-  var timedOutWaitingForLow = false
+  const timedOutWaitingForLow = false
 
-  while true:
-    let currentState = DEV_Digital_Read(UWORD(EPD_BUSY_PIN))
-    if currentState != UBYTE(0):
-      if observedLow:
-        break
-
-      let elapsedSinceStartMs = (epochTime() - startTime) * 1000
-      if elapsedSinceStartMs >= busyWaitHighTimeoutMs:
-        timedOutWaitingForLow = true
-        break
-
-      DEV_Delay_ms(UDOUBLE(1))
-      inc loopCount
-
-      if driverDebugLogsEnabled() and loopCount mod 1000 == 0:
-        let now = epochTime()
-        if (now - lastLog) * 1000 >= 1000:
-          logDriverDebug(%*{
-            "event": "driver:waveshare:busy",
-            "loops": loopCount,
-            "elapsedMs": ((now - startTime) * 1000).int,
-            "stage": "waitForLow"
-          })
-          lastLog = now
-
-      continue
-
+  while DEV_Digital_Read(UWORD(EPD_BUSY_PIN)) == UBYTE(0):
     if not observedLow:
       observedLow = true
       lowStartTime = epochTime()
@@ -201,9 +175,11 @@ proc epd7in3eReadBusyH() =
         break
 
   let endTime = epochTime()
+
   if observedLow and not timedOutWaitingForHigh:
     waitForHighMs = (endTime - lowStartTime) * 1000
-  if observedLow:
+
+  if observedLow and waitForLowMs == 0:
     waitForLowMs = (lowStartTime - startTime) * 1000
 
   if timedOutWaitingForHigh and driverDebugLogsEnabled():
@@ -211,13 +187,6 @@ proc epd7in3eReadBusyH() =
       "event": "driver:waveshare:busy",
       "stage": "waitForHighTimeout",
       "elapsedMs": waitForHighMs.int
-    })
-
-  if timedOutWaitingForLow and driverDebugLogsEnabled():
-    logDriverDebug(%*{
-      "event": "driver:waveshare:busy",
-      "stage": "waitForLowTimeout",
-      "elapsedMs": ((endTime - startTime) * 1000).int
     })
 
   let durationMs = (endTime - startTime) * 1000
