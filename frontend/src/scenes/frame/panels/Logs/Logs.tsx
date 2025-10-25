@@ -6,6 +6,7 @@ import { insertBreaks } from '../../../../utils/insertBreaks'
 import { frameLogic } from '../../frameLogic'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '../../../../components/Button'
+import { DropdownMenu } from '../../../../components/DropdownMenu'
 
 function formatTimestamp(isoTimestamp: string): string {
   const date = new Date(isoTimestamp)
@@ -21,6 +22,26 @@ export function Logs() {
   const { logs, logsLoading } = useValues(logsLogic({ frameId }))
   const [atBottom, setAtBottom] = useState(false)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
+
+  const downloadLogs = () => {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const logContent = logs
+      .map((log) => {
+        const isoTimestamp = new Date(log.timestamp).toISOString()
+        return `[${isoTimestamp}] (${log.type}) ${log.line}`
+      })
+      .join('\n')
+    const blob = new Blob([logContent], { type: 'text/plain;charset=utf-8' })
+    const fileName = `frame-${frameId}-logs-${timestamp}.log`
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
 
   useEffect(() => {
     if (atBottom) {
@@ -41,6 +62,17 @@ export function Logs() {
     <div>No Logs yet</div>
   ) : (
     <div className="h-full bg-black p-2 relative">
+      <DropdownMenu
+        horizontal
+        buttonColor="tertiary"
+        className="absolute top-0.25 right-8 z-10"
+        items={[
+          {
+            label: 'Download log',
+            onClick: downloadLogs,
+          },
+        ]}
+      />
       <Virtuoso
         className="h-full bg-black font-mono text-sm overflow-y-scroll overflow-x-hidden relative"
         ref={virtuosoRef}

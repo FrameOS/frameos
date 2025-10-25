@@ -3,6 +3,7 @@ import { frameLogic } from '../../frameLogic'
 import { useEffect, useRef, useState, KeyboardEvent } from 'react'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '../../../../components/Button'
+import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { terminalLogic } from './terminalLogic'
 
 // Convert a string with ANSI escape codes to HTML with inline styles.
@@ -74,6 +75,20 @@ export function Terminal() {
     connect()
   }, [])
 
+  const downloadTerminalLog = () => {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const fileName = `frame-${frameId}-terminal-log-${timestamp}.log`
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -84,6 +99,17 @@ export function Terminal() {
 
   return (
     <div className="flex flex-col h-full space-y-2 relative">
+      <DropdownMenu
+        horizontal
+        buttonColor="tertiary"
+        className="absolute top-4 right-2 z-10"
+        items={[
+          {
+            label: 'Download log',
+            onClick: downloadTerminalLog,
+          },
+        ]}
+      />
       <Virtuoso
         className="flex-1 bg-black text-white font-mono text-sm overflow-y-scroll overflow-x-hidden p-2 rounded"
         data={lines}
