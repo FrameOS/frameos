@@ -128,17 +128,35 @@ proc epd7in3eSendData(data: UBYTE) =
 
 proc epd7in3eReadBusyH() =
   let startTime = epochTime()
-  logDebug("busy:wait:start")
+  var loopCount = 0
+  var lastLog = startTime
+  let initialState = DEV_Digital_Read(UWORD(EPD_BUSY_PIN))
+  logDebug("busy:wait:start", %*{"initialState": initialState.int})
+
   while DEV_Digital_Read(UWORD(EPD_BUSY_PIN)) == UBYTE(0):
+    inc loopCount
     DEV_Delay_ms(UDOUBLE(1))
+
+    if driverDebugLogsEnabled() and loopCount mod 500 == 0:
+      let now = epochTime()
+      if (now - lastLog) * 1000 >= 1000:
+        logDriverDebug(%*{
+          "event": "driver:waveshare:busy", "loops": loopCount,
+          "elapsedMs": ((now - startTime) * 1000).int
+        })
+        lastLog = now
+
   let durationMs = (epochTime() - startTime) * 1000
-  logDebug("busy:wait:end", %*{"durationMs": durationMs})
+  let finalState = DEV_Digital_Read(UWORD(EPD_BUSY_PIN))
+  logDebug("busy:wait:end", %*{"durationMs": durationMs, "loops": loopCount, "finalState": finalState.int})
 
 proc epd7in3eTurnOnDisplay() =
   logDebug("turnOnDisplay:start")
+  logDebug("turnOnDisplay:powerOn")
   epd7in3eSendCommand(0x04) # POWER_ON
   epd7in3eReadBusyH()
 
+  logDebug("turnOnDisplay:secondSetting")
   ## Second setting
   epd7in3eSendCommand(0x06)
   epd7in3eSendData(0x6F)
@@ -146,10 +164,12 @@ proc epd7in3eTurnOnDisplay() =
   epd7in3eSendData(0x17)
   epd7in3eSendData(0x49)
 
+  logDebug("turnOnDisplay:refresh")
   epd7in3eSendCommand(0x12) # DISPLAY_REFRESH
   epd7in3eSendData(0x00)
   epd7in3eReadBusyH()
 
+  logDebug("turnOnDisplay:powerOff")
   epd7in3eSendCommand(0x02) # POWER_OFF
   epd7in3eSendData(0x00)
   epd7in3eReadBusyH()
@@ -162,6 +182,7 @@ proc EPD_7IN3E_Init*() =
   DEV_Delay_ms(UDOUBLE(30))
   logDebug("init:afterResetDelay")
 
+  logDebug("init:cmdh")
   epd7in3eSendCommand(0xAA)
   epd7in3eSendData(0x49)
   epd7in3eSendData(0x55)
@@ -170,43 +191,52 @@ proc EPD_7IN3E_Init*() =
   epd7in3eSendData(0x09)
   epd7in3eSendData(0x18)
 
+  logDebug("init:drvPLL")
   epd7in3eSendCommand(0x01)
   epd7in3eSendData(0x3F)
 
+  logDebug("init:powerSetting")
   epd7in3eSendCommand(0x00)
   epd7in3eSendData(0x5F)
   epd7in3eSendData(0x69)
 
+  logDebug("init:boosterSoftStart")
   epd7in3eSendCommand(0x03)
   epd7in3eSendData(0x00)
   epd7in3eSendData(0x54)
   epd7in3eSendData(0x00)
   epd7in3eSendData(0x44)
 
+  logDebug("init:powerOptimisation1")
   epd7in3eSendCommand(0x05)
   epd7in3eSendData(0x40)
   epd7in3eSendData(0x1F)
   epd7in3eSendData(0x1F)
   epd7in3eSendData(0x2C)
 
+  logDebug("init:powerOptimisation2")
   epd7in3eSendCommand(0x06)
   epd7in3eSendData(0x6F)
   epd7in3eSendData(0x1F)
   epd7in3eSendData(0x17)
   epd7in3eSendData(0x49)
 
+  logDebug("init:powerOptimisation3")
   epd7in3eSendCommand(0x08)
   epd7in3eSendData(0x6F)
   epd7in3eSendData(0x1F)
   epd7in3eSendData(0x1F)
   epd7in3eSendData(0x22)
 
+  logDebug("init:powerOptimisation4")
   epd7in3eSendCommand(0x30)
   epd7in3eSendData(0x03)
 
+  logDebug("init:vcomAndDataInterval")
   epd7in3eSendCommand(0x50)
   epd7in3eSendData(0x3F)
 
+  logDebug("init:resolution")
   epd7in3eSendCommand(0x60)
   epd7in3eSendData(0x02)
   epd7in3eSendData(0x00)
@@ -217,12 +247,15 @@ proc EPD_7IN3E_Init*() =
   epd7in3eSendData(0x01)
   epd7in3eSendData(0xE0)
 
+  logDebug("init:vdcsSetting")
   epd7in3eSendCommand(0x84)
   epd7in3eSendData(0x01)
 
+  logDebug("init:pllControl")
   epd7in3eSendCommand(0xE3)
   epd7in3eSendData(0x2F)
 
+  logDebug("init:powerOn")
   epd7in3eSendCommand(0x04)
   epd7in3eReadBusyH()
   logDebug("init:done")
@@ -338,6 +371,16 @@ proc EPD_7IN3E_Display*(image: ptr UBYTE) =
   let totalBytes = width * height
 
   logDebug("display:start", %*{"widthBytes": width, "height": height, "totalBytes": totalBytes})
+
+  if driverDebugLogsEnabled() and totalBytes > 0:
+    let previewCount = min(totalBytes, 16)
+    var preview = newSeq[int](previewCount)
+    for i in 0 ..< previewCount:
+      preview[i] = buffer[i].int
+    logDriverDebug(%*{
+      "event": "driver:waveshare:dataPreview", "count": previewCount,
+      "bytes": preview
+    })
 
   epd7in3eSendCommand(0x10)
   for j in 0 ..< height:
