@@ -31,7 +31,13 @@
 ## ****************************************************************************
 
 import
-  DEV_Config
+  DEV_Config,
+  json,
+  strformat,
+  strutils,
+  times
+
+from drivers/waveshare/types import logDriverDebug, driverDebugLogsEnabled
 
 const
   EPD_7IN3E_WIDTH* = 800
@@ -52,19 +58,40 @@ const
 type
   UByteArray = UncheckedArray[UBYTE]
 
-template debug(msg: string) =
-  when defined(debug):
-    echo msg
+var
+  dataLogCounter = 0
+  dataBytesCurrentCommand = 0
+
+template logDebug(action: string, extra: JsonNode = nil) =
+  if driverDebugLogsEnabled():
+    var payload = %*{"event": "driver:waveshare:debug", "action": action}
+    if extra != nil and extra.kind == JObject:
+      for key, value in extra.pairs:
+        payload[key] = value
+    logDriverDebug(payload)
+
+proc logCommand(reg: UBYTE) =
+  dataLogCounter = 0
+  dataBytesCurrentCommand = 0
+  if driverDebugLogsEnabled():
+    logDriverDebug(%*{
+      "event": "driver:waveshare:command",
+      "command": reg.int,
+      "commandHex": &"0x{toHex(reg.int, 2)}"
+    })
 
 proc epd7in3eReset() =
+  logDebug("reset:start")
   DEV_Digital_Write(UWORD(EPD_RST_PIN), UBYTE(1))
   DEV_Delay_ms(UDOUBLE(20))
   DEV_Digital_Write(UWORD(EPD_RST_PIN), UBYTE(0))
   DEV_Delay_ms(UDOUBLE(2))
   DEV_Digital_Write(UWORD(EPD_RST_PIN), UBYTE(1))
   DEV_Delay_ms(UDOUBLE(20))
+  logDebug("reset:done")
 
 proc epd7in3eSendCommand(reg: UBYTE) =
+  logCommand(reg)
   DEV_Digital_Write(UWORD(EPD_DC_PIN), UBYTE(0))
   DEV_Digital_Write(UWORD(EPD_CS_PIN), UBYTE(0))
   DEV_SPI_WriteByte(reg)
@@ -76,13 +103,39 @@ proc epd7in3eSendData(data: UBYTE) =
   DEV_SPI_WriteByte(data)
   DEV_Digital_Write(UWORD(EPD_CS_PIN), UBYTE(1))
 
+  inc dataBytesCurrentCommand
+  if driverDebugLogsEnabled():
+    if dataLogCounter < 16:
+      logDriverDebug(%*{
+        "event": "driver:waveshare:data",
+        "index": dataBytesCurrentCommand,
+        "data": data.int,
+        "dataHex": &"0x{toHex(data.int, 2)}"
+      })
+    elif dataLogCounter == 16:
+      logDriverDebug(%*{
+        "event": "driver:waveshare:data",
+        "message": "Further data logging suppressed for this command",
+        "bytesSent": dataBytesCurrentCommand
+      })
+    elif (dataBytesCurrentCommand mod 4096) == 0:
+      logDriverDebug(%*{
+        "event": "driver:waveshare:data",
+        "message": "Data transfer progress",
+        "bytesSent": dataBytesCurrentCommand
+      })
+    inc dataLogCounter
+
 proc epd7in3eReadBusyH() =
-  debug("e-Paper busy H")
+  let startTime = epochTime()
+  logDebug("busy:wait:start")
   while DEV_Digital_Read(UWORD(EPD_BUSY_PIN)) == UBYTE(0):
     DEV_Delay_ms(UDOUBLE(1))
-  debug("e-Paper busy H release")
+  let durationMs = (epochTime() - startTime) * 1000
+  logDebug("busy:wait:end", %*{"durationMs": durationMs})
 
 proc epd7in3eTurnOnDisplay() =
+  logDebug("turnOnDisplay:start")
   epd7in3eSendCommand(0x04) # POWER_ON
   epd7in3eReadBusyH()
 
@@ -100,11 +153,14 @@ proc epd7in3eTurnOnDisplay() =
   epd7in3eSendCommand(0x02) # POWER_OFF
   epd7in3eSendData(0x00)
   epd7in3eReadBusyH()
+  logDebug("turnOnDisplay:done")
 
 proc EPD_7IN3E_Init*() =
+  logDebug("init:start")
   epd7in3eReset()
   epd7in3eReadBusyH()
   DEV_Delay_ms(UDOUBLE(30))
+  logDebug("init:afterResetDelay")
 
   epd7in3eSendCommand(0xAA)
   epd7in3eSendData(0x49)
@@ -169,10 +225,12 @@ proc EPD_7IN3E_Init*() =
 
   epd7in3eSendCommand(0x04)
   epd7in3eReadBusyH()
+  logDebug("init:done")
 
 proc EPD_7IN3E_Init_Fast*() =
   ## No dedicated fast initialisation sequence is available in the original
   ## driver, so we fall back to the standard initialisation routine.
+  logDebug("initFast:delegated")
   EPD_7IN3E_Init()
 
 proc EPD_7IN3E_Clear*(color: UBYTE) =
@@ -182,6 +240,9 @@ proc EPD_7IN3E_Clear*(color: UBYTE) =
     else:
       EPD_7IN3E_WIDTH div 2 + 1
   let height = EPD_7IN3E_HEIGHT
+  let totalBytes = width * height
+
+  logDebug("clear:start", %*{"color": color.int, "widthBytes": width, "height": height, "totalBytes": totalBytes})
 
   epd7in3eSendCommand(0x10)
   for _ in 0 ..< height:
@@ -189,6 +250,7 @@ proc EPD_7IN3E_Clear*(color: UBYTE) =
       let packed = (color shl 4) or color
       epd7in3eSendData(UBYTE(packed))
 
+  logDebug("clear:dataWritten", %*{"totalBytes": totalBytes})
   epd7in3eTurnOnDisplay()
 
 proc EPD_7IN3E_Show7Block*() =
@@ -201,12 +263,14 @@ proc EPD_7IN3E_Show7Block*() =
     UBYTE(EPD_7IN3E_WHITE)
   ]
 
+  logDebug("show7Block:start", %*{"blocks": colorSeven.len, "bytesPerBlock": 20000})
   epd7in3eSendCommand(0x10)
   for color in colorSeven:
     for _ in 0 ..< 20000:
       let packed = (color shl 4) or color
       epd7in3eSendData(UBYTE(packed))
 
+  logDebug("show7Block:dataWritten", %*{"totalBytes": colorSeven.len * 20000})
   epd7in3eTurnOnDisplay()
 
 proc EPD_7IN3E_Show*() =
@@ -225,10 +289,12 @@ proc EPD_7IN3E_Show*() =
     else:
       EPD_7IN3E_WIDTH div 2 + 1
   let height = EPD_7IN3E_HEIGHT
+  let totalBytes = width * height
 
   var k = 0
   var o = 0
 
+  logDebug("show:start", %*{"widthBytes": width, "height": height, "totalBytes": totalBytes})
   epd7in3eSendCommand(0x10)
   for j in 0 ..< height:
     if (j > 10) and (j < 50):
@@ -254,10 +320,12 @@ proc EPD_7IN3E_Show*() =
     if o >= height:
       o = 0
 
+  logDebug("show:dataWritten", %*{"totalBytes": totalBytes})
   epd7in3eTurnOnDisplay()
 
 proc EPD_7IN3E_Display*(image: ptr UBYTE) =
   if image.isNil:
+    logDebug("display:image:nil")
     return
 
   let width =
@@ -267,6 +335,9 @@ proc EPD_7IN3E_Display*(image: ptr UBYTE) =
       EPD_7IN3E_WIDTH div 2 + 1
   let height = EPD_7IN3E_HEIGHT
   let buffer = cast[ptr UByteArray](image)
+  let totalBytes = width * height
+
+  logDebug("display:start", %*{"widthBytes": width, "height": height, "totalBytes": totalBytes})
 
   epd7in3eSendCommand(0x10)
   for j in 0 ..< height:
@@ -274,12 +345,15 @@ proc EPD_7IN3E_Display*(image: ptr UBYTE) =
       let idx = i + j * width
       epd7in3eSendData(buffer[idx])
 
+  logDebug("display:dataWritten", %*{"totalBytes": totalBytes})
   epd7in3eTurnOnDisplay()
 
 proc EPD_7IN3E_Sleep*() =
+  logDebug("sleep:start")
   epd7in3eSendCommand(0x02)
   epd7in3eSendData(0x00)
   epd7in3eReadBusyH()
 
   epd7in3eSendCommand(0x07)
   epd7in3eSendData(0xA5)
+  logDebug("sleep:done")
