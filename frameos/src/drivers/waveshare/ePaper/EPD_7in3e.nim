@@ -126,29 +126,106 @@ proc epd7in3eSendData(data: UBYTE) =
       })
     inc dataLogCounter
 
+const
+  ## Maximum time (in milliseconds) we are willing to wait for the BUSY line to
+  ## drop low before reporting a timeout in the debug logs. This matches the
+  ## expectation that the display can legitimately spend tens of seconds in the
+  ## busy state during a refresh.
+  busyWaitLowTimeoutMs = 60000.0
+
 proc epd7in3eReadBusyH() =
   let startTime = epochTime()
   var loopCount = 0
   var lastLog = startTime
-  let initialState = DEV_Digital_Read(UWORD(EPD_BUSY_PIN))
+  var state = DEV_Digital_Read(UWORD(EPD_BUSY_PIN))
+  let initialState = state
   logDebug("busy:wait:start", %*{"initialState": initialState.int})
 
-  while DEV_Digital_Read(UWORD(EPD_BUSY_PIN)) == UBYTE(0):
-    inc loopCount
-    DEV_Delay_ms(UDOUBLE(1))
+  var observedLow = initialState == UBYTE(0)
+  var waitForLowMs = 0.0
+  var timedOutWaitingForLow = false
+  var waitForLowStart = startTime
 
-    if driverDebugLogsEnabled() and loopCount mod 500 == 0:
-      let now = epochTime()
-      if (now - lastLog) * 1000 >= 1000:
-        logDriverDebug(%*{
-          "event": "driver:waveshare:busy", "loops": loopCount,
-          "elapsedMs": ((now - startTime) * 1000).int
-        })
-        lastLog = now
+  if not observedLow:
+    waitForLowStart = epochTime()
+    while true:
+      state = DEV_Digital_Read(UWORD(EPD_BUSY_PIN))
+      if state == UBYTE(0):
+        observedLow = true
+        waitForLowMs = (epochTime() - waitForLowStart) * 1000
+        break
+
+      DEV_Delay_ms(UDOUBLE(1))
+      inc loopCount
+
+      if driverDebugLogsEnabled() and loopCount mod 500 == 0:
+        let now = epochTime()
+        if (now - lastLog) * 1000 >= 1000:
+          logDriverDebug(%*{
+            "event": "driver:waveshare:busy",
+            "loops": loopCount,
+            "elapsedMs": ((now - startTime) * 1000).int,
+            "stage": "waitForLow"
+          })
+          lastLog = now
+
+      let elapsedLowMs = (epochTime() - waitForLowStart) * 1000
+      if elapsedLowMs >= busyWaitLowTimeoutMs:
+        timedOutWaitingForLow = true
+        waitForLowMs = elapsedLowMs
+        break
+  elif observedLow:
+    ## The line was already low when we entered; record the elapsed time as
+    ## zero to make the debug output explicit.
+    waitForLowMs = 0.0
+
+  if not observedLow:
+    state = DEV_Digital_Read(UWORD(EPD_BUSY_PIN))
+    if state == UBYTE(0):
+      observedLow = true
+      let elapsedLowMs = (epochTime() - waitForLowStart) * 1000
+      if elapsedLowMs > waitForLowMs:
+        waitForLowMs = elapsedLowMs
+
+  if timedOutWaitingForLow and driverDebugLogsEnabled():
+    logDriverDebug(%*{
+      "event": "driver:waveshare:busy",
+      "stage": "waitForLowTimeout",
+      "elapsedMs": waitForLowMs.int
+    })
+
+  var waitForHighMs = 0.0
+  if state == UBYTE(0):
+    let waitForHighStart = epochTime()
+    while state == UBYTE(0):
+      DEV_Delay_ms(UDOUBLE(1))
+      inc loopCount
+
+      if driverDebugLogsEnabled() and loopCount mod 500 == 0:
+        let now = epochTime()
+        if (now - lastLog) * 1000 >= 1000:
+          logDriverDebug(%*{
+            "event": "driver:waveshare:busy",
+            "loops": loopCount,
+            "elapsedMs": ((now - startTime) * 1000).int,
+            "stage": "waitForHigh"
+          })
+          lastLog = now
+
+      state = DEV_Digital_Read(UWORD(EPD_BUSY_PIN))
+    waitForHighMs = (epochTime() - waitForHighStart) * 1000
 
   let durationMs = (epochTime() - startTime) * 1000
-  let finalState = DEV_Digital_Read(UWORD(EPD_BUSY_PIN))
-  logDebug("busy:wait:end", %*{"durationMs": durationMs, "loops": loopCount, "finalState": finalState.int})
+  let finalState = state
+  logDebug("busy:wait:end", %*{
+    "durationMs": durationMs,
+    "loops": loopCount,
+    "finalState": finalState.int,
+    "observedLow": observedLow,
+    "waitedForLowMs": waitForLowMs,
+    "waitedForHighMs": waitForHighMs,
+    "timedOutWaitingForLow": timedOutWaitingForLow
+  })
 
 proc epd7in3eTurnOnDisplay() =
   logDebug("turnOnDisplay:start")
