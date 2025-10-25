@@ -120,6 +120,11 @@ proc init*(frameOS: FrameOS): Driver =
 
   process.close()
 
+proc logProcessExit(logger: Logger, process: Process, context: string) =
+  let exitCode = process.waitForExit()
+  if exitCode != 0:
+    discard logger.safeLog(fmt"{context} exited with status {exitCode}")
+
 proc render*(self: Driver, image: Image) =
   if self.lastImageData == image.data:
     discard self.logger.safeLog("Skipping render. Identical to last render.")
@@ -190,6 +195,16 @@ proc render*(self: Driver, image: Image) =
         break toploop
 
   if error:
+    try:
+      pIn.close()
+    except:
+      discard
+    if process.running:
+      try:
+        process.terminate()
+      except OSError:
+        discard
+    logProcessExit(self.logger, process, "inkyPython-run (handshake)")
     process.close()
     return
 
@@ -213,6 +228,7 @@ proc render*(self: Driver, image: Image) =
   while pOut.readLine(line):
     discard self.logger.safeLog(line)
 
+  logProcessExit(self.logger, process, "inkyPython-run")
   process.close()
 
 # Convert the rendered pixels to a PNG image. For accurate colors on the web.

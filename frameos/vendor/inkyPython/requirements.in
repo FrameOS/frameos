@@ -3,9 +3,9 @@
 -i https://piwheels.org/simple
 --extra-index-url https://pypi.org/simple
 
-inky==2.1.0
-numpy==1.26.1
-pillow==9.5.0
+inky==2.2.1
+numpy==2.2.1
+pillow==11.0.0
 RPi.GPIO==0.7.1
 gpiod==2.3.0
 gpiodevice==0.0.5

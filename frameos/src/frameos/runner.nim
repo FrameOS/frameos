@@ -13,6 +13,7 @@ import drivers/drivers as drivers
 
 # How fast must a scene render to be condidered fast. Two in a row pauses logging for 10s.
 const FAST_SCENE_CUTOFF_SECONDS = 0.5
+const INKY_FAST_RENDER_THRESHOLD_MS = 2.0
 
 # How frequently we announce a new render via websockets
 const SERVER_RENDER_DELAY_SECONDS = 1.0
@@ -122,8 +123,14 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     try:
       # TODO: render the driver part in another thread
       drivers.render(lastRotatedImage)
+      let driverElapsedMs = round((epochTime() - driverTimer) * 1000, 3)
       self.logger.log(%*{"event": "render:driver",
-        "device": self.frameConfig.device, "ms": round((epochTime() - driverTimer) * 1000, 3)})
+        "device": self.frameConfig.device, "ms": driverElapsedMs})
+      if self.frameConfig.device.startsWith("pimoroni.inky") and driverElapsedMs < INKY_FAST_RENDER_THRESHOLD_MS:
+        self.logger.log(%*{"event": "render:driver:warning",
+          "device": self.frameConfig.device,
+          "ms": driverElapsedMs,
+          "message": "Driver render finished suspiciously fast; check inkyPython logs for errors."})
     except Exception as e:
       self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
