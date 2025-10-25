@@ -132,6 +132,13 @@ const
   ## mirrors the behaviour of the reference C implementation which treats a
   ## high level as "ready" and a low level as "busy".
   busyWaitHighTimeoutMs = 60000.0
+  ## Some panels can take a short amount of time after a command before the
+  ## BUSY pin actually drops low. The C driver ends up waiting because by the
+  ## time it checks the pin the display is already busy, while the Nim version
+  ## was fast enough to miss the low pulse entirely. We explicitly wait for the
+  ## BUSY line to go low for a limited amount of time so we do not skip the
+  ## refresh cycle.
+  busyWaitLowTimeoutMs = 2000.0
 
 proc epd7in3eReadBusyH() =
   let startTime = epochTime()
@@ -142,45 +149,72 @@ proc epd7in3eReadBusyH() =
 
   var observedLow = initialState == UBYTE(0)
   var lowStartTime = if observedLow: startTime else: 0.0
-  var waitForLowMs = 0.0
+  var waitForLowMs = if observedLow: 0.0 else: 0.0
   var waitForHighMs = 0.0
+  var timedOutWaitingForLow = false
   var timedOutWaitingForHigh = false
-  const timedOutWaitingForLow = false
 
-  while DEV_Digital_Read(UWORD(EPD_BUSY_PIN)) == UBYTE(0):
-    if not observedLow:
-      observedLow = true
-      lowStartTime = epochTime()
-      waitForLowMs = (lowStartTime - startTime) * 1000
+  if not observedLow:
+    let lowDeadline = startTime + busyWaitLowTimeoutMs / 1000.0
+    while DEV_Digital_Read(UWORD(EPD_BUSY_PIN)) != UBYTE(0):
+      DEV_Delay_ms(UDOUBLE(1))
+      inc loopCount
 
-    DEV_Delay_ms(UDOUBLE(1))
-    inc loopCount
+      if driverDebugLogsEnabled() and loopCount mod 1000 == 0:
+        let now = epochTime()
+        if (now - lastLog) * 1000 >= 1000:
+          logDriverDebug(%*{
+            "event": "driver:waveshare:busy",
+            "loops": loopCount,
+            "elapsedMs": ((now - startTime) * 1000).int,
+            "stage": "waitForLow"
+          })
+          lastLog = now
 
-    if driverDebugLogsEnabled() and loopCount mod 1000 == 0:
+      if epochTime() >= lowDeadline:
+        timedOutWaitingForLow = true
+        waitForLowMs = (epochTime() - startTime) * 1000
+        break
+
+    if not timedOutWaitingForLow:
       let now = epochTime()
-      if (now - lastLog) * 1000 >= 1000:
-        logDriverDebug(%*{
-          "event": "driver:waveshare:busy",
-          "loops": loopCount,
-          "elapsedMs": ((now - startTime) * 1000).int,
-          "stage": "waitForHigh"
-        })
-        lastLog = now
+      if DEV_Digital_Read(UWORD(EPD_BUSY_PIN)) == UBYTE(0):
+        observedLow = true
+        lowStartTime = now
+        waitForLowMs = (lowStartTime - startTime) * 1000
 
-    if observedLow:
-      let elapsedHighMs = (epochTime() - lowStartTime) * 1000
+  if observedLow and not timedOutWaitingForLow:
+    while DEV_Digital_Read(UWORD(EPD_BUSY_PIN)) == UBYTE(0):
+      DEV_Delay_ms(UDOUBLE(1))
+      inc loopCount
+
+      if driverDebugLogsEnabled() and loopCount mod 1000 == 0:
+        let now = epochTime()
+        if (now - lastLog) * 1000 >= 1000:
+          logDriverDebug(%*{
+            "event": "driver:waveshare:busy",
+            "loops": loopCount,
+            "elapsedMs": ((now - startTime) * 1000).int,
+            "stage": "waitForHigh"
+          })
+          lastLog = now
+
+      let now = epochTime()
+      let elapsedHighMs = (now - lowStartTime) * 1000
       if elapsedHighMs >= busyWaitHighTimeoutMs:
         timedOutWaitingForHigh = true
         waitForHighMs = elapsedHighMs
         break
 
-  let endTime = epochTime()
+    if not timedOutWaitingForHigh:
+      waitForHighMs = (epochTime() - lowStartTime) * 1000
 
-  if observedLow and not timedOutWaitingForHigh:
-    waitForHighMs = (endTime - lowStartTime) * 1000
-
-  if observedLow and waitForLowMs == 0:
-    waitForLowMs = (lowStartTime - startTime) * 1000
+  if timedOutWaitingForLow and driverDebugLogsEnabled():
+    logDriverDebug(%*{
+      "event": "driver:waveshare:busy",
+      "stage": "waitForLowTimeout",
+      "elapsedMs": waitForLowMs.int
+    })
 
   if timedOutWaitingForHigh and driverDebugLogsEnabled():
     logDriverDebug(%*{
@@ -189,6 +223,7 @@ proc epd7in3eReadBusyH() =
       "elapsedMs": waitForHighMs.int
     })
 
+  let endTime = epochTime()
   let durationMs = (endTime - startTime) * 1000
   let finalState = DEV_Digital_Read(UWORD(EPD_BUSY_PIN))
   logDebug("busy:wait:end", %*{
