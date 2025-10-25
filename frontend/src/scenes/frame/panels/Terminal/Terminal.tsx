@@ -66,7 +66,7 @@ function ansiToHtml(value: string): string {
 export function Terminal() {
   const { frameId } = useValues(frameLogic)
   const { lines } = useValues(terminalLogic({ frameId }))
-  const { connect, sendCommand } = useActions(terminalLogic({ frameId }))
+  const { connect, sendCommand, sendKeys } = useActions(terminalLogic({ frameId }))
   const [cmd, setCmd] = useState('')
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const [atBottom, setAtBottom] = useState(true)
@@ -89,11 +89,41 @@ export function Terminal() {
     URL.revokeObjectURL(url)
   }
 
+  const handleCommand = () => {
+    sendCommand(cmd)
+    setCmd('')
+  }
+
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
-      sendCommand(cmd)
-      setCmd('')
+      handleCommand()
+    }
+  }
+
+  const translateCtrlKeys = (value: string): string =>
+    value
+      .split('')
+      .map((char) => {
+        if (!char) {
+          return ''
+        }
+        const upper = char.toUpperCase()
+        const code = upper.charCodeAt(0)
+        if (code >= 64 && code <= 95) {
+          return String.fromCharCode(code - 64)
+        }
+        return char
+      })
+      .join('')
+
+  const handleSendKeys = (withCtrl: boolean) => {
+    if (!cmd.trim()) {
+      return
+    }
+    const payload = withCtrl ? translateCtrlKeys(cmd) : cmd
+    if (payload) {
+      sendKeys(payload)
     }
   }
 
@@ -135,7 +165,7 @@ export function Terminal() {
           Scroll to latest
         </Button>
       )}
-      <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <input
           value={cmd}
           onChange={(e) => setCmd(e.target.value)}
@@ -144,6 +174,15 @@ export function Terminal() {
           className="w-full focus:outline-none p-1 rounded bg-black text-white"
           placeholder="enter command"
         />
+        <Button color="secondary" size="small" onClick={() => handleCommand()}>
+          Send command
+        </Button>
+        <Button color="secondary" size="small" onClick={() => handleSendKeys(false)}>
+          Send keys
+        </Button>
+        <Button color="secondary" size="small" onClick={() => handleSendKeys(true)}>
+          Send CTRL
+        </Button>
       </div>
     </div>
   )
