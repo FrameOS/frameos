@@ -33,11 +33,14 @@
 import
   DEV_Config,
   json,
+  options,
   strformat,
   strutils,
-  times
+  times,
+  std/monotimes
 
 from drivers/waveshare/types import logDriverDebug, driverDebugLogsEnabled
+import frameos/utils/time
 
 const
   EPD_7IN3E_WIDTH* = 800
@@ -129,47 +132,49 @@ proc epd7in3eSendData(data: UBYTE) =
     inc dataLogCounter
 
 proc epd7in3eReadBusyH() =
-  let startTime = epochTime()
+  let startTime = getMonoTime()
   var loopCount = 0
   var lastLog = startTime
   let initialState = DEV_Digital_Read(UWORD(EPD_BUSY_PIN))
   logDebug("busy:wait:start", %*{"initialState": initialState.int})
 
   var observedLow = initialState == UBYTE(0)
-  var lowStartTime = if observedLow: startTime else: 0.0
+  var lowStartTime = if observedLow: some(startTime) else: none(MonoTime)
 
   if (not observedLow) and DEV_Digital_Read(UWORD(EPD_BUSY_PIN)) == UBYTE(0):
     observedLow = true
-    lowStartTime = epochTime()
+    lowStartTime = some(getMonoTime())
 
   while DEV_Digital_Read(UWORD(EPD_BUSY_PIN)) == UBYTE(0):
     if not observedLow:
       observedLow = true
-      lowStartTime = epochTime()
+      lowStartTime = some(getMonoTime())
 
     DEV_Delay_ms(UDOUBLE(1))
     inc loopCount
 
     if driverDebugLogsEnabled() and loopCount mod busyLogLoopInterval == 0:
-      let now = epochTime()
-      if (now - lastLog) * 1000 >= busyLogMinIntervalMs:
+      let now = getMonoTime()
+      if durationToMilliseconds(now - lastLog) >= busyLogMinIntervalMs:
         logDriverDebug(%*{
           "event": "driver:waveshare:busy",
           "loops": loopCount,
-          "elapsedMs": ((now - startTime) * 1000).int,
+          "elapsedMs": durationToMilliseconds(now - startTime),
           "stage": "waitForHigh"
         })
         lastLog = now
 
-  let endTime = epochTime()
-  let durationMs = (endTime - startTime) * 1000
+  let endTime = getMonoTime()
+  let durationMs = durationToMilliseconds(endTime - startTime)
   let finalState = DEV_Digital_Read(UWORD(EPD_BUSY_PIN))
 
   let waitForLowMs =
-    if observedLow: (lowStartTime - startTime) * 1000
+    if observedLow and lowStartTime.isSome:
+      durationToMilliseconds(lowStartTime.get() - startTime)
     else: 0.0
   let waitForHighMs =
-    if observedLow: (endTime - lowStartTime) * 1000
+    if observedLow and lowStartTime.isSome:
+      durationToMilliseconds(endTime - lowStartTime.get())
     else: 0.0
 
   logDebug("busy:wait:end", %*{

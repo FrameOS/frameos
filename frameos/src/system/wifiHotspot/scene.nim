@@ -2,12 +2,14 @@
 
 {.warning[UnusedImport]: off.}
 import pixie, json, times, strformat, strutils, sequtils, options, algorithm
+import std/monotimes
 
 import frameos/values
 import frameos/types
 import frameos/channels
 import frameos/utils/image
 import frameos/utils/url
+import frameos/utils/time
 import apps/render/split/app as render_splitApp
 import apps/render/image/app as render_imageApp
 import apps/data/qr/app as data_qrApp
@@ -38,10 +40,10 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext) =
   let state = scene.state
   var nextNode = nodeId
   var currentNode = nodeId
-  var timer = epochTime()
+  var timer = getMonoTime()
   while nextNode != -1.NodeId:
     currentNode = nextNode
-    timer = epochTime()
+    timer = getMonoTime()
     case nextNode:
     of 1.NodeId: # render/split
       self.node1.run(context)
@@ -84,7 +86,8 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext) =
       nextNode = -1.NodeId
 
     if DEBUG:
-      self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": (-timer + epochTime()) * 1000})
+      let elapsedMs = durationToMilliseconds(getMonoTime() - timer)
+      self.logger.log(%*{"event": "debug:scene", "node": currentNode, "ms": elapsedMs})
 
 proc runEvent*(self: Scene, context: ExecutionContext) =
   case context.event:
