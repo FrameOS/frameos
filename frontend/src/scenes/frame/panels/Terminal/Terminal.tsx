@@ -3,6 +3,7 @@ import { frameLogic } from '../../frameLogic'
 import { useEffect, useRef, useState, KeyboardEvent } from 'react'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '../../../../components/Button'
+import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { terminalLogic } from './terminalLogic'
 
 // Convert a string with ANSI escape codes to HTML with inline styles.
@@ -65,7 +66,7 @@ function ansiToHtml(value: string): string {
 export function Terminal() {
   const { frameId } = useValues(frameLogic)
   const { lines } = useValues(terminalLogic({ frameId }))
-  const { connect, sendCommand } = useActions(terminalLogic({ frameId }))
+  const { connect, sendCommand, sendKeys } = useActions(terminalLogic({ frameId }))
   const [cmd, setCmd] = useState('')
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const [atBottom, setAtBottom] = useState(true)
@@ -74,16 +75,71 @@ export function Terminal() {
     connect()
   }, [])
 
+  const downloadTerminalLog = () => {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const fileName = `frame-${frameId}-terminal-log-${timestamp}.log`
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  const handleCommand = () => {
+    sendCommand(cmd)
+    setCmd('')
+  }
+
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
-      sendCommand(cmd)
-      setCmd('')
+      handleCommand()
+    }
+  }
+
+  const translateCtrlKeys = (value: string): string =>
+    value
+      .split('')
+      .map((char) => {
+        if (!char) {
+          return ''
+        }
+        const upper = char.toUpperCase()
+        const code = upper.charCodeAt(0)
+        if (code >= 64 && code <= 95) {
+          return String.fromCharCode(code - 64)
+        }
+        return char
+      })
+      .join('')
+
+  const handleSendKeys = (withCtrl: boolean) => {
+    if (!cmd.trim()) {
+      return
+    }
+    const payload = withCtrl ? translateCtrlKeys(cmd) : cmd
+    if (payload) {
+      sendKeys(payload)
     }
   }
 
   return (
     <div className="flex flex-col h-full space-y-2 relative">
+      <DropdownMenu
+        horizontal
+        buttonColor="tertiary"
+        className="absolute top-4 right-2 z-10"
+        items={[
+          {
+            label: 'Download log',
+            onClick: downloadTerminalLog,
+          },
+        ]}
+      />
       <Virtuoso
         className="flex-1 bg-black text-white font-mono text-sm overflow-y-scroll overflow-x-hidden p-2 rounded"
         data={lines}
@@ -109,7 +165,7 @@ export function Terminal() {
           Scroll to latest
         </Button>
       )}
-      <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <input
           value={cmd}
           onChange={(e) => setCmd(e.target.value)}
@@ -118,6 +174,15 @@ export function Terminal() {
           className="w-full focus:outline-none p-1 rounded bg-black text-white"
           placeholder="enter command"
         />
+        <Button color="secondary" size="small" onClick={() => handleCommand()}>
+          Send command
+        </Button>
+        <Button color="secondary" size="small" onClick={() => handleSendKeys(false)}>
+          Send keys
+        </Button>
+        <Button color="secondary" size="small" onClick={() => handleSendKeys(true)}>
+          Send CTRL
+        </Button>
       </div>
     </div>
   )

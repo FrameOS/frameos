@@ -4,7 +4,7 @@ import frameos/types
 import frameos/utils/image
 import frameos/utils/dither
 import drivers/waveshare/driver as waveshareDriver
-from drivers/waveshare/types import Driver, ColorOption
+from drivers/waveshare/types import Driver, ColorOption, setDriverDebugLogger
 export Driver
 
 var
@@ -34,6 +34,7 @@ proc init*(frameOS: FrameOS): Driver =
   let width = waveshareDriver.width
   let height = waveshareDriver.height
 
+  setDriverDebugLogger(logger)
   logger.log(%*{"event": "driver:waveshare", "width": width, "height": height, "init": "starting"})
   waveshareDriver.init()
 

@@ -61,15 +61,19 @@ type
 ##  GPIOI config
 ##
 
-var EPD_RST_PIN*: cint
+var EPD_RST_PIN* {.importc: "EPD_RST_PIN".}: cint
 
-var EPD_DC_PIN*: cint
+var EPD_DC_PIN* {.importc: "EPD_DC_PIN".}: cint
 
-var EPD_CS_PIN*: cint
+var EPD_CS_PIN* {.importc: "EPD_CS_PIN".}: cint
 
-var EPD_BUSY_PIN*: cint
+var EPD_BUSY_PIN* {.importc: "EPD_BUSY_PIN".}: cint
 
-var EPD_PWR_PIN*: cint
+var EPD_PWR_PIN* {.importc: "EPD_PWR_PIN".}: cint
+
+var EPD_MOSI_PIN* {.importc: "EPD_MOSI_PIN".}: cint
+
+var EPD_SCLK_PIN* {.importc: "EPD_SCLK_PIN".}: cint
 
 ## ------------------------------------------------------------------------------------------------------
 

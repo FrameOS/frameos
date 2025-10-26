@@ -35,7 +35,7 @@ import scenes/scene_sceneNodes as scene_sceneNodes
 
 let defaultSceneId* = some("black".SceneId)
 
-const sceneOptions* = [
+const sceneOptions*: array[30, tuple[id: SceneId, name: string]] = [
   ("black".SceneId, "Black"),
   ("blue".SceneId, "Blue"),
   ("dataCodeFloat".SceneId, "Numeric Code Nodes"),

@@ -249,6 +249,15 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               />
             )}
           </Field>
+          <Field name="debug" label="Debug mode (noisy)">
+            <Select
+              name="debug"
+              options={[
+                { value: 'false', label: 'Disabled' },
+                { value: 'true', label: 'Enabled' },
+              ]}
+            />
+          </Field>
         </div>
 
         {frameForm.mode == 'nixos' ? (
@@ -1028,15 +1037,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               type="text"
               placeholder="e.g. /srv/frameos/logs/frame-{date}.log"
               required
-            />
-          </Field>
-          <Field name="debug" label="Debug logging (noisy)">
-            <Select
-              name="debug"
-              options={[
-                { value: 'false', label: 'Disabled' },
-                { value: 'true', label: 'Enabled' },
-              ]}
             />
           </Field>
         </div>
