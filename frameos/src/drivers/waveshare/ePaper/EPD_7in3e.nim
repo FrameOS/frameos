@@ -67,6 +67,15 @@ var
   dataLogCounter = 0
   dataBytesCurrentCommand = 0
 
+proc capturePinStates(): JsonNode =
+  %*{
+    "busy": DEV_Digital_Read(UWORD(EPD_BUSY_PIN)).int,
+    "rst": DEV_Digital_Read(UWORD(EPD_RST_PIN)).int,
+    "dc": DEV_Digital_Read(UWORD(EPD_DC_PIN)).int,
+    "cs": DEV_Digital_Read(UWORD(EPD_CS_PIN)).int,
+    "pwr": DEV_Digital_Read(UWORD(EPD_PWR_PIN)).int
+  }
+
 template logDebug(action: string, extra: JsonNode = nil) =
   if driverDebugLogsEnabled():
     var payload = %*{"event": "driver:waveshare:debug", "action": action}
@@ -136,7 +145,10 @@ proc epd7in3eReadBusyH() =
   var loopCount = 0
   var lastLog = startTime
   let initialState = DEV_Digital_Read(UWORD(EPD_BUSY_PIN))
-  logDebug("busy:wait:start", %*{"initialState": initialState.int})
+  logDebug("busy:wait:start", %*{
+    "initialState": initialState.int,
+    "pins": capturePinStates()
+  })
 
   var observedLow = initialState == UBYTE(0)
   var lowStartTime = if observedLow: some(startTime) else: none(MonoTime)
@@ -160,13 +172,15 @@ proc epd7in3eReadBusyH() =
           "event": "driver:waveshare:busy",
           "loops": loopCount,
           "elapsedMs": durationToMilliseconds(now - startTime),
-          "stage": "waitForHigh"
+          "stage": "waitForHigh",
+          "pins": capturePinStates()
         })
         lastLog = now
 
   let endTime = getMonoTime()
   let durationMs = durationToMilliseconds(endTime - startTime)
   let finalState = DEV_Digital_Read(UWORD(EPD_BUSY_PIN))
+  let finalPins = capturePinStates()
 
   let waitForLowMs =
     if observedLow and lowStartTime.isSome:
@@ -185,7 +199,8 @@ proc epd7in3eReadBusyH() =
     "waitedForLowMs": waitForLowMs,
     "waitedForHighMs": waitForHighMs,
     "timedOutWaitingForLow": false,
-    "timedOutWaitingForHigh": false
+    "timedOutWaitingForHigh": false,
+    "pins": finalPins
   })
 
 proc epd7in3eTurnOnDisplay() =
