@@ -1,4 +1,4 @@
-import { useValues } from 'kea'
+import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { useRef, useState, useEffect } from 'react'
 import { logsLogic } from './logsLogic'
@@ -7,6 +7,9 @@ import { frameLogic } from '../../frameLogic'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '../../../../components/Button'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { frameSettingsLogic } from '../FrameSettings/frameSettingsLogic'
+import { Spinner } from '../../../../components/Spinner'
+import { ArrowUpTrayIcon, ArrowPathIcon } from '@heroicons/react/24/solid'
 
 function formatTimestamp(isoTimestamp: string): string {
   const date = new Date(isoTimestamp)
@@ -22,6 +25,8 @@ export function Logs() {
   const { logs, logsLoading } = useValues(logsLogic({ frameId }))
   const [atBottom, setAtBottom] = useState(false)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
+  const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
+  const { clearBuildCache } = useActions(frameSettingsLogic({ frameId }))
 
   const downloadLogs = () => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -70,6 +75,18 @@ export function Logs() {
           {
             label: 'Download log',
             onClick: downloadLogs,
+            icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+          },
+          {
+            label: 'Clear build cache',
+            onClick: () => {
+              clearBuildCache()
+            },
+            icon: buildCacheLoading ? (
+              <Spinner color="white" className="w-4 h-4" />
+            ) : (
+              <ArrowPathIcon className="w-5 h-5" />
+            ),
           },
         ]}
       />
