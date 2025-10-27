@@ -129,6 +129,30 @@ export interface RepositoryType {
   templates?: TemplateType[]
 }
 
+export interface Gallery {
+  id: number
+  name: string
+  description?: string | null
+  image_count: number
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface GalleryImage {
+  id: string
+  gallery_id: number
+  filename: string
+  mime_type?: string | null
+  extension?: string | null
+  width?: number | null
+  height?: number | null
+  file_size?: number | null
+  created_at?: string | null
+  updated_at?: string | null
+  thumbnail_url?: string | null
+  original_url: string
+}
+
 export interface LogType {
   id: number
   timestamp: string
@@ -521,6 +545,9 @@ export interface FrameOSSettings {
   }
   frameOS?: {
     apiKey?: string
+  }
+  gallery?: {
+    imageStorageLocation?: string
   }
   github?: {
     api_key?: string

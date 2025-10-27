@@ -31,9 +31,14 @@ export function Frames() {
             title="FrameOS"
             version={version}
             right={
-              <Button color="secondary" onClick={() => router.actions.push(urls.settings())}>
-                Settings
-              </Button>
+              <div className="flex gap-2">
+                <Button color="secondary" onClick={() => router.actions.push(urls.gallery())}>
+                  Gallery
+                </Button>
+                <Button color="secondary" onClick={() => router.actions.push(urls.settings())}>
+                  Settings
+                </Button>
+              </div>
             }
           />
         </div>

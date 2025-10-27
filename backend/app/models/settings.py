@@ -1,7 +1,11 @@
 from sqlalchemy import Integer, String
 from sqlalchemy.orm import Session, mapped_column
-from app.database import Base
 from sqlalchemy.dialects.sqlite import JSON
+
+from app.database import Base
+
+
+GALLERY_DEFAULTS = {"imageStorageLocation": "local path ./db/gallery/"}
 
 class Settings(Base):
     __tablename__ = 'settings'
@@ -18,4 +22,12 @@ class Settings(Base):
 
 
 def get_settings_dict(db: Session) -> dict:
-    return {setting.key: setting.value for setting in db.query(Settings).all()}
+    settings = {setting.key: setting.value for setting in db.query(Settings).all()}
+
+    gallery_settings = settings.get("gallery") or {}
+    if not isinstance(gallery_settings, dict):
+        gallery_settings = {}
+    gallery_settings = {**GALLERY_DEFAULTS, **gallery_settings}
+    settings["gallery"] = gallery_settings
+
+    return settings

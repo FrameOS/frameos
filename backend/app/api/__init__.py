@@ -26,4 +26,5 @@ from .settings import *  # noqa: E402, F403
 from .ssh import *  # noqa: E402, F403
 from .templates import *  # noqa: E402, F403
 from .users import *  # noqa: E402, F403
+from .gallery import *  # noqa: E402, F403
 

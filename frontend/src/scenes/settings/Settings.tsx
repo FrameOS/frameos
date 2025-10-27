@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import { router } from 'kea-router'
 import { Form, Group } from 'kea-forms'
 import { Header } from '../../components/Header'
 import { Box } from '../../components/Box'
@@ -10,6 +11,7 @@ import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
 import { sceneLogic } from '../sceneLogic'
+import { urls } from '../../urls'
 import { TrashIcon } from '@heroicons/react/24/solid'
 import { NumberTextInput } from '../../components/NumberTextInput'
 import { Switch } from '../../components/Switch'
@@ -34,13 +36,19 @@ export function Settings() {
     <div className="h-full w-full overflow-hidden max-w-screen max-h-screen left-0 top-0 absolute">
       <div className="flex flex-col h-full max-h-full">
         <div className="h-[60px]">
-          <Header
-            title="Settings"
-            right={
-              <div className="flex gap-2">
-                {!isHassioIngress ? <Button onClick={logout}>Logout</Button> : null}
-                <Button color={settingsChanged ? 'primary' : 'secondary'} onClick={submitSettings}>
-                  Save
+              <Header
+                title="Settings"
+                right={
+                  <div className="flex gap-2">
+                    <Button color="secondary" onClick={() => router.actions.push(urls.frames())}>
+                      Frames
+                    </Button>
+                    <Button color="secondary" onClick={() => router.actions.push(urls.gallery())}>
+                      Gallery
+                    </Button>
+                    {!isHassioIngress ? <Button onClick={logout}>Logout</Button> : null}
+                    <Button color={settingsChanged ? 'primary' : 'secondary'} onClick={submitSettings}>
+                      Save
                 </Button>
               </div>
             }
@@ -118,7 +126,7 @@ export function Settings() {
                 </Group>
 
                 <Group name="frameOS">
-                  <H6 className="pt-4">FrameOS Gallery</H6>
+                  <H6 className="pt-4">FrameOS Gallery API</H6>
                   <Box className="p-2 space-y-2">
                     <p className="text-sm leading-loose">
                       <a className="text-blue-400 hover:underline" target="_blank" href="https://gallery.frameos.net/">
@@ -133,6 +141,18 @@ export function Settings() {
                       tooltip="Just use 2024 for now. We might add custom accounts in the future"
                     >
                       <TextInput />
+                    </Field>
+                  </Box>
+                </Group>
+                <Group name="gallery">
+                  <H6 className="pt-4">FrameOS Gallery</H6>
+                  <Box className="p-2 space-y-2">
+                    <p className="text-sm leading-loose">
+                      Choose where FrameOS stores gallery uploads. Use the <span className="font-mono">local path</span>{' '}
+                      prefix to save files on this server.
+                    </p>
+                    <Field name="imageStorageLocation" label="Image storage location">
+                      <TextInput placeholder="local path ./db/gallery/" />
                     </Field>
                   </Box>
                 </Group>
