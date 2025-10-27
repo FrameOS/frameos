@@ -7,6 +7,7 @@ import { Palette } from './types'
 export const devices: Option[] = [
   { value: 'web_only', label: 'Web only' },
   { value: 'framebuffer', label: 'HDMI / Framebuffer' },
+  { value: 'http.upload', label: 'HTTP upload' },
   { value: 'pimoroni.inky_impression_7', label: 'Pimoroni Inky Impression - 7.3" 2025 edition' },
   { value: 'pimoroni.inky_impression_13', label: 'Pimoroni Inky Impression - 13.3" 2025 edition' },
   { value: 'pimoroni.inky_impression', label: 'Pimoroni Inky Impression - all others' },

@@ -72,11 +72,26 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
     )
 
 proc loadDeviceConfig*(data: JsonNode): DeviceConfig =
+  var headers: seq[HttpHeaderPair] = @[]
+  if data != nil and data.kind == JObject and data.hasKey("uploadHeaders") and data["uploadHeaders"].kind == JArray:
+    for header in data["uploadHeaders"].items:
+      if header.kind == JObject:
+        let name = header{"name"}.getStr("").strip()
+        let value = header{"value"}.getStr("")
+        if name.len > 0:
+          headers.add(HttpHeaderPair(name: name, value: value))
+
   if data == nil or data.kind != JObject:
-    result = DeviceConfig(vcom: 0)
+    result = DeviceConfig(
+      vcom: 0,
+      httpUploadUrl: "",
+      httpUploadHeaders: headers,
+    )
   else:
     result = DeviceConfig(
-      vcom: data{"vcom"}.getFloat(0)
+      vcom: data{"vcom"}.getFloat(0),
+      httpUploadUrl: data{"uploadUrl"}.getStr(""),
+      httpUploadHeaders: headers,
     )
 
 proc loadPalette*(data: JsonNode): PaletteConfig =

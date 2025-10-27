@@ -210,6 +210,71 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               </Field>
             </Group>
           ) : null}
+          {frameForm.device === 'http.upload' ? (
+            <div className="">
+              <Group name="device_config">
+                <Field
+                  name="uploadUrl"
+                  label="Upload URL"
+                  tooltip="Upload the rendered image here as PNG in the POST body. Only upload when the image changes."
+                >
+                  {({ value, onChange }) => (
+                    <TextInput
+                      value={(value as string) ?? ''}
+                      onChange={onChange}
+                      placeholder="https://example.com/upload"
+                      required
+                    />
+                  )}
+                </Field>
+                <Field
+                  name="uploadHeaders"
+                  label="HTTP headers"
+                  tooltip="Optional headers (for example Authorization) to send with every upload."
+                >
+                  {({ value, onChange }) => {
+                    const headers = Array.isArray(value) ? [...value] : []
+                    const updateHeader = (index: number, key: 'name' | 'value', newValue: string) => {
+                      const next = headers.map((header: { name?: string; value?: string }, idx: number) =>
+                        idx === index
+                          ? { name: header?.name ?? '', value: header?.value ?? '', [key]: newValue }
+                          : header
+                      )
+                      onChange(next)
+                    }
+                    const addHeader = () => onChange([...headers, { name: '', value: '' }])
+                    const removeHeader = (index: number) => {
+                      onChange(headers.filter((_: unknown, idx: number) => idx !== index))
+                    }
+                    return (
+                      <div className="space-y-2">
+                        {headers.map((header: { name?: string; value?: string }, index: number) => (
+                          <div key={index} className="flex flex-col gap-2 @md:flex-row @md:items-center">
+                            <TextInput
+                              value={header?.name ?? ''}
+                              onChange={(val) => updateHeader(index, 'name', val)}
+                              placeholder="Header name"
+                            />
+                            <TextInput
+                              value={header?.value ?? ''}
+                              onChange={(val) => updateHeader(index, 'value', val)}
+                              placeholder="Header value"
+                            />
+                            <Button color="gray" size="small" onClick={() => removeHeader(index)}>
+                              Remove
+                            </Button>
+                          </div>
+                        ))}
+                        <Button color="secondary" size="small" onClick={addHeader}>
+                          Add header
+                        </Button>
+                      </div>
+                    )
+                  }}
+                </Field>
+              </Group>
+            </div>
+          ) : null}
           {frameForm.mode === 'nixos' ? (
             <Field
               name="nix.platform"
