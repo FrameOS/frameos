@@ -11,6 +11,7 @@ import { TextArea } from '../../components/TextArea'
 import { Spinner } from '../../components/Spinner'
 import { router } from 'kea-router'
 import { urls } from '../../urls'
+import { Select } from '../../components/Select'
 
 export function Gallery() {
   useMountedLogic(galleryLogic)
@@ -24,6 +25,7 @@ export function Gallery() {
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [imageStyle, setImageStyle] = useState<'full' | 'thumbnail'>('full')
 
   useEffect(() => {
     if (selectedGallery) {
@@ -178,28 +180,45 @@ export function Gallery() {
                   </form>
                 </Box>
                 <Box className="p-4 space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <h3 className="text-md font-semibold text-white">Images</h3>
                       <p className="text-xs text-gray-300">Upload new images or manage existing ones.</p>
                     </div>
-                    <div className="flex items-center">
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        className="hidden"
-                        accept="image/*"
-                        multiple
-                        onChange={(event) => {
-                          handleUploadImages(event.target.files)
-                          if (event.target) {
-                            event.target.value = ''
-                          }
-                        }}
-                      />
-                      <Button color="secondary" onClick={() => fileInputRef.current?.click()}>
-                        Upload images
-                      </Button>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-gray-300 uppercase tracking-wide" htmlFor="image-style-select">
+                          Style
+                        </label>
+                        <Select
+                          id="image-style-select"
+                          value={imageStyle}
+                          onChange={(value) => setImageStyle(value as 'full' | 'thumbnail')}
+                          options={[
+                            { value: 'full', label: 'Full width' },
+                            { value: 'thumbnail', label: 'Thumbnail grid' },
+                          ]}
+                          className="w-40"
+                        />
+                      </div>
+                      <div className="flex items-center">
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          className="hidden"
+                          accept="image/*"
+                          multiple
+                          onChange={(event) => {
+                            handleUploadImages(event.target.files)
+                            if (event.target) {
+                              event.target.value = ''
+                            }
+                          }}
+                        />
+                        <Button color="secondary" onClick={() => fileInputRef.current?.click()}>
+                          Upload images
+                        </Button>
+                      </div>
                     </div>
                   </div>
                   {isImagesLoading ? (
@@ -207,9 +226,18 @@ export function Gallery() {
                       <Spinner />
                     </div>
                   ) : galleryImages.length ? (
-                    <div className="grid gap-4 grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3">
+                    <div
+                      className={
+                        imageStyle === 'thumbnail'
+                          ? 'grid gap-3 grid-cols-2 @md:grid-cols-3 @lg:grid-cols-4'
+                          : 'grid gap-4 grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3'
+                      }
+                    >
                       {galleryImages.map((image) => (
-                        <Box key={image.id} className="p-2 space-y-2">
+                        <Box
+                          key={image.id}
+                          className={imageStyle === 'thumbnail' ? 'p-1.5 space-y-1.5' : 'p-2 space-y-2'}
+                        >
                           <a
                             href={image.original_url}
                             target="_blank"
@@ -217,13 +245,35 @@ export function Gallery() {
                             className="block overflow-hidden rounded-lg bg-black"
                           >
                             <img
-                              src={image.thumbnail_url || image.original_url}
+                              src={
+                                imageStyle === 'thumbnail'
+                                  ? image.thumbnail_url || image.original_url
+                                  : image.original_url
+                              }
                               alt={image.filename}
-                              className="w-full h-48 object-cover"
+                              className={
+                                imageStyle === 'thumbnail'
+                                  ? 'w-full aspect-square object-cover'
+                                  : 'w-full h-48 object-cover'
+                              }
                             />
                           </a>
-                          <div className="text-xs text-gray-300 truncate">{image.filename}</div>
-                          <div className="flex justify-between items-center text-xs text-gray-400">
+                          <div
+                            className={
+                              imageStyle === 'thumbnail'
+                                ? 'text-[11px] text-gray-300 truncate'
+                                : 'text-xs text-gray-300 truncate'
+                            }
+                          >
+                            {image.filename}
+                          </div>
+                          <div
+                            className={
+                              imageStyle === 'thumbnail'
+                                ? 'flex justify-between items-center text-[11px] text-gray-400'
+                                : 'flex justify-between items-center text-xs text-gray-400'
+                            }
+                          >
                             <span>
                               {image.width && image.height ? `${image.width}×${image.height}` : 'Unknown size'}
                             </span>
