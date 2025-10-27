@@ -1,5 +1,6 @@
 import json
 import pixie
+import times
 import assets/web as webAssets
 import asyncdispatch
 import httpclient
@@ -123,13 +124,25 @@ router myrouter:
       resp Http401, "Unauthorized"
     log(%*{"event": "http", "get": request.pathInfo})
     {.gcsafe.}: # We're reading immutable globals and png data via a lock. It's fine.
-      let (sceneId, _, _) = getLastPublicState()
-      let headers = {
-        "Content-Type": "image/png",
-        "Content-Disposition": &"inline; filename=\"{sceneId}.png\"",
-        "X-Scene-Id": $sceneId,
-        "Access-Control-Expose-Headers": "X-Scene-Id"
-      }
+      let (sceneId, _, _, lastUpdate) = getLastPublicState()
+      let ifModifiedSince = request.headers.getOrDefault("If-Modified-Since")
+      if ifModifiedSince != "" and lastUpdate > 0.0:
+        try:
+          let ifModifiedTime = parse(ifModifiedSince, "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
+          if lastUpdate <= ifModifiedTime.toTime().toUnixFloat():
+            resp Http304, [("X-Scene-Id", $sceneId), ("Access-Control-Expose-Headers", "X-Scene-Id")], ""
+            return
+        except:
+          discard # Invalid date, proceed
+      var headers = @[
+      ("Content-Type", "image/png"),
+      ("Content-Disposition", &"inline; filename=\"{sceneId}.png\""),
+      ("X-Scene-Id", $sceneId),
+      ("Access-Control-Expose-Headers", "X-Scene-Id")
+      ]
+      if lastUpdate > 0.0:
+        let lastModified = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
+        headers.add(("Last-Modified", lastModified))
       try:
         let image = drivers.toPng(360 - globalFrameConfig.rotate)
         if image != "":
@@ -161,14 +174,14 @@ router myrouter:
       resp Http401, "Unauthorized"
     log(%*{"event": "http", "get": request.pathInfo})
     {.gcsafe.}: # It's a copy of the state, so it's fine.
-      let (sceneId, state, _) = getLastPublicState()
+      let (sceneId, state, _, _) = getLastPublicState()
       resp Http200, {"Content-Type": "application/json"}, $(%*{"sceneId": $sceneId, "state": state})
   get "/c":
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"
     var fieldsHtml = ""
     var fieldsSubmitHtml = ""
-    let (currentSceneId, values, fields) = getLastPublicState()
+    let (currentSceneId, values, fields, _) = getLastPublicState()
     for field in fields:
       let key = field.name
       let label = if field.label != "": field.label else: key
