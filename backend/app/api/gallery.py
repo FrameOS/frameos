@@ -24,8 +24,7 @@ from app.schemas.gallery import (
 from . import api_with_auth
 
 
-DEFAULT_STORAGE_SETTING = "local path ./db/gallery/"
-LOCAL_PREFIX = "local path "
+DEFAULT_STORAGE_SETTING = "./db/gallery/"
 THUMBNAIL_SIZE = 512
 
 
@@ -36,8 +35,6 @@ def _repo_root() -> Path:
 def _resolve_storage_location(raw_value: Optional[str]) -> Path:
     value = raw_value or DEFAULT_STORAGE_SETTING
     value = value.strip()
-    if value.startswith(LOCAL_PREFIX):
-        value = value[len(LOCAL_PREFIX) :].strip()
     if not value:
         value = "./db/gallery/"
     path = Path(value)
