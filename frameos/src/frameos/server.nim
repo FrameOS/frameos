@@ -125,11 +125,11 @@ router myrouter:
     log(%*{"event": "http", "get": request.pathInfo})
     {.gcsafe.}: # We're reading immutable globals and png data via a lock. It's fine.
       let (sceneId, _, _, lastUpdate) = getLastPublicState()
-      let ifModifiedSince = request.headers.getOrDefault("If-Modified-Since")
+      let ifModifiedSince = seq[string](request.headers.getOrDefault("if-modified-since")).join(", ")
       if ifModifiedSince != "" and lastUpdate > 0.0:
         try:
           let ifModifiedTime = parse(ifModifiedSince, "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
-          if lastUpdate <= ifModifiedTime.toTime().toUnixFloat():
+          if int64(lastUpdate) <= ifModifiedTime.toTime().toUnix():
             resp Http304, [("X-Scene-Id", $sceneId), ("Access-Control-Expose-Headers", "X-Scene-Id")], ""
             return
         except:
