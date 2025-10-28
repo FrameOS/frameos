@@ -43,6 +43,11 @@ DRIVERS = {
         can_render=True,
         can_turn_on_off=True
     ),
+    "httpUpload": Driver(
+        name="httpUpload",
+        import_path="httpUpload/httpUpload",
+        can_render=True,
+    ),
     "evdev": Driver( # touch and mouse inputs
         name="evdev",
         import_path="evdev/evdev",
