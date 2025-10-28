@@ -46,6 +46,8 @@ def get_one_app_sources(keyword: str) -> dict[str, str]:
         local_app_path = os.path.join(local_apps_path, keyword)
         files = os.listdir(local_app_path)
         for file in files:
+            if file == "app_loader.nim":
+                continue
             full_path = os.path.join(local_app_path, file)
             if os.path.isfile(full_path):
                 # TODO: also support folders and binary files

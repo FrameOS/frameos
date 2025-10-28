@@ -4,6 +4,7 @@ import times
 import assets/web as webAssets
 import asyncdispatch
 import httpclient
+import httpcore
 import threadpool
 import jester
 import locks
@@ -41,6 +42,18 @@ proc h(message: string): string =
 
 proc s(message: string): string =
   message.replace("'", "\\'").replace("\n", "\\n")
+
+proc shouldReturnNotModified*(headers: HttpHeaders, lastUpdate: float): bool {.gcsafe.} =
+  if lastUpdate <= 0.0:
+    return false
+  let ifModifiedSince = seq[string](headers.getOrDefault("if-modified-since")).join(", ")
+  if ifModifiedSince == "":
+    return false
+  try:
+    let ifModifiedTime = parse(ifModifiedSince, "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
+    return int64(lastUpdate) <= ifModifiedTime.toTime().toUnix()
+  except CatchableError:
+    return false
 
 const AUTH_HEADER = "authorization"
 const AUTH_TYPE = "Bearer"
@@ -125,20 +138,14 @@ router myrouter:
     log(%*{"event": "http", "get": request.pathInfo})
     {.gcsafe.}: # We're reading immutable globals and png data via a lock. It's fine.
       let (sceneId, _, _, lastUpdate) = getLastPublicState()
-      let ifModifiedSince = seq[string](request.headers.getOrDefault("if-modified-since")).join(", ")
-      if ifModifiedSince != "" and lastUpdate > 0.0:
-        try:
-          let ifModifiedTime = parse(ifModifiedSince, "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
-          if int64(lastUpdate) <= ifModifiedTime.toTime().toUnix():
-            resp Http304, [("X-Scene-Id", $sceneId), ("Access-Control-Expose-Headers", "X-Scene-Id")], ""
-            return
-        except:
-          discard # Invalid date, proceed
+      if shouldReturnNotModified(request.headers, lastUpdate):
+        resp Http304, [("X-Scene-Id", $sceneId), ("Access-Control-Expose-Headers", "X-Scene-Id")], ""
+        return
       var headers = @[
-      ("Content-Type", "image/png"),
-      ("Content-Disposition", &"inline; filename=\"{sceneId}.png\""),
-      ("X-Scene-Id", $sceneId),
-      ("Access-Control-Expose-Headers", "X-Scene-Id")
+        ("Content-Type", "image/png"),
+        ("Content-Disposition", &"inline; filename=\"{sceneId}.png\""),
+        ("X-Scene-Id", $sceneId),
+        ("Access-Control-Expose-Headers", "X-Scene-Id")
       ]
       if lastUpdate > 0.0:
         let lastModified = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
