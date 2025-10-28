@@ -1,0 +1,46 @@
+{
+  "name": "Wikimedia Commons",
+  "description": "Images from Wikimedia Commons",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "mode",
+      "type": "select",
+      "value": "potd",
+      "options": ["potd", "random"],
+      "required": false,
+      "label": "Mode",
+      "hint": "Picture of the Day or Random Image"
+    },
+    {
+      "name": "submode",
+      "type": "select",
+      "value": "day",
+      "options": ["day", "onthisday", "month", "random"],
+      "required": false,
+      "label": "Sub-mode (for POTD)",
+      "hint": "Type of Picture of the Day selection"
+    },
+    {
+      "name": "saveAssets",
+      "type": "select",
+      "value": "never",
+      "options": ["auto", "always", "never"],
+      "label": "Save asset",
+      "hint": "Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\\n\\nYou can later use the 'Local image' app to view saved assets.\\n\\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ],
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true,
+    "durationEnabled": true,
+    "duration": "3600"
+  }
+}
