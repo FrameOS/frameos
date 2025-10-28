@@ -23,6 +23,43 @@ block test_parse_ical_datetime:
     doAssert parseICalDateTime("20240101T000000", "UTC") != parseICalDateTime("20240101T000000", "Europe/Brussels")
     doAssert parseICalDateTime("20240101T000000Z", "UTC") == parseICalDateTime("20240101T000000Z", "Europe/Brussels")
 
+block test_windows_timezone_aliases:
+    echo ">> Testing: windows timezone aliases"
+    let content = """BEGIN:VCALENDAR
+METHOD:PUBLISH
+PRODID:Microsoft Exchange Server 2010
+VERSION:2.0
+X-WR-TIMEZONE:GMT Standard Time
+BEGIN:VTIMEZONE
+TZID:GMT Standard Time
+BEGIN:STANDARD
+DTSTART:16010101T020000
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0000
+RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=10
+END:STANDARD
+BEGIN:DAYLIGHT
+DTSTART:16010101T010000
+TZOFFSETFROM:+0000
+TZOFFSETTO:+0100
+RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=3
+END:DAYLIGHT
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:windows-ical-test
+DTSTART;TZID=GMT Standard Time:20240331T100000
+DTEND;TZID=GMT Standard Time:20240331T110000
+SUMMARY:Test Event
+END:VEVENT
+END:VCALENDAR"""
+    var calendar = parseICalendar(content)
+    doAssert calendar.timeZone == "Europe/London"
+    doAssert calendar.events.len == 1
+    let event = calendar.events[0]
+    doAssert event.startTs == parseICalDateTime("20240331T100000", "Europe/London")
+    doAssert event.endTs == parseICalDateTime("20240331T110000", "Europe/London")
+    doAssert event.summary == "Test Event"
+
 block test_get_simple_next_interval:
     echo ">> Testing: get_simple_next_interval"
     let daily = RRule(freq: daily, interval: 1, byDay: @[], byMonth: @[], byMonthDay: @[], until: Timestamp(0.0),
