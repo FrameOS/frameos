@@ -69,6 +69,7 @@ export const terminalLogic = kea<terminalLogicType>([
     appendText: (text: string) => ({ text }),
     setLines: (lines: string[]) => ({ lines }),
     sendCommand: (command: string) => ({ command }),
+    sendKeys: (keys: string) => ({ keys }),
   }),
   reducers({
     // ansi encoded lines
@@ -108,6 +109,9 @@ export const terminalLogic = kea<terminalLogicType>([
     },
     sendCommand: ({ command }) => {
       cache.ws?.send(command + '\n')
+    },
+    sendKeys: ({ keys }) => {
+      cache.ws?.send(keys)
     },
   })),
   afterMount(({ cache }) => {

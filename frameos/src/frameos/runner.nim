@@ -1,4 +1,5 @@
 import json, pixie, times, options, asyncdispatch, strformat, strutils, tables
+import std/monotimes
 import apps/render/image/app as render_imageApp
 import apps/data/qr/app as data_qrApp
 
@@ -7,6 +8,7 @@ import frameos/channels
 import frameos/logger
 import frameos/types
 import frameos/utils/image
+import frameos/utils/time
 import frameos/scenes
 
 import drivers/drivers as drivers
@@ -21,7 +23,7 @@ const SERVER_RENDER_DELAY_SECONDS = 1.0
 var thread: Thread[(FrameConfig, Logger, Option[SceneId])]
 
 proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene): (Image, float) =
-  let sceneTimer = epochTime()
+  let sceneTimer = getMonoTime()
   let requiredWidth = self.frameConfig.renderWidth()
   let requiredHeight = self.frameConfig.renderHeight()
   self.logger.log(%*{"event": "render:scene", "width": requiredWidth, "height": requiredHeight,
@@ -71,21 +73,23 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     self.logger.log(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
   self.lastRenderAt = epochTime()
-  self.logger.log(%*{"event": "render:done", "sceneId": scene.id.string, "ms": round((epochTime() - sceneTimer) * 1000, 3)})
+  let elapsedMs = durationToMilliseconds(getMonoTime() - sceneTimer)
+  self.logger.log(%*{"event": "render:done", "sceneId": scene.id.string, "ms": round(elapsedMs, 3)})
 
 proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   self.logger.log(%*{"event": "render:startLoop"})
-  var timer = 0.0
-  var driverTimer = 0.0
+  var timer = getMonoTime()
+  var driverTimer = getMonoTime()
   var sleepDuration = 0.0
   var fastSceneCount = 0
-  var fastSceneResumeAt = 0.0
-  var nextServerRenderAt = 0.0
+  var fastSceneResumeAt = none(MonoTime)
+  var nextServerRenderAt = getMonoTime()
   var lastSceneId = "".SceneId
   var currentScene: FrameScene
+  let serverRenderDelay = initDuration(milliseconds = int(SERVER_RENDER_DELAY_SECONDS * 1000))
 
   while true:
-    timer = epochTime()
+    timer = getMonoTime()
     self.isRendering = true
     let sceneId = if exportedScenes.hasKey(self.currentSceneId): self.currentSceneId else: getFirstSceneId()
     let exportedScene = exportedScenes[sceneId]
@@ -110,20 +114,20 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     let interval = currentScene.refreshInterval
     let (lastRotatedImage, nextSleep) = self.renderSceneImage(exportedScene, currentScene)
     if interval < 1:
-      let now = epochTime()
+      let now = getMonoTime()
       if now >= nextServerRenderAt:
-        nextServerRenderAt = nextServerRenderAt + SERVER_RENDER_DELAY_SECONDS
+        nextServerRenderAt = nextServerRenderAt + serverRenderDelay
         if nextServerRenderAt < now:
-          nextServerRenderAt = now + SERVER_RENDER_DELAY_SECONDS
+          nextServerRenderAt = now + serverRenderDelay
         triggerServerRender()
     else:
       triggerServerRender()
 
-    driverTimer = epochTime()
+    driverTimer = getMonoTime()
     try:
       # TODO: render the driver part in another thread
       drivers.render(lastRotatedImage)
-      let driverElapsedMs = round((epochTime() - driverTimer) * 1000, 3)
+      let driverElapsedMs = round(durationToMilliseconds(getMonoTime() - driverTimer), 3)
       self.logger.log(%*{"event": "render:driver",
         "device": self.frameConfig.device, "ms": driverElapsedMs})
       if self.frameConfig.device.startsWith("pimoroni.inky") and driverElapsedMs < INKY_FAST_RENDER_THRESHOLD_MS:
@@ -135,22 +139,23 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
       self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
     if interval < 1 or (nextSleep > 0 and nextSleep < interval):
-      let now = epochTime()
-      if now - timer < FAST_SCENE_CUTOFF_SECONDS:
+      let now = getMonoTime()
+      let elapsedSeconds = durationToSeconds(now - timer)
+      if elapsedSeconds < FAST_SCENE_CUTOFF_SECONDS:
         fastSceneCount += 1
         # Two fast scenes in a row
         if fastSceneCount == 2:
           # TODO: capture logs per _scene_ and log if slow
           self.logger.log(%*{"event": "render:pause", "message": "Rendering fast. Pausing all scene render logs for 10 seconds."})
           self.logger.disable()
-          fastSceneResumeAt = now + 10
-        elif fastSceneResumeAt != 0.0 and now > fastSceneResumeAt:
+          fastSceneResumeAt = some(now + initDuration(seconds = 10))
+        elif fastSceneResumeAt.isSome and now > fastSceneResumeAt.get():
           fastSceneCount = 0
-          fastSceneResumeAt = 0.0
+          fastSceneResumeAt = none(MonoTime)
           self.logger.enable()
       else:
         fastSceneCount = 0
-        fastSceneResumeAt = 0.0
+        fastSceneResumeAt = none(MonoTime)
         self.logger.enable()
 
     # Gives a chance for the gathered events to be collected
@@ -171,7 +176,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
 
     # If no sleep duration provided by the scene, calculate based on the interval
     sleepDuration = if nextSleep >= 0: nextSleep * 1000
-                    else: max((interval - (epochTime() - timer)) * 1000, 0.1)
+                    else: max((interval - durationToSeconds(getMonoTime() - timer)) * 1000, 0.1)
     self.logger.log(%*{"event": "render:sleep", "ms": round(sleepDuration, 3)})
 
     let future = sleepAsync(sleepDuration)

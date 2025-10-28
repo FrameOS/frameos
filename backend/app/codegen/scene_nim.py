@@ -800,12 +800,14 @@ class SceneWriter:
 
 {{.warning[UnusedImport]: off.}}
 import pixie, json, times, strformat, strutils, sequtils, options, algorithm
+import std/monotimes
 
 import frameos/values
 import frameos/types
 import frameos/channels
 import frameos/utils/image
 import frameos/utils/url
+import frameos/utils/time
 {newline.join(self.imports)}
 
 const DEBUG = {'true' if self.frame.debug else 'false'}

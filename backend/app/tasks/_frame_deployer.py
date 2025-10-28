@@ -659,6 +659,8 @@ class FrameDeployer:
                     variant_files = [f"{waveshare.variant}.nim", f"{c_file}.c", f"{c_file}.h"]
                 elif waveshare.variant == "EPD_10in3":
                     variant_files = [f"{waveshare.variant}.nim", "IT8951.c", "IT8951.h", "IT8951.nim"]
+                elif waveshare.variant == "EPD_7in3e":
+                    variant_files = [f"{waveshare.variant}.nim"]
                 else:
                     variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
 

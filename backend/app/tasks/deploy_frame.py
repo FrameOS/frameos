@@ -166,7 +166,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             if drivers.get("waveshare") or drivers.get("gpioButton"):
                 check_lgpio = await self.exec_command(
-                    '[[ -f "/usr/local/include/lgpio.h" || -f "/usr/include/lgpio.h" ]] && exit 0 || exit 1',
+                    'if [ -f "/usr/local/include/lgpio.h" ] || [ -f "/usr/include/lgpio.h" ]; then exit 0; else exit 1; fi',
                     raise_on_error=False
                 )
                 if check_lgpio != 0:

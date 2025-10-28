@@ -30,6 +30,7 @@ var
   lastPublicStatesLock: Lock
   lastPublicStates {.guard: lastPublicStatesLock.} = %*{}
   lastPublicSceneId {.guard: lastPublicStatesLock.} = "".SceneId
+  lastPublicStateUpdates {.guard: lastPublicStatesLock.} = initTable[SceneId, float]()
   lastPersistedStates = %*{}
   lastPersistedSceneId: Option[SceneId] = none(SceneId)
 
@@ -49,13 +50,16 @@ proc getLastImagePng*(): string =
     height = lastImage.height
   return encodePng(width, height, 4, copy[0].addr, copy.len * 4)
 
-proc getLastPublicState*(): (SceneId, JsonNode, seq[StateField]) =
+proc getLastPublicState*(): (SceneId, JsonNode, seq[StateField], float) =
   {.gcsafe.}: # It's fine: state is copied and .publicStateFields don't change
     var state = %*{}
+    var lastUpdate = 0.0
     withLock lastPublicStatesLock:
       if lastPublicStates.hasKey(lastPublicSceneId.string):
         state = lastPublicStates[lastPublicSceneId.string].copy()
-      return (lastPublicSceneId, state, exportedScenes[lastPublicSceneId].publicStateFields)
+      if lastPublicStateUpdates.hasKey(lastPublicSceneId):
+        lastUpdate = lastPublicStateUpdates[lastPublicSceneId]
+      return (lastPublicSceneId, state, exportedScenes[lastPublicSceneId].publicStateFields, lastUpdate)
 
 proc getAllPublicStates*(): (SceneId, JsonNode) =
   {.gcsafe.}: # It's fine: state is copied and .publicStateFields don't change
@@ -82,6 +86,7 @@ proc updateLastPublicState*(self: FrameScene) =
       let key = field.name
       if self.state.hasKey(key) and self.state[key] != lastSceneState{key}:
         lastSceneState[key] = copy(self.state[key])
+    lastPublicStateUpdates[self.id] = epochTime()
   self.lastPublicStateUpdate = epochTime()
 
 proc sanitizePathString*(s: string): string =
