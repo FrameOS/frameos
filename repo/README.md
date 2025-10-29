@@ -1,3 +1,3 @@
-# Examples repository
+# FrameOS samples repository
 
-This used to be http://repo.frameos.net/, but is now bundled inside the app itself.
+This used to be http://repo.frameos.net/, but is now bundled within the app itself.
