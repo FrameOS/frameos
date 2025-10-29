@@ -1,0 +1,9 @@
+{
+  "name": "Haiku of the hour",
+  "description": "A witty haiku (or anything else) about the current hour, with a background to match. Requires an OpenAI API key",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 480,
+  "imageHeight": 800,
+  "scenes": "./scenes.json"
+}

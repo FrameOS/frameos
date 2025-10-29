@@ -1,0 +1,9 @@
+{
+  "name": "Webcam RSTP",
+  "description": "",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 480,
+  "imageHeight": 800,
+  "scenes": "./scenes.json"
+}

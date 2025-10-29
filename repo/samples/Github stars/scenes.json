@@ -1,0 +1,402 @@
+[
+  {
+    "edges": [
+      {
+        "id": "e981d9ce-22ca-4994-9319-d36d1b996938",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "target": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "60e138de-d1a1-4b4e-8669-63bee13579dc",
+        "source": "7bae8fb3-f31c-4966-ab75-3b77fba06f79",
+        "sourceHandle": "next",
+        "target": "a5ec0784-99ef-45bc-b7fb-1350bcfed5fa",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "0f9ed7b3-0c57-483b-9d3e-39f697fa8865",
+        "source": "3a48f3b9-2c00-4547-95e4-64ac1429b05e",
+        "sourceHandle": "fieldOutput",
+        "target": "a5ec0784-99ef-45bc-b7fb-1350bcfed5fa",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "5cc91f90-4523-4e89-b696-358d06a84772",
+        "source": "aafa48a0-4b6a-4023-9ed1-18e443a539fa",
+        "sourceHandle": "fieldOutput",
+        "target": "7bae8fb3-f31c-4966-ab75-3b77fba06f79",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "2a978cfc-4578-4a61-9806-395baa9fc3ac",
+        "source": "e4740c02-cac4-4744-adc6-cbde64b81dc0",
+        "sourceHandle": "fieldOutput",
+        "target": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "332e9787-292a-44b3-b82c-2c9ed8c9b7db",
+        "source": "ae79d8ed-f602-4a40-9b23-b9797072725a",
+        "sourceHandle": "fieldOutput",
+        "target": "aafa48a0-4b6a-4023-9ed1-18e443a539fa",
+        "targetHandle": "codeField/stars",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "2928e502-ddb1-45ee-ae74-8e703ac50d83",
+        "source": "d86b1289-1a9e-4121-84cb-221f8f69914a",
+        "sourceHandle": "next",
+        "target": "7bae8fb3-f31c-4966-ab75-3b77fba06f79",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "4f853450-fe8c-4b59-9654-0ad1a2e4a2bf",
+        "target": "ed5bcd16-4ad2-453c-8e1e-33ceb5ecb474",
+        "targetHandle": "prev",
+        "source": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "9a5b1232-2137-4f19-8955-b786cfbc06a1",
+        "source": "ed5bcd16-4ad2-453c-8e1e-33ceb5ecb474",
+        "sourceHandle": "next",
+        "target": "d86b1289-1a9e-4121-84cb-221f8f69914a",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "9fa9dceb-cdd0-4442-9d38-e5ff1575b231",
+        "source": "bea1c24b-2c81-44e7-99ae-7675f6183769",
+        "sourceHandle": "fieldOutput",
+        "target": "ed5bcd16-4ad2-453c-8e1e-33ceb5ecb474",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "8cddcda3-e280-4a1c-ac27-439d4d132b56",
+        "source": "42bbb7ef-cac9-4ee5-a773-a575df4a23f5",
+        "sourceHandle": "fieldOutput",
+        "target": "bea1c24b-2c81-44e7-99ae-7675f6183769",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "df7debdd-a31f-4d32-8397-dcb1888dd6f8",
+        "source": "09bf70cb-a700-47b8-aa54-33ab8a1a974f",
+        "sourceHandle": "fieldOutput",
+        "target": "42bbb7ef-cac9-4ee5-a773-a575df4a23f5",
+        "targetHandle": "fieldInput/url",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "8149e9b0-59c9-4bfd-b3a1-6f91b29ae50a",
+        "target": "09bf70cb-a700-47b8-aa54-33ab8a1a974f",
+        "targetHandle": "codeField/repository",
+        "source": "9cb6c5e7-2b6c-4ab8-9bb4-21ccfa601bfc",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "4c6ab45a-d890-449d-bfa3-d87af04ad230",
+        "source": "78f163a1-a745-44b8-9d17-4a30bc22d2ab",
+        "sourceHandle": "fieldOutput",
+        "target": "d86b1289-1a9e-4121-84cb-221f8f69914a",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "access": "public",
+        "label": "Repository",
+        "name": "repository",
+        "persist": "disk",
+        "placeholder": "user/repo",
+        "type": "string",
+        "value": "FrameOS/frameos"
+      },
+      {
+        "access": "private",
+        "label": "Stars",
+        "name": "stars",
+        "persist": "disk",
+        "type": "integer",
+        "value": "0"
+      },
+      {
+        "name": "response",
+        "label": "response",
+        "type": "json",
+        "persist": "disk",
+        "access": "private"
+      }
+    ],
+    "id": "7be4f87f-cb33-4adc-9088-e1f8e6b1dd15",
+    "name": "Github Stars",
+    "nodes": [
+      {
+        "data": { "keyword": "render" },
+        "dragging": false,
+        "height": 161,
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "position": { "x": -240.2665292262411, "y": -12.066144998763349 },
+        "positionAbsolute": {
+          "x": -240.2665292262411,
+          "y": -12.066144998763349
+        },
+        "selected": false,
+        "type": "event",
+        "width": 212
+      },
+      {
+        "data": { "config": {}, "keyword": "render/text" },
+        "dragging": false,
+        "height": 414,
+        "id": "7bae8fb3-f31c-4966-ab75-3b77fba06f79",
+        "position": { "x": 1407.380619333796, "y": 33.235136185818135 },
+        "positionAbsolute": { "x": 1407.380619333796, "y": 33.235136185818135 },
+        "selected": false,
+        "type": "app",
+        "width": 418
+      },
+      {
+        "data": {
+          "config": {
+            "fontSize": "16",
+            "position": "top-left",
+            "vAlign": "top"
+          },
+          "keyword": "render/text"
+        },
+        "dragging": false,
+        "height": 414,
+        "id": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
+        "position": { "x": 28.693455855844093, "y": -1.4476375735820852 },
+        "positionAbsolute": {
+          "x": 28.693455855844093,
+          "y": -1.4476375735820852
+        },
+        "selected": false,
+        "type": "app",
+        "width": 418
+      },
+      {
+        "data": {
+          "config": {
+            "fontSize": "16",
+            "position": "right",
+            "vAlign": "bottom"
+          },
+          "keyword": "render/text"
+        },
+        "dragging": false,
+        "height": 414,
+        "id": "a5ec0784-99ef-45bc-b7fb-1350bcfed5fa",
+        "position": { "x": 1942.2644031685622, "y": 41.43591166035668 },
+        "positionAbsolute": { "x": 1942.2644031685622, "y": 41.43591166035668 },
+        "selected": false,
+        "type": "app",
+        "width": 418
+      },
+      {
+        "data": {
+          "config": { "format": "yyyy-MM-dd" },
+          "keyword": "data/clock"
+        },
+        "dragging": false,
+        "height": 140,
+        "id": "3a48f3b9-2c00-4547-95e4-64ac1429b05e",
+        "position": { "x": 1888.4164476374804, "y": -169.31892344351013 },
+        "positionAbsolute": {
+          "x": 1888.4164476374804,
+          "y": -169.31892344351013
+        },
+        "selected": false,
+        "type": "app",
+        "width": 354
+      },
+      {
+        "data": {
+          "code": "if stars >= 0: &\"{stars} star\" & (if stars == 1: \"\" else: \"s\") else: \"Error fetching stars\"",
+          "codeArgs": [{ "name": "stars", "type": "integer" }],
+          "codeOutputs": [{ "name": "text", "type": "string" }],
+          "codeJS": "stars >= 0 ? `${stars} star${stars === 1 ? '' : 's'}` : \"Error fetching stars\""
+        },
+        "dragging": false,
+        "height": 146,
+        "id": "aafa48a0-4b6a-4023-9ed1-18e443a539fa",
+        "position": { "x": 1349.1031999557708, "y": -147.36992754157697 },
+        "positionAbsolute": {
+          "x": 1349.1031999557708,
+          "y": -147.36992754157697
+        },
+        "resizing": false,
+        "selected": false,
+        "style": { "height": 146, "width": 486 },
+        "type": "code",
+        "width": 486
+      },
+      {
+        "data": { "keyword": "repository" },
+        "dragging": false,
+        "height": 48,
+        "id": "e4740c02-cac4-4744-adc6-cbde64b81dc0",
+        "position": { "x": -1.9547642767449531, "y": -107.81168948374423 },
+        "positionAbsolute": {
+          "x": -1.9547642767449531,
+          "y": -107.81168948374423
+        },
+        "selected": false,
+        "type": "state",
+        "width": 192
+      },
+      {
+        "data": { "keyword": "stars" },
+        "dragging": false,
+        "height": 48,
+        "id": "ae79d8ed-f602-4a40-9b23-b9797072725a",
+        "position": { "x": 1345.540499473972, "y": -233.93665556744182 },
+        "positionAbsolute": {
+          "x": 1345.540499473972,
+          "y": -233.93665556744182
+        },
+        "selected": false,
+        "type": "state",
+        "width": 147
+      },
+      {
+        "id": "d86b1289-1a9e-4121-84cb-221f8f69914a",
+        "position": { "x": 908.7696242005394, "y": 1.4379972373182568 },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": { "stateKey": "stars", "debugLog": "true" }
+        },
+        "type": "app",
+        "width": 350,
+        "height": 162,
+        "selected": false,
+        "positionAbsolute": { "x": 908.7696242005394, "y": 1.4379972373182568 },
+        "dragging": false
+      },
+      {
+        "id": "ed5bcd16-4ad2-453c-8e1e-33ceb5ecb474",
+        "position": { "x": 478.74683629875585, "y": -2.783445113100804 },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": { "stateKey": "response", "debugLog": "true" }
+        },
+        "type": "app",
+        "width": 350,
+        "height": 162,
+        "selected": false
+      },
+      {
+        "id": "bea1c24b-2c81-44e7-99ae-7675f6183769",
+        "position": { "x": 448.6032760678311, "y": -135.34238227525793 },
+        "data": { "keyword": "data/parseJson", "config": {} },
+        "type": "app",
+        "width": 204,
+        "height": 112,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 448.6032760678311,
+          "y": -135.34238227525793
+        },
+        "dragging": false
+      },
+      {
+        "id": "42bbb7ef-cac9-4ee5-a773-a575df4a23f5",
+        "position": { "x": 407.69887301982334, "y": -274.30497720026017 },
+        "data": {
+          "keyword": "data/downloadUrl",
+          "config": {},
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true,
+            "durationEnabled": true,
+            "duration": "300",
+            "expressionEnabled": false,
+            "expression": null,
+            "expressionType": null
+          }
+        },
+        "type": "app",
+        "width": 244,
+        "height": 112,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 407.69887301982334,
+          "y": -274.30497720026017
+        },
+        "dragging": false
+      },
+      {
+        "id": "09bf70cb-a700-47b8-aa54-33ab8a1a974f",
+        "position": { "x": 373.8644416455458, "y": -413.8239976091653 },
+        "data": {
+          "code": "\"https://api.github.com/repos/\" & repository",
+          "codeArgs": [{ "name": "repository", "type": "string" }],
+          "codeOutputs": [{ "name": "url", "type": "text" }],
+          "codeJS": "\"https://api.github.com/repos/\" + repository"
+        },
+        "type": "code",
+        "style": { "width": 300, "height": 119 },
+        "width": 300,
+        "height": 119,
+        "selected": false,
+        "positionAbsolute": { "x": 373.8644416455458, "y": -413.8239976091653 },
+        "dragging": false
+      },
+      {
+        "id": "9cb6c5e7-2b6c-4ab8-9bb4-21ccfa601bfc",
+        "position": { "x": 370.94040298154374, "y": -482.3908512189293 },
+        "data": { "keyword": "repository" },
+        "type": "state",
+        "width": 192,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 370.94040298154374,
+          "y": -482.3908512189293
+        },
+        "dragging": false
+      },
+      {
+        "id": "78f163a1-a745-44b8-9d17-4a30bc22d2ab",
+        "position": { "x": 878.0620839771876, "y": -145.12543465164183 },
+        "data": {
+          "code": "state{\"response\"}{\"stargazers_count\"}",
+          "codeArgs": [],
+          "codeOutputs": [{ "name": "valueJson", "type": "json" }],
+          "codeJS": "state.response.stargazers_count"
+        },
+        "type": "code",
+        "style": { "width": 334, "height": 119 },
+        "width": 334,
+        "height": 119,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 878.0620839771876,
+          "y": -145.12543465164183
+        },
+        "dragging": false,
+        "resizing": false
+      }
+    ],
+    "settings": {
+      "backgroundColor": "#000000",
+      "refreshInterval": 60,
+      "execution": "interpreted"
+    },
+    "default": false
+  }
+]
