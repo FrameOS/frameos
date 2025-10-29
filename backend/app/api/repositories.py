@@ -44,32 +44,40 @@ async def create_repository(data: RepositoryCreateRequest, db: Session = Depends
         logging.error(f'Database error: {e}')
         raise HTTPException(status_code=500, detail="Database error")
 
+@api_with_auth.get("/repositories/system", response_model=RepositoriesListResponse)
+async def get_system_repositories(db: Session = Depends(get_db)):
+    pass
+
 @api_with_auth.get("/repositories", response_model=RepositoriesListResponse)
 async def get_repositories(db: Session = Depends(get_db)):
     try:
-        # Remove old repo if it exists
-        if db.query(Settings).filter_by(key="@system/repository_init_done").first():
-            old_url = "https://repo.frameos.net/versions/0/templates.json"
-            repository = db.query(Repository).filter_by(url=old_url).first()
-            if repository:
-                db.delete(repository)
-            db.delete(db.query(Settings).filter_by(key="@system/repository_init_done").first())
-            db.commit()
+        if db.query(Settings).filter_by(key="@system/repository_global_cleanup").first():
+            # We're good here. No need to do all the checks
+            pass
+        else:
+            # Remove old repo if it exists
+            if db.query(Settings).filter_by(key="@system/repository_init_done").first():
+                old_url = "https://repo.frameos.net/versions/0/templates.json"
+                repository = db.query(Repository).filter_by(url=old_url).first()
+                if repository:
+                    db.delete(repository)
+                db.delete(db.query(Settings).filter_by(key="@system/repository_init_done").first())
+                db.commit()
 
-        # Create samples repo if not done
-        if not db.query(Settings).filter_by(key="@system/repository_samples_done").first():
-            repository = Repository(name="", url=FRAMEOS_SAMPLES_URL)
-            await repository.update_templates()
-            db.add(repository)
-            db.add(Settings(key="@system/repository_samples_done", value="true"))
-            db.commit()
+            # delete old gallery/samples repos
+            if db.query(Settings).filter_by(key="@system/repository_samples_done").first():
+                repository = db.query(Repository).filter_by(url=FRAMEOS_SAMPLES_URL).first()
+                if repository:
+                    db.delete(repository)
+                db.delete(db.query(Settings).filter_by(key="@system/repository_samples_done").first())
 
-        # Create gallery repo if not done
-        if not db.query(Settings).filter_by(key="@system/repository_gallery_done").first():
-            repository = Repository(name="", url=FRAMEOS_GALLERY_URL)
-            await repository.update_templates()
-            db.add(repository)
-            db.add(Settings(key="@system/repository_gallery_done", value="true"))
+            if db.query(Settings).filter_by(key="@system/repository_gallery_done").first():
+                repository = db.query(Repository).filter_by(url=FRAMEOS_GALLERY_URL).first()
+                if repository:
+                    db.delete(repository)
+                db.delete(db.query(Settings).filter_by(key="@system/repository_gallery_done").first())
+
+            db.add(Settings(key="@system/repository_global_cleanup", value="true"))
             db.commit()
 
         repositories = db.query(Repository).all()
