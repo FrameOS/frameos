@@ -194,6 +194,7 @@ function Diagram_({ sceneId }: DiagramProps) {
           minZoom={0.2}
           maxZoom={4}
           proOptions={{ hideAttribution: true }}
+          deleteKeyCode={['Backspace', 'Delete']}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
         >
