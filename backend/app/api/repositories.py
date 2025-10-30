@@ -1,8 +1,11 @@
 import logging
 import asyncio
+import json
 from datetime import datetime, timedelta
 from http import HTTPStatus
+from pathlib import Path
 from fastapi import Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from urllib.parse import urlparse
@@ -21,6 +24,71 @@ from . import api_with_auth
 
 FRAMEOS_SAMPLES_URL = "https://repo.frameos.net/samples/repository.json"
 FRAMEOS_GALLERY_URL = "https://repo.frameos.net/gallery/repository.json"
+
+SYSTEM_REPOSITORIES_PATH = Path(__file__).resolve().parents[3] / "repo" / "scenes"
+
+
+def _load_template_definition(repository_slug: str, template_dir: Path):
+    template_path = template_dir / "template.json"
+    if not template_path.is_file():
+        return None
+
+    with template_path.open("r", encoding="utf-8") as template_file:
+        template_data = json.load(template_file)
+
+    image_path = template_data.get("image")
+    if image_path:
+        template_data["image"] = f"/api/repositories/system/{repository_slug}/templates/{template_dir.name}/image"
+
+    scenes_reference = template_data.get("scenes")
+    if isinstance(scenes_reference, str):
+        scenes_path = _resolve_template_resource(template_dir, scenes_reference)
+        if scenes_path and scenes_path.is_file():
+            with scenes_path.open("r", encoding="utf-8") as scenes_file:
+                template_data["scenes"] = json.load(scenes_file)
+        else:
+            template_data["scenes"] = []
+
+    return template_data
+
+
+def _resolve_template_resource(base_dir: Path, resource_path: str) -> Path | None:
+    if not resource_path:
+        return None
+
+    relative_path = resource_path[2:] if resource_path.startswith("./") else resource_path
+    candidate_path = (base_dir / relative_path).resolve()
+
+    try:
+        candidate_path.relative_to(base_dir.resolve())
+    except ValueError:
+        return None
+
+    return candidate_path
+
+
+def _load_system_repository(repository_dir: Path):
+    repository_slug = repository_dir.name
+    repository_metadata_path = repository_dir / "repository.json"
+    metadata: dict[str, str | None] = {}
+    if repository_metadata_path.is_file():
+        with repository_metadata_path.open("r", encoding="utf-8") as repository_file:
+            metadata = json.load(repository_file)
+
+    templates = []
+    for template_dir in sorted(path for path in repository_dir.iterdir() if path.is_dir()):
+        template_definition = _load_template_definition(repository_slug, template_dir)
+        if template_definition:
+            templates.append(template_definition)
+
+    return {
+        "id": f"system-{repository_slug}",
+        "name": metadata.get("name") or repository_slug.title(),
+        "description": metadata.get("description"),
+        "url": f"/api/repositories/system/{repository_slug}/repository.json",
+        "last_updated_at": None,
+        "templates": templates,
+    }
 
 
 @api_with_auth.post("/repositories", response_model=RepositoryResponse, status_code=201)
@@ -46,7 +114,42 @@ async def create_repository(data: RepositoryCreateRequest, db: Session = Depends
 
 @api_with_auth.get("/repositories/system", response_model=RepositoriesListResponse)
 async def get_system_repositories(db: Session = Depends(get_db)):
-    pass
+    if not SYSTEM_REPOSITORIES_PATH.exists():
+        return []
+
+    repositories = []
+    for repository_dir in sorted(path for path in SYSTEM_REPOSITORIES_PATH.iterdir() if path.is_dir()):
+        repositories.append(_load_system_repository(repository_dir))
+
+    return repositories
+
+
+@api_with_auth.get("/repositories/system/{repository_slug}/templates/{template_slug}/image")
+async def get_system_repository_image(repository_slug: str, template_slug: str):
+    repository_path = SYSTEM_REPOSITORIES_PATH / repository_slug
+    if not repository_path.is_dir():
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    template_path = repository_path / template_slug
+    if not template_path.is_dir():
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    template_definition_path = template_path / "template.json"
+    if not template_definition_path.is_file():
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    with template_definition_path.open("r", encoding="utf-8") as template_file:
+        template_data = json.load(template_file)
+
+    image_reference = template_data.get("image")
+    if not isinstance(image_reference, str) or not image_reference:
+        raise HTTPException(status_code=404, detail="Template image not found")
+
+    image_path = _resolve_template_resource(template_path, image_reference)
+    if not image_path or not image_path.is_file():
+        raise HTTPException(status_code=404, detail="Template image not found")
+
+    return FileResponse(image_path)
 
 @api_with_auth.get("/repositories", response_model=RepositoriesListResponse)
 async def get_repositories(db: Session = Depends(get_db)):
