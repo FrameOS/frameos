@@ -46,3 +46,15 @@ suite "eventsToAgenda app":
 
     check output.contains("^(48,#112233)Wednesday, December 25")
     check output.contains("^(24,#778899)Until Friday, December 27  ^(24,#445566)Conference")
+
+  test "shows ongoing multi-day event when starting with today":
+    let events = %*[
+      {"summary": "Retreat", "startTime": "2024-12-23", "endTime": "2024-12-27"}
+    ]
+    let app = newAgendaApp(events, startWithToday = true)
+    app.testOverrideToday = "2024-12-26"
+    let output = app.get(nil)
+
+    check not output.contains("No events today")
+    check output.count("^(48,#112233)Thursday, December 26") == 1
+    check output.contains("^(24,#778899)Until Friday, December 27  ^(24,#445566)Retreat")

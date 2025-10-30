@@ -19,6 +19,7 @@ type
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
+    testOverrideToday*: string
 
 const titleFormat = "{weekday}, {month/n} {day}"
 
@@ -47,6 +48,11 @@ proc get*(self: App, context: ExecutionContext): string =
   let time = &"^({formatFontSize(self.appConfig.baseFontSize)},{self.appConfig.timeColor.toHtmlHex()})"
   let events = self.appConfig.events
   let timezone = self.getTimezone(events)
+  let todayTs =
+    if self.testOverrideToday.len > 0:
+      parseTs("{year/4}-{month/2}-{day/2}", self.testOverrideToday)
+    else:
+      epochTime().Timestamp
 
   proc h1(text: string): string = &"{title}{text}\n{normal}\n"
   proc formatDay(day: string): string = format(parseTs("{year/4}-{month/2}-{day/2}", day), titleFormat)
@@ -57,7 +63,6 @@ proc get*(self: App, context: ExecutionContext): string =
 
   var currentDay = ""
   if self.appConfig.startWithToday or noEvents:
-    let todayTs = epochTime().Timestamp
     result &= h1(format(todayTs, titleFormat, tzName = timezone))
     currentDay = format(todayTs, "{year/4}-{month/2}-{day/2}", tzName = timezone)
 
@@ -75,12 +80,18 @@ proc get*(self: App, context: ExecutionContext): string =
     let endDay = obj{"endTime"}.getStr()
     let withTime = "T" in startDay
     let startDate = startDay.split("T")[0]
+    let endDate = endDay.split("T")[0]
+    var displayDay = startDate
 
-    if startDate != currentDay: # new day, past or future
-      if not hasAny and startDate != currentDay and self.appConfig.startWithToday:
+    if self.appConfig.startWithToday and currentDay != "" and
+        startDate <= currentDay and currentDay <= endDate:
+      displayDay = currentDay
+
+    if displayDay != currentDay: # new day, past or future
+      if not hasAny and displayDay != currentDay and self.appConfig.startWithToday:
         result &= "No events today\n"
-      result &= "\n" & h1(formatDay(startDate))
-      currentDay = startDate
+      result &= "\n" & h1(formatDay(displayDay))
+      currentDay = displayDay
 
     hasAny = true
 

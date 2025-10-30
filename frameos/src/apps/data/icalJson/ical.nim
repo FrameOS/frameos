@@ -70,6 +70,7 @@ type
     rRuleGenerated*: Table[string, (Timestamp, VEvent)]
     result*: EventsSeq
     splitCutoff*: Table[string, Timestamp]
+    masterTzByUid*: Table[string, string]
 
 const MAX_RESULT_COUNT = 100000
 
@@ -443,8 +444,23 @@ proc processCurrentFields*(self: var ParsedCalendar) =
   # if fields.hasKey("RDATE"):
   #   assert(false, "RDATE is not supported")
   if fields.hasKey("EXDATE"):
-    for value in fields["EXDATE"].items():
-      event.exDates.add(parseICalDateTime(value, event.timeZone))
+    for raw in fields["EXDATE"].items():
+      var tzParam = ""
+      var datesPart = raw
+      let colon = raw.find(':')
+      if colon != -1:
+        for p in raw[0 ..< colon].split(';'):
+          if p.startsWith("TZID="):
+            tzParam = normalizeTimeZone(p.split("=", 1)[1])
+        datesPart = raw[colon + 1 .. ^1]
+      let tzToUse =
+        if tzParam.len > 0: tzParam
+        elif self.masterTzByUid.hasKey(event.uid): self.masterTzByUid[event.uid]
+        elif event.timeZone.len > 0: event.timeZone
+        else: self.timeZone
+
+      for token in datesPart.split(','):
+        event.exDates.add(parseICalDateTime(token, tzToUse))
 
   # Text fields
   if fields.hasKey("SUMMARY"):
@@ -495,6 +511,10 @@ proc processCurrentFields*(self: var ParsedCalendar) =
   #   assert(false, "TRANSP is not supported")
   # if fields.hasKey("PRIORITY"):
   #   assert(false, "PRIORITY is not supported")
+
+  if event.recurrenceId.len == 0 and event.uid.len > 0:
+    self.masterTzByUid[event.uid] = event.timeZone
+
   self.events.add(event)
 
 proc processLine*(self: var ParsedCalendar, line: string) =
@@ -536,6 +556,7 @@ proc processLine*(self: var ParsedCalendar, line: string) =
 proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
   result = ParsedCalendar(timeZone: normalizeTimeZone(timeZone))
   result.timeZone = normalizeTimeZone(timeZone) # Default. Will be overridden by X-WR-TIMEZONE if given
+  result.masterTzByUid = initTable[string, string]()
   var accumulator = ""
   for line in content.splitLines():
     if line.len > 0 and (line[0] == ' ' or line[0] == '\t'):
@@ -731,6 +752,12 @@ proc hasThisAndFuture*(value: string): bool =
         return true
   return false
 
+proc tzForRid(self: ParsedCalendar, ev: VEvent, ridTzParam: string): string =
+  if ridTzParam.len > 0: return normalizeTimeZone(ridTzParam)
+  if self.masterTzByUid.hasKey(ev.uid): return self.masterTzByUid[ev.uid]
+  if ev.timeZone.len > 0: return ev.timeZone
+  return self.timeZone
+
 proc extractTzAndDate*(value: string): (string, string) =
   ## Extract timezone and the actual datetime part from a RECURRENCE-ID line
   var tz = ""
@@ -744,14 +771,16 @@ proc extractTzAndDate*(value: string): (string, string) =
         tz = normalizeTimeZone(p.split("=", 1)[1])
   return (tz, datePart)
 
+proc keyFor(uid: string, ts: Timestamp): string =
+  uid & "/" & $int64(ts.float) # use toUnix if you have it
+
 proc addMatchedEvent(self: var ParsedCalendar, ts: Timestamp, event: VEvent) =
   if self.result.len() > MAX_RESULT_COUNT:
     raise newException(ValueError, "Too many events in calendar. Increase MAX_RESULT_COUNT.")
 
   if event.recurrenceId != "":
-    var (ridTz, ridDate) = extractTzAndDate(event.recurrenceId)
-    if ridTz.len == 0:
-      ridTz = if event.timeZone == "": self.timeZone else: event.timeZone
+    var (ridTzParam, ridDate) = extractTzAndDate(event.recurrenceId)
+    let ridTz = self.tzForRid(event, ridTzParam)
     let ridTs = parseICalDateTime(ridDate, ridTz)
 
     # If the override defines a child series (has RRULE) or is marked THISANDFUTURE,
@@ -761,17 +790,17 @@ proc addMatchedEvent(self: var ParsedCalendar, ts: Timestamp, event: VEvent) =
       # record/keep earliest cutoff
       if not self.splitCutoff.hasKey(event.uid) or ridTs < self.splitCutoff[event.uid]:
         self.splitCutoff[event.uid] = ridTs
-      let key = event.uid & "/" & $ts # key by ACTUAL OCCURRENCE time
+      let key = keyFor(event.uid, ts)
       self.rRuleProvided[key] = (ts, event)
     else:
       # Single-instance override (move/cancel this one occurrence)
-      let key = event.uid & "/" & $ridTs # key by ORIGINAL occurrence time
+      let key = keyFor(event.uid, ridTs) # key by ORIGINAL occurrence time
       self.rRuleProvided[key] = (ts, event)
 
   elif event.rrules.len() > 0:
     if event.status == stCancelled:
       return
-    let key = event.uid & "/" & $ts
+    let key = keyFor(event.uid, ts)
     self.rRuleGenerated[key] = (ts, event)
 
   else:
@@ -844,9 +873,8 @@ proc getEvents*(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
       self.addMatchedEvent(event.startTs, event)
 
     if event.recurrenceId != "":
-      var (ridTz, ridDate) = extractTzAndDate(event.recurrenceId)
-      if ridTz.len == 0:
-        ridTz = if event.timeZone == "": self.timeZone else: event.timeZone
+      var (ridTzParam, ridDate) = extractTzAndDate(event.recurrenceId)
+      let ridTz = self.tzForRid(event, ridTzParam) # NEW
       let ridTs = parseICalDateTime(ridDate, ridTz)
       if ridTs <= endTs and ridTs >= startTs:
         let displayTs = if event.startTs == 0.Timestamp: ridTs else: event.startTs
