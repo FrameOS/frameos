@@ -118,8 +118,19 @@ async def get_system_repositories(db: Session = Depends(get_db)):
         return []
 
     repositories = []
-    for repository_dir in sorted(path for path in SYSTEM_REPOSITORIES_PATH.iterdir() if path.is_dir()):
+    paths = [path for path in SYSTEM_REPOSITORIES_PATH.iterdir() if path.is_dir()]
+    for repository_dir in paths:
         repositories.append(_load_system_repository(repository_dir))
+
+    # Sort order: samples first, then gallery, then everything else alphabetically
+    def sort_key(repo):
+        if repo.get('id') == "system-samples":
+            return (0, "")
+        elif repo.get('id') == "system-gallery":
+            return (1, "")
+        return (2, repo.get('id') or "")
+
+    repositories.sort(key=sort_key)
 
     return repositories
 
