@@ -42,6 +42,8 @@ type
   FieldsTable* = Table[string, DoublyLinkedList[string]]
   EventsSeq* = seq[(Timestamp, VEvent)]
 
+  EventStatus* = enum stNone, stTentative, stConfirmed, stCancelled
+
   VEvent* = object
     uid*: string
     timeZone*: string
@@ -55,6 +57,7 @@ type
     description*: string
     location*: string
     url*: string
+    status*: EventStatus
 
   ParsedCalendar* = object
     events*: seq[VEvent]
@@ -66,6 +69,7 @@ type
     rRuleProvided*: Table[string, (Timestamp, VEvent)]
     rRuleGenerated*: Table[string, (Timestamp, VEvent)]
     result*: EventsSeq
+    splitCutoff*: Table[string, Timestamp]
 
 const MAX_RESULT_COUNT = 100000
 
@@ -459,8 +463,14 @@ proc processCurrentFields*(self: var ParsedCalendar) =
   #   assert(false, "GEO is not supported")
   # if fields.hasKey("CATEGORIES"):
   #   assert(false, "CATEGORIES is not supported")
-  # if fields.hasKey("STATUS"):
-  #   assert(false, "STATUS is not supported")
+
+  if fields.hasKey("STATUS"):
+    let s = getFirstValue("STATUS").toUpperAscii()
+    case s
+    of "CANCELLED": event.status = stCancelled
+    of "TENTATIVE": event.status = stTentative
+    of "CONFIRMED": event.status = stConfirmed
+    else: event.status = stNone
 
   # Attendee and Alarm Properties
   # if fields.hasKey("ATTENDEE"):
@@ -710,19 +720,61 @@ proc matchesRRule*(currentCal: Calendar, rrule: RRule): bool =
 
   return true
 
+proc hasThisAndFuture*(value: string): bool =
+  let i = value.find(':')
+  if i == -1: return false
+  for p in value[0 ..< i].split(';'):
+    let up = p.toUpperAscii()
+    if up.startsWith("RANGE="):
+      let v = up.split("=", 1)[1]
+      if v == "THISANDFUTURE":
+        return true
+  return false
+
+proc extractTzAndDate*(value: string): (string, string) =
+  ## Extract timezone and the actual datetime part from a RECURRENCE-ID line
+  var tz = ""
+  var datePart = value
+  let colon = value.find(':')
+  if colon != -1:
+    let paramsPart = value[0 ..< colon]
+    datePart = value[colon + 1 .. ^1]
+    for p in paramsPart.split(';'):
+      if p.startsWith("TZID="):
+        tz = normalizeTimeZone(p.split("=", 1)[1])
+  return (tz, datePart)
+
 proc addMatchedEvent(self: var ParsedCalendar, ts: Timestamp, event: VEvent) =
   if self.result.len() > MAX_RESULT_COUNT:
     raise newException(ValueError, "Too many events in calendar. Increase MAX_RESULT_COUNT.")
 
-  let key = event.uid & "/" & $ts
   if event.recurrenceId != "":
-    self.rRuleProvided[key] = (ts, event)
+    var (ridTz, ridDate) = extractTzAndDate(event.recurrenceId)
+    if ridTz.len == 0:
+      ridTz = if event.timeZone == "": self.timeZone else: event.timeZone
+    let ridTs = parseICalDateTime(ridDate, ridTz)
+
+    # If the override defines a child series (has RRULE) or is marked THISANDFUTURE,
+    # (a) key by *this occurrence's* ts so it replaces the parent's same slot
+    # (b) remember a cutoff so the parent series stops after ridTs.
+    if event.rrules.len() > 0 or hasThisAndFuture(event.recurrenceId):
+      # record/keep earliest cutoff
+      if not self.splitCutoff.hasKey(event.uid) or ridTs < self.splitCutoff[event.uid]:
+        self.splitCutoff[event.uid] = ridTs
+      let key = event.uid & "/" & $ts # key by ACTUAL OCCURRENCE time
+      self.rRuleProvided[key] = (ts, event)
+    else:
+      # Single-instance override (move/cancel this one occurrence)
+      let key = event.uid & "/" & $ridTs # key by ORIGINAL occurrence time
+      self.rRuleProvided[key] = (ts, event)
 
   elif event.rrules.len() > 0:
+    let key = event.uid & "/" & $ts
     self.rRuleGenerated[key] = (ts, event)
 
   else:
-    self.result.add((ts, event))
+    if event.status != stCancelled:
+      self.result.add((ts, event))
 
 proc applyRRule(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent,
     rrule: RRule) =
@@ -745,7 +797,7 @@ proc applyRRule(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
 
     if simpleRepeat:
       nextIntervalStart = getSimpleNextInterval(currentCal, rrule, timeZone)
-      if currentTs <= endTs and newEndTs >= startTs:
+      if not event.exDates.contains(currentTs) and currentTs <= endTs and newEndTs >= startTs:
         self.addMatchedEvent(currentTs, event)
         counter += 1
 
@@ -784,11 +836,58 @@ proc getEvents*(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
     if event.rrules.len == 0 and event.startTs <= endTs and event.endTs >= startTs:
       self.addMatchedEvent(event.startTs, event)
 
+    if event.recurrenceId != "":
+      var (ridTz, ridDate) = extractTzAndDate(event.recurrenceId)
+      if ridTz.len == 0:
+        ridTz = if event.timeZone == "": self.timeZone else: event.timeZone
+      let ridTs = parseICalDateTime(ridDate, ridTz)
+      if ridTs <= endTs and ridTs >= startTs:
+        # Use the actual (possibly new) start if present, otherwise ridTs.
+        let displayTs = if event.startTs == 0.Timestamp: ridTs else: event.startTs
+        self.addMatchedEvent(displayTs, event)
+
+  var removedParentCounts: Table[string, int]
+
+  # Stop original parent series after any THISANDFUTURE split points
+  for uid, cutoff in self.splitCutoff.pairs():
+    var kill: seq[string] = @[]
+    for key, (ts, ev) in self.rRuleGenerated.pairs():
+      # ev.recurrenceId == "" identifies instances generated from the *parent* series
+      if ev.uid == uid and ev.recurrenceId == "" and ts >= cutoff:
+        kill.add(key)
+    if kill.len > 0:
+      removedParentCounts[uid] = kill.len
+    for k in kill:
+      self.rRuleGenerated.del(k)
+
+  # Child series here = overrides with RRULE *or* RANGE=THISANDFUTURE
+  for uid, removed in removedParentCounts.pairs():
+    if removed <= 0: continue
+    if not self.splitCutoff.hasKey(uid): continue
+    let cutoff = self.splitCutoff[uid]
+
+    # collect child instances >= cutoff
+    var childKeys: seq[(Timestamp, string)] = @[]
+    for key, (ts, ev) in self.rRuleProvided.pairs():
+      if ev.uid != uid: continue
+      if ts < cutoff: continue
+      if ev.rrules.len > 0 or hasThisAndFuture(ev.recurrenceId):
+        childKeys.add((ts, key))
+
+    # sort by occurrence time and keep only the first `removed`
+    childKeys.sort(proc (a, b: (Timestamp, string)): int = cmp(a[0], b[0]))
+    if childKeys.len > removed:
+      for i in removed ..< childKeys.len:
+        let k = childKeys[i][1]
+        self.rRuleProvided.del(k)
+
   # dedupe rrule results and standalone results
   for key, (ts, event) in self.rRuleProvided.pairs():
     if self.rRuleGenerated.hasKey(key):
-      self.rRuleGenerated.del(key)
-    self.result.add((ts, event))
+      self.rRuleGenerated.del(key) # remove the RRULE-generated original
+    if event.status != stCancelled:
+      self.result.add((ts, event)) # add overrides only if not cancelled
+
   for key, (ts, event) in self.rRuleGenerated.pairs():
     self.result.add((ts, event))
 
