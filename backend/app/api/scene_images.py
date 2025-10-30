@@ -1,17 +1,15 @@
 import io
-from jose import JWTError, jwt
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy.orm import Session
-from app.api.auth import ALGORITHM, SECRET_KEY
-
 from app.config import config
 from app.database import get_db
 from app.models.scene_image import SceneImage            # created earlier
 from app.models.frame import Frame
 from . import api_no_auth
+from app.utils.jwt_tokens import validate_scoped_token
 
 
 def _generate_placeholder(
@@ -95,12 +93,7 @@ async def get_scene_image(
     """
 
     if config.HASSIO_RUN_MODE != 'ingress':
-        try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            if payload.get("sub") != f"frame={frame_id}":
-                raise HTTPException(status_code=401, detail="Unauthorized")
-        except JWTError:
-            raise HTTPException(status_code=401, detail="Unauthorized")
+        validate_scoped_token(token, expected_subject=f"frame={frame_id}")
 
 
     img_row: SceneImage | None = (

@@ -18,14 +18,21 @@ from app.schemas.repositories import (
     RepositoryCreateRequest,
     RepositoryUpdateRequest,
     RepositoryResponse,
-    RepositoriesListResponse
+    RepositoriesListResponse,
+    RepositoryImageTokenResponse,
 )
-from . import api_with_auth
+from app.config import config
+from app.utils.jwt_tokens import create_scoped_token_response, validate_scoped_token
+from . import api_with_auth, api_no_auth
 
 FRAMEOS_SAMPLES_URL = "https://repo.frameos.net/samples/repository.json"
 FRAMEOS_GALLERY_URL = "https://repo.frameos.net/gallery/repository.json"
 
 SYSTEM_REPOSITORIES_PATH = Path(__file__).resolve().parents[3] / "repo" / "scenes"
+
+
+def _system_template_subject(repository_slug: str, template_slug: str) -> str:
+    return f"system-template={repository_slug}/{template_slug}"
 
 
 def _load_template_definition(repository_slug: str, template_dir: Path):
@@ -135,8 +142,24 @@ async def get_system_repositories(db: Session = Depends(get_db)):
     return repositories
 
 
-@api_with_auth.get("/repositories/system/{repository_slug}/templates/{template_slug}/image")
-async def get_system_repository_image(repository_slug: str, template_slug: str):
+@api_with_auth.get(
+    "/repositories/system/{repository_slug}/templates/{template_slug}/image_token",
+    response_model=RepositoryImageTokenResponse,
+)
+async def get_system_repository_image_token(repository_slug: str, template_slug: str):
+    return create_scoped_token_response(
+        _system_template_subject(repository_slug, template_slug)
+    )
+
+
+@api_no_auth.get("/repositories/system/{repository_slug}/templates/{template_slug}/image")
+async def get_system_repository_image(repository_slug: str, template_slug: str, token: str):
+    if config.HASSIO_RUN_MODE != 'ingress':
+        validate_scoped_token(
+            token,
+            expected_subject=_system_template_subject(repository_slug, template_slug),
+        )
+
     repository_path = SYSTEM_REPOSITORIES_PATH / repository_slug
     if not repository_path.is_dir():
         raise HTTPException(status_code=404, detail="Repository not found")

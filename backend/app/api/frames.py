@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 # stdlib ---------------------------------------------------------------------
-from datetime import datetime, timedelta
+from datetime import datetime
 from http import HTTPStatus
 import aiofiles
 import asyncssh
@@ -19,7 +19,6 @@ from urllib.parse import quote
 
 # third-party ---------------------------------------------------------------
 import httpx
-from jose import JWTError, jwt
 from fastapi import Depends, File, Form, Request, HTTPException, UploadFile, Header
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
@@ -48,7 +47,7 @@ from app.schemas.frames import (
     FrameCreateRequest,
     FrameUpdateRequest,
 )
-from app.api.auth import ALGORITHM, SECRET_KEY, get_current_user
+from app.api.auth import get_current_user
 from app.config import config
 from app.utils.network import is_safe_host
 from app.utils.remote_exec import (
@@ -73,6 +72,7 @@ from app.ws.agent_ws import (
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
 from app.utils.local_exec import exec_local_command
+from app.utils.jwt_tokens import create_scoped_token_response, validate_scoped_token
 from . import api_with_auth, api_no_auth
 
 
@@ -538,12 +538,7 @@ async def api_frame_get_asset(
             except HTTPException:
                 raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
         elif token:
-            try:
-                payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-                if payload.get("sub") != f"frame={id}":
-                    raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
-            except JWTError:
-                raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
+            validate_scoped_token(token, expected_subject=f"frame={id}")
         else:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
 
@@ -674,12 +669,7 @@ async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
     "/frames/{id:int}/image_token", response_model=FrameImageLinkResponse
 )
 async def get_image_token(id: int):
-    expire_minutes = 5
-    now = datetime.utcnow()
-    expire = now + timedelta(minutes=expire_minutes)
-    to_encode = {"sub": f"frame={id}", "exp": expire}
-    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return {"token": token, "expires_in": int((expire - now).total_seconds())}
+    return create_scoped_token_response(f"frame={id}")
 
 
 @api_no_auth.get("/frames/{id:int}/image")
@@ -691,12 +681,7 @@ async def api_frame_get_image(
     redis: Redis = Depends(get_redis),
 ):
     if config.HASSIO_RUN_MODE != "ingress":
-        try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            if payload.get("sub") != f"frame={id}":
-                raise HTTPException(status_code=401, detail="Unauthorized")
-        except JWTError:
-            raise HTTPException(status_code=401, detail="Unauthorized")
+        validate_scoped_token(token, expected_subject=f"frame={id}")
 
     frame = db.get(Frame, id)
     if frame is None:

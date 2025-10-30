@@ -11,6 +11,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { Button } from '../../../../components/Button'
 import { useEntityImage } from '../../../../models/entityImagesModel'
+import { useMemo } from 'react'
 import clsx from 'clsx'
 import { Tooltip } from '../../../../components/Tooltip'
 
@@ -33,8 +34,28 @@ export function TemplateRow({
   saveRemoteAsLocal,
   installedTemplatesByName,
 }: TemplateProps): JSX.Element {
+  const imageEntity = useMemo(() => {
+    if (template.id) {
+      return `templates/${template.id}`
+    }
+
+    if (typeof template.image === 'string') {
+      const match = template.image.match(
+        /^\/api\/(repositories\/system\/[^/]+\/templates\/[^/]+)\/image$/
+      )
+      if (match) {
+        return match[1]
+      }
+    }
+
+    return null
+  }, [template.id, template.image])
+
   // I know the order of hooks is weird here, but the "if" should never change for this component
-  const imageUrl = template.id ? useEntityImage(`templates/${template.id}`, 'image').imageUrl : template.image
+  const { imageUrl: managedImageUrl } = useEntityImage(imageEntity, 'image')
+  const fallbackImageUrl =
+    managedImageUrl ?? (typeof template.image === 'string' ? template.image : null)
+  const imageUrl = fallbackImageUrl
 
   return (
     <div
