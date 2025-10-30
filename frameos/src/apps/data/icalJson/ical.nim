@@ -769,6 +769,8 @@ proc addMatchedEvent(self: var ParsedCalendar, ts: Timestamp, event: VEvent) =
       self.rRuleProvided[key] = (ts, event)
 
   elif event.rrules.len() > 0:
+    if event.status == stCancelled:
+      return
     let key = event.uid & "/" & $ts
     self.rRuleGenerated[key] = (ts, event)
 
@@ -826,8 +828,13 @@ proc applyRRule(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
 
 proc getEvents*(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, search: string = "",
     maxCount: int = 1000): EventsSeq =
+
   for event in self.events:
     if search != "" and not event.summary.contains(search):
+      continue
+
+    # ⬅️ Skip whole-series cancellations (master VEVENT without RECURRENCE-ID)
+    if event.status == stCancelled and event.recurrenceId.len == 0:
       continue
 
     for rrule in event.rrules:
@@ -842,7 +849,6 @@ proc getEvents*(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
         ridTz = if event.timeZone == "": self.timeZone else: event.timeZone
       let ridTs = parseICalDateTime(ridDate, ridTz)
       if ridTs <= endTs and ridTs >= startTs:
-        # Use the actual (possibly new) start if present, otherwise ridTs.
         let displayTs = if event.startTs == 0.Timestamp: ridTs else: event.startTs
         self.addMatchedEvent(displayTs, event)
 
