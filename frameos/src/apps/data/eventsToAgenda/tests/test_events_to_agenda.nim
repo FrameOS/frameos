@@ -31,9 +31,9 @@ suite "eventsToAgenda app":
     let app = newAgendaApp(events)
     let output = app.get(nil)
 
-    check output.contains("^(48,#112233)Tuesday, Dec 24")
+    check output.contains("^(48,#112233)Tuesday, December 24")
     check output.contains("^(24,#778899)08:00 - 09:00  ^(24,#445566)Breakfast")
-    check output.contains("^(48,#112233)Wednesday, Dec 25")
+    check output.contains("^(48,#112233)Wednesday, December 25")
     check output.contains("^(24,#778899)All day  ^(24,#445566)Holiday")
     check output.find("Breakfast") < output.find("Holiday")
 
@@ -44,5 +44,5 @@ suite "eventsToAgenda app":
     let app = newAgendaApp(events)
     let output = app.get(nil)
 
-    check output.contains("^(48,#112233)Wednesday, Dec 25")
-    check output.contains("^(24,#778899)Until Friday, Dec 27  ^(24,#445566)Conference")
+    check output.contains("^(48,#112233)Wednesday, December 25")
+    check output.contains("^(24,#778899)Until Friday, December 27  ^(24,#445566)Conference")

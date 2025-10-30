@@ -31,10 +31,20 @@ proc getTimezone*(self: App, json: JsonNode): string =
   if self.frameConfig.timeZone != "":
     return self.frameConfig.timeZone
 
+proc formatFontSize(value: float): string =
+  var formatted = value.formatFloat(ffDecimal, 6)
+  while formatted.len > 0 and formatted[^1] == '0':
+    formatted.setLen(formatted.len - 1)
+  if formatted.len > 0 and formatted[^1] == '.':
+    formatted.setLen(formatted.len - 1)
+  if formatted.len == 0:
+    return "0"
+  result = formatted
+
 proc get*(self: App, context: ExecutionContext): string =
-  let title = &"^({self.appConfig.titleFontSize},{self.appConfig.titleColor.toHtmlHex()})"
-  let normal = &"^({self.appConfig.baseFontSize},{self.appConfig.textColor.toHtmlHex()})"
-  let time = &"^({self.appConfig.baseFontSize},{self.appConfig.timeColor.toHtmlHex()})"
+  let title = &"^({formatFontSize(self.appConfig.titleFontSize)},{self.appConfig.titleColor.toHtmlHex()})"
+  let normal = &"^({formatFontSize(self.appConfig.baseFontSize)},{self.appConfig.textColor.toHtmlHex()})"
+  let time = &"^({formatFontSize(self.appConfig.baseFontSize)},{self.appConfig.timeColor.toHtmlHex()})"
   let events = self.appConfig.events
   let timezone = self.getTimezone(events)
 
