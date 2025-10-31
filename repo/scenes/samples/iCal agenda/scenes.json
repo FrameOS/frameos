@@ -1,0 +1,384 @@
+[
+  {
+    "id": "d68549a7-a425-4dca-bb2a-82b113e7ccb2",
+    "name": "iCal agenda",
+    "settings": {
+      "backgroundColor": "#ffffff",
+      "refreshInterval": 60,
+      "execution": "interpreted"
+    },
+    "fields": [
+      {
+        "access": "public",
+        "label": "iCal URL",
+        "name": "iCalURL",
+        "persist": "disk",
+        "type": "string"
+      },
+      {
+        "access": "private",
+        "label": "Events",
+        "name": "events",
+        "persist": "memory",
+        "type": "json",
+        "value": "[]"
+      },
+      {
+        "access": "public",
+        "label": "Font size",
+        "name": "fontSize",
+        "persist": "disk",
+        "type": "float",
+        "value": "20"
+      },
+      {
+        "access": "public",
+        "label": "Title font size",
+        "name": "titleFontSize",
+        "persist": "disk",
+        "type": "float",
+        "value": "28"
+      },
+      {
+        "name": "font",
+        "label": "Font",
+        "type": "font",
+        "persist": "disk",
+        "access": "public"
+      }
+    ],
+    "nodes": [
+      {
+        "data": {
+          "keyword": "render"
+        },
+        "dragging": false,
+        "height": 161,
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "position": {
+          "x": 102.0918627233498,
+          "y": 190.35147067720533
+        },
+        "positionAbsolute": {
+          "x": 102.0918627233498,
+          "y": 190.35147067720533
+        },
+        "selected": false,
+        "type": "event",
+        "width": 212
+      },
+      {
+        "data": {
+          "config": {
+            "stateKey": "events"
+          },
+          "keyword": "logic/setAsState"
+        },
+        "dragging": false,
+        "height": 134,
+        "id": "7928bf65-7161-43be-8bf1-c49302596be6",
+        "position": {
+          "x": 576.4732449503583,
+          "y": 192.12116727025415
+        },
+        "positionAbsolute": {
+          "x": 576.4732449503583,
+          "y": 192.12116727025415
+        },
+        "selected": false,
+        "type": "app",
+        "width": 354
+      },
+      {
+        "data": {
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true
+          },
+          "config": {
+            "addLocation": "false",
+            "addTimezone": "true",
+            "addUrl": "false",
+            "exportCount": "40"
+          },
+          "keyword": "data/icalJson"
+        },
+        "dragging": false,
+        "height": 364,
+        "id": "e93b204c-aa3f-4397-a3f7-2a6f1f648fb9",
+        "position": {
+          "x": 378.0528238265531,
+          "y": -283.39450307959305
+        },
+        "positionAbsolute": {
+          "x": 378.0528238265531,
+          "y": -283.39450307959305
+        },
+        "selected": false,
+        "type": "app",
+        "width": 531
+      },
+      {
+        "data": {
+          "cache": {
+            "duration": "900",
+            "durationEnabled": true,
+            "enabled": true,
+            "inputEnabled": true
+          },
+          "config": {},
+          "keyword": "data/downloadUrl"
+        },
+        "dragging": false,
+        "height": 112,
+        "id": "f6fb98f6-3c04-49d2-8f5e-7bcfebe1239c",
+        "position": {
+          "x": 343.06783318636593,
+          "y": -466.13660175931227
+        },
+        "positionAbsolute": {
+          "x": 343.06783318636593,
+          "y": -466.13660175931227
+        },
+        "selected": false,
+        "type": "app",
+        "width": 251
+      },
+      {
+        "data": {
+          "keyword": "iCalURL"
+        },
+        "dragging": false,
+        "height": 48,
+        "id": "c8948803-4338-466b-b85f-b6d6459f8de1",
+        "position": {
+          "x": 313.1066507283249,
+          "y": -547.4776323795462
+        },
+        "positionAbsolute": {
+          "x": 313.1066507283249,
+          "y": -547.4776323795462
+        },
+        "selected": false,
+        "type": "state",
+        "width": 172
+      },
+      {
+        "data": {
+          "config": {
+            "borderColor": "#ffffff",
+            "borderWidth": "0",
+            "fontColor": "#000000",
+            "overflow": "visible",
+            "position": "left",
+            "richText": "basic-caret",
+            "vAlign": "top"
+          },
+          "keyword": "render/text"
+        },
+        "dragging": false,
+        "height": 420,
+        "id": "e9c69dfd-f257-4287-bf8d-eb7649cc34d8",
+        "position": {
+          "x": 1293.9415152857314,
+          "y": 98.4250772641658
+        },
+        "positionAbsolute": {
+          "x": 1293.9415152857314,
+          "y": 98.4250772641658
+        },
+        "selected": false,
+        "type": "app",
+        "width": 372
+      },
+      {
+        "data": {
+          "config": {
+            "baseFontSize": "20",
+            "textColor": "#000000",
+            "titleColor": "#000000",
+            "titleFontSize": "28"
+          },
+          "keyword": "data/eventsToAgenda"
+        },
+        "dragging": false,
+        "height": 282,
+        "id": "261ac021-20e0-4699-9147-541a762c013a",
+        "position": {
+          "x": 1251.7101941794317,
+          "y": -255.11189516677453
+        },
+        "positionAbsolute": {
+          "x": 1251.7101941794317,
+          "y": -255.11189516677453
+        },
+        "resizing": false,
+        "selected": false,
+        "style": {
+          "height": 282,
+          "width": 309
+        },
+        "type": "app",
+        "width": 309
+      },
+      {
+        "data": {
+          "keyword": "events"
+        },
+        "dragging": false,
+        "height": 48,
+        "id": "66ac0d50-8342-4e11-b594-d27e46f80cfc",
+        "position": {
+          "x": 1210.7033031429971,
+          "y": -332.7392074186162
+        },
+        "positionAbsolute": {
+          "x": 1210.7033031429971,
+          "y": -332.7392074186162
+        },
+        "selected": false,
+        "type": "state",
+        "width": 145
+      },
+      {
+        "data": {
+          "keyword": "fontSize"
+        },
+        "dragging": false,
+        "height": 48,
+        "id": "e34e1f24-6a38-48e9-90db-de4242f277f9",
+        "position": {
+          "x": 1170.6056451099698,
+          "y": -404.8341679992418
+        },
+        "positionAbsolute": {
+          "x": 1170.6056451099698,
+          "y": -404.8341679992418
+        },
+        "selected": false,
+        "type": "state",
+        "width": 170
+      },
+      {
+        "data": {
+          "keyword": "titleFontSize"
+        },
+        "dragging": false,
+        "height": 48,
+        "id": "9e1961fd-6516-4ada-b5eb-6d68182f8772",
+        "position": {
+          "x": 1131.8474632402952,
+          "y": -475.58258624041605
+        },
+        "positionAbsolute": {
+          "x": 1131.8474632402952,
+          "y": -475.58258624041605
+        },
+        "selected": false,
+        "type": "state",
+        "width": 209
+      },
+      {
+        "id": "2e47fecc-3ed0-4490-808d-a682774db538",
+        "position": {
+          "x": 1149.900392055103,
+          "y": 286.91752260293157
+        },
+        "data": {
+          "keyword": "font"
+        },
+        "type": "state",
+        "width": 128,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1149.900392055103,
+          "y": 286.91752260293157
+        },
+        "dragging": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "6a8525e5-a6aa-435d-87f0-1b285d4b1ab5",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "target": "7928bf65-7161-43be-8bf1-c49302596be6",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "dd7d871c-f8d0-4348-a8a3-37f94debf344",
+        "source": "e93b204c-aa3f-4397-a3f7-2a6f1f648fb9",
+        "sourceHandle": "fieldOutput",
+        "target": "7928bf65-7161-43be-8bf1-c49302596be6",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "18eb4275-d26c-42f8-be6e-04831c150785",
+        "source": "f6fb98f6-3c04-49d2-8f5e-7bcfebe1239c",
+        "sourceHandle": "fieldOutput",
+        "target": "e93b204c-aa3f-4397-a3f7-2a6f1f648fb9",
+        "targetHandle": "fieldInput/ical",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "235edd79-574d-48a2-9277-8d286eb9cea9",
+        "source": "c8948803-4338-466b-b85f-b6d6459f8de1",
+        "sourceHandle": "fieldOutput",
+        "target": "f6fb98f6-3c04-49d2-8f5e-7bcfebe1239c",
+        "targetHandle": "fieldInput/url",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "846e238b-42b3-4697-b7b9-4b4c1bc012fb",
+        "source": "7928bf65-7161-43be-8bf1-c49302596be6",
+        "sourceHandle": "next",
+        "target": "e9c69dfd-f257-4287-bf8d-eb7649cc34d8",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "ae8e415e-dc25-4077-8524-30567cb5ea19",
+        "source": "261ac021-20e0-4699-9147-541a762c013a",
+        "sourceHandle": "fieldOutput",
+        "target": "e9c69dfd-f257-4287-bf8d-eb7649cc34d8",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "21d1fbca-6481-4d4a-bfe6-d7bf61ad8869",
+        "source": "66ac0d50-8342-4e11-b594-d27e46f80cfc",
+        "sourceHandle": "fieldOutput",
+        "target": "261ac021-20e0-4699-9147-541a762c013a",
+        "targetHandle": "fieldInput/events",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "c503a106-1190-4d47-b0b0-feb907dae00b",
+        "source": "e34e1f24-6a38-48e9-90db-de4242f277f9",
+        "sourceHandle": "fieldOutput",
+        "target": "261ac021-20e0-4699-9147-541a762c013a",
+        "targetHandle": "fieldInput/baseFontSize",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "ea88d063-165c-46a9-8647-5950c7d2e9e3",
+        "source": "9e1961fd-6516-4ada-b5eb-6d68182f8772",
+        "sourceHandle": "fieldOutput",
+        "target": "261ac021-20e0-4699-9147-541a762c013a",
+        "targetHandle": "fieldInput/titleFontSize",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "0051b615-17d4-4571-b0e0-5d496968a1ac",
+        "source": "2e47fecc-3ed0-4490-808d-a682774db538",
+        "sourceHandle": "fieldOutput",
+        "target": "e9c69dfd-f257-4287-bf8d-eb7649cc34d8",
+        "targetHandle": "fieldInput/font",
+        "type": "codeNodeEdge"
+      }
+    ]
+  }
+]

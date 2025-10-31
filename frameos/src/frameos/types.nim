@@ -84,8 +84,14 @@ type
     payload*: JsonNode
 
   # Part of FrameConfig
+  HttpHeaderPair* = object
+    name*: string
+    value*: string
+
   DeviceConfig* = ref object
     vcom*: float # used for the 10.3" display
+    httpUploadUrl*: string
+    httpUploadHeaders*: seq[HttpHeaderPair]
 
   Logger* = ref object
     frameConfig*: FrameConfig

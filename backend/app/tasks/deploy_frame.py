@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 import os
+import re
+import shlex
 import tempfile
 from typing import Any
 
@@ -18,6 +20,20 @@ from app.utils.nix_utils import nix_cmd
 from app.tasks._frame_deployer import FrameDeployer
 
 from .utils import find_nim_v2
+
+
+APT_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
+
+
+def _sanitize_apt_package_name(pkg: str) -> str:
+    """Validate *pkg* to prevent shell injection in apt installs."""
+
+    normalized = pkg.strip()
+    if not normalized:
+        raise ValueError("Invalid apt package name: empty value")
+    if not APT_PACKAGE_NAME_PATTERN.fullmatch(normalized):
+        raise ValueError(f"Invalid apt package name: {pkg!r}")
+    return normalized
 
 async def deploy_frame(id: int, redis: Redis):
     await redis.enqueue_job("deploy_frame", id=id)
@@ -50,23 +66,32 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         settings = get_settings_dict(db)
 
         async def install_if_necessary(pkg: str, raise_on_error=True) -> int:
+            try:
+                sanitized_pkg = _sanitize_apt_package_name(pkg)
+            except ValueError as exc:
+                await self.log("stderr", f"- {exc}")
+                if raise_on_error:
+                    raise
+                return 1
+
             search_strings = ["run apt-get update", "404 Not Found", "Failed to fetch", "failed to fetch", "Unable to fetch some archives"]
             output: list[str] = []
+            quoted_pkg = shlex.quote(sanitized_pkg)
             response = await self.exec_command(
-                f"dpkg -l | grep -q \"^ii  {pkg} \" || sudo apt-get install -y {pkg}",
+                f"dpkg -l | grep -q \"^ii  {quoted_pkg} \" || sudo apt-get install -y {quoted_pkg}",
                 raise_on_error=False,
                 output=output
             )
             if response != 0:
                 combined_output = "".join(output)
                 if any(s in combined_output for s in search_strings):
-                    await self.log("stdout", f"- Installing {pkg} failed. Trying to update apt.")
+                    await self.log("stdout", f"- Installing {sanitized_pkg} failed. Trying to update apt.")
                     response = await self.exec_command(
-                        "sudo apt-get update && sudo apt-get install -y " + pkg,
+                        "sudo apt-get update && sudo apt-get install -y " + quoted_pkg,
                         raise_on_error=raise_on_error
                     )
                     if response != 0: # we propably raised above
-                        await self.log("stdout", f"- Installing {pkg} failed again.")
+                        await self.log("stdout", f"- Installing {sanitized_pkg} failed again.")
             return response
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -180,6 +205,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                             "  mkdir -p /tmp/lgpio-install && "
                             "  cd /tmp/lgpio-install && "
                             "  wget -q -O v0.2.2.tar.gz https://github.com/joan2937/lg/archive/refs/tags/v0.2.2.tar.gz && "
+                            "  echo 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  v0.2.2.tar.gz' | sha256sum -c - && "
                             "  tar -xzf v0.2.2.tar.gz && "
                             "  cd lg-0.2.2 && "
                             "  make && "
@@ -211,6 +237,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 await self.exec_command(
                     "mkdir -p /srv/frameos/vendor/quickjs/ && "
                     "wget -q -O quickjs-2025-04-26.tar.xz https://bellard.org/quickjs/quickjs-2025-04-26.tar.xz && "
+                    "echo '2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf  quickjs-2025-04-26.tar.xz' | sha256sum -c - && "
                     "tar -xJf quickjs-2025-04-26.tar.xz -C /srv/frameos/vendor/quickjs/ && " \
                     "rm quickjs-2025-04-26.tar.xz"
                 )

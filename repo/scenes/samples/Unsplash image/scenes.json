@@ -1,0 +1,128 @@
+[
+  {
+    "id": "cf88f114-6229-456f-ab5a-25d23ac87b83",
+    "name": "Unsplash image",
+    "settings": {
+      "backgroundColor": "#000000",
+      "refreshInterval": 600,
+      "execution": "interpreted"
+    },
+    "fields": [
+      {
+        "access": "public",
+        "label": "Search term",
+        "name": "search",
+        "persist": "disk",
+        "placeholder": "e.g. nature, fish, city",
+        "type": "string",
+        "value": "nature"
+      }
+    ],
+    "nodes": [
+      {
+        "data": {
+          "keyword": "render"
+        },
+        "dragging": false,
+        "height": 161,
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "position": {
+          "x": 146,
+          "y": 79
+        },
+        "positionAbsolute": {
+          "x": 146,
+          "y": 79
+        },
+        "selected": false,
+        "type": "event",
+        "width": 212
+      },
+      {
+        "data": {
+          "config": {},
+          "keyword": "render/image"
+        },
+        "height": 134,
+        "id": "7d4ca5fe-cb1a-413c-8ac1-c7c12c8dcd12",
+        "position": {
+          "x": 472.75,
+          "y": 97
+        },
+        "type": "app",
+        "width": 324
+      },
+      {
+        "data": {
+          "cache": {
+            "duration": "3600",
+            "durationEnabled": true,
+            "enabled": true,
+            "inputEnabled": true
+          },
+          "config": {},
+          "keyword": "data/unsplash"
+        },
+        "dragging": false,
+        "height": 168,
+        "id": "c03a1fe5-5806-45a4-8a61-16c9c0ce1bc8",
+        "position": {
+          "x": 448.75,
+          "y": -99
+        },
+        "positionAbsolute": {
+          "x": 448.75,
+          "y": -99
+        },
+        "selected": false,
+        "type": "app",
+        "width": 299
+      },
+      {
+        "id": "69a6d642-cfe5-49ea-9286-f3e8be061264",
+        "position": {
+          "x": 413.885067114094,
+          "y": -166.40939597315435
+        },
+        "data": {
+          "keyword": "search"
+        },
+        "type": "state",
+        "width": 204,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 413.885067114094,
+          "y": -166.40939597315435
+        },
+        "dragging": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "7c54bcdb-f561-4483-b4fc-c8ae04635092",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "target": "7d4ca5fe-cb1a-413c-8ac1-c7c12c8dcd12",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "38c71787-77e4-4026-b1c2-4962d362f19d",
+        "source": "c03a1fe5-5806-45a4-8a61-16c9c0ce1bc8",
+        "sourceHandle": "fieldOutput",
+        "target": "7d4ca5fe-cb1a-413c-8ac1-c7c12c8dcd12",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "418f856f-20f8-4402-86f1-b6315a6544d4",
+        "target": "c03a1fe5-5806-45a4-8a61-16c9c0ce1bc8",
+        "targetHandle": "fieldInput/search",
+        "source": "69a6d642-cfe5-49ea-9286-f3e8be061264",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      }
+    ]
+  }
+]

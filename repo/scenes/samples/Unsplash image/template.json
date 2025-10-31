@@ -1,0 +1,9 @@
+{
+  "name": "Unsplash image",
+  "description": "Display a random image from unsplash.com. An API key is required. Demo keys provide 50 images/hour.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 480,
+  "imageHeight": 800,
+  "scenes": "./scenes.json"
+}

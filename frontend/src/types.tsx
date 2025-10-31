@@ -21,6 +21,8 @@ export interface FrameType {
   device?: string
   device_config?: {
     vcom?: number
+    uploadUrl?: string
+    uploadHeaders?: { name: string; value: string }[]
   }
   color?: string
   interval: number

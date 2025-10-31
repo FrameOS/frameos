@@ -1,5 +1,6 @@
 import ../ical
 import lib/tz
+import sequtils
 import chrono
 
 proc toFullCal(event: string, timeZone = "UTC"): seq[(Timestamp, VEvent)] =
@@ -22,6 +23,43 @@ block test_parse_ical_datetime:
     doAssert parseICalDateTime("20240101", "UTC") != parseICalDateTime("20240101", "Europe/Brussels")
     doAssert parseICalDateTime("20240101T000000", "UTC") != parseICalDateTime("20240101T000000", "Europe/Brussels")
     doAssert parseICalDateTime("20240101T000000Z", "UTC") == parseICalDateTime("20240101T000000Z", "Europe/Brussels")
+
+block test_windows_timezone_aliases:
+    echo ">> Testing: windows timezone aliases"
+    let content = """BEGIN:VCALENDAR
+METHOD:PUBLISH
+PRODID:Microsoft Exchange Server 2010
+VERSION:2.0
+X-WR-TIMEZONE:GMT Standard Time
+BEGIN:VTIMEZONE
+TZID:GMT Standard Time
+BEGIN:STANDARD
+DTSTART:16010101T020000
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0000
+RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=10
+END:STANDARD
+BEGIN:DAYLIGHT
+DTSTART:16010101T010000
+TZOFFSETFROM:+0000
+TZOFFSETTO:+0100
+RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=3
+END:DAYLIGHT
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:windows-ical-test
+DTSTART;TZID=GMT Standard Time:20240331T100000
+DTEND;TZID=GMT Standard Time:20240331T110000
+SUMMARY:Test Event
+END:VEVENT
+END:VCALENDAR"""
+    var calendar = parseICalendar(content)
+    doAssert calendar.timeZone == "Europe/London"
+    doAssert calendar.events.len == 1
+    let event = calendar.events[0]
+    doAssert event.startTs == parseICalDateTime("20240331T100000", "Europe/London")
+    doAssert event.endTs == parseICalDateTime("20240331T110000", "Europe/London")
+    doAssert event.summary == "Test Event"
 
 block test_get_simple_next_interval:
     echo ">> Testing: get_simple_next_interval"
@@ -1047,3 +1085,52 @@ SUMMARY:Overridden
     doAssert len(events) == 1
     doAssert events[0][0] == parseICalDateTime("20070215T090000", "America/New_York")
 
+
+block test_rrules_44:
+    echo ">> Testing: RECURRENCE-ID with STATUS:CANCELLED (should remove the instance)"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:20241001T180000
+DTEND;TZID=America/New_York:20241001T200000
+RRULE:FREQ=WEEKLY;COUNT=4
+SUMMARY:Block / Family Time
+END:VEVENT
+BEGIN:VEVENT
+UID:1234567890
+DTSTART;TZID=America/New_York:20241008T180000
+DTEND;TZID=America/New_York:20241008T200000
+RECURRENCE-ID;TZID=America/New_York:20241008T180000
+STATUS:CANCELLED
+SUMMARY:Block / Family Time (cancelled)
+""")
+    # There are 4 original Tuesdays, one cancelled (Oct 8) should be gone.
+    doAssert len(events) == 3, "Expected 3 visible events, got " & $len(events)
+    doAssert events.mapIt(it[0]).contains(parseICalDateTime("20241001T180000", "America/New_York"))
+    doAssert not events.mapIt(it[0]).contains(parseICalDateTime("20241008T180000", "America/New_York")), "Cancelled instance still present"
+    doAssert events.mapIt(it[0]).contains(parseICalDateTime("20241015T180000", "America/New_York"))
+    doAssert events.mapIt(it[0]).contains(parseICalDateTime("20241022T180000", "America/New_York"))
+
+block test_rrules_45:
+    echo ">> Testing: RECURRENCE-ID;RANGE=THISANDFUTURE (split series)"
+    let events = toFullCal("""
+DTSTART;TZID=America/New_York:20241001T180000
+DTEND;TZID=America/New_York:20241001T200000
+RRULE:FREQ=WEEKLY;COUNT=6
+SUMMARY:Block / Family Time
+END:VEVENT
+BEGIN:VEVENT
+UID:1234567890
+DTSTART;TZID=America/New_York:20241015T190000
+DTEND;TZID=America/New_York:20241015T210000
+RECURRENCE-ID;RANGE=THISANDFUTURE;TZID=America/New_York:20241015T180000
+RRULE:FREQ=WEEKLY
+SUMMARY:Block / Family Time (moved later)
+""")
+    # Original series: 10/01, 10/08, 10/15, 10/22, 10/29, 11/05
+    # Split at 10/15, child series replaces 10/15 and beyond at new times
+    let starts = events.mapIt(it[0])
+    doAssert not starts.contains(parseICalDateTime("20241015T180000", "America/New_York")), "Old 18:00 event still present after split"
+    doAssert starts.contains(parseICalDateTime("20241015T190000", "America/New_York")), "New 19:00 child series event missing"
+    doAssert starts.contains(parseICalDateTime("20241022T190000", "America/New_York")), "Future child series event missing"
+    doAssert not starts.contains(parseICalDateTime("20241022T180000", "America/New_York")), "Parent series not cut off after split"
+    echo len(events)
+    doAssert len(events) == 6, "Expected 6 total visible events (2 before split + 4 after)"

@@ -1,0 +1,9 @@
+{
+  "name": "GitHub stars",
+  "description": "Display the star count of your project",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 250,
+  "imageHeight": 122,
+  "scenes": "./scenes.json"
+}

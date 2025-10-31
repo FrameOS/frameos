@@ -97,6 +97,10 @@ export const editAppLogic = kea<editAppLogicType>([
             const response = await apiFetch(`/api/apps/source?keyword=${encodeURIComponent(values.savedKeyword)}`)
             sources = await response.json()
           }
+          if (sources['app_loader.nim'] !== undefined) {
+            const { ['app_loader.nim']: _ignored, ...filteredSources } = sources
+            sources = filteredSources
+          }
           for (const file of files) {
             if (file in sources) {
               actions.setActiveFile(file)

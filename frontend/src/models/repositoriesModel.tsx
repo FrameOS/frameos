@@ -18,12 +18,17 @@ export const repositoriesModel = kea<repositoriesModelType>([
       {
         loadRepositories: async () => {
           try {
+            const systemResponse = await apiFetch('/api/repositories/system')
+            if (!systemResponse.ok) {
+              throw new Error('Failed to fetch system repositories')
+            }
+            const systemData = await systemResponse.json()
             const response = await apiFetch('/api/repositories')
             if (!response.ok) {
               throw new Error('Failed to fetch repositories')
             }
             const data = await response.json()
-            return data as RepositoryType[]
+            return [...systemData, ...data] as RepositoryType[]
           } catch (error) {
             console.error(error)
             return values.repositories

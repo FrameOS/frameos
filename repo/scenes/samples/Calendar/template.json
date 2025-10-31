@@ -1,0 +1,9 @@
+{
+  "name": "Calendar",
+  "description": "Monthly calendar with .ics support. Light and dark mode.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "scenes": "./scenes.json"
+}

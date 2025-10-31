@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict, RootModel
 from typing import Any, Dict, List, Optional
+
+from .common import ImageTokenResponse
 from datetime import datetime
 
 class FrameBase(BaseModel):
@@ -110,9 +112,8 @@ class FrameLogsResponse(BaseModel):
 class FrameMetricsResponse(BaseModel):
     metrics: List[Dict[str, Any]]
 
-class FrameImageLinkResponse(BaseModel):
-    token: str
-    expires_in: int
+class FrameImageLinkResponse(ImageTokenResponse):
+    pass
 
 class FrameStateResponse(RootModel):
     # The state is returned as JSON

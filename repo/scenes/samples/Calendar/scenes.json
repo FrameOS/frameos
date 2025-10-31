@@ -1,0 +1,261 @@
+[
+  {
+    "id": "ea50234d-b1f0-4d47-9915-5a9d6a679ae7",
+    "name": "Calendar",
+    "nodes": [
+      {
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "type": "event",
+        "position": { "x": 189.39661853806825, "y": -941.1436002264414 },
+        "data": { "keyword": "render" },
+        "width": 212,
+        "height": 161,
+        "selected": false,
+        "dragging": false,
+        "positionAbsolute": { "x": 189.39661853806825, "y": -941.1436002264414 }
+      },
+      {
+        "id": "51170b30-80e7-4e36-b2d4-b1a1b3e633d2",
+        "position": { "x": 488.50294164668446, "y": -944.3037524942042 },
+        "data": { "keyword": "render/image", "config": {} },
+        "type": "app",
+        "width": 324,
+        "height": 134,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 488.50294164668446,
+          "y": -944.3037524942042
+        },
+        "dragging": false
+      },
+      {
+        "id": "c0aaed13-1736-45f5-8875-88ee72711570",
+        "position": { "x": 412.99216331939056, "y": -1672.956117364947 },
+        "data": {
+          "keyword": "data/icalJson",
+          "config": {
+            "exportFrom": "last month",
+            "exportUntil": "next month",
+            "exportCount": "500"
+          },
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true,
+            "durationEnabled": false,
+            "duration": null,
+            "expressionEnabled": false,
+            "expression": null,
+            "expressionType": null
+          }
+        },
+        "type": "app",
+        "width": 527,
+        "height": 364,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 412.99216331939056,
+          "y": -1672.956117364947
+        },
+        "dragging": false
+      },
+      {
+        "id": "7c158446-481c-4f0a-950c-9e2882ff62d7",
+        "position": { "x": 373.99811023404675, "y": -1808.5933935362077 },
+        "data": {
+          "keyword": "data/downloadUrl",
+          "config": {},
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true,
+            "durationEnabled": true,
+            "duration": "900",
+            "expressionEnabled": false,
+            "expression": null,
+            "expressionType": null
+          }
+        },
+        "type": "app",
+        "width": 251,
+        "height": 112,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 373.99811023404675,
+          "y": -1808.5933935362077
+        },
+        "dragging": false
+      },
+      {
+        "id": "58f6aea6-0b19-40e8-8a00-c28c84052aca",
+        "position": { "x": 343.3176768050232, "y": -1885.0526805287366 },
+        "data": { "keyword": "url" },
+        "type": "state",
+        "width": 158,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 343.3176768050232,
+          "y": -1885.0526805287366
+        },
+        "dragging": false
+      },
+      {
+        "id": "b4819c14-ede2-42f3-b248-362e943c30db",
+        "type": "app",
+        "position": { "x": 462.51011908806345, "y": -1275.9185007950603 },
+        "data": { "keyword": "render/calendar", "config": {}, "cache": {} },
+        "width": 430,
+        "height": 308,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 462.51011908806345,
+          "y": -1275.9185007950603
+        },
+        "dragging": false
+      },
+      {
+        "id": "431b0a6c-a33d-40cd-b23d-20922efccae6",
+        "position": { "x": -78.07355134708706, "y": -1147.9975362594241 },
+        "data": { "keyword": "scale" },
+        "type": "state",
+        "width": 486,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": -78.07355134708706,
+          "y": -1147.9975362594241
+        },
+        "dragging": false
+      },
+      {
+        "id": "3ca57817-2d32-443b-a4f2-0a983927eeeb",
+        "position": { "x": 162.47296616211986, "y": -1085.6640886767232 },
+        "data": { "keyword": "theme" },
+        "type": "state",
+        "width": 240,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 162.47296616211986,
+          "y": -1085.6640886767232
+        },
+        "dragging": false
+      },
+      {
+        "id": "a8380615-26aa-49b5-b300-c8522dbe7025",
+        "position": { "x": 85.51891621784415, "y": -1211.7570963274093 },
+        "data": { "keyword": "startWeekOnMonday" },
+        "type": "state",
+        "width": 323,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 85.51891621784415,
+          "y": -1211.7570963274093
+        },
+        "dragging": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "cbf9350f-c33d-4b7e-9930-79c013827659",
+        "target": "51170b30-80e7-4e36-b2d4-b1a1b3e633d2",
+        "targetHandle": "prev",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "a9ae0a48-1385-416f-bbb6-77b099bb10be",
+        "source": "7c158446-481c-4f0a-950c-9e2882ff62d7",
+        "sourceHandle": "fieldOutput",
+        "target": "c0aaed13-1736-45f5-8875-88ee72711570",
+        "targetHandle": "fieldInput/ical",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "bad552ff-c98b-4500-bbf7-8ebe3f9e3a24",
+        "source": "58f6aea6-0b19-40e8-8a00-c28c84052aca",
+        "sourceHandle": "fieldOutput",
+        "target": "7c158446-481c-4f0a-950c-9e2882ff62d7",
+        "targetHandle": "fieldInput/url",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "a7f20421-03bd-42a1-b9f8-ef69b48d8ba3",
+        "source": "c0aaed13-1736-45f5-8875-88ee72711570",
+        "sourceHandle": "fieldOutput",
+        "target": "b4819c14-ede2-42f3-b248-362e943c30db",
+        "targetHandle": "fieldInput/events",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "5a600525-011a-438d-9f2d-ebef46606452",
+        "source": "b4819c14-ede2-42f3-b248-362e943c30db",
+        "sourceHandle": "fieldOutput",
+        "target": "51170b30-80e7-4e36-b2d4-b1a1b3e633d2",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "a1ae439f-2b91-4f97-b573-48cb50521b9c",
+        "source": "431b0a6c-a33d-40cd-b23d-20922efccae6",
+        "sourceHandle": "fieldOutput",
+        "target": "b4819c14-ede2-42f3-b248-362e943c30db",
+        "targetHandle": "fieldInput/scale",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "1bac55e2-d7a2-4a55-8bc7-0b125ba0f04e",
+        "source": "3ca57817-2d32-443b-a4f2-0a983927eeeb",
+        "sourceHandle": "fieldOutput",
+        "target": "b4819c14-ede2-42f3-b248-362e943c30db",
+        "targetHandle": "fieldInput/theme",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "5f913e3e-6c03-4006-91ae-7f09f04209d6",
+        "source": "a8380615-26aa-49b5-b300-c8522dbe7025",
+        "sourceHandle": "fieldOutput",
+        "target": "b4819c14-ede2-42f3-b248-362e943c30db",
+        "targetHandle": "fieldInput/startWeekOnMonday",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "name": "url",
+        "label": "iCal URL",
+        "type": "text",
+        "value": "",
+        "persist": "disk",
+        "access": "public"
+      },
+      {
+        "name": "startWeekOnMonday",
+        "label": "Week starts on Monday",
+        "type": "boolean",
+        "value": "true",
+        "persist": "disk",
+        "access": "public"
+      },
+      {
+        "name": "scale",
+        "label": "Scale (%) — scales fonts, paddings, strokes",
+        "type": "integer",
+        "value": "100",
+        "persist": "disk",
+        "access": "public"
+      },
+      {
+        "name": "theme",
+        "label": "Calendar theme",
+        "type": "select",
+        "value": "light",
+        "persist": "disk",
+        "access": "public",
+        "options": ["light", "dark"]
+      }
+    ],
+    "settings": { "refreshInterval": 900, "backgroundColor": "#000000", "execution": "interpreted" }
+  }
+]

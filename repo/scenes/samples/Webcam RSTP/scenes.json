@@ -1,0 +1,131 @@
+[
+  {
+    "id": "3c161900-1da2-42ab-8eee-ac669dcdb5c1",
+    "name": "Webcam RSTP",
+    "nodes": [
+      {
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "type": "event",
+        "position": {
+          "x": 162,
+          "y": -60
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 212,
+        "height": 298,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 162,
+          "y": -60
+        },
+        "dragging": false
+      },
+      {
+        "id": "27b8ec1c-db13-416c-bc09-ee07bcadda77",
+        "position": {
+          "x": 512.5,
+          "y": 117
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {}
+        },
+        "type": "app",
+        "width": 325,
+        "height": 134,
+        "selected": false
+      },
+      {
+        "id": "46430b0e-8a20-420c-a735-6a8b8f7fef5b",
+        "type": "app",
+        "position": {
+          "x": 482.25,
+          "y": -22.11100171274424
+        },
+        "data": {
+          "keyword": "data/rstpSnapshot",
+          "config": {},
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true,
+            "durationEnabled": true,
+            "duration": "900",
+            "expressionEnabled": false,
+            "expression": null,
+            "expressionType": null
+          }
+        },
+        "width": 254,
+        "height": 112,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 482.25,
+          "y": -22.11100171274424
+        },
+        "dragging": false
+      },
+      {
+        "id": "8eb3fce0-90e7-4580-b59d-608d841570f2",
+        "position": {
+          "x": 454.25,
+          "y": -104.11100171274424
+        },
+        "data": {
+          "keyword": "url"
+        },
+        "type": "state",
+        "width": 203,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 454.25,
+          "y": -104.11100171274424
+        },
+        "dragging": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "c4ab3737-5f73-41b4-ad03-b2d1088b8134",
+        "target": "27b8ec1c-db13-416c-bc09-ee07bcadda77",
+        "targetHandle": "prev",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "a07b0634-0976-453e-a75a-42df68692069",
+        "source": "46430b0e-8a20-420c-a735-6a8b8f7fef5b",
+        "sourceHandle": "fieldOutput",
+        "target": "27b8ec1c-db13-416c-bc09-ee07bcadda77",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "fbe8df35-cfc3-4745-8b85-4ea487d8d0a6",
+        "source": "8eb3fce0-90e7-4580-b59d-608d841570f2",
+        "sourceHandle": "fieldOutput",
+        "target": "46430b0e-8a20-420c-a735-6a8b8f7fef5b",
+        "targetHandle": "fieldInput/url",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "name": "url",
+        "label": "Webcam URL",
+        "type": "text",
+        "value": "",
+        "persist": "disk",
+        "access": "public"
+      }
+    ],
+    "settings": {
+      "refreshInterval": 300,
+      "backgroundColor": "#000000",
+      "execution": "interpreted"
+    }
+  }
+]

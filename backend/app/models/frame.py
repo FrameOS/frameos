@@ -243,9 +243,15 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "width": frame.width or 0,
         "height": frame.height or 0,
         "device": frame.device or "web_only",
-        "deviceConfig": {
-            **({"vcom": float(frame.device_config.get('vcom', '0'))} if frame.device_config and frame.device_config.get('vcom') else {})
-        },
+        "deviceConfig": (lambda cfg: {
+            **({"vcom": float(cfg.get('vcom', '0'))} if cfg.get('vcom') not in (None, "") else {}),
+            **({"uploadUrl": str(cfg.get('uploadUrl'))} if cfg.get('uploadUrl') else {}),
+            **({"uploadHeaders": [
+                {"name": str(h.get('name')).strip(), "value": str(h.get('value', ''))}
+                for h in cfg.get('uploadHeaders', [])
+                if isinstance(h, dict) and str(h.get('name', '')).strip()
+            ]} if cfg.get('uploadHeaders') else {}),
+        })(frame.device_config or {}),
         "metricsInterval": frame.metrics_interval or 60.0,
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",

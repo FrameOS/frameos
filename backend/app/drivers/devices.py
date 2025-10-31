@@ -19,6 +19,8 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
         device_drivers = {"inkyHyperPixel2r": DRIVERS["inkyHyperPixel2r"]}
     elif device == "framebuffer":
         device_drivers = {"frameBuffer": DRIVERS["frameBuffer"]}
+    elif device == "http.upload":
+        device_drivers = {"httpUpload": DRIVERS["httpUpload"]}
     elif device.startswith("waveshare."):
         waveshare = DRIVERS["waveshare"]
         waveshare.variant = device.split(".")[1]
@@ -49,7 +51,7 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
             ]
 
     # Always enable evdev if not eink
-    if device != "pimoroni.inky_impression" and device != "pimoroni.inky_impression_7" and device != "pimoroni.inky_impression_13" and not device.startswith("waveshare."):
+    if device != "pimoroni.inky_impression" and device != "pimoroni.inky_impression_7" and device != "pimoroni.inky_impression_13" and not device.startswith("waveshare.") and device != "http.upload":
         device_drivers['evdev'] = DRIVERS['evdev']
 
     if frame.device == "pimoroni.inky_impression" or device == "pimoroni.inky_impression_7" or frame.device == "pimoroni.inky_impression_13":
