@@ -1,0 +1,9 @@
+{
+  "name": "Made in Space",
+  "description": "Images of galaxies, nebulae, and other celestial bodies taken from space telescopes, as well as artistic interpretations of space phenomena.. 56 images",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "scenes": "./scenes.json"
+}

@@ -1,0 +1,99 @@
+[
+  {
+    "id": "7c351a65-1b3a-491a-a2fb-a4325a47cdf7",
+    "name": "Made in Space",
+    "settings": {
+      "backgroundColor": "#000000",
+      "refreshInterval": 3600,
+      "execution": "interpreted"
+    },
+    "fields": [],
+    "nodes": [
+      {
+        "data": {
+          "keyword": "render"
+        },
+        "height": 161,
+        "id": "9eb12a2c-9606-4663-80c5-b8a61fd23fa7",
+        "position": {
+          "x": 210,
+          "y": 211
+        },
+        "type": "event",
+        "width": 212,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 210,
+          "y": 211
+        },
+        "dragging": false
+      },
+      {
+        "id": "fde55dc0-5e96-4048-a899-3510ebf42e63",
+        "position": {
+          "x": 521,
+          "y": 227
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {}
+        },
+        "type": "app",
+        "width": 311,
+        "height": 106,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 521,
+          "y": 227
+        },
+        "dragging": false
+      },
+      {
+        "id": "9f106977-5929-4c9a-884e-35b0bc7b51d4",
+        "position": {
+          "x": 487,
+          "y": 16
+        },
+        "data": {
+          "keyword": "data/frameOSGallery",
+          "config": {
+            "category": "space-gallery"
+          },
+          "cache": {
+            "duration": "60",
+            "durationEnabled": true,
+            "enabled": true,
+            "inputEnabled": true
+          }
+        },
+        "type": "app",
+        "width": 333,
+        "height": 156,
+        "selected": false,
+        "dragging": false,
+        "positionAbsolute": {
+          "x": 487,
+          "y": 16
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "f9671947-579c-4b67-be4d-c346b2757c82",
+        "source": "9eb12a2c-9606-4663-80c5-b8a61fd23fa7",
+        "sourceHandle": "next",
+        "target": "fde55dc0-5e96-4048-a899-3510ebf42e63",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "6c1d6b53-d37e-49ed-847d-7cfaef52f573",
+        "target": "fde55dc0-5e96-4048-a899-3510ebf42e63",
+        "targetHandle": "fieldInput/image",
+        "source": "9f106977-5929-4c9a-884e-35b0bc7b51d4",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      }
+    ]
+  }
+]

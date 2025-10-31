@@ -3,13 +3,11 @@ import io
 import zipfile
 import json
 import string
-from datetime import datetime, timedelta
 
 import httpx
 from PIL import Image
 from fastapi import Depends, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import Response, StreamingResponse, JSONResponse
-from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -24,9 +22,9 @@ from app.schemas.templates import (
     CreateTemplateRequest,
     UpdateTemplateRequest,
 )
-from app.api.auth import SECRET_KEY, ALGORITHM
 from app.api import api_with_auth, api_no_auth
 from app.redis import get_redis
+from app.utils.jwt_tokens import create_scoped_token_response, validate_scoped_token
 
 
 def respond_with_template(template: Template):
@@ -241,28 +239,13 @@ async def get_template(template_id: str, db: Session = Depends(get_db)):
 
 @api_with_auth.get("/templates/{template_id}/image_token", response_model=TemplateImageTokenResponse)
 async def get_image_token(template_id: str):
-    expire_minutes = 5
-    now = datetime.utcnow()
-    expire = now + timedelta(minutes=expire_minutes)
-    to_encode = {"sub": f"template={template_id}", "exp": expire}
-    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    expires_in = int((expire - now).total_seconds())
-
-    return {
-        "token": token,
-        "expires_in": expires_in
-    }
+    return create_scoped_token_response(f"template={template_id}")
 
 @api_no_auth.get("/templates/{template_id}/image")
 async def get_template_image(template_id: str, token: str, request: Request, db: Session = Depends(get_db)):
     if config.HASSIO_RUN_MODE != 'ingress':
         # All modes except ingress require a token in the url
-        try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            if payload.get("sub") != f"template={template_id}":
-                raise HTTPException(status_code=401, detail="Unauthorized")
-        except JWTError:
-            raise HTTPException(status_code=401, detail="Unauthorized")
+        validate_scoped_token(token, expected_subject=f"template={template_id}")
 
     template = db.get(Template, template_id)
     if not template or not template.image:

@@ -12,7 +12,7 @@ export interface EntityImageInfo {
 }
 
 export function useEntityImage(
-  entity: string,
+  entity: string | null,
   subentity: string
 ): {
   imageUrl: string | null
@@ -24,11 +24,13 @@ export function useEntityImage(
 
   const [isLoading, setIsLoading] = useState(true)
 
-  const imageUrl = getEntityImage(entity, subentity)
+  const imageUrl = entity ? getEntityImage(entity, subentity) : null
 
   useEffect(() => {
-    updateEntityImage(entity, subentity, false)
-  }, [!!imageUrl])
+    if (entity) {
+      updateEntityImage(entity, subentity, false)
+    }
+  }, [entity, !!imageUrl])
 
   useEffect(() => {
     // Whenever the image URL changes, we consider the image as loading again
@@ -45,7 +47,7 @@ export const entityImagesModel = kea<entityImagesModelType>([
   connect({ logic: [socketLogic] }),
   path(['src', 'models', 'entityImages']),
   actions({
-    updateEntityImage: (entity: string, subentity: string, force = true) => ({ entity, subentity, force }),
+    updateEntityImage: (entity: string | null, subentity: string, force = true) => ({ entity, subentity, force }),
     setEntityImageInfo: (entity: string, imageInfo: EntityImageInfo) => ({ entity, imageInfo }),
     updateEntityImageTimestamp: (entity: string, subentity: string) => ({ entity, subentity }),
   }),
@@ -74,6 +76,10 @@ export const entityImagesModel = kea<entityImagesModelType>([
       (s) => [s.entityImageInfos, s.entityImageTimestamps],
       (entityImageInfos, entityImageTimestamps) => {
         return (entity: string, subentity: string) => {
+          if (!entity) {
+            return null
+          }
+
           if (inHassioIngress()) {
             const timestamp = entityImageTimestamps[entity + '/' + subentity] ?? -1
             return `${getBasePath()}/api/${entity}/${subentity}?token&t=${timestamp}`
@@ -93,6 +99,10 @@ export const entityImagesModel = kea<entityImagesModelType>([
   listeners(({ actions, values }) => ({
     updateEntityImage: async ({ entity, subentity, force }) => {
       // Check if we have a valid URL
+      if (!entity) {
+        return
+      }
+
       const imageUrl = values.getEntityImage(entity, subentity)
       if (imageUrl) {
         // The URL is still valid, no need to refetch new signed URL

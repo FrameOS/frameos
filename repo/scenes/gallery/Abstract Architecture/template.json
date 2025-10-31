@@ -1,0 +1,9 @@
+{
+  "name": "Abstract Architecture",
+  "description": "Modern buildings, old styles. 34 images",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 720,
+  "imageHeight": 1280,
+  "scenes": "./scenes.json"
+}

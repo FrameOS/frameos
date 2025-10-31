@@ -309,19 +309,28 @@ export const templatesLogic = kea<templatesLogicType>([
       }
     },
     applyRemoteToFrame: async ({ template, repository, replace }) => {
+      if (template.scenes?.length) {
+        actions.applyTemplate(template, replace)
+        return
+      }
+
       const request: Record<string, any> = {
         format: 'scenes',
       }
-      if ('zip' in template) {
-        let zipPath = (template as any).zip
-        if (zipPath.startsWith('./')) {
-          const repositoryPath = repository.url.replace(/\/[^/]+$/, '')
-          zipPath = `${repositoryPath}/${zipPath.slice(2)}`
-        }
-        request['url'] = zipPath
-      } else {
+
+      const templateWithZip = template as TemplateType & { zip?: string }
+      let zipPath = templateWithZip.zip
+      if (!zipPath) {
         throw new Error('Failed to load template')
       }
+
+      if (zipPath.startsWith('./')) {
+        const repositoryPath = repository.url.replace(/\/[^/]+$/, '')
+        zipPath = `${repositoryPath}/${zipPath.slice(2)}`
+      }
+
+      request['url'] = zipPath
+
       const response = await apiFetch(`/api/templates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -1,6 +1,8 @@
 from pydantic import BaseModel, ConfigDict, RootModel
 from typing import Any, List, Optional, Union
 
+from .common import ImageTokenResponse
+
 class TemplateBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,6 +42,5 @@ class UpdateTemplateRequest(BaseModel):
     name: Optional[str]
     description: Optional[str]
 
-class TemplateImageTokenResponse(BaseModel):
-    token: str
-    expires_in: int
+class TemplateImageTokenResponse(ImageTokenResponse):
+    pass

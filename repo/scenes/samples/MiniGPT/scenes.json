@@ -1,0 +1,276 @@
+[
+  {
+    "id": "ca494ef1-4d07-4a0a-ac83-abea7833dbc8",
+    "name": "MiniGPT",
+    "settings": {
+      "backgroundColor": "#ffffff",
+      "refreshInterval": 3600,
+      "execution": "interpreted"
+    },
+    "fields": [
+      {
+        "access": "public",
+        "label": "Prompt",
+        "name": "prompt",
+        "persist": "disk",
+        "placeholder": "Type your question here",
+        "type": "text",
+        "value": "Generate ideas for a smart e-ink display around the house."
+      },
+      {
+        "access": "private",
+        "label": "Reply",
+        "name": "reply",
+        "persist": "disk",
+        "type": "text"
+      }
+    ],
+    "nodes": [
+      {
+        "data": {
+          "keyword": "render"
+        },
+        "dragging": false,
+        "height": 161,
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "position": {
+          "x": 609.7521646377853,
+          "y": 91.39649711881316
+        },
+        "positionAbsolute": {
+          "x": 609.7521646377853,
+          "y": 91.39649711881316
+        },
+        "selected": false,
+        "type": "event",
+        "width": 212
+      },
+      {
+        "data": {
+          "config": {
+            "borderColor": "#ffffff",
+            "borderWidth": "0",
+            "fontColor": "#000000",
+            "fontSize": "32",
+            "position": "top-left",
+            "vAlign": "top"
+          },
+          "keyword": "render/text"
+        },
+        "dragging": false,
+        "height": 364,
+        "id": "a825a9fc-175b-4ea6-b07b-f433e7e63b51",
+        "position": {
+          "x": 963.7030255952195,
+          "y": 92.84111016544779
+        },
+        "positionAbsolute": {
+          "x": 963.7030255952195,
+          "y": 92.84111016544779
+        },
+        "selected": false,
+        "type": "app",
+        "width": 341
+      },
+      {
+        "data": {
+          "code": "\"> \" & prompt & \"\\n\\n\" & reply",
+          "codeJS": "'> ' + prompt + '\\n\\n' + reply",
+          "codeArgs": [
+            {
+              "name": "prompt",
+              "type": "string"
+            },
+            {
+              "name": "reply",
+              "type": "string"
+            }
+          ]
+        },
+        "dragging": false,
+        "height": 119,
+        "id": "578a95b3-83c8-4d32-9b71-e37f95472a99",
+        "position": {
+          "x": 925.9537104668107,
+          "y": -78.28446163478942
+        },
+        "positionAbsolute": {
+          "x": 925.9537104668107,
+          "y": -78.28446163478942
+        },
+        "resizing": false,
+        "selected": false,
+        "style": {
+          "height": 119,
+          "width": 357
+        },
+        "type": "code",
+        "width": 357
+      },
+      {
+        "data": {
+          "cache": {
+            "duration": "3600",
+            "durationEnabled": true,
+            "enabled": true,
+            "inputEnabled": true
+          },
+          "config": {},
+          "keyword": "data/openaiText"
+        },
+        "dragging": false,
+        "height": 288,
+        "id": "b1fd8c5b-c2ec-4c8d-8031-d9b90be0273d",
+        "position": {
+          "x": 1054.510206309392,
+          "y": -427.1008646987811
+        },
+        "positionAbsolute": {
+          "x": 1054.510206309392,
+          "y": -427.1008646987811
+        },
+        "selected": false,
+        "type": "app",
+        "width": 388
+      },
+      {
+        "data": {
+          "config": {
+            "borderColor": "#ffffff",
+            "fontColor": "#000000",
+            "position": "right",
+            "vAlign": "bottom"
+          },
+          "keyword": "render/text"
+        },
+        "height": 364,
+        "id": "f2e326b1-a913-40a8-822b-9db4c3f621ca",
+        "position": {
+          "x": 1526.2545148893385,
+          "y": 82.84844173887186
+        },
+        "selected": false,
+        "type": "app",
+        "width": 334
+      },
+      {
+        "data": {
+          "config": {
+            "format": "yyyy-MM-dd"
+          },
+          "keyword": "data/clock"
+        },
+        "dragging": false,
+        "height": 140,
+        "id": "ff68a0c8-7ca4-44ec-bf75-13a8d3769554",
+        "position": {
+          "x": 1498.5605368441798,
+          "y": -151.28498110254804
+        },
+        "positionAbsolute": {
+          "x": 1498.5605368441798,
+          "y": -151.28498110254804
+        },
+        "selected": false,
+        "type": "app",
+        "width": 354
+      },
+      {
+        "id": "0df3af8f-8ee5-4210-b870-02bfd5d88085",
+        "position": {
+          "x": 1012.1940030907762,
+          "y": -519.0210638340682
+        },
+        "data": {
+          "keyword": "prompt"
+        },
+        "type": "state",
+        "width": 162,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1012.1940030907762,
+          "y": -519.0210638340682
+        },
+        "dragging": false
+      },
+      {
+        "id": "e7743cc7-060f-4d81-9b45-be911acbe649",
+        "position": {
+          "x": 849.9461898685558,
+          "y": -157.65093438457743
+        },
+        "data": {
+          "keyword": "prompt"
+        },
+        "type": "state",
+        "width": 162,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 849.9461898685558,
+          "y": -157.65093438457743
+        },
+        "dragging": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "578a95b3-83c8-4d32-9b71-e37f95472a99",
+        "source": "578a95b3-83c8-4d32-9b71-e37f95472a99",
+        "sourceHandle": "fieldOutput",
+        "target": "a825a9fc-175b-4ea6-b07b-f433e7e63b51",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "c814aed6-a55d-4499-ad22-5397e4ff437d",
+        "source": "b1fd8c5b-c2ec-4c8d-8031-d9b90be0273d",
+        "sourceHandle": "fieldOutput",
+        "target": "578a95b3-83c8-4d32-9b71-e37f95472a99",
+        "targetHandle": "codeField/reply",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "3c6f9fdd-6bac-42a5-a280-09d7f320ac94",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "target": "a825a9fc-175b-4ea6-b07b-f433e7e63b51",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "da42bf41-5378-4ea8-9513-a7e29314b9c9",
+        "source": "a825a9fc-175b-4ea6-b07b-f433e7e63b51",
+        "sourceHandle": "next",
+        "target": "f2e326b1-a913-40a8-822b-9db4c3f621ca",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "e00c1983-4311-4fd6-8995-ab31b62b5173",
+        "source": "ff68a0c8-7ca4-44ec-bf75-13a8d3769554",
+        "sourceHandle": "fieldOutput",
+        "target": "f2e326b1-a913-40a8-822b-9db4c3f621ca",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "ea55e759-e8b0-40a0-a74a-f43c79181892",
+        "target": "b1fd8c5b-c2ec-4c8d-8031-d9b90be0273d",
+        "targetHandle": "fieldInput/user",
+        "source": "0df3af8f-8ee5-4210-b870-02bfd5d88085",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "2f9d08e6-44de-4fb0-93d1-0c312112e903",
+        "target": "578a95b3-83c8-4d32-9b71-e37f95472a99",
+        "targetHandle": "codeField/prompt",
+        "source": "e7743cc7-060f-4d81-9b45-be911acbe649",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      }
+    ]
+  }
+]

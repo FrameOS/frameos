@@ -1,0 +1,424 @@
+[
+  {
+    "edges": [
+      {
+        "id": "86f566f5-b478-45df-bed8-7e251049fce5",
+        "source": "15b4d501-7833-4088-a0b0-178eb24bbac9",
+        "sourceHandle": "fieldOutput",
+        "target": "6db1ffd3-e809-42db-8416-9e048df66788",
+        "targetHandle": "fieldInput/ical",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "15d3fef9-46f8-4cc1-8947-d4b76c01ba6f",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "target": "cf744507-48e4-4b09-87ee-6e1b208a4cf6",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "c01d6c28-836d-4d74-b781-e833b57e6f46",
+        "source": "cf744507-48e4-4b09-87ee-6e1b208a4cf6",
+        "sourceHandle": "field/render_functions[1][1]",
+        "target": "d8b1f15b-b673-4eb1-8e9c-dc6ee2023cf6",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "42eb1cfc-b7f5-4a40-a06d-2b18451c7320",
+        "source": "d8b1f15b-b673-4eb1-8e9c-dc6ee2023cf6",
+        "sourceHandle": "next",
+        "target": "38541584-fef2-4306-ba02-c3d77bd316b4",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "5d94e230-973d-4d58-850a-9e34ff8db9e8",
+        "source": "cf744507-48e4-4b09-87ee-6e1b208a4cf6",
+        "sourceHandle": "field/render_functions[1][2]",
+        "target": "ccbf9c4c-4a6f-412b-9e2c-952edba32d6e",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "47a95d15-9b45-4f40-8745-46d064135c4f",
+        "source": "5c65d5dc-c327-4aad-a5e5-25d2268aee2c",
+        "sourceHandle": "fieldOutput",
+        "target": "15b4d501-7833-4088-a0b0-178eb24bbac9",
+        "targetHandle": "fieldInput/url",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "ce2ecf88-091d-4c2e-a2cf-82991bd7d810",
+        "source": "f354fc8e-9f82-42f9-9de1-c85fe7a3f0e6",
+        "sourceHandle": "fieldOutput",
+        "target": "38541584-fef2-4306-ba02-c3d77bd316b4",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "5f4dd693-b9d7-424b-8933-527a4ac3f01c",
+        "source": "6db1ffd3-e809-42db-8416-9e048df66788",
+        "sourceHandle": "fieldOutput",
+        "target": "f354fc8e-9f82-42f9-9de1-c85fe7a3f0e6",
+        "targetHandle": "fieldInput/events",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "d54eccc1-20d3-4411-8e55-96a67478ba01",
+        "source": "c9408446-948d-4846-a158-8d8836840618",
+        "sourceHandle": "fieldOutput",
+        "target": "f354fc8e-9f82-42f9-9de1-c85fe7a3f0e6",
+        "targetHandle": "fieldInput/baseFontSize",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "809dfcd5-e196-48ad-973a-6005b88e4afd",
+        "source": "fd3331ec-6c0f-4799-8c0f-5bcd03c0510c",
+        "sourceHandle": "fieldOutput",
+        "target": "f354fc8e-9f82-42f9-9de1-c85fe7a3f0e6",
+        "targetHandle": "fieldInput/titleFontSize",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "67c42fc5-2e60-44f3-9186-035614264740",
+        "source": "ccbf9c4c-4a6f-412b-9e2c-952edba32d6e",
+        "sourceHandle": "next",
+        "target": "378c6086-257f-461d-9dec-b093abdad809",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "f11b0dd2-561e-4a17-adc8-624772573d98",
+        "target": "378c6086-257f-461d-9dec-b093abdad809",
+        "targetHandle": "fieldInput/image",
+        "source": "56136c72-8744-4db2-a966-87869cd29ad9",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "access": "public",
+        "label": "iCal URL",
+        "name": "iCalURL",
+        "persist": "disk",
+        "type": "string"
+      },
+      {
+        "access": "public",
+        "label": "Font size",
+        "name": "fontSize",
+        "persist": "disk",
+        "type": "float",
+        "value": "32"
+      },
+      {
+        "access": "public",
+        "label": "Title font size",
+        "name": "titleFontSize",
+        "persist": "disk",
+        "type": "float",
+        "value": "48"
+      }
+    ],
+    "id": "6855b741-76b0-4e8d-a1a2-0b9e7660915b",
+    "name": "Split agenda",
+    "nodes": [
+      {
+        "data": {
+          "keyword": "render"
+        },
+        "dragging": false,
+        "height": 199,
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "position": {
+          "x": -678.7968292694732,
+          "y": 513.3910957685507
+        },
+        "positionAbsolute": {
+          "x": -678.7968292694732,
+          "y": 513.3910957685507
+        },
+        "selected": false,
+        "type": "event",
+        "width": 212
+      },
+      {
+        "data": {
+          "config": {
+            "borderColor": "#ffffff",
+            "borderWidth": "0",
+            "fontColor": "#000000",
+            "fontSize": "20",
+            "overflow": "visible",
+            "position": "left",
+            "richText": "basic-caret",
+            "vAlign": "top"
+          },
+          "keyword": "render/text"
+        },
+        "dragging": false,
+        "height": 392,
+        "id": "38541584-fef2-4306-ba02-c3d77bd316b4",
+        "position": {
+          "x": 564.3983123871726,
+          "y": 683.7491829571068
+        },
+        "positionAbsolute": {
+          "x": 564.3983123871726,
+          "y": 683.7491829571068
+        },
+        "selected": false,
+        "type": "app",
+        "width": 372
+      },
+      {
+        "data": {
+          "cache": {
+            "duration": "600",
+            "durationEnabled": true,
+            "enabled": true,
+            "inputEnabled": true
+          },
+          "config": {},
+          "keyword": "data/downloadUrl"
+        },
+        "dragging": false,
+        "height": 112,
+        "id": "15b4d501-7833-4088-a0b0-178eb24bbac9",
+        "position": {
+          "x": 365.3333593057796,
+          "y": -223.62393254609623
+        },
+        "positionAbsolute": {
+          "x": 365.3333593057796,
+          "y": -223.62393254609623
+        },
+        "selected": false,
+        "type": "app",
+        "width": 251
+      },
+      {
+        "data": {
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true
+          },
+          "config": {
+            "addLocation": "false",
+            "addTimezone": "true",
+            "addUrl": "false",
+            "exportCount": "20"
+          },
+          "keyword": "data/icalJson"
+        },
+        "dragging": false,
+        "height": 364,
+        "id": "6db1ffd3-e809-42db-8416-9e048df66788",
+        "position": {
+          "x": 432.205268576237,
+          "y": -83.24529232598451
+        },
+        "positionAbsolute": {
+          "x": 432.205268576237,
+          "y": -83.24529232598451
+        },
+        "selected": false,
+        "type": "app",
+        "width": 531
+      },
+      {
+        "data": {
+          "config": {
+            "columns": "2"
+          },
+          "keyword": "render/split"
+        },
+        "height": 358,
+        "id": "cf744507-48e4-4b09-87ee-6e1b208a4cf6",
+        "position": {
+          "x": -349.6809742584811,
+          "y": 519.3618683177809
+        },
+        "type": "app",
+        "width": 310
+      },
+      {
+        "data": {
+          "config": {},
+          "keyword": "render/color"
+        },
+        "dragging": false,
+        "height": 81,
+        "id": "d8b1f15b-b673-4eb1-8e9c-dc6ee2023cf6",
+        "position": {
+          "x": 182.23547594127814,
+          "y": 607.0962947110556
+        },
+        "positionAbsolute": {
+          "x": 182.23547594127814,
+          "y": 607.0962947110556
+        },
+        "selected": false,
+        "type": "app",
+        "width": 195
+      },
+      {
+        "data": {
+          "config": {
+            "color": "#000000"
+          },
+          "keyword": "render/color"
+        },
+        "dragging": false,
+        "height": 81,
+        "id": "ccbf9c4c-4a6f-412b-9e2c-952edba32d6e",
+        "position": {
+          "x": 751.9446659519555,
+          "y": 1138.4247562496714
+        },
+        "positionAbsolute": {
+          "x": 751.9446659519555,
+          "y": 1138.4247562496714
+        },
+        "selected": false,
+        "type": "app",
+        "width": 196
+      },
+      {
+        "data": {
+          "keyword": "iCalURL"
+        },
+        "dragging": false,
+        "height": 48,
+        "id": "5c65d5dc-c327-4aad-a5e5-25d2268aee2c",
+        "position": {
+          "x": 332.34448098535285,
+          "y": -308.8282487667512
+        },
+        "positionAbsolute": {
+          "x": 332.34448098535285,
+          "y": -308.8282487667512
+        },
+        "selected": false,
+        "type": "state",
+        "width": 172
+      },
+      {
+        "data": {
+          "cache": {},
+          "config": {
+            "textColor": "#000000",
+            "titleColor": "#000000"
+          },
+          "keyword": "data/eventsToAgenda"
+        },
+        "dragging": false,
+        "height": 282,
+        "id": "f354fc8e-9f82-42f9-9de1-c85fe7a3f0e6",
+        "position": {
+          "x": 521.0911747817175,
+          "y": 299.6283046931287
+        },
+        "positionAbsolute": {
+          "x": 532.0911747817175,
+          "y": 299.6283046931287
+        },
+        "resizing": false,
+        "selected": false,
+        "style": {
+          "height": 282,
+          "width": 279
+        },
+        "type": "app",
+        "width": 279
+      },
+      {
+        "data": {
+          "keyword": "fontSize"
+        },
+        "dragging": false,
+        "height": 48,
+        "id": "c9408446-948d-4846-a158-8d8836840618",
+        "position": {
+          "x": 245.73426280393653,
+          "y": 311.31270229817983
+        },
+        "positionAbsolute": {
+          "x": 245.73426280393653,
+          "y": 311.31270229817983
+        },
+        "selected": false,
+        "type": "state",
+        "width": 170
+      },
+      {
+        "data": {
+          "keyword": "titleFontSize"
+        },
+        "dragging": false,
+        "height": 48,
+        "id": "fd3331ec-6c0f-4799-8c0f-5bcd03c0510c",
+        "position": {
+          "x": 13.289202798026622,
+          "y": 341.8975786147469
+        },
+        "positionAbsolute": {
+          "x": 13.289202798026622,
+          "y": 341.8975786147469
+        },
+        "selected": false,
+        "type": "state",
+        "width": 209
+      },
+      {
+        "id": "378c6086-257f-461d-9dec-b093abdad809",
+        "position": {
+          "x": 1279.2084499918114,
+          "y": 817.7854624383936
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {}
+        },
+        "type": "app",
+        "width": 325,
+        "height": 134
+      },
+      {
+        "id": "56136c72-8744-4db2-a966-87869cd29ad9",
+        "position": {
+          "x": 1208.1751112338095,
+          "y": 601.340587096623
+        },
+        "data": {
+          "keyword": "data/frameOSGallery",
+          "config": {},
+          "cache": {
+            "duration": "900",
+            "durationEnabled": true,
+            "enabled": true,
+            "inputEnabled": true
+          }
+        },
+        "type": "app",
+        "width": 330,
+        "height": 140,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1208.1751112338095,
+          "y": 601.340587096623
+        },
+        "dragging": false
+      }
+    ],
+    "settings": {
+      "backgroundColor": "#000000",
+      "refreshInterval": 60,
+      "execution": "interpreted"
+    },
+    "default": false
+  }
+]
