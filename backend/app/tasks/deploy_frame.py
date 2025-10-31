@@ -78,11 +78,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             output: list[str] = []
             quoted_pkg = shlex.quote(sanitized_pkg)
             response = await self.exec_command(
-                (
-                    f"dpkg-query -W -f='${{Status}}' {quoted_pkg} 2>/dev/null | "
-                    "grep -q \"install ok installed\" || "
-                    f"sudo apt-get install -y {quoted_pkg}"
-                ),
+                f"dpkg -l | grep -q \"^ii  {quoted_pkg} \" || sudo apt-get install -y {quoted_pkg}",
                 raise_on_error=False,
                 output=output
             )
