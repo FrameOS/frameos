@@ -32,6 +32,7 @@ import apps/render/image/app_loader as render_image_loader
 import apps/render/opacity/app_loader as render_opacity_loader
 import apps/render/split/app_loader as render_split_loader
 import apps/render/text/app_loader as render_text_loader
+import apps/render/weeklyCrosses/app_loader as render_weeklyCrosses_loader
 
 proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   case keyword:
@@ -68,6 +69,7 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   of "render/opacity": render_opacity_loader.init(node, scene)
   of "render/split": render_split_loader.init(node, scene)
   of "render/text": render_text_loader.init(node, scene)
+  of "render/weeklyCrosses": render_weeklyCrosses_loader.init(node, scene)
   else: raise newException(ValueError, "Unknown app keyword: " & keyword)
 
 proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
@@ -105,6 +107,7 @@ proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   of "render/opacity": render_opacity_loader.setField(app, field, value)
   of "render/split": render_split_loader.setField(app, field, value)
   of "render/text": render_text_loader.setField(app, field, value)
+  of "render/weeklyCrosses": render_weeklyCrosses_loader.setField(app, field, value)
   else: raise newException(ValueError, "Unknown app keyword: " & keyword)
 
 proc runApp*(keyword: string, app: AppRoot, context: ExecutionContext) =
@@ -120,6 +123,7 @@ proc runApp*(keyword: string, app: AppRoot, context: ExecutionContext) =
   of "render/opacity": render_opacity_loader.run(app, context)
   of "render/split": render_split_loader.run(app, context)
   of "render/text": render_text_loader.run(app, context)
+  of "render/weeklyCrosses": render_weeklyCrosses_loader.run(app, context)
   else: raise newException(Exception, "App '" & keyword & "' cannot be run; use get().")
 
 proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
@@ -153,4 +157,5 @@ proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   of "render/opacity": render_opacity_loader.get(app, context)
   of "render/split": render_split_loader.get(app, context)
   of "render/text": render_text_loader.get(app, context)
+  of "render/weeklyCrosses": render_weeklyCrosses_loader.get(app, context)
   else: raise newException(ValueError, "Unknown app keyword: " & keyword)

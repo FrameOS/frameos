@@ -1,0 +1,51 @@
+{
+  "name": "Weekly crosses",
+  "description": "Render a weekly habit tracker grid with crosses for completed days.",
+  "category": "render",
+  "version": "0.1.0",
+  "fields": [
+    {
+      "name": "data",
+      "type": "string",
+      "label": "History string",
+      "value": "..xx.x...x",
+      "required": true
+    },
+    {
+      "name": "startOfWeek",
+      "type": "select",
+      "label": "Start of week",
+      "options": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+      "value": "mon",
+      "required": true
+    },
+    {
+      "name": "selectedIndexOffset",
+      "type": "integer",
+      "label": "Selected index offset",
+      "value": "0",
+      "required": true
+    },
+    {
+      "name": "maxDisplayedWeeks",
+      "type": "integer",
+      "label": "Max displayed weeks",
+      "value": "4",
+      "required": true
+    },
+    {
+      "name": "startDay",
+      "type": "select",
+      "label": "First entry day",
+      "options": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+      "value": "mon",
+      "required": true
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ]
+}
