@@ -1,0 +1,5 @@
+menu "FrameOS customisations"
+
+comment "Additional FrameOS packages can be selected here in the future"
+
+endmenu

@@ -1,0 +1,4 @@
+# Buildroot artifacts
+/dl/
+/sources/
+/output/
