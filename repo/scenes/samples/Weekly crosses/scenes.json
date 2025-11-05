@@ -177,7 +177,7 @@
           "y": 20.0
         },
         "data": {
-          "keyword": "startDay"
+          "keyword": "startDate"
         },
         "width": 220,
         "height": 48,
@@ -357,7 +357,7 @@
         "source": "e37f5864-9c5c-47b4-88fd-756368dfe3ba",
         "sourceHandle": "fieldOutput",
         "target": "b4a85313-0601-4f76-ab20-eecb711c6ae1",
-        "targetHandle": "fieldInput/startDay",
+        "targetHandle": "fieldInput/startDate",
         "type": "codeNodeEdge"
       },
       {
@@ -485,19 +485,10 @@
         "access": "public"
       },
       {
-        "name": "startDay",
-        "label": "First entry day",
-        "type": "select",
-        "value": "mon",
-        "options": [
-          "mon",
-          "tue",
-          "wed",
-          "thu",
-          "fri",
-          "sat",
-          "sun"
-        ],
+        "name": "startDate",
+        "label": "First entry date",
+        "type": "date",
+        "value": "2024-01-01",
         "persist": "disk",
         "access": "public"
       },

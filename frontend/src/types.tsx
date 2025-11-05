@@ -160,6 +160,7 @@ export type FieldType =
   | 'integer'
   | 'boolean'
   | 'color'
+  | 'date'
   | 'json'
   | 'node'
   | 'scene'
@@ -173,6 +174,7 @@ export const fieldTypes = [
   'integer',
   'boolean',
   'color',
+  'date',
   'json',
   'node',
   'scene',

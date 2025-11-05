@@ -229,7 +229,20 @@
       "type": "string"
     },
     "FieldType": {
-      "enum": ["string", "text", "float", "integer", "boolean", "color", "json", "node", "scene", "image", "font"],
+      "enum": [
+        "string",
+        "text",
+        "float",
+        "integer",
+        "boolean",
+        "color",
+        "date",
+        "json",
+        "node",
+        "scene",
+        "image",
+        "font"
+      ],
       "type": "string"
     },
     "MarkdownField": {

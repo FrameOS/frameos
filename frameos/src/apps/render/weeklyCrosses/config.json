@@ -34,11 +34,10 @@
       "required": true
     },
     {
-      "name": "startDay",
-      "type": "select",
-      "label": "First entry day",
-      "options": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
-      "value": "mon",
+      "name": "startDate",
+      "type": "date",
+      "label": "First entry date",
+      "value": "2024-01-01",
       "required": true
     }
   ],
