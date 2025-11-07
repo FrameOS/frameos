@@ -40,3 +40,8 @@ e2e/frameos/
 gpt.txt
 .env
 .aider*
+
+frameos/buildroot/output
+frameos/buildroot/sources
+frameos/buildroot/dl
+
