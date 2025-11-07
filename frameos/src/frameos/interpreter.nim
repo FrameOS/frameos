@@ -897,6 +897,16 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
     for nodeId in scene.eventListeners[context.event]:
       let nextNode = if scene.nextNodeIds.hasKey(nodeId): scene.nextNodeIds[nodeId] else: -1.NodeId
       if nextNode != 0.NodeId and nextNode != -1.NodeId:
+        if context.event == "button":
+          if scene.nodes.hasKey(nodeId):
+            let node = scene.nodes[nodeId]
+            if not node.data.isNil and node.data.hasKey("label"):
+              let buttonFilter = strip(node.data["label"].getStr())
+              if buttonFilter.len > 0:
+                if context.payload.isNil or context.payload.kind != JObject:
+                  continue
+                if not context.payload.hasKey("label") or context.payload["label"].getStr() != buttonFilter:
+                  continue
         try:
           discard scene.runNode(nextNode, context)
         except Exception as e:

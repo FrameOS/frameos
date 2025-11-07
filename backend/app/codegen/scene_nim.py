@@ -698,11 +698,29 @@ class SceneWriter:
 
             for node in nodes:
                 next_node = self.next_nodes.get(node["id"], "-1")
-                self.run_event_lines += [
-                    f"  try: discard self.runNode({self.node_id_to_integer(next_node)}.NodeId, context)",
-                    f'  except Exception as e: self.logger.log(%*{{"event": "{sanitize_nim_string(event)}:error", ' +
-                    f'"node": {self.node_id_to_integer(next_node)}, "error": $e.msg, "stacktrace": e.getStackTrace()}})'
-                ]
+                button_label = ""
+                if event == "button":
+                    button_label = (node.get("data", {}).get("label") or "").strip()
+
+                if event == "button" and button_label:
+                    filter_value = sanitize_nim_string(button_label)
+                    condition = (
+                        '  if not context.payload.isNil and context.payload.kind == JObject '
+                        'and context.payload.hasKey("label") '
+                        f'and context.payload["label"].getStr() == "{filter_value}":'
+                    )
+                    self.run_event_lines += [
+                        condition,
+                        f"    try: discard self.runNode({self.node_id_to_integer(next_node)}.NodeId, context)",
+                        f'    except Exception as e: self.logger.log(%*{{"event": "{sanitize_nim_string(event)}:error", ' +
+                        f'"node": {self.node_id_to_integer(next_node)}, "error": $e.msg, "stacktrace": e.getStackTrace()}})'
+                    ]
+                else:
+                    self.run_event_lines += [
+                        f"  try: discard self.runNode({self.node_id_to_integer(next_node)}.NodeId, context)",
+                        f'  except Exception as e: self.logger.log(%*{{"event": "{sanitize_nim_string(event)}:error", ' +
+                        f'"node": {self.node_id_to_integer(next_node)}, "error": $e.msg, "stacktrace": e.getStackTrace()}})'
+                    ]
         if not self.event_nodes.get("render", None):
             self.run_event_lines += [
                 'of "render":',

@@ -333,6 +333,11 @@ export interface EventNodeData {
   keyword: string
 }
 
+export interface ButtonEventNodeData extends EventNodeData {
+  keyword: 'button'
+  label?: string
+}
+
 export interface DispatchNodeData {
   keyword: string
   config: Record<string, any>

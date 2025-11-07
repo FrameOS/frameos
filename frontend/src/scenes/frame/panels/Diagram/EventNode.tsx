@@ -3,7 +3,7 @@ import { NodeProps, Handle, Position } from 'reactflow'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import copy from 'copy-to-clipboard'
-import { EventNodeData, FrameEvent, StateField } from '../../../../types'
+import { ButtonEventNodeData, EventNodeData, FrameEvent, StateField } from '../../../../types'
 import { stateFieldAccess } from '../../../../utils/fieldTypes'
 
 import _events from '../../../../../schema/events.json'
@@ -16,6 +16,7 @@ import { buttonColor, buttonSize } from '../../../../components/Button'
 import { showAsFps } from '../../../../decorators/refreshInterval'
 import { appNodeLogic } from './appNodeLogic'
 import { newNodePickerLogic } from './newNodePickerLogic'
+import { TextInput } from '../../../../components/TextInput'
 
 const events: FrameEvent[] = _events as any
 
@@ -24,12 +25,12 @@ export function EventNode(props: NodeProps): JSX.Element {
   const { id } = props
   const { width, height, defaultInterval } = useValues(frameLogic)
   const { selectedNodeId, scene } = useValues(diagramLogic)
-  const { selectNode } = useActions(diagramLogic)
+  const { selectNode, updateNodeData } = useActions(diagramLogic)
 
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const { node, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
-  const data: EventNodeData = (node?.data as EventNodeData) ?? ({ keyword: '' } satisfies EventNodeData)
-  const keyword = data.keyword
+  const keyword = (node?.data as EventNodeData | undefined)?.keyword ?? ''
+  const data = (node?.data as EventNodeData) ?? ({ keyword: '' } satisfies EventNodeData)
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
 
   const isEventWithStateFields = keyword === 'init' || keyword === 'setSceneState' || keyword === 'render'
@@ -106,6 +107,18 @@ export function EventNode(props: NodeProps): JSX.Element {
           />
         </div>
       </div>
+      {keyword === 'button' ? (
+        <div className="p-1 space-y-1">
+          <label className="block text-xs uppercase tracking-wide text-gray-400">Label</label>
+          <TextInput
+            value={(data as ButtonEventNodeData).label ?? ''}
+            onChange={(value) => updateNodeData(id, { label: value })}
+            placeholder="e.g. A"
+            theme="node"
+          />
+          <div className="text-xs text-gray-400">Leave empty to listen to all buttons.</div>
+        </div>
+      ) : null}
       {keyword === 'render' ? (
         // show a blank box with the dimensions of the scene
         <div className="p-1">
