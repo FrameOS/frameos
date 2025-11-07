@@ -58,6 +58,13 @@ export function StateFieldEdit({
       onChange={onChange}
       className="!p-0"
     />
+  ) : field.type === 'date' ? (
+    <TextInput
+      type="date"
+      placeholder={field.placeholder}
+      value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
+      onChange={onChange}
+    />
   ) : (
     <TextInput
       placeholder={field.placeholder}

@@ -1,0 +1,518 @@
+[
+  {
+    "id": "0a2b2f53-3cc1-41b6-8366-94b31465d8e7",
+    "name": "Weekly crosses",
+    "nodes": [
+      {
+        "id": "99e9ef71-5acc-4732-9243-91d1d307655e",
+        "type": "event",
+        "position": {
+          "x": -260.0,
+          "y": -120.0
+        },
+        "positionAbsolute": {
+          "x": -260.0,
+          "y": -120.0
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 212,
+        "height": 40,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "b4a85313-0601-4f76-ab20-eecb711c6ae1",
+        "type": "app",
+        "position": {
+          "x": 20.0,
+          "y": -140.0
+        },
+        "positionAbsolute": {
+          "x": 20.0,
+          "y": -140.0
+        },
+        "data": {
+          "keyword": "render/weeklyCrosses",
+          "config": {}
+        },
+        "width": 420,
+        "height": 240,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "477ddb1d-3775-4644-a55c-32c837fdab8f",
+        "type": "event",
+        "position": {
+          "x": -260.0,
+          "y": 200.0
+        },
+        "positionAbsolute": {
+          "x": -260.0,
+          "y": 200.0
+        },
+        "data": {
+          "keyword": "button"
+        },
+        "width": 212,
+        "height": 40,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "c357b791-220f-4bbf-9e58-961fde84ce89",
+        "type": "app",
+        "position": {
+          "x": 60.0,
+          "y": 180.0
+        },
+        "positionAbsolute": {
+          "x": 60.0,
+          "y": 180.0
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "selectedIndexOffset",
+            "debugLog": false
+          }
+        },
+        "width": 320,
+        "height": 180,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "544cb687-c0c4-4065-8705-c68454b4441b",
+        "type": "app",
+        "position": {
+          "x": 420.0,
+          "y": 220.0
+        },
+        "positionAbsolute": {
+          "x": 420.0,
+          "y": 220.0
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "data",
+            "debugLog": false
+          }
+        },
+        "width": 320,
+        "height": 180,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "adb01ec8-7cbb-4b0e-932f-39e2e3ccfee7",
+        "type": "dispatch",
+        "position": {
+          "x": 760.0,
+          "y": 240.0
+        },
+        "positionAbsolute": {
+          "x": 760.0,
+          "y": 240.0
+        },
+        "data": {
+          "keyword": "render",
+          "config": {}
+        },
+        "width": 220,
+        "height": 40,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "6b6d2cbb-9576-4d01-86cf-96d26d13cc4e",
+        "type": "state",
+        "position": {
+          "x": -480.0,
+          "y": -260.0
+        },
+        "positionAbsolute": {
+          "x": -480.0,
+          "y": -260.0
+        },
+        "data": {
+          "keyword": "data"
+        },
+        "width": 220,
+        "height": 48,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "3b85753b-4bed-4b92-981f-a0254113398f",
+        "type": "state",
+        "position": {
+          "x": -500.0,
+          "y": -60.0
+        },
+        "positionAbsolute": {
+          "x": -500.0,
+          "y": -60.0
+        },
+        "data": {
+          "keyword": "startOfWeek"
+        },
+        "width": 240,
+        "height": 48,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "e37f5864-9c5c-47b4-88fd-756368dfe3ba",
+        "type": "state",
+        "position": {
+          "x": -500.0,
+          "y": 20.0
+        },
+        "positionAbsolute": {
+          "x": -500.0,
+          "y": 20.0
+        },
+        "data": {
+          "keyword": "startDate"
+        },
+        "width": 220,
+        "height": 48,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "edfea288-2203-498a-9c83-c578644f51e5",
+        "type": "state",
+        "position": {
+          "x": -480.0,
+          "y": 100.0
+        },
+        "positionAbsolute": {
+          "x": -480.0,
+          "y": 100.0
+        },
+        "data": {
+          "keyword": "maxDisplayedWeeks"
+        },
+        "width": 280,
+        "height": 48,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "ee656035-c130-416a-aadc-2646516b2106",
+        "type": "state",
+        "position": {
+          "x": -480.0,
+          "y": 300.0
+        },
+        "positionAbsolute": {
+          "x": -480.0,
+          "y": 300.0
+        },
+        "data": {
+          "keyword": "selectedIndexOffset"
+        },
+        "width": 280,
+        "height": 48,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "2e9d1b82-d2f7-4bef-96e6-b491940ae474",
+        "type": "code",
+        "position": {
+          "x": -40.0,
+          "y": 360.0
+        },
+        "positionAbsolute": {
+          "x": -40.0,
+          "y": 360.0
+        },
+        "data": {
+          "code": "block:\n  var cleaned = newStringOfCap(data.len)\n  for ch in data:\n    if ch == 'x' or ch == 'X':\n      cleaned.add('x')\n    elif ch == '.':\n      cleaned.add('.')\n  let payload = if context.payload.isNil: newJObject() else: context.payload\n  var level = 0\n  if payload.hasKey(\"level\"):\n    try:\n      level = payload[\"level\"].getInt()\n    except CatchableError:\n      discard\n  var label = \"\"\n  if payload.hasKey(\"label\"):\n    try:\n      label = payload[\"label\"].getStr()\n    except CatchableError:\n      discard\n  label = label.toLowerAscii()\n  if cleaned.len == 0:\n    return 0\n  var offset = current\n  if offset < 0:\n    offset = 0\n  let maxOffset = cleaned.len - 1\n  if offset > maxOffset:\n    offset = maxOffset\n  if level == 0:\n    case label\n    of \"left\":\n      if offset < maxOffset:\n        offset += 1\n    of \"right\":\n      if offset > 0:\n        offset -= 1\n    else:\n      discard\n  offset",
+          "codeJS": "(() => {\n  const cleaned = [];\n  for (const ch of data) {\n    if (ch === 'x' || ch === 'X') {\n      cleaned.push('x');\n    } else if (ch === '.') {\n      cleaned.push('.');\n    }\n  }\n  const payload = (typeof context !== 'undefined' && context && context.payload) ? context.payload : {};\n  const level = typeof payload.level === 'number' ? payload.level : 0;\n  const label = typeof payload.label === 'string' ? payload.label.toLowerCase() : '';\n  if (cleaned.length === 0) {\n    return 0;\n  }\n  let offsetValue = Number.isFinite(current) ? current : 0;\n  const maxOffset = cleaned.length - 1;\n  if (offsetValue < 0) offsetValue = 0;\n  if (offsetValue > maxOffset) offsetValue = maxOffset;\n  if (level === 0) {\n    if (label === 'left') {\n      if (offsetValue < maxOffset) offsetValue += 1;\n    } else if (label === 'right') {\n      if (offsetValue > 0) offsetValue -= 1;\n    }\n  }\n  return offsetValue;\n})()",
+          "codeArgs": [
+            {
+              "name": "data",
+              "type": "string"
+            },
+            {
+              "name": "current",
+              "type": "integer"
+            }
+          ],
+          "codeOutputs": [
+            {
+              "name": "offset",
+              "type": "integer"
+            }
+          ]
+        },
+        "width": 360,
+        "height": 200,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "a2b602d1-8e62-4778-942a-1ad9719f3e0f",
+        "type": "code",
+        "position": {
+          "x": 220.0,
+          "y": 360.0
+        },
+        "positionAbsolute": {
+          "x": 220.0,
+          "y": 360.0
+        },
+        "data": {
+          "code": "newJInt(offset)",
+          "codeJS": "offset",
+          "codeArgs": [
+            {
+              "name": "offset",
+              "type": "integer"
+            }
+          ],
+          "codeOutputs": [
+            {
+              "name": "json",
+              "type": "json"
+            }
+          ]
+        },
+        "width": 200,
+        "height": 140,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "dd0de4de-67ff-403a-bc96-dbc4f5980ded",
+        "type": "code",
+        "position": {
+          "x": 480.0,
+          "y": 380.0
+        },
+        "positionAbsolute": {
+          "x": 480.0,
+          "y": 380.0
+        },
+        "data": {
+          "code": "block:\n  var cleaned = newStringOfCap(data.len)\n  for ch in data:\n    if ch == 'x' or ch == 'X':\n      cleaned.add('x')\n    elif ch == '.':\n      cleaned.add('.')\n  let payload = if context.payload.isNil: newJObject() else: context.payload\n  var level = 0\n  if payload.hasKey(\"level\"):\n    try:\n      level = payload[\"level\"].getInt()\n    except CatchableError:\n      discard\n  var label = \"\"\n  if payload.hasKey(\"label\"):\n    try:\n      label = payload[\"label\"].getStr()\n    except CatchableError:\n      discard\n  label = label.toLowerAscii()\n  if cleaned.len == 0:\n    if level == 0 and label == \"mark\":\n      return \"x\"\n    return \"\"\n  var offsetClamped = offset\n  if offsetClamped < 0:\n    offsetClamped = 0\n  let maxOffset = cleaned.len - 1\n  if offsetClamped > maxOffset:\n    offsetClamped = maxOffset\n  if level == 0 and label == \"mark\":\n    let idx = cleaned.len - 1 - offsetClamped\n    if idx >= 0 and idx < cleaned.len:\n      if cleaned[idx] == 'x':\n        cleaned[idx] = '.'\n      else:\n        cleaned[idx] = 'x'\n  cleaned",
+          "codeJS": "(() => {\n  const cleaned = [];\n  for (const ch of data) {\n    if (ch === 'x' || ch === 'X') {\n      cleaned.push('x');\n    } else if (ch === '.') {\n      cleaned.push('.');\n    }\n  }\n  const payload = (typeof context !== 'undefined' && context && context.payload) ? context.payload : {};\n  const level = typeof payload.level === 'number' ? payload.level : 0;\n  const label = typeof payload.label === 'string' ? payload.label.toLowerCase() : '';\n  if (cleaned.length === 0) {\n    if (level === 0 && label === 'mark') {\n      return 'x';\n    }\n    return '';\n  }\n  let offsetClamped = Number.isFinite(offset) ? offset : 0;\n  const maxOffset = cleaned.length - 1;\n  if (offsetClamped < 0) offsetClamped = 0;\n  if (offsetClamped > maxOffset) offsetClamped = maxOffset;\n  if (level === 0 && label === 'mark') {\n    const idx = cleaned.length - 1 - offsetClamped;\n    if (idx >= 0 && idx < cleaned.length) {\n      cleaned[idx] = cleaned[idx] === 'x' ? '.' : 'x';\n    }\n  }\n  return cleaned.join('');\n})()",
+          "codeArgs": [
+            {
+              "name": "data",
+              "type": "string"
+            },
+            {
+              "name": "offset",
+              "type": "integer"
+            }
+          ],
+          "codeOutputs": [
+            {
+              "name": "value",
+              "type": "string"
+            }
+          ]
+        },
+        "width": 360,
+        "height": 200,
+        "selected": false,
+        "dragging": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "e58f602d-a546-4ea2-b035-1fd092c87566",
+        "source": "99e9ef71-5acc-4732-9243-91d1d307655e",
+        "sourceHandle": "next",
+        "target": "b4a85313-0601-4f76-ab20-eecb711c6ae1",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "88da2cce-650d-47b1-87a7-bd3cf6a206d6",
+        "source": "6b6d2cbb-9576-4d01-86cf-96d26d13cc4e",
+        "sourceHandle": "fieldOutput",
+        "target": "b4a85313-0601-4f76-ab20-eecb711c6ae1",
+        "targetHandle": "fieldInput/data",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "a2427583-8475-4e32-b864-d90736f569d6",
+        "source": "3b85753b-4bed-4b92-981f-a0254113398f",
+        "sourceHandle": "fieldOutput",
+        "target": "b4a85313-0601-4f76-ab20-eecb711c6ae1",
+        "targetHandle": "fieldInput/startOfWeek",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "dc6f1e5f-bc50-4aee-9d0c-42a30a824dcb",
+        "source": "e37f5864-9c5c-47b4-88fd-756368dfe3ba",
+        "sourceHandle": "fieldOutput",
+        "target": "b4a85313-0601-4f76-ab20-eecb711c6ae1",
+        "targetHandle": "fieldInput/startDate",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "9c0629b1-e294-4788-9e6a-c74dbbd8d7fc",
+        "source": "edfea288-2203-498a-9c83-c578644f51e5",
+        "sourceHandle": "fieldOutput",
+        "target": "b4a85313-0601-4f76-ab20-eecb711c6ae1",
+        "targetHandle": "fieldInput/maxDisplayedWeeks",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "c64f6827-0e1d-48fa-8136-9bf26c9ea7c3",
+        "source": "ee656035-c130-416a-aadc-2646516b2106",
+        "sourceHandle": "fieldOutput",
+        "target": "b4a85313-0601-4f76-ab20-eecb711c6ae1",
+        "targetHandle": "fieldInput/selectedIndexOffset",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "aba76b2c-4b73-4b24-89e0-5b1574978dda",
+        "source": "477ddb1d-3775-4644-a55c-32c837fdab8f",
+        "sourceHandle": "next",
+        "target": "c357b791-220f-4bbf-9e58-961fde84ce89",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "51c1d774-010b-4351-9ec9-03cbae9f7f30",
+        "source": "c357b791-220f-4bbf-9e58-961fde84ce89",
+        "sourceHandle": "next",
+        "target": "544cb687-c0c4-4065-8705-c68454b4441b",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "f27ea0ce-d942-4b8b-b95f-d058a6404c51",
+        "source": "544cb687-c0c4-4065-8705-c68454b4441b",
+        "sourceHandle": "next",
+        "target": "adb01ec8-7cbb-4b0e-932f-39e2e3ccfee7",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "a61e8e1e-ca07-4fbd-bf75-cae487963717",
+        "source": "6b6d2cbb-9576-4d01-86cf-96d26d13cc4e",
+        "sourceHandle": "fieldOutput",
+        "target": "2e9d1b82-d2f7-4bef-96e6-b491940ae474",
+        "targetHandle": "codeField/data",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "2a3cd03f-c573-4605-94d7-c3b798cfe500",
+        "source": "ee656035-c130-416a-aadc-2646516b2106",
+        "sourceHandle": "fieldOutput",
+        "target": "2e9d1b82-d2f7-4bef-96e6-b491940ae474",
+        "targetHandle": "codeField/current",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "1404aaa0-6da4-4a5f-a30c-027ce5be237d",
+        "source": "2e9d1b82-d2f7-4bef-96e6-b491940ae474",
+        "sourceHandle": "fieldOutput/offset",
+        "target": "a2b602d1-8e62-4778-942a-1ad9719f3e0f",
+        "targetHandle": "codeField/offset",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "263ff841-625e-44ec-a23c-8b042db508f6",
+        "source": "2e9d1b82-d2f7-4bef-96e6-b491940ae474",
+        "sourceHandle": "fieldOutput/offset",
+        "target": "dd0de4de-67ff-403a-bc96-dbc4f5980ded",
+        "targetHandle": "codeField/offset",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "a7d2dd86-8672-4b72-9387-06267828b583",
+        "source": "a2b602d1-8e62-4778-942a-1ad9719f3e0f",
+        "sourceHandle": "fieldOutput/json",
+        "target": "c357b791-220f-4bbf-9e58-961fde84ce89",
+        "targetHandle": "fieldInput/valueJson",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "7c54643a-760e-4402-bd96-d2a70c098a5c",
+        "source": "6b6d2cbb-9576-4d01-86cf-96d26d13cc4e",
+        "sourceHandle": "fieldOutput",
+        "target": "dd0de4de-67ff-403a-bc96-dbc4f5980ded",
+        "targetHandle": "codeField/data",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "7bc20987-d131-44cd-9cf6-dbc3d61460fd",
+        "source": "dd0de4de-67ff-403a-bc96-dbc4f5980ded",
+        "sourceHandle": "fieldOutput/value",
+        "target": "544cb687-c0c4-4065-8705-c68454b4441b",
+        "targetHandle": "fieldInput/valueString",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "name": "data",
+        "label": "History string",
+        "type": "string",
+        "value": "..xx.x...x",
+        "persist": "disk",
+        "access": "public",
+        "placeholder": "Use '.' and 'x' characters"
+      },
+      {
+        "name": "startOfWeek",
+        "label": "Start of week",
+        "type": "select",
+        "value": "mon",
+        "options": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri",
+          "sat",
+          "sun"
+        ],
+        "persist": "disk",
+        "access": "public"
+      },
+      {
+        "name": "startDate",
+        "label": "First entry date",
+        "type": "date",
+        "value": "2024-01-01",
+        "persist": "disk",
+        "access": "public"
+      },
+      {
+        "name": "maxDisplayedWeeks",
+        "label": "Max displayed weeks",
+        "type": "integer",
+        "value": "4",
+        "persist": "disk",
+        "access": "public"
+      },
+      {
+        "name": "selectedIndexOffset",
+        "label": "Selected index offset",
+        "type": "integer",
+        "value": "0",
+        "persist": "memory",
+        "access": "public"
+      }
+    ],
+    "settings": {
+      "refreshInterval": 900,
+      "backgroundColor": "#000000",
+      "execution": "interpreted"
+    }
+  }
+]

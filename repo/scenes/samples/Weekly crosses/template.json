@@ -1,0 +1,9 @@
+{
+  "name": "Weekly crosses",
+  "description": "Track a weekly habit with GPIO button controls for marking days and shifting focus.",
+  "config": null,
+  "image": "./image.png",
+  "image_width": 1,
+  "image_height": 1,
+  "scenes": "./scenes.json"
+}
