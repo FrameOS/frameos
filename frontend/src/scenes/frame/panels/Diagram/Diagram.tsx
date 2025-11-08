@@ -37,7 +37,7 @@ import { CodeNodeEdge } from './CodeNodeEdge'
 import { SceneDropDown } from '../Scenes/SceneDropDown'
 import { AppNodeEdge } from './AppNodeEdge'
 import { NewNodePicker } from './NewNodePicker'
-import { getNewFieldName, newNodePickerLogic } from './newNodePickerLogic'
+import { CANVAS_NODE_ID, getNewFieldName, newNodePickerLogic } from './newNodePickerLogic'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -170,6 +170,27 @@ function Diagram_({ sceneId }: DiagramProps) {
     }
   }, [])
 
+  const onContextMenu = useCallback(
+    (event: ReactMouseEvent) => {
+      const target = event.target as HTMLElement | null
+      const pane = target?.closest('.react-flow__pane') as HTMLElement | null
+      if (!pane) {
+        return
+      }
+      event.preventDefault()
+      if (!reactFlowInstance) {
+        return
+      }
+      const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
+      const position = reactFlowInstance.project({
+        x: event.clientX - (reactFlowBounds?.left ?? 0),
+        y: event.clientY - (reactFlowBounds?.top ?? 0),
+      })
+      openNewNodePicker(event.clientX, event.clientY, position.x, position.y, CANVAS_NODE_ID, 'canvas', 'canvas')
+    },
+    [openNewNodePicker, reactFlowInstance]
+  )
+
   useEffect(() => {
     if (fitViewCounter > 0) {
       reactFlowInstance?.fitView({ maxZoom: 1, padding: 0.2 })
@@ -178,7 +199,7 @@ function Diagram_({ sceneId }: DiagramProps) {
 
   return (
     <BindLogic logic={diagramLogic} props={diagramLogicProps}>
-      <div className="w-full h-full dndflow" ref={reactFlowWrapper}>
+      <div className="w-full h-full dndflow" ref={reactFlowWrapper} onContextMenu={onContextMenu}>
         <ReactFlow
           nodes={nodesWithStyle}
           edges={edges}

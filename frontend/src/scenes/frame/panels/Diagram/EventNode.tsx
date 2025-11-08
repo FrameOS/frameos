@@ -11,12 +11,12 @@ import { ClipboardIcon } from '@heroicons/react/24/solid'
 import { frameLogic } from '../../frameLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
-import { showAsFps } from '../../../../decorators/refreshInterval'
 import { appNodeLogic } from './appNodeLogic'
 import { newNodePickerLogic } from './newNodePickerLogic'
 import { TextInput } from '../../../../components/TextInput'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { ColorInput } from '../../../../components/ColorInput'
+import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 
 const events: FrameEvent[] = _events as any
 
@@ -137,26 +137,26 @@ export function EventNode(props: NodeProps): JSX.Element {
       </div>
       {keyword === 'button' ? (
         <div className="p-1 space-y-1">
-          <label className="block text-xs uppercase tracking-wide text-gray-400">Label</label>
+          <label className="block text-xs text-indigo-200">Label</label>
           <TextInput
             value={(data as ButtonEventNodeData).label ?? ''}
             onChange={(value) => updateNodeData(id, { label: value })}
             placeholder="e.g. A"
             theme="node"
           />
-          <div className="text-xs text-gray-400">Leave empty to match all buttons.</div>
+          <div className="text-xs text-indigo-200">Leave empty to match all buttons.</div>
         </div>
       ) : null}
       {keyword === 'render' ? (
         <div className="p-1 space-y-2">
           <div>
-            <div className="flex items-center justify-between text-xs uppercase tracking-wide text-gray-400">
+            <div className="flex items-center justify-between text-xs text-indigo-200">
               <span>Dimensions</span>
               <span className="text-white text-sm">{width && height ? `${width}×${height}` : 'Unknown'}</span>
             </div>
           </div>
           <div>
-            <label className="block text-xs uppercase tracking-wide text-gray-400">Refresh interval in seconds</label>
+            <label className="block text-xs text-indigo-200">Refresh interval in seconds</label>
             <NumberTextInput
               theme="node"
               value={refreshInterval}
@@ -165,7 +165,7 @@ export function EventNode(props: NodeProps): JSX.Element {
             />
           </div>
           <div>
-            <label className="block text-xs uppercase tracking-wide text-gray-400">Background color</label>
+            <label className="block text-xs text-indigo-200">Background color</label>
             <ColorInput
               theme="node"
               className="!min-w-[50px]"
@@ -177,33 +177,51 @@ export function EventNode(props: NodeProps): JSX.Element {
       ) : null}
       {sourceFieldsToShow.length > 0 ? (
         <div className="p-1">
-          {sourceFieldsToShow.map((field: StateField, i) => {
-            const fieldValue = isEventWithStateFields
-              ? stateFieldAccess(scene, field, 'state')
-              : stateFieldAccess(scene, field, 'context.payload')
-            return (
-              <div key={i} className="flex items-center justify-end space-x-1 w-full">
-                <code className="text-xs mr-2 text-gray-400 flex-1">{field.type}</code>
-                <div title={field.label}>{field.name}</div>
-                <ClipboardIcon
-                  className="w-5 h-5 cursor-pointer"
-                  onClick={() =>
-                    copy(
-                      isEventWithStateFields
-                        ? stateFieldAccess(scene, field, 'state')
-                        : stateFieldAccess(scene, field, 'context.payload')
-                    )
-                  }
-                />
-                <Handle
-                  type="source"
-                  position={Position.Right}
-                  id={`code/${fieldValue}`}
-                  style={{ position: 'relative', transform: 'none', right: 0, top: 0, background: '#000000' }}
-                />
-              </div>
-            )
-          })}
+          <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5 w-full">
+            <tbody>
+              {sourceFieldsToShow.map((field: StateField, i) => {
+                const fieldValue = isEventWithStateFields
+                  ? stateFieldAccess(scene, field, 'state')
+                  : stateFieldAccess(scene, field, 'context.payload')
+                return (
+                  <tr key={i}>
+                    <td className="font-sm text-indigo-200 w-full" colSpan={3}>
+                      <div className="flex items-center gap-2">
+                        {field.type ? <FieldTypeTag type={field.type} /> : null}
+                        <div className="flex-1" title={field.label}>
+                          {field.label ?? field.name}
+                        </div>
+                        <ClipboardIcon
+                          className="w-5 h-5 cursor-pointer"
+                          onClick={() =>
+                            copy(
+                              isEventWithStateFields
+                                ? stateFieldAccess(scene, field, 'state')
+                                : stateFieldAccess(scene, field, 'context.payload')
+                            )
+                          }
+                        />
+                        <Handle
+                          type="source"
+                          position={Position.Right}
+                          id={`code/${fieldValue}`}
+                          style={{
+                            position: 'relative',
+                            transform: 'none',
+                            right: 0,
+                            top: 0,
+                            background: '#000000',
+                            borderBottomLeftRadius: 0,
+                            borderTopLeftRadius: 0,
+                          }}
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       ) : null}
     </div>
