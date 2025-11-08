@@ -35,7 +35,7 @@
     },
     {
       "name": "startDate",
-      "type": "date",
+      "type": "string",
       "label": "First entry date",
       "value": "2024-01-01",
       "required": true
