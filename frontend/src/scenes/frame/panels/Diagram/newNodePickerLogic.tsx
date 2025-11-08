@@ -17,6 +17,7 @@ import {
   SceneNodeData,
   EventNodeData,
   FrameEvent,
+  DispatchNodeData,
 } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
@@ -32,6 +33,7 @@ export interface LocalFuse extends Fuse<OptionWithType> {}
 export const CANVAS_NODE_ID = '__canvas__'
 
 const events: FrameEvent[] = _events as any
+const dispatchableEvents: FrameEvent[] = events.filter((event) => event.canDispatch)
 
 export interface NewNodePickerLogicProps {
   frameId: number
@@ -258,6 +260,14 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             keyword: 'clipboard',
           })
           options.push({ label: 'Code node', value: 'code', type: 'string', keyword: 'code' })
+          for (const event of dispatchableEvents) {
+            options.push({
+              label: `dispatch: ${event.name}`,
+              value: `dispatch/${event.name}`,
+              type: 'string',
+              keyword: event.name,
+            })
+          }
           for (const event of events) {
             options.push({
               label: `event: ${event.name}`,
@@ -400,8 +410,19 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
     sortedNewNodeOptions: [
       (s) => [s.allNewNodeOptions],
       (allNewNodeOptions): OptionWithType[] => {
-        const priority: Record<string, OptionWithType[]> = { render: [], logic: [], legacy: [], other: [] }
+        const priority: Record<string, OptionWithType[]> = {
+          special: [],
+          dispatch: [],
+          render: [],
+          logic: [],
+          legacy: [],
+          other: [],
+        }
         for (const option of allNewNodeOptions) {
+          if (option.label === 'Paste from clipboard' || option.label === 'Code node') {
+            priority['special'].push(option)
+            continue
+          }
           const type = option.label.split(':')[0]
           if (priority[type]) {
             priority[type].push(option)
@@ -409,7 +430,14 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             priority['other'].push(option)
           }
         }
-        return [...priority['render'], ...priority['logic'], ...priority['legacy'], ...priority['other']]
+        return [
+          ...priority['special'],
+          ...priority['dispatch'],
+          ...priority['render'],
+          ...priority['logic'],
+          ...priority['legacy'],
+          ...priority['other'],
+        ]
       },
     ],
     fuse: [
@@ -521,6 +549,10 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           newNode.type = 'code'
           newNode.style = { width: 300, height: 119 }
           newNode.data = { code: '', codeArgs: [], codeOutputs: [] } satisfies CodeNodeData
+        } else if (value.startsWith('dispatch/')) {
+          const eventKeyword = value.substring(9)
+          newNode.type = 'dispatch'
+          newNode.data = { keyword: eventKeyword, config: {} } satisfies DispatchNodeData
         } else if (value.startsWith('app/')) {
           const appKeyword = value.substring(4)
           const app = values.apps[appKeyword]

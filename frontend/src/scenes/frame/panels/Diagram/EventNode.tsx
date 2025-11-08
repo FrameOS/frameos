@@ -20,9 +20,8 @@ import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 
 const events: FrameEvent[] = _events as any
 
-export function EventNode(props: NodeProps): JSX.Element {
+export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
-  const { id } = props
   const { width, height, defaultInterval } = useValues(frameLogic)
   const { selectedNodeId, scene } = useValues(diagramLogic)
   const { selectNode, updateNodeData, copyAppJSON, deleteApp } = useActions(diagramLogic)
@@ -65,6 +64,84 @@ export function EventNode(props: NodeProps): JSX.Element {
     return nodeEdges.some((edge) => edge.sourceHandle === `code/${fieldValue}`)
   })
 
+  const backgroundClassName = clsx(
+    'shadow-lg border-2',
+    selectedNodeId === id
+      ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
+      : 'bg-black bg-opacity-70 border-red-900 shadow-red-700/50 '
+  )
+
+  const titleClassName = clsx(
+    'frameos-node-title text-xl p-1 px-2 gap-2',
+    selectedNodeId === id ? 'bg-indigo-900' : 'bg-red-900',
+    'flex w-full justify-between items-center'
+  )
+
+  const configRows: JSX.Element[] = []
+
+  if (keyword === 'button') {
+    configRows.push(
+      <tr key="button-label">
+        <td className="font-sm text-indigo-200 w-full">
+          <div className="flex items-center gap-2">
+            <div className="flex-1">Label</div>
+            <TextInput
+              value={(data as ButtonEventNodeData).label ?? ''}
+              onChange={(value) => updateNodeData(id, { label: value })}
+              placeholder="e.g. A"
+              theme="node"
+            />
+          </div>
+          <div className="text-xs text-indigo-200 mt-1">Leave empty to match all buttons.</div>
+        </td>
+      </tr>
+    )
+  }
+
+  if (keyword === 'render') {
+    configRows.push(
+      <tr key="render-dimensions">
+        <td className="font-sm text-indigo-200 w-full">
+          <div className="flex items-center gap-2">
+            <div className="flex-1">Dimensions</div>
+            <div className="text-white text-sm">{width && height ? `${width}×${height}` : 'Unknown'}</div>
+          </div>
+        </td>
+      </tr>
+    )
+    configRows.push(
+      <tr key="render-refresh">
+        <td className="font-sm text-indigo-200 w-full">
+          <div className="flex items-center gap-2">
+            <div className="flex-1">Refresh interval in seconds</div>
+            <NumberTextInput
+              theme="node"
+              className="max-w-[70px]"
+              value={refreshInterval}
+              placeholder={String(defaultInterval)}
+              onChange={(value) => updateSceneSetting('refreshInterval', value)}
+            />
+          </div>
+        </td>
+      </tr>
+    )
+    configRows.push(
+      <tr key="render-background">
+        <td className="font-sm text-indigo-200 w-full">
+          <div className="flex items-center gap-2">
+            <div className="flex-1">Background color</div>
+            <ColorInput
+              theme="node"
+              className="!min-w-[50px]"
+              value={backgroundColor}
+              onChange={(value) => updateSceneSetting('backgroundColor', value)}
+            />
+          </div>
+        </td>
+      </tr>
+    )
+  }
+
   return (
     <div
       onClick={() => {
@@ -72,19 +149,9 @@ export function EventNode(props: NodeProps): JSX.Element {
           selectNode(id)
         }
       }}
-      className={clsx(
-        'shadow-lg border-2',
-        selectedNodeId === id
-          ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
-          : 'bg-black bg-opacity-70 border-red-900 shadow-red-700/50 '
-      )}
+      className={backgroundClassName}
     >
-      <div
-        className={clsx(
-          'flex gap-2 justify-between items-center frameos-node-title text-xl p-1',
-          selectedNodeId === id ? 'bg-indigo-900' : 'bg-red-900'
-        )}
-      >
+      <div className={titleClassName}>
         <div>{keyword} (event)</div>
         <div className="flex items-center justify-center gap-2">
           <DropdownMenu
@@ -119,6 +186,7 @@ export function EventNode(props: NodeProps): JSX.Element {
               borderBottomLeftRadius: 0,
               borderTopLeftRadius: 0,
             }}
+            isConnectable={isConnectable}
             onClick={(e) => {
               e.stopPropagation()
               // NextNodeHandle
@@ -135,44 +203,11 @@ export function EventNode(props: NodeProps): JSX.Element {
           />
         </div>
       </div>
-      {keyword === 'button' ? (
-        <div className="p-1 space-y-1">
-          <label className="block text-xs text-indigo-200">Label</label>
-          <TextInput
-            value={(data as ButtonEventNodeData).label ?? ''}
-            onChange={(value) => updateNodeData(id, { label: value })}
-            placeholder="e.g. A"
-            theme="node"
-          />
-          <div className="text-xs text-indigo-200">Leave empty to match all buttons.</div>
-        </div>
-      ) : null}
-      {keyword === 'render' ? (
-        <div className="p-1 space-y-2">
-          <div>
-            <div className="flex items-center justify-between text-xs text-indigo-200">
-              <span>Dimensions</span>
-              <span className="text-white text-sm">{width && height ? `${width}×${height}` : 'Unknown'}</span>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-indigo-200">Refresh interval in seconds</label>
-            <NumberTextInput
-              theme="node"
-              value={refreshInterval}
-              placeholder={String(defaultInterval)}
-              onChange={(value) => updateSceneSetting('refreshInterval', value)}
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-indigo-200">Background color</label>
-            <ColorInput
-              theme="node"
-              className="!min-w-[50px]"
-              value={backgroundColor}
-              onChange={(value) => updateSceneSetting('backgroundColor', value)}
-            />
-          </div>
+      {configRows.length > 0 ? (
+        <div className="p-1">
+          <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5 w-full">
+            <tbody>{configRows}</tbody>
+          </table>
         </div>
       ) : null}
       {sourceFieldsToShow.length > 0 ? (
@@ -214,6 +249,7 @@ export function EventNode(props: NodeProps): JSX.Element {
                             borderBottomLeftRadius: 0,
                             borderTopLeftRadius: 0,
                           }}
+                          isConnectable={isConnectable}
                         />
                       </div>
                     </td>
