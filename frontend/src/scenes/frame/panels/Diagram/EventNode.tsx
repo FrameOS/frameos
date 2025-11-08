@@ -3,20 +3,20 @@ import { NodeProps, Handle, Position } from 'reactflow'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import copy from 'copy-to-clipboard'
-import { ButtonEventNodeData, EventNodeData, FrameEvent, StateField } from '../../../../types'
+import { ButtonEventNodeData, EventNodeData, FrameEvent, FrameSceneSettings, StateField } from '../../../../types'
 import { stateFieldAccess } from '../../../../utils/fieldTypes'
 
 import _events from '../../../../../schema/events.json'
 import { ClipboardIcon } from '@heroicons/react/24/solid'
 import { frameLogic } from '../../frameLogic'
-import { Tooltip } from '../../../../components/Tooltip'
-import { SceneSettings } from '../Scenes/SceneSettings'
-import { EllipsisHorizontalIcon } from '@heroicons/react/24/outline'
-import { buttonColor, buttonSize } from '../../../../components/Button'
+import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { showAsFps } from '../../../../decorators/refreshInterval'
 import { appNodeLogic } from './appNodeLogic'
 import { newNodePickerLogic } from './newNodePickerLogic'
 import { TextInput } from '../../../../components/TextInput'
+import { NumberTextInput } from '../../../../components/NumberTextInput'
+import { ColorInput } from '../../../../components/ColorInput'
 
 const events: FrameEvent[] = _events as any
 
@@ -25,7 +25,8 @@ export function EventNode(props: NodeProps): JSX.Element {
   const { id } = props
   const { width, height, defaultInterval } = useValues(frameLogic)
   const { selectedNodeId, scene } = useValues(diagramLogic)
-  const { selectNode, updateNodeData } = useActions(diagramLogic)
+  const { selectNode, updateNodeData, copyAppJSON, deleteApp } = useActions(diagramLogic)
+  const { updateScene } = useActions(frameLogic)
 
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const { node, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
@@ -36,6 +37,25 @@ export function EventNode(props: NodeProps): JSX.Element {
   const isEventWithStateFields = keyword === 'init' || keyword === 'setSceneState' || keyword === 'render'
 
   const fields = isEventWithStateFields ? scene?.fields ?? [] : events?.find((e) => e.name == keyword)?.fields ?? []
+
+  const refreshInterval = scene?.settings?.refreshInterval
+  const backgroundColor = scene?.settings?.backgroundColor ?? '#000000'
+
+  const updateSceneSetting = <K extends keyof FrameSceneSettings>(key: K, value: FrameSceneSettings[K] | undefined) => {
+    if (!sceneId) {
+      return
+    }
+
+    const newSettings: FrameSceneSettings = { ...(scene?.settings ?? {}) }
+
+    if (value === undefined || value === null) {
+      delete newSettings[key]
+    } else {
+      newSettings[key] = value
+    }
+
+    updateScene(sceneId, { settings: newSettings })
+  }
 
   // these fields are deprecated, but keep showing nodes that are connected
   const sourceFieldsToShow = fields.filter((field) => {
@@ -67,15 +87,23 @@ export function EventNode(props: NodeProps): JSX.Element {
       >
         <div>{keyword} (event)</div>
         <div className="flex items-center justify-center gap-2">
-          {scene?.id ? (
-            <Tooltip
-              tooltipColor="gray"
-              className={clsx(buttonSize('tiny'), buttonColor('none'))}
-              title={<SceneSettings sceneId={scene?.id} />}
-            >
-              <EllipsisHorizontalIcon className="w-5 h-5" aria-label="Menu" />
-            </Tooltip>
-          ) : null}
+          <DropdownMenu
+            className="w-fit"
+            buttonColor="none"
+            horizontal
+            items={[
+              {
+                label: 'Copy as JSON',
+                onClick: () => copyAppJSON(id),
+                icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Delete Node',
+                onClick: () => deleteApp(id),
+                icon: <TrashIcon className="w-5 h-5" />,
+              },
+            ]}
+          />
           <Handle
             type="source"
             position={Position.Right}
@@ -116,29 +144,34 @@ export function EventNode(props: NodeProps): JSX.Element {
             placeholder="e.g. A"
             theme="node"
           />
-          <div className="text-xs text-gray-400">Leave empty to listen to all buttons.</div>
+          <div className="text-xs text-gray-400">Leave empty to match all buttons.</div>
         </div>
       ) : null}
       {keyword === 'render' ? (
-        // show a blank box with the dimensions of the scene
-        <div className="p-1">
-          <div
-            className="relative flex flex-col items-center justify-center text-center bg-gray-800 text-white border border-gray-700 rounded-md"
-            style={{
-              aspectRatio: `${width} / ${height}`,
-              minWidth: 200,
-              maxWidth: 250,
-              maxHeight: 250,
-              background: scene?.settings?.backgroundColor ?? 'black',
-              textShadow: `-1px 0 black, 0 1px black, 1px 0 black, 0 -1px black, 0 0 5px black`,
-            }}
-          >
-            {scene?.nodes?.length === 1 ? <div className="text-md mb-1 p-2">Connect a node to get started.</div> : null}
-            {width && height ? <div className="text-2xl mb-1">{`${width}x${height}`}</div> : null}
-            <div className="text-xl">
-              {((scene?.settings?.refreshInterval ?? defaultInterval) >= 1 ? 'every ' : '') +
-                showAsFps(scene?.settings?.refreshInterval ?? defaultInterval)}
+        <div className="p-1 space-y-2">
+          <div>
+            <div className="flex items-center justify-between text-xs uppercase tracking-wide text-gray-400">
+              <span>Dimensions</span>
+              <span className="text-white text-sm">{width && height ? `${width}×${height}` : 'Unknown'}</span>
             </div>
+          </div>
+          <div>
+            <label className="block text-xs uppercase tracking-wide text-gray-400">Refresh interval in seconds</label>
+            <NumberTextInput
+              theme="node"
+              value={refreshInterval}
+              placeholder={String(defaultInterval)}
+              onChange={(value) => updateSceneSetting('refreshInterval', value)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs uppercase tracking-wide text-gray-400">Background color</label>
+            <ColorInput
+              theme="node"
+              className="!min-w-[50px]"
+              value={backgroundColor}
+              onChange={(value) => updateSceneSetting('backgroundColor', value)}
+            />
           </div>
         </div>
       ) : null}
