@@ -7,7 +7,7 @@ import { ButtonEventNodeData, EventNodeData, FrameEvent, FrameSceneSettings, Sta
 import { stateFieldAccess } from '../../../../utils/fieldTypes'
 
 import _events from '../../../../../schema/events.json'
-import { ClipboardIcon } from '@heroicons/react/24/solid'
+import { ClipboardIcon, InformationCircleIcon } from '@heroicons/react/24/solid'
 import { frameLogic } from '../../frameLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
@@ -17,6 +17,7 @@ import { TextInput } from '../../../../components/TextInput'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { ColorInput } from '../../../../components/ColorInput'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
+import { Tooltip } from '../../../../components/Tooltip'
 
 const events: FrameEvent[] = _events as any
 
@@ -113,7 +114,13 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
       <tr key="render-refresh">
         <td className="font-sm text-indigo-200 w-full">
           <div className="flex items-center gap-2">
-            <div className="flex-1">Refresh interval in seconds</div>
+            <div className="flex-1">Refresh interval</div>
+            <Tooltip
+              title="Seconds between automatic re-renders of this scene. Can be a very small number for real-time rendering."
+              containerClassName="ml-1 inline-block align-sub"
+            >
+              <InformationCircleIcon className="w-4 h-4 text-indigo-200" aria-label="Info" />
+            </Tooltip>
             <NumberTextInput
               theme="node"
               className="max-w-[70px]"
