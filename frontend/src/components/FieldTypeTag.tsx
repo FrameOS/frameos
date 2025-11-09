@@ -8,6 +8,7 @@ export const typeColors: Record<FieldType, TagProps['color']> = {
   integer: 'teal',
   boolean: 'gray',
   color: 'orange',
+  date: 'secondary',
   json: 'secondary',
   node: 'secondary',
   scene: 'secondary',

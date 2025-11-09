@@ -392,6 +392,16 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                   onChange={(value) => updateNodeConfig(id, field.name, value)}
                                   className="!min-w-[50px]"
                                 />
+                              ) : field.type === 'date' ? (
+                                <TextInput
+                                  theme="node"
+                                  type="date"
+                                  placeholder={field.placeholder}
+                                  value={String(
+                                    (field.name in data.config ? data.config[field.name] : field.value) ?? ''
+                                  )}
+                                  onChange={(value) => updateNodeConfig(id, field.name, value)}
+                                />
                               ) : (
                                 <TextInput
                                   theme="node"

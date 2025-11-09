@@ -15,6 +15,9 @@ import {
   fieldTypes,
   toFieldType,
   SceneNodeData,
+  EventNodeData,
+  FrameEvent,
+  DispatchNodeData,
 } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
@@ -23,8 +26,14 @@ import { diagramLogic } from './diagramLogic'
 import Fuse from 'fuse.js'
 import { Edge } from 'reactflow'
 import { sceneStateLogic } from '../SceneState/sceneStateLogic'
+import _events from '../../../../../schema/events.json'
 
 export interface LocalFuse extends Fuse<OptionWithType> {}
+
+export const CANVAS_NODE_ID = '__canvas__'
+
+const events: FrameEvent[] = _events as any
+const dispatchableEvents: FrameEvent[] = events.filter((event) => event.canDispatch)
 
 export interface NewNodePickerLogicProps {
   frameId: number
@@ -180,7 +189,10 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
     newNodeHandleDataType: [
       (s) => [s.newNodePicker, s.apps, s.node, s.scenes],
       (newNodePicker, apps, node, scenes): FieldType | null => {
-        if (!newNodePicker || !node) {
+        if (!newNodePicker || newNodePicker.nodeId === CANVAS_NODE_ID) {
+          return null
+        }
+        if (!node) {
           return null
         }
         const { handleId, handleType } = newNodePicker
@@ -234,11 +246,55 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
     allNewNodeOptions: [
       (s) => [s.newNodePicker, s.apps, s.scene, s.scenes, s.newNodeHandleDataType, s.node],
       (newNodePicker, apps, scene, scenes, newNodeHandleDataType, node): OptionWithType[] => {
-        if (!newNodePicker || !node) {
+        if (!newNodePicker) {
           return []
         }
-        const { handleId, handleType } = newNodePicker
+        const { handleId, handleType, nodeId } = newNodePicker
         const options: OptionWithType[] = []
+
+        if (nodeId === CANVAS_NODE_ID) {
+          options.push({
+            label: 'Paste from clipboard',
+            value: 'clipboard/paste',
+            type: 'string',
+            keyword: 'clipboard',
+          })
+          options.push({ label: 'Code node', value: 'code', type: 'string', keyword: 'code' })
+          for (const event of dispatchableEvents) {
+            options.push({
+              label: `dispatch: ${event.name}`,
+              value: `dispatch/${event.name}`,
+              type: 'string',
+              keyword: event.name,
+            })
+          }
+          for (const event of events) {
+            options.push({
+              label: `event: ${event.name}`,
+              value: `event/${event.name}`,
+              type: 'string',
+              keyword: event.name,
+            })
+          }
+          for (const [keyword, app] of Object.entries(apps)) {
+            if (app.category !== 'legacy' && (!app.output || app.output.length == 0 || app.category === 'render')) {
+              options.push({
+                label: `${app.category ?? 'app'}: ${app.name}`,
+                value: `app/${keyword}`,
+                type: toFieldType(app.output?.[0].type ?? 'string'),
+                keyword,
+              })
+            }
+          }
+          for (const { id, name } of scenes) {
+            options.push({ label: `scene: ${name}`, value: `scene/${id}`, type: 'scene', keyword: id })
+          }
+          return options
+        }
+
+        if (!node) {
+          return []
+        }
 
         // Pulling out a field (e.g. "font size") to the left of an app to specify a custom input
         if (handleType === 'target' && (handleId.startsWith('fieldInput/') || handleId.startsWith('codeField/'))) {
@@ -315,6 +371,14 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               })
             }
           }
+          for (const event of dispatchableEvents) {
+            options.push({
+              label: `dispatch: ${event.name}`,
+              value: `dispatch/${event.name}`,
+              type: 'string',
+              keyword: event.name,
+            })
+          }
           for (const { id, name } of scenes) {
             options.push({
               label: `scene: ${name}`,
@@ -354,8 +418,19 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
     sortedNewNodeOptions: [
       (s) => [s.allNewNodeOptions],
       (allNewNodeOptions): OptionWithType[] => {
-        const priority: Record<string, OptionWithType[]> = { render: [], logic: [], legacy: [], other: [] }
+        const priority: Record<string, OptionWithType[]> = {
+          special: [],
+          dispatch: [],
+          render: [],
+          logic: [],
+          legacy: [],
+          other: [],
+        }
         for (const option of allNewNodeOptions) {
+          if (option.label === 'Paste from clipboard' || option.label === 'Code node') {
+            priority['special'].push(option)
+            continue
+          }
           const type = option.label.split(':')[0]
           if (priority[type]) {
             priority[type].push(option)
@@ -363,7 +438,14 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             priority['other'].push(option)
           }
         }
-        return [...priority['render'], ...priority['logic'], ...priority['legacy'], ...priority['other']]
+        return [
+          ...priority['special'],
+          ...priority['render'],
+          ...priority['logic'],
+          ...priority['dispatch'],
+          ...priority['legacy'],
+          ...priority['other'],
+        ]
       },
     ],
     fuse: [
@@ -401,7 +483,10 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         if (!newNodePicker) {
           return 'New node'
         }
-        const { handleId, handleType } = newNodePicker
+        const { handleId, handleType, nodeId } = newNodePicker
+        if (handleType === 'canvas' || nodeId === CANVAS_NODE_ID) {
+          return 'Select next node'
+        }
         if (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) {
           return 'Select next node'
         }
@@ -426,10 +511,86 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
     ],
   }),
   listeners(({ actions, values, props }) => ({
-    selectNewNodeOption: ({
+    selectNewNodeOption: async ({
       newNodePicker: { diagramX, diagramY, nodeId, handleId, handleType },
-      option: { label, value, type, keyword },
+      option: { value, type, keyword },
     }) => {
+      if (value === 'clipboard/paste') {
+        if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
+          console.warn('Clipboard API not available for pasting nodes')
+          actions.setSearchValue('')
+          return
+        }
+        try {
+          const clipboardText = await navigator.clipboard.readText()
+          const parsed = JSON.parse(clipboardText)
+          if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object' || !('type' in parsed)) {
+            throw new Error('Clipboard does not contain a valid node JSON')
+          }
+          const pastedNode: DiagramNode = {
+            ...(parsed as DiagramNode),
+            id: uuidv4(),
+            position: { x: diagramX, y: diagramY },
+            selected: false,
+          }
+          delete (pastedNode as any).positionAbsolute
+          delete (pastedNode as any).dragging
+          actions.setNodes([...values.nodes, pastedNode])
+          window.setTimeout(() => {
+            props.updateNodeInternals?.(pastedNode.id)
+          }, 200)
+        } catch (error) {
+          console.error('Failed to paste node from clipboard', error)
+        }
+        actions.setSearchValue('')
+        return
+      }
+
+      if (nodeId === CANVAS_NODE_ID) {
+        const newNode: DiagramNode = {
+          id: uuidv4(),
+          position: { x: diagramX, y: diagramY },
+          data: {} as any,
+        }
+
+        if (value === 'code') {
+          newNode.type = 'code'
+          newNode.style = { width: 300, height: 119 }
+          newNode.data = { code: '', codeArgs: [], codeOutputs: [] } satisfies CodeNodeData
+        } else if (value.startsWith('dispatch/')) {
+          const eventKeyword = value.substring(9)
+          newNode.type = 'dispatch'
+          newNode.data = { keyword: eventKeyword, config: {} } satisfies DispatchNodeData
+        } else if (value.startsWith('app/')) {
+          const appKeyword = value.substring(4)
+          const app = values.apps[appKeyword]
+          newNode.type = 'app'
+          const appData: AppNodeData = { keyword: appKeyword, config: {} }
+          if (app?.cache) {
+            appData.cache = { ...app.cache }
+          }
+          newNode.data = appData
+        } else if (value.startsWith('scene/')) {
+          const sceneKeyword = value.substring(6)
+          newNode.type = 'scene'
+          newNode.data = { keyword: sceneKeyword, config: {} } satisfies SceneNodeData
+        } else if (value.startsWith('event/')) {
+          const eventKeyword = value.substring(6)
+          newNode.type = 'event'
+          newNode.data = { keyword: eventKeyword } satisfies EventNodeData
+        } else {
+          actions.setSearchValue('')
+          return
+        }
+
+        actions.setNodes([...values.nodes, newNode])
+        window.setTimeout(() => {
+          props.updateNodeInternals?.(newNode.id)
+        }, 200)
+        actions.setSearchValue('')
+        return
+      }
+
       const newNode: DiagramNode = {
         id: uuidv4(),
         position: { x: diagramX, y: diagramY },
@@ -549,6 +710,20 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           if (app.cache) {
             ;(newNode.data as AppNodeData).cache = { ...app.cache }
           }
+        }
+      } else if (value.startsWith('dispatch/')) {
+        const eventKeyword = value.substring(9)
+        newNode.type = 'dispatch'
+        newNode.data = { keyword: eventKeyword, config: {} } satisfies DispatchNodeData
+        if (newNodeOutputHandle === 'prev') {
+          newNode.position.x -= 20
+          newNode.position.y -= 20
+        } else if (newNodeOutputHandle === 'next') {
+          newNode.position.x -= 270
+          newNode.position.y -= 20
+        } else {
+          newNode.position.x -= 20
+          newNode.position.y -= 20
         }
       } else {
         return

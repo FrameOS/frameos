@@ -160,6 +160,7 @@ export type FieldType =
   | 'integer'
   | 'boolean'
   | 'color'
+  | 'date'
   | 'json'
   | 'node'
   | 'scene'
@@ -173,6 +174,7 @@ export const fieldTypes = [
   'integer',
   'boolean',
   'color',
+  'date',
   'json',
   'node',
   'scene',
@@ -331,6 +333,11 @@ export interface StateNodeData {
 
 export interface EventNodeData {
   keyword: string
+}
+
+export interface ButtonEventNodeData extends EventNodeData {
+  keyword: 'button'
+  label?: string
 }
 
 export interface DispatchNodeData {

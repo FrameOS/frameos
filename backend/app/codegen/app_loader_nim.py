@@ -41,9 +41,9 @@ def _as_float(v: Scalar, default: float) -> float:
             pass
     return default
 
-def _default_literal(field_type: str, default: Scalar, required: bool) -> str:
+def _default_literal(field_name: str, field_type: str, default: Scalar, required: bool) -> str:
     """Return a Nim literal/expression usable as the fallback/default element value."""
-    if field_type in ("string", "text", "select", "font"):
+    if field_type in ("string", "text", "select", "font", "date"):
         return _nim_quote(default if isinstance(default, str) else "")
     if field_type == "integer":
         return str(_as_int(default, 0))
@@ -65,7 +65,7 @@ def _default_literal(field_type: str, default: Scalar, required: bool) -> str:
         # fallback to black if not provided
         s = default if isinstance(default, str) and default else "#000000"
         return f'parseHtmlColor({_nim_quote(s)})'
-    raise ValueError(f"Unsupported field type: {field_type}")
+    raise ValueError(f"Unsupported field type: {field_type}, field name: {field_name}")
 
 def _scalar_getter(field_name: str, field_type: str, default_expr: str, required: bool) -> str:
     """
@@ -73,7 +73,7 @@ def _scalar_getter(field_name: str, field_type: str, default_expr: str, required
     Returns a Nim *expression* (often a 'block:' expression).
     """
     k = f'params{{"{field_name}"}}'
-    if field_type in ("string", "text", "select", "font"):
+    if field_type in ("string", "text", "select", "font", "date"):
         return f'{k}.getStr({default_expr})'
 
     if field_type == "integer":
@@ -150,7 +150,7 @@ def _scalar_getter(field_name: str, field_type: str, default_expr: str, required
       except CatchableError:
         discard
   v"""
-    raise ValueError(f"Unsupported field type: {field_type}")
+    raise ValueError(f"Unsupported field type: {field_type}, fieldName: {field_name}")
 
 def _field_elem_nim_type(field_type: str, required: bool) -> str:
     """Element type (for seqs)."""
@@ -218,7 +218,7 @@ def _seq_init_expr(field: Dict[str, Any], all_fields: Dict[str, Dict[str, Any]])
     ftype = field["type"]
     required = bool(field.get("required", False))
     elem_type = _field_elem_nim_type(ftype, required)
-    elem_default = _default_literal(ftype, field.get("value"), required)
+    elem_default = _default_literal(name, ftype, field.get("value"), required)
 
     seq_spec: List[List[Union[str, int]]] = field.get("seq", [])
     dims = len(seq_spec)
@@ -567,7 +567,7 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
             continue
 
         # Scalars
-        default_expr = _default_literal(field_type, field_default, field_required)
+        default_expr = _default_literal(field_name, field_type, field_default, field_required)
         getter_expr = _scalar_getter(field_name, field_type, default_expr, field_required)
         if getter_expr.startswith("block:"):
             formatted = _format_block_value_after_colon(getter_expr)

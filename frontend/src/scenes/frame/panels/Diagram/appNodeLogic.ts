@@ -40,7 +40,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
       appsModel,
       ['apps'],
       diagramLogic({ frameId, sceneId }),
-      ['nodes', 'edges', 'selectedNodeId', 'scene as currentScene', 'codeNodeLanguage'],
+      ['nodes', 'edges', 'scene as currentScene', 'codeNodeLanguage'],
       frameLogic({ frameId }),
       ['scenes'],
     ],
@@ -106,7 +106,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
           .map((edge) => edge.sourceHandle?.replace('field/', '') ?? ''),
       { resultEqualityCheck: equal },
     ],
-    isSelected: [(s) => [s.selectedNodeId, s.nodeId], (selectedNodeId, nodeId) => selectedNodeId === nodeId],
+    isSelected: [(s) => [s.node], (node) => node?.selected ?? false],
     sources: [
       (s) => [s.apps, s.node],
       (apps, node): Record<string, string> | null => {

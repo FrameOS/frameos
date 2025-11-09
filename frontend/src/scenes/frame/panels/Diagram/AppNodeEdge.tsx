@@ -31,10 +31,10 @@ export function AppNodeEdge({
         style={
           isNodeConnection
             ? selected
-              ? { strokeWidth: 8, stroke: '#ffffff' }
+              ? { strokeWidth: 8, stroke: '#f29cf6' }
               : { strokeWidth: 6, stroke: 'hsl(56 60% 70% / 1)' }
             : selected
-            ? { strokeWidth: 4, stroke: '#ffffff' }
+            ? { strokeWidth: 4, stroke: '#f29cf6' }
             : { strokeWidth: 2, stroke: '#c5c5c5' }
         }
       />
