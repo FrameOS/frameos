@@ -116,7 +116,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
           <div className="flex items-center gap-2">
             <div className="flex-1">Refresh interval</div>
             <Tooltip
-              title="Seconds between automatic re-renders of this scene. Can be a very small number for real-time rendering."
+              title="Seconds between automatic re-renders of this scene. Can be a large number (3600 seconds = 1 hour), or a very small number for real-time rendering (0.04s = 25fps)."
               containerClassName="ml-1 inline-block align-sub"
             >
               <InformationCircleIcon className="w-4 h-4 text-indigo-200" aria-label="Info" />
