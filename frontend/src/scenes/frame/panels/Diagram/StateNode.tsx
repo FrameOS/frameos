@@ -23,14 +23,14 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
         className={clsx(
           'shadow-lg border-2 h-full flex flex-col',
           isSelected
-            ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
+            ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
             : 'bg-black bg-opacity-70 border-[#81701d] shadow-[#81701d]/50'
         )}
       >
         <div
           className={clsx(
             'frameos-node-title text-xl p-2',
-            isSelected ? 'bg-indigo-900' : 'bg-[#7f6e1d]',
+            isSelected ? 'bg-fuchsia-900' : 'bg-[#7f6e1d]',
             'flex w-full justify-between items-center gap-1'
           )}
         >

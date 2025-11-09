@@ -24,12 +24,12 @@ const events: FrameEvent[] = _events as any
 export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
   const { width, height, defaultInterval } = useValues(frameLogic)
-  const { selectedNodeId, scene } = useValues(diagramLogic)
+  const { scene } = useValues(diagramLogic)
   const { selectNode, updateNodeData, copyAppJSON, deleteApp } = useActions(diagramLogic)
   const { updateScene } = useActions(frameLogic)
 
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { node, nodeEdges } = useValues(appNodeLogic(appNodeLogicProps))
+  const { node, nodeEdges, isSelected } = useValues(appNodeLogic(appNodeLogicProps))
   const keyword = (node?.data as EventNodeData | undefined)?.keyword ?? ''
   const data = (node?.data as EventNodeData) ?? ({ keyword: '' } satisfies EventNodeData)
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
@@ -67,14 +67,14 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
 
   const backgroundClassName = clsx(
     'shadow-lg border-2',
-    selectedNodeId === id
-      ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
+    isSelected
+      ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
       : 'bg-black bg-opacity-70 border-red-900 shadow-red-700/50 '
   )
 
   const titleClassName = clsx(
     'frameos-node-title text-xl p-1 px-2 gap-2',
-    selectedNodeId === id ? 'bg-indigo-900' : 'bg-red-900',
+    isSelected ? 'bg-fuchsia-900' : 'bg-red-900',
     'flex w-full justify-between items-center'
   )
 
@@ -152,7 +152,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   return (
     <div
       onClick={() => {
-        if (selectedNodeId !== id) {
+        if (!isSelected) {
           selectNode(id)
         }
       }}

@@ -10,6 +10,7 @@ import ReactFlow, {
   EdgeProps,
   useUpdateNodeInternals,
   ReactFlowProvider,
+  SelectionMode,
 } from 'reactflow'
 import { frameLogic } from '../../frameLogic'
 import {
@@ -218,6 +219,7 @@ function Diagram_({ sceneId }: DiagramProps) {
           deleteKeyCode={['Backspace', 'Delete']}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
+          selectionMode={SelectionMode.Partial}
         >
           <Background id="1" gap={24} color="#cccccc" variant={BackgroundVariant.Dots} />
           <div className="absolute top-1 right-1 z-10 flex gap-2">
