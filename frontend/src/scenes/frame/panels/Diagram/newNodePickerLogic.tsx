@@ -371,6 +371,14 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               })
             }
           }
+          for (const event of dispatchableEvents) {
+            options.push({
+              label: `dispatch: ${event.name}`,
+              value: `dispatch/${event.name}`,
+              type: 'string',
+              keyword: event.name,
+            })
+          }
           for (const { id, name } of scenes) {
             options.push({
               label: `scene: ${name}`,
@@ -432,9 +440,9 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         }
         return [
           ...priority['special'],
-          ...priority['dispatch'],
           ...priority['render'],
           ...priority['logic'],
+          ...priority['dispatch'],
           ...priority['legacy'],
           ...priority['other'],
         ]
@@ -702,6 +710,20 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           if (app.cache) {
             ;(newNode.data as AppNodeData).cache = { ...app.cache }
           }
+        }
+      } else if (value.startsWith('dispatch/')) {
+        const eventKeyword = value.substring(9)
+        newNode.type = 'dispatch'
+        newNode.data = { keyword: eventKeyword, config: {} } satisfies DispatchNodeData
+        if (newNodeOutputHandle === 'prev') {
+          newNode.position.x -= 20
+          newNode.position.y -= 20
+        } else if (newNodeOutputHandle === 'next') {
+          newNode.position.x -= 270
+          newNode.position.y -= 20
+        } else {
+          newNode.position.x -= 20
+          newNode.position.y -= 20
         }
       } else {
         return
