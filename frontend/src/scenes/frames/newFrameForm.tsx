@@ -40,6 +40,7 @@ export const newFrameForm = kea<newFrameFormType>([
         name: '',
         frame_host: '',
         device: 'web_only',
+        platform: 'pi-zero2',
         server_host:
           typeof window !== 'undefined'
             ? `${window.location.hostname}:${
@@ -52,6 +53,10 @@ export const newFrameForm = kea<newFrameFormType>([
       errors: (frame: Partial<NewFrameFormType>) => ({
         name: !frame.name ? 'Please enter a name' : null,
         frame_host: frame.mode === 'rpios' && !frame.frame_host ? 'Please enter a host' : null,
+        platform:
+          frame.mode && ['nixos', 'buildroot'].includes(frame.mode) && !frame.platform
+            ? 'Please pick a platform'
+            : null,
       }),
       submit: async (frame) => {
         try {

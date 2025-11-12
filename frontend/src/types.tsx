@@ -3,7 +3,7 @@ import { Edge, Node } from 'reactflow'
 export interface FrameType {
   id: number
   name: string
-  mode?: 'rpios' | 'nixos'
+  mode?: 'rpios' | 'nixos' | 'buildroot'
   frame_host: string
   frame_port: number
   frame_access_key: string
@@ -76,16 +76,18 @@ export interface FrameType {
   }
   palette?: Palette
   nix?: FrameNixConfig
+  buildroot?: FrameBuildrootConfig
   active_connections?: number
 }
 
-export type FrameMode = 'rpios' | 'nixos' | 'import'
+export type FrameMode = 'rpios' | 'nixos' | 'buildroot' | 'import'
 export interface NewFrameFormType {
   mode: FrameMode
   name?: string | null
   frame_host?: string | null
   device?: string | null
   server_host?: string | null
+  platform?: string | null
 }
 
 export interface GPIOButton {
@@ -573,4 +575,8 @@ export interface FrameNixConfig {
   platform?: string
   timezone?: string
   customModule?: string
+}
+
+export interface FrameBuildrootConfig {
+  platform?: string
 }

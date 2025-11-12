@@ -8,7 +8,15 @@ import { frameControlUrl, frameImageUrl, frameUrl } from '../../../../decorators
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
-import { devices, spectraPalettes, withCustomPalette, platforms, modes, devicesNixOS } from '../../../../devices'
+import {
+  devices,
+  spectraPalettes,
+  withCustomPalette,
+  buildrootPlatforms,
+  modes,
+  devicesNixOS,
+  nixosPlatforms,
+} from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 import { appsLogic } from '../Apps/appsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
@@ -81,7 +89,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       ),
                     },
                   ]
-                : [
+                : mode === 'nixos'
+                ? [
                     {
                       label: 'Collect NixOS garbage (on frame)',
                       onClick: () => {
@@ -106,7 +115,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                         <ArrowPathIcon className="w-5 h-5" />
                       ),
                     },
-                  ]),
+                  ]
+                : []),
               {
                 label: 'Import .json',
                 onClick: () => {
@@ -281,8 +291,15 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               label="Platform"
               tooltip='More coming soon... Try the generic "rpios" mode until then.'
             >
-              <Select name="nix.platform" options={platforms} />
+              <Select name="nix.platform" options={nixosPlatforms} />
             </Field>
+          ) : null}
+          {frameForm.mode === 'buildroot' ? (
+            <Group name="buildroot">
+              <Field name="platform" label="Platform">
+                <Select name="buildroot.platform" options={buildrootPlatforms} />
+              </Field>
+            </Group>
           ) : null}
           <Field name="rotate" label="Rotation">
             {({ value, onChange }) => (

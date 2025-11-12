@@ -1267,9 +1267,12 @@ async def api_frame_new(
             frame.agent = {} # mark as changed for the orm
             frame.agent['agentEnabled'] = False
             frame.agent['agentRunCommands'] = True
+            platform = data.platform or (frame.nix or {}).get('platform') or 'pi-zero2'
             if timezone := settings.get('defaults', {}).get('timezone'):
                 frame.nix = {} # mark as changed for the orm
                 frame.nix['timezone'] = timezone
+            else:
+                frame.nix = frame.nix or {}
             if wifi_ssid := settings.get('defaults', {}).get('wifiSSID'):
                 frame.network['wifiSSID'] = wifi_ssid
             if wifi_password := settings.get('defaults', {}).get('wifiPassword'):
@@ -1277,8 +1280,18 @@ async def api_frame_new(
             db.add(frame)
             db.commit()
             db.refresh(frame)
-            frame.nix = { **frame.nix, 'hostname': f'frame{frame.id}' }
+            frame.nix = { **frame.nix, 'hostname': f'frame{frame.id}', 'platform': platform }
             frame.frame_host = f'frame{frame.id}.local'
+            db.add(frame)
+            db.commit()
+            db.refresh(frame)
+        elif data.mode == "buildroot":
+            frame.mode = 'buildroot'
+            frame.ssh_user = 'root'
+            selected_platform = data.platform or (frame.buildroot or {}).get('platform') or 'luckfox-pico-plus'
+            frame.buildroot = { **(frame.buildroot or {}), 'platform': selected_platform }
+            if not frame.frame_host:
+                frame.frame_host = f'frame{frame.id}.local'
             db.add(frame)
             db.commit()
             db.refresh(frame)

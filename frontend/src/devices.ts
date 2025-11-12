@@ -170,9 +170,17 @@ export const withCustomPalette: Record<string, Palette> = {
 }
 
 // TODO: add more platforms
-export const platforms: Option[] = [{ value: 'pi-zero2', label: 'Raspberry Pi Zero W2' }]
+export const nixosPlatforms: Option[] = [{ value: 'pi-zero2', label: 'Raspberry Pi Zero W2' }]
+
+export const buildrootPlatforms: Option[] = [
+  { value: 'luckfox-pico-plus', label: 'Luckfox Pico Plus' },
+  { value: 'luckfox-pico-max', label: 'Luckfox Pico Max' },
+  { value: 'generic-rv1103', label: 'Generic RV1103' },
+  { value: 'generic-t113-s3', label: 'Generic T113-S3' },
+]
 
 export const modes: Option[] = [
   { value: 'rpios', label: 'Raspberry Pi OS (default)' },
   { value: 'nixos', label: 'NixOS (new, experimental)' },
+  { value: 'buildroot', label: 'Buildroot (beta)' },
 ]
