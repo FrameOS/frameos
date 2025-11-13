@@ -5,6 +5,7 @@ import { Modal } from '../../../components/Modal'
 import { sdCardModalLogic } from './sdCardModalLogic'
 import { FrameSettings } from '../panels/FrameSettings/FrameSettings'
 import { panelsLogic } from '../panels/panelsLogic'
+import { luckfoxBuildrootPlatformValues } from '../../../devices'
 
 export function SDCardModal() {
   const { frameId, frame, mode } = useValues(frameLogic)
@@ -12,8 +13,8 @@ export function SDCardModal() {
   const { showSDCardModal } = useValues(sdCardModalLogic({ frameId }))
   const { closeSDCardModal, buildSDCard } = useActions(sdCardModalLogic({ frameId }))
   const { openLogs } = useActions(panelsLogic({ frameId }))
-  const luckfoxPlatforms = ['luckfox-pico-plus', 'luckfox-pico-max']
-  const isLuckfoxBuildroot = mode === 'buildroot' && luckfoxPlatforms.includes(frame?.buildroot?.platform ?? '')
+  const isLuckfoxBuildroot =
+    mode === 'buildroot' && luckfoxBuildrootPlatformValues.includes(frame?.buildroot?.platform ?? '')
 
   return (
     <>

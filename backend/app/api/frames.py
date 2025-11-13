@@ -1305,8 +1305,13 @@ async def api_frame_new(
         elif data.mode == "buildroot":
             frame.mode = 'buildroot'
             frame.ssh_user = 'root'
-            selected_platform = data.platform or (frame.buildroot or {}).get('platform') or 'luckfox-pico-plus'
-            frame.buildroot = { **(frame.buildroot or {}), 'platform': selected_platform }
+            selected_platform = (data.platform or (frame.buildroot or {}).get('platform') or '').strip()
+            buildroot_settings = {**(frame.buildroot or {})}
+            if selected_platform:
+                buildroot_settings['platform'] = selected_platform
+            else:
+                buildroot_settings.pop('platform', None)
+            frame.buildroot = buildroot_settings
             if not frame.frame_host:
                 frame.frame_host = f'frame{frame.id}.local'
             db.add(frame)

@@ -50,7 +50,7 @@ export function NewFrame(): JSX.Element {
             size="small"
             color={mode === 'buildroot' ? 'primary' : 'secondary'}
             onClick={() => {
-              setNewFrameValues({ mode: 'buildroot', platform: 'luckfox-pico-plus' })
+              setNewFrameValues({ mode: 'buildroot', platform: '' })
             }}
           >
             Buildroot (alpha)

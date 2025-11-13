@@ -7,6 +7,7 @@ import { Header } from '../../components/Header'
 import { Panels } from './panels/Panels'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { panelsLogic } from './panels/panelsLogic'
+import { luckfoxBuildrootPlatformValues } from '../../devices'
 import { assetsLogic } from './panels/Assets/assetsLogic'
 import { FrameConnection } from '../frames/Frame'
 import { sdCardModalLogic } from './sdcard/sdCardModalLogic'
@@ -51,7 +52,7 @@ export function Frame(props: FrameSceneProps) {
   // TODO
   const firstEverForNixOS = false && frame.mode === 'nixos' && frame.status === 'uninitialized'
   const isLuckfoxBuildroot =
-    frame?.mode === 'buildroot' && ['luckfox-pico-plus', 'luckfox-pico-max'].includes(frame.buildroot?.platform ?? '')
+    frame?.mode === 'buildroot' && luckfoxBuildrootPlatformValues.includes(frame.buildroot?.platform ?? '')
   const canBuildSdImage = mode === 'nixos' || isLuckfoxBuildroot
 
   return (

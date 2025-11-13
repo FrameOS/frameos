@@ -169,15 +169,29 @@ export const withCustomPalette: Record<string, Palette> = {
   'pimoroni.inky_impression_13': spectraPalettes[0],
 }
 
-// TODO: add more platforms
 export const nixosPlatforms: Option[] = [{ value: 'pi-zero2', label: 'Raspberry Pi Zero W2' }]
 
-export const buildrootPlatforms: Option[] = [
-  { value: 'luckfox-pico-plus', label: 'Luckfox Pico Plus' },
-  { value: 'luckfox-pico-max', label: 'Luckfox Pico Max' },
-  { value: 'generic-rv1103', label: 'Generic RV1103' },
-  { value: 'generic-t113-s3', label: 'Generic T113-S3' },
+export const luckfoxBuildrootPlatformValues = [
+  'RV1103_Luckfox_Pico',
+  'RV1103_Luckfox_Pico_Mini',
+  'RV1103_Luckfox_Pico_Plus',
+  'RV1103_Luckfox_Pico_WebBee',
+  'RV1106_Luckfox_Pico_Pro_Max',
+  'RV1106_Luckfox_Pico_Ultra',
+  'RV1106_Luckfox_Pico_Ultra_W',
+  'RV1106_Luckfox_Pico_Pi',
+  'RV1106_Luckfox_Pico_Pi_W',
+  'RV1106_Luckfox_Pico_86Panel',
+  'RV1106_Luckfox_Pico_86Panel_W',
+  'RV1106_Luckfox_Pico_Zero',
 ]
+
+export const luckfoxBuildrootPlatforms: Option[] = luckfoxBuildrootPlatformValues.map((platform) => ({
+  value: platform,
+  label: platform,
+}))
+
+export const buildrootPlatforms: Option[] = [{ value: '', label: '-- Please select --' }, ...luckfoxBuildrootPlatforms]
 
 export const modes: Option[] = [
   { value: 'rpios', label: 'Raspberry Pi OS (default)' },

@@ -34,10 +34,37 @@ from .utils import find_nim_v2
 
 LUCKFOX_REPO_URL = "https://github.com/LuckfoxTECH/luckfox-pico.git"
 LUCKFOX_COMMIT = "994243753789e1b40ef91122e8b3688aae8f01b8"
-LUCKFOX_SUPPORTED_PLATFORMS = {
-    "luckfox-pico-plus": "luckfox_pico_plus",
-    "luckfox-pico-max": "luckfox_pico_max",
+LUCKFOX_HARDWARE_CHOICES = {
+    "RV1103_Luckfox_Pico": 0,
+    "RV1103_Luckfox_Pico_Mini": 1,
+    "RV1103_Luckfox_Pico_Plus": 2,
+    "RV1103_Luckfox_Pico_WebBee": 3,
+    "RV1106_Luckfox_Pico_Pro_Max": 4,
+    "RV1106_Luckfox_Pico_Ultra": 5,
+    "RV1106_Luckfox_Pico_Ultra_W": 6,
+    "RV1106_Luckfox_Pico_Pi": 7,
+    "RV1106_Luckfox_Pico_Pi_W": 8,
+    "RV1106_Luckfox_Pico_86Panel": 9,
+    "RV1106_Luckfox_Pico_86Panel_W": 10,
+    "RV1106_Luckfox_Pico_Zero": 11,
 }
+
+LUCKFOX_SUPPORTED_PLATFORMS: dict[str, tuple[str, int]] = {
+    name: (name, index) for name, index in LUCKFOX_HARDWARE_CHOICES.items()
+}
+
+LUCKFOX_SUPPORTED_PLATFORMS.update(
+    {
+        "luckfox-pico-plus": (
+            "RV1103_Luckfox_Pico_Plus",
+            LUCKFOX_HARDWARE_CHOICES["RV1103_Luckfox_Pico_Plus"],
+        ),
+        "luckfox-pico-max": (
+            "RV1106_Luckfox_Pico_Ultra",
+            LUCKFOX_HARDWARE_CHOICES["RV1106_Luckfox_Pico_Ultra"],
+        ),
+    }
+)
 
 
 def _sanitize_filename(value: str) -> str:
@@ -161,16 +188,17 @@ async def _build_nixos_sd_card_image(db: Session, redis: Redis, frame: Frame) ->
 
 async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) -> Path:
     platform = (frame.buildroot or {}).get("platform")
-    board = LUCKFOX_SUPPORTED_PLATFORMS.get(platform or "")
-    if not board:
+    board_entry = LUCKFOX_SUPPORTED_PLATFORMS.get(platform or "")
+    if not board_entry:
         raise RuntimeError("Unsupported Luckfox platform")
+    board, hardware_index = board_entry
 
     await log(
         db,
         redis,
         frame.id,
         "build",
-        f"Building Luckfox Pico image for platform {platform} (commit {LUCKFOX_COMMIT[:12]})",
+        f"Building Luckfox Pico image for platform {board} (commit {LUCKFOX_COMMIT[:12]})",
     )
 
     build_started = datetime.now()
@@ -231,9 +259,32 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
         worktree_created = True
 
         try:
+            selection_input = f"{hardware_index}\\n\\n\\n"
+
+            await log(
+                db,
+                redis,
+                frame.id,
+                "build",
+                f"Automating Luckfox lunch selection with choice {hardware_index} ({board})",
+            )
+
+            lunch_cmd = (
+                f"cd {shlex.quote(str(repo_path))} && "
+                f"printf %b {shlex.quote(selection_input)} | ./build.sh lunch"
+            )
+            status, _, _ = await exec_local_command(
+                db,
+                redis,
+                frame,
+                lunch_cmd,
+            )
+            if status != 0:
+                raise RuntimeError("Luckfox build.sh lunch failed")
+
             build_commands = [
-                f"./build.sh {board}",
-                f"./build.sh {board} build",
+                "./build.sh",
+                "./build.sh allsave",
             ]
 
             build_succeeded = False
@@ -247,8 +298,8 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
                 raise RuntimeError("Luckfox build.sh failed")
 
             pack_commands = [
-                f"./build.sh {board} pack",
-                f"./build.sh {board} image",
+                "./build.sh firmware",
+                "./build.sh updateimg",
             ]
             for command in pack_commands:
                 full_cmd = f"cd {shlex.quote(str(repo_path))} && {command}"
