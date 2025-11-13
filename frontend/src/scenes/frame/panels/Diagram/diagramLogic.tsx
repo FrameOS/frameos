@@ -165,6 +165,10 @@ export const diagramLogic = kea<diagramLogicType>([
     sceneName: [(s) => [s.scene], (scene) => scene?.name || (scene?.id ? `Scene: ${scene.id}` : 'Untitled scene')],
     selectedNode: [(s) => [s.nodes], (nodes): Node | null => nodes.find((node) => node.selected) ?? null],
     selectedNodeId: [(s) => [s.selectedNode], (node) => node?.id ?? null],
+    selectedNodeIds: [
+      (s) => [s.nodes],
+      (nodes): string[] => nodes.filter((node) => node.selected).map((node) => node.id),
+    ],
     edges: [
       (s) => [s.rawEdges],
       (rawEdges): Edge[] =>
@@ -317,8 +321,8 @@ export const diagramLogic = kea<diagramLogicType>([
     scene: (scene: FrameScene, oldScene: FrameScene) => {
       if (scene && !equal(scene.nodes, oldScene?.nodes)) {
         // nodes changed on the form, update our local state, but retain the selected flag
-        const selectedNodeId = values.selectedNodeId
-        const newNodes = scene.nodes.map((n) => (n.id === selectedNodeId ? { ...n, selected: true } : n))
+        const selectedNodeIds = values.selectedNodeIds
+        const newNodes = scene.nodes.map((n) => (selectedNodeIds.includes(n.id) ? { ...n, selected: true } : n))
         if (!equal(newNodes, values.nodes)) {
           actions.setNodes(newNodes)
         }
