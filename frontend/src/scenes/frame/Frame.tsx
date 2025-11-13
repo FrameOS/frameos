@@ -50,6 +50,9 @@ export function Frame(props: FrameSceneProps) {
     frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && frame.agent.agentRunCommands
   // TODO
   const firstEverForNixOS = false && frame.mode === 'nixos' && frame.status === 'uninitialized'
+  const isLuckfoxBuildroot =
+    frame?.mode === 'buildroot' && ['luckfox-pico-plus', 'luckfox-pico-max'].includes(frame.buildroot?.platform ?? '')
+  const canBuildSdImage = mode === 'nixos' || isLuckfoxBuildroot
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -72,7 +75,7 @@ export function Frame(props: FrameSceneProps) {
                   buttonColor="secondary"
                   className="items-center"
                   items={[
-                    ...(mode === 'nixos' ? [{ label: 'Build SD card...', onClick: () => openSDCardModal() }] : []),
+                    ...(canBuildSdImage ? [{ label: 'Build SD card...', onClick: () => openSDCardModal() }] : []),
                     { label: 'Re-Render', onClick: () => renderFrame() },
                     { label: 'Restart FrameOS', onClick: () => restartFrame() },
                     { label: 'Stop FrameOS', onClick: () => stopFrame() },

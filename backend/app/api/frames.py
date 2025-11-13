@@ -8,6 +8,7 @@ import asyncssh
 import hashlib
 import io
 import json
+import mimetypes
 import os
 import re
 import tempfile
@@ -1155,13 +1156,29 @@ async def api_frame_build_sd_image_event(id: int, db: Session = Depends(get_db),
         frame = db.get(Frame, id)
         if not frame:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-        name = (frame.name or "Untitled Frame").replace(" ", "_").replace("/", "_")
+        base_name = frame.name or f"frame{frame.id}"
+        sanitized = "".join(c if c.isalnum() or c in "-._" else "_" for c in base_name).strip("._-") or f"frame{frame.id}"
+        suffix = "".join(img_path.suffixes) or img_path.suffix or ".img"
+        filename = f"{sanitized}{suffix}"
+        quoted_filename = quote(filename)
 
-        filename = f"{name}.img.zst"
-        headers  = {
-            "Content-Disposition": f'attachment; filename="{filename}"'
+        mime, _ = mimetypes.guess_type(str(img_path))
+        if not mime and img_path.suffixes:
+            last_suffix = img_path.suffixes[-1]
+            if last_suffix == ".zst":
+                mime = "application/zstd"
+            elif last_suffix == ".gz":
+                mime = "application/gzip"
+            elif last_suffix == ".xz":
+                mime = "application/x-xz"
+            elif last_suffix == ".zip":
+                mime = "application/zip"
+
+        headers = {
+            "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quoted_filename}",
+            "Content-Length": str(img_path.stat().st_size),
         }
-        return StreamingResponse(sender(), headers=headers, media_type="application/zstd")
+        return StreamingResponse(sender(), headers=headers, media_type=mime or "application/octet-stream")
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
