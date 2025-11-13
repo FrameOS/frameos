@@ -192,11 +192,6 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
         if status != 0:
             raise RuntimeError("Failed to checkout Luckfox commit")
 
-        submodule_cmd = f"cd {shlex.quote(str(repo_path))} && git submodule update --init --recursive"
-        status, _, _ = await exec_local_command(db, redis, frame, submodule_cmd, log_command=submodule_cmd)
-        if status != 0:
-            raise RuntimeError("Failed to update Luckfox submodules")
-
         build_commands = [
             f"./build.sh {board}",
             f"./build.sh {board} build",
