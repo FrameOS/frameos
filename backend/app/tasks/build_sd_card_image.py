@@ -17,6 +17,7 @@ import shutil
 import tempfile
 import time
 from datetime import datetime, timezone
+import platform as platform_module
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ from .utils import find_nim_v2
 
 LUCKFOX_REPO_URL = "https://github.com/LuckfoxTECH/luckfox-pico.git"
 LUCKFOX_COMMIT = "994243753789e1b40ef91122e8b3688aae8f01b8"
+LUCKFOX_DOCKER_IMAGE = "luckfoxtech/luckfox_pico:1.0"
 LUCKFOX_HARDWARE_CHOICES = {
     "RV1103_Luckfox_Pico": 0,
     "RV1103_Luckfox_Pico_Mini": 1,
@@ -187,11 +189,13 @@ async def _build_nixos_sd_card_image(db: Session, redis: Redis, frame: Frame) ->
 
 
 async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) -> Path:
-    platform = (frame.buildroot or {}).get("platform")
-    board_entry = LUCKFOX_SUPPORTED_PLATFORMS.get(platform or "")
+    frame_platform = (frame.buildroot or {}).get("platform")
+    board_entry = LUCKFOX_SUPPORTED_PLATFORMS.get(frame_platform or "")
     if not board_entry:
         raise RuntimeError("Unsupported Luckfox platform")
     board, hardware_index = board_entry
+
+    run_in_docker = platform_module.system() == "Darwin"
 
     await log(
         db,
@@ -200,6 +204,16 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
         "build",
         f"Building Luckfox Pico image for platform {board} (commit {LUCKFOX_COMMIT[:12]})",
     )
+
+    if run_in_docker:
+        await log(
+            db,
+            redis,
+            frame.id,
+            "build",
+            "macOS host detected – running Luckfox SDK commands inside Docker image "
+            f"{LUCKFOX_DOCKER_IMAGE}",
+        )
 
     build_started = datetime.now()
     build_started_ts = time.time()
@@ -213,7 +227,34 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
-        repo_path = tmp_path / "luckfox-pico"
+        repo_path = (tmp_path / "luckfox-pico").resolve()
+
+        async def run_luckfox_command(command: str, *, log_command: str | bool = True):
+            if run_in_docker:
+                inner_command = shlex.quote(f"cd /home && {command}")
+                docker_cmd = (
+                    "docker run --rm --privileged "
+                    f"-v {shlex.quote(str(repo_path))}:/home "
+                    f"{LUCKFOX_DOCKER_IMAGE} "
+                    "/bin/bash -lc "
+                    f"{inner_command}"
+                )
+                return await exec_local_command(
+                    db,
+                    redis,
+                    frame,
+                    docker_cmd,
+                    log_command=log_command,
+                )
+
+            full_cmd = f"cd {shlex.quote(str(repo_path))} && {command}"
+            return await exec_local_command(
+                db,
+                redis,
+                frame,
+                full_cmd,
+                log_command=log_command,
+            )
 
         if vendor_repo_path.exists() and (vendor_repo_path / ".git").exists():
             await log(db, redis, frame.id, "build", f"Reusing cached Luckfox Pico SDK in {vendor_repo_path}")
@@ -270,14 +311,11 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
             )
 
             lunch_cmd = (
-                f"cd {shlex.quote(str(repo_path))} && "
                 f"printf %b {shlex.quote(selection_input)} | ./build.sh lunch"
             )
-            status, _, _ = await exec_local_command(
-                db,
-                redis,
-                frame,
+            status, _, _ = await run_luckfox_command(
                 lunch_cmd,
+                log_command=lunch_cmd,
             )
             if status != 0:
                 raise RuntimeError("Luckfox build.sh lunch failed")
@@ -289,8 +327,7 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
 
             build_succeeded = False
             for command in build_commands:
-                full_cmd = f"cd {shlex.quote(str(repo_path))} && {command}"
-                status, _, _ = await exec_local_command(db, redis, frame, full_cmd, log_command=command)
+                status, _, _ = await run_luckfox_command(command, log_command=command)
                 if status == 0:
                     build_succeeded = True
                     break
@@ -302,8 +339,7 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
                 "./build.sh updateimg",
             ]
             for command in pack_commands:
-                full_cmd = f"cd {shlex.quote(str(repo_path))} && {command}"
-                status, _, _ = await exec_local_command(db, redis, frame, full_cmd, log_command=command)
+                status, _, _ = await run_luckfox_command(command, log_command=command)
                 if status == 0:
                     break
 
@@ -335,7 +371,7 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
             candidates = [p for p in repo_path.rglob("*") if p.is_file()]
 
         board_hint = board.replace("_", "").lower()
-        name_hint = (platform or "").replace("-", "").lower()
+        name_hint = (frame_platform or "").replace("-", "").lower()
 
         def _is_candidate(path: Path) -> bool:
             if path.stat().st_mtime < build_started_ts:
@@ -373,7 +409,7 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
 
         safe_name = _sanitize_filename(frame.name or f"frame{frame.id}")
         suffix = "".join(source_path.suffixes) or source_path.suffix or ".img"
-        dest_name = f"{safe_name}-{platform}{suffix}"
+        dest_name = f"{safe_name}-{frame_platform}{suffix}"
         dest_path = cache_root / dest_name
         if dest_path.exists():
             dest_path.unlink()
