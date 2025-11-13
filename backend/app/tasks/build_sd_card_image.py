@@ -39,15 +39,6 @@ LUCKFOX_SUPPORTED_PLATFORMS = {
     "luckfox-pico-max": "luckfox_pico_max",
 }
 
-LUCKFOX_BOARD_CONFIGS = {
-    "luckfox_pico_plus": Path(
-        "project/cfg/BoardConfig_IPC/BoardConfig-SD_CARD-Buildroot-RV1103_Luckfox_Pico_Plus-IPC.mk"
-    ),
-    "luckfox_pico_max": Path(
-        "project/cfg/BoardConfig_IPC/BoardConfig-SD_CARD-Buildroot-RV1106_Luckfox_Pico_Pro_Max-IPC.mk"
-    ),
-}
-
 
 def _sanitize_filename(value: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-")
@@ -240,27 +231,6 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
         worktree_created = True
 
         try:
-            board_config_relative = LUCKFOX_BOARD_CONFIGS.get(board)
-            if not board_config_relative:
-                raise RuntimeError(f"No board config mapping available for {board}")
-
-            board_config_path = repo_path / board_config_relative
-            if not board_config_path.exists():
-                raise RuntimeError(f"Luckfox board config missing: {board_config_relative}")
-
-            board_config_link = repo_path / ".BoardConfig.mk"
-            if board_config_link.exists() or board_config_link.is_symlink():
-                board_config_link.unlink()
-
-            board_config_link.symlink_to(board_config_path)
-            await log(
-                db,
-                redis,
-                frame.id,
-                "build",
-                f"Using Luckfox board config {board_config_relative}",
-            )
-
             build_commands = [
                 f"./build.sh {board}",
                 f"./build.sh {board} build",
