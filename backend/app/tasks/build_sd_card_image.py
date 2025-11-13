@@ -234,6 +234,7 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
                 inner_command = shlex.quote(f"cd /home && {command}")
                 docker_cmd = (
                     "docker run --rm --privileged "
+                    "--platform linux/amd64 "
                     f"-v {shlex.quote(str(repo_path))}:/home "
                     f"{LUCKFOX_DOCKER_IMAGE} "
                     "/bin/bash -lc "
@@ -320,9 +321,14 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
             if status != 0:
                 raise RuntimeError("Luckfox build.sh lunch failed")
 
+            # ``./build.sh`` frequently aborts after the U-Boot step even though the
+            # follow-up ``allsave`` target succeeds and produces the artefacts we
+            # need.  Running ``allsave`` first avoids a noisy failure while keeping
+            # the plain build available as a fallback should the SDK change its
+            # expectations.
             build_commands = [
-                "./build.sh",
                 "./build.sh allsave",
+                "./build.sh",
             ]
 
             build_succeeded = False

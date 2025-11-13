@@ -220,6 +220,9 @@ function Diagram_({ sceneId }: DiagramProps) {
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           selectionMode={SelectionMode.Partial}
+          selectionOnDrag
+          selectionKeyCode={null}
+          panOnDrag={[1]}
         >
           <Background id="1" gap={24} color="#cccccc" variant={BackgroundVariant.Dots} />
           <div className="absolute top-1 right-1 z-10 flex gap-2">
