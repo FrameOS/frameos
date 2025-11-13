@@ -178,44 +178,98 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
 
     dest_path: Path | None = None
 
+    cache_root = Path.home() / ".cache" / "frameos" / "luckfox"
+    vendor_repo_path = cache_root / "vendor" / "luckfox-pico"
+
+    vendor_repo_path.parent.mkdir(parents=True, exist_ok=True)
+
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         repo_path = tmp_path / "luckfox-pico"
 
-        clone_cmd = f"git clone --filter=blob:none {shlex.quote(LUCKFOX_REPO_URL)} {shlex.quote(str(repo_path))}"
-        status, _, _ = await exec_local_command(db, redis, frame, clone_cmd, log_command=clone_cmd)
+        if vendor_repo_path.exists() and (vendor_repo_path / ".git").exists():
+            await log(db, redis, frame.id, "build", f"Reusing cached Luckfox Pico SDK in {vendor_repo_path}")
+        else:
+            if vendor_repo_path.exists():
+                shutil.rmtree(vendor_repo_path)
+            clone_cmd = (
+                f"git clone --filter=blob:none --depth=1 --single-branch "
+                f"{shlex.quote(LUCKFOX_REPO_URL)} {shlex.quote(str(vendor_repo_path))}"
+            )
+            status, _, _ = await exec_local_command(db, redis, frame, clone_cmd, log_command=clone_cmd)
+            if status != 0:
+                raise RuntimeError("Failed to clone Luckfox repository")
+
+        commit_check_cmd = (
+            f"cd {shlex.quote(str(vendor_repo_path))} && git cat-file -e {shlex.quote(LUCKFOX_COMMIT)}"
+        )
+        status, _, _ = await exec_local_command(
+            db,
+            redis,
+            frame,
+            commit_check_cmd,
+            log_command=False,
+            log_output=False,
+        )
         if status != 0:
-            raise RuntimeError("Failed to clone Luckfox repository")
+            fetch_cmd = (
+                f"cd {shlex.quote(str(vendor_repo_path))} && "
+                f"git fetch --filter=blob:none --depth=1 origin {shlex.quote(LUCKFOX_COMMIT)}"
+            )
+            status, _, _ = await exec_local_command(db, redis, frame, fetch_cmd, log_command=fetch_cmd)
+            if status != 0:
+                raise RuntimeError("Failed to fetch Luckfox commit")
 
-        checkout_cmd = f"cd {shlex.quote(str(repo_path))} && git checkout {shlex.quote(LUCKFOX_COMMIT)}"
-        status, _, _ = await exec_local_command(db, redis, frame, checkout_cmd, log_command=checkout_cmd)
+        worktree_created = False
+        worktree_cmd = (
+            f"cd {shlex.quote(str(vendor_repo_path))} && "
+            f"git worktree add --force {shlex.quote(str(repo_path))} {shlex.quote(LUCKFOX_COMMIT)}"
+        )
+        status, _, _ = await exec_local_command(db, redis, frame, worktree_cmd, log_command=worktree_cmd)
         if status != 0:
-            raise RuntimeError("Failed to checkout Luckfox commit")
+            raise RuntimeError("Failed to create Luckfox worktree")
+        worktree_created = True
 
-        build_commands = [
-            f"./build.sh {board}",
-            f"./build.sh {board} build",
-        ]
+        try:
+            build_commands = [
+                f"./build.sh {board}",
+                f"./build.sh {board} build",
+            ]
 
-        build_succeeded = False
-        for command in build_commands:
-            full_cmd = f"cd {shlex.quote(str(repo_path))} && {command}"
-            status, _, _ = await exec_local_command(db, redis, frame, full_cmd, log_command=command)
-            if status == 0:
-                build_succeeded = True
-                break
-        if not build_succeeded:
-            raise RuntimeError("Luckfox build.sh failed")
+            build_succeeded = False
+            for command in build_commands:
+                full_cmd = f"cd {shlex.quote(str(repo_path))} && {command}"
+                status, _, _ = await exec_local_command(db, redis, frame, full_cmd, log_command=command)
+                if status == 0:
+                    build_succeeded = True
+                    break
+            if not build_succeeded:
+                raise RuntimeError("Luckfox build.sh failed")
 
-        pack_commands = [
-            f"./build.sh {board} pack",
-            f"./build.sh {board} image",
-        ]
-        for command in pack_commands:
-            full_cmd = f"cd {shlex.quote(str(repo_path))} && {command}"
-            status, _, _ = await exec_local_command(db, redis, frame, full_cmd, log_command=command)
-            if status == 0:
-                break
+            pack_commands = [
+                f"./build.sh {board} pack",
+                f"./build.sh {board} image",
+            ]
+            for command in pack_commands:
+                full_cmd = f"cd {shlex.quote(str(repo_path))} && {command}"
+                status, _, _ = await exec_local_command(db, redis, frame, full_cmd, log_command=command)
+                if status == 0:
+                    break
+
+        finally:
+            if worktree_created:
+                remove_cmd = (
+                    f"cd {shlex.quote(str(vendor_repo_path))} && "
+                    f"git worktree remove --force {shlex.quote(str(repo_path))}"
+                )
+                await exec_local_command(
+                    db,
+                    redis,
+                    frame,
+                    remove_cmd,
+                    log_command=False,
+                    log_output=False,
+                )
 
         candidates: list[Path] = []
         search_roots = [
@@ -264,7 +318,6 @@ async def _build_luckfox_sd_card_image(db: Session, redis: Redis, frame: Frame) 
         filtered.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         source_path = filtered[0]
 
-        cache_root = Path.home() / ".cache" / "frameos" / "luckfox"
         cache_root.mkdir(parents=True, exist_ok=True)
 
         safe_name = _sanitize_filename(frame.name or f"frame{frame.id}")

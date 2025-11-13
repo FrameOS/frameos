@@ -25,14 +25,45 @@ async def exec_local_command(
     )
 
     async def pump(stream, tag, buf):
-        while True:
-            raw = await stream.readline()
-            if not raw:                       # EOF
-                break
-            line = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
-            buf.append(line)
+        pending = ""
+
+        async def _flush(segment: str):
+            if not segment:
+                return
+            buf.append(segment)
             if log_output:
-                await log(db, redis, int(frame.id), tag, line)
+                await log(db, redis, int(frame.id), tag, segment)
+
+        while True:
+            raw = await stream.read(1024)
+            if not raw:  # EOF
+                break
+
+            chunk = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+            pending += chunk
+
+            while True:
+                newline_index = pending.find("\n")
+                carriage_index = pending.find("\r")
+
+                split_index = -1
+                if newline_index != -1 and carriage_index != -1:
+                    split_index = min(newline_index, carriage_index)
+                elif newline_index != -1:
+                    split_index = newline_index
+                elif carriage_index != -1:
+                    split_index = carriage_index
+
+                if split_index == -1:
+                    break
+
+                segment = pending[:split_index].strip("\r")
+                pending = pending[split_index + 1 :]
+                await _flush(segment)
+
+        pending = pending.strip("\r")
+        if pending:
+            await _flush(pending)
 
     out_buf: list[str] = []
     err_buf: list[str] = []
