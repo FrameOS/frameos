@@ -104,7 +104,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                     },
                   ]),
               {
-                label: 'Import .json',
+                label: 'Import frame .json',
                 onClick: () => {
                   function handleFileSelect(event: Event): void {
                     const inputElement = event.target as HTMLInputElement
@@ -146,7 +146,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 loading: false,
               },
               {
-                label: 'Export .json',
+                label: 'Export frame .json',
                 onClick: () => {
                   downloadJson(frame, `${frame.name || `frame${frame.id}`}.json`)
                 },
@@ -162,7 +162,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 loading: buildZipLoading,
               },
               {
-                label: 'Download C source .zip',
+                label: 'Download C sources .zip',
                 onClick: () => {
                   downloadCSourceZip()
                 },

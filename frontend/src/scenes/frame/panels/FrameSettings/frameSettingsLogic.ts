@@ -50,7 +50,7 @@ export const frameSettingsLogic = kea<frameSettingsLogicType>([
             headers: { 'Content-Type': 'application/zip' },
           })
           if (!response.ok) {
-            throw new Error('Failed to download C source zip')
+            throw new Error('Failed to download C sources .zip')
           }
           downloadZip(await response.blob(), `frame_${props.frameId}_c_source.zip`)
           return false

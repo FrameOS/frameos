@@ -15,6 +15,8 @@ import { terminalLogic } from './panels/Terminal/terminalLogic'
 import { Switch } from '../../components/Switch'
 import { Form } from 'kea-forms'
 import { Field } from '../../components/Field'
+import { frameSettingsLogic } from './panels/FrameSettings/frameSettingsLogic'
+import { logsLogic } from './panels/Logs/logsLogic'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -42,6 +44,8 @@ export function Frame(props: FrameSceneProps) {
   const { openSDCardModal } = useActions(sdCardModalLogic(frameLogicProps))
   useMountedLogic(assetsLogic(frameLogicProps)) // Don't lose what we downloaded when navigating away from the tab
   useMountedLogic(terminalLogic(frameLogicProps))
+  useMountedLogic(frameSettingsLogic(frameLogicProps))
+  useMountedLogic(logsLogic(frameLogicProps))
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
 
   const canDeployAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && mode === 'rpios'
