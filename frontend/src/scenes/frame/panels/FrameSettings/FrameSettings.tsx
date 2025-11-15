@@ -83,7 +83,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       loading: buildCacheLoading,
                     },
                   ]
-                : [
+                : mode === 'nixos'
+                ? [
                     {
                       label: 'Collect NixOS garbage (on frame)',
                       onClick: () => {
@@ -102,7 +103,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       icon: <ArrowPathIcon className="w-5 h-5" />,
                       loading: collectGarbageBackendLoading,
                     },
-                  ]),
+                  ]
+                : []),
               {
                 label: 'Import frame .json',
                 onClick: () => {
