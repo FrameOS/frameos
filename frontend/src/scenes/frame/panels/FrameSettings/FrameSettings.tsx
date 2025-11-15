@@ -40,7 +40,13 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const { appsWithSaveAssets } = useValues(appsLogic)
   const { nixCollectGarbageFrame, nixCollectGarbageBackend, clearBuildCache, downloadBuildZip, downloadCSourceZip } =
     useActions(frameSettingsLogic({ frameId }))
-  const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
+  const {
+    buildCacheLoading,
+    buildZipLoading,
+    cSourceZipLoading,
+    collectGarbageFrameLoading,
+    collectGarbageBackendLoading,
+  } = useValues(frameSettingsLogic({ frameId }))
   const { openLogs } = useActions(panelsLogic({ frameId }))
   const url = frameUrl(frame)
   const controlUrl = frameControlUrl(frame)
@@ -73,11 +79,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                         clearBuildCache()
                         openLogs()
                       },
-                      icon: buildCacheLoading ? (
-                        <Spinner color="white" className="w-4 h-4" />
-                      ) : (
-                        <ArrowPathIcon className="w-5 h-5" />
-                      ),
+                      icon: <ArrowPathIcon className="w-5 h-5" />,
+                      loading: buildCacheLoading,
                     },
                   ]
                 : [
@@ -87,11 +90,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                         nixCollectGarbageFrame()
                         openLogs()
                       },
-                      icon: buildCacheLoading ? (
-                        <Spinner color="white" className="w-4 h-4" />
-                      ) : (
-                        <ArrowPathIcon className="w-5 h-5" />
-                      ),
+                      icon: <ArrowPathIcon className="w-5 h-5" />,
+                      loading: collectGarbageFrameLoading,
                     },
                     {
                       label: 'Collect NixOS garbage (on backend)',
@@ -99,11 +99,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                         nixCollectGarbageBackend()
                         openLogs()
                       },
-                      icon: buildCacheLoading ? (
-                        <Spinner color="white" className="w-4 h-4" />
-                      ) : (
-                        <ArrowPathIcon className="w-5 h-5" />
-                      ),
+                      icon: <ArrowPathIcon className="w-5 h-5" />,
+                      loading: collectGarbageBackendLoading,
                     },
                   ]),
               {
@@ -146,6 +143,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   fileInput.click()
                 },
                 icon: <ArrowDownTrayIcon className="w-5 h-5" />,
+                loading: false,
               },
               {
                 label: 'Export .json',
@@ -153,6 +151,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   downloadJson(frame, `${frame.name || `frame${frame.id}`}.json`)
                 },
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: false,
               },
               {
                 label: 'Download build .zip',
@@ -160,6 +159,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   downloadBuildZip()
                 },
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: buildZipLoading,
               },
               {
                 label: 'Download C source',
@@ -167,6 +167,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   downloadCSourceZip()
                 },
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: cSourceZipLoading,
               },
               {
                 label: 'Delete frame',
@@ -176,6 +177,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   }
                 },
                 icon: <TrashIcon className="w-5 h-5" />,
+                loading: false,
               },
             ]}
           />
