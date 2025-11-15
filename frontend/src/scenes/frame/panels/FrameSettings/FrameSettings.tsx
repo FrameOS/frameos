@@ -154,7 +154,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 loading: false,
               },
               {
-                label: 'Download build .zip',
+                label: 'Download Nim build .zip',
                 onClick: () => {
                   downloadBuildZip()
                 },
@@ -162,7 +162,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 loading: buildZipLoading,
               },
               {
-                label: 'Download C source',
+                label: 'Download C source .zip',
                 onClick: () => {
                   downloadCSourceZip()
                 },
