@@ -175,4 +175,5 @@ export const platforms: Option[] = [{ value: 'pi-zero2', label: 'Raspberry Pi Ze
 export const modes: Option[] = [
   { value: 'rpios', label: 'Raspberry Pi OS (default)' },
   { value: 'nixos', label: 'NixOS (new, experimental)' },
+  { value: 'buildroot', label: 'Buildroot (very early alpha)' },
 ]

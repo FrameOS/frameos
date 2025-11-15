@@ -162,7 +162,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 loading: buildZipLoading,
               },
               {
-                label: 'Download C sources .zip',
+                label: 'Generate C sources .zip',
                 onClick: () => {
                   downloadCSourceZip()
                 },

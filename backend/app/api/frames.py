@@ -541,7 +541,7 @@ async def api_frame_local_c_source_zip(
     with tempfile.TemporaryDirectory() as tmp:
         deployer = FrameDeployer(db, redis, frame, nim_path, tmp)
 
-        if frame.device == "buildroot":
+        if frame.mode == "buildroot":
             arch = "armv7l" # 32bit arm, explicitly for now
         else:
             try:
