@@ -41,6 +41,22 @@ export const frameSettingsLogic = kea<frameSettingsLogicType>([
         },
       },
     ],
+    cSourceZip: [
+      false,
+      {
+        downloadCSourceZip: async () => {
+          const response = await apiFetch(`/api/frames/${props.frameId}/download_c_source_zip`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/zip' },
+          })
+          if (!response.ok) {
+            throw new Error('Failed to download C source zip')
+          }
+          downloadZip(await response.blob(), `frame_${props.frameId}_c_source.zip`)
+          return false
+        },
+      },
+    ],
     collectGarbageFrame: [
       false,
       {

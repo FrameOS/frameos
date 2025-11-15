@@ -522,6 +522,70 @@ async def api_frame_local_build_zip(                 # noqa: D401
         return StreamingResponse(sender(), headers=headers, media_type="application/zip")
 
 
+@api_with_auth.post("/frames/{id:int}/download_c_source_zip")
+async def api_frame_local_c_source_zip(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    try:
+        nim_path = find_nim_v2()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Unable to locate Nim installation: {exc}",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        deployer = FrameDeployer(db, redis, frame, nim_path, tmp)
+
+        try:
+            arch = await deployer.get_cpu_architecture()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_GATEWAY,
+                detail=f"Unable to detect frame architecture: {exc}",
+            )
+
+        source_dir = deployer.create_local_source_folder(tmp)
+        await deployer.make_local_modifications(source_dir)
+        await copy_custom_fonts_to_local_source_folder(db, source_dir)
+
+        build_dir = os.path.join(tmp, f"build_{deployer.build_id}")
+        os.makedirs(build_dir, exist_ok=True)
+        await deployer.create_local_build_archive(build_dir, source_dir, arch)
+
+        zip_path = os.path.join(tmp, f"frameos_{deployer.build_id}_c_source.zip")
+        with zipfile.ZipFile(
+            zip_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            strict_timestamps=False,
+        ) as zf:
+            for root, _dirs, files in os.walk(build_dir):
+                for file in files:
+                    full = os.path.join(root, file)
+                    arc = os.path.relpath(full, build_dir)
+                    zf.write(full, arc)
+
+        async with aiofiles.open(zip_path, "rb") as fh:
+            zip_bytes = await fh.read()
+
+    async def sender():
+        yield zip_bytes
+
+    safe_name = (frame.name or "frame").replace(" ", "_").replace("/", "_")
+    filename = f"{safe_name}_{deployer.build_id}_c_source.zip"
+    headers = {
+        "Content-Disposition": (
+            f'attachment; filename="{_ascii_safe(filename)}"'
+        )
+    }
+    return StreamingResponse(sender(), headers=headers, media_type="application/zip")
+
+
 @api_no_auth.get("/frames/{id:int}/asset")
 async def api_frame_get_asset(
     id: int,

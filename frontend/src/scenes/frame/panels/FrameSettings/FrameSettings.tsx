@@ -38,9 +38,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic)
-  const { nixCollectGarbageFrame, nixCollectGarbageBackend, clearBuildCache, downloadBuildZip } = useActions(
-    frameSettingsLogic({ frameId })
-  )
+  const { nixCollectGarbageFrame, nixCollectGarbageBackend, clearBuildCache, downloadBuildZip, downloadCSourceZip } =
+    useActions(frameSettingsLogic({ frameId }))
   const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
   const { openLogs } = useActions(panelsLogic({ frameId }))
   const url = frameUrl(frame)
@@ -159,6 +158,13 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 label: 'Download build .zip',
                 onClick: () => {
                   downloadBuildZip()
+                },
+                icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Download C source',
+                onClick: () => {
+                  downloadCSourceZip()
                 },
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
               },
