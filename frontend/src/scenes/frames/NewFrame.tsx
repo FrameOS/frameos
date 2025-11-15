@@ -11,6 +11,7 @@ import { devices, devicesNixOS, buildrootPlatforms, nixosPlatforms } from '../..
 import { A } from 'kea-router'
 import { urls } from '../../urls'
 import { Spinner } from '../../components/Spinner'
+import { DropdownMenu } from '../../components/DropdownMenu'
 
 function isLocalServer(host?: string): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -39,35 +40,56 @@ export function NewFrame(): JSX.Element {
           </Button>
           <Button
             size="small"
-            color={mode === 'nixos' ? 'primary' : 'secondary'}
-            onClick={() => {
-              setNewFrameValues({ mode: 'nixos', platform: 'pi-zero2' })
-            }}
-          >
-            NixOS (alpha)
-          </Button>
-          <Button
-            size="small"
-            color={mode === 'buildroot' ? 'primary' : 'secondary'}
-            onClick={() => {
-              setNewFrameValues({ mode: 'buildroot', platform: '' })
-            }}
-          >
-            Buildroot (alpha)
-          </Button>
-          <Button
-            size="small"
             color={mode === 'import' ? 'primary' : 'secondary'}
             onClick={() => setNewFrameValue('mode', 'import')}
           >
             Import JSON
           </Button>
+          {mode === 'nixos' ? (
+            <Button
+              size="small"
+              color="primary"
+              onClick={() => {
+                setNewFrameValues({ mode: 'nixos', platform: 'pi-zero2' })
+              }}
+            >
+              NixOS
+            </Button>
+          ) : null}
+          {mode === 'buildroot' ? (
+            <Button
+              size="small"
+              color="primary"
+              onClick={() => {
+                setNewFrameValues({ mode: 'buildroot', platform: '' })
+              }}
+            >
+              Buildroot
+            </Button>
+          ) : null}
+          <DropdownMenu
+            buttonColor="secondary"
+            items={[
+              {
+                label: 'NixOS (alpha)',
+                onClick: () => {
+                  setNewFrameValues({ mode: 'nixos', platform: 'pi-zero2' })
+                },
+              },
+              {
+                label: 'Buildroot (alpha)',
+                onClick: () => {
+                  setNewFrameValues({ mode: 'buildroot', platform: '' })
+                },
+              },
+            ]}
+          />
         </div>
         {mode === 'rpios' ? (
           <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
             <p className="text-sm text-gray-500">
-              Enter the credentials of a running Raspberry Pi OS Lite (Bookworm) machine here. We will then deploy
-              FrameOS over SSH.
+              Enter the credentials of a running Raspberry Pi OS Lite machine here. We will then deploy FrameOS over
+              SSH.
             </p>
             <Field name="name" label="Name">
               <TextInput name="name" placeholder="Kitchen Frame" required />
@@ -117,8 +139,9 @@ export function NewFrame(): JSX.Element {
         ) : mode === 'nixos' ? (
           <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
             <p className="text-sm text-yellow-500">
-              This mode is <strong>under active development</strong>. Your frames could break with any new update, so
-              proceed with caution and take backups! Not all devices are supported yet.
+              NixOS mode is <strong>experimental</strong> and might get deprecated in favor of pure Buildroot. Your
+              frames could break with any new update, so proceed with caution and take backups! Not all devices are
+              supported yet.
             </p>
             <p className="text-sm text-gray-500">
               Steps: 1) add your frame, 2) add scenes to it, 3) download a SD card image, 4) flash it, 5) boot
