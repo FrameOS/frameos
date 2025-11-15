@@ -63,6 +63,7 @@ class Frame(Base):
     agent = mapped_column(JSON, nullable=True)
     palette = mapped_column(JSON, nullable=True)
     nix = mapped_column(JSON, nullable=True)
+    buildroot = mapped_column(JSON, nullable=True)
 
     # not used
     apps = mapped_column(JSON, nullable=True)
@@ -112,6 +113,7 @@ class Frame(Base):
             'agent': self.agent,
             'palette': self.palette,
             'nix': self.nix,
+            'buildroot': self.buildroot,
             'last_successful_deploy': self.last_successful_deploy,
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }

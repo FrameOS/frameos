@@ -76,6 +76,7 @@ export interface FrameType {
   }
   palette?: Palette
   nix?: FrameNixConfig
+  buildroot?: FrameBuildrootConfig
   active_connections?: number
 }
 
@@ -86,6 +87,7 @@ export interface NewFrameFormType {
   frame_host?: string | null
   device?: string | null
   server_host?: string | null
+  platform?: string | null
 }
 
 export interface GPIOButton {
@@ -573,4 +575,8 @@ export interface FrameNixConfig {
   platform?: string
   timezone?: string
   customModule?: string
+}
+
+export interface FrameBuildrootConfig {
+  platform?: string
 }

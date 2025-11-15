@@ -48,6 +48,7 @@ class FrameBase(BaseModel):
     agent: Optional[Dict[str, Any]]
     palette: Optional[Dict[str, Any]]
     nix: Optional[Dict[str, Any]] = None
+    buildroot: Optional[Dict[str, Any]] = None
     last_successful_deploy: Optional[Dict[str, Any]]
     last_successful_deploy_at: Optional[datetime]
     active_connections: Optional[int] = None
@@ -104,6 +105,7 @@ class FrameUpdateRequest(BaseModel):
     agent: Optional[Dict[str, Any]] = None
     palette: Optional[Dict[str, Any]] = None
     nix: Optional[Dict[str, Any]] = None
+    buildroot: Optional[Dict[str, Any]] = None
     next_action: Optional[str] = None
 
 class FrameLogsResponse(BaseModel):
