@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1.6
-ARG DEBIAN_RELEASE=bookworm
-FROM debian:${DEBIAN_RELEASE} AS builder
-ARG DEBIAN_RELEASE
-ENV DEBIAN_RELEASE=${DEBIAN_RELEASE}
+ARG BASE_IMAGE=debian:bookworm
+FROM ${BASE_IMAGE} AS builder
+ARG BASE_IMAGE
+ARG DISTRO_NAME=pios
+ARG DISTRO_RELEASE=bookworm
+ARG TARGET_NAME=${DISTRO_NAME}-${DISTRO_RELEASE}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -10,7 +12,6 @@ ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 ARG LGPIO_REPO=https://github.com/joan2937/lg.git
 ARG LGPIO_VERSION=v0.2.2
-ARG TARGET_NAME=pios-${DEBIAN_RELEASE}
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \

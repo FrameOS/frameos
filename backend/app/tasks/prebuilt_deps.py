@@ -67,16 +67,35 @@ async def fetch_prebuilt_manifest(base_url: str | None = None) -> dict[str, Preb
         return entries
 
 
+def _normalize_ubuntu_release(version: str) -> str | None:
+    release = (version or "").lower().strip()
+    release = release.replace("lts", "").strip()
+    if release.startswith("22.04") or release.startswith("jammy"):
+        return "22.04"
+    if release.startswith("24.04") or release.startswith("noble"):
+        return "24.04"
+    return None
+
+
 def resolve_prebuilt_target(distro: str, version: str, arch: str) -> str | None:
+    distro_input = (distro or "").lower()
     distro_key = {
         "raspios": "pios",
         "pios": "pios",
-    }.get((distro or "").lower())
+        "ubuntu": "ubuntu",
+    }.get(distro_input)
     if not distro_key:
         return None
 
+    release_key: str | None = None
     release = (version or "").lower()
-    if release not in {"buster", "bookworm", "trixie"}:
+    if distro_key == "pios":
+        allowed = {"buster", "bookworm", "trixie"}
+        if release in allowed:
+            release_key = release
+    elif distro_key == "ubuntu":
+        release_key = _normalize_ubuntu_release(version)
+    if not release_key:
         return None
 
     arch_key = {
@@ -87,11 +106,16 @@ def resolve_prebuilt_target(distro: str, version: str, arch: str) -> str | None:
         "armv7l": "armhf",
         "armv6l": "armhf",
         "armhf": "armhf",
+        "x86_64": "amd64",
+        "amd64": "amd64",
     }.get((arch or "").lower())
     if not arch_key:
         return None
 
-    return f"{distro_key}-{release}-{arch_key}"
+    if distro_key == "pios" and arch_key == "amd64":
+        return None
+
+    return f"{distro_key}-{release_key}-{arch_key}"
 
 
 __all__ = [

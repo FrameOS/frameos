@@ -1,13 +1,13 @@
 # Prebuilt dependency builder
 
-These scripts produce Nim, QuickJS and lgpio builds for the Raspberry Pi OS
-variants we care about. They run each build inside a Debian container matching
-one of the following releases and architectures:
+These scripts produce Nim, QuickJS and lgpio builds for the Raspberry Pi OS and
+Ubuntu LTS variants we care about. They run each build inside a container
+matching one of the following releases and architectures:
 
-- Raspberry Pi OS (Debian **buster**)
-- Raspberry Pi OS (Debian **bookworm**)
-- Raspberry Pi OS (Debian **trixie** preview)
-- **armhf** (32‑bit ARMv7) and **arm64** (AArch64)
+- Raspberry Pi OS (Debian **buster**, **bookworm**, **trixie** preview)
+- Ubuntu **22.04** LTS (Jammy Jellyfish)
+- Ubuntu **24.04** LTS (Noble Numbat)
+- **armhf** (32‑bit ARMv7), **arm64** (AArch64) and **amd64** (x86_64)
 
 ## Requirements
 
@@ -20,12 +20,13 @@ one of the following releases and architectures:
 
 ```bash
 # From the repository root
-./tools/prebuilt-deps/build.sh          # builds all 6 combos
-./tools/prebuilt-deps/build.sh pios-bookworm-arm64  # single target
+./tools/prebuilt-deps/build.sh          # builds every supported combo
+./tools/prebuilt-deps/build.sh pios-bookworm-arm64  # Raspberry Pi OS example
+./tools/prebuilt-deps/build.sh ubuntu-24.04-amd64   # Ubuntu example
 ```
 
 The script drops results under `build/prebuilt-deps/<target>/` where `<target>`
-looks like `pios-bookworm-armhf`. Each folder contains versioned component
+looks like `pios-bookworm-armhf` or `ubuntu-24.04-amd64`. Each folder contains versioned component
 directories so you can keep several revisions side-by-side, e.g.:
 
 ```
@@ -46,8 +47,9 @@ You can upload the entire folder as a tarball to your cache server.
 Each dependency (Nim, QuickJS, lgpio) is built by its own Dockerfile. When you
 rerun the builder it reuses any dependency whose `.build-info` marker matches
 the requested versions/platform so you only rebuild the missing pieces. Delete a
-component directory (e.g. `rm -rf build/prebuilt-deps/pios-bookworm-arm64/nim`)
-or the entire target folder to force a rebuild.
+component directory (e.g. `rm -rf build/prebuilt-deps/pios-bookworm-arm64/nim`
+or `build/prebuilt-deps/ubuntu-22.04-amd64/nim`) or the entire target folder to
+force a rebuild.
 
 ### Custom versions
 

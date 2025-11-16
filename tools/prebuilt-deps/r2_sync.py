@@ -76,12 +76,25 @@ DEFAULT_BUCKET = os.environ.get("R2_BUCKET", "frameos-archive")
 DEFAULT_PREFIX = os.environ.get("R2_PREFIX", "prebuilt-deps")
 
 # Keep the target matrix in sync with tools/prebuilt-deps/build.sh
-RELEASES = ["bookworm", "trixie"]
-ARCHES = ["armhf", "arm64"]
-COMPONENTS = ["nim", "quickjs", "lgpio"]
+DEFAULT_TARGETS = [
+    "pios-buster-armhf",
+    "pios-buster-arm64",
+    "pios-bookworm-armhf",
+    "pios-bookworm-arm64",
+    "pios-trixie-armhf",
+    "pios-trixie-arm64",
+    "ubuntu-22.04-armhf",
+    "ubuntu-22.04-arm64",
+    "ubuntu-22.04-amd64",
+    "ubuntu-24.04-armhf",
+    "ubuntu-24.04-arm64",
+    "ubuntu-24.04-amd64",
+]
+COMPONENTS = ["quickjs", "lgpio"]
 TARGET_PLATFORMS = {
     "armhf": "linux/arm/v7",
     "arm64": "linux/arm64",
+    "amd64": "linux/amd64",
 }
 
 
@@ -177,11 +190,17 @@ def parse_args() -> argparse.Namespace:
 def desired_targets(custom: Optional[Iterable[str]]) -> List[str]:
     if custom:
         return list(custom)
-    targets: List[str] = []
-    for release in RELEASES:
-        for arch in ARCHES:
-            targets.append(f"pios-{release}-{arch}")
-    return targets
+    return list(DEFAULT_TARGETS)
+
+
+def target_distro_release_arch(target: str) -> Tuple[str, str, str]:
+    parts = target.split("-")
+    if len(parts) < 3:
+        return "", "", ""
+    distro = parts[0]
+    arch = parts[-1]
+    release = "-".join(parts[1:-1])
+    return distro, release, arch
 
 
 def s3_client():
@@ -247,19 +266,14 @@ def component_object_key(prefix: str, target: str, component: str, version: str)
     return f"{prefix}/{target}/{component}-{version}.tar.gz"
 
 
-def target_release_arch(target: str) -> Tuple[str, str]:
-    parts = target.split("-")
-    if len(parts) >= 3:
-        return parts[1], parts[2]
-    return "", ""
-
-
 def write_local_metadata(entry: ManifestEntry, target_dir: Path) -> None:
-    release, arch = target_release_arch(entry.target)
+    distro, release, arch = target_distro_release_arch(entry.target)
     platform = TARGET_PLATFORMS.get(arch, "")
     payload = {
         "target": entry.target,
-        "debian_release": release,
+        "distribution": distro,
+        "release": release,
+        "arch": arch,
         "platform": platform,
         "nim_version": entry.versions.get("nim", ""),
         "quickjs_version": entry.versions.get("quickjs", ""),

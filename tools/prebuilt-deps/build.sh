@@ -12,27 +12,42 @@ LGPIO_REPO="${LGPIO_REPO:-https://github.com/joan2937/lg.git}"
 
 declare -a COMPONENTS=("nim" "quickjs" "lgpio")
 
-RELEASES=("bookworm" "trixie")
-ARCH_MATRIX=(
-  "armhf:linux/arm/v7"
-  "arm64:linux/arm64"
+TARGET_MATRIX=(
+  "pios|buster|armhf|linux/arm/v7|debian:buster"
+  "pios|buster|arm64|linux/arm64|debian:buster"
+  "pios|bookworm|armhf|linux/arm/v7|debian:bookworm"
+  "pios|bookworm|arm64|linux/arm64|debian:bookworm"
+  "pios|trixie|armhf|linux/arm/v7|debian:trixie"
+  "pios|trixie|arm64|linux/arm64|debian:trixie"
+  "ubuntu|22.04|armhf|linux/arm/v7|ubuntu:22.04"
+  "ubuntu|22.04|arm64|linux/arm64|ubuntu:22.04"
+  "ubuntu|22.04|amd64|linux/amd64|ubuntu:22.04"
+  "ubuntu|24.04|armhf|linux/arm/v7|ubuntu:24.04"
+  "ubuntu|24.04|arm64|linux/arm64|ubuntu:24.04"
+  "ubuntu|24.04|amd64|linux/amd64|ubuntu:24.04"
 )
+
+declare -A TARGET_INFO=()
+for entry in "${TARGET_MATRIX[@]}"; do
+  IFS="|" read -r distro release arch platform base_image <<<"${entry}"
+  target="${distro}-${release}-${arch}"
+  TARGET_INFO["${target}"]="${distro}|${release}|${arch}|${platform}|${base_image}"
+done
 
 declare -a REQUESTED_TARGETS=()
 if [[ $# -gt 0 ]]; then
   for arg in "$@"; do
-    if [[ ! $arg =~ ^pios-(buster|bookworm|trixie)-(armhf|arm64)$ ]]; then
-      echo "Unknown target '$arg'. Expected format pios-<buster|bookworm|trixie>-<armhf|arm64>." >&2
+    if [[ -z "${TARGET_INFO["${arg}"]:-}" ]]; then
+      echo "Unknown target '${arg}'." >&2
+      echo "Valid targets: ${!TARGET_INFO[*]}" >&2
       exit 1
     fi
     REQUESTED_TARGETS+=("$arg")
   done
 else
-  for release in "${RELEASES[@]}"; do
-    for entry in "${ARCH_MATRIX[@]}"; do
-      arch_name="${entry%%:*}"
-      REQUESTED_TARGETS+=("pios-${release}-${arch_name}")
-    done
+  for entry in "${TARGET_MATRIX[@]}"; do
+    IFS="|" read -r distro release arch _ <<<"${entry}"
+    REQUESTED_TARGETS+=("${distro}-${release}-${arch}")
   done
 fi
 
@@ -60,29 +75,13 @@ component_marker() {
 }
 
 for target in "${REQUESTED_TARGETS[@]}"; do
-  release="${target#pios-}"
-  release="${release%-*}"
-  arch="${target##*-}"
-
-  platform=""
-  for entry in "${ARCH_MATRIX[@]}"; do
-    arch_name="${entry%%:*}"
-    plat="${entry#*:}"
-    if [[ "${arch_name}" == "${arch}" ]]; then
-      platform="${plat}"
-      break
-    fi
-  done
-
-  if [[ -z "${platform}" ]]; then
-    echo "Could not map arch '${arch}' to a docker platform" >&2
-    exit 1
-  fi
+  info="${TARGET_INFO["${target}"]}"
+  IFS="|" read -r distro release arch platform base_image <<<"${info}"
 
   dest="${OUTPUT_BASE}/${target}"
   mkdir -p "${dest}"
 
-  echo "\n=== Target ${target} (Debian ${release}, platform ${platform}) ===" >&2
+  echo "\n=== Target ${target} (${distro} ${release}, platform ${platform}) ===" >&2
 
   for component in "${COMPONENTS[@]}"; do
     component_args=()
@@ -135,7 +134,9 @@ for target in "${REQUESTED_TARGETS[@]}"; do
     docker buildx build \
       --progress=plain \
       --platform "${platform}" \
-      --build-arg "DEBIAN_RELEASE=${release}" \
+      --build-arg "BASE_IMAGE=${base_image}" \
+      --build-arg "DISTRO_NAME=${distro}" \
+      --build-arg "DISTRO_RELEASE=${release}" \
       --build-arg "TARGET_NAME=${target}" \
       "${component_args[@]}" \
       --output "type=local,dest=${comp_dest}" \
@@ -148,7 +149,9 @@ for target in "${REQUESTED_TARGETS[@]}"; do
   cat >"${dest}/metadata.json" <<META
 {
   "target": "${target}",
-  "debian_release": "${release}",
+  "distribution": "${distro}",
+  "release": "${release}",
+  "arch": "${arch}",
   "platform": "${platform}",
   "nim_version": "${NIM_VERSION}",
   "quickjs_version": "${QUICKJS_VERSION}",
