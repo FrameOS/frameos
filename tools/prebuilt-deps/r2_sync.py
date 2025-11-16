@@ -77,12 +77,10 @@ DEFAULT_PREFIX = os.environ.get("R2_PREFIX", "prebuilt-deps")
 
 # Keep the target matrix in sync with tools/prebuilt-deps/build.sh
 DEFAULT_TARGETS = [
-    "pios-buster-armhf",
-    "pios-buster-arm64",
-    "pios-bookworm-armhf",
-    "pios-bookworm-arm64",
-    "pios-trixie-armhf",
-    "pios-trixie-arm64",
+    "debian-bookworm-armhf",
+    "debian-bookworm-arm64",
+    "debian-trixie-armhf",
+    "debian-trixie-arm64",
     "ubuntu-22.04-armhf",
     "ubuntu-22.04-arm64",
     "ubuntu-22.04-amd64",
@@ -152,7 +150,7 @@ def parse_args() -> argparse.Namespace:
         nargs="*",
         help=(
             "Targets to operate on (defaults to the same matrix as build.sh). "
-            "Examples: pios-bookworm-armhf pios-bookworm-arm64"
+            "Examples: debian-bookworm-armhf debian-bookworm-arm64"
         ),
     )
 
