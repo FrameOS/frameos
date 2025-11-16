@@ -13,6 +13,7 @@ in lock-step.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -104,6 +105,7 @@ class ManifestEntry:
     metadata_key: Optional[str] = None
     updated_at: str = ""
     component_keys: Optional[Dict[str, str]] = None
+    component_md5sums: Optional[Dict[str, str]] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, str]) -> "ManifestEntry":
@@ -114,6 +116,7 @@ class ManifestEntry:
             metadata_key=data.get("metadata_key"),
             updated_at=data.get("updated_at", ""),
             component_keys=data.get("component_keys"),
+            component_md5sums=data.get("component_md5sums"),
         )
 
     def to_dict(self) -> Dict[str, str]:
@@ -123,6 +126,7 @@ class ManifestEntry:
             "object_key": self.object_key,
             "updated_at": self.updated_at,
             "component_keys": self.component_keys,
+            "component_md5sums": self.component_md5sums,
         }
         if self.metadata_key:
             data["metadata_key"] = self.metadata_key
@@ -341,6 +345,51 @@ def make_tarball(source_dir: Path, identifier: str, component: str) -> Path:
     return Path(temp_path)
 
 
+def file_md5sum(path: Path) -> str:
+    digest = hashlib.md5()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def head_object_md5sum(client, bucket: str, key: str) -> Optional[str]:
+    try:
+        response = client.head_object(Bucket=bucket, Key=key)
+    except ClientError as exc:
+        if exc.response["Error"].get("Code") in {"404", "NoSuchKey"}:
+            return None
+        raise
+    etag = response.get("ETag")
+    if not etag:
+        return None
+    return etag.strip('"')
+
+
+def ensure_manifest_md5sums(client, bucket: str, manifest: Dict[str, List[ManifestEntry]]) -> bool:
+    changed = False
+    cache: Dict[str, str] = {}
+    for entry_list in manifest.values():
+        for entry in entry_list:
+            if not entry.component_keys:
+                continue
+            if entry.component_md5sums is None:
+                entry.component_md5sums = {}
+            for component, key in entry.component_keys.items():
+                if entry.component_md5sums.get(component):
+                    continue
+                if key in cache:
+                    entry.component_md5sums[component] = cache[key]
+                    changed = True
+                    continue
+                md5sum = head_object_md5sum(client, bucket, key)
+                if md5sum:
+                    cache[key] = md5sum
+                    entry.component_md5sums[component] = md5sum
+                    changed = True
+    return changed
+
+
 def upload_target(
     client,
     bucket: str,
@@ -356,6 +405,7 @@ def upload_target(
 
     identifier = package_identifier(metadata)
     component_keys: Dict[str, str] = {}
+    component_md5sums: Dict[str, str] = {}
     components_to_upload = []
     for component in COMPONENTS:
         version = component_version(metadata, component)
@@ -384,8 +434,11 @@ def upload_target(
         needs_upload = True
         if not force:
             try:
-                client.head_object(Bucket=bucket, Key=object_key)
+                response = client.head_object(Bucket=bucket, Key=object_key)
                 needs_upload = False
+                md5sum = response.get("ETag")
+                if md5sum:
+                    component_md5sums[component] = md5sum.strip('"')
             except ClientError as exc:
                 if exc.response["Error"].get("Code") not in {"404", "NoSuchKey"}:
                     raise
@@ -403,6 +456,7 @@ def upload_target(
         for component, comp_dir, object_key in components_to_upload or []:
             tarball = make_tarball(comp_dir, identifier, component)
             tarballs.append(tarball)
+            component_md5sums[component] = file_md5sum(tarball)
             client.upload_file(
                 Filename=str(tarball),
                 Bucket=bucket,
@@ -417,6 +471,7 @@ def upload_target(
             object_key=None,
             updated_at=datetime.now(timezone.utc).isoformat(),
             component_keys=component_keys,
+            component_md5sums=component_md5sums or None,
         )
         manifest[entry.target] = [entry]
     finally:
@@ -521,6 +576,7 @@ def ensure_build(targets: List[str], build_script: str):
 def command_upload(args):
     client = s3_client()
     manifest = load_manifest(client, args.bucket, args.manifest_key)
+    ensure_manifest_md5sums(client, args.bucket, manifest)
     targets = desired_targets(args.targets)
     for target_dir in iter_local_targets():
         if target_dir.name not in targets:
@@ -552,6 +608,7 @@ def command_sync(args):
     targets = desired_targets(args.targets)
     client = s3_client()
     manifest = load_manifest(client, args.bucket, args.manifest_key)
+    ensure_manifest_md5sums(client, args.bucket, manifest)
     latest = latest_entries(manifest)
 
     for target in targets:
@@ -569,6 +626,7 @@ def command_sync(args):
     ensure_build(missing, args.build_script)
 
     manifest = load_manifest(client, args.bucket, args.manifest_key)
+    ensure_manifest_md5sums(client, args.bucket, manifest)
     to_upload = set(missing)
     for target_dir in iter_local_targets() or []:
         if target_dir.name in to_upload:
