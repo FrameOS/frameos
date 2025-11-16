@@ -236,16 +236,14 @@ class CrossCompiler:
                     libfreetype6-dev
 
                 export HOME=/toolchain-home
-                mkdir -p "$HOME/.nimble" "$HOME/.choosenim"
-                if [ -x "/prebuilt/nim/bin/nim" ]; then
+                mkdir -p "$HOME/.nimble"
+                if [ -x "$HOME/nim-prebuilt/bin/nim" ]; then
+                    export PATH="$HOME/nim-prebuilt/bin:$PATH"
+                elif [ -x "/prebuilt/nim/bin/nim" ]; then
                     export PATH="/prebuilt/nim/bin:$PATH"
                 else
-                    export PATH="$HOME/.nimble/bin:$HOME/.choosenim/current/bin:$PATH"
-                    if [ ! -x "$HOME/.nimble/bin/nimble" ]; then
-                        curl -L https://nim-lang.org/choosenim/init.sh -o /tmp/choosenim.sh
-                        sh /tmp/choosenim.sh -y
-                        rm -f /tmp/choosenim.sh
-                    fi
+                    echo "Missing prebuilt Nim compiler (expected at $HOME/nim-prebuilt or /prebuilt/nim)" >&2
+                    exit 1
                 fi
 
                 cd /src
@@ -303,6 +301,18 @@ class CrossCompiler:
             path = await self._ensure_prebuilt_component(component)
             if path:
                 self.prebuilt_components[component] = path
+
+        nim_component = self.prebuilt_components.get("nim")
+        if nim_component:
+            self._stage_prebuilt_nim(nim_component)
+        else:
+            await self._log(
+                "stderr",
+                "- Nim prebuilt component unavailable; cross compilation cannot continue",
+            )
+            raise RuntimeError(
+                "Prebuilt Nim compiler missing – rerun prebuilt builder or refresh the cache",
+            )
 
     async def _ensure_prebuilt_component(self, component: str) -> Path | None:
         if not self.prebuilt_entry:
@@ -371,6 +381,20 @@ class CrossCompiler:
             for chunk in iter(lambda: fh.read(1024 * 1024), b""):
                 hasher.update(chunk)
         return hasher.hexdigest()
+
+    def _stage_prebuilt_nim(self, nim_dir: Path) -> None:
+        dest = self.home_dir / "nim-prebuilt"
+        marker_src = nim_dir / ".build-info"
+        marker_dest = dest / ".build-info"
+        if dest.exists():
+            if (
+                marker_src.exists()
+                and marker_dest.exists()
+                and marker_src.read_text() == marker_dest.read_text()
+            ):
+                return
+            shutil.rmtree(dest)
+        shutil.copytree(nim_dir, dest, dirs_exist_ok=True)
 
     def _stage_quickjs(self, source_dir: str) -> None:
         quickjs_dir = self.prebuilt_components.get("quickjs")
