@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.6
 ARG DEBIAN_RELEASE=bookworm
 FROM debian:${DEBIAN_RELEASE} AS builder
+ARG DEBIAN_RELEASE
+ENV DEBIAN_RELEASE=${DEBIAN_RELEASE}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
