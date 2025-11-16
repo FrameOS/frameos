@@ -360,6 +360,13 @@ def upload_target(
                 file=sys.stderr,
             )
             return
+        build_info_file = comp_dir / ".build-info"
+        if not build_info_file.is_file():
+            print(
+                f"Skipping {target_dir.name}: {comp_dir.name} missing .build-info",
+                file=sys.stderr,
+            )
+            return
         object_key = component_object_key(prefix, metadata["target"], component, version)
         component_keys[component] = object_key
         needs_upload = True
