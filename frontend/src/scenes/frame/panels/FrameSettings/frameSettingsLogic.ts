@@ -57,6 +57,22 @@ export const frameSettingsLogic = kea<frameSettingsLogicType>([
         },
       },
     ],
+    binaryZip: [
+      false,
+      {
+        downloadBinaryZip: async () => {
+          const response = await apiFetch(`/api/frames/${props.frameId}/download_binary_zip`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/zip' },
+          })
+          if (!response.ok) {
+            throw new Error('Failed to download built binary .zip')
+          }
+          downloadZip(await response.blob(), `frame_${props.frameId}_binary.zip`)
+          return false
+        },
+      },
+    ],
     collectGarbageFrame: [
       false,
       {

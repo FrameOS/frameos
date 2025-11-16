@@ -46,12 +46,19 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic)
-  const { nixCollectGarbageFrame, nixCollectGarbageBackend, clearBuildCache, downloadBuildZip, downloadCSourceZip } =
-    useActions(frameSettingsLogic({ frameId }))
+  const {
+    nixCollectGarbageFrame,
+    nixCollectGarbageBackend,
+    clearBuildCache,
+    downloadBuildZip,
+    downloadCSourceZip,
+    downloadBinaryZip,
+  } = useActions(frameSettingsLogic({ frameId }))
   const {
     buildCacheLoading,
     buildZipLoading,
     cSourceZipLoading,
+    binaryZipLoading,
     collectGarbageFrameLoading,
     collectGarbageBackendLoading,
   } = useValues(frameSettingsLogic({ frameId }))
@@ -178,6 +185,14 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 },
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
                 loading: cSourceZipLoading,
+              },
+              {
+                label: 'Download built binary .zip',
+                onClick: () => {
+                  downloadBinaryZip()
+                },
+                icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: binaryZipLoading,
               },
               {
                 label: 'Delete frame',

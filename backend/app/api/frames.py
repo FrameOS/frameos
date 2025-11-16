@@ -11,8 +11,9 @@ import json
 import mimetypes
 import os
 import re
-import tempfile
 import shlex
+import shutil
+import tempfile
 import zipfile
 from tempfile import NamedTemporaryFile
 from typing import Any, Optional, Tuple
@@ -582,6 +583,90 @@ async def api_frame_local_c_source_zip(
 
     safe_name = (frame.name or "frame").replace(" ", "_").replace("/", "_")
     filename = f"{safe_name}_{deployer.build_id}_c_source.zip"
+    headers = {
+        "Content-Disposition": (
+            f'attachment; filename="{_ascii_safe(filename)}"'
+        )
+    }
+    return StreamingResponse(sender(), headers=headers, media_type="application/zip")
+
+
+@api_with_auth.post("/frames/{id:int}/download_binary_zip")
+async def api_frame_local_binary_zip(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    try:
+        # Ensure Nim is available before attempting to build
+        nim_path = find_nim_v2()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Unable to locate Nim installation: {exc}",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        deployer = FrameDeployer(db, redis, frame, nim_path, tmp)
+        source_dir = deployer.create_local_source_folder(tmp)
+        await deployer.make_local_modifications(source_dir)
+        await copy_custom_fonts_to_local_source_folder(db, source_dir)
+
+        build_cmd = (
+            f"cd {source_dir} && "
+            "nimble assets -y && nimble setup && nimble build -y"
+        )
+
+        status, *_ = await exec_local_command(
+            db,
+            redis,
+            frame,
+            build_cmd,
+            log_command="nimble build (local)",
+        )
+        if status != 0:
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail="Failed to build FrameOS binary",
+            )
+
+        binary_path = os.path.join(source_dir, "build", "frameos")
+        if not os.path.exists(binary_path):
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail="FrameOS binary not found after build",
+            )
+
+        dist_dir = os.path.join(tmp, "dist")
+        os.makedirs(dist_dir, exist_ok=True)
+        bin_dir = os.path.join(dist_dir, "bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        shutil.copy2(binary_path, os.path.join(bin_dir, "frameos"))
+
+        zip_path = os.path.join(tmp, f"frameos_{deployer.build_id}_binary.zip")
+        with zipfile.ZipFile(
+            zip_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            strict_timestamps=False,
+        ) as zf:
+            for root, _dirs, files in os.walk(dist_dir):
+                for file in files:
+                    full = os.path.join(root, file)
+                    relative = os.path.relpath(full, dist_dir)
+                    arc = os.path.join("dist", relative)
+                    zf.write(full, arc)
+
+        async with aiofiles.open(zip_path, "rb") as fh:
+            zip_bytes = await fh.read()
+
+    async def sender():
+        yield zip_bytes
+
+    safe_name = (frame.name or "frame").replace(" ", "_").replace("/", "_")
+    filename = f"{safe_name}_{deployer.build_id}_binary.zip"
     headers = {
         "Content-Disposition": (
             f'attachment; filename="{_ascii_safe(filename)}"'
