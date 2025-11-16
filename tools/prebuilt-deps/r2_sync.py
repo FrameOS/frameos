@@ -78,6 +78,7 @@ DEFAULT_PREFIX = os.environ.get("R2_PREFIX", "prebuilt-deps")
 # Keep the target matrix in sync with tools/prebuilt-deps/build.sh
 RELEASES = ["bookworm", "trixie"]
 ARCHES = ["armhf", "arm64"]
+COMPONENTS = [ "quickjs", "lgpio"]
 
 
 @dataclass
@@ -85,9 +86,10 @@ class ManifestEntry:
     target: str
     slug: str
     versions: Dict[str, str]
-    object_key: str
+    object_key: Optional[str]
     metadata_key: str
     updated_at: str
+    component_keys: Optional[Dict[str, str]] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, str]) -> "ManifestEntry":
@@ -95,9 +97,10 @@ class ManifestEntry:
             target=data["target"],
             slug=data["slug"],
             versions=data["versions"],
-            object_key=data["object_key"],
+            object_key=data.get("object_key"),
             metadata_key=data["metadata_key"],
             updated_at=data.get("updated_at", ""),
+            component_keys=data.get("component_keys"),
         )
 
     def to_dict(self) -> Dict[str, str]:
@@ -108,6 +111,7 @@ class ManifestEntry:
             "object_key": self.object_key,
             "metadata_key": self.metadata_key,
             "updated_at": self.updated_at,
+            "component_keys": self.component_keys,
         }
 
 
@@ -211,6 +215,18 @@ def slug_from_metadata(metadata: Dict[str, str]) -> str:
     )
 
 
+def component_version(metadata: Dict[str, str], component: str) -> Optional[str]:
+    return metadata.get(f"{component}_version")
+
+
+def component_dir(target_dir: Path, component: str, version: str) -> Path:
+    return target_dir / f"{component}-{version}"
+
+
+def component_object_key(prefix: str, target: str, component: str, version: str) -> str:
+    return f"{prefix}/{target}/{component}-{version}.tar.gz"
+
+
 def load_manifest(client, bucket: str, manifest_key: str) -> Dict[str, List[ManifestEntry]]:
     try:
         response = client.get_object(Bucket=bucket, Key=manifest_key)
@@ -259,11 +275,14 @@ def read_local_metadata(target_dir: Path) -> Optional[Dict[str, str]]:
     return json.loads(metadata_file.read_text())
 
 
-def make_tarball(target_dir: Path, slug: str) -> Path:
-    temp_fd, temp_path = tempfile.mkstemp(prefix=slug.replace("/", "_") + "_", suffix=".tar.gz")
+def make_tarball(source_dir: Path, slug: str, component: str) -> Path:
+    temp_fd, temp_path = tempfile.mkstemp(
+        prefix=f"{slug.replace('/', '_')}_{component}_",
+        suffix=".tar.gz",
+    )
     os.close(temp_fd)
     with tarfile.open(temp_path, "w:gz") as tar:
-        tar.add(target_dir, arcname=target_dir.name)
+        tar.add(source_dir, arcname=source_dir.name)
     return Path(temp_path)
 
 
@@ -281,32 +300,64 @@ def upload_target(
         return
 
     slug = slug_from_metadata(metadata)
-    object_key = f"{prefix}/{slug}/prebuilt.tar.gz"
-    metadata_key = f"{prefix}/{slug}/metadata.json"
+    metadata_key = f"{prefix}/metadata.json"
 
-    if not force:
-        try:
-            client.head_object(Bucket=bucket, Key=object_key)
-            print(f"Remote already has {object_key}, skipping upload")
+    component_keys: Dict[str, str] = {}
+    components_to_upload = []
+    for component in COMPONENTS:
+        version = component_version(metadata, component)
+        if not version:
+            print(
+                f"Skipping {target_dir.name}: {component}_version missing in metadata",
+                file=sys.stderr,
+            )
             return
-        except ClientError as exc:
-            if exc.response["Error"].get("Code") not in {"404", "NoSuchKey"}:
-                raise
+        comp_dir = component_dir(target_dir, component, version)
+        if not comp_dir.exists():
+            print(
+                f"Skipping {target_dir.name}: directory {comp_dir.name} not found",
+                file=sys.stderr,
+            )
+            return
+        object_key = component_object_key(prefix, metadata["target"], component, version)
+        component_keys[component] = object_key
+        needs_upload = True
+        if not force:
+            try:
+                client.head_object(Bucket=bucket, Key=object_key)
+                needs_upload = False
+            except ClientError as exc:
+                if exc.response["Error"].get("Code") not in {"404", "NoSuchKey"}:
+                    raise
+        if needs_upload:
+            components_to_upload.append((component, comp_dir, object_key))
 
-    tarball = make_tarball(target_dir, slug)
-    try:
-        client.upload_file(
-            Filename=str(tarball),
-            Bucket=bucket,
-            Key=object_key,
-            ExtraArgs={"ContentType": "application/gzip"},
+    if not components_to_upload and not force:
+        print(
+            f"Remote already has all components for {target_dir.name}, skipping upload",
         )
+        return
+
+    tarballs: List[Path] = []
+    try:
+        for component, comp_dir, object_key in components_to_upload or []:
+            tarball = make_tarball(comp_dir, slug, component)
+            tarballs.append(tarball)
+            client.upload_file(
+                Filename=str(tarball),
+                Bucket=bucket,
+                Key=object_key,
+                ExtraArgs={"ContentType": "application/gzip"},
+            )
+            print(f"Uploaded {comp_dir.name} -> s3://{bucket}/{object_key}")
+
         client.upload_file(
             Filename=str(target_dir / "metadata.json"),
             Bucket=bucket,
             Key=metadata_key,
             ExtraArgs={"ContentType": "application/json"},
         )
+
         entry = ManifestEntry(
             target=metadata["target"],
             slug=slug,
@@ -315,18 +366,19 @@ def upload_target(
                 "quickjs": metadata["quickjs_version"],
                 "lgpio": metadata["lgpio_version"],
             },
-            object_key=object_key,
+            object_key=None,
             metadata_key=metadata_key,
             updated_at=datetime.now(timezone.utc).isoformat(),
+            component_keys=component_keys,
         )
         manifest.setdefault(entry.target, [])
         manifest[entry.target] = [
             *[e for e in manifest[entry.target] if e.slug != entry.slug],
             entry,
         ]
-        print(f"Uploaded {target_dir.name} -> s3://{bucket}/{object_key}")
     finally:
-        tarball.unlink(missing_ok=True)
+        for tarball in tarballs:
+            tarball.unlink(missing_ok=True)
 
 
 def safe_extract(tar: tarfile.TarFile, path: Path) -> None:
@@ -344,6 +396,38 @@ def safe_extract(tar: tarfile.TarFile, path: Path) -> None:
     tar.extractall(path=path)
 
 
+def download_component_tarball(
+    client,
+    bucket: str,
+    key: str,
+    target_dir: Path,
+):
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
+    os.close(tmp_fd)
+    try:
+        client.download_file(bucket, key, tmp_path)
+        with tarfile.open(tmp_path, "r:gz") as tar:
+            safe_extract(tar, target_dir)
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
+def download_metadata_file(client, bucket: str, metadata_key: str, target_dir: Path):
+    if not metadata_key:
+        return
+    tmp_fd, tmp_path = tempfile.mkstemp()
+    os.close(tmp_fd)
+    try:
+        client.download_file(bucket, metadata_key, tmp_path)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        shutil.move(tmp_path, target_dir / "metadata.json")
+    except ClientError as exc:
+        if exc.response["Error"].get("Code") not in {"404", "NoSuchKey"}:
+            raise
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
 def download_entry(
     client,
     bucket: str,
@@ -356,6 +440,16 @@ def download_entry(
         print(f"{entry.target} already matches {entry.slug}, skipping download")
         return
 
+    if entry.component_keys:
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for component, key in sorted(entry.component_keys.items()):
+            download_component_tarball(client, bucket, key, target_dir)
+        download_metadata_file(client, bucket, entry.metadata_key, target_dir)
+        print(f"Downloaded {entry.target} components -> {target_dir}")
+        return
+
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
     os.close(tmp_fd)
     try:
@@ -365,6 +459,7 @@ def download_entry(
         BUILD_DIR.mkdir(parents=True, exist_ok=True)
         with tarfile.open(tmp_path, "r:gz") as tar:
             safe_extract(tar, BUILD_DIR)
+        download_metadata_file(client, bucket, entry.metadata_key, target_dir)
         print(f"Downloaded {entry.target} -> {target_dir}")
     finally:
         Path(tmp_path).unlink(missing_ok=True)
@@ -377,7 +472,14 @@ def list_entries(entries: Dict[str, List[ManifestEntry]]):
     for target in sorted(entries):
         for entry in sorted(entries[target], key=lambda e: e.updated_at, reverse=True):
             versions = ", ".join(f"{k}={v}" for k, v in entry.versions.items())
-            print(f"{target}: {entry.slug} ({versions}) -> {entry.object_key}")
+            if entry.component_keys:
+                destinations = ", ".join(
+                    f"{component}={key}"
+                    for component, key in sorted(entry.component_keys.items())
+                )
+            else:
+                destinations = entry.object_key or ""
+            print(f"{target}: {entry.slug} ({versions}) -> {destinations}")
 
 
 def ensure_build(targets: List[str], build_script: str):

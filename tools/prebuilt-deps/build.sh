@@ -10,7 +10,7 @@ QUICKJS_SHA256="${QUICKJS_SHA256:-2f20074c25166ef6f781f381c50d57b502cb85d470d639
 LGPIO_VERSION="${LGPIO_VERSION:-v0.2.2}"
 LGPIO_REPO="${LGPIO_REPO:-https://github.com/joan2937/lg.git}"
 
-declare -a COMPONENTS=("nim" "quickjs" "lgpio")
+declare -a COMPONENTS=("quickjs" "lgpio")
 
 RELEASES=("bookworm" "trixie")
 ARCH_MATRIX=(
