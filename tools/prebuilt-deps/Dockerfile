@@ -2,6 +2,8 @@
 ARG DEBIAN_RELEASE=bookworm
 FROM debian:${DEBIAN_RELEASE} AS builder
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 ARG NIM_VERSION=2.2.4
