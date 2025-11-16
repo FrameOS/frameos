@@ -35,9 +35,18 @@ quickjs/include/quickjs/*.h
 quickjs/lib/libquickjs.a
 lgpio/include/*.h
 lgpio/lib/*
+nim/.build-info
+quickjs/.build-info
+lgpio/.build-info
 ```
 
 You can upload the entire folder as a tarball to your cache server.
+
+Each dependency (Nim, QuickJS, lgpio) is built by its own Dockerfile. When you
+rerun the builder it reuses any dependency whose `.build-info` marker matches
+the requested versions/platform so you only rebuild the missing pieces. Delete a
+component directory (e.g. `rm -rf build/prebuilt-deps/pios-bookworm-arm64/nim`)
+or the entire target folder to force a rebuild.
 
 ### Custom versions
 
