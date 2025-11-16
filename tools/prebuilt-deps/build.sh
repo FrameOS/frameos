@@ -11,16 +11,6 @@ LGPIO_VERSION="${LGPIO_VERSION:-v0.2.2}"
 LGPIO_REPO="${LGPIO_REPO:-https://github.com/joan2937/lg.git}"
 
 declare -a COMPONENTS=("nim" "quickjs" "lgpio")
-declare -A COMPONENT_OUTPUT_DIR=(
-  [nim]="nim"
-  [quickjs]="quickjs"
-  [lgpio]="lgpio"
-)
-declare -A COMPONENT_DOCKERFILES=(
-  [nim]="${ROOT_DIR}/tools/prebuilt-deps/Dockerfile.nim"
-  [quickjs]="${ROOT_DIR}/tools/prebuilt-deps/Dockerfile.quickjs"
-  [lgpio]="${ROOT_DIR}/tools/prebuilt-deps/Dockerfile.lgpio"
-)
 
 RELEASES=("bookworm" "trixie")
 ARCH_MATRIX=(
@@ -49,32 +39,6 @@ fi
 command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 1; }
 
 mkdir -p "${OUTPUT_BASE}"
-
-component_build_args() {
-  local component="$1"
-  local -n _out="$2"
-  case "${component}" in
-    nim)
-      _out=("--build-arg" "NIM_VERSION=${NIM_VERSION}")
-      ;;
-    quickjs)
-      _out=(
-        "--build-arg" "QUICKJS_VERSION=${QUICKJS_VERSION}"
-        "--build-arg" "QUICKJS_SHA256=${QUICKJS_SHA256}"
-      )
-      ;;
-    lgpio)
-      _out=(
-        "--build-arg" "LGPIO_VERSION=${LGPIO_VERSION}"
-        "--build-arg" "LGPIO_REPO=${LGPIO_REPO}"
-      )
-      ;;
-    *)
-      echo "Unknown component '${component}'" >&2
-      exit 1
-      ;;
-  esac
-}
 
 component_marker() {
   local component="$1" target="$2" release="$3" platform="$4"
@@ -121,7 +85,34 @@ for target in "${REQUESTED_TARGETS[@]}"; do
   echo "\n=== Target ${target} (Debian ${release}, platform ${platform}) ===" >&2
 
   for component in "${COMPONENTS[@]}"; do
-    subdir="${COMPONENT_OUTPUT_DIR[${component}]}"
+    component_args=()
+    case "${component}" in
+      nim)
+        subdir="nim"
+        component_dockerfile="${ROOT_DIR}/tools/prebuilt-deps/Dockerfile.nim"
+        component_args=("--build-arg" "NIM_VERSION=${NIM_VERSION}")
+        ;;
+      quickjs)
+        subdir="quickjs"
+        component_dockerfile="${ROOT_DIR}/tools/prebuilt-deps/Dockerfile.quickjs"
+        component_args=(
+          "--build-arg" "QUICKJS_VERSION=${QUICKJS_VERSION}"
+          "--build-arg" "QUICKJS_SHA256=${QUICKJS_SHA256}"
+        )
+        ;;
+      lgpio)
+        subdir="lgpio"
+        component_dockerfile="${ROOT_DIR}/tools/prebuilt-deps/Dockerfile.lgpio"
+        component_args=(
+          "--build-arg" "LGPIO_VERSION=${LGPIO_VERSION}"
+          "--build-arg" "LGPIO_REPO=${LGPIO_REPO}"
+        )
+        ;;
+      *)
+        echo "Unknown component '${component}'" >&2
+        exit 1
+        ;;
+    esac
     comp_dest="${dest}/${subdir}"
     marker_file="${comp_dest}/.build-info"
     expected_marker="$(component_marker "${component}" "${target}" "${release}" "${platform}")"
@@ -141,8 +132,6 @@ for target in "${REQUESTED_TARGETS[@]}"; do
     rm -rf "${comp_dest}"
     mkdir -p "${comp_dest}"
 
-    component_args=()
-    component_build_args "${component}" component_args
     docker buildx build \
       --progress=plain \
       --platform "${platform}" \
@@ -151,7 +140,7 @@ for target in "${REQUESTED_TARGETS[@]}"; do
       "${component_args[@]}" \
       --output "type=local,dest=${comp_dest}" \
       --target artifacts \
-      -f "${COMPONENT_DOCKERFILES[${component}]}" "${ROOT_DIR}"
+      -f "${component_dockerfile}" "${ROOT_DIR}"
 
     printf '%s' "${expected_marker}" > "${marker_file}"
   done
