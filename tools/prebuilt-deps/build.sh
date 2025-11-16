@@ -13,8 +13,6 @@ LGPIO_REPO="${LGPIO_REPO:-https://github.com/joan2937/lg.git}"
 declare -a COMPONENTS=("nim" "quickjs" "lgpio")
 
 TARGET_MATRIX=(
-  "pios|buster|armhf|linux/arm/v7|debian:buster"
-  "pios|buster|arm64|linux/arm64|debian:buster"
   "pios|bookworm|armhf|linux/arm/v7|debian:bookworm"
   "pios|bookworm|arm64|linux/arm64|debian:bookworm"
   "pios|trixie|armhf|linux/arm/v7|debian:trixie"
@@ -27,19 +25,34 @@ TARGET_MATRIX=(
   "ubuntu|24.04|amd64|linux/amd64|ubuntu:24.04"
 )
 
-declare -A TARGET_INFO=()
-for entry in "${TARGET_MATRIX[@]}"; do
-  IFS="|" read -r distro release arch platform base_image <<<"${entry}"
-  target="${distro}-${release}-${arch}"
-  TARGET_INFO["${target}"]="${distro}|${release}|${arch}|${platform}|${base_image}"
-done
+get_target_entry() {
+  local search_target="$1"
+  for entry in "${TARGET_MATRIX[@]}"; do
+    IFS="|" read -r distro release arch _ <<<"${entry}"
+    local entry_target="${distro}-${release}-${arch}"
+    if [[ "${entry_target}" == "${search_target}" ]]; then
+      printf '%s' "${entry}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+list_targets() {
+  local targets=()
+  for entry in "${TARGET_MATRIX[@]}"; do
+    IFS="|" read -r distro release arch _ <<<"${entry}"
+    targets+=("${distro}-${release}-${arch}")
+  done
+  printf '%s' "${targets[*]}"
+}
 
 declare -a REQUESTED_TARGETS=()
 if [[ $# -gt 0 ]]; then
   for arg in "$@"; do
-    if [[ -z "${TARGET_INFO["${arg}"]:-}" ]]; then
+    if ! info="$(get_target_entry "${arg}")"; then
       echo "Unknown target '${arg}'." >&2
-      echo "Valid targets: ${!TARGET_INFO[*]}" >&2
+      echo "Valid targets: $(list_targets)" >&2
       exit 1
     fi
     REQUESTED_TARGETS+=("$arg")
@@ -75,7 +88,10 @@ component_marker() {
 }
 
 for target in "${REQUESTED_TARGETS[@]}"; do
-  info="${TARGET_INFO["${target}"]}"
+  if ! info="$(get_target_entry "${target}")"; then
+    echo "Unknown target '${target}'." >&2
+    exit 1
+  fi
   IFS="|" read -r distro release arch platform base_image <<<"${info}"
 
   dest="${OUTPUT_BASE}/${target}"

@@ -214,7 +214,30 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 await self.exec_command("sudo service frameos stop", raise_on_error=False)
 
             # 2. Remote steps
-            await install_if_necessary("ntp")
+            async def ensure_ntp_installed() -> None:
+                """Ensure either the legacy ntp package or ntpsec is present."""
+
+                async def package_is_installed(pkg: str) -> bool:
+                    quoted_pkg = shlex.quote(pkg)
+                    return (
+                        await self.exec_command(
+                            f"dpkg -l | grep -q \"^ii  {quoted_pkg} \"",
+                            raise_on_error=False,
+                        )
+                        == 0
+                    )
+
+                if await package_is_installed("ntp") or await package_is_installed("ntpsec"):
+                    return
+
+                for candidate in ("ntp", "ntpsec"):
+                    response = await install_if_necessary(candidate, raise_on_error=False)
+                    if response == 0:
+                        return
+
+                raise Exception("Unable to install ntp or ntpsec via apt")
+
+            await ensure_ntp_installed()
             await install_if_necessary("build-essential")
             await install_if_necessary("hostapd")
             await install_if_necessary("imagemagick")
