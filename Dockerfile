@@ -1,5 +1,5 @@
 # Use the official Python 3.12 image as the base
-FROM python:3.12-slim-bullseye
+FROM python:3.12-slim-bookworm
 
 # Set the working directory
 WORKDIR /app
