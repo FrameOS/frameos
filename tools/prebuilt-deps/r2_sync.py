@@ -23,7 +23,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import boto3
 from botocore.exceptions import ClientError
@@ -79,6 +79,10 @@ DEFAULT_PREFIX = os.environ.get("R2_PREFIX", "prebuilt-deps")
 RELEASES = ["bookworm", "trixie"]
 ARCHES = ["armhf", "arm64"]
 COMPONENTS = [ "quickjs", "lgpio"]
+TARGET_PLATFORMS = {
+    "armhf": "linux/arm/v7",
+    "arm64": "linux/arm64",
+}
 
 
 @dataclass
@@ -87,8 +91,8 @@ class ManifestEntry:
     slug: str
     versions: Dict[str, str]
     object_key: Optional[str]
-    metadata_key: str
-    updated_at: str
+    metadata_key: Optional[str] = None
+    updated_at: str = ""
     component_keys: Optional[Dict[str, str]] = None
 
     @classmethod
@@ -98,21 +102,23 @@ class ManifestEntry:
             slug=data["slug"],
             versions=data["versions"],
             object_key=data.get("object_key"),
-            metadata_key=data["metadata_key"],
+            metadata_key=data.get("metadata_key"),
             updated_at=data.get("updated_at", ""),
             component_keys=data.get("component_keys"),
         )
 
     def to_dict(self) -> Dict[str, str]:
-        return {
+        data = {
             "target": self.target,
             "slug": self.slug,
             "versions": self.versions,
             "object_key": self.object_key,
-            "metadata_key": self.metadata_key,
             "updated_at": self.updated_at,
             "component_keys": self.component_keys,
         }
+        if self.metadata_key:
+            data["metadata_key"] = self.metadata_key
+        return data
 
 
 def parse_args() -> argparse.Namespace:
@@ -227,6 +233,29 @@ def component_object_key(prefix: str, target: str, component: str, version: str)
     return f"{prefix}/{target}/{component}-{version}.tar.gz"
 
 
+def target_release_arch(target: str) -> Tuple[str, str]:
+    parts = target.split("-")
+    if len(parts) >= 3:
+        return parts[1], parts[2]
+    return "", ""
+
+
+def write_local_metadata(entry: ManifestEntry, target_dir: Path) -> None:
+    release, arch = target_release_arch(entry.target)
+    platform = TARGET_PLATFORMS.get(arch, "")
+    payload = {
+        "target": entry.target,
+        "debian_release": release,
+        "platform": platform,
+        "nim_version": entry.versions.get("nim", ""),
+        "quickjs_version": entry.versions.get("quickjs", ""),
+        "lgpio_version": entry.versions.get("lgpio", ""),
+    }
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_file = target_dir / "metadata.json"
+    target_file.write_text(json.dumps(payload, indent=2) + "\n")
+
+
 def load_manifest(client, bucket: str, manifest_key: str) -> Dict[str, List[ManifestEntry]]:
     try:
         response = client.get_object(Bucket=bucket, Key=manifest_key)
@@ -300,8 +329,6 @@ def upload_target(
         return
 
     slug = slug_from_metadata(metadata)
-    metadata_key = f"{prefix}/metadata.json"
-
     component_keys: Dict[str, str] = {}
     components_to_upload = []
     for component in COMPONENTS:
@@ -351,13 +378,6 @@ def upload_target(
             )
             print(f"Uploaded {comp_dir.name} -> s3://{bucket}/{object_key}")
 
-        client.upload_file(
-            Filename=str(target_dir / "metadata.json"),
-            Bucket=bucket,
-            Key=metadata_key,
-            ExtraArgs={"ContentType": "application/json"},
-        )
-
         entry = ManifestEntry(
             target=metadata["target"],
             slug=slug,
@@ -367,7 +387,6 @@ def upload_target(
                 "lgpio": metadata["lgpio_version"],
             },
             object_key=None,
-            metadata_key=metadata_key,
             updated_at=datetime.now(timezone.utc).isoformat(),
             component_keys=component_keys,
         )
@@ -412,22 +431,6 @@ def download_component_tarball(
         Path(tmp_path).unlink(missing_ok=True)
 
 
-def download_metadata_file(client, bucket: str, metadata_key: str, target_dir: Path):
-    if not metadata_key:
-        return
-    tmp_fd, tmp_path = tempfile.mkstemp()
-    os.close(tmp_fd)
-    try:
-        client.download_file(bucket, metadata_key, tmp_path)
-        target_dir.mkdir(parents=True, exist_ok=True)
-        shutil.move(tmp_path, target_dir / "metadata.json")
-    except ClientError as exc:
-        if exc.response["Error"].get("Code") not in {"404", "NoSuchKey"}:
-            raise
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
-
-
 def download_entry(
     client,
     bucket: str,
@@ -446,7 +449,7 @@ def download_entry(
         target_dir.mkdir(parents=True, exist_ok=True)
         for component, key in sorted(entry.component_keys.items()):
             download_component_tarball(client, bucket, key, target_dir)
-        download_metadata_file(client, bucket, entry.metadata_key, target_dir)
+        write_local_metadata(entry, target_dir)
         print(f"Downloaded {entry.target} components -> {target_dir}")
         return
 
@@ -459,7 +462,7 @@ def download_entry(
         BUILD_DIR.mkdir(parents=True, exist_ok=True)
         with tarfile.open(tmp_path, "r:gz") as tar:
             safe_extract(tar, BUILD_DIR)
-        download_metadata_file(client, bucket, entry.metadata_key, target_dir)
+        write_local_metadata(entry, target_dir)
         print(f"Downloaded {entry.target} -> {target_dir}")
     finally:
         Path(tmp_path).unlink(missing_ok=True)
