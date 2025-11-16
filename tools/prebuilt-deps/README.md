@@ -25,19 +25,20 @@ one of the following releases and architectures:
 ```
 
 The script drops results under `build/prebuilt-deps/<target>/` where `<target>`
-looks like `pios-bookworm-armhf`. Each folder contains:
+looks like `pios-bookworm-armhf`. Each folder contains versioned component
+directories so you can keep several revisions side-by-side, e.g.:
 
 ```
 metadata.json
-nim/bin/*
-nim/lib/*
-quickjs/include/quickjs/*.h
-quickjs/lib/libquickjs.a
-lgpio/include/*.h
-lgpio/lib/*
-nim/.build-info
-quickjs/.build-info
-lgpio/.build-info
+nim-2.2.4/bin/*
+nim-2.2.4/lib/*
+quickjs-2025-04-26/include/quickjs/*.h
+quickjs-2025-04-26/lib/libquickjs.a
+lgpio-v0.2.2/include/*.h
+lgpio-v0.2.2/lib/*
+nim-2.2.4/.build-info
+quickjs-2025-04-26/.build-info
+lgpio-v0.2.2/.build-info
 ```
 
 You can upload the entire folder as a tarball to your cache server.

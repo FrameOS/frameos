@@ -88,12 +88,12 @@ for target in "${REQUESTED_TARGETS[@]}"; do
     component_args=()
     case "${component}" in
       nim)
-        subdir="nim"
+        subdir="nim-${NIM_VERSION}"
         component_dockerfile="${ROOT_DIR}/tools/prebuilt-deps/Dockerfile.nim"
         component_args=("--build-arg" "NIM_VERSION=${NIM_VERSION}")
         ;;
       quickjs)
-        subdir="quickjs"
+        subdir="quickjs-${QUICKJS_VERSION}"
         component_dockerfile="${ROOT_DIR}/tools/prebuilt-deps/Dockerfile.quickjs"
         component_args=(
           "--build-arg" "QUICKJS_VERSION=${QUICKJS_VERSION}"
@@ -101,7 +101,7 @@ for target in "${REQUESTED_TARGETS[@]}"; do
         )
         ;;
       lgpio)
-        subdir="lgpio"
+        subdir="lgpio-${LGPIO_VERSION}"
         component_dockerfile="${ROOT_DIR}/tools/prebuilt-deps/Dockerfile.lgpio"
         component_args=(
           "--build-arg" "LGPIO_VERSION=${LGPIO_VERSION}"
