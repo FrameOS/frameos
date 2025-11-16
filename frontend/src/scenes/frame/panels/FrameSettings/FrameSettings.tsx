@@ -174,6 +174,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 label: 'Download Nim build .zip',
                 onClick: () => {
                   downloadBuildZip()
+                  openLogs()
                 },
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
                 loading: buildZipLoading,
@@ -182,6 +183,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 label: 'Generate C sources .zip',
                 onClick: () => {
                   downloadCSourceZip()
+                  openLogs()
                 },
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
                 loading: cSourceZipLoading,
@@ -190,6 +192,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 label: 'Download built binary .zip',
                 onClick: () => {
                   downloadBinaryZip()
+                  openLogs()
                 },
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
                 loading: binaryZipLoading,
