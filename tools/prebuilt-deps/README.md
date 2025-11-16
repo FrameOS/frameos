@@ -84,6 +84,11 @@ latest builds automatically.
   The script also honours `R2_PREFIX` (defaults to `prebuilt-deps`) and
   `R2_REGION` (defaults to `auto`).
 
+  If you prefer not to export the variables globally you can place them in a
+  `.env` file (ignored by git) at the repository root or inside
+  `tools/prebuilt-deps/`. The helper automatically loads the first `.env` it
+  finds, or you can point at a custom path via `R2_ENV_FILE=/path/to/.env`.
+
 ### Commands
 
 ```bash

@@ -23,7 +23,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Sequence
 
 import boto3
 from botocore.exceptions import ClientError
@@ -31,6 +31,46 @@ from botocore.exceptions import ClientError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILD_DIR = REPO_ROOT / "build" / "prebuilt-deps"
+
+
+def load_env_file() -> Optional[Path]:
+    """Populate os.environ with values from a .env file if present."""
+
+    def apply_env(path: Path) -> bool:
+        if not path or not path.is_file():
+            return False
+        for raw_line in path.read_text().splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+        return True
+
+    candidates: Sequence[Path] = []
+    env_override = os.environ.get("R2_ENV_FILE")
+    if env_override:
+        candidates = [Path(env_override).expanduser()]
+    else:
+        script_dir = Path(__file__).resolve().parent
+        candidates = [
+            Path.cwd() / ".env",
+            script_dir / ".env",
+            REPO_ROOT / ".env",
+        ]
+
+    for candidate in candidates:
+        if apply_env(candidate):
+            return candidate
+    return None
+
+
+load_env_file()
 
 DEFAULT_BUCKET = os.environ.get("R2_BUCKET", "frameos-archive")
 DEFAULT_PREFIX = os.environ.get("R2_PREFIX", "prebuilt-deps")
