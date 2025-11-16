@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shlex
+import shutil
 import tarfile
 import tempfile
 from dataclasses import dataclass
@@ -11,6 +13,7 @@ from textwrap import dedent
 from typing import Callable, Iterable
 
 import asyncssh
+import httpx
 
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
@@ -19,6 +22,11 @@ from app.drivers.devices import drivers_for_frame
 from app.models.frame import Frame
 from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
+from app.tasks.prebuilt_deps import (
+    PrebuiltEntry,
+    fetch_prebuilt_manifest,
+    resolve_prebuilt_target,
+)
 from app.utils.local_exec import exec_local_command
 from app.utils.ssh_utils import get_ssh_connection, remove_ssh_connection
 
@@ -41,6 +49,7 @@ class RemoteRequirement:
 SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 CACHE_ENV = "FRAMEOS_CROSS_CACHE"
 DEFAULT_CACHE = Path.home() / ".cache/frameos/cross"
+PREBUILT_TIMEOUT = float(os.environ.get("FRAMEOS_PREBUILT_TIMEOUT", "20"))
 
 
 REMOTE_REQUIREMENTS: tuple[RemoteRequirement, ...] = (
@@ -111,6 +120,8 @@ class CrossCompiler:
         deployer: FrameDeployer,
         target: TargetMetadata,
         temp_dir: str,
+        prebuilt_entry: PrebuiltEntry | None = None,
+        prebuilt_target: str | None = None,
     ) -> None:
         self.db = db
         self.redis = redis
@@ -127,6 +138,12 @@ class CrossCompiler:
         self.sysroot_dir.mkdir(parents=True, exist_ok=True)
         self.home_dir = self.toolchain_dir / "home"
         self.home_dir.mkdir(parents=True, exist_ok=True)
+        self.prebuilt_entry = prebuilt_entry
+        self.prebuilt_target = prebuilt_target
+        self.prebuilt_dir = cache_root / "prebuilt" / key
+        self.prebuilt_dir.mkdir(parents=True, exist_ok=True)
+        self.prebuilt_components: dict[str, Path] = {}
+        self.prebuilt_timeout = PREBUILT_TIMEOUT
         for rel in ("usr/include", "usr/local/include", "usr/lib", "usr/local/lib"):
             (self.sysroot_dir / rel).mkdir(parents=True, exist_ok=True)
 
@@ -135,7 +152,9 @@ class CrossCompiler:
             "stdout",
             f"- Cross compiling for {self.target.arch} on {self._docker_image()} via {self._platform()}",
         )
+        await self._prepare_prebuilt_components()
         await self._prepare_sysroot()
+        self._stage_quickjs(source_dir)
         binary_path = await self._run_docker_build(source_dir)
         if not os.path.exists(binary_path):
             raise RuntimeError("Cross compilation completed but frameos binary is missing")
@@ -147,6 +166,21 @@ class CrossCompiler:
         if not required:
             await self._log("stdout", "- No device-specific libraries required from frame")
             return
+
+        if self.prebuilt_components.get("lgpio"):
+            await self._log("stdout", "- Using prebuilt lgpio headers and libraries")
+            self._inject_prebuilt_lgpio()
+            required = [
+                spec
+                for spec in required
+                if not spec.name.startswith("lgpio")
+            ]
+            if not required:
+                await self._log(
+                    "stdout",
+                    "- Remaining sysroot requirements satisfied by prebuilt components",
+                )
+                return
 
         remote_paths: list[str] = []
         for spec in required:
@@ -203,11 +237,15 @@ class CrossCompiler:
 
                 export HOME=/toolchain-home
                 mkdir -p "$HOME/.nimble" "$HOME/.choosenim"
-                export PATH="$HOME/.nimble/bin:$HOME/.choosenim/current/bin:$PATH"
-                if [ ! -x "$HOME/.nimble/bin/nimble" ]; then
-                    curl -L https://nim-lang.org/choosenim/init.sh -o /tmp/choosenim.sh
-                    sh /tmp/choosenim.sh -y
-                    rm -f /tmp/choosenim.sh
+                if [ -x "/prebuilt/nim/bin/nim" ]; then
+                    export PATH="/prebuilt/nim/bin:$PATH"
+                else
+                    export PATH="$HOME/.nimble/bin:$HOME/.choosenim/current/bin:$PATH"
+                    if [ ! -x "$HOME/.nimble/bin/nimble" ]; then
+                        curl -L https://nim-lang.org/choosenim/init.sh -o /tmp/choosenim.sh
+                        sh /tmp/choosenim.sh -y
+                        rm -f /tmp/choosenim.sh
+                    fi
                 fi
 
                 cd /src
@@ -228,6 +266,11 @@ class CrossCompiler:
                 f"-v {shlex.quote(str(self.home_dir))}:/toolchain-home",
                 f"-v {shlex.quote(str(self.sysroot_dir))}:/sysroot",
                 f"-v {shlex.quote(str(script_path))}:/tmp/build.sh:ro",
+                *(
+                    [f"-v {shlex.quote(str(self.prebuilt_components['nim']))}:/prebuilt/nim:ro"]
+                    if self.prebuilt_components.get("nim")
+                    else []
+                ),
                 "-e HOME=/toolchain-home",
                 "-w /src",
                 shlex.quote(self._docker_image()),
@@ -245,6 +288,128 @@ class CrossCompiler:
         if status != 0:
             raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
         return os.path.join(source_dir, "build", "frameos")
+
+    async def _prepare_prebuilt_components(self) -> None:
+        if not self.prebuilt_entry:
+            return
+
+        if self.prebuilt_target:
+            await self._log(
+                "stdout",
+                f"- Attempting to use prebuilt components for {self.prebuilt_target}",
+            )
+
+        for component in ("nim", "quickjs", "lgpio"):
+            path = await self._ensure_prebuilt_component(component)
+            if path:
+                self.prebuilt_components[component] = path
+
+    async def _ensure_prebuilt_component(self, component: str) -> Path | None:
+        if not self.prebuilt_entry:
+            return None
+        url = self.prebuilt_entry.url_for(component)
+        if not url:
+            return None
+        version = self.prebuilt_entry.version_for(component, "unknown") or "unknown"
+        safe_version = self._sanitize(version)
+        dest_dir = self.prebuilt_dir / f"{component}-{safe_version}"
+        marker = dest_dir / ".build-info"
+        expected_marker = f"{component}|{version}|{url}|{self.prebuilt_entry.md5_for(component) or ''}"
+        if marker.exists() and marker.read_text() == expected_marker:
+            return dest_dir
+
+        await self._log("stdout", f"- Downloading prebuilt {component} ({version})")
+        if dest_dir.exists():
+            shutil.rmtree(dest_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            await self._download_and_extract(url, dest_dir, self.prebuilt_entry.md5_for(component))
+        except Exception as exc:
+            await self._log(
+                "stderr",
+                f"- Failed to download prebuilt {component}: {exc}; falling back",
+            )
+            shutil.rmtree(dest_dir, ignore_errors=True)
+            return None
+
+        marker.write_text(expected_marker)
+        return dest_dir
+
+    async def _download_and_extract(self, url: str, dest_dir: Path, expected_md5: str | None) -> None:
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
+        os.close(tmp_fd)
+        try:
+            async with httpx.AsyncClient(timeout=self.prebuilt_timeout) as client:
+                async with client.stream("GET", url) as response:
+                    response.raise_for_status()
+                    with open(tmp_path, "wb") as fh:
+                        async for chunk in response.aiter_bytes():
+                            fh.write(chunk)
+            if expected_md5:
+                actual = self._file_md5sum(Path(tmp_path))
+                if actual != expected_md5:
+                    raise RuntimeError(
+                        f"MD5 mismatch for {url}: expected {expected_md5}, got {actual}"
+                    )
+            with tarfile.open(tmp_path, "r:gz") as tar:
+                self._safe_extract(tar, dest_dir)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    @staticmethod
+    def _safe_extract(tar: tarfile.TarFile, path: Path) -> None:
+        for member in tar.getmembers():
+            member_path = path / member.name
+            if not str(member_path.resolve()).startswith(str(path.resolve())):
+                raise RuntimeError("Tar file attempted to escape target directory")
+        tar.extractall(path=path)
+
+    @staticmethod
+    def _file_md5sum(path: Path) -> str:
+        hasher = hashlib.md5()
+        with path.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    def _stage_quickjs(self, source_dir: str) -> None:
+        quickjs_dir = self.prebuilt_components.get("quickjs")
+        if not quickjs_dir:
+            return
+        dest = Path(source_dir) / "quickjs"
+        if dest.exists():
+            shutil.rmtree(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        include_src = quickjs_dir / "include" / "quickjs"
+        if include_src.exists():
+            shutil.copytree(include_src, dest / "include" / "quickjs", dirs_exist_ok=True)
+        for header in ("quickjs.h", "quickjs-libc.h"):
+            for candidate in (
+                include_src / header,
+                quickjs_dir / header,
+            ):
+                if candidate.exists():
+                    shutil.copy2(candidate, dest / header)
+                    break
+        lib_candidates = [
+            quickjs_dir / "lib" / "libquickjs.a",
+            quickjs_dir / "libquickjs.a",
+        ]
+        for candidate in lib_candidates:
+            if candidate.exists():
+                shutil.copy2(candidate, dest / "libquickjs.a")
+                break
+
+    def _inject_prebuilt_lgpio(self) -> None:
+        lgpio_dir = self.prebuilt_components.get("lgpio")
+        if not lgpio_dir:
+            return
+        include_src = lgpio_dir / "include"
+        lib_src = lgpio_dir / "lib"
+        if include_src.exists():
+            shutil.copytree(include_src, self.sysroot_dir / "usr/local/include", dirs_exist_ok=True)
+        if lib_src.exists():
+            shutil.copytree(lib_src, self.sysroot_dir / "usr/local/lib", dirs_exist_ok=True)
 
     async def _download_remote_paths(self, paths: Iterable[str]) -> None:
         remote_tar = f"/tmp/frameos_sysroot_{self.deployer.build_id}.tar.gz"
@@ -349,6 +514,45 @@ async def build_binary_with_cross_toolchain(
     distro = await deployer.get_distro()
     version = await deployer.get_distro_version()
     target = TargetMetadata(arch=arch, distro=distro, version=version)
+    prebuilt_entry: PrebuiltEntry | None = None
+    prebuilt_target = resolve_prebuilt_target(distro, version, arch)
+    if prebuilt_target:
+        try:
+            manifest = await fetch_prebuilt_manifest()
+        except Exception as exc:  # pragma: no cover - network failure
+            await log(
+                db,
+                redis,
+                int(frame.id),
+                "stderr",
+                f"- Failed to load prebuilt manifest for {prebuilt_target}: {exc}",
+            )
+        else:
+            prebuilt_entry = manifest.get(prebuilt_target)
+            if prebuilt_entry:
+                await log(
+                    db,
+                    redis,
+                    int(frame.id),
+                    "stdout",
+                    f"- Using prebuilt dependencies for {prebuilt_target}",
+                )
+            else:
+                await log(
+                    db,
+                    redis,
+                    int(frame.id),
+                    "stdout",
+                    f"- No prebuilt dependencies published for {prebuilt_target}",
+                )
+    else:
+        await log(
+            db,
+            redis,
+            int(frame.id),
+            "stdout",
+            "- No matching prebuilt target for this distro/version/arch combination",
+        )
     compiler = CrossCompiler(
         db=db,
         redis=redis,
@@ -356,6 +560,8 @@ async def build_binary_with_cross_toolchain(
         deployer=deployer,
         target=target,
         temp_dir=temp_dir,
+        prebuilt_entry=prebuilt_entry,
+        prebuilt_target=prebuilt_target,
     )
     return await compiler.build(source_dir)
 
