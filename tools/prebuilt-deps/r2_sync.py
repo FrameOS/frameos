@@ -32,6 +32,7 @@ from botocore.exceptions import ClientError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILD_DIR = REPO_ROOT / "build" / "prebuilt-deps"
+LOCAL_MANIFEST_PATH = REPO_ROOT / "tools" / "prebuilt-deps" / "manifest.json"
 
 
 def load_env_file() -> Optional[Path]:
@@ -308,6 +309,11 @@ def save_manifest(client, bucket: str, manifest_key: str, entries: Dict[str, Lis
             flat.append(entry.to_dict())
     body = json.dumps({"entries": flat}, indent=2).encode("utf-8")
     client.put_object(Bucket=bucket, Key=manifest_key, Body=body, ContentType="application/json")
+    try:
+        LOCAL_MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
+        LOCAL_MANIFEST_PATH.write_bytes(body)
+    except OSError as exc:
+        print(f"Warning: unable to write local manifest to {LOCAL_MANIFEST_PATH}: {exc}")
 
 
 def latest_entries(entries: Dict[str, List[ManifestEntry]]) -> Dict[str, ManifestEntry]:
@@ -499,11 +505,18 @@ def download_component_tarball(
     bucket: str,
     key: str,
     target_dir: Path,
+    expected_md5: Optional[str] = None,
 ):
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
     os.close(tmp_fd)
     try:
         client.download_file(bucket, key, tmp_path)
+        if expected_md5:
+            actual_md5 = file_md5sum(Path(tmp_path))
+            if actual_md5 != expected_md5:
+                raise RuntimeError(
+                    f"MD5 mismatch for {key}: expected {expected_md5}, got {actual_md5}"
+                )
         with tarfile.open(tmp_path, "r:gz") as tar:
             safe_extract(tar, target_dir)
     finally:
@@ -528,7 +541,8 @@ def download_entry(
             shutil.rmtree(target_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
         for component, key in sorted(entry.component_keys.items()):
-            download_component_tarball(client, bucket, key, target_dir)
+            md5sum = (entry.component_md5sums or {}).get(component) if entry.component_md5sums else None
+            download_component_tarball(client, bucket, key, target_dir, expected_md5=md5sum)
         write_local_metadata(entry, target_dir)
         print(f"Downloaded {entry.target} components -> {target_dir}")
         return

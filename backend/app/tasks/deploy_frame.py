@@ -258,9 +258,11 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                         if prebuilt_entry:
                             lgpio_prebuilt_url = prebuilt_entry.url_for("lgpio")
                             lgpio_version = prebuilt_entry.version_for("lgpio", DEFAULT_LGPIO_VERSION)
+                            lgpio_md5sum = prebuilt_entry.md5_for("lgpio")
                         else:
                             lgpio_prebuilt_url = None
                             lgpio_version = DEFAULT_LGPIO_VERSION
+                            lgpio_md5sum = None
 
                         if lgpio_prebuilt_url:
                             try:
@@ -268,10 +270,16 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                                     "stdout",
                                     f"--> Installing lgpio {lgpio_version} from archive",
                                 )
-                                await self.exec_command(
+                                lgpio_command = (
                                     "rm -rf /tmp/lgpio-prebuilt && "
                                     "mkdir -p /tmp/lgpio-prebuilt && "
                                     f"wget -q -O /tmp/lgpio-prebuilt/lgpio.tar.gz {shlex.quote(lgpio_prebuilt_url)} && "
+                                )
+                                if lgpio_md5sum:
+                                    lgpio_command += (
+                                        f"echo '{lgpio_md5sum}  /tmp/lgpio-prebuilt/lgpio.tar.gz' | md5sum -c - && "
+                                    )
+                                lgpio_command += (
                                     "tar -xzf /tmp/lgpio-prebuilt/lgpio.tar.gz -C /tmp/lgpio-prebuilt && "
                                     "sudo mkdir -p /usr/local/include /usr/local/lib && "
                                     "sudo cp -r /tmp/lgpio-prebuilt/include/. /usr/local/include/ && "
@@ -279,6 +287,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                                     "sudo ldconfig && "
                                     "rm -rf /tmp/lgpio-prebuilt"
                                 )
+                                await self.exec_command(lgpio_command)
                                 lgpio_installed = True
                             except Exception as exc:
                                 await self.log(
@@ -319,6 +328,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             quickjs_dirname = f"quickjs-{quickjs_version}"
             quickjs_vendor_dir = f"/srv/frameos/vendor/quickjs/{quickjs_dirname}"
             quickjs_prebuilt_url = prebuilt_entry.url_for("quickjs") if prebuilt_entry else None
+            quickjs_md5sum = prebuilt_entry.md5_for("quickjs") if prebuilt_entry else None
 
             # Ensure /srv/frameos
             await self.exec_command(
@@ -342,12 +352,17 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 await self.log("stdout", f"- Downloading QuickJS prebuilt archive ({quickjs_dirname})")
                 quickjs_archive = f"/tmp/quickjs-prebuilt-{build_id}.tar.gz"
                 try:
-                    await self.exec_command(
+                    quickjs_command = (
                         "mkdir -p /srv/frameos/vendor/quickjs/ && "
                         f"wget -q -O {quickjs_archive} {shlex.quote(quickjs_prebuilt_url)} && "
+                    )
+                    if quickjs_md5sum:
+                        quickjs_command += f"echo '{quickjs_md5sum}  {quickjs_archive}' | md5sum -c - && "
+                    quickjs_command += (
                         f"tar -xzf {quickjs_archive} -C /srv/frameos/vendor/quickjs/ && "
                         f"rm {quickjs_archive}"
                     )
+                    await self.exec_command(quickjs_command)
                     await self.exec_command(
                         "bash -c '"
                         f"QUICKJS_DIR={shlex.quote(quickjs_vendor_dir)}; "
