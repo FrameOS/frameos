@@ -67,8 +67,8 @@ Use `tools/prebuilt-deps/r2_sync.py` to mirror the build outputs to the
 matrix as `build.sh`, bundles each target folder as a `tar.gz` archive and
 stores it under `prebuilt-deps/<target>/<versions>/` alongside a
 `metadata.json`. A manifest file (`prebuilt-deps/manifest.json`) keeps
-track of every uploaded slug so the script can discover and download the
-latest builds automatically.
+track of every target so the script can discover and download the latest
+builds automatically.
 
 ### Prerequisites
 
@@ -108,4 +108,5 @@ python tools/prebuilt-deps/r2_sync.py sync
 
 Each command accepts `--targets pios-bookworm-armhf ...` to restrict the
 set of targets, along with knobs such as `--force` (download/upload even
-when the current slug already matches) and `--skip-build` (download only).
+when the current metadata already matches) and `--skip-build` (download
+only).

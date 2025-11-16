@@ -88,7 +88,6 @@ TARGET_PLATFORMS = {
 @dataclass
 class ManifestEntry:
     target: str
-    slug: str
     versions: Dict[str, str]
     object_key: Optional[str]
     metadata_key: Optional[str] = None
@@ -99,8 +98,7 @@ class ManifestEntry:
     def from_dict(cls, data: Dict[str, str]) -> "ManifestEntry":
         return cls(
             target=data["target"],
-            slug=data["slug"],
-            versions=data["versions"],
+            versions=data.get("versions", {}),
             object_key=data.get("object_key"),
             metadata_key=data.get("metadata_key"),
             updated_at=data.get("updated_at", ""),
@@ -110,7 +108,6 @@ class ManifestEntry:
     def to_dict(self) -> Dict[str, str]:
         data = {
             "target": self.target,
-            "slug": self.slug,
             "versions": self.versions,
             "object_key": self.object_key,
             "updated_at": self.updated_at,
@@ -154,7 +151,7 @@ def parse_args() -> argparse.Namespace:
     down.add_argument(
         "--force",
         action="store_true",
-        help="Always download/extract even if the local slug matches",
+        help="Always download/extract even if the local metadata matches",
     )
 
     sub.add_parser("list", help="List entries stored in the manifest")
@@ -212,13 +209,30 @@ def s3_client():
     )
 
 
-def slug_from_metadata(metadata: Dict[str, str]) -> str:
+def package_identifier(metadata: Dict[str, str]) -> str:
     return (
         f"{metadata['target']}/"
         f"nim-{metadata['nim_version']}_"
         f"quickjs-{metadata['quickjs_version']}_"
         f"lgpio-{metadata['lgpio_version']}"
     )
+
+
+def versions_from_metadata(metadata: Dict[str, str]) -> Dict[str, str]:
+    return {
+        "nim": metadata.get("nim_version", ""),
+        "quickjs": metadata.get("quickjs_version", ""),
+        "lgpio": metadata.get("lgpio_version", ""),
+    }
+
+
+def metadata_matches_entry(metadata: Dict[str, str], entry: ManifestEntry) -> bool:
+    if metadata.get("target") != entry.target:
+        return False
+    for key, version in entry.versions.items():
+        if metadata.get(f"{key}_version") != version:
+            return False
+    return True
 
 
 def component_version(metadata: Dict[str, str], component: str) -> Optional[str]:
@@ -304,9 +318,9 @@ def read_local_metadata(target_dir: Path) -> Optional[Dict[str, str]]:
     return json.loads(metadata_file.read_text())
 
 
-def make_tarball(source_dir: Path, slug: str, component: str) -> Path:
+def make_tarball(source_dir: Path, identifier: str, component: str) -> Path:
     temp_fd, temp_path = tempfile.mkstemp(
-        prefix=f"{slug.replace('/', '_')}_{component}_",
+        prefix=f"{identifier.replace('/', '_')}_{component}_",
         suffix=".tar.gz",
     )
     os.close(temp_fd)
@@ -328,7 +342,7 @@ def upload_target(
         print(f"Skipping {target_dir.name}: metadata.json missing", file=sys.stderr)
         return
 
-    slug = slug_from_metadata(metadata)
+    identifier = package_identifier(metadata)
     component_keys: Dict[str, str] = {}
     components_to_upload = []
     for component in COMPONENTS:
@@ -368,7 +382,7 @@ def upload_target(
     tarballs: List[Path] = []
     try:
         for component, comp_dir, object_key in components_to_upload or []:
-            tarball = make_tarball(comp_dir, slug, component)
+            tarball = make_tarball(comp_dir, identifier, component)
             tarballs.append(tarball)
             client.upload_file(
                 Filename=str(tarball),
@@ -380,21 +394,12 @@ def upload_target(
 
         entry = ManifestEntry(
             target=metadata["target"],
-            slug=slug,
-            versions={
-                "nim": metadata["nim_version"],
-                "quickjs": metadata["quickjs_version"],
-                "lgpio": metadata["lgpio_version"],
-            },
+            versions=versions_from_metadata(metadata),
             object_key=None,
             updated_at=datetime.now(timezone.utc).isoformat(),
             component_keys=component_keys,
         )
-        manifest.setdefault(entry.target, [])
-        manifest[entry.target] = [
-            *[e for e in manifest[entry.target] if e.slug != entry.slug],
-            entry,
-        ]
+        manifest[entry.target] = [entry]
     finally:
         for tarball in tarballs:
             tarball.unlink(missing_ok=True)
@@ -439,8 +444,9 @@ def download_entry(
 ):
     target_dir = BUILD_DIR / entry.target
     local_meta = read_local_metadata(target_dir)
-    if local_meta and slug_from_metadata(local_meta) == entry.slug and not force:
-        print(f"{entry.target} already matches {entry.slug}, skipping download")
+    if local_meta and metadata_matches_entry(local_meta, entry) and not force:
+        version_summary = ", ".join(f"{k}={v}" for k, v in entry.versions.items())
+        print(f"{entry.target} already matches ({version_summary}), skipping download")
         return
 
     if entry.component_keys:
@@ -482,7 +488,7 @@ def list_entries(entries: Dict[str, List[ManifestEntry]]):
                 )
             else:
                 destinations = entry.object_key or ""
-            print(f"{target}: {entry.slug} ({versions}) -> {destinations}")
+            print(f"{target}: ({versions}) -> {destinations}")
 
 
 def ensure_build(targets: List[str], build_script: str):
