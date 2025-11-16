@@ -233,6 +233,22 @@ class FrameDeployer:
         distro = distro_out[0].strip().lower()
         return distro if distro else "unknown"
 
+    async def get_distro_version(self) -> str:
+        version_out: list[str] = []
+        await self.exec_command(
+            "bash -c '"
+            "if [ -f /etc/os-release ]; then "
+            ". /etc/os-release ; "
+            "if [ -n \"${VERSION_CODENAME}\" ]; then echo ${VERSION_CODENAME}; "
+            "elif [ -n \"${VERSION_ID}\" ]; then echo ${VERSION_ID}; "
+            "else echo unknown; fi; "
+            "else echo unknown; fi'",
+            version_out,
+            log_output=False,
+        )
+        version = version_out[0].strip().lower() if version_out else ""
+        return version or "unknown"
+
     async def get_total_memory_mb(self) -> int:
         mem_output: list[str] = []
         await self.exec_command(

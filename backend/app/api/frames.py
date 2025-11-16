@@ -73,6 +73,7 @@ from app.ws.agent_ws import (
 )
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
+from app.utils.cross_compile import build_binary_with_cross_toolchain
 from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import create_scoped_token_response, validate_scoped_token
 from . import api_with_auth, api_no_auth
@@ -614,30 +615,20 @@ async def api_frame_local_binary_zip(
         await deployer.make_local_modifications(source_dir)
         await copy_custom_fonts_to_local_source_folder(db, source_dir)
 
-        build_cmd = (
-            f"cd {source_dir} && "
-            "nimble assets -y && nimble setup && nimble build -y"
-        )
-
-        status, *_ = await exec_local_command(
-            db,
-            redis,
-            frame,
-            build_cmd,
-            log_command="nimble build (local)",
-        )
-        if status != 0:
+        try:
+            binary_path = await build_binary_with_cross_toolchain(
+                db=db,
+                redis=redis,
+                frame=frame,
+                deployer=deployer,
+                source_dir=source_dir,
+                temp_dir=tmp,
+            )
+        except Exception as exc:
             raise HTTPException(
                 status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                detail="Failed to build FrameOS binary",
-            )
-
-        binary_path = os.path.join(source_dir, "build", "frameos")
-        if not os.path.exists(binary_path):
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                detail="FrameOS binary not found after build",
-            )
+                detail=f"Failed to build FrameOS binary: {exc}",
+            ) from exc
 
         dist_dir = os.path.join(tmp, "dist")
         os.makedirs(dist_dir, exist_ok=True)
