@@ -80,8 +80,9 @@ def _normalize_ubuntu_release(version: str) -> str | None:
 def resolve_prebuilt_target(distro: str, version: str, arch: str) -> str | None:
     distro_input = (distro or "").lower()
     distro_key = {
-        "raspios": "pios",
-        "pios": "pios",
+        "raspios": "debian",
+        "pios": "debian",
+        "debian": "debian",
         "ubuntu": "ubuntu",
     }.get(distro_input)
     if not distro_key:
@@ -89,7 +90,7 @@ def resolve_prebuilt_target(distro: str, version: str, arch: str) -> str | None:
 
     release_key: str | None = None
     release = (version or "").lower()
-    if distro_key == "pios":
+    if distro_key == "debian":
         allowed = {"buster", "bookworm", "trixie"}
         if release in allowed:
             release_key = release
@@ -112,7 +113,7 @@ def resolve_prebuilt_target(distro: str, version: str, arch: str) -> str | None:
     if not arch_key:
         return None
 
-    if distro_key == "pios" and arch_key == "amd64":
+    if distro_key == "debian" and arch_key == "amd64":
         return None
 
     return f"{distro_key}-{release_key}-{arch_key}"

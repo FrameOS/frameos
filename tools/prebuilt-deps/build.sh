@@ -13,10 +13,10 @@ LGPIO_REPO="${LGPIO_REPO:-https://github.com/joan2937/lg.git}"
 declare -a COMPONENTS=("nim" "quickjs" "lgpio")
 
 TARGET_MATRIX=(
-  "pios|bookworm|armhf|linux/arm/v7|debian:bookworm"
-  "pios|bookworm|arm64|linux/arm64|debian:bookworm"
-  "pios|trixie|armhf|linux/arm/v7|debian:trixie"
-  "pios|trixie|arm64|linux/arm64|debian:trixie"
+  "debian|bookworm|armhf|linux/arm/v7|debian:bookworm"
+  "debian|bookworm|arm64|linux/arm64|debian:bookworm"
+  "debian|trixie|armhf|linux/arm/v7|debian:trixie"
+  "debian|trixie|arm64|linux/arm64|debian:trixie"
   "ubuntu|22.04|armhf|linux/arm/v7|ubuntu:22.04"
   "ubuntu|22.04|arm64|linux/arm64|ubuntu:22.04"
   "ubuntu|22.04|amd64|linux/amd64|ubuntu:22.04"

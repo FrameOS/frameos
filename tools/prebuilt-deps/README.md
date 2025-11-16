@@ -21,12 +21,12 @@ matching one of the following releases and architectures:
 ```bash
 # From the repository root
 ./tools/prebuilt-deps/build.sh          # builds every supported combo
-./tools/prebuilt-deps/build.sh pios-bookworm-arm64  # Raspberry Pi OS example
+./tools/prebuilt-deps/build.sh debian-bookworm-arm64  # Raspberry Pi OS example
 ./tools/prebuilt-deps/build.sh ubuntu-24.04-amd64   # Ubuntu example
 ```
 
 The script drops results under `build/prebuilt-deps/<target>/` where `<target>`
-looks like `pios-bookworm-armhf` or `ubuntu-24.04-amd64`. Each folder contains versioned component
+looks like `debian-bookworm-armhf` or `ubuntu-24.04-amd64`. Each folder contains versioned component
 directories so you can keep several revisions side-by-side, e.g.:
 
 ```
@@ -47,7 +47,7 @@ You can upload the entire folder as a tarball to your cache server.
 Each dependency (Nim, QuickJS, lgpio) is built by its own Dockerfile. When you
 rerun the builder it reuses any dependency whose `.build-info` marker matches
 the requested versions/platform so you only rebuild the missing pieces. Delete a
-component directory (e.g. `rm -rf build/prebuilt-deps/pios-bookworm-arm64/nim`
+component directory (e.g. `rm -rf build/prebuilt-deps/debian-bookworm-arm64/nim`
 or `build/prebuilt-deps/ubuntu-22.04-amd64/nim`) or the entire target folder to
 force a rebuild.
 
@@ -108,7 +108,7 @@ python tools/prebuilt-deps/r2_sync.py upload
 python tools/prebuilt-deps/r2_sync.py sync
 ```
 
-Each command accepts `--targets pios-bookworm-armhf ...` to restrict the
+Each command accepts `--targets debian-bookworm-armhf ...` to restrict the
 set of targets, along with knobs such as `--force` (download/upload even
 when the current metadata already matches) and `--skip-build` (download
 only).

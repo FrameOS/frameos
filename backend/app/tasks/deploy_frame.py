@@ -133,7 +133,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                         await self.log("stdout", f"- Using prebuilt target '{prebuilt_target}' when available")
                     else:
                         await self.log("stdout", f"- No prebuilt components published for '{prebuilt_target}'")
-            elif distro in ("raspios", "pios"):
+            elif distro in ("raspios", "debian"):
                 await self.log(
                     "stdout",
                     "- No matching prebuilt target for this distro/version/arch combination",

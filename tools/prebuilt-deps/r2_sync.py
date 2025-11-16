@@ -88,7 +88,7 @@ DEFAULT_TARGETS = [
     "ubuntu-24.04-arm64",
     "ubuntu-24.04-amd64",
 ]
-COMPONENTS = ["quickjs", "lgpio"]
+COMPONENTS = ["nim", "quickjs", "lgpio"]
 TARGET_PLATFORMS = {
     "armhf": "linux/arm/v7",
     "arm64": "linux/arm64",
