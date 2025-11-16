@@ -18,8 +18,15 @@ from app.utils.local_exec import exec_local_command
 from app.models.settings import get_settings_dict
 from app.utils.nix_utils import nix_cmd
 from app.tasks._frame_deployer import FrameDeployer
+from app.tasks.prebuilt_deps import fetch_prebuilt_manifest, resolve_prebuilt_target
 
 from .utils import find_nim_v2
+
+DEFAULT_QUICKJS_VERSION = "2025-04-26"
+DEFAULT_QUICKJS_SHA256 = "2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf"
+DEFAULT_LGPIO_VERSION = "v0.2.2"
+DEFAULT_LGPIO_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+LGPIO_ARCHIVE_URL = "https://github.com/joan2937/lg/archive/refs/tags/{version}.tar.gz"
 
 
 APT_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
@@ -101,10 +108,36 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             arch = await self.get_cpu_architecture()
             distro = await self.get_distro()
+            distro_version = await self.get_distro_version()
             total_memory = await self.get_total_memory_mb()
             low_memory = total_memory < 512
 
-            await self.log("stdout", f"- Detected distro: {distro}, architecture: {arch}, total memory: {total_memory} MiB")
+            await self.log(
+                "stdout",
+                f"- Detected distro: {distro} ({distro_version}), architecture: {arch}, total memory: {total_memory} MiB",
+            )
+
+            prebuilt_entry = None
+            prebuilt_target = resolve_prebuilt_target(distro, distro_version, arch)
+            if prebuilt_target:
+                try:
+                    manifest = await fetch_prebuilt_manifest()
+                except Exception as exc:
+                    await self.log(
+                        "stdout",
+                        f"- Could not load prebuilt manifest for target {prebuilt_target}: {exc}",
+                    )
+                else:
+                    prebuilt_entry = manifest.get(prebuilt_target)
+                    if prebuilt_entry:
+                        await self.log("stdout", f"- Using prebuilt target '{prebuilt_target}' when available")
+                    else:
+                        await self.log("stdout", f"- No prebuilt components published for '{prebuilt_target}'")
+            elif distro in ("raspios", "pios"):
+                await self.log(
+                    "stdout",
+                    "- No matching prebuilt target for this distro/version/arch combination",
+                )
 
             # Fast-path for NixOS targets
             if distro == "nixos":
@@ -197,27 +230,72 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 if check_lgpio != 0:
                     # Try installing liblgpio-dev
                     if await install_if_necessary("liblgpio-dev", raise_on_error=False) != 0:
-                        await self.log("stdout", "--> Could not find liblgpio-dev. Installing from source.")
-                        await install_if_necessary("python3-setuptools")
-                        command = (
-                            "if [ ! -f /usr/local/include/lgpio.h ]; then "
-                            "  rm -rf /tmp/lgpio-install && "
-                            "  mkdir -p /tmp/lgpio-install && "
-                            "  cd /tmp/lgpio-install && "
-                            "  wget -q -O v0.2.2.tar.gz https://github.com/joan2937/lg/archive/refs/tags/v0.2.2.tar.gz && "
-                            "  echo 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  v0.2.2.tar.gz' | sha256sum -c - && "
-                            "  tar -xzf v0.2.2.tar.gz && "
-                            "  cd lg-0.2.2 && "
-                            "  make && "
-                            "  sudo make install && "
-                            "  sudo rm -rf /tmp/lgpio-install; "
-                            "fi"
-                        )
-                        await self.exec_command(command)
+                        await self.log("stdout", "--> Could not find liblgpio-dev. Trying archived builds.")
+                        lgpio_installed = False
+                        if prebuilt_entry:
+                            lgpio_prebuilt_url = prebuilt_entry.url_for("lgpio")
+                            lgpio_version = prebuilt_entry.version_for("lgpio", DEFAULT_LGPIO_VERSION)
+                        else:
+                            lgpio_prebuilt_url = None
+                            lgpio_version = DEFAULT_LGPIO_VERSION
+
+                        if lgpio_prebuilt_url:
+                            try:
+                                await self.log(
+                                    "stdout",
+                                    f"--> Installing lgpio {lgpio_version} from archive",
+                                )
+                                await self.exec_command(
+                                    "rm -rf /tmp/lgpio-prebuilt && "
+                                    "mkdir -p /tmp/lgpio-prebuilt && "
+                                    f"wget -q -O /tmp/lgpio-prebuilt/lgpio.tar.gz {shlex.quote(lgpio_prebuilt_url)} && "
+                                    "tar -xzf /tmp/lgpio-prebuilt/lgpio.tar.gz -C /tmp/lgpio-prebuilt && "
+                                    "sudo mkdir -p /usr/local/include /usr/local/lib && "
+                                    "sudo cp -r /tmp/lgpio-prebuilt/include/. /usr/local/include/ && "
+                                    "sudo cp -r /tmp/lgpio-prebuilt/lib/. /usr/local/lib/ && "
+                                    "sudo ldconfig && "
+                                    "rm -rf /tmp/lgpio-prebuilt"
+                                )
+                                lgpio_installed = True
+                            except Exception as exc:
+                                await self.log(
+                                    "stdout",
+                                    f"--> Failed to install prebuilt lgpio ({exc}). Falling back to source build.",
+                                )
+
+                        if not lgpio_installed:
+                            await self.log("stdout", "--> Installing lgpio from source.")
+                            await install_if_necessary("python3-setuptools")
+                            lgpio_tar = f"{DEFAULT_LGPIO_VERSION}.tar.gz"
+                            lgpio_source_dir = f"lg-{DEFAULT_LGPIO_VERSION.lstrip('v')}"
+                            command = (
+                                "if [ ! -f /usr/local/include/lgpio.h ]; then "
+                                "  rm -rf /tmp/lgpio-install && "
+                                "  mkdir -p /tmp/lgpio-install && "
+                                "  cd /tmp/lgpio-install && "
+                                f"  wget -q -O {lgpio_tar} {LGPIO_ARCHIVE_URL.format(version=DEFAULT_LGPIO_VERSION)} && "
+                                f"  echo '{DEFAULT_LGPIO_SHA256}  {lgpio_tar}' | sha256sum -c - && "
+                                f"  tar -xzf {lgpio_tar} && "
+                                f"  cd {lgpio_source_dir} && "
+                                "  make && "
+                                "  sudo make install && "
+                                "  sudo rm -rf /tmp/lgpio-install; "
+                                "fi"
+                            )
+                            await self.exec_command(command)
 
             # Any app dependencies
             for dep in self.get_apt_packages():
                 await install_if_necessary(dep)
+
+            quickjs_version = (
+                prebuilt_entry.version_for("quickjs", DEFAULT_QUICKJS_VERSION)
+                if prebuilt_entry
+                else DEFAULT_QUICKJS_VERSION
+            )
+            quickjs_dirname = f"quickjs-{quickjs_version}"
+            quickjs_vendor_dir = f"/srv/frameos/vendor/quickjs/{quickjs_dirname}"
+            quickjs_prebuilt_url = prebuilt_entry.url_for("quickjs") if prebuilt_entry else None
 
             # Ensure /srv/frameos
             await self.exec_command(
@@ -226,26 +304,97 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 "fi"
             )
 
-            # 1. check if /srv/frameos/vendor/quickjs/quickjs-2025-04-26 exists
-            check_quickjs = await self.exec_command(
-                '[[ -d "/srv/frameos/vendor/quickjs/quickjs-2025-04-26" ]] && exit 0 || exit 1',
-                raise_on_error=False
+            def _quickjs_exists_command(path: str) -> str:
+                return f'[[ -d "{path}" ]] && exit 0 || exit 1'
+
+            quickjs_installed = (
+                await self.exec_command(
+                    _quickjs_exists_command(quickjs_vendor_dir),
+                    raise_on_error=False,
+                )
+                == 0
             )
-            if check_quickjs != 0:
-                # download  https://bellard.org/quickjs/quickjs-2025-04-26.tar.xz
+
+            if not quickjs_installed and quickjs_prebuilt_url:
+                await self.log("stdout", f"- Downloading QuickJS prebuilt archive ({quickjs_dirname})")
+                quickjs_archive = f"/tmp/quickjs-prebuilt-{build_id}.tar.gz"
+                try:
+                    await self.exec_command(
+                        "mkdir -p /srv/frameos/vendor/quickjs/ && "
+                        f"wget -q -O {quickjs_archive} {shlex.quote(quickjs_prebuilt_url)} && "
+                        f"tar -xzf {quickjs_archive} -C /srv/frameos/vendor/quickjs/ && "
+                        f"rm {quickjs_archive}"
+                    )
+                    await self.exec_command(
+                        "bash -c '"
+                        f"QUICKJS_DIR={shlex.quote(quickjs_vendor_dir)}; "
+                        "if [ -d \"$QUICKJS_DIR/include/quickjs\" ]; then "
+                        "  if [ -f \"$QUICKJS_DIR/include/quickjs/quickjs.h\" ] && [ ! -f \"$QUICKJS_DIR/quickjs.h\" ]; then "
+                        "    cp \"$QUICKJS_DIR/include/quickjs/quickjs.h\" \"$QUICKJS_DIR/quickjs.h\"; "
+                        "  fi; "
+                        "  if [ -f \"$QUICKJS_DIR/include/quickjs/quickjs-libc.h\" ] && [ ! -f \"$QUICKJS_DIR/quickjs-libc.h\" ]; then "
+                        "    cp \"$QUICKJS_DIR/include/quickjs/quickjs-libc.h\" \"$QUICKJS_DIR/quickjs-libc.h\"; "
+                        "  fi; "
+                        "fi; "
+                        "if [ -f \"$QUICKJS_DIR/lib/libquickjs.a\" ] && [ ! -f \"$QUICKJS_DIR/libquickjs.a\" ]; then "
+                        "  cp \"$QUICKJS_DIR/lib/libquickjs.a\" \"$QUICKJS_DIR/libquickjs.a\"; "
+                        "fi'"
+                    )
+                    quickjs_installed = True
+                except Exception as exc:
+                    await self.log(
+                        "stdout",
+                        f"- Failed to download prebuilt QuickJS ({exc}). Falling back to source build.",
+                    )
+                    quickjs_prebuilt_url = None
+                    quickjs_version = DEFAULT_QUICKJS_VERSION
+                    quickjs_dirname = f"quickjs-{quickjs_version}"
+                    quickjs_vendor_dir = f"/srv/frameos/vendor/quickjs/{quickjs_dirname}"
+                    quickjs_installed = (
+                        await self.exec_command(
+                            _quickjs_exists_command(quickjs_vendor_dir),
+                            raise_on_error=False,
+                        )
+                        == 0
+                    )
+
+            if not quickjs_installed and quickjs_version != DEFAULT_QUICKJS_VERSION:
+                quickjs_version = DEFAULT_QUICKJS_VERSION
+                quickjs_dirname = f"quickjs-{quickjs_version}"
+                quickjs_vendor_dir = f"/srv/frameos/vendor/quickjs/{quickjs_dirname}"
+                quickjs_installed = (
+                    await self.exec_command(
+                        _quickjs_exists_command(quickjs_vendor_dir),
+                        raise_on_error=False,
+                    )
+                    == 0
+                )
+
+            if not quickjs_installed:
+                quickjs_tar = f"quickjs-{quickjs_version}.tar.xz"
                 await self.log("stdout", "- Downloading quickjs")
                 await self.exec_command(
                     "mkdir -p /srv/frameos/vendor/quickjs/ && "
-                    "wget -q -O quickjs-2025-04-26.tar.xz https://bellard.org/quickjs/quickjs-2025-04-26.tar.xz && "
-                    "echo '2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf  quickjs-2025-04-26.tar.xz' | sha256sum -c - && "
-                    "tar -xJf quickjs-2025-04-26.tar.xz -C /srv/frameos/vendor/quickjs/ && " \
-                    "rm quickjs-2025-04-26.tar.xz"
+                    f"wget -q -O {quickjs_tar} https://bellard.org/quickjs/{quickjs_tar} && "
+                    f"echo '{DEFAULT_QUICKJS_SHA256}  {quickjs_tar}' | sha256sum -c - && "
+                    f"tar -xJf {quickjs_tar} -C /srv/frameos/vendor/quickjs/ && "
+                    f"rm {quickjs_tar}"
                 )
                 await self.log("stdout", "- Finished downloading quickjs")
-            # build it
-            await self.exec_command(
-                'cd /srv/frameos/vendor/quickjs/quickjs-2025-04-26 && make libquickjs.a'
+
+            quickjs_has_makefile = (
+                await self.exec_command(
+                    f'test -f "{quickjs_vendor_dir}/Makefile"',
+                    raise_on_error=False,
+                    log_command=False,
+                    log_output=False,
+                )
+                == 0
             )
+            if quickjs_has_makefile:
+                await self.exec_command(
+                    f'cd {quickjs_vendor_dir} && make libquickjs.a'
+                )
 
             await self.exec_command("mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
             await self.log("stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
@@ -264,7 +413,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             # Unpack & compile on device
             await self.exec_command(f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz")
             await self.exec_command(
-                f"ln -s /srv/frameos/vendor/quickjs/quickjs-2025-04-26 /srv/frameos/build/build_{build_id}/quickjs",
+                f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} /srv/frameos/build/build_{build_id}/quickjs",
             )
             await self.exec_command(
                 f"cd /srv/frameos/build/build_{build_id} && "
