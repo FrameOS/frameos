@@ -37,11 +37,14 @@ RUN set -euxo pipefail \
     && ./koch boot -d:release \
     && ./koch tools \
     && ./install.sh /artifacts \
+    && mkdir -p /artifacts/bin \
+    && cp -a ./bin/. /artifacts/bin/ \
     && cd /build \
     && rm -rf nim-${NIM_VERSION}
 
 RUN set -euxo pipefail \
     && find /artifacts -type f -print0 | xargs -0 chmod 0644 \
+    && find /artifacts/bin -type f -print0 | xargs -0 chmod 0755 \
     && find /artifacts -type d -print0 | xargs -0 chmod 0755
 
 FROM scratch AS artifacts
