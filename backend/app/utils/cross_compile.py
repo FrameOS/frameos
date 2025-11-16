@@ -217,7 +217,13 @@ class CrossCompiler:
                 #!/usr/bin/env bash
                 set -euo pipefail
 
+                log_debug() {{
+                    printf '[frameos-cross] %s\n' "$*" >&2
+                }}
+
                 export DEBIAN_FRONTEND=noninteractive
+                log_debug "Container uname: $(uname -a)"
+                log_debug "Working directory before build: $(pwd)"
                 apt-get update
                 apt-get install -y --no-install-recommends \
                     build-essential \
@@ -237,19 +243,45 @@ class CrossCompiler:
 
                 export HOME=/toolchain-home
                 mkdir -p "$HOME/.nimble"
-                if [ -x "$HOME/nim-prebuilt/bin/nim" ]; then
-                    export PATH="$HOME/nim-prebuilt/bin:$PATH"
-                elif [ -x "/prebuilt/nim/bin/nim" ]; then
-                    export PATH="/prebuilt/nim/bin:$PATH"
-                else
+                log_debug "Listing contents of $HOME"
+                ls -al "$HOME" >&2 || true
+                if [ -d "$HOME/nim-prebuilt" ]; then
+                    log_debug "Top-level $HOME/nim-prebuilt entries"
+                    find "$HOME/nim-prebuilt" -print >&2 || true
+                fi
+                if [ -d "/prebuilt/nim" ]; then
+                    log_debug "Top-level /prebuilt/nim entries"
+                    find "/prebuilt/nim" -print >&2 || true
+                fi
+
+                nim_path=""
+                for candidate in "$HOME/nim-prebuilt/bin/nim" "/prebuilt/nim/bin/nim"; do
+                    if [ -x "$candidate" ]; then
+                        nim_path="$candidate"
+                        log_debug "Using Nim binary at $candidate"
+                        export PATH="$(dirname "$candidate"):$PATH"
+                        "$candidate" --version >&2 || true
+                        break
+                    else
+                        log_debug "Nim candidate missing or not executable: $candidate"
+                    fi
+                done
+
+                if [ -z "$nim_path" ]; then
+                    log_debug "Unable to locate Nim; showing find output"
+                    find "$HOME" -maxdepth 4 -name nim -print >&2 || true
                     echo "Missing prebuilt Nim compiler (expected at $HOME/nim-prebuilt or /prebuilt/nim)" >&2
                     exit 1
                 fi
 
                 cd /src
+                log_debug "Running nimble assets"
                 nimble assets -y
+                log_debug "Running nimble setup"
                 nimble setup
+                log_debug "Running nimble build"
                 nimble build -y {pass_c} {pass_l}
+                log_debug "nimble build completed"
                 """
             ).strip()
             + "\n"
@@ -303,8 +335,12 @@ class CrossCompiler:
                 self.prebuilt_components[component] = path
 
         nim_component = self.prebuilt_components.get("nim")
-        if nim_component:
-            self._stage_prebuilt_nim(nim_component)
+        staged_nim = self._stage_prebuilt_nim(nim_component) if nim_component else None
+        if staged_nim:
+            await self._log(
+                "stdout",
+                f"- Nim toolchain staged at {staged_nim}",
+            )
         else:
             await self._log(
                 "stderr",
@@ -382,7 +418,7 @@ class CrossCompiler:
                 hasher.update(chunk)
         return hasher.hexdigest()
 
-    def _stage_prebuilt_nim(self, nim_dir: Path) -> None:
+    def _stage_prebuilt_nim(self, nim_dir: Path) -> Path | None:
         dest = self.home_dir / "nim-prebuilt"
         marker_src = nim_dir / ".build-info"
         marker_dest = dest / ".build-info"
@@ -392,9 +428,24 @@ class CrossCompiler:
                 and marker_dest.exists()
                 and marker_src.read_text() == marker_dest.read_text()
             ):
-                return
+                return self._ensure_nim_bin(dest)
             shutil.rmtree(dest)
         shutil.copytree(nim_dir, dest, dirs_exist_ok=True)
+        return self._ensure_nim_bin(dest)
+
+    def _ensure_nim_bin(self, dest: Path) -> Path | None:
+        canonical = dest / "bin" / "nim"
+        if canonical.exists():
+            canonical.chmod(0o755)
+            return canonical
+        for candidate in dest.rglob("bin/nim"):
+            if candidate == canonical or not candidate.is_file():
+                continue
+            canonical.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(candidate, canonical)
+            canonical.chmod(0o755)
+            return canonical
+        return None
 
     def _stage_quickjs(self, source_dir: str) -> None:
         quickjs_dir = self.prebuilt_components.get("quickjs")
