@@ -78,7 +78,7 @@ DEFAULT_PREFIX = os.environ.get("R2_PREFIX", "prebuilt-deps")
 # Keep the target matrix in sync with tools/prebuilt-deps/build.sh
 RELEASES = ["bookworm", "trixie"]
 ARCHES = ["armhf", "arm64"]
-COMPONENTS = [ "quickjs", "lgpio"]
+COMPONENTS = ["nim", "quickjs", "lgpio"]
 TARGET_PLATFORMS = {
     "armhf": "linux/arm/v7",
     "arm64": "linux/arm64",
