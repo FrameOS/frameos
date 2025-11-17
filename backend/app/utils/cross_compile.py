@@ -39,11 +39,17 @@ class TargetMetadata:
 
 
 @dataclass(slots=True)
-class RemoteRequirement:
+class RemotePathSpec:
     name: str
     patterns: list[str]
     parent_depth: int
+
+
+@dataclass(slots=True)
+class RemoteComponent:
+    name: str
     predicate: Callable[[dict[str, object]], bool]
+    paths: tuple[RemotePathSpec, ...]
 
 
 SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -59,27 +65,29 @@ TOOLCHAIN_PACKAGES = (
 )
 
 
-REMOTE_REQUIREMENTS: tuple[RemoteRequirement, ...] = (
-    RemoteRequirement(
-        name="lgpio-libs",
-        patterns=[
-            "/usr/lib/**/liblgpio.so",
-            "/usr/lib/**/liblgpio.so.*",
-            "/usr/local/lib/**/liblgpio.so*",
-        ],
-        parent_depth=1,
-        predicate=lambda drivers: bool(drivers.get("waveshare"))
-        or bool(drivers.get("gpioButton")),
-    ),
-    RemoteRequirement(
-        name="lgpio-includes",
-        patterns=[
-            "/usr/include/**/lgpio.h",
-            "/usr/local/include/**/lgpio.h",
-        ],
-        parent_depth=0,
-        predicate=lambda drivers: bool(drivers.get("waveshare"))
-        or bool(drivers.get("gpioButton")),
+REMOTE_COMPONENTS: tuple[RemoteComponent, ...] = (
+    RemoteComponent(
+        name="lgpio",
+        predicate=lambda _drivers: True,
+        paths=(
+            RemotePathSpec(
+                name="lgpio-libs",
+                patterns=[
+                    "/usr/lib/**/liblgpio.so",
+                    "/usr/lib/**/liblgpio.so.*",
+                    "/usr/local/lib/**/liblgpio.so*",
+                ],
+                parent_depth=1,
+            ),
+            RemotePathSpec(
+                name="lgpio-includes",
+                patterns=[
+                    "/usr/include/**/lgpio.h",
+                    "/usr/local/include/**/lgpio.h",
+                ],
+                parent_depth=0,
+            ),
+        ),
     ),
 )
 
@@ -161,29 +169,28 @@ class CrossCompiler:
 
     async def _prepare_sysroot(self) -> None:
         drivers = drivers_for_frame(self.frame)
-        required = [spec for spec in REMOTE_REQUIREMENTS if spec.predicate(drivers)]
+        components = [
+            component for component in REMOTE_COMPONENTS if component.predicate(drivers)
+        ]
 
-        prebuilt_lgpio = self.prebuilt_components.get("lgpio")
-        if prebuilt_lgpio:
-            await self._log("stdout", "- Using prebuilt lgpio headers and libraries")
-            self._inject_prebuilt_lgpio()
-            required = [
-                spec
-                for spec in required
-                if not spec.name.startswith("lgpio")
-            ]
-            if not required:
+        remote_specs: list[RemotePathSpec] = []
+        used_prebuilt = False
+        for component in components:
+            if component.name in self.prebuilt_components:
+                used_prebuilt = True
+                await self._log(
+                    "stdout",
+                    f"- Using prebuilt {component.name} headers and libraries",
+                )
+                self._inject_prebuilt_component(component.name)
+                continue
+            remote_specs.extend(component.paths)
+
+        if not remote_specs:
+            if used_prebuilt:
                 await self._log(
                     "stdout",
                     "- Remaining sysroot requirements satisfied by prebuilt components",
-                )
-                return
-
-        if not required:
-            if prebuilt_lgpio:
-                await self._log(
-                    "stdout",
-                    "- No additional device-specific libraries required from frame",
                 )
             else:
                 await self._log(
@@ -193,7 +200,7 @@ class CrossCompiler:
             return
 
         remote_paths: list[str] = []
-        for spec in required:
+        for spec in remote_specs:
             match = await self._remote_first_match(spec.patterns)
             if not match:
                 await self._log("stderr", f"- Unable to locate {spec.name} on frame; continuing")
@@ -509,6 +516,10 @@ class CrossCompiler:
     def _first_file_match(root: Path, pattern: str) -> Path | None:
         matches = sorted(root.rglob(pattern))
         return matches[0] if matches else None
+
+    def _inject_prebuilt_component(self, component: str) -> None:
+        if component == "lgpio":
+            self._inject_prebuilt_lgpio()
 
     def _inject_prebuilt_lgpio(self) -> None:
         lgpio_dir = self.prebuilt_components.get("lgpio")
