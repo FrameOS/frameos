@@ -288,6 +288,9 @@ class CrossCompiler:
                     export PATH="$extra_path_dirs:$PATH"
                 fi
 
+                echo "PATH:"
+                echo $PATH
+
                 cd /src
                 log_debug "Running nimble assets"
                 nimble assets -y
