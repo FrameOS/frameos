@@ -229,7 +229,7 @@ class CrossCompiler:
                 log_debug "Container uname: $(uname -a)"
                 log_debug "Working directory before build: $(pwd)"
                 apt-get update
-                apt-get install -y --no-install-recommends build-essential ca-certificates curl git make pkg-config python3 python3-pip unzip xz-utils zlib1g-dev libssl-dev libffi-dev libjpeg-dev libfreetype6-dev
+                apt-get install -y --no-install-recommends build-essential ca-certificates curl git make pkg-config python3 python3-pip unzip xz-utils zlib1g-dev libssl-dev libffi-dev libjpeg-dev libfreetype6-dev libevdev-dev
 
                 extra_cflags={extra_cflags}
                 extra_libs={extra_libs}
