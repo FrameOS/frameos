@@ -460,6 +460,23 @@ class CrossCompiler:
             shutil.rmtree(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(quickjs_dir, dest, dirs_exist_ok=True)
+        self._normalize_quickjs_layout(dest)
+
+    def _normalize_quickjs_layout(self, quickjs_root: Path) -> None:
+        """Ensure the staged QuickJS tree matches the layout produced by nimble."""
+
+        def ensure_file(name: str) -> None:
+            target = quickjs_root / name
+            if target.exists():
+                return
+            match = next((p for p in quickjs_root.rglob(name) if p.is_file()), None)
+            if not match:
+                return
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(match, target)
+
+        for filename in ("libquickjs.a", "libquickjs.libc.a", "quickjs.h", "quickjs-libc.h"):
+            ensure_file(filename)
 
     def _inject_prebuilt_lgpio(self) -> None:
         lgpio_dir = self.prebuilt_components.get("lgpio")
