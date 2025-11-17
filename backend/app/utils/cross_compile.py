@@ -61,22 +61,6 @@ TOOLCHAIN_PACKAGES = (
 
 REMOTE_REQUIREMENTS: tuple[RemoteRequirement, ...] = (
     RemoteRequirement(
-        name="libevdev-libs",
-        patterns=[
-            "/usr/lib/**/libevdev.so",
-            "/usr/lib/**/libevdev.so.*",
-            "/lib/**/libevdev.so*",
-        ],
-        parent_depth=1,
-        predicate=lambda drivers: bool(drivers.get("evdev")),
-    ),
-    RemoteRequirement(
-        name="libevdev-includes",
-        patterns=["/usr/include/**/libevdev.h"],
-        parent_depth=2,
-        predicate=lambda drivers: bool(drivers.get("evdev")),
-    ),
-    RemoteRequirement(
         name="lgpio-libs",
         patterns=[
             "/usr/lib/**/liblgpio.so",
@@ -403,6 +387,7 @@ class CrossCompiler:
         dest_dir.mkdir(parents=True, exist_ok=True)
         try:
             await self._download_and_extract(url, dest_dir, self.prebuilt_entry.md5_for(component))
+            self._normalize_component_dir(dest_dir)
         except Exception as exc:
             await self._log(
                 "stderr",
@@ -444,6 +429,20 @@ class CrossCompiler:
         tar.extractall(path=path)
 
     @staticmethod
+    def _normalize_component_dir(dest_dir: Path) -> None:
+        entries = [p for p in dest_dir.iterdir() if p.name not in {".build-info",}]
+        subdirs = [p for p in entries if p.is_dir()]
+        files = [p for p in entries if p.is_file()]
+        if files or not subdirs:
+            return
+        if len(subdirs) != 1:
+            return
+        inner = subdirs[0]
+        for child in inner.iterdir():
+            shutil.move(str(child), dest_dir / child.name)
+        shutil.rmtree(inner)
+
+    @staticmethod
     def _file_md5sum(path: Path) -> str:
         hasher = hashlib.md5()
         with path.open("rb") as fh:
@@ -459,25 +458,40 @@ class CrossCompiler:
         if dest.exists():
             shutil.rmtree(dest)
         dest.mkdir(parents=True, exist_ok=True)
-        include_src = quickjs_dir / "include" / "quickjs"
-        if include_src.exists():
-            shutil.copytree(include_src, dest / "include" / "quickjs", dirs_exist_ok=True)
-        for header in ("quickjs.h", "quickjs-libc.h"):
-            for candidate in (
-                include_src / header,
-                quickjs_dir / header,
-            ):
-                if candidate.exists():
-                    shutil.copy2(candidate, dest / header)
-                    break
-        lib_candidates = [
-            quickjs_dir / "lib" / "libquickjs.a",
-            quickjs_dir / "libquickjs.a",
-        ]
-        for candidate in lib_candidates:
-            if candidate.exists():
-                shutil.copy2(candidate, dest / "libquickjs.a")
-                break
+        include_src = self._find_quickjs_include_dir(quickjs_dir)
+        if include_src:
+            target_include = dest / "include" / "quickjs"
+            target_include.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(include_src, target_include, dirs_exist_ok=True)
+
+        header = self._first_file_match(quickjs_dir, "quickjs.h")
+        if header:
+            shutil.copy2(header, dest / "quickjs.h")
+
+        libc_header = self._first_file_match(quickjs_dir, "quickjs-libc.h")
+        if libc_header:
+            shutil.copy2(libc_header, dest / "quickjs-libc.h")
+
+        libquickjs = self._first_file_match(quickjs_dir, "libquickjs.a")
+        if libquickjs:
+            shutil.copy2(libquickjs, dest / "libquickjs.a")
+
+    @staticmethod
+    def _find_quickjs_include_dir(root: Path) -> Path | None:
+        direct = root / "include" / "quickjs"
+        if direct.exists():
+            return direct
+        candidates = sorted(
+            path
+            for path in root.rglob("quickjs")
+            if path.is_dir() and (path / "quickjs.h").exists()
+        )
+        return candidates[0] if candidates else None
+
+    @staticmethod
+    def _first_file_match(root: Path, pattern: str) -> Path | None:
+        matches = sorted(root.rglob(pattern))
+        return matches[0] if matches else None
 
     def _inject_prebuilt_lgpio(self) -> None:
         lgpio_dir = self.prebuilt_components.get("lgpio")
