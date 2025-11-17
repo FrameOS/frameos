@@ -50,6 +50,13 @@ SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 CACHE_ENV = "FRAMEOS_CROSS_CACHE"
 DEFAULT_CACHE = Path.home() / ".cache/frameos/cross"
 PREBUILT_TIMEOUT = float(os.environ.get("FRAMEOS_PREBUILT_TIMEOUT", "20"))
+TOOLCHAIN_IMAGE_VERSION = "1"
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+CROSS_TOOLCHAIN_DOCKERFILE = BACKEND_ROOT / "tools" / "cross-toolchain.Dockerfile"
+TOOLCHAIN_PACKAGES = (
+    "build-essential ca-certificates curl git make pkg-config python3 python3-pip "
+    "unzip xz-utils zlib1g-dev libssl-dev libffi-dev libjpeg-dev libfreetype6-dev libevdev-dev"
+)
 
 
 REMOTE_REQUIREMENTS: tuple[RemoteRequirement, ...] = (
@@ -225,11 +232,8 @@ class CrossCompiler:
                     printf '[frameos-cross] %s\n' "$*" >&2
                 }}
 
-                export DEBIAN_FRONTEND=noninteractive
                 log_debug "Container uname: $(uname -a)"
                 log_debug "Working directory before build: $(pwd)"
-                apt-get update
-                apt-get install -y --no-install-recommends build-essential ca-certificates curl git make pkg-config python3 python3-pip unzip xz-utils zlib1g-dev libssl-dev libffi-dev libjpeg-dev libfreetype6-dev libevdev-dev
 
                 extra_cflags={extra_cflags}
                 extra_libs={extra_libs}
@@ -252,6 +256,8 @@ class CrossCompiler:
         )
         os.chmod(script_path, 0o755)
 
+        image = await self._ensure_toolchain_image()
+
         docker_cmd = " ".join(
             [
                 "docker run --rm",
@@ -260,7 +266,7 @@ class CrossCompiler:
                 f"-v {shlex.quote(str(self.sysroot_dir))}:/sysroot:ro",
                 f"-v {shlex.quote(str(script_path))}:/tmp/build.sh:ro",
                 "-w /src",
-                shlex.quote(self._docker_image()),
+                shlex.quote(image),
                 "bash /tmp/build.sh",
             ]
         )
@@ -529,6 +535,54 @@ class CrossCompiler:
         base, default_version = DISTRO_DEFAULTS.get(distro, ("debian", "bookworm"))
         safe_version = version if re.match(r"^[A-Za-z0-9_.-]+$", version) else default_version
         return f"{base}:{safe_version}"
+
+    def _toolchain_image(self) -> str:
+        base = self._sanitize(self._docker_image().replace("/", "_"))
+        platform = self._sanitize(self._platform().replace("/", "_"))
+        return f"frameos-cross-{base}-{platform}-v{TOOLCHAIN_IMAGE_VERSION}"
+
+    async def _ensure_toolchain_image(self) -> str:
+        image = self._toolchain_image()
+        inspect_cmd = f"docker image inspect {shlex.quote(image)} >/dev/null 2>&1"
+        status, _out, _err = await exec_local_command(
+            self.db,
+            self.redis,
+            self.frame,
+            inspect_cmd,
+            log_command=False,
+            log_output=False,
+        )
+        if status == 0:
+            return image
+
+        dockerfile = str(CROSS_TOOLCHAIN_DOCKERFILE)
+        if not os.path.exists(dockerfile):
+            raise RuntimeError(
+                "Cross toolchain Dockerfile is missing; expected at backend/tools/cross-toolchain.Dockerfile",
+            )
+        context_dir = str(Path(dockerfile).parent)
+        build_cmd = " ".join(
+            [
+                "docker buildx build --load",
+                f"--platform {self._platform()}",
+                f"--build-arg BASE_IMAGE={shlex.quote(self._docker_image())}",
+                f"--build-arg TOOLCHAIN_PACKAGES={shlex.quote(TOOLCHAIN_PACKAGES)}",
+                f"-t {shlex.quote(image)}",
+                f"-f {shlex.quote(dockerfile)}",
+                shlex.quote(context_dir),
+            ]
+        )
+
+        status, _stdout, err = await exec_local_command(
+            self.db,
+            self.redis,
+            self.frame,
+            build_cmd,
+            log_command="docker buildx build (cross toolchain)",
+        )
+        if status != 0:
+            raise RuntimeError(f"Failed to build cross toolchain image: {err or 'see logs'}")
+        return image
 
     @staticmethod
     def _sanitize(value: str) -> str:
