@@ -160,10 +160,10 @@ class CrossCompiler:
             f"- Cross compiling for {self.target.arch} on {self._docker_image()} via {self._platform()}",
         )
         await self._prepare_prebuilt_components()
-        self._ensure_quickjs_sources(source_dir)
+        await self._ensure_quickjs_sources(source_dir)
         build_dir = await self._generate_c_sources(source_dir)
         await self._prepare_sysroot()
-        self._ensure_quickjs_in_build_dir(source_dir, build_dir)
+        await self._ensure_quickjs_in_build_dir(source_dir, build_dir)
         binary_path = await self._run_docker_build(str(build_dir))
         if not os.path.exists(binary_path):
             raise RuntimeError("Cross compilation completed but frameos binary is missing")
@@ -296,16 +296,29 @@ class CrossCompiler:
             raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
         return os.path.join(build_dir, "frameos")
 
-    def _ensure_quickjs_sources(self, source_dir: str) -> None:
+    async def _ensure_quickjs_sources(self, source_dir: str) -> None:
         quickjs_root = Path(source_dir) / "quickjs"
         libquickjs = quickjs_root / "libquickjs.a"
-        if self.prebuilt_components.get("quickjs"):
+        await self._log(
+            "stdout",
+            f"- Ensuring QuickJS sources are available at {quickjs_root} (exists={quickjs_root.exists()})",
+        )
+        prebuilt_path = self.prebuilt_components.get("quickjs")
+        if prebuilt_path:
+            await self._log(
+                "stdout",
+                f"  • Prebuilt QuickJS component detected at {prebuilt_path}; staging into source tree",
+            )
             self._stage_quickjs(source_dir)
         if libquickjs.exists():
+            await self._log("stdout", f"  • Found QuickJS archive at {libquickjs}")
             return
+        await self._log("stderr", "  • QuickJS archive missing after initial stage; retrying")
         self._stage_quickjs(source_dir)
         if libquickjs.exists():
+            await self._log("stdout", f"  • QuickJS archive found after restage at {libquickjs}")
             return
+        await self._log_quickjs_probe(Path(source_dir), "source directory")
         raise RuntimeError(
             "QuickJS sources are missing; run `nimble build_quickjs` or publish a prebuilt component.",
         )
@@ -320,19 +333,37 @@ class CrossCompiler:
         )
         return build_dir
 
-    def _ensure_quickjs_in_build_dir(self, source_dir: str, build_dir: Path) -> None:
+    async def _ensure_quickjs_in_build_dir(self, source_dir: str, build_dir: Path) -> None:
         dest = Path(build_dir) / "quickjs"
         libquickjs = dest / "libquickjs.a"
+        await self._log(
+            "stdout",
+            f"- Ensuring QuickJS assets exist within build dir {dest} (exists={dest.exists()})",
+        )
         if self.prebuilt_components.get("quickjs"):
+            await self._log(
+                "stdout",
+                "  • Staging prebuilt QuickJS component directly into build directory",
+            )
             self._stage_quickjs(str(build_dir))
         if libquickjs.exists():
+            await self._log("stdout", f"  • Build directory already contains {libquickjs}")
             return
         source_quickjs = Path(source_dir) / "quickjs"
         if source_quickjs.exists():
+            await self._log(
+                "stdout",
+                f"  • Copying QuickJS tree from source directory ({source_quickjs}) into build directory",
+            )
             shutil.copytree(source_quickjs, dest, dirs_exist_ok=True)
         else:
+            await self._log(
+                "stderr",
+                f"  • Source directory missing QuickJS folder at {source_quickjs}; attempting to restage",
+            )
             self._stage_quickjs(str(build_dir))
         if not libquickjs.exists():
+            await self._log_quickjs_probe(Path(build_dir), "build directory")
             raise RuntimeError(
                 "QuickJS libraries missing from generated C sources; unable to continue cross compilation",
             )
@@ -559,6 +590,36 @@ class CrossCompiler:
             seen.add(value)
             ordered.append(value)
         return ordered
+
+    async def _log_quickjs_probe(self, root: Path, context: str) -> None:
+        await self._log(
+            "stderr",
+            f"  • Probing {context} {root} for QuickJS artifacts",
+        )
+        libs = sorted(root.rglob("libquickjs.a"))
+        headers = sorted(root.rglob("quickjs.h"))
+        folders = [p for p in root.rglob("quickjs") if p.is_dir()]
+
+        await self._log(
+            "stderr",
+            f"    - Found {len(libs)} libquickjs.a file(s), {len(headers)} quickjs.h file(s), and {len(folders)} quickjs directory matches",
+        )
+
+        async def _log_subset(paths: list[Path], label: str) -> None:
+            if not paths:
+                return
+            preview = paths[:5]
+            for candidate in preview:
+                await self._log("stderr", f"      {label}: {candidate}")
+            if len(paths) > len(preview):
+                await self._log(
+                    "stderr",
+                    f"      … {len(paths) - len(preview)} additional {label} entries suppressed",
+                )
+
+        await _log_subset(libs, "lib")
+        await _log_subset(headers, "header")
+        await _log_subset(folders[:5], "dir")
 
     def _platform(self) -> str:
         return PLATFORM_MAP.get(self.target.arch, "linux/amd64")
