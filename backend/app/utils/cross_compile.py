@@ -458,26 +458,8 @@ class CrossCompiler:
         dest = Path(source_dir) / "quickjs"
         if dest.exists():
             shutil.rmtree(dest)
-        dest.mkdir(parents=True, exist_ok=True)
-        include_src = quickjs_dir / "include" / "quickjs"
-        if include_src.exists():
-            shutil.copytree(include_src, dest / "include" / "quickjs", dirs_exist_ok=True)
-        for header in ("quickjs.h", "quickjs-libc.h"):
-            for candidate in (
-                include_src / header,
-                quickjs_dir / header,
-            ):
-                if candidate.exists():
-                    shutil.copy2(candidate, dest / header)
-                    break
-        lib_candidates = [
-            quickjs_dir / "lib" / "libquickjs.a",
-            quickjs_dir / "libquickjs.a",
-        ]
-        for candidate in lib_candidates:
-            if candidate.exists():
-                shutil.copy2(candidate, dest / "libquickjs.a")
-                break
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(quickjs_dir, dest, dirs_exist_ok=True)
 
     def _inject_prebuilt_lgpio(self) -> None:
         lgpio_dir = self.prebuilt_components.get("lgpio")
