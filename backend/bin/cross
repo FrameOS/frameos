@@ -24,6 +24,7 @@ from backend.app.tasks._frame_deployer import FrameDeployer  # type: ignore  # n
 from backend.app.tasks.utils import find_nim_v2  # type: ignore  # noqa: E402
 from backend.app.utils.cross_compile import CrossCompiler, TargetMetadata  # type: ignore  # noqa: E402
 from backend.app.utils import local_exec  # type: ignore  # noqa: E402
+from app.utils import local_exec as app_local_exec  # type: ignore  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -136,6 +137,7 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
         await console_log(level, message)
 
     local_exec.log = exec_log  # type: ignore[assignment]
+    app_local_exec.log = exec_log  # type: ignore[assignment]
 
     with tempfile.TemporaryDirectory(prefix=f"frameos-cross-{slug}-") as tmp:
         deployer = StandaloneFrameDeployer(frame=frame, nim_path=nim_path, temp_dir=tmp, logger=console_log)
