@@ -15,8 +15,10 @@ declare -a COMPONENTS=("nim" "quickjs" "lgpio")
 TARGET_MATRIX=(
   "debian|bookworm|armhf|linux/arm/v7|debian:bookworm"
   "debian|bookworm|arm64|linux/arm64|debian:bookworm"
+  "debian|bookworm|amd64|linux/amd64|debian:bookworm"
   "debian|trixie|armhf|linux/arm/v7|debian:trixie"
   "debian|trixie|arm64|linux/arm64|debian:trixie"
+  "debian|trixie|amd64|linux/amd64|debian:trixie"
   "ubuntu|22.04|arm64|linux/arm64|ubuntu:22.04"
   "ubuntu|22.04|amd64|linux/amd64|ubuntu:22.04"
   "ubuntu|24.04|arm64|linux/arm64|ubuntu:24.04"
