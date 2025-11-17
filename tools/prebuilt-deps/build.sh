@@ -159,6 +159,15 @@ for target in "${REQUESTED_TARGETS[@]}"; do
       --target artifacts \
       -f "${component_dockerfile}" "${ROOT_DIR}"
 
+    if [[ "${component}" == "lgpio" ]]; then
+      for static_lib in lib/liblgpio.a lib/librgpio.a; do
+        if [[ ! -f "${comp_dest}/${static_lib}" ]]; then
+          echo " - ${component}: missing ${static_lib} in artifacts" >&2
+          exit 1
+        fi
+      done
+    fi
+
     printf '%s' "${expected_marker}" > "${marker_file}"
   done
 

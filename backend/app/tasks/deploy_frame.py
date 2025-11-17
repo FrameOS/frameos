@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import os
 import re
 import shlex
-import shutil
+import tarfile
 import tempfile
 from typing import Any
 
@@ -105,6 +105,44 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     if response != 0: # we propably raised above
                         await self.log("stdout", f"- Installing {sanitized_pkg} failed again.")
             return response
+
+        async def upload_directory_tree(local_dir: str, remote_dir: str, label: str) -> None:
+            normalized_local = os.path.abspath(local_dir)
+            if not os.path.isdir(normalized_local):
+                await self.log("stdout", f"- Skipping {label}; nothing to upload")
+                return
+
+            fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
+            os.close(fd)
+            arcname = os.path.basename(remote_dir.rstrip("/")) or os.path.basename(normalized_local.rstrip("/")) or "payload"
+            try:
+                with tarfile.open(tmp_path, "w:gz") as archive:
+                    archive.add(normalized_local, arcname=arcname)
+                with open(tmp_path, "rb") as fh:
+                    data = fh.read()
+            finally:
+                os.remove(tmp_path)
+
+            remote_archive = f"/tmp/{arcname}_{build_id}.tar.gz"
+            await upload_file(db, redis, frame, remote_archive, data)
+            parent_dir = os.path.dirname(remote_dir.rstrip("/")) or "/"
+            quoted_parent = shlex.quote(parent_dir)
+            quoted_remote = shlex.quote(remote_dir)
+            quoted_archive = shlex.quote(remote_archive)
+            await self.exec_command(f"mkdir -p {quoted_parent}")
+            await self.exec_command(f"rm -rf {quoted_remote}", raise_on_error=False)
+            await self.exec_command(
+                f"tar -xzf {quoted_archive} -C {quoted_parent} && rm {quoted_archive}"
+            )
+
+        async def upload_binary(local_path: str, remote_path: str) -> None:
+            normalized_local = os.path.abspath(local_path)
+            if not os.path.isfile(normalized_local):
+                raise FileNotFoundError(f"frameos binary missing at {normalized_local}")
+            with open(normalized_local, "rb") as fh:
+                data = fh.read()
+            await upload_file(db, redis, frame, remote_path, data)
+            await self.exec_command(f"chmod +x {shlex.quote(remote_path)}", raise_on_error=False)
 
         with tempfile.TemporaryDirectory() as temp_dir:
             self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
@@ -215,10 +253,11 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             archive_path = await self.create_local_build_archive(build_dir, source_dir, arch)
 
             cross_compiled = False
+            cross_compiled_binary: str | None = None
             if can_cross_compile_target(arch):
                 await self.log("stdout", "- Target supports cross compilation; building binary locally")
                 try:
-                    await build_binary_with_cross_toolchain(
+                    cross_compiled_binary = await build_binary_with_cross_toolchain(
                         db=db,
                         redis=redis,
                         frame=frame,
@@ -233,12 +272,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     )
                 else:
                     cross_compiled = True
-                    archive_path = shutil.make_archive(
-                        build_dir,
-                        "gztar",
-                        temp_dir,
-                        os.path.basename(build_dir),
-                    )
                     await self.log("stdout", "- Cross compilation succeeded; skipping remote build")
 
             if low_memory and not cross_compiled:
@@ -469,40 +502,49 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     )
 
             await self.exec_command("mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
-            await self.log("stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
+            if not cross_compiled:
+                await self.log("stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
 
-            # 3. Upload the local tarball
-            with open(archive_path, "rb") as fh:
-                data = fh.read()
-            await upload_file(
-                self.db,
-                self.redis,
-                self.frame,
-                f"/srv/frameos/build/build_{build_id}.tar.gz",
-                data,
-            )
+                # 3. Upload the local tarball
+                with open(archive_path, "rb") as fh:
+                    data = fh.read()
+                await upload_file(
+                    self.db,
+                    self.redis,
+                    self.frame,
+                    f"/srv/frameos/build/build_{build_id}.tar.gz",
+                    data,
+                )
 
-            # Unpack & compile on device
-            await self.exec_command(f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz")
-            if not cross_compiled and quickjs_dirname:
+                # Unpack & compile on device
                 await self.exec_command(
-                    f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} /srv/frameos/build/build_{build_id}/quickjs",
+                    f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz"
                 )
-                await self.exec_command(
-                    f"cd /srv/frameos/build/build_{build_id} && "
-                    "PARALLEL_MEM=$(awk '/MemTotal/{printf \"%.0f\\n\", $2/1024/250}' /proc/meminfo) && "
-                    "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
-                    "make -j$PARALLEL",
-                    timeout=3600, # 30 minute timeout for compilation
-                )
-            elif cross_compiled:
-                await self.log("stdout", "- Skipping on-device build; using cross-compiled binary")
+                if quickjs_dirname:
+                    await self.exec_command(
+                        f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} /srv/frameos/build/build_{build_id}/quickjs",
+                    )
+                    await self.exec_command(
+                        f"cd /srv/frameos/build/build_{build_id} && "
+                        "PARALLEL_MEM=$(awk '/MemTotal/{printf \"%.0f\\n\", $2/1024/250}' /proc/meminfo) && "
+                        "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
+                        "make -j$PARALLEL",
+                        timeout=3600, # 30 minute timeout for compilation
+                    )
+            else:
+                await self.log("stdout", "- Using cross-compiled binary; skipping build archive upload")
 
             await self.exec_command(f"mkdir -p /srv/frameos/releases/release_{build_id}")
-            await self.exec_command(
-                f"cp /srv/frameos/build/build_{build_id}/frameos "
-                f"/srv/frameos/releases/release_{build_id}/frameos"
-            )
+            release_frameos_path = f"/srv/frameos/releases/release_{build_id}/frameos"
+            if not cross_compiled:
+                await self.exec_command(
+                    f"cp /srv/frameos/build/build_{build_id}/frameos "
+                    f"{release_frameos_path}"
+                )
+            else:
+                if not cross_compiled_binary:
+                    raise RuntimeError("Cross compilation succeeded but binary path is unknown")
+                await upload_binary(cross_compiled_binary, release_frameos_path)
 
             # 4. Upload scenes.json.gz and frame.json
             await self._upload_scenes_json(f"/srv/frameos/releases/release_{build_id}/scenes.json.gz", gzip=True)
@@ -510,10 +552,19 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             # Driver-specific vendor steps
             if inkyPython := drivers.get("inkyPython"):
-                await self.exec_command(
-                    f"mkdir -p /srv/frameos/vendor && "
-                    f"cp -r /srv/frameos/build/build_{build_id}/vendor/inkyPython /srv/frameos/vendor/"
-                )
+                vendor_folder = inkyPython.vendor_folder or ""
+                local_vendor_path = os.path.join(build_dir, "vendor", vendor_folder)
+                if cross_compiled:
+                    await upload_directory_tree(
+                        local_vendor_path,
+                        f"/srv/frameos/vendor/{vendor_folder}",
+                        "inkyPython vendor files",
+                    )
+                else:
+                    await self.exec_command(
+                        f"mkdir -p /srv/frameos/vendor && "
+                        f"cp -r /srv/frameos/build/build_{build_id}/vendor/inkyPython /srv/frameos/vendor/"
+                    )
                 await install_if_necessary("python3-pip")
                 await install_if_necessary("python3-venv")
                 await self.exec_command(
@@ -526,10 +577,19 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 )
 
             if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
-                await self.exec_command(
-                    f"mkdir -p /srv/frameos/vendor && "
-                    f"cp -r /srv/frameos/build/build_{build_id}/vendor/inkyHyperPixel2r /srv/frameos/vendor/"
-                )
+                vendor_folder = inkyHyperPixel2r.vendor_folder or ""
+                local_vendor_path = os.path.join(build_dir, "vendor", vendor_folder)
+                if cross_compiled:
+                    await upload_directory_tree(
+                        local_vendor_path,
+                        f"/srv/frameos/vendor/{vendor_folder}",
+                        "inkyHyperPixel2r vendor files",
+                    )
+                else:
+                    await self.exec_command(
+                        f"mkdir -p /srv/frameos/vendor && "
+                        f"cp -r /srv/frameos/build/build_{build_id}/vendor/inkyHyperPixel2r /srv/frameos/vendor/"
+                    )
                 await install_if_necessary("python3-dev")
                 await install_if_necessary("python3-pip")
                 await install_if_necessary("python3-venv")

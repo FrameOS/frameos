@@ -609,7 +609,7 @@ class FrameDeployer:
 
         await self.log(
             "stdout",
-            "- Generating C sources for remote compilation.",
+            "- Generating C sources from Nim sources.",
         )
 
         cpu = await self.arch_to_nim_cpu(arch)

@@ -33,10 +33,15 @@ RUN set -euxo pipefail \
     && git clone --depth=1 --branch "${LGPIO_VERSION}" "${LGPIO_REPO}" lgpio-src \
     && cd lgpio-src \
     && make \
+    && mapfile -t LGPIO_OBJS < <(make -qp | awk '/^OBJ_LGPIO =/ {for (i=3; i<=NF; ++i) print $i}') \
+    && mapfile -t RGPIO_OBJS < <(make -qp | awk '/^OBJ_RGPIO =/ {for (i=3; i<=NF; ++i) print $i}') \
+    && ar rcs liblgpio.a "${LGPIO_OBJS[@]}" \
+    && ar rcs librgpio.a "${RGPIO_OBJS[@]}" \
     && make DESTDIR=/tmp/lgpio install \
     && mkdir -p /artifacts/lib /artifacts/include \
     && cp -r /tmp/lgpio/usr/local/include/. /artifacts/include/ \
     && cp -r /tmp/lgpio/usr/local/lib/. /artifacts/lib/ \
+    && cp liblgpio.a librgpio.a /artifacts/lib/ \
     && rm -rf /tmp/lgpio \
     && cd /build \
     && rm -rf lgpio-src
