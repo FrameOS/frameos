@@ -94,6 +94,12 @@ PLATFORM_MAP = {
 }
 
 
+def can_cross_compile_target(arch: str | None) -> bool:
+    """Return ``True`` when *arch* has a known Docker platform mapping."""
+
+    return (arch or "").lower() in PLATFORM_MAP
+
+
 DISTRO_DEFAULTS = {
     "raspios": ("debian", "bookworm"),
     "debian": ("debian", "bookworm"),

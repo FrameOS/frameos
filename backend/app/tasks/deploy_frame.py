@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import os
 import re
 import shlex
+import shutil
 import tempfile
 from typing import Any
 
@@ -17,6 +18,10 @@ from app.utils.remote_exec import upload_file
 from app.utils.local_exec import exec_local_command
 from app.models.settings import get_settings_dict
 from app.utils.nix_utils import nix_cmd
+from app.utils.cross_compile import (
+    build_binary_with_cross_toolchain,
+    can_cross_compile_target,
+)
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.prebuilt_deps import fetch_prebuilt_manifest, resolve_prebuilt_target
 
@@ -209,7 +214,34 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await self.log("stdout", "- Creating build archive")
             archive_path = await self.create_local_build_archive(build_dir, source_dir, arch)
 
-            if low_memory:
+            cross_compiled = False
+            if can_cross_compile_target(arch):
+                await self.log("stdout", "- Target supports cross compilation; building binary locally")
+                try:
+                    await build_binary_with_cross_toolchain(
+                        db=db,
+                        redis=redis,
+                        frame=frame,
+                        deployer=self,
+                        source_dir=source_dir,
+                        temp_dir=temp_dir,
+                    )
+                except Exception as exc:
+                    await self.log(
+                        "stderr",
+                        f"- Cross compilation failed ({exc}); falling back to on-device build",
+                    )
+                else:
+                    cross_compiled = True
+                    archive_path = shutil.make_archive(
+                        build_dir,
+                        "gztar",
+                        temp_dir,
+                        os.path.basename(build_dir),
+                    )
+                    await self.log("stdout", "- Cross compilation succeeded; skipping remote build")
+
+            if low_memory and not cross_compiled:
                 await self.log("stdout", "- Low memory device, stopping FrameOS for compilation")
                 await self.exec_command("sudo service frameos stop", raise_on_error=False)
 
@@ -320,71 +352,85 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             for dep in self.get_apt_packages():
                 await install_if_necessary(dep)
 
-            quickjs_version = (
-                prebuilt_entry.version_for("quickjs", DEFAULT_QUICKJS_VERSION)
-                if prebuilt_entry
-                else DEFAULT_QUICKJS_VERSION
-            )
-            quickjs_dirname = f"quickjs-{quickjs_version}"
-            quickjs_vendor_dir = f"/srv/frameos/vendor/quickjs/{quickjs_dirname}"
-            quickjs_prebuilt_url = prebuilt_entry.url_for("quickjs") if prebuilt_entry else None
-            quickjs_md5sum = prebuilt_entry.md5_for("quickjs") if prebuilt_entry else None
-
-            # Ensure /srv/frameos
-            await self.exec_command(
-                "if [ ! -d /srv/frameos/ ]; then "
-                "  sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; "
-                "fi"
-            )
-
-            def _quickjs_exists_command(path: str) -> str:
-                return f'[[ -d "{path}" ]] && exit 0 || exit 1'
-
-            quickjs_installed = (
-                await self.exec_command(
-                    _quickjs_exists_command(quickjs_vendor_dir),
-                    raise_on_error=False,
+            quickjs_dirname: str | None = None
+            if not cross_compiled:
+                quickjs_version = (
+                    prebuilt_entry.version_for("quickjs", DEFAULT_QUICKJS_VERSION)
+                    if prebuilt_entry
+                    else DEFAULT_QUICKJS_VERSION
                 )
-                == 0
-            )
+                quickjs_dirname = f"quickjs-{quickjs_version}"
+                quickjs_vendor_dir = f"/srv/frameos/vendor/quickjs/{quickjs_dirname}"
+                quickjs_prebuilt_url = prebuilt_entry.url_for("quickjs") if prebuilt_entry else None
+                quickjs_md5sum = prebuilt_entry.md5_for("quickjs") if prebuilt_entry else None
 
-            if not quickjs_installed and quickjs_prebuilt_url:
-                await self.log("stdout", f"- Downloading QuickJS prebuilt archive ({quickjs_dirname})")
-                quickjs_archive = f"/tmp/quickjs-prebuilt-{build_id}.tar.gz"
-                try:
-                    quickjs_command = (
-                        "mkdir -p /srv/frameos/vendor/quickjs/ && "
-                        f"wget -q -O {quickjs_archive} {shlex.quote(quickjs_prebuilt_url)} && "
-                    )
-                    if quickjs_md5sum:
-                        quickjs_command += f"echo '{quickjs_md5sum}  {quickjs_archive}' | md5sum -c - && "
-                    quickjs_command += (
-                        f"tar -xzf {quickjs_archive} -C /srv/frameos/vendor/quickjs/ && "
-                        f"rm {quickjs_archive}"
-                    )
-                    await self.exec_command(quickjs_command)
+                # Ensure /srv/frameos
+                await self.exec_command(
+                    "if [ ! -d /srv/frameos/ ]; then "
+                    "  sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; "
+                    "fi"
+                )
+
+                def _quickjs_exists_command(path: str) -> str:
+                    return f'[[ -d "{path}" ]] && exit 0 || exit 1'
+
+                quickjs_installed = (
                     await self.exec_command(
-                        "bash -c '"
-                        f"QUICKJS_DIR={shlex.quote(quickjs_vendor_dir)}; "
-                        "if [ -d \"$QUICKJS_DIR/include/quickjs\" ]; then "
-                        "  if [ -f \"$QUICKJS_DIR/include/quickjs/quickjs.h\" ] && [ ! -f \"$QUICKJS_DIR/quickjs.h\" ]; then "
-                        "    cp \"$QUICKJS_DIR/include/quickjs/quickjs.h\" \"$QUICKJS_DIR/quickjs.h\"; "
-                        "  fi; "
-                        "  if [ -f \"$QUICKJS_DIR/include/quickjs/quickjs-libc.h\" ] && [ ! -f \"$QUICKJS_DIR/quickjs-libc.h\" ]; then "
-                        "    cp \"$QUICKJS_DIR/include/quickjs/quickjs-libc.h\" \"$QUICKJS_DIR/quickjs-libc.h\"; "
-                        "  fi; "
-                        "fi; "
-                        "if [ -f \"$QUICKJS_DIR/lib/libquickjs.a\" ] && [ ! -f \"$QUICKJS_DIR/libquickjs.a\" ]; then "
-                        "  cp \"$QUICKJS_DIR/lib/libquickjs.a\" \"$QUICKJS_DIR/libquickjs.a\"; "
-                        "fi'"
+                        _quickjs_exists_command(quickjs_vendor_dir),
+                        raise_on_error=False,
                     )
-                    quickjs_installed = True
-                except Exception as exc:
-                    await self.log(
-                        "stdout",
-                        f"- Failed to download prebuilt QuickJS ({exc}). Falling back to source build.",
-                    )
-                    quickjs_prebuilt_url = None
+                    == 0
+                )
+
+                if not quickjs_installed and quickjs_prebuilt_url:
+                    await self.log("stdout", f"- Downloading QuickJS prebuilt archive ({quickjs_dirname})")
+                    quickjs_archive = f"/tmp/quickjs-prebuilt-{build_id}.tar.gz"
+                    try:
+                        quickjs_command = (
+                            "mkdir -p /srv/frameos/vendor/quickjs/ && "
+                            f"wget -q -O {quickjs_archive} {shlex.quote(quickjs_prebuilt_url)} && "
+                        )
+                        if quickjs_md5sum:
+                            quickjs_command += f"echo '{quickjs_md5sum}  {quickjs_archive}' | md5sum -c - && "
+                        quickjs_command += (
+                            f"tar -xzf {quickjs_archive} -C /srv/frameos/vendor/quickjs/ && "
+                            f"rm {quickjs_archive}"
+                        )
+                        await self.exec_command(quickjs_command)
+                        await self.exec_command(
+                            "bash -c '"
+                            f"QUICKJS_DIR={shlex.quote(quickjs_vendor_dir)}; "
+                            "if [ -d \"$QUICKJS_DIR/include/quickjs\" ]; then "
+                            "  if [ -f \"$QUICKJS_DIR/include/quickjs/quickjs.h\" ] && [ ! -f \"$QUICKJS_DIR/quickjs.h\" ]; then "
+                            "    cp \"$QUICKJS_DIR/include/quickjs/quickjs.h\" \"$QUICKJS_DIR/quickjs.h\"; "
+                            "  fi; "
+                            "  if [ -f \"$QUICKJS_DIR/include/quickjs/quickjs-libc.h\" ] && [ ! -f \"$QUICKJS_DIR/quickjs-libc.h\" ]; then "
+                            "    cp \"$QUICKJS_DIR/include/quickjs/quickjs-libc.h\" \"$QUICKJS_DIR/quickjs-libc.h\"; "
+                            "  fi; "
+                            "fi; "
+                            "if [ -f \"$QUICKJS_DIR/lib/libquickjs.a\" ] && [ ! -f \"$QUICKJS_DIR/libquickjs.a\" ]; then "
+                            "  cp \"$QUICKJS_DIR/lib/libquickjs.a\" \"$QUICKJS_DIR/libquickjs.a\"; "
+                            "fi'"
+                        )
+                        quickjs_installed = True
+                    except Exception as exc:
+                        await self.log(
+                            "stdout",
+                            f"- Failed to download prebuilt QuickJS ({exc}). Falling back to source build.",
+                        )
+                        quickjs_prebuilt_url = None
+                        quickjs_version = DEFAULT_QUICKJS_VERSION
+                        quickjs_dirname = f"quickjs-{quickjs_version}"
+                        quickjs_vendor_dir = f"/srv/frameos/vendor/quickjs/{quickjs_dirname}"
+                        quickjs_installed = (
+                            await self.exec_command(
+                                _quickjs_exists_command(quickjs_vendor_dir),
+                                raise_on_error=False,
+                            )
+                            == 0
+                        )
+
+                if not quickjs_installed and quickjs_version != DEFAULT_QUICKJS_VERSION:
                     quickjs_version = DEFAULT_QUICKJS_VERSION
                     quickjs_dirname = f"quickjs-{quickjs_version}"
                     quickjs_vendor_dir = f"/srv/frameos/vendor/quickjs/{quickjs_dirname}"
@@ -396,43 +442,31 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                         == 0
                     )
 
-            if not quickjs_installed and quickjs_version != DEFAULT_QUICKJS_VERSION:
-                quickjs_version = DEFAULT_QUICKJS_VERSION
-                quickjs_dirname = f"quickjs-{quickjs_version}"
-                quickjs_vendor_dir = f"/srv/frameos/vendor/quickjs/{quickjs_dirname}"
-                quickjs_installed = (
+                if not quickjs_installed:
+                    quickjs_tar = f"quickjs-{quickjs_version}.tar.xz"
+                    await self.log("stdout", "- Downloading quickjs")
                     await self.exec_command(
-                        _quickjs_exists_command(quickjs_vendor_dir),
+                        "mkdir -p /srv/frameos/vendor/quickjs/ && "
+                        f"wget -q -O {quickjs_tar} https://bellard.org/quickjs/{quickjs_tar} && "
+                        f"echo '{DEFAULT_QUICKJS_SHA256}  {quickjs_tar}' | sha256sum -c - && "
+                        f"tar -xJf {quickjs_tar} -C /srv/frameos/vendor/quickjs/ && "
+                        f"rm {quickjs_tar}"
+                    )
+                    await self.log("stdout", "- Finished downloading quickjs")
+
+                quickjs_has_makefile = (
+                    await self.exec_command(
+                        f'test -f "{quickjs_vendor_dir}/Makefile"',
                         raise_on_error=False,
+                        log_command=False,
+                        log_output=False,
                     )
                     == 0
                 )
-
-            if not quickjs_installed:
-                quickjs_tar = f"quickjs-{quickjs_version}.tar.xz"
-                await self.log("stdout", "- Downloading quickjs")
-                await self.exec_command(
-                    "mkdir -p /srv/frameos/vendor/quickjs/ && "
-                    f"wget -q -O {quickjs_tar} https://bellard.org/quickjs/{quickjs_tar} && "
-                    f"echo '{DEFAULT_QUICKJS_SHA256}  {quickjs_tar}' | sha256sum -c - && "
-                    f"tar -xJf {quickjs_tar} -C /srv/frameos/vendor/quickjs/ && "
-                    f"rm {quickjs_tar}"
-                )
-                await self.log("stdout", "- Finished downloading quickjs")
-
-            quickjs_has_makefile = (
-                await self.exec_command(
-                    f'test -f "{quickjs_vendor_dir}/Makefile"',
-                    raise_on_error=False,
-                    log_command=False,
-                    log_output=False,
-                )
-                == 0
-            )
-            if quickjs_has_makefile:
-                await self.exec_command(
-                    f'cd {quickjs_vendor_dir} && make libquickjs.a'
-                )
+                if quickjs_has_makefile:
+                    await self.exec_command(
+                        f'cd {quickjs_vendor_dir} && make libquickjs.a'
+                    )
 
             await self.exec_command("mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
             await self.log("stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
@@ -450,16 +484,19 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             # Unpack & compile on device
             await self.exec_command(f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz")
-            await self.exec_command(
-                f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} /srv/frameos/build/build_{build_id}/quickjs",
-            )
-            await self.exec_command(
-                f"cd /srv/frameos/build/build_{build_id} && "
-                "PARALLEL_MEM=$(awk '/MemTotal/{printf \"%.0f\\n\", $2/1024/250}' /proc/meminfo) && "
-                "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
-                "make -j$PARALLEL",
-                timeout=3600, # 30 minute timeout for compilation
-            )
+            if not cross_compiled and quickjs_dirname:
+                await self.exec_command(
+                    f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} /srv/frameos/build/build_{build_id}/quickjs",
+                )
+                await self.exec_command(
+                    f"cd /srv/frameos/build/build_{build_id} && "
+                    "PARALLEL_MEM=$(awk '/MemTotal/{printf \"%.0f\\n\", $2/1024/250}' /proc/meminfo) && "
+                    "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
+                    "make -j$PARALLEL",
+                    timeout=3600, # 30 minute timeout for compilation
+                )
+            elif cross_compiled:
+                await self.log("stdout", "- Skipping on-device build; using cross-compiled binary")
 
             await self.exec_command(f"mkdir -p /srv/frameos/releases/release_{build_id}")
             await self.exec_command(
