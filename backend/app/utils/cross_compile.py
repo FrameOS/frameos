@@ -136,8 +136,6 @@ class CrossCompiler:
         self.toolchain_dir.mkdir(parents=True, exist_ok=True)
         self.sysroot_dir = self.toolchain_dir / "sysroot"
         self.sysroot_dir.mkdir(parents=True, exist_ok=True)
-        self.home_dir = self.toolchain_dir / "home"
-        self.home_dir.mkdir(parents=True, exist_ok=True)
         self.prebuilt_entry = prebuilt_entry
         self.prebuilt_target = prebuilt_target
         self.prebuilt_dir = cache_root / "prebuilt" / key
@@ -153,9 +151,11 @@ class CrossCompiler:
             f"- Cross compiling for {self.target.arch} on {self._docker_image()} via {self._platform()}",
         )
         await self._prepare_prebuilt_components()
+        self._ensure_quickjs_sources(source_dir)
+        build_dir = await self._generate_c_sources(source_dir)
         await self._prepare_sysroot()
-        self._stage_quickjs(source_dir)
-        binary_path = await self._run_docker_build(source_dir)
+        self._ensure_quickjs_in_build_dir(source_dir, build_dir)
+        binary_path = await self._run_docker_build(str(build_dir))
         if not os.path.exists(binary_path):
             raise RuntimeError("Cross compilation completed but frameos binary is missing")
         return binary_path
@@ -204,23 +204,17 @@ class CrossCompiler:
         )
         await self._download_remote_paths(needed)
 
-    async def _run_docker_build(self, source_dir: str) -> str:
-        source_dir = os.path.abspath(source_dir)
+    async def _run_docker_build(self, build_dir: str) -> str:
+        build_dir = os.path.abspath(build_dir)
         script_path = self.temp_dir / "frameos-cross-build.sh"
-        include_dirs = self._existing_container_dirs(
-            ["/sysroot/usr/include", "/sysroot/usr/local/include"]
+        include_dirs = self._dedupe_preserve_order(
+            self._existing_container_dirs(["/sysroot/usr/include", "/sysroot/usr/local/include"])
         )
-        include_dirs.extend(self._component_dirs("include"))
-        include_dirs = self._dedupe_preserve_order(include_dirs)
-
-        lib_dirs = self._existing_container_dirs(["/sysroot/usr/lib", "/sysroot/usr/local/lib"])
-        lib_dirs.extend(self._component_dirs("lib"))
-        lib_dirs = self._dedupe_preserve_order(lib_dirs)
-
-        extra_path_dirs = self._component_dirs("bin")
-        extra_path_env = shlex.quote(":".join(extra_path_dirs)) if extra_path_dirs else "''"
-        pass_c = " ".join(f'--passC:"-I{path}"' for path in include_dirs)
-        pass_l = " ".join(f'--passL:"-L{path}"' for path in lib_dirs)
+        lib_dirs = self._dedupe_preserve_order(
+            self._existing_container_dirs(["/sysroot/usr/lib", "/sysroot/usr/local/lib"])
+        )
+        extra_cflags = shlex.quote(" ".join(f"-I{path}" for path in include_dirs)) if include_dirs else "''"
+        extra_libs = shlex.quote(" ".join(f"-L{path}" for path in lib_dirs)) if lib_dirs else "''"
         script_path.write_text(
             dedent(
                 f"""
@@ -235,70 +229,23 @@ class CrossCompiler:
                 log_debug "Container uname: $(uname -a)"
                 log_debug "Working directory before build: $(pwd)"
                 apt-get update
-                apt-get install -y --no-install-recommends \
-                    build-essential \
-                    ca-certificates \
-                    curl \
-                    git \
-                    pkg-config \
-                    python3 \
-                    python3-pip \
-                    unzip \
-                    xz-utils \
-                    zlib1g-dev \
-                    libssl-dev \
-                    libffi-dev \
-                    libjpeg-dev \
-                    libfreetype6-dev
+                apt-get install -y --no-install-recommends build-essential ca-certificates curl git make pkg-config python3 python3-pip unzip xz-utils zlib1g-dev libssl-dev libffi-dev libjpeg-dev libfreetype6-dev
 
-                export HOME=/toolchain-home
-                mkdir -p "$HOME/.nimble"
-                log_debug "Listing contents of $HOME"
-                ls -al "$HOME" >&2 || true
-                if [ -d "$HOME/nim-prebuilt" ]; then
-                    log_debug "Top-level $HOME/nim-prebuilt entries"
+                extra_cflags={extra_cflags}
+                extra_libs={extra_libs}
+                if [ -n "$extra_cflags" ]; then
+                    log_debug "Using extra CFLAGS: $extra_cflags"
+                    export EXTRA_CFLAGS="$extra_cflags"
                 fi
-                if [ -d "/prebuilt/nim" ]; then
-                    log_debug "Top-level /prebuilt/nim entries"
+                if [ -n "$extra_libs" ]; then
+                    log_debug "Using extra LIBS: $extra_libs"
+                    export EXTRA_LIBS="$extra_libs"
                 fi
-
-                nim_path=""
-                for candidate in "$HOME/nim-prebuilt/bin/nim" "/prebuilt/nim/bin/nim"; do
-                    if [ -x "$candidate" ]; then
-                        nim_path="$candidate"
-                        log_debug "Using Nim binary at $candidate"
-                        export PATH="$(dirname "$candidate"):$PATH"
-                        "$candidate" --version >&2 || true
-                        break
-                    else
-                        log_debug "Nim candidate missing or not executable: $candidate"
-                    fi
-                done
-
-                if [ -z "$nim_path" ]; then
-                    log_debug "Unable to locate Nim; showing find output"
-                    find "$HOME" -maxdepth 4 -name nim -print >&2 || true
-                    echo "Missing prebuilt Nim compiler (expected at $HOME/nim-prebuilt or /prebuilt/nim)" >&2
-                    exit 1
-                fi
-
-                extra_path_dirs={extra_path_env}
-                if [ -n "$extra_path_dirs" ]; then
-                    log_debug "Prepending extra PATH entries: $extra_path_dirs"
-                    export PATH="$extra_path_dirs:$PATH"
-                fi
-
-                echo "PATH:"
-                echo $PATH
 
                 cd /src
-                log_debug "Running nimble assets"
-                nimble assets -y
-                log_debug "Running nimble setup"
-                nimble setup
-                log_debug "Running nimble build"
-                nimble build -y {pass_c} {pass_l}
-                log_debug "nimble build completed"
+                log_debug "Compiling generated C sources"
+                make -j"$(nproc)"
+                log_debug "make completed"
                 """
             ).strip()
             + "\n"
@@ -309,16 +256,9 @@ class CrossCompiler:
             [
                 "docker run --rm",
                 f"--platform {self._platform()}",
-                f"-v {shlex.quote(source_dir)}:/src",
-                f"-v {shlex.quote(str(self.home_dir))}:/toolchain-home",
-                f"-v {shlex.quote(str(self.sysroot_dir))}:/sysroot",
+                f"-v {shlex.quote(build_dir)}:/src",
+                f"-v {shlex.quote(str(self.sysroot_dir))}:/sysroot:ro",
                 f"-v {shlex.quote(str(script_path))}:/tmp/build.sh:ro",
-                *(
-                    [f"-v {shlex.quote(str(self.prebuilt_components['nim']))}:/prebuilt/nim:ro"]
-                    if self.prebuilt_components.get("nim")
-                    else []
-                ),
-                "-e HOME=/toolchain-home",
                 "-w /src",
                 shlex.quote(self._docker_image()),
                 "bash /tmp/build.sh",
@@ -334,7 +274,44 @@ class CrossCompiler:
         )
         if status != 0:
             raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
-        return os.path.join(source_dir, "build", "frameos")
+        return os.path.join(build_dir, "frameos")
+
+    def _ensure_quickjs_sources(self, source_dir: str) -> None:
+        quickjs_root = Path(source_dir) / "quickjs"
+        libquickjs = quickjs_root / "libquickjs.a"
+        if libquickjs.exists():
+            return
+        self._stage_quickjs(source_dir)
+        if libquickjs.exists():
+            return
+        raise RuntimeError(
+            "QuickJS sources are missing; run `nimble build_quickjs` or publish a prebuilt component.",
+        )
+
+    async def _generate_c_sources(self, source_dir: str) -> Path:
+        build_dir = self.temp_dir / f"build_{self.deployer.build_id}"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        await self.deployer.create_local_build_archive(
+            str(build_dir),
+            source_dir,
+            self.target.arch,
+        )
+        return build_dir
+
+    def _ensure_quickjs_in_build_dir(self, source_dir: str, build_dir: Path) -> None:
+        dest = Path(build_dir) / "quickjs"
+        libquickjs = dest / "libquickjs.a"
+        if libquickjs.exists():
+            return
+        source_quickjs = Path(source_dir) / "quickjs"
+        if source_quickjs.exists():
+            shutil.copytree(source_quickjs, dest, dirs_exist_ok=True)
+        else:
+            self._stage_quickjs(str(build_dir))
+        if not libquickjs.exists():
+            raise RuntimeError(
+                "QuickJS libraries missing from generated C sources; unable to continue cross compilation",
+            )
 
     async def _prepare_prebuilt_components(self) -> None:
         if not self.prebuilt_entry:
@@ -346,26 +323,10 @@ class CrossCompiler:
                 f"- Attempting to use prebuilt components for {self.prebuilt_target}",
             )
 
-        for component in ("nim", "quickjs", "lgpio"):
+        for component in ("quickjs", "lgpio"):
             path = await self._ensure_prebuilt_component(component)
             if path:
                 self.prebuilt_components[component] = path
-
-        nim_component = self.prebuilt_components.get("nim")
-        staged_nim = self._stage_prebuilt_nim(nim_component) if nim_component else None
-        if staged_nim:
-            await self._log(
-                "stdout",
-                f"- Nim toolchain staged at {staged_nim}",
-            )
-        else:
-            await self._log(
-                "stderr",
-                "- Nim prebuilt component unavailable; cross compilation cannot continue",
-            )
-            raise RuntimeError(
-                "Prebuilt Nim compiler missing – rerun prebuilt builder or refresh the cache",
-            )
 
     async def _ensure_prebuilt_component(self, component: str) -> Path | None:
         if not self.prebuilt_entry:
@@ -434,35 +395,6 @@ class CrossCompiler:
             for chunk in iter(lambda: fh.read(1024 * 1024), b""):
                 hasher.update(chunk)
         return hasher.hexdigest()
-
-    def _stage_prebuilt_nim(self, nim_dir: Path) -> Path | None:
-        dest = self.home_dir / "nim-prebuilt"
-        marker_src = nim_dir / ".build-info"
-        marker_dest = dest / ".build-info"
-        if dest.exists():
-            if (
-                marker_src.exists()
-                and marker_dest.exists()
-                and marker_src.read_text() == marker_dest.read_text()
-            ):
-                return self._ensure_nim_bin(dest)
-            shutil.rmtree(dest)
-        shutil.copytree(nim_dir, dest, dirs_exist_ok=True)
-        return self._ensure_nim_bin(dest)
-
-    def _ensure_nim_bin(self, dest: Path) -> Path | None:
-        canonical = dest / "bin" / "nim"
-        if canonical.exists():
-            canonical.chmod(0o755)
-            return canonical
-        for candidate in dest.rglob("bin/nim"):
-            if candidate == canonical or not candidate.is_file():
-                continue
-            canonical.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(candidate, canonical)
-            canonical.chmod(0o755)
-            return canonical
-        return None
 
     def _stage_quickjs(self, source_dir: str) -> None:
         quickjs_dir = self.prebuilt_components.get("quickjs")
@@ -576,35 +508,6 @@ class CrossCompiler:
             if (self.sysroot_dir / rel).exists():
                 existing.append(candidate)
         return existing
-
-    def _component_dirs(self, subdir: str) -> list[str]:
-        collected: list[str] = []
-        for host_root, container_root in self._component_mount_roots():
-            collected.extend(self._containerized_dirs(host_root, container_root, subdir))
-        return self._dedupe_preserve_order(collected)
-
-    def _component_mount_roots(self) -> list[tuple[Path, str]]:
-        roots: list[tuple[Path, str]] = [(self.home_dir, "/toolchain-home")]
-        nim_component = self.prebuilt_components.get("nim")
-        if nim_component:
-            roots.append((nim_component, "/prebuilt/nim"))
-        return roots
-
-    @staticmethod
-    def _containerized_dirs(root: Path, container_root: str, subdir: str) -> list[str]:
-        if not root.exists():
-            return []
-        found: list[str] = []
-        for candidate in root.rglob(subdir):
-            if not candidate.is_dir() or candidate.name != subdir:
-                continue
-            try:
-                relative = candidate.relative_to(root)
-            except ValueError:
-                continue
-            container_path = str(Path(container_root) / relative)
-            found.append(container_path)
-        return found
 
     @staticmethod
     def _dedupe_preserve_order(values: Iterable[str]) -> list[str]:

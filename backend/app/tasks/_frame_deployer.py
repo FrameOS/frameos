@@ -607,8 +607,10 @@ class FrameDeployer:
             shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "env"), ignore_errors=True)
             shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
 
-        await self.log("stdout",
-                "- No cross compilation. Generating source code for compilation on frame.")
+        await self.log(
+            "stdout",
+            "- Generating C sources for remote compilation.",
+        )
 
         cpu = await self.arch_to_nim_cpu(arch)
         debug_options = "--lineTrace:on" if frame.debug else ""
@@ -712,9 +714,17 @@ class FrameDeployer:
                 lines_make = mf_in.readlines()
             for ln in lines_make:
                 if ln.startswith("LIBS = "):
-                    ln = "LIBS = -L. " + " ".join(linker_flags) + "\n"
+                    ln = (
+                        "LIBS = -L. "
+                        + " ".join(linker_flags)
+                        + " $(EXTRA_LIBS)\n"
+                    )
                 if ln.startswith("CFLAGS = "):
-                    ln = "CFLAGS = " + " ".join([f for f in compiler_flags if f != '-c']) + "\n"
+                    ln = (
+                        "CFLAGS = "
+                        + " ".join([f for f in compiler_flags if f != '-c'])
+                        + " $(EXTRA_CFLAGS)\n"
+                    )
                 mk.write(ln)
 
         archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")
