@@ -458,25 +458,26 @@ class CrossCompiler:
         dest = Path(source_dir) / "quickjs"
         if dest.exists():
             shutil.rmtree(dest)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(quickjs_dir, dest, dirs_exist_ok=True)
-        self._normalize_quickjs_layout(dest)
-
-    def _normalize_quickjs_layout(self, quickjs_root: Path) -> None:
-        """Ensure the staged QuickJS tree matches the layout produced by nimble."""
-
-        def ensure_file(name: str) -> None:
-            target = quickjs_root / name
-            if target.exists():
-                return
-            match = next((p for p in quickjs_root.rglob(name) if p.is_file()), None)
-            if not match:
-                return
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(match, target)
-
-        for filename in ("libquickjs.a", "libquickjs.libc.a", "quickjs.h", "quickjs-libc.h"):
-            ensure_file(filename)
+        dest.mkdir(parents=True, exist_ok=True)
+        include_src = quickjs_dir / "include" / "quickjs"
+        if include_src.exists():
+            shutil.copytree(include_src, dest / "include" / "quickjs", dirs_exist_ok=True)
+        for header in ("quickjs.h", "quickjs-libc.h"):
+            for candidate in (
+                include_src / header,
+                quickjs_dir / header,
+            ):
+                if candidate.exists():
+                    shutil.copy2(candidate, dest / header)
+                    break
+        lib_candidates = [
+            quickjs_dir / "lib" / "libquickjs.a",
+            quickjs_dir / "libquickjs.a",
+        ]
+        for candidate in lib_candidates:
+            if candidate.exists():
+                shutil.copy2(candidate, dest / "libquickjs.a")
+                break
 
     def _inject_prebuilt_lgpio(self) -> None:
         lgpio_dir = self.prebuilt_components.get("lgpio")
