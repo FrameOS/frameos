@@ -11,10 +11,13 @@ import shlex
 import shutil
 import string
 import tempfile
-from typing import Optional
+from typing import Any, Optional
 from gzip import compress
 
-from arq import ArqRedis as Redis
+try:
+    from arq import ArqRedis as Redis
+except ModuleNotFoundError:  # pragma: no cover - optional dependency for standalone builds
+    Redis = Any  # type: ignore[assignment]
 from sqlalchemy.orm import Session
 
 from app.models.apps import get_one_app_sources
