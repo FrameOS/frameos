@@ -162,11 +162,9 @@ class CrossCompiler:
     async def _prepare_sysroot(self) -> None:
         drivers = drivers_for_frame(self.frame)
         required = [spec for spec in REMOTE_REQUIREMENTS if spec.predicate(drivers)]
-        if not required:
-            await self._log("stdout", "- No device-specific libraries required from frame")
-            return
 
-        if self.prebuilt_components.get("lgpio"):
+        prebuilt_lgpio = self.prebuilt_components.get("lgpio")
+        if prebuilt_lgpio:
             await self._log("stdout", "- Using prebuilt lgpio headers and libraries")
             self._inject_prebuilt_lgpio()
             required = [
@@ -180,6 +178,19 @@ class CrossCompiler:
                     "- Remaining sysroot requirements satisfied by prebuilt components",
                 )
                 return
+
+        if not required:
+            if prebuilt_lgpio:
+                await self._log(
+                    "stdout",
+                    "- No additional device-specific libraries required from frame",
+                )
+            else:
+                await self._log(
+                    "stdout",
+                    "- No device-specific libraries required from frame",
+                )
+            return
 
         remote_paths: list[str] = []
         for spec in required:
