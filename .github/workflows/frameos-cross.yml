@@ -1,0 +1,56 @@
+name: FrameOS cross compilation
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - frameos/**
+      - backend/app/utils/cross_compile.py
+      - backend/app/tasks/_frame_deployer.py
+      - backend/bin/cross
+      - .github/workflows/frameos-cross.yml
+  pull_request:
+    paths:
+      - frameos/**
+      - backend/app/utils/cross_compile.py
+      - backend/app/tasks/_frame_deployer.py
+      - backend/bin/cross
+      - .github/workflows/frameos-cross.yml
+
+jobs:
+  determine-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.set-matrix.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: set-matrix
+        run: |
+          MATRIX=$(python backend/bin/cross matrix)
+          echo "targets=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  cross-build:
+    needs: determine-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.determine-matrix.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Install Nim
+        env:
+          CHOOSENIM_NO_ANALYTICS: 1
+        run: |
+          curl https://nim-lang.org/choosenim/init.sh -sSf | sh -s -- -y
+          echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+          nim --version
+      - name: Cross compile ${{ matrix.slug }}
+        run: |
+          cd frameos
+          make cross-${{ matrix.slug }}
+      - name: Smoke test frameos check
+        run: |
+          cd frameos/build/cross/${{ matrix.slug }}
+          docker run --rm --platform ${{ matrix.platform }} -v "$PWD:/workspace:ro" ${{ matrix.image }} /workspace/frameos check

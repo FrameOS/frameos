@@ -10,7 +10,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
-from typing import Callable, Iterable
+from typing import Awaitable, Callable, Iterable
 
 import asyncssh
 import httpx
@@ -98,6 +98,7 @@ PLATFORM_MAP = {
     "armv8": "linux/arm64",
     "armv7l": "linux/arm/v7",
     "armv7": "linux/arm/v7",
+    "armhf": "linux/arm/v7",
     "armv6l": "linux/arm/v6",
 }
 
@@ -115,6 +116,9 @@ DISTRO_DEFAULTS = {
 }
 
 
+LogFunc = Callable[[str, str], Awaitable[None]]
+
+
 class CrossCompiler:
     def __init__(
         self,
@@ -127,6 +131,8 @@ class CrossCompiler:
         temp_dir: str,
         prebuilt_entry: PrebuiltEntry | None = None,
         prebuilt_target: str | None = None,
+        logger: LogFunc | None = None,
+        enable_remote_sysroot: bool = True,
     ) -> None:
         self.db = db
         self.redis = redis
@@ -147,6 +153,8 @@ class CrossCompiler:
         self.prebuilt_dir.mkdir(parents=True, exist_ok=True)
         self.prebuilt_components: dict[str, Path] = {}
         self.prebuilt_timeout = PREBUILT_TIMEOUT
+        self.logger = logger
+        self.enable_remote_sysroot = enable_remote_sysroot
         self._sysroot_include_dirs: set[str] = set()
         self._sysroot_lib_dirs: set[str] = set()
         for rel in ("usr/include", "usr/local/include", "usr/lib", "usr/local/lib"):
@@ -168,6 +176,13 @@ class CrossCompiler:
         return binary_path
 
     async def _prepare_sysroot(self) -> None:
+        if not self.enable_remote_sysroot:
+            await self._log(
+                "stdout",
+                "- Remote sysroot synchronization disabled; using default include/lib paths",
+            )
+            return
+
         drivers = drivers_for_frame(self.frame)
         components = [
             component for component in REMOTE_COMPONENTS if component.predicate(drivers)
@@ -592,6 +607,9 @@ class CrossCompiler:
         return found or None
 
     async def _log(self, level: str, message: str) -> None:
+        if self.logger:
+            await self.logger(level, message)
+            return
         await log(self.db, self.redis, int(self.frame.id), level, message)
 
     def _apply_parent(self, path: str, depth: int) -> str:

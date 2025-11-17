@@ -268,7 +268,7 @@ class FrameDeployer:
     async def arch_to_nim_cpu(self, arch: str) -> str:
         if arch in ("aarch64", "arm64"):
             return "arm64"
-        elif arch in ("armv6l", "armv7l"):
+        elif arch in ("armv6l", "armv7l", "armhf"):
             return "arm"
         elif arch == "i386":
             return "i386"
@@ -565,10 +565,11 @@ class FrameDeployer:
         with open(flake_path, "w", encoding="utf-8") as fh:
             fh.write(flake)
 
-    def create_local_source_folder(self, temp_dir: str) -> str:
+    def create_local_source_folder(self, temp_dir: str, source_root: str | None = None) -> str:
         source_dir = os.path.join(temp_dir, "frameos")
         os.makedirs(source_dir, exist_ok=True)
-        shutil.copytree("../frameos", source_dir, dirs_exist_ok=True)
+        base = Path(source_root or "../frameos").resolve()
+        shutil.copytree(base, source_dir, dirs_exist_ok=True)
         return source_dir
 
     async def create_local_build_archive(
