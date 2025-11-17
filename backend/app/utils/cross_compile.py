@@ -207,8 +207,18 @@ class CrossCompiler:
     async def _run_docker_build(self, source_dir: str) -> str:
         source_dir = os.path.abspath(source_dir)
         script_path = self.temp_dir / "frameos-cross-build.sh"
-        include_dirs = self._existing_container_dirs(["/sysroot/usr/include", "/sysroot/usr/local/include"])
+        include_dirs = self._existing_container_dirs(
+            ["/sysroot/usr/include", "/sysroot/usr/local/include"]
+        )
+        include_dirs.extend(self._component_dirs("include"))
+        include_dirs = self._dedupe_preserve_order(include_dirs)
+
         lib_dirs = self._existing_container_dirs(["/sysroot/usr/lib", "/sysroot/usr/local/lib"])
+        lib_dirs.extend(self._component_dirs("lib"))
+        lib_dirs = self._dedupe_preserve_order(lib_dirs)
+
+        extra_path_dirs = self._component_dirs("bin")
+        extra_path_env = shlex.quote(":".join(extra_path_dirs)) if extra_path_dirs else "''"
         pass_c = " ".join(f'--passC:"-I{path}"' for path in include_dirs)
         pass_l = " ".join(f'--passL:"-L{path}"' for path in lib_dirs)
         script_path.write_text(
@@ -247,11 +257,9 @@ class CrossCompiler:
                 ls -al "$HOME" >&2 || true
                 if [ -d "$HOME/nim-prebuilt" ]; then
                     log_debug "Top-level $HOME/nim-prebuilt entries"
-                    find "$HOME/nim-prebuilt" -print >&2 || true
                 fi
                 if [ -d "/prebuilt/nim" ]; then
                     log_debug "Top-level /prebuilt/nim entries"
-                    find "/prebuilt/nim" -print >&2 || true
                 fi
 
                 nim_path=""
@@ -272,6 +280,12 @@ class CrossCompiler:
                     find "$HOME" -maxdepth 4 -name nim -print >&2 || true
                     echo "Missing prebuilt Nim compiler (expected at $HOME/nim-prebuilt or /prebuilt/nim)" >&2
                     exit 1
+                fi
+
+                extra_path_dirs={extra_path_env}
+                if [ -n "$extra_path_dirs" ]; then
+                    log_debug "Prepending extra PATH entries: $extra_path_dirs"
+                    export PATH="$extra_path_dirs:$PATH"
                 fi
 
                 cd /src
@@ -559,6 +573,46 @@ class CrossCompiler:
             if (self.sysroot_dir / rel).exists():
                 existing.append(candidate)
         return existing
+
+    def _component_dirs(self, subdir: str) -> list[str]:
+        collected: list[str] = []
+        for host_root, container_root in self._component_mount_roots():
+            collected.extend(self._containerized_dirs(host_root, container_root, subdir))
+        return self._dedupe_preserve_order(collected)
+
+    def _component_mount_roots(self) -> list[tuple[Path, str]]:
+        roots: list[tuple[Path, str]] = [(self.home_dir, "/toolchain-home")]
+        nim_component = self.prebuilt_components.get("nim")
+        if nim_component:
+            roots.append((nim_component, "/prebuilt/nim"))
+        return roots
+
+    @staticmethod
+    def _containerized_dirs(root: Path, container_root: str, subdir: str) -> list[str]:
+        if not root.exists():
+            return []
+        found: list[str] = []
+        for candidate in root.rglob(subdir):
+            if not candidate.is_dir() or candidate.name != subdir:
+                continue
+            try:
+                relative = candidate.relative_to(root)
+            except ValueError:
+                continue
+            container_path = str(Path(container_root) / relative)
+            found.append(container_path)
+        return found
+
+    @staticmethod
+    def _dedupe_preserve_order(values: Iterable[str]) -> list[str]:
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for value in values:
+            if value in seen:
+                continue
+            seen.add(value)
+            ordered.append(value)
+        return ordered
 
     def _platform(self) -> str:
         return PLATFORM_MAP.get(self.target.arch, "linux/amd64")
