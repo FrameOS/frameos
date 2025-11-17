@@ -149,6 +149,8 @@ class CrossCompiler:
         self.prebuilt_dir.mkdir(parents=True, exist_ok=True)
         self.prebuilt_components: dict[str, Path] = {}
         self.prebuilt_timeout = PREBUILT_TIMEOUT
+        self._sysroot_include_dirs: set[str] = set()
+        self._sysroot_lib_dirs: set[str] = set()
         for rel in ("usr/include", "usr/local/include", "usr/lib", "usr/local/lib"):
             (self.sysroot_dir / rel).mkdir(parents=True, exist_ok=True)
 
@@ -200,6 +202,8 @@ class CrossCompiler:
                 remote_paths.append(target_path)
 
         unique_paths = list(dict.fromkeys(remote_paths))
+        for path in unique_paths:
+            self._register_sysroot_dir(path)
         needed = [path for path in unique_paths if not (self.sysroot_dir / path.lstrip("/")).exists()]
         if not needed:
             await self._log("stdout", "- Reusing cached sysroot libraries")
@@ -214,11 +218,21 @@ class CrossCompiler:
     async def _run_docker_build(self, build_dir: str) -> str:
         build_dir = os.path.abspath(build_dir)
         script_path = self.temp_dir / "frameos-cross-build.sh"
+        include_candidates = (
+            [f"/sysroot{path}" for path in sorted(self._sysroot_include_dirs)]
+            if self._sysroot_include_dirs
+            else ["/sysroot/usr/include", "/sysroot/usr/local/include"]
+        )
         include_dirs = self._dedupe_preserve_order(
-            self._existing_container_dirs(["/sysroot/usr/include", "/sysroot/usr/local/include"])
+            self._existing_container_dirs(include_candidates)
+        )
+        lib_candidates = (
+            [f"/sysroot{path}" for path in sorted(self._sysroot_lib_dirs)]
+            if self._sysroot_lib_dirs
+            else ["/sysroot/usr/lib", "/sysroot/usr/local/lib"]
         )
         lib_dirs = self._dedupe_preserve_order(
-            self._existing_container_dirs(["/sysroot/usr/lib", "/sysroot/usr/local/lib"])
+            self._existing_container_dirs(lib_candidates)
         )
         extra_cflags = shlex.quote(" ".join(f"-I{path}" for path in include_dirs)) if include_dirs else "''"
         extra_libs = shlex.quote(" ".join(f"-L{path}" for path in lib_dirs)) if lib_dirs else "''"
@@ -285,6 +299,8 @@ class CrossCompiler:
     def _ensure_quickjs_sources(self, source_dir: str) -> None:
         quickjs_root = Path(source_dir) / "quickjs"
         libquickjs = quickjs_root / "libquickjs.a"
+        if self.prebuilt_components.get("quickjs"):
+            self._stage_quickjs(source_dir)
         if libquickjs.exists():
             return
         self._stage_quickjs(source_dir)
@@ -307,6 +323,8 @@ class CrossCompiler:
     def _ensure_quickjs_in_build_dir(self, source_dir: str, build_dir: Path) -> None:
         dest = Path(build_dir) / "quickjs"
         libquickjs = dest / "libquickjs.a"
+        if self.prebuilt_components.get("quickjs"):
+            self._stage_quickjs(str(build_dir))
         if libquickjs.exists():
             return
         source_quickjs = Path(source_dir) / "quickjs"
@@ -438,8 +456,10 @@ class CrossCompiler:
         lib_src = lgpio_dir / "lib"
         if include_src.exists():
             shutil.copytree(include_src, self.sysroot_dir / "usr/local/include", dirs_exist_ok=True)
+            self._register_sysroot_dir("/usr/local/include")
         if lib_src.exists():
             shutil.copytree(lib_src, self.sysroot_dir / "usr/local/lib", dirs_exist_ok=True)
+            self._register_sysroot_dir("/usr/local/lib")
 
     async def _download_remote_paths(self, paths: Iterable[str]) -> None:
         remote_tar = f"/tmp/frameos_sysroot_{self.deployer.build_id}.tar.gz"
@@ -507,13 +527,27 @@ class CrossCompiler:
             target = target.parent
         return str(target)
 
-    def _existing_container_dirs(self, candidates: list[str]) -> list[str]:
+    def _existing_container_dirs(self, candidates: Iterable[str]) -> list[str]:
         existing: list[str] = []
         for candidate in candidates:
             rel = candidate.lstrip("/")
-            if (self.sysroot_dir / rel).exists():
+            if rel.startswith("sysroot/"):
+                rel = rel[len("sysroot/") :]
+            host_path = self.sysroot_dir / rel
+            if host_path.exists():
                 existing.append(candidate)
         return existing
+
+    def _register_sysroot_dir(self, path: str) -> None:
+        normalized = "/" + path.lstrip("/")
+        if normalized.startswith("/usr/include"):
+            self._sysroot_include_dirs.add(normalized)
+        elif normalized.startswith("/usr/local/include"):
+            self._sysroot_include_dirs.add(normalized)
+        elif normalized.startswith("/usr/lib"):
+            self._sysroot_lib_dirs.add(normalized)
+        elif normalized.startswith("/usr/local/lib"):
+            self._sysroot_lib_dirs.add(normalized)
 
     @staticmethod
     def _dedupe_preserve_order(values: Iterable[str]) -> list[str]:
