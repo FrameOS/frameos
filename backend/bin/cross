@@ -20,12 +20,6 @@ if str(REPO_ROOT) not in sys.path:
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from backend.app.tasks._frame_deployer import FrameDeployer  # type: ignore  # noqa: E402
-from backend.app.tasks.utils import find_nim_v2  # type: ignore  # noqa: E402
-from backend.app.utils.cross_compile import CrossCompiler, TargetMetadata  # type: ignore  # noqa: E402
-from backend.app.utils import local_exec  # type: ignore  # noqa: E402
-from app.utils import local_exec as app_local_exec  # type: ignore  # noqa: E402
-
 
 @dataclass(frozen=True)
 class TargetDefinition:
@@ -80,15 +74,6 @@ class FrameStub:
     ssh_port: int = 22
 
 
-class StandaloneFrameDeployer(FrameDeployer):
-    def __init__(self, frame: FrameStub, nim_path: str, temp_dir: str, logger):
-        super().__init__(db=None, redis=None, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
-        self._logger = logger
-
-    async def log(self, type: str, line: str, timestamp=None):  # type: ignore[override]
-        await self._logger(type, line)
-
-
 def load_frame_stub(frameos_root: Path) -> FrameStub:
     config = frameos_root / "frame.json"
     data: dict[str, Any] = {}
@@ -127,6 +112,24 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
     artifacts_dir = artifacts_dir.resolve()
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
+    from backend.app.tasks._frame_deployer import FrameDeployer  # type: ignore  # noqa: E402
+    from backend.app.tasks.utils import find_nim_v2  # type: ignore  # noqa: E402
+    from backend.app.tasks.prebuilt_deps import (  # type: ignore  # noqa: E402
+        fetch_prebuilt_manifest,
+        resolve_prebuilt_target,
+    )
+    from backend.app.utils import local_exec  # type: ignore  # noqa: E402
+    from backend.app.utils.cross_compile import CrossCompiler, TargetMetadata  # type: ignore  # noqa: E402
+    from app.utils import local_exec as app_local_exec  # type: ignore  # noqa: E402
+
+    class StandaloneFrameDeployer(FrameDeployer):
+        def __init__(self, frame: FrameStub, nim_path: str, temp_dir: str, logger):
+            super().__init__(db=None, redis=None, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
+            self._logger = logger
+
+        async def log(self, type: str, line: str, timestamp=None):  # type: ignore[override]
+            await self._logger(type, line)
+
     nim_path = find_nim_v2()
     frame = load_frame_stub(frameos_root)
 
@@ -142,6 +145,23 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
     with tempfile.TemporaryDirectory(prefix=f"frameos-cross-{slug}-") as tmp:
         deployer = StandaloneFrameDeployer(frame=frame, nim_path=nim_path, temp_dir=tmp, logger=console_log)
         source_dir = deployer.create_local_source_folder(tmp, source_root=str(frameos_root))
+
+        prebuilt_entry = None
+        prebuilt_target = resolve_prebuilt_target(target.distro, target.version, target.arch)
+        if prebuilt_target:
+            manifest = await fetch_prebuilt_manifest()
+            prebuilt_entry = manifest.get(prebuilt_target)
+            if prebuilt_entry is None:
+                await console_log(
+                    "stderr",
+                    f"- No prebuilt components available for {prebuilt_target}; continuing without them",
+                )
+        else:
+            await console_log(
+                "stderr",
+                "- Unable to determine matching prebuilt components for this target; continuing without them",
+            )
+
         compiler = CrossCompiler(
             db=None,
             redis=None,
@@ -149,8 +169,8 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
             deployer=deployer,
             target=TargetMetadata(arch=target.arch, distro=target.distro, version=target.version),
             temp_dir=tmp,
-            prebuilt_entry=None,
-            prebuilt_target=None,
+            prebuilt_entry=prebuilt_entry,
+            prebuilt_target=prebuilt_target,
             logger=console_log,
             enable_remote_sysroot=False,
         )
