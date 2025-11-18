@@ -19,7 +19,7 @@ on:
 
 jobs:
   determine-matrix:
-    runs-on: depot-ubuntu-22.04-4	
+    runs-on: depot-ubuntu-24.04
     outputs:
       targets: ${{ steps.set-matrix.outputs.targets }}
     steps:
@@ -31,7 +31,7 @@ jobs:
 
   cross-build:
     needs: determine-matrix
-    runs-on: depot-ubuntu-22.04-4	
+    runs-on: depot-ubuntu-24.04-4
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.determine-matrix.outputs.targets) }}
