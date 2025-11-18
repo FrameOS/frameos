@@ -145,9 +145,6 @@ def resolve_prebuilt_target(distro: str, version: str, arch: str) -> str | None:
     if not arch_key:
         return None
 
-    if distro_key == "debian" and arch_key == "amd64":
-        return None
-
     return f"{distro_key}-{release_key}-{arch_key}"
 
 
