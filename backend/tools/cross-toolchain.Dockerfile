@@ -15,8 +15,8 @@ ARG TOOLCHAIN_PACKAGES="build-essential \
     unzip \
     xz-utils \
     zlib1g-dev \
-    libssl-dev \
     libffi-dev \
+    libssl-dev \
     libjpeg-dev \
     libfreetype6-dev \
     libevdev-dev"
