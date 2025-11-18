@@ -57,4 +57,4 @@ jobs:
       - name: Smoke test frameos check
         run: |
           cd frameos/build/cross/${{ matrix.slug }}
-          docker run --rm --platform ${{ matrix.platform }} -v "$PWD:/workspace:ro" ${{ matrix.image }} /workspace/frameos check
+          docker run --rm --platform ${{ matrix.platform }} -v "$PWD:/workspace:ro" ${{ matrix.image }} bash -c "set -euo pipefail; export DEBIAN_FRONTEND=noninteractive; apt-get update; apt-get install -y --no-install-recommends ca-certificates libssl3; /workspace/frameos check"
