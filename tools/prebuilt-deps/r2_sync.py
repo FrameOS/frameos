@@ -81,12 +81,12 @@ DEFAULT_PREFIX = os.environ.get("R2_PREFIX", "prebuilt-deps")
 DEFAULT_TARGETS = [
     "debian-bookworm-armhf",
     "debian-bookworm-arm64",
+    "debian-bookworm-amd64",
     "debian-trixie-armhf",
     "debian-trixie-arm64",
-    "ubuntu-22.04-armhf",
+    "debian-trixie-amd64",
     "ubuntu-22.04-arm64",
     "ubuntu-22.04-amd64",
-    "ubuntu-24.04-armhf",
     "ubuntu-24.04-arm64",
     "ubuntu-24.04-amd64",
 ]
