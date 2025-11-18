@@ -1418,9 +1418,9 @@ async def api_frame_new(
             data.device,
             data.interval,
         )
+
         frame.mode = data.mode
-        if data.mode == "nixos":
-            frame.mode = 'nixos'
+        if frame.mode == "nixos":
             frame.ssh_user = 'frame'
             frame.network = {} # mark as changed for the orm
             frame.network['wifiHotspot'] = 'bootOnly'
@@ -1445,8 +1445,7 @@ async def api_frame_new(
             db.add(frame)
             db.commit()
             db.refresh(frame)
-        elif data.mode == "buildroot":
-            frame.mode = 'buildroot'
+        elif frame.mode == "buildroot":
             frame.ssh_user = 'root'
             selected_platform = (data.platform or (frame.buildroot or {}).get('platform') or '').strip()
             buildroot_settings = {**(frame.buildroot or {})}
@@ -1457,6 +1456,13 @@ async def api_frame_new(
             frame.buildroot = buildroot_settings
             if not frame.frame_host:
                 frame.frame_host = f'frame{frame.id}.local'
+            db.add(frame)
+            db.commit()
+            db.refresh(frame)
+        elif frame.mode == "rpios":
+            rpios_settings = {**(frame.rpios or {})}
+            rpios_settings["platform"] = data.platform or (frame.rpios or {}).get('platform') or ''
+            frame.rpios = rpios_settings
             db.add(frame)
             db.commit()
             db.refresh(frame)
