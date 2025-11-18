@@ -56,6 +56,11 @@ SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 CACHE_ENV = "FRAMEOS_CROSS_CACHE"
 DEFAULT_CACHE = Path.home() / ".cache/frameos/cross"
 PREBUILT_TIMEOUT = float(os.environ.get("FRAMEOS_PREBUILT_TIMEOUT", "20"))
+FEATURE_FLAG_ENV = "FRAMEOS_CROSS_FEATURE_CFLAGS"
+DEFAULT_FEATURE_CFLAGS = {
+    "amd64": ["-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mvpclmulqdq"],
+    "x86_64": ["-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mvpclmulqdq"],
+}
 TOOLCHAIN_IMAGE_VERSION = "1"
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 CROSS_TOOLCHAIN_DOCKERFILE = BACKEND_ROOT / "tools" / "cross-toolchain.Dockerfile"
@@ -257,7 +262,18 @@ class CrossCompiler:
         lib_dirs = self._dedupe_preserve_order(
             self._existing_container_dirs(lib_candidates)
         )
-        extra_cflags = shlex.quote(" ".join(f"-I{path}" for path in include_dirs)) if include_dirs else "''"
+        feature_flags = self._cpu_feature_cflags()
+        if feature_flags:
+            await self._log(
+                "stdout",
+                "- Enabling CPU feature flags for cross-compile: "
+                + " ".join(feature_flags),
+            )
+        include_flags = [f"-I{path}" for path in include_dirs]
+        extra_cflags_parts = [*feature_flags, *include_flags]
+        extra_cflags = (
+            shlex.quote(" ".join(extra_cflags_parts)) if extra_cflags_parts else "''"
+        )
         extra_libs = shlex.quote(" ".join(f"-L{path}" for path in lib_dirs)) if lib_dirs else "''"
         script_path.write_text(
             dedent(
@@ -318,6 +334,14 @@ class CrossCompiler:
         if status != 0:
             raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
         return os.path.join(build_dir, "frameos")
+
+    def _cpu_feature_cflags(self) -> list[str]:
+        arch = (self.target.arch or "").lower()
+        flags = list(DEFAULT_FEATURE_CFLAGS.get(arch, []))
+        override = os.environ.get(FEATURE_FLAG_ENV)
+        if override:
+            flags.extend(arg for arg in shlex.split(override) if arg)
+        return flags
 
     async def _ensure_quickjs_sources(self, source_dir: str) -> None:
         quickjs_root = Path(source_dir) / "quickjs"
