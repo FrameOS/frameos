@@ -51,9 +51,10 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'palette',
   'nix',
   'buildroot',
+  'rpios',
 ]
 
-const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot']
+const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot', 'rpios']
 const FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS: (keyof FrameType)[] = [
   'device',
   'scenes',

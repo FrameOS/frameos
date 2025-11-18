@@ -77,6 +77,7 @@ export interface FrameType {
   palette?: Palette
   nix?: FrameNixConfig
   buildroot?: FrameBuildrootConfig
+  rpios?: FrameRpiOSConfig
   active_connections?: number
 }
 
@@ -578,5 +579,9 @@ export interface FrameNixConfig {
 }
 
 export interface FrameBuildrootConfig {
+  platform?: string
+}
+
+export interface FrameRpiOSConfig {
   platform?: string
 }

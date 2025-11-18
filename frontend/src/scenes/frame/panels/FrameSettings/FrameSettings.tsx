@@ -13,6 +13,7 @@ import {
   spectraPalettes,
   withCustomPalette,
   buildrootPlatforms,
+  rpiOSPlatforms,
   modes,
   devicesNixOS,
   nixosPlatforms,
@@ -230,10 +231,10 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           ) : null}
           <Field
             name="device"
-            label="Device"
+            label="Display driver"
             tooltip={
               frameForm.mode === 'nixos'
-                ? "We're adding support for all the devices into the NixOS version. Check back later for more."
+                ? 'Not all drivers work under NixOS. Check the "Raspberry Pi OS" deployment mode for more.'
                 : undefined
             }
           >
@@ -315,7 +316,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             <Field
               name="nix.platform"
               label="Platform"
-              tooltip='More coming soon... Try the generic "rpios" mode until then.'
+              tooltip='There are more options under the "Raspberry Pi OS" deployment mode.'
             >
               <Select name="nix.platform" options={nixosPlatforms} />
             </Field>
@@ -324,6 +325,13 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             <Group name="buildroot">
               <Field name="platform" label="Platform">
                 <Select name="buildroot.platform" options={buildrootPlatforms} />
+              </Field>
+            </Group>
+          ) : null}
+          {frameForm.mode === 'rpios' ? (
+            <Group name="rpios">
+              <Field name="platform" label="Platform">
+                <Select name="rpios.platform" options={rpiOSPlatforms} />
               </Field>
             </Group>
           ) : null}

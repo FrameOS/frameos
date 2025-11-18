@@ -69,6 +69,7 @@ class FrameStub:
     gpio_buttons: list[Any] = field(default_factory=list)
     debug: bool = False
     nix: dict[str, Any] | None = None
+    rpios: dict[str, Any] | None = None
     reboot: dict[str, Any] | None = None
     ssh_pass: str | None = None
     ssh_port: int = 22
@@ -90,6 +91,7 @@ def load_frame_stub(frameos_root: Path) -> FrameStub:
         gpio_buttons=list(data.get("gpioButtons") or []),
         debug=bool(data.get("debug", False)),
         nix=dict(data.get("nix") or {}),
+        rpios=dict(data.get("rpios") or {}),
         reboot=dict(data.get("reboot") or {}),
     )
 

@@ -7,7 +7,7 @@ import { Field } from '../../components/Field'
 import { newFrameForm } from './newFrameForm'
 import { Select } from '../../components/Select'
 import { useActions, useValues } from 'kea'
-import { devices, devicesNixOS, buildrootPlatforms, nixosPlatforms } from '../../devices'
+import { devices, devicesNixOS, buildrootPlatforms, nixosPlatforms, rpiOSPlatforms } from '../../devices'
 import { A } from 'kea-router'
 import { urls } from '../../urls'
 import { Spinner } from '../../components/Spinner'
@@ -120,8 +120,11 @@ export function NewFrame(): JSX.Element {
                 </>
               )}
             </Field>
-            <Field name="device" label="Driver">
+            <Field name="device" label="Display driver">
               <Select name="device" options={devices} />
+            </Field>
+            <Field name="platform" label="Platform">
+              <Select name="platform" options={rpiOSPlatforms} />
             </Field>
             <div className="flex gap-2">
               <Button type="submit">Add Frame</Button>

@@ -56,7 +56,8 @@ export const newFrameForm = kea<newFrameFormType>([
         platform:
           frame.mode && ['nixos', 'buildroot'].includes(frame.mode) && !frame.platform
             ? 'Please pick a platform'
-            : null,
+            : // no errors for RpiOS, support autodetection
+              null,
       }),
       submit: async (frame) => {
         try {

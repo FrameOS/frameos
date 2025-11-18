@@ -193,6 +193,17 @@ export const luckfoxBuildrootPlatforms: Option[] = luckfoxBuildrootPlatformValue
 
 export const buildrootPlatforms: Option[] = [{ value: '', label: '-- Please select --' }, ...luckfoxBuildrootPlatforms]
 
+export const rpiOSPlatforms: Option[] = [
+  { value: '', label: 'Autodetect' },
+  { value: 'pi.zerow', label: 'Raspberry Pi Zero W' },
+  { value: 'pi.zerow2', label: 'Raspberry Pi Zero W2' },
+  { value: 'pi.5', label: 'Raspberry Pi 5' },
+  { value: 'pi.4', label: 'Raspberry Pi 4' },
+  { value: 'pi', label: 'Raspberry Pi generic' },
+  { value: 'debian', label: 'Debian generic' },
+  { value: 'ubuntu', label: 'Ubuntu generic' },
+]
+
 export const modes: Option[] = [
   { value: 'rpios', label: 'Raspberry Pi OS (default)' },
   { value: 'nixos', label: 'NixOS (new, experimental)' },
