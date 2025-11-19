@@ -21,10 +21,6 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 
-DEFAULT_RUNNER = "ubuntu-24.04"
-ARM_RUNNER = "ubuntu-24.04-arm"
-
-
 @dataclass(frozen=True)
 class TargetDefinition:
     distro: str
@@ -32,7 +28,6 @@ class TargetDefinition:
     arch: str
     platform: str
     image: str
-    runner: str = DEFAULT_RUNNER
 
     @property
     def slug(self) -> str:
@@ -46,20 +41,19 @@ class TargetDefinition:
             "arch": self.arch,
             "platform": self.platform,
             "image": self.image,
-            "runner": self.runner,
         }
 
 
 TARGETS: tuple[TargetDefinition, ...] = (
-    TargetDefinition("debian", "bookworm", "armhf", "linux/arm/v7", "debian:bookworm", runner=ARM_RUNNER),
-    TargetDefinition("debian", "bookworm", "arm64", "linux/arm64", "debian:bookworm", runner=ARM_RUNNER),
+    TargetDefinition("debian", "bookworm", "armhf", "linux/arm/v7", "debian:bookworm"),
+    TargetDefinition("debian", "bookworm", "arm64", "linux/arm64", "debian:bookworm"),
     TargetDefinition("debian", "bookworm", "amd64", "linux/amd64", "debian:bookworm"),
-    TargetDefinition("debian", "trixie", "armhf", "linux/arm/v7", "debian:trixie", runner=ARM_RUNNER),
-    TargetDefinition("debian", "trixie", "arm64", "linux/arm64", "debian:trixie", runner=ARM_RUNNER),
+    TargetDefinition("debian", "trixie", "armhf", "linux/arm/v7", "debian:trixie"),
+    TargetDefinition("debian", "trixie", "arm64", "linux/arm64", "debian:trixie"),
     TargetDefinition("debian", "trixie", "amd64", "linux/amd64", "debian:trixie"),
-    TargetDefinition("ubuntu", "22.04", "arm64", "linux/arm64", "ubuntu:22.04", runner=ARM_RUNNER),
+    TargetDefinition("ubuntu", "22.04", "arm64", "linux/arm64", "ubuntu:22.04"),
     TargetDefinition("ubuntu", "22.04", "amd64", "linux/amd64", "ubuntu:22.04"),
-    TargetDefinition("ubuntu", "24.04", "arm64", "linux/arm64", "ubuntu:24.04", runner=ARM_RUNNER),
+    TargetDefinition("ubuntu", "24.04", "arm64", "linux/arm64", "ubuntu:24.04"),
     TargetDefinition("ubuntu", "24.04", "amd64", "linux/amd64", "ubuntu:24.04"),
 )
 
