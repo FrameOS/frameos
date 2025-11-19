@@ -44,7 +44,20 @@ jobs:
       - name: Install backend dependencies
         run: |
           pip install -r backend/requirements.txt
+      - name: Install Nim (prebuilt)
+        if: matrix.runner == 'ubuntu-24.04-arm'
+        env:
+          NIM_VERSION: 2.2.4
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.nim"
+          curl -L "https://archive.frameos.net/prebuilt-deps/${{ matrix.slug }}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
+          tar -xzf /tmp/nim.tar.gz -C "$HOME/.nim"
+          echo "$HOME/.nim/nim-${NIM_VERSION}/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.nim/nim-${NIM_VERSION}/bin:$PATH"
+          nim --version
       - name: Install Nim
+        if: matrix.runner != 'ubuntu-24.04-arm'
         env:
           CHOOSENIM_NO_ANALYTICS: 1
         run: |
@@ -59,4 +72,4 @@ jobs:
       - name: Smoke test frameos check
         run: |
           cd frameos/build/cross/${{ matrix.slug }}
-          docker run --rm --platform ${{ matrix.platform }} -v "$PWD:/workspace:ro" ${{ matrix.image }} bash -c "set -euo pipefail; export DEBIAN_FRONTEND=noninteractive; apt-get update; apt-get install -y --no-install-recommends ca-certificates libssl3; /workspace/frameos check"
+          docker run --rm --platform ${{ matrix.platform }} -v "$PWD:/workspace:ro" ${{ matrix.image }} bash -c "set -euo pipefail; export DEBIAN_FRONTEND=noninteractive; apt-get update; SSL_PACKAGE=libssl3; if apt-cache show libssl3t64 >/dev/null 2>&1; then SSL_PACKAGE=libssl3t64; fi; apt-get install -y --no-install-recommends ca-certificates \$SSL_PACKAGE; /workspace/frameos check"

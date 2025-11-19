@@ -58,8 +58,8 @@ DEFAULT_CACHE = Path.home() / ".cache/frameos/cross"
 PREBUILT_TIMEOUT = float(os.environ.get("FRAMEOS_PREBUILT_TIMEOUT", "20"))
 FEATURE_FLAG_ENV = "FRAMEOS_CROSS_FEATURE_CFLAGS"
 DEFAULT_FEATURE_CFLAGS = {
-    "amd64": ["-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mvpclmulqdq"],
-    "x86_64": ["-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mvpclmulqdq"],
+    "amd64": ["-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"],
+    "x86_64": ["-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"],
 }
 TOOLCHAIN_IMAGE_VERSION = "1"
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
