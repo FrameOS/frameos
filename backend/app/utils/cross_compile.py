@@ -107,7 +107,6 @@ PLATFORM_MAP = {
     "armv6l": "linux/arm/v6",
 }
 
-
 def can_cross_compile_target(arch: str | None) -> bool:
     """Return ``True`` when *arch* has a known Docker platform mapping."""
 
