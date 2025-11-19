@@ -28,6 +28,7 @@ class TargetDefinition:
     arch: str
     platform: str
     image: str
+    runner: str = "ubuntu-24.04"
 
     @property
     def slug(self) -> str:
@@ -41,19 +42,20 @@ class TargetDefinition:
             "arch": self.arch,
             "platform": self.platform,
             "image": self.image,
+            "runner": self.runner,
         }
 
 
 TARGETS: tuple[TargetDefinition, ...] = (
-    TargetDefinition("debian", "bookworm", "armhf", "linux/arm/v7", "debian:bookworm"),
-    TargetDefinition("debian", "bookworm", "arm64", "linux/arm64", "debian:bookworm"),
+    TargetDefinition("debian", "bookworm", "armhf", "linux/arm/v7", "debian:bookworm", runner="ubuntu-24.04-arm"),
+    TargetDefinition("debian", "bookworm", "arm64", "linux/arm64", "debian:bookworm", runner="ubuntu-24.04-arm"),
     TargetDefinition("debian", "bookworm", "amd64", "linux/amd64", "debian:bookworm"),
-    TargetDefinition("debian", "trixie", "armhf", "linux/arm/v7", "debian:trixie"),
-    TargetDefinition("debian", "trixie", "arm64", "linux/arm64", "debian:trixie"),
+    TargetDefinition("debian", "trixie", "armhf", "linux/arm/v7", "debian:trixie", runner="ubuntu-24.04-arm"),
+    TargetDefinition("debian", "trixie", "arm64", "linux/arm64", "debian:trixie", runner="ubuntu-24.04-arm"),
     TargetDefinition("debian", "trixie", "amd64", "linux/amd64", "debian:trixie"),
-    TargetDefinition("ubuntu", "22.04", "arm64", "linux/arm64", "ubuntu:22.04"),
+    TargetDefinition("ubuntu", "22.04", "arm64", "linux/arm64", "ubuntu:22.04", runner="ubuntu-24.04-arm"),
     TargetDefinition("ubuntu", "22.04", "amd64", "linux/amd64", "ubuntu:22.04"),
-    TargetDefinition("ubuntu", "24.04", "arm64", "linux/arm64", "ubuntu:24.04"),
+    TargetDefinition("ubuntu", "24.04", "arm64", "linux/arm64", "ubuntu:24.04", runner="ubuntu-24.04-arm"),
     TargetDefinition("ubuntu", "24.04", "amd64", "linux/amd64", "ubuntu:24.04"),
 )
 
