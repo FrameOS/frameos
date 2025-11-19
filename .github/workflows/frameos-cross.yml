@@ -78,8 +78,8 @@ jobs:
     needs: determine-matrix
     runs-on: ubuntu-24.04
     env:
-      TARGET_SLUG: debian-trixie-arm64
-      TARGET_PLATFORM: linux/arm64
+      TARGET_SLUG: debian-trixie-amd64
+      TARGET_PLATFORM: linux/amd64
       TARGET_IMAGE: debian:trixie
     strategy:
       fail-fast: false
