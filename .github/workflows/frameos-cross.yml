@@ -73,3 +73,52 @@ jobs:
         run: |
           cd frameos/build/cross/${{ matrix.slug }}
           docker run --rm --platform ${{ matrix.platform }} -v "$PWD:/workspace:ro" ${{ matrix.image }} bash -c "set -euo pipefail; export DEBIAN_FRONTEND=noninteractive; apt-get update; SSL_PACKAGE=libssl3; if apt-cache show libssl3t64 >/dev/null 2>&1; then SSL_PACKAGE=libssl3t64; fi; apt-get install -y --no-install-recommends ca-certificates \$SSL_PACKAGE; /workspace/frameos check"
+
+  driver-variant-builds:
+    needs: determine-matrix
+    runs-on: ubuntu-24.04
+    env:
+      TARGET_SLUG: debian-trixie-arm64
+      TARGET_PLATFORM: linux/arm64
+      TARGET_IMAGE: debian:trixie
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: web-only
+            device: web_only
+          - label: hdmi
+            device: framebuffer
+          - label: waveshare-7.3e
+            device: waveshare.EPD_7in3e
+          - label: pimoroni-13.3
+            device: pimoroni.inky_impression_13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Install backend dependencies
+        run: |
+          pip install -r backend/requirements.txt
+      - name: Install Nim
+        env:
+          CHOOSENIM_NO_ANALYTICS: 1
+        run: |
+          curl https://nim-lang.org/choosenim/init.sh -sSf | sh -s -- -y
+          echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.nimble/bin:$PATH"
+          nim --version
+      - name: "Configure frame device (driver: ${{ matrix.label }})"
+        run: |
+          tmp=$(mktemp)
+          jq --arg device "${{ matrix.device }}" '.device = $device' frameos/frame.json > "$tmp"
+          mv "$tmp" frameos/frame.json
+          cat frameos/frame.json | jq '.device'
+      - name: Cross compile ${{ env.TARGET_SLUG }} (${{ matrix.label }})
+        run: |
+          cd frameos
+          make cross-${TARGET_SLUG}
+      - name: Smoke test frameos check (${{ matrix.label }})
+        run: |
+          cd frameos/build/cross/${TARGET_SLUG}
+          docker run --rm --platform ${TARGET_PLATFORM} -v "$PWD:/workspace:ro" ${TARGET_IMAGE} bash -c "set -euo pipefail; export DEBIAN_FRONTEND=noninteractive; apt-get update; SSL_PACKAGE=libssl3; if apt-cache show libssl3t64 >/dev/null 2>&1; then SSL_PACKAGE=libssl3t64; fi; apt-get install -y --no-install-recommends ca-certificates \$SSL_PACKAGE; /workspace/frameos check"
