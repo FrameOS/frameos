@@ -28,7 +28,6 @@ RUN set -eu \
             SSL_PACKAGE="libssl3t64"; \
         else \
             SSL_PACKAGE=""; \
-        fi; \
-    fi \
+        fi \
     && apt-get install -y --no-install-recommends $TOOLCHAIN_PACKAGES ${SSL_PACKAGE:+$SSL_PACKAGE} \
     && rm -rf /var/lib/apt/lists/*
