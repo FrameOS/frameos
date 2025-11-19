@@ -50,8 +50,16 @@ jobs:
           NIM_VERSION: 2.2.4
         run: |
           set -euo pipefail
+          distro=$(lsb_release -si | tr '[:upper:]' '[:lower:]')
+          version=$(lsb_release -sr)
+          case "$(uname -m)" in
+            aarch64) host_arch=arm64 ;;
+            armv7l|armv6l) host_arch=armhf ;;
+            *) echo "Unsupported runner architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          nim_slug="${distro}-${version}-${host_arch}"
           mkdir -p "$HOME/.nim"
-          curl -L "https://archive.frameos.net/prebuilt-deps/${{ matrix.slug }}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
+          curl -L "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
           tar -xzf /tmp/nim.tar.gz -C "$HOME/.nim"
           echo "$HOME/.nim/nim-${NIM_VERSION}/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.nim/nim-${NIM_VERSION}/bin:$PATH"
