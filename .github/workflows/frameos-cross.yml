@@ -58,6 +58,7 @@ jobs:
             *) echo "Unsupported runner architecture: $(uname -m)" >&2; exit 1 ;;
           esac
           nim_slug="${distro}-${version}-${host_arch}"
+          echo $nim_slug
           mkdir -p "$HOME/.nim"
           curl -L "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
           tar -xzf /tmp/nim.tar.gz -C "$HOME/.nim"
