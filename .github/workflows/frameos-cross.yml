@@ -2,14 +2,6 @@ name: FrameOS cross compilation
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - frameos/**
-      - backend/app/utils/cross_compile.py
-      - backend/app/tasks/_frame_deployer.py
-      - backend/bin/cross
-      - backend/tools/cross-toolchain.Dockerfile
-      - .github/workflows/frameos-cross.yml
   pull_request:
     paths:
       - frameos/**
