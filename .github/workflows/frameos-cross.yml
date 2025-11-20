@@ -79,6 +79,7 @@ jobs:
       - name: Cross compile ${{ matrix.slug }}
         run: |
           cd frameos
+          cat frame.json
           make cross-${{ matrix.slug }}
       - name: Smoke test frameos check
         run: |
@@ -128,6 +129,7 @@ jobs:
       - name: Cross compile ${{ env.TARGET_SLUG }} (${{ matrix.label }})
         run: |
           cd frameos
+          cat frame.json
           make cross-${TARGET_SLUG}
       - name: Smoke test frameos check (${{ matrix.label }})
         run: |
