@@ -190,10 +190,18 @@ class CrossCompiler:
 
     async def _prepare_sysroot(self) -> None:
         if not self.enable_remote_sysroot:
-            await self._log(
-                "stdout",
-                "- Remote sysroot synchronization disabled; using default include/lib paths",
-            )
+            if self.prebuilt_components:
+                await self._log(
+                    "stdout",
+                    "- Remote sysroot synchronization disabled; staging prebuilt sysroot components",
+                )
+                for component in self.prebuilt_components:
+                    self._inject_prebuilt_component(component)
+            else:
+                await self._log(
+                    "stdout",
+                    "- Remote sysroot synchronization disabled; using default include/lib paths",
+                )
             return
 
         drivers = drivers_for_frame(self.frame)
