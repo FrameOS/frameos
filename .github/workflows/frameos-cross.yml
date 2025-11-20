@@ -62,6 +62,8 @@ jobs:
           mkdir -p "$HOME/.nim"
           curl -L "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
           tar -xzf /tmp/nim.tar.gz -C "$HOME/.nim"
+          rm -rf "$HOME/.nim/nim-2.2.4/nim/bin"
+          mv "$HOME/.nim/nim-2.2.4/nim/*" "$HOME/.nim/nim-2.2.4/"
           echo "$HOME/.nim/nim-${NIM_VERSION}/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.nim/nim-${NIM_VERSION}/bin:$PATH"
           nim --version
@@ -76,7 +78,6 @@ jobs:
           nim --version
       - name: Cross compile ${{ matrix.slug }}
         run: |
-          mv /home/runner/.nim/nim-2.2.4/nim/* /home/runner/.nim/nim-2.2.4/
           cd frameos
           make cross-${{ matrix.slug }}
       - name: Smoke test frameos check
