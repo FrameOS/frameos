@@ -31,7 +31,8 @@ DEFAULT_QUICKJS_VERSION = "2025-04-26"
 DEFAULT_QUICKJS_SHA256 = "2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf"
 DEFAULT_LGPIO_VERSION = "v0.2.2"
 DEFAULT_LGPIO_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-LGPIO_ARCHIVE_URL = "https://github.com/joan2937/lg/archive/refs/tags/{version}.tar.gz"
+# LGPIO_ARCHIVE_URL = "https://github.com/joan2937/lg/archive/refs/tags/v0.2.2.tar.gz"
+LGPIO_ARCHIVE_URL = "https://archive.frameos.net/source/lgpio-{version}.tar.gz"
 
 
 APT_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
