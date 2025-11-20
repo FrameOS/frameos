@@ -37,7 +37,6 @@ jobs:
         run: |
           pip install -r backend/requirements.txt
       - name: Install Nim (prebuilt)
-        if: matrix.runner == 'ubuntu-24.04-arm'
         env:
           NIM_VERSION: 2.2.4
         run: |
@@ -58,15 +57,6 @@ jobs:
           mv $HOME/.nim/nim-2.2.4/nim/* "$HOME/.nim/nim-2.2.4/"
           echo "$HOME/.nim/nim-${NIM_VERSION}/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.nim/nim-${NIM_VERSION}/bin:$PATH"
-          nim --version
-      - name: Install Nim
-        if: matrix.runner != 'ubuntu-24.04-arm'
-        env:
-          CHOOSENIM_NO_ANALYTICS: 1
-        run: |
-          curl https://nim-lang.org/choosenim/init.sh -sSf | sh -s -- -y
-          echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.nimble/bin:$PATH"
           nim --version
       - name: Cross compile ${{ matrix.slug }}
         run: |
