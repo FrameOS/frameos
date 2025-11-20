@@ -136,6 +136,7 @@ class CrossCompiler:
         await self._ensure_quickjs_sources(source_dir)
         build_dir = await self._generate_c_sources(source_dir)
         await self._prepare_sysroot()
+        await self._ensure_lgpio_in_sysroot()
         await self._ensure_quickjs_in_build_dir(source_dir, build_dir)
         binary_path = await self._run_docker_build(str(build_dir))
         if not os.path.exists(binary_path):
@@ -365,6 +366,32 @@ class CrossCompiler:
             path = await self._ensure_prebuilt_component(component)
             if path:
                 self.prebuilt_components[component] = path
+
+    async def _ensure_lgpio_in_sysroot(self) -> None:
+        """Guarantee lgpio headers and libraries are staged in the sysroot."""
+
+        header = self.sysroot_dir / "usr/local/include/lgpio.h"
+        static_lib = self.sysroot_dir / "usr/local/lib/liblgpio.a"
+        if header.exists() and static_lib.exists():
+            return
+
+        # Attempt to (re)download the prebuilt component if it's missing.
+        if self.prebuilt_entry:
+            if "lgpio" not in self.prebuilt_components:
+                path = await self._ensure_prebuilt_component("lgpio")
+                if path:
+                    self.prebuilt_components["lgpio"] = path
+            self._inject_prebuilt_component("lgpio")
+
+        if header.exists() and static_lib.exists():
+            return
+
+        await self._log(
+            "stderr",
+            "lgpio headers or libraries are missing from the sysroot after staging; "
+            "publish a prebuilt lgpio archive to archive.frameos.org and retry the build.",
+        )
+        raise RuntimeError("lgpio libraries missing from sysroot; unable to continue cross compilation")
 
     async def _ensure_prebuilt_component(self, component: str) -> Path | None:
         if not self.prebuilt_entry:
