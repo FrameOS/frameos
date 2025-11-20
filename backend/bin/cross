@@ -84,7 +84,7 @@ def load_frame_stub(frameos_root: Path) -> FrameStub:
     if config.exists():
         with config.open("r", encoding="utf-8") as fh:
             try:
-                data = json.load(fh)
+                data = json.loads(fh.read())
             except json.JSONDecodeError:
                 data = {}
     return FrameStub(
