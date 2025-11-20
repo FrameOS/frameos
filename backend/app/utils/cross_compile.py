@@ -223,7 +223,7 @@ class CrossCompiler:
                 log_debug "Container uname: $(uname -a)"
                 log_debug "Working directory before build: $(pwd)"
 
-                log_debug "ls -l /sysroot/usr/local/lib
+                log_debug "ls -l /sysroot/usr/local/lib"
                 ls -l /sysroot/usr/local/lib
 
                 extra_cflags={extra_cflags}
