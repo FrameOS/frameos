@@ -584,4 +584,5 @@ export interface FrameBuildrootConfig {
 
 export interface FrameRpiOSConfig {
   platform?: string
+  disableCrossCompilation?: boolean
 }

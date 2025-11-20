@@ -328,13 +328,13 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               </Field>
             </Group>
           ) : null}
-          {frameForm.mode === 'rpios' ? (
+          {/* {frameForm.mode === 'rpios' || !frameForm.mode ? (
             <Group name="rpios">
               <Field name="platform" label="Platform">
                 <Select name="rpios.platform" options={rpiOSPlatforms} />
               </Field>
             </Group>
-          ) : null}
+          ) : null} */}
           <Field name="rotate" label="Rotation">
             {({ value, onChange }) => (
               <Select
@@ -365,6 +365,17 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               />
             )}
           </Field>
+          {frameForm.mode === 'rpios' || !frameForm.mode ? (
+            <Group name="rpios">
+              <Field
+                name="disableCrossCompilation"
+                label="Disable cross compilation"
+                tooltip="Build directly on the frame instead of using the cross compiler. This is much  slower, but may be needed in some case."
+              >
+                <Switch name="rpios.disableCrossCompilation" fullWidth />
+              </Field>
+            </Group>
+          ) : null}
           <Field name="debug" label="Debug mode (noisy)">
             <Select
               name="debug"

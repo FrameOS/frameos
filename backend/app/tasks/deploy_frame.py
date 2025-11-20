@@ -252,9 +252,20 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await self.log("stdout", "- Creating build archive")
             archive_path = await self.create_local_build_archive(build_dir, source_dir, arch)
 
+            rpios_settings = frame.rpios or {}
+            disable_cross_compilation = rpios_settings.get("disableCrossCompilation")
+            disable_cross_compilation = (
+                disable_cross_compilation is True
+                or (isinstance(disable_cross_compilation, str) and disable_cross_compilation.lower() == "true")
+            )
             cross_compiled = False
             cross_compiled_binary: str | None = None
-            if can_cross_compile_target(arch):
+            if disable_cross_compilation:
+                await self.log(
+                    "stdout",
+                    "- Cross compilation disabled in frame settings; building on device",
+                )
+            elif can_cross_compile_target(arch):
                 await self.log("stdout", "- Target supports cross compilation; building binary locally")
                 try:
                     cross_compiled_binary = await build_binary_with_cross_toolchain(

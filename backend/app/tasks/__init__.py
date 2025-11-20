@@ -1,33 +1,8 @@
-"""Task exports with lazy loading."""
-from __future__ import annotations
-
-from importlib import import_module
-from typing import Any
-
-_TASK_EXPORTS = {
-    "build_sd_card_image_task": "build_sd_card_image",
-    "fast_deploy_frame": "fast_deploy_frame",
-    "deploy_frame": "deploy_frame",
-    "reset_frame": "reset_frame",
-    "restart_frame": "restart_frame",
-    "reboot_frame": "restart_frame",
-    "restart_agent": "restart_agent",
-    "stop_frame": "stop_frame",
-    "deploy_agent": "deploy_agent",
-}
-
-__all__ = sorted(_TASK_EXPORTS)
-
-
-def __getattr__(name: str) -> Any:
-    module_name = _TASK_EXPORTS.get(name)
-    if not module_name:
-        raise AttributeError(f"module 'app.tasks' has no attribute '{name}'")
-    module = import_module(f"app.tasks.{module_name}")
-    value = getattr(module, name)
-    globals()[name] = value
-    return value
-
-
-def __dir__() -> list[str]:
-    return sorted(__all__)
+from .build_sd_card_image import build_sd_card_image_task # noqa
+from .fast_deploy_frame import fast_deploy_frame # noqa
+from .deploy_frame import deploy_frame # noqa
+from .reset_frame import reset_frame # noqa
+from .restart_frame import restart_frame, reboot_frame # noqa
+from .restart_agent import restart_agent # noqa
+from .stop_frame import stop_frame # noqa
+from .deploy_agent import deploy_agent # noqa
