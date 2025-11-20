@@ -656,16 +656,9 @@ class FrameDeployer:
             if waveshare.variant:
                 variant_folder = get_variant_folder(waveshare.variant)
 
-                if variant_folder == "it8951":
-                    util_files = ["DEV_Config.c", "DEV_Config.h"]
-                else:
-                    util_files = ["Debug.h", "DEV_Config.c", "DEV_Config.h"]
-
-                for uf in util_files:
-                    shutil.copy(
-                        os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, uf),
-                        os.path.join(build_dir, uf)
-                    )
+                util_files = ["DEV_Config.c", "DEV_Config.h"]
+                if variant_folder != "it8951":
+                    util_files.insert(0, "Debug.h")
 
                 # color e-paper variants
                 if waveshare.variant in [
@@ -682,10 +675,12 @@ class FrameDeployer:
                 else:
                     variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
 
-                for vf in variant_files:
+                waveshare_files = list(dict.fromkeys(util_files + variant_files))
+
+                for wf in waveshare_files:
                     shutil.copy(
-                        os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, vf),
-                        os.path.join(build_dir, vf)
+                        os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, wf),
+                        os.path.join(build_dir, wf)
                     )
 
         with open(os.path.join(build_dir, "Makefile"), "w") as mk:
