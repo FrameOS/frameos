@@ -78,7 +78,9 @@ jobs:
         run: |
           ls -l /home/runner/.nim/
           ls -l /home/runner/.nim/nim-2.2.4/
-          ls -l /home/runner/.nim/nim-2.2.4/lib/
+          # ls -l /home/runner/.nim/nim-2.2.4/lib/
+          ls -l /home/runner/.nim/nim-2.2.4/nim/lib/
+          mv /home/runner/.nim/nim-2.2.4/nim/* /home/runner/.nim/nim-2.2.4/
           cd frameos
           make cross-${{ matrix.slug }}
       - name: Smoke test frameos check
