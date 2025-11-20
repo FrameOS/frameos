@@ -71,7 +71,8 @@ TOOLCHAIN_PACKAGES = (
     "unzip xz-utils zlib1g-dev libssl-dev libffi-dev libjpeg-dev libfreetype6-dev libevdev-dev"
 )
 LUCKFOX_BUILDROOT_TOOLCHAIN_URL = (
-    "https://files.luckfox.com/wiki/Luckfox-Pico/Software/arm-rockchip830-linux-uclibcgnueabihf.tar.gz"
+    # "https://files.luckfox.com/wiki/Luckfox-Pico/Software/arm-rockchip830-linux-uclibcgnueabihf.tar.gz"
+    "https://archive.frameos.net/vendor/luckfox/arm-rockchip830-linux-uclibcgnueabihf.tar.gz"
 )
 LUCKFOX_BUILDROOT_TOOLCHAIN_PREFIX = "arm-rockchip830-linux-uclibcgnueabihf"
 LUCKFOX_BUILDROOT_TOOLCHAIN_DIR = "/opt/luckfox/toolchain"
