@@ -134,6 +134,16 @@ class ManifestEntry:
         return data
 
 
+@dataclass
+class UploadPlan:
+    target: str
+    metadata: Dict[str, str]
+    target_dir: Path
+    component_keys: Dict[str, str]
+    component_md5sums: Dict[str, str]
+    components_to_upload: List[Tuple[str, Path, str]]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bucket", default=DEFAULT_BUCKET, help="R2 bucket name")
@@ -162,6 +172,12 @@ def parse_args() -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
     up = sub.add_parser("upload", help="Upload local builds to R2")
     up.add_argument("--force", action="store_true", help="Re-upload even if remote exists")
+    up.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Proceed with uploads without an interactive confirmation",
+    )
 
     down = sub.add_parser("download", help="Download archives from R2")
     down.add_argument(
@@ -182,6 +198,12 @@ def parse_args() -> argparse.Namespace:
         "--skip-build",
         action="store_true",
         help="Only download existing archives, never invoke build.sh",
+    )
+    sync.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Proceed with uploads without an interactive confirmation",
     )
 
     args = parser.parse_args()
@@ -396,20 +418,18 @@ def ensure_manifest_md5sums(client, bucket: str, manifest: Dict[str, List[Manife
     return changed
 
 
-def upload_target(
+def prepare_upload_target(
     client,
     bucket: str,
     prefix: str,
-    manifest: Dict[str, List[ManifestEntry]],
     target_dir: Path,
     force: bool = False,
-):
+) -> Optional[UploadPlan]:
     metadata = read_local_metadata(target_dir)
     if not metadata:
         print(f"Skipping {target_dir.name}: metadata.json missing", file=sys.stderr)
-        return
+        return None
 
-    identifier = package_identifier(metadata)
     component_keys: Dict[str, str] = {}
     component_md5sums: Dict[str, str] = {}
     components_to_upload = []
@@ -420,21 +440,21 @@ def upload_target(
                 f"Skipping {target_dir.name}: {component}_version missing in metadata",
                 file=sys.stderr,
             )
-            return
+            return None
         comp_dir = component_dir(target_dir, component, version)
         if not comp_dir.exists():
             print(
                 f"Skipping {target_dir.name}: directory {comp_dir.name} not found",
                 file=sys.stderr,
             )
-            return
+            return None
         build_info_file = comp_dir / ".build-info"
         if not build_info_file.is_file():
             print(
                 f"Skipping {target_dir.name}: {comp_dir.name} missing .build-info",
                 file=sys.stderr,
             )
-            return
+            return None
         object_key = component_object_key(prefix, metadata["target"], component, version)
         component_keys[component] = object_key
         needs_upload = True
@@ -455,11 +475,32 @@ def upload_target(
         print(
             f"Remote already has all components for {target_dir.name}, skipping upload",
         )
-        return
+        return None
+
+    return UploadPlan(
+        target=metadata["target"],
+        metadata=metadata,
+        target_dir=target_dir,
+        component_keys=component_keys,
+        component_md5sums=component_md5sums,
+        components_to_upload=components_to_upload,
+    )
+
+
+def upload_target(
+    client,
+    bucket: str,
+    prefix: str,
+    manifest: Dict[str, List[ManifestEntry]],
+    plan: UploadPlan,
+):
+    metadata = plan.metadata
+    identifier = package_identifier(metadata)
 
     tarballs: List[Path] = []
     try:
-        for component, comp_dir, object_key in components_to_upload or []:
+        component_md5sums = dict(plan.component_md5sums or {})
+        for component, comp_dir, object_key in plan.components_to_upload:
             tarball = make_tarball(comp_dir, identifier, component)
             tarballs.append(tarball)
             component_md5sums[component] = file_md5sum(tarball)
@@ -476,7 +517,7 @@ def upload_target(
             versions=versions_from_metadata(metadata),
             object_key=None,
             updated_at=datetime.now(timezone.utc).isoformat(),
-            component_keys=component_keys,
+            component_keys=plan.component_keys,
             component_md5sums=component_md5sums or None,
         )
         manifest[entry.target] = [entry]
@@ -587,15 +628,52 @@ def ensure_build(targets: List[str], build_script: str):
     subprocess.run(cmd, cwd=REPO_ROOT, check=True)
 
 
+def describe_upload_plans(plans: List[UploadPlan], bucket: str) -> None:
+    print("The following uploads are planned:")
+    for plan in plans:
+        print(f"- {plan.target_dir.name}:")
+        for component, comp_dir, object_key in plan.components_to_upload:
+            print(f"    {component} ({comp_dir.name}) -> s3://{bucket}/{object_key}")
+    print()
+
+
+def confirm_upload_plans(
+    plans: List[UploadPlan], bucket: str, auto_confirm: bool = False
+) -> bool:
+    if not plans:
+        print("No uploads are planned.")
+        return False
+    describe_upload_plans(plans, bucket)
+    if auto_confirm:
+        print("Auto-confirming uploads.")
+        return True
+    response = input("Proceed with uploads? [y/N]: ").strip().lower()
+    return response in {"y", "yes"}
+
+
 def command_upload(args):
     client = s3_client()
     manifest = load_manifest(client, args.bucket, args.manifest_key)
     ensure_manifest_md5sums(client, args.bucket, manifest)
     targets = desired_targets(args.targets)
+    plans: List[UploadPlan] = []
     for target_dir in iter_local_targets():
         if target_dir.name not in targets:
             continue
-        upload_target(client, args.bucket, args.prefix, manifest, target_dir, force=args.force)
+        plan = prepare_upload_target(
+            client, args.bucket, args.prefix, target_dir, force=args.force
+        )
+        if plan:
+            plans.append(plan)
+    if not plans:
+        save_manifest(client, args.bucket, args.manifest_key, manifest)
+        print("Nothing to upload.")
+        return
+    if not confirm_upload_plans(plans, args.bucket, auto_confirm=args.yes):
+        print("Upload cancelled.")
+        return
+    for plan in plans:
+        upload_target(client, args.bucket, args.prefix, manifest, plan)
     save_manifest(client, args.bucket, args.manifest_key, manifest)
 
 
@@ -642,11 +720,23 @@ def command_sync(args):
     manifest = load_manifest(client, args.bucket, args.manifest_key)
     ensure_manifest_md5sums(client, args.bucket, manifest)
     to_upload = set(missing)
+    plans: List[UploadPlan] = []
     for target_dir in iter_local_targets() or []:
         if target_dir.name in to_upload:
-            upload_target(client, args.bucket, args.prefix, manifest, target_dir, force=False)
-    if to_upload:
-        save_manifest(client, args.bucket, args.manifest_key, manifest)
+            plan = prepare_upload_target(
+                client, args.bucket, args.prefix, target_dir, force=False
+            )
+            if plan:
+                plans.append(plan)
+    if not plans:
+        print("No new artifacts to upload.")
+        return
+    if not confirm_upload_plans(plans, args.bucket, auto_confirm=args.yes):
+        print("Upload cancelled.")
+        return
+    for plan in plans:
+        upload_target(client, args.bucket, args.prefix, manifest, plan)
+    save_manifest(client, args.bucket, args.manifest_key, manifest)
 
 
 def main() -> int:
