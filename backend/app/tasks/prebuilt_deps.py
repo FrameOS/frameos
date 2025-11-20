@@ -116,6 +116,7 @@ def resolve_prebuilt_target(distro: str, version: str, arch: str) -> str | None:
         "pios": "debian",
         "debian": "debian",
         "ubuntu": "ubuntu",
+        "buildroot": "buildroot",
     }.get(distro_input)
     if not distro_key:
         return None

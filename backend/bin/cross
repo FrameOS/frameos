@@ -57,6 +57,7 @@ TARGETS: tuple[TargetDefinition, ...] = (
     TargetDefinition("ubuntu", "22.04", "amd64", "linux/amd64", "ubuntu:22.04"),
     TargetDefinition("ubuntu", "24.04", "arm64", "linux/arm64", "ubuntu:24.04", runner="ubuntu-24.04-arm"),
     TargetDefinition("ubuntu", "24.04", "amd64", "linux/amd64", "ubuntu:24.04"),
+    TargetDefinition("buildroot", "luckfox-pico-plus", "armv7l", "linux/amd64", "ubuntu:22.04"),
 )
 
 TARGET_MAP = {target.slug: target for target in TARGETS}
@@ -172,7 +173,13 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
             redis=None,
             frame=frame,
             deployer=deployer,
-            target=TargetMetadata(arch=target.arch, distro=target.distro, version=target.version),
+            target=TargetMetadata(
+                arch=target.arch,
+                distro=target.distro,
+                version=target.version,
+                platform=target.platform,
+                image=target.image,
+            ),
             temp_dir=tmp,
             prebuilt_entry=prebuilt_entry,
             prebuilt_target=prebuilt_target,

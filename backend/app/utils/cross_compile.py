@@ -36,6 +36,8 @@ class TargetMetadata:
     arch: str
     distro: str
     version: str
+    platform: str | None = None
+    image: str | None = None
 
 
 @dataclass(slots=True)
@@ -68,6 +70,11 @@ TOOLCHAIN_PACKAGES = (
     "build-essential ca-certificates curl git make pkg-config python3 python3-pip "
     "unzip xz-utils zlib1g-dev libssl-dev libffi-dev libjpeg-dev libfreetype6-dev libevdev-dev"
 )
+LUCKFOX_BUILDROOT_TOOLCHAIN_URL = (
+    "https://files.luckfox.com/wiki/Luckfox-Pico/Software/arm-rockchip830-linux-uclibcgnueabihf.tar.gz"
+)
+LUCKFOX_BUILDROOT_TOOLCHAIN_PREFIX = "arm-rockchip830-linux-uclibcgnueabihf"
+LUCKFOX_BUILDROOT_TOOLCHAIN_DIR = "/opt/luckfox/toolchain"
 
 
 REMOTE_COMPONENTS: tuple[RemoteComponent, ...] = (
@@ -117,6 +124,7 @@ DISTRO_DEFAULTS = {
     "raspios": ("debian", "bookworm"),
     "debian": ("debian", "bookworm"),
     "ubuntu": ("ubuntu", "22.04"),
+    "buildroot": ("ubuntu", "22.04"),
 }
 
 
@@ -172,7 +180,7 @@ class CrossCompiler:
         await self._prepare_prebuilt_components()
         await self._ensure_quickjs_sources(source_dir)
         build_dir = await self._generate_c_sources(source_dir)
-        await self._prepare_sysroot()
+        # await self._prepare_sysroot()
         await self._ensure_quickjs_in_build_dir(source_dir, build_dir)
         binary_path = await self._run_docker_build(str(build_dir))
         if not os.path.exists(binary_path):
@@ -274,6 +282,27 @@ class CrossCompiler:
             shlex.quote(" ".join(extra_cflags_parts)) if extra_cflags_parts else "''"
         )
         extra_libs = shlex.quote(" ".join(f"-L{path}" for path in lib_dirs)) if lib_dirs else "''"
+        toolchain_setup = ""
+        if self._is_luckfox_buildroot():
+            toolchain_setup = (
+                dedent(
+                    f"""
+                    toolchain_prefix={LUCKFOX_BUILDROOT_TOOLCHAIN_PREFIX}
+                    if [ -d "{LUCKFOX_BUILDROOT_TOOLCHAIN_DIR}/bin" ]; then
+                        export PATH="{LUCKFOX_BUILDROOT_TOOLCHAIN_DIR}/bin:$PATH"
+                        export CC="$toolchain_prefix-gcc"
+                        export CXX="$toolchain_prefix-g++"
+                        export AR="$toolchain_prefix-ar"
+                        export STRIP="$toolchain_prefix-strip"
+                        export PKG_CONFIG_PATH="{LUCKFOX_BUILDROOT_TOOLCHAIN_DIR}/lib/pkgconfig:${{PKG_CONFIG_PATH:-}}"
+                        log_debug "Using Luckfox Buildroot toolchain from {LUCKFOX_BUILDROOT_TOOLCHAIN_DIR}"
+                    else
+                        log_debug "Luckfox toolchain not found at {LUCKFOX_BUILDROOT_TOOLCHAIN_DIR}; falling back to container defaults"
+                    fi
+                    """
+                ).strip()
+                + "\n\n"
+            )
         script_path.write_text(
             dedent(
                 f"""
@@ -297,6 +326,8 @@ class CrossCompiler:
                     log_debug "Using extra LIBS: $extra_libs"
                     export EXTRA_LIBS="$extra_libs"
                 fi
+
+                {toolchain_setup}
 
                 cd /src
                 log_debug "Compiling generated C sources"
@@ -705,9 +736,13 @@ class CrossCompiler:
         await _log_subset(folders[:5], "dir")
 
     def _platform(self) -> str:
+        if getattr(self.target, "platform", None):
+            return str(self.target.platform)
         return PLATFORM_MAP.get(self.target.arch, "linux/amd64")
 
     def _docker_image(self) -> str:
+        if getattr(self.target, "image", None):
+            return str(self.target.image)
         distro = self.target.distro or "unknown"
         version = self.target.version or "latest"
         base, default_version = DISTRO_DEFAULTS.get(distro, ("debian", "bookworm"))
@@ -719,7 +754,73 @@ class CrossCompiler:
         platform = self._sanitize(self._platform().replace("/", "_"))
         return f"frameos-cross-{base}-{platform}-v{TOOLCHAIN_IMAGE_VERSION}"
 
+    def _is_luckfox_buildroot(self) -> bool:
+        return (self.target.distro or "").lower() == "buildroot" and str(self.target.version).startswith(
+            "luckfox"
+        )
+
+    async def _ensure_luckfox_toolchain_image(self) -> str:
+        image = self._toolchain_image()
+        inspect_cmd = f"docker image inspect {shlex.quote(image)} >/dev/null 2>&1"
+        status, _out, _err = await exec_local_command(
+            self.db,
+            self.redis,
+            self.frame,
+            inspect_cmd,
+            log_command=False,
+            log_output=False,
+        )
+        if status == 0:
+            return image
+
+        dockerfile_contents = dedent(
+            f"""
+            FROM {self._docker_image()}
+
+            ARG TOOLCHAIN_URL={LUCKFOX_BUILDROOT_TOOLCHAIN_URL}
+            ARG TOOLCHAIN_DIR={LUCKFOX_BUILDROOT_TOOLCHAIN_DIR}
+
+            RUN set -eux \\
+                && apt-get update \\
+                && apt-get install -y --no-install-recommends {TOOLCHAIN_PACKAGES} ca-certificates \\
+                && mkdir -p "${{TOOLCHAIN_DIR}}" \\
+                && curl -L "$TOOLCHAIN_URL" -o /tmp/toolchain.tar.gz \\
+                && tar -xzf /tmp/toolchain.tar.gz -C /opt \\
+                && mv /opt/arm-rockchip830-linux-uclibcgnueabihf "$TOOLCHAIN_DIR" \\
+                && rm -rf /tmp/toolchain.tar.gz /var/lib/apt/lists/*
+
+            ENV LUCKFOX_TOOLCHAIN={LUCKFOX_BUILDROOT_TOOLCHAIN_DIR}
+            ENV PATH=$LUCKFOX_TOOLCHAIN/bin:$PATH
+            """
+        ).strip()
+
+        with tempfile.TemporaryDirectory(prefix="frameos-cross-luckfox-") as tmp:
+            dockerfile_path = Path(tmp) / "Dockerfile"
+            dockerfile_path.write_text(dockerfile_contents)
+            build_cmd = " ".join(
+                [
+                    "docker buildx build --load",
+                    "--platform linux/amd64",
+                    f"-t {shlex.quote(image)}",
+                    f"-f {shlex.quote(str(dockerfile_path))}",
+                    shlex.quote(tmp),
+                ]
+            )
+
+            status, _stdout, err = await exec_local_command(
+                self.db,
+                self.redis,
+                self.frame,
+                build_cmd,
+                log_command="docker buildx build (luckfox toolchain)",
+            )
+            if status != 0:
+                raise RuntimeError(f"Failed to build Luckfox cross toolchain image: {err or 'see logs'}")
+        return image
+
     async def _ensure_toolchain_image(self) -> str:
+        if self._is_luckfox_buildroot():
+            return await self._ensure_luckfox_toolchain_image()
         image = self._toolchain_image()
         inspect_cmd = f"docker image inspect {shlex.quote(image)} >/dev/null 2>&1"
         status, _out, _err = await exec_local_command(
@@ -777,9 +878,14 @@ async def build_binary_with_cross_toolchain(
     source_dir: str,
     temp_dir: str,
 ) -> str:
-    arch = "armv7l" if frame.mode == "buildroot" else await deployer.get_cpu_architecture()
-    distro = await deployer.get_distro()
-    version = await deployer.get_distro_version()
+    if frame.mode == "buildroot":
+        arch = "armv7l"
+        distro = "buildroot"
+        version = "22.04"
+    else:
+        arch = await deployer.get_cpu_architecture()
+        distro = await deployer.get_distro()
+        version = await deployer.get_distro_version()
     target = TargetMetadata(arch=arch, distro=distro, version=version)
     prebuilt_entry: PrebuiltEntry | None = None
     prebuilt_target = resolve_prebuilt_target(distro, version, arch)
