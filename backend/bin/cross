@@ -184,7 +184,6 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
             prebuilt_entry=prebuilt_entry,
             prebuilt_target=prebuilt_target,
             logger=console_log,
-            enable_remote_sysroot=False,
         )
         binary_path = await compiler.build(source_dir)
 

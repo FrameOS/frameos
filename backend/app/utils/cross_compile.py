@@ -12,13 +12,11 @@ from pathlib import Path
 from textwrap import dedent
 from typing import Awaitable, Callable, Iterable
 
-import asyncssh
 import httpx
 
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
-from app.drivers.devices import drivers_for_frame
 from app.models.frame import Frame
 from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
@@ -28,7 +26,6 @@ from app.tasks.prebuilt_deps import (
     resolve_prebuilt_target,
 )
 from app.utils.local_exec import exec_local_command
-from app.utils.ssh_utils import get_ssh_connection, remove_ssh_connection
 
 
 @dataclass(slots=True)
@@ -38,20 +35,6 @@ class TargetMetadata:
     version: str
     platform: str | None = None
     image: str | None = None
-
-
-@dataclass(slots=True)
-class RemotePathSpec:
-    name: str
-    patterns: list[str]
-    parent_depth: int
-
-
-@dataclass(slots=True)
-class RemoteComponent:
-    name: str
-    predicate: Callable[[dict[str, object]], bool]
-    paths: tuple[RemotePathSpec, ...]
 
 
 SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -76,33 +59,6 @@ LUCKFOX_BUILDROOT_TOOLCHAIN_URL = (
 )
 LUCKFOX_BUILDROOT_TOOLCHAIN_PREFIX = "arm-rockchip830-linux-uclibcgnueabihf"
 LUCKFOX_BUILDROOT_TOOLCHAIN_DIR = "/opt/luckfox/toolchain"
-
-
-REMOTE_COMPONENTS: tuple[RemoteComponent, ...] = (
-    RemoteComponent(
-        name="lgpio",
-        predicate=lambda _drivers: True,
-        paths=(
-            RemotePathSpec(
-                name="lgpio-libs",
-                patterns=[
-                    "/usr/lib/**/liblgpio.so",
-                    "/usr/lib/**/liblgpio.so.*",
-                    "/usr/local/lib/**/liblgpio.so*",
-                ],
-                parent_depth=1,
-            ),
-            RemotePathSpec(
-                name="lgpio-includes",
-                patterns=[
-                    "/usr/include/**/lgpio.h",
-                    "/usr/local/include/**/lgpio.h",
-                ],
-                parent_depth=0,
-            ),
-        ),
-    ),
-)
 
 
 PLATFORM_MAP = {
@@ -145,7 +101,6 @@ class CrossCompiler:
         prebuilt_entry: PrebuiltEntry | None = None,
         prebuilt_target: str | None = None,
         logger: LogFunc | None = None,
-        enable_remote_sysroot: bool = True,
     ) -> None:
         self.db = db
         self.redis = redis
@@ -167,7 +122,6 @@ class CrossCompiler:
         self.prebuilt_components: dict[str, Path] = {}
         self.prebuilt_timeout = PREBUILT_TIMEOUT
         self.logger = logger
-        self.enable_remote_sysroot = enable_remote_sysroot
         self._sysroot_include_dirs: set[str] = set()
         self._sysroot_lib_dirs: set[str] = set()
         for rel in ("usr/include", "usr/local/include", "usr/lib", "usr/local/lib"):
@@ -189,75 +143,18 @@ class CrossCompiler:
         return binary_path
 
     async def _prepare_sysroot(self) -> None:
-        if not self.enable_remote_sysroot:
-            if self.prebuilt_components:
-                await self._log(
-                    "stdout",
-                    "- Remote sysroot synchronization disabled; staging prebuilt sysroot components",
-                )
-                for component in self.prebuilt_components:
-                    self._inject_prebuilt_component(component)
-            else:
-                await self._log(
-                    "stdout",
-                    "- Remote sysroot synchronization disabled; using default include/lib paths",
-                )
-            return
-
-        drivers = drivers_for_frame(self.frame)
-        components = [
-            component for component in REMOTE_COMPONENTS if component.predicate(drivers)
-        ]
-
-        remote_specs: list[RemotePathSpec] = []
-        used_prebuilt = False
-        for component in components:
-            if component.name in self.prebuilt_components:
-                used_prebuilt = True
-                await self._log(
-                    "stdout",
-                    f"- Using prebuilt {component.name} headers and libraries",
-                )
-                self._inject_prebuilt_component(component.name)
-                continue
-            remote_specs.extend(component.paths)
-
-        if not remote_specs:
-            if used_prebuilt:
-                await self._log(
-                    "stdout",
-                    "- Remaining sysroot requirements satisfied by prebuilt components",
-                )
-            else:
-                await self._log(
-                    "stdout",
-                    "- No device-specific libraries required from frame",
-                )
-            return
-
-        remote_paths: list[str] = []
-        for spec in remote_specs:
-            match = await self._remote_first_match(spec.patterns)
-            if not match:
-                await self._log("stderr", f"- Unable to locate {spec.name} on frame; continuing")
-                continue
-            target_path = self._apply_parent(match, spec.parent_depth)
-            if target_path:
-                remote_paths.append(target_path)
-
-        unique_paths = list(dict.fromkeys(remote_paths))
-        for path in unique_paths:
-            self._register_sysroot_dir(path)
-        needed = [path for path in unique_paths if not (self.sysroot_dir / path.lstrip("/")).exists()]
-        if not needed:
-            await self._log("stdout", "- Reusing cached sysroot libraries")
-            return
-
-        await self._log(
-            "stdout",
-            f"- Downloading {len(needed)} path(s) from frame for sysroot cache",
-        )
-        await self._download_remote_paths(needed)
+        if self.prebuilt_components:
+            await self._log(
+                "stdout",
+                "- Staging prebuilt sysroot components",
+            )
+            for component in self.prebuilt_components:
+                self._inject_prebuilt_component(component)
+        else:
+            await self._log(
+                "stdout",
+                "- Using default include/lib paths without remote sysroot synchronization",
+            )
 
     async def _run_docker_build(self, build_dir: str) -> str:
         build_dir = os.path.abspath(build_dir)
@@ -612,74 +509,11 @@ class CrossCompiler:
             shutil.copytree(lib_src, self.sysroot_dir / "usr/local/lib", dirs_exist_ok=True)
             self._register_sysroot_dir("/usr/local/lib")
 
-    async def _download_remote_paths(self, paths: Iterable[str]) -> None:
-        remote_tar = f"/tmp/frameos_sysroot_{self.deployer.build_id}.tar.gz"
-        tar_parts = " ".join(
-            f"-C / {shlex.quote(path.lstrip('/'))}" for path in paths if path.startswith("/")
-        )
-        if not tar_parts:
-            return
-        await self.deployer.exec_command(
-            f"tar -czf {remote_tar} {tar_parts}",
-            # log_command="tar (collect sysroot)",
-        )
-
-        fd, local_tar = tempfile.mkstemp(suffix=".tar.gz")
-        os.close(fd)
-        try:
-            await self._download_file(remote_tar, local_tar)
-            await self.deployer.exec_command(
-                f"rm -f {remote_tar}", log_output=False, raise_on_error=False
-            )
-            with tarfile.open(local_tar, "r:gz") as tf:
-                tf.extractall(self.sysroot_dir)
-        finally:
-            os.unlink(local_tar)
-
-    async def _download_file(self, remote_path: str, local_path: str) -> None:
-        ssh = await get_ssh_connection(self.db, self.redis, self.frame)
-        try:
-            await asyncssh.scp((ssh, remote_path), local_path)
-        finally:
-            await remove_ssh_connection(self.db, self.redis, ssh, self.frame)
-
-    async def _remote_first_match(self, patterns: list[str]) -> str | None:
-        search_script = "python3 - <<'PY'\n" + "\n".join(
-            [
-                "import glob",
-                "patterns = %r" % patterns,
-                "for pat in patterns:",
-                "    matches = glob.glob(pat, recursive=True)",
-                "    if matches:",
-                "        print(matches[0])",
-                "        break",
-                "PY",
-            ]
-        )
-        output: list[str] = []
-        await self.deployer.exec_command(
-            search_script,
-            output=output,
-            # log_command="python3 (detect remote path)",
-            log_output=False,
-            raise_on_error=False,
-        )
-        if not output:
-            return None
-        found = output[0].strip()
-        return found or None
-
     async def _log(self, level: str, message: str) -> None:
         if self.logger:
             await self.logger(level, message)
             return
         await log(self.db, self.redis, int(self.frame.id), level, message)
-
-    def _apply_parent(self, path: str, depth: int) -> str:
-        target = Path(path)
-        for _ in range(depth):
-            target = target.parent
-        return str(target)
 
     def _existing_container_dirs(self, candidates: Iterable[str]) -> list[str]:
         existing: list[str] = []
