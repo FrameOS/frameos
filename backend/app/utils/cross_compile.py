@@ -180,7 +180,7 @@ class CrossCompiler:
         await self._prepare_prebuilt_components()
         await self._ensure_quickjs_sources(source_dir)
         build_dir = await self._generate_c_sources(source_dir)
-        # await self._prepare_sysroot()
+        await self._prepare_sysroot()
         await self._ensure_quickjs_in_build_dir(source_dir, build_dir)
         binary_path = await self._run_docker_build(str(build_dir))
         if not os.path.exists(binary_path):
