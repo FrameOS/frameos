@@ -219,7 +219,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
         className="space-y-4 @container"
         enableFormOnSubmit
       >
-        <H6 className="mt-2">Basic Settings</H6>
+        <H6 className="mt-2">Device settings</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field name="name" label="Name">
             <TextInput name="name" placeholder="Hallway frame" required />
