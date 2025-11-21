@@ -172,18 +172,18 @@ export const withCustomPalette: Record<string, Palette> = {
 export const nixosPlatforms: Option[] = [{ value: 'pi-zero2', label: 'Raspberry Pi Zero W2' }]
 
 export const luckfoxBuildrootPlatformValues = [
-  'RV1103_Luckfox_Pico',
-  'RV1103_Luckfox_Pico_Mini',
+  // 'RV1103_Luckfox_Pico',
+  // 'RV1103_Luckfox_Pico_Mini',
   'RV1103_Luckfox_Pico_Plus',
-  'RV1103_Luckfox_Pico_WebBee',
+  // 'RV1103_Luckfox_Pico_WebBee',
   'RV1106_Luckfox_Pico_Pro_Max',
-  'RV1106_Luckfox_Pico_Ultra',
-  'RV1106_Luckfox_Pico_Ultra_W',
-  'RV1106_Luckfox_Pico_Pi',
-  'RV1106_Luckfox_Pico_Pi_W',
-  'RV1106_Luckfox_Pico_86Panel',
-  'RV1106_Luckfox_Pico_86Panel_W',
-  'RV1106_Luckfox_Pico_Zero',
+  // 'RV1106_Luckfox_Pico_Ultra',
+  // 'RV1106_Luckfox_Pico_Ultra_W',
+  // 'RV1106_Luckfox_Pico_Pi',
+  // 'RV1106_Luckfox_Pico_Pi_W',
+  // 'RV1106_Luckfox_Pico_86Panel',
+  // 'RV1106_Luckfox_Pico_86Panel_W',
+  // 'RV1106_Luckfox_Pico_Zero',
 ]
 
 export const luckfoxBuildrootPlatforms: Option[] = luckfoxBuildrootPlatformValues.map((platform) => ({
