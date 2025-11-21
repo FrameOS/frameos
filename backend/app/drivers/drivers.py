@@ -54,6 +54,7 @@ DRIVERS = {
     "evdev": Driver( # touch and mouse inputs
         name="evdev",
         import_path="evdev/evdev",
+        link_flags=("-levdev",),
     ),
     "spi": Driver( # enables spi on deploy
         name="spi",
