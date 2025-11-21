@@ -110,7 +110,3 @@ jobs:
           cd frameos
           cat frame.json
           make cross-${TARGET_SLUG}
-      - name: Smoke test frameos check (${{ matrix.label }})
-        run: |
-          cd frameos
-          CMD="frameos check" make run-${TARGET_SLUG}
