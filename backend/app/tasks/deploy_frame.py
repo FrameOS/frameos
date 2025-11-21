@@ -33,10 +33,10 @@ DEFAULT_LGPIO_VERSION = "v0.2.2"
 DEFAULT_LGPIO_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 # Mirror of: https://github.com/joan2937/lg/archive/refs/tags/v0.2.2.tar.gz
-LGPIO_ARCHIVE_URL = "https://archive.frameos.net/source/lgpio-{version}.tar.gz"
+LGPIO_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/lgpio-{version}.tar.gz"
 
 # Mirror of: https://bellard.org/quickjs/quickjs-${version}.tar.xz
-QUICKJS_ARCHIVE_URL = "https://archive.frameos.net/source/quickjs-{version}.tar.xz"
+QUICKJS_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/quickjs-{version}.tar.xz"
 
 APT_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 
