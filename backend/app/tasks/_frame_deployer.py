@@ -240,6 +240,9 @@ class FrameDeployer:
         return target_host
 
     async def get_distro(self) -> str:
+        if self.frame.mode == "buildroot":
+            return "buildroot" # explicitly for now
+
         distro_out: list[str] = []
         await self.exec_command(
             "bash -c '"
@@ -253,6 +256,9 @@ class FrameDeployer:
         return distro if distro else "unknown"
 
     async def get_distro_version(self) -> str:
+        if self.frame.mode == "buildroot":
+            return "22.04" # explicitly for now
+
         version_out: list[str] = []
         await self.exec_command(
             "bash -c '"
@@ -279,6 +285,9 @@ class FrameDeployer:
         return total_memory
 
     async def get_cpu_architecture(self) -> str:
+        if self.frame.mode == "buildroot":
+            return "armv7l" # 32bit arm, explicitly for now
+
         uname_output: list[str] = []
         await self.exec_command("uname -m", uname_output)
         arch = "".join(uname_output).strip()

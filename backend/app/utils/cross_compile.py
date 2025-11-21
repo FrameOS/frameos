@@ -751,14 +751,9 @@ async def build_binary_with_cross_toolchain(
     source_dir: str,
     temp_dir: str,
 ) -> str:
-    if frame.mode == "buildroot":
-        arch = "armv7l"
-        distro = "buildroot"
-        version = "22.04"
-    else:
-        arch = await deployer.get_cpu_architecture()
-        distro = await deployer.get_distro()
-        version = await deployer.get_distro_version()
+    arch = await deployer.get_cpu_architecture()
+    distro = await deployer.get_distro()
+    version = await deployer.get_distro_version()
     target = TargetMetadata(arch=arch, distro=distro, version=version)
     prebuilt_entry: PrebuiltEntry | None = None
     prebuilt_target = resolve_prebuilt_target(distro, version, arch)

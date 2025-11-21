@@ -544,16 +544,13 @@ async def api_frame_local_c_source_zip(
     with tempfile.TemporaryDirectory() as tmp:
         deployer = FrameDeployer(db, redis, frame, nim_path, tmp)
 
-        if frame.mode == "buildroot":
-            arch = "armv7l" # 32bit arm, explicitly for now
-        else:
-            try:
-                arch = await deployer.get_cpu_architecture()
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=HTTPStatus.BAD_GATEWAY,
-                    detail=f"Unable to detect frame architecture: {exc}",
-                )
+        try:
+            arch = await deployer.get_cpu_architecture()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_GATEWAY,
+                detail=f"Unable to detect frame architecture: {exc}",
+            )
 
         source_dir = deployer.create_local_source_folder(tmp)
         await deployer.make_local_modifications(source_dir)

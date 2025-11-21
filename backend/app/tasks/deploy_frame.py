@@ -27,16 +27,15 @@ from app.tasks.prebuilt_deps import fetch_prebuilt_manifest, resolve_prebuilt_ta
 
 from .utils import find_nim_v2
 
+# Mirror of: https://bellard.org/quickjs/quickjs-${version}.tar.xz
+QUICKJS_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/quickjs-{version}.tar.xz"
 DEFAULT_QUICKJS_VERSION = "2025-04-26"
 DEFAULT_QUICKJS_SHA256 = "2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf"
-DEFAULT_LGPIO_VERSION = "v0.2.2"
-DEFAULT_LGPIO_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 # Mirror of: https://github.com/joan2937/lg/archive/refs/tags/v0.2.2.tar.gz
 LGPIO_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/lgpio-{version}.tar.gz"
-
-# Mirror of: https://bellard.org/quickjs/quickjs-${version}.tar.xz
-QUICKJS_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/quickjs-{version}.tar.xz"
+DEFAULT_LGPIO_VERSION = "v0.2.2"
+DEFAULT_LGPIO_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 APT_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 
