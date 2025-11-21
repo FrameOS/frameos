@@ -6,7 +6,7 @@
   "serverApiKey": "test-api-key",
   "width": 800,
   "height": 480,
-  "device": "waveshare.EPD_7in3e",
+  "device": "web_only",
   "deviceConfig": {},
   "color": null,
   "backgroundColor": "blue",
