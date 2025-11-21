@@ -11,7 +11,7 @@ import shlex
 import shutil
 import string
 import tempfile
-from typing import Optional
+from typing import Iterable, Optional
 from gzip import compress
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
@@ -21,6 +21,7 @@ from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
 from app.utils.remote_exec import upload_file, run_command
+from app.drivers.drivers import Driver
 from app.drivers.waveshare import write_waveshare_driver_nim, get_variant_folder
 from app.drivers.devices import drivers_for_frame
 from app.models import get_apps_from_scenes
@@ -67,6 +68,25 @@ class FrameDeployer:
 
     async def log(self, type: str, line: str, timestamp: Optional[datetime] = None):
         await log(self.db, self.redis, int(self.frame.id), type=type, line=line, timestamp=timestamp)
+
+    @staticmethod
+    def _dedupe_preserve_order(flags: Iterable[str]) -> list[str]:
+        seen: set[str] = set()
+        unique_flags: list[str] = []
+        for flag in flags:
+            if flag not in seen:
+                seen.add(flag)
+                unique_flags.append(flag)
+        return unique_flags
+
+    @staticmethod
+    def _driver_linker_flags(drivers: dict[str, Driver]) -> list[str]:
+        flags: list[str] = []
+        for driver in drivers.values():
+            for flag in driver.link_flags:
+                if flag not in flags:
+                    flags.append(flag)
+        return flags
 
     async def _store_paths_missing(self, paths: list[str]) -> list[str]:
         """
@@ -702,8 +722,11 @@ class FrameDeployer:
                         and fl not in ['-o', '-c', '-D']
                     ]
 
-            # add quickjs lib. this was just removed in the step above, but we know it's needed
-            linker_flags += ["quickjs/libquickjs.a"]
+            linker_flags = self._dedupe_preserve_order(
+                linker_flags
+                + ["quickjs/libquickjs.a"]
+                + self._driver_linker_flags(drivers)
+            )
 
             with open(os.path.join(source_dir, "tools", "nimc.Makefile"), "r") as mf_in:
                 lines_make = mf_in.readlines()

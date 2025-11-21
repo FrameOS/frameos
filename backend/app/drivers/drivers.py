@@ -11,6 +11,7 @@ class Driver:
     can_png: bool = False # add toPng(rotate)
     can_turn_on_off: bool = False # add turnOn() and turnOff()
     lines: Optional[list[str]] = None # extra config lines for drivers
+    link_flags: tuple[str, ...] = () # additional linker flags required when this driver is present
 
 DRIVERS = {
     "inkyPython": Driver(
@@ -23,6 +24,7 @@ DRIVERS = {
     "gpioButton": Driver(
         name="gpioButton",
         import_path="gpioButton/gpioButton",
+        link_flags=("-llgpio",),
     ),
     "frameBuffer": Driver(
         name="frameBuffer",
@@ -35,6 +37,7 @@ DRIVERS = {
         import_path="waveshare/waveshare",
         can_render=True,
         can_png=True,
+        link_flags=("-llgpio",),
     ),
     "inkyHyperPixel2r": Driver(
         name="inkyHyperPixel2r",
