@@ -46,6 +46,7 @@ jobs:
           case "$(uname -m)" in
             aarch64) host_arch=arm64 ;;
             armv7l|armv6l) host_arch=armhf ;;
+            x86_64) host_arch=amd64 ;;
             *) echo "Unsupported runner architecture: $(uname -m)" >&2; exit 1 ;;
           esac
           nim_slug="${distro}-${version}-${host_arch}"
