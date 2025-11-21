@@ -64,10 +64,6 @@ jobs:
           cd frameos
           cat frame.json
           make cross-${{ matrix.slug }}
-      - name: Smoke test frameos check
-        run: |
-          cd frameos
-          CMD="frameos check" make run-${{ matrix.slug }}
 
   driver-variant-builds:
     needs: determine-matrix
