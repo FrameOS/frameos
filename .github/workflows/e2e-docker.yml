@@ -32,7 +32,11 @@ jobs:
       - name: Wait for service on port 8989
         run: |
           echo "Waiting up to 30s for the service to respond on port 8989..."
-          timeout 30 bash -c "until curl -s http://localhost:8989; do sleep 1; done"
+          if ! timeout 30 bash -c "until curl -s http://localhost:8989; do sleep 1; done"; then
+            echo "Service did not become ready in time. Printing container logs:"
+            docker logs frameos || true
+            exit 1
+          fi
 
       - name: Test /signup endpoint
         id: signup-test
