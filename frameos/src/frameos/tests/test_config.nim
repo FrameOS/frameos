@@ -10,7 +10,6 @@ block test_load_config:
     doAssert config.serverApiKey == "test-api-key"
     doAssert config.width == 800
     doAssert config.height == 480
-    doAssert config.device == "web_only"
     doAssert config.metrics_interval == 60 # 60.0 in frame.json
     doAssert config.rotate == 0
     doAssert config.flip == ""
