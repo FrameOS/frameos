@@ -66,8 +66,8 @@ jobs:
           make cross-${{ matrix.slug }}
       - name: Smoke test frameos check
         run: |
-          cd frameos/build/cross/${{ matrix.slug }}
-          docker run --rm --platform ${{ matrix.platform }} -v "$PWD:/workspace:ro" ${{ matrix.image }} bash -c "set -euo pipefail; export DEBIAN_FRONTEND=noninteractive; apt-get update; SSL_PACKAGE=libssl3; if apt-cache show libssl3t64 >/dev/null 2>&1; then SSL_PACKAGE=libssl3t64; fi; apt-get install -y --no-install-recommends ca-certificates \$SSL_PACKAGE; /workspace/frameos check"
+          cd frameos
+          CMD="frameos check" make run-${{ matrix.slug }}
 
   driver-variant-builds:
     needs: determine-matrix
@@ -116,5 +116,5 @@ jobs:
           make cross-${TARGET_SLUG}
       - name: Smoke test frameos check (${{ matrix.label }})
         run: |
-          cd frameos/build/cross/${TARGET_SLUG}
-          docker run --rm --platform ${TARGET_PLATFORM} -v "$PWD:/workspace:ro" ${TARGET_IMAGE} bash -c "set -euo pipefail; export DEBIAN_FRONTEND=noninteractive; apt-get update; SSL_PACKAGE=libssl3; if apt-cache show libssl3t64 >/dev/null 2>&1; then SSL_PACKAGE=libssl3t64; fi; apt-get install -y --no-install-recommends ca-certificates \$SSL_PACKAGE; /workspace/frameos check"
+          cd frameos
+          CMD="frameos check" make run-${TARGET_SLUG}

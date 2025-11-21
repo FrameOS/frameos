@@ -31,9 +31,12 @@ DEFAULT_QUICKJS_VERSION = "2025-04-26"
 DEFAULT_QUICKJS_SHA256 = "2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf"
 DEFAULT_LGPIO_VERSION = "v0.2.2"
 DEFAULT_LGPIO_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-# LGPIO_ARCHIVE_URL = "https://github.com/joan2937/lg/archive/refs/tags/v0.2.2.tar.gz"
+
+# Mirror of: https://github.com/joan2937/lg/archive/refs/tags/v0.2.2.tar.gz
 LGPIO_ARCHIVE_URL = "https://archive.frameos.net/source/lgpio-{version}.tar.gz"
 
+# Mirror of: https://bellard.org/quickjs/quickjs-${version}.tar.xz
+QUICKJS_ARCHIVE_URL = "https://archive.frameos.net/source/quickjs-{version}.tar.xz"
 
 APT_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 
@@ -144,6 +147,16 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 data = fh.read()
             await upload_file(db, redis, frame, remote_path, data)
             await self.exec_command(f"chmod +x {shlex.quote(remote_path)}", raise_on_error=False)
+
+        async def sync_vendor_dir(local_dir: str, vendor_folder: str, label: str) -> None:
+            remote_dir = f"/srv/frameos/vendor/{vendor_folder}"
+            if cross_compiled:
+                await upload_directory_tree(local_dir, remote_dir, label)
+            else:
+                await self.exec_command(
+                    f"mkdir -p /srv/frameos/vendor && "
+                    f"cp -r /srv/frameos/build/build_{build_id}/vendor/{vendor_folder} /srv/frameos/vendor/"
+                )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
@@ -460,22 +473,13 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                         quickjs_installed = True
                     except Exception as exc:
                         await self.log(
-                            "stdout",
-                            f"- Failed to download prebuilt QuickJS ({exc}). Falling back to source build.",
-                        )
-                        quickjs_prebuilt_url = None
-                        quickjs_version = DEFAULT_QUICKJS_VERSION
-                        quickjs_dirname = f"quickjs-{quickjs_version}"
-                        quickjs_vendor_dir = f"/srv/frameos/vendor/quickjs/{quickjs_dirname}"
-                        quickjs_installed = (
-                            await self.exec_command(
-                                _quickjs_exists_command(quickjs_vendor_dir),
-                                raise_on_error=False,
-                            )
-                            == 0
+                            "stderr",
+                            f"- Failed to unpack QuickJS prebuilt: {exc}",
                         )
 
                 if not quickjs_installed and quickjs_version != DEFAULT_QUICKJS_VERSION:
+                    quickjs_prebuilt_url = None
+                    quickjs_md5sum = None
                     quickjs_version = DEFAULT_QUICKJS_VERSION
                     quickjs_dirname = f"quickjs-{quickjs_version}"
                     quickjs_vendor_dir = f"/srv/frameos/vendor/quickjs/{quickjs_dirname}"
@@ -488,16 +492,34 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     )
 
                 if not quickjs_installed:
-                    quickjs_tar = f"quickjs-{quickjs_version}.tar.xz"
-                    await self.log("stdout", "- Downloading quickjs")
+                    await self.log("stdout", "- Installing dependencies for QuickJS")
+                    await install_if_necessary("libunistring-dev")
+                    await install_if_necessary("libtool")
+                    await install_if_necessary("cmake")
+                    await install_if_necessary("pkg-config")
+                    await install_if_necessary("libatomic-ops-dev")
+                    await install_if_necessary("libicu-dev")
+                    await install_if_necessary("zlib1g-dev")
+
+                    await self.exec_command("cd /srv/frameos/vendor && rm -rf quickjs")
+                    quickjs_url = QUICKJS_ARCHIVE_URL.format(version=quickjs_version)
+                    await self.log("stdout", f"- Downloading QuickJS {quickjs_version}")
                     await self.exec_command(
-                        "mkdir -p /srv/frameos/vendor/quickjs/ && "
-                        f"wget -q -O {quickjs_tar} https://bellard.org/quickjs/{quickjs_tar} && "
-                        f"echo '{DEFAULT_QUICKJS_SHA256}  {quickjs_tar}' | sha256sum -c - && "
-                        f"tar -xJf {quickjs_tar} -C /srv/frameos/vendor/quickjs/ && "
-                        f"rm {quickjs_tar}"
+                        "cd /srv/frameos/vendor && "
+                        f"wget -q {quickjs_url} && "
+                        f"tar -xf quickjs-{quickjs_version}.tar.gz && "
+                        f"rm quickjs-{quickjs_version}.tar.gz && "
+                        f"mv quickjs quickjs-{quickjs_version}"
                     )
-                    await self.log("stdout", "- Finished downloading quickjs")
+                    await self.log("stdout", "- Building libquickjs.a")
+                    await self.exec_command(
+                        "cd /srv/frameos/vendor && "
+                        f"cd {quickjs_dirname} && make libquickjs.a"
+                    )
+                    await self.exec_command(
+                        "cd /srv/frameos/vendor && "
+                        f"cd {quickjs_dirname} && echo -n '{quickjs_version}' > VERSION"
+                    )
 
                 quickjs_has_makefile = (
                     await self.exec_command(
@@ -514,10 +536,17 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     )
 
             await self.exec_command("mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
-            if not cross_compiled:
+            await self.exec_command(f"mkdir -p /srv/frameos/releases/release_{build_id}")
+            release_frameos_path = f"/srv/frameos/releases/release_{build_id}/frameos"
+
+            if cross_compiled:
+                await self.log("stdout", "- Using cross-compiled binary; skipping build archive upload")
+                if not cross_compiled_binary:
+                    raise RuntimeError("Cross compilation succeeded but binary path is unknown")
+                await upload_binary(cross_compiled_binary, release_frameos_path)
+            else:
                 await self.log("stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
 
-                # 3. Upload the local tarball
                 with open(archive_path, "rb") as fh:
                     data = fh.read()
                 await upload_file(
@@ -528,7 +557,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     data,
                 )
 
-                # Unpack & compile on device
                 await self.exec_command(
                     f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz"
                 )
@@ -543,20 +571,10 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                         "make -j$PARALLEL",
                         timeout=3600, # 30 minute timeout for compilation
                     )
-            else:
-                await self.log("stdout", "- Using cross-compiled binary; skipping build archive upload")
-
-            await self.exec_command(f"mkdir -p /srv/frameos/releases/release_{build_id}")
-            release_frameos_path = f"/srv/frameos/releases/release_{build_id}/frameos"
-            if not cross_compiled:
                 await self.exec_command(
                     f"cp /srv/frameos/build/build_{build_id}/frameos "
                     f"{release_frameos_path}"
                 )
-            else:
-                if not cross_compiled_binary:
-                    raise RuntimeError("Cross compilation succeeded but binary path is unknown")
-                await upload_binary(cross_compiled_binary, release_frameos_path)
 
             # 4. Upload scenes.json.gz and frame.json
             await self._upload_scenes_json(f"/srv/frameos/releases/release_{build_id}/scenes.json.gz", gzip=True)
@@ -566,17 +584,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             if inkyPython := drivers.get("inkyPython"):
                 vendor_folder = inkyPython.vendor_folder or ""
                 local_vendor_path = os.path.join(build_dir, "vendor", vendor_folder)
-                if cross_compiled:
-                    await upload_directory_tree(
-                        local_vendor_path,
-                        f"/srv/frameos/vendor/{vendor_folder}",
-                        "inkyPython vendor files",
-                    )
-                else:
-                    await self.exec_command(
-                        f"mkdir -p /srv/frameos/vendor && "
-                        f"cp -r /srv/frameos/build/build_{build_id}/vendor/inkyPython /srv/frameos/vendor/"
-                    )
+                await sync_vendor_dir(local_vendor_path, vendor_folder, "inkyPython vendor files")
                 await install_if_necessary("python3-pip")
                 await install_if_necessary("python3-venv")
                 await self.exec_command(
@@ -591,17 +599,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
                 vendor_folder = inkyHyperPixel2r.vendor_folder or ""
                 local_vendor_path = os.path.join(build_dir, "vendor", vendor_folder)
-                if cross_compiled:
-                    await upload_directory_tree(
-                        local_vendor_path,
-                        f"/srv/frameos/vendor/{vendor_folder}",
-                        "inkyHyperPixel2r vendor files",
-                    )
-                else:
-                    await self.exec_command(
-                        f"mkdir -p /srv/frameos/vendor && "
-                        f"cp -r /srv/frameos/build/build_{build_id}/vendor/inkyHyperPixel2r /srv/frameos/vendor/"
-                    )
+                await sync_vendor_dir(local_vendor_path, vendor_folder, "inkyHyperPixel2r vendor files")
                 await install_if_necessary("python3-dev")
                 await install_if_necessary("python3-pip")
                 await install_if_necessary("python3-venv")
