@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import re
 import shlex
 import shutil
+import subprocess
 import tarfile
 import tempfile
 from dataclasses import dataclass
@@ -180,6 +182,66 @@ class CrossCompiler:
             addr = f"unix://{addr}"
         return addr
 
+    async def _ensure_buildkit_daemon(self, addr: str) -> None:
+        if not addr.startswith("unix://"):
+            return
+
+        probe_cmd = " ".join(
+            shlex.quote(part)
+            for part in (
+                "buildctl",
+                "--addr",
+                addr,
+                "debug",
+                "workers",
+            )
+        )
+        status, _, _ = await exec_local_command(
+            self.db,
+            self.redis,
+            self.frame,
+            probe_cmd,
+            log_command="buildctl debug workers (probe)",
+        )
+        if status == 0:
+            return
+
+        socket_path = addr.removeprefix("unix://")
+        await self._log(
+            "stdout",
+            f"{icon} Starting local buildkitd at {socket_path} because existing daemon is unavailable",
+        )
+        Path(socket_path).parent.mkdir(parents=True, exist_ok=True)
+        log_path = Path("/tmp/buildkit.log")
+        with log_path.open("ab") as log_file:
+            subprocess.Popen(
+                [
+                    "buildkitd",
+                    "--oci-worker-no-process-sandbox",
+                    "--root",
+                    "/var/lib/buildkit",
+                    "--addr",
+                    addr,
+                ],
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+            )
+
+        await asyncio.sleep(1.5)
+
+        status, _, _ = await exec_local_command(
+            self.db,
+            self.redis,
+            self.frame,
+            probe_cmd,
+            log_command="buildctl debug workers (post-start)",
+        )
+        if status != 0:
+            raise RuntimeError(
+                "Unable to reach BuildKit daemon after automatic start; "
+                "check /tmp/buildkit.log for details"
+            )
+
     async def _run_docker_build(self, build_dir: str) -> str:
         build_dir = os.path.abspath(build_dir)
         script_path = self.temp_dir / "frameos-cross-build.sh"
@@ -271,6 +333,7 @@ class CrossCompiler:
 
         buildkit_addr = self._buildkit_addr()
         if buildkit_addr:
+            await self._ensure_buildkit_daemon(buildkit_addr)
             return await self._run_buildkit_build(build_dir, script_path, buildkit_addr)
 
         image = await self._ensure_toolchain_image()
