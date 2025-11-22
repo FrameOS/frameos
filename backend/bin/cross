@@ -118,13 +118,10 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     from backend.app.tasks._frame_deployer import FrameDeployer  # type: ignore  # noqa: E402
+    from backend.app.tasks.binary_builder import FrameBinaryBuilder  # type: ignore  # noqa: E402
     from backend.app.tasks.utils import find_nim_v2  # type: ignore  # noqa: E402
-    from backend.app.tasks.prebuilt_deps import (  # type: ignore  # noqa: E402
-        fetch_prebuilt_manifest,
-        resolve_prebuilt_target,
-    )
     from backend.app.utils import local_exec  # type: ignore  # noqa: E402
-    from backend.app.utils.cross_compile import CrossCompiler, TargetMetadata  # type: ignore  # noqa: E402
+    from backend.app.utils.cross_compile import TargetMetadata  # type: ignore  # noqa: E402
     from app.utils import local_exec as app_local_exec  # type: ignore  # noqa: E402
 
     class StandaloneFrameDeployer(FrameDeployer):
@@ -149,43 +146,30 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
 
     with tempfile.TemporaryDirectory(prefix=f"frameos-cross-{slug}-") as tmp:
         deployer = StandaloneFrameDeployer(frame=frame, nim_path=nim_path, temp_dir=tmp, logger=console_log)
-        source_dir = deployer.create_local_source_folder(tmp, source_root=str(frameos_root))
-
-        prebuilt_entry = None
-        prebuilt_target = resolve_prebuilt_target(target.distro, target.version, target.arch)
-        if prebuilt_target:
-            manifest = await fetch_prebuilt_manifest()
-            prebuilt_entry = manifest.get(prebuilt_target)
-            if prebuilt_entry is None:
-                await console_log(
-                    "stderr",
-                    f"- No prebuilt components available for {prebuilt_target}; continuing without them",
-                )
-        else:
-            debug_line = f"distro: {target.distro}, version: {target.version}, arch: {target.arch}"
-            await console_log(
-                "stderr",
-                f"- Unable to determine matching prebuilt components for this target; continuing without them. {debug_line}",
-            )
-
-        compiler = CrossCompiler(
+        builder = FrameBinaryBuilder(
             db=None,
             redis=None,
             frame=frame,
             deployer=deployer,
-            target=TargetMetadata(
-                arch=target.arch,
-                distro=target.distro,
-                version=target.version,
-                platform=target.platform,
-                image=target.image,
-            ),
             temp_dir=tmp,
-            prebuilt_entry=prebuilt_entry,
-            prebuilt_target=prebuilt_target,
+            source_root=str(frameos_root),
             logger=console_log,
         )
-        binary_path = await compiler.build(source_dir)
+        target_override = TargetMetadata(
+            arch=target.arch,
+            distro=target.distro,
+            version=target.version,
+            platform=target.platform,
+            image=target.image,
+        )
+        build_result = await builder.build(
+            allow_cross_compile=True,
+            force_cross_compile=True,
+            target_override=target_override,
+        )
+        binary_path = build_result.binary_path
+        if not binary_path:
+            raise RuntimeError("Cross compilation completed without producing a binary")
 
         target_dir = artifacts_dir / slug
         target_dir.mkdir(parents=True, exist_ok=True)

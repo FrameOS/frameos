@@ -73,7 +73,7 @@ from app.ws.agent_ws import (
 )
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
-from app.utils.cross_compile import build_binary_with_cross_toolchain
+from app.tasks.binary_builder import FrameBinaryBuilder
 from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import create_scoped_token_response, validate_scoped_token
 from . import api_with_auth, api_no_auth
@@ -608,24 +608,22 @@ async def api_frame_local_binary_zip(
 
     with tempfile.TemporaryDirectory() as tmp:
         deployer = FrameDeployer(db, redis, frame, nim_path, tmp)
-        source_dir = deployer.create_local_source_folder(tmp)
-        await deployer.make_local_modifications(source_dir)
-        await copy_custom_fonts_to_local_source_folder(db, source_dir)
+        builder = FrameBinaryBuilder(db=db, redis=redis, frame=frame, deployer=deployer, temp_dir=tmp)
 
         try:
-            binary_path = await build_binary_with_cross_toolchain(
-                db=db,
-                redis=redis,
-                frame=frame,
-                deployer=deployer,
-                source_dir=source_dir,
-                temp_dir=tmp,
-            )
+            build_result = await builder.build(force_cross_compile=True)
         except Exception as exc:
             raise HTTPException(
                 status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                 detail=f"Failed to build FrameOS binary: {exc}",
             ) from exc
+
+        binary_path = build_result.binary_path
+        if not binary_path:
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail="Cross compilation completed without producing a binary",
+            )
 
         dist_dir = os.path.join(tmp, "dist")
         os.makedirs(dist_dir, exist_ok=True)

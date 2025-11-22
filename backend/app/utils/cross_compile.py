@@ -27,6 +27,8 @@ from app.tasks.prebuilt_deps import (
 )
 from app.utils.local_exec import exec_local_command
 
+icon = "🔶"
+
 
 @dataclass(slots=True)
 class TargetMetadata:
@@ -92,8 +94,8 @@ class CrossCompiler:
     def __init__(
         self,
         *,
-        db: Session,
-        redis: Redis,
+        db: Session | None,
+        redis: Redis | None,
         frame: Frame,
         deployer: FrameDeployer,
         target: TargetMetadata,
@@ -130,7 +132,7 @@ class CrossCompiler:
     async def build(self, source_dir: str) -> str:
         await self._log(
             "stdout",
-            f"- Cross compiling for {self.target.arch} on {self._docker_image()} via {self._platform()}",
+            f"{icon} Cross compiling for {self.target.arch} on {self._docker_image()} via {self._platform()}",
         )
         await self._prepare_prebuilt_components()
         await self._ensure_quickjs_sources(source_dir)
@@ -147,14 +149,14 @@ class CrossCompiler:
         if self.prebuilt_components:
             await self._log(
                 "stdout",
-                "- Staging prebuilt sysroot components",
+                f"{icon} Staging prebuilt sysroot components",
             )
             for component in self.prebuilt_components:
                 self._inject_prebuilt_component(component)
         else:
             await self._log(
                 "stdout",
-                "- Using default include/lib paths without remote sysroot synchronization",
+                f"{icon} Using default include/lib paths without remote sysroot synchronization",
             )
 
     async def _run_docker_build(self, build_dir: str) -> str:
@@ -180,7 +182,7 @@ class CrossCompiler:
         if feature_flags:
             await self._log(
                 "stdout",
-                "- Enabling CPU feature flags for cross-compile: "
+                f"{icon} Enabling CPU feature flags for cross-compile: "
                 + " ".join(feature_flags),
             )
         include_flags = [f"-I{path}" for path in include_dirs]
@@ -285,22 +287,22 @@ class CrossCompiler:
         libquickjs = quickjs_root / "libquickjs.a"
         await self._log(
             "stdout",
-            f"- Ensuring QuickJS sources are available at {quickjs_root} (exists={quickjs_root.exists()})",
+            f"{icon} Ensuring QuickJS sources are available at {quickjs_root} (exists={quickjs_root.exists()})",
         )
         prebuilt_path = self.prebuilt_components.get("quickjs")
         if prebuilt_path:
             await self._log(
                 "stdout",
-                f"  • Prebuilt QuickJS component detected at {prebuilt_path}; staging into source tree",
+                f"{icon} Prebuilt QuickJS component detected at {prebuilt_path}; staging into source tree",
             )
             self._stage_quickjs(source_dir)
         if libquickjs.exists():
-            await self._log("stdout", f"  • Found QuickJS archive at {libquickjs}")
+            await self._log("stdout", f"{icon} Found QuickJS archive at {libquickjs}")
             return
         await self._log("stderr", "  • QuickJS archive missing after initial stage; retrying")
         self._stage_quickjs(source_dir)
         if libquickjs.exists():
-            await self._log("stdout", f"  • QuickJS archive found after restage at {libquickjs}")
+            await self._log("stdout", f"{icon} QuickJS archive found after restage at {libquickjs}")
             return
         await self._log_quickjs_probe(Path(source_dir), "source directory")
         raise RuntimeError(
@@ -322,28 +324,28 @@ class CrossCompiler:
         libquickjs = dest / "libquickjs.a"
         await self._log(
             "stdout",
-            f"- Ensuring QuickJS assets exist within build dir {dest} (exists={dest.exists()})",
+            f"{icon} Ensuring QuickJS assets exist within build dir {dest} (exists={dest.exists()})",
         )
         if self.prebuilt_components.get("quickjs"):
             await self._log(
                 "stdout",
-                "  • Staging prebuilt QuickJS component directly into build directory",
+                f"{icon} Staging prebuilt QuickJS component directly into build directory",
             )
             self._stage_quickjs(str(build_dir))
         if libquickjs.exists():
-            await self._log("stdout", f"  • Build directory already contains {libquickjs}")
+            await self._log("stdout", f"Build directory already contains {libquickjs}")
             return
         source_quickjs = Path(source_dir) / "quickjs"
         if source_quickjs.exists():
             await self._log(
                 "stdout",
-                f"  • Copying QuickJS tree from source directory ({source_quickjs}) into build directory",
+                f"{icon} Copying QuickJS tree from source directory ({source_quickjs}) into build directory",
             )
             shutil.copytree(source_quickjs, dest, dirs_exist_ok=True)
         else:
             await self._log(
                 "stderr",
-                f"  • Source directory missing QuickJS folder at {source_quickjs}; attempting to restage",
+                f"{icon} Source directory missing QuickJS folder at {source_quickjs}; attempting to restage",
             )
             self._stage_quickjs(str(build_dir))
         if not libquickjs.exists():
@@ -359,7 +361,7 @@ class CrossCompiler:
         if self.prebuilt_target:
             await self._log(
                 "stdout",
-                f"- Attempting to use prebuilt components for {self.prebuilt_target}",
+                f"{icon} Attempting to use prebuilt components for {self.prebuilt_target}",
             )
 
         for component in ("quickjs", "lgpio"):
@@ -407,7 +409,7 @@ class CrossCompiler:
         if marker.exists() and marker.read_text() == expected_marker:
             return dest_dir
 
-        await self._log("stdout", f"- Downloading prebuilt {component} ({version})")
+        await self._log("stdout", f"{icon} Downloading prebuilt {component} ({version})")
         if dest_dir.exists():
             shutil.rmtree(dest_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -417,7 +419,7 @@ class CrossCompiler:
         except Exception as exc:
             await self._log(
                 "stderr",
-                f"- Failed to download prebuilt {component}: {exc}; falling back",
+                f"{icon} Failed to download prebuilt {component}: {exc}; falling back",
             )
             shutil.rmtree(dest_dir, ignore_errors=True)
             return None
@@ -540,7 +542,10 @@ class CrossCompiler:
         if self.logger:
             await self.logger(level, message)
             return
-        await log(self.db, self.redis, int(self.frame.id), level, message)
+        elif self.db and self.redis:
+            await log(self.db, self.redis, int(self.frame.id), level, message)
+        else:
+            print(f"[{level}] {message}")
 
     def _existing_container_dirs(self, candidates: Iterable[str]) -> list[str]:
         existing: list[str] = []
@@ -578,7 +583,7 @@ class CrossCompiler:
     async def _log_quickjs_probe(self, root: Path, context: str) -> None:
         await self._log(
             "stderr",
-            f"  • Probing {context} {root} for QuickJS artifacts",
+            f"{icon} Probing {context} {root} for QuickJS artifacts",
         )
         libs = sorted(root.rglob("libquickjs.a"))
         headers = sorted(root.rglob("quickjs.h"))
@@ -741,55 +746,70 @@ class CrossCompiler:
 
 async def build_binary_with_cross_toolchain(
     *,
-    db: Session,
-    redis: Redis,
+    db: Session | None,
+    redis: Redis | None,
     frame: Frame,
     deployer: FrameDeployer,
     source_dir: str,
     temp_dir: str,
+    prebuilt_entry: PrebuiltEntry | None = None,
+    prebuilt_target: str | None = None,
+    target_override: TargetMetadata | None = None,
+    logger: LogFunc | None = None,
 ) -> str:
-    arch = await deployer.get_cpu_architecture()
-    distro = await deployer.get_distro()
-    version = await deployer.get_distro_version()
+    arch: str | None
+    distro: str | None
+    version: str | None
+    if target_override:
+        arch = target_override.arch
+        distro = target_override.distro
+        version = target_override.version
+    else:
+        arch = await deployer.get_cpu_architecture()
+        distro = await deployer.get_distro()
+        version = await deployer.get_distro_version()
     target = TargetMetadata(arch=arch, distro=distro, version=version)
-    prebuilt_entry: PrebuiltEntry | None = None
-    prebuilt_target = resolve_prebuilt_target(distro, version, arch)
-    if prebuilt_target:
+    resolved_target = prebuilt_target or resolve_prebuilt_target(distro, version, arch)
+    if resolved_target and not prebuilt_entry:
         try:
             manifest = await fetch_prebuilt_manifest()
         except Exception as exc:  # pragma: no cover - network failure
-            await log(
+            await _log_line(
+                logger,
                 db,
                 redis,
-                int(frame.id),
+                frame,
                 "stderr",
-                f"- Failed to load prebuilt manifest for {prebuilt_target}: {exc}",
+                f"{icon} Failed to load prebuilt manifest for {resolved_target}: {exc}",
             )
         else:
-            prebuilt_entry = manifest.get(prebuilt_target)
+            prebuilt_entry = manifest.get(resolved_target)
             if prebuilt_entry:
-                await log(
+                await _log_line(
+                    logger,
                     db,
                     redis,
-                    int(frame.id),
+                    frame,
                     "stdout",
-                    f"- Using prebuilt dependencies for {prebuilt_target}",
+                    f"{icon} Using prebuilt dependencies for {resolved_target}",
                 )
             else:
-                await log(
+                await _log_line(
+                    logger,
                     db,
                     redis,
-                    int(frame.id),
+                    frame,
                     "stdout",
-                    f"- No prebuilt dependencies published for {prebuilt_target}",
+                    f"{icon} No prebuilt dependencies published for {resolved_target}",
                 )
-    else:
-        await log(
+    elif not resolved_target:
+        await _log_line(
+            logger,
             db,
             redis,
-            int(frame.id),
+            frame,
             "stdout",
-            "- No matching prebuilt target for this distro/version/arch combination",
+            f"{icon} No matching prebuilt target for this distro/version/arch combination",
         )
     compiler = CrossCompiler(
         db=db,
@@ -799,7 +819,24 @@ async def build_binary_with_cross_toolchain(
         target=target,
         temp_dir=temp_dir,
         prebuilt_entry=prebuilt_entry,
-        prebuilt_target=prebuilt_target,
+        prebuilt_target=resolved_target,
+        logger=logger,
     )
     return await compiler.build(source_dir)
+
+
+async def _log_line(
+    logger: LogFunc | None,
+    db: Session | None,
+    redis: Redis | None,
+    frame: Frame,
+    level: str,
+    message: str,
+) -> None:
+    if logger:
+        await logger(level, message)
+    elif db and redis:
+        await log(db, redis, int(frame.id), level, message)
+    else:
+        print(f"[{level}] {message}")
 

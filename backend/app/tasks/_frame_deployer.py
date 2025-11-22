@@ -377,15 +377,11 @@ class FrameDeployer:
         with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
             source = write_drivers_nim(drivers)
             f.write(source)
-            if frame.debug:
-                await self.log("stdout", f"Generated drivers.nim:\n{source}")
 
         if drivers.get("waveshare"):
             with open(os.path.join(source_dir, "src", "drivers", "waveshare", "driver.nim"), "w") as wf:
                 source = write_waveshare_driver_nim(drivers)
                 wf.write(source)
-                if frame.debug:
-                    await self.log("stdout", f"Generated waveshare driver:\n{source}")
 
         await self._update_flake_with_frame_settings(source_dir)
 
@@ -641,7 +637,7 @@ class FrameDeployer:
 
         await self.log(
             "stdout",
-            "- Generating C sources from Nim sources.",
+            "🔥 Generating C sources from Nim sources.",
         )
 
         cpu = await self.arch_to_nim_cpu(arch)

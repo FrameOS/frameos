@@ -19,14 +19,13 @@ from app.utils.remote_exec import upload_file
 from app.utils.local_exec import exec_local_command
 from app.models.settings import get_settings_dict
 from app.utils.nix_utils import nix_cmd
-from app.utils.cross_compile import (
-    build_binary_with_cross_toolchain,
-    can_cross_compile_target,
-)
+from app.utils.cross_compile import TargetMetadata
 from app.tasks._frame_deployer import FrameDeployer
-from app.tasks.prebuilt_deps import fetch_prebuilt_manifest, resolve_prebuilt_target
+from app.tasks.binary_builder import FrameBinaryBuilder
 
 from .utils import find_nim_v2
+
+icon = "🔷"
 
 # Mirror of: https://bellard.org/quickjs/quickjs-${version}.tar.xz
 QUICKJS_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/quickjs-{version}.tar.xz"
@@ -78,13 +77,13 @@ async def _install_if_necessary(deployer: FrameDeployer, pkg: str, raise_on_erro
     if response != 0:
         combined_output = "".join(output)
         if any(s in combined_output for s in search_strings):
-            await deployer.log("stdout", f"- Installing {sanitized_pkg} failed. Trying to update apt.")
+            await deployer.log("stdout", f"{icon} Installing {sanitized_pkg} failed. Trying to update apt.")
             response = await deployer.exec_command(
                 "sudo apt-get update && sudo apt-get install -y " + quoted_pkg,
                 raise_on_error=raise_on_error,
             )
             if response != 0:  # we probably raised above
-                await deployer.log("stdout", f"- Installing {sanitized_pkg} failed again.")
+                await deployer.log("stdout", f"{icon} Installing {sanitized_pkg} failed again.")
     return response
 
 
@@ -93,7 +92,7 @@ async def _upload_directory_tree(
 ) -> None:
     normalized_local = os.path.abspath(local_dir)
     if not os.path.isdir(normalized_local):
-        await deployer.log("stdout", f"- Skipping {label}; nothing to upload")
+        await deployer.log("stdout", f"{icon} Skipping {label}; nothing to upload")
         return
 
     fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
@@ -152,31 +151,6 @@ async def _sync_vendor_dir(
         )
 
 
-async def _resolve_prebuilt_entry(distro: str, distro_version: str, arch: str, deployer: FrameDeployer):
-    prebuilt_entry = None
-    prebuilt_target = resolve_prebuilt_target(distro, distro_version, arch)
-    if prebuilt_target:
-        try:
-            manifest = await fetch_prebuilt_manifest()
-        except Exception as exc:  # pragma: no cover - network/manifest failures vary
-            await deployer.log(
-                "stdout",
-                f"- Could not load prebuilt manifest for target {prebuilt_target}: {exc}",
-            )
-        else:
-            prebuilt_entry = manifest.get(prebuilt_target)
-            if prebuilt_entry:
-                await deployer.log("stdout", f"- Using prebuilt target '{prebuilt_target}' when available")
-            else:
-                await deployer.log("stdout", f"- No prebuilt components published for '{prebuilt_target}'")
-    elif distro in ("raspios", "debian"):
-        await deployer.log(
-            "stdout",
-            "- No matching prebuilt target for this distro/version/arch combination",
-        )
-    return prebuilt_entry
-
-
 async def _deploy_with_nixos(
     deployer: FrameDeployer,
     settings: dict[str, Any],
@@ -186,8 +160,8 @@ async def _deploy_with_nixos(
     redis: Redis,
     frame: Frame,
 ):
-    await deployer.log("stdout", "- NixOS detected – using flake-based deploy")
-    await deployer.log("stdout", f"- Preparing sources with local modifications under {temp_dir}")
+    await deployer.log("stdout", f"{icon} NixOS detected – using flake-based deploy")
+    await deployer.log("stdout", f"{icon} Preparing sources with local modifications under {temp_dir}")
     source_dir_local = deployer.create_local_source_folder(temp_dir)
     await deployer.make_local_modifications(source_dir_local)
     await copy_custom_fonts_to_local_source_folder(db, source_dir_local)
@@ -228,7 +202,7 @@ async def _deploy_with_nixos(
     frame.last_successful_deploy = frame_dict
     frame.last_successful_deploy_at = datetime.now(timezone.utc)
     await update_frame(db, redis, frame)
-    await deployer.log("stdinfo", f"Deploy finished in {datetime.now() - deployer.deploy_start} 🎉")
+    await deployer.log("stdinfo", f"{icon} Deploy finished in {datetime.now() - deployer.deploy_start} 🎉")
 
 
 async def _ensure_ntp_installed(deployer: FrameDeployer) -> None:
@@ -374,7 +348,7 @@ async def _ensure_quickjs(
     )
 
     if not quickjs_installed and quickjs_prebuilt_url:
-        await deployer.log("stdout", f"- Downloading QuickJS prebuilt archive ({quickjs_dirname})")
+        await deployer.log("stdout", f"{icon} Downloading QuickJS prebuilt archive ({quickjs_dirname})")
         quickjs_archive = f"/tmp/quickjs-prebuilt-{build_id}.tar.gz"
         try:
             quickjs_command = (
@@ -407,7 +381,7 @@ async def _ensure_quickjs(
         except Exception as exc:  # pragma: no cover - remote failures vary
             await deployer.log(
                 "stderr",
-                f"- Failed to unpack QuickJS prebuilt: {exc}",
+                f"{icon} Failed to unpack QuickJS prebuilt: {exc}",
             )
 
     if not quickjs_installed and quickjs_version != DEFAULT_QUICKJS_VERSION:
@@ -438,7 +412,7 @@ async def _ensure_quickjs(
 
     await deployer.exec_command("cd /srv/frameos/vendor && rm -rf quickjs")
     quickjs_url = QUICKJS_ARCHIVE_URL.format(version=quickjs_version)
-    await deployer.log("stdout", f"- Downloading QuickJS {quickjs_version}")
+    await deployer.log("stdout", f"{icon} Downloading QuickJS {quickjs_version}")
     await deployer.exec_command(
         "cd /srv/frameos/vendor && "
         f"wget -q {quickjs_url} && "
@@ -505,7 +479,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
             build_id = self.build_id
             install_if_necessary = partial(_install_if_necessary, self)
-            await self.log("stdout", f"Deploying frame {frame.name} with build id {self.build_id}")
+            await self.log("stdout", f"{icon} Deploying frame {frame.name} with build id {self.build_id}")
 
             arch = await self.get_cpu_architecture()
             distro = await self.get_distro()
@@ -515,10 +489,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             await self.log(
                 "stdout",
-                f"- Detected distro: {distro} ({distro_version}), architecture: {arch}, total memory: {total_memory} MiB",
+                f"{icon} Detected distro: {distro} ({distro_version}), architecture: {arch}, total memory: {total_memory} MiB",
             )
-
-            prebuilt_entry = await _resolve_prebuilt_entry(distro, distro_version, arch, self)
 
             # Fast-path for NixOS targets
             if distro == "nixos":
@@ -539,23 +511,14 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             ## Deploy onto Raspberry Pi OS or Debian/Ubuntu:
 
             if distro == "raspios":
-                await self.log("stdout", "- Raspberry Pi OS detected")
+                await self.log("stdout", f"{icon} Raspberry Pi OS detected")
             elif distro in ("debian", "ubuntu"):
-                await self.log("stdout", "- Debian/Ubuntu detected")
+                await self.log("stdout", f"{icon} Debian/Ubuntu detected")
             else:
-                await self.log("stdout", f"- Unknown distro '{distro}', trying apt and hoping for the best")
+                await self.log("stdout", f"{icon} Unknown distro '{distro}', trying apt and hoping for the best")
                 distro = "debian"
 
             drivers = drivers_for_frame(frame)
-
-            # 1. Create build tar.gz locally
-            await self.log("stdout", "- Copying build folders")
-            build_dir = create_build_folder(temp_dir, build_id)
-            source_dir = self.create_local_source_folder(temp_dir)
-            await self.log("stdout", "- Applying local modifications")
-            await self.make_local_modifications(source_dir)
-            await self.log("stdout", "- Creating build archive")
-            archive_path = await self.create_local_build_archive(build_dir, source_dir, arch)
 
             rpios_settings = frame.rpios or {}
             disable_cross_compilation = rpios_settings.get("disableCrossCompilation")
@@ -563,38 +526,36 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 disable_cross_compilation is True
                 or (isinstance(disable_cross_compilation, str) and disable_cross_compilation.lower() == "true")
             )
-            cross_compiled = False
-            cross_compiled_binary: str | None = None
             if disable_cross_compilation:
                 await self.log(
                     "stdout",
-                    "- Cross compilation disabled in frame settings; building on device",
+                    f"{icon} Cross compilation disabled in frame settings; building on device",
                 )
-            elif can_cross_compile_target(arch):
-                await self.log("stdout", "- Target supports cross compilation; building binary locally")
-                try:
-                    cross_compiled_binary = await build_binary_with_cross_toolchain(
-                        db=db,
-                        redis=redis,
-                        frame=frame,
-                        deployer=self,
-                        source_dir=source_dir,
-                        temp_dir=temp_dir,
-                    )
-                except Exception as exc:
-                    await self.log(
-                        "stderr",
-                        f"- Cross compilation failed ({exc}); falling back to on-device build",
-                    )
-                else:
-                    cross_compiled = True
-                    await self.log("stdout", "- Cross compilation succeeded; skipping remote build")
+
+            builder = FrameBinaryBuilder(
+                db=db,
+                redis=redis,
+                frame=frame,
+                deployer=self,
+                temp_dir=temp_dir,
+            )
+            build_result = await builder.build(
+                allow_cross_compile=not disable_cross_compilation,
+                target_override=TargetMetadata(arch=arch, distro=distro, version=distro_version),
+            )
+
+            prebuilt_entry = build_result.prebuilt_entry
+            archive_path = build_result.archive_path
+            build_dir = build_result.build_dir
+            cross_compiled = build_result.cross_compiled
+            cross_compiled_binary = build_result.binary_path
 
             if low_memory and not cross_compiled:
-                await self.log("stdout", "- Low memory device, stopping FrameOS for compilation")
+                await self.log("stdout", f"{icon} Low memory device, stopping FrameOS for compilation")
                 await self.exec_command("sudo service frameos stop", raise_on_error=False)
 
             # 2. Remote steps
+            await self.log("stdout", f"{icon} Installing dependencies on remote")
             await _ensure_ntp_installed(self)
             await install_if_necessary("build-essential")
             await install_if_necessary("hostapd")
@@ -618,11 +579,12 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             release_frameos_path = f"/srv/frameos/releases/release_{build_id}/frameos"
 
             if cross_compiled:
-                await self.log("stdout", "- Using cross-compiled binary; skipping build archive upload")
+                await self.log("stdout", f"{icon} Using cross-compiled binary")
                 if not cross_compiled_binary:
                     raise RuntimeError("Cross compilation succeeded but binary path is unknown")
                 await _upload_binary(self, cross_compiled_binary, release_frameos_path)
             else:
+                await self.log("stdout", f"{icon} Building FrameOS on remote, no cross-compilation")
                 await self.log("stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
 
                 with open(archive_path, "rb") as fh:
@@ -660,6 +622,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             # Driver-specific vendor steps
             if inkyPython := drivers.get("inkyPython"):
+                await self.log("stdout", f"{icon} Installing inkyPython driver")
                 vendor_folder = inkyPython.vendor_folder or ""
                 local_vendor_path = os.path.join(build_dir, "vendor", vendor_folder)
                 await _sync_vendor_dir(
@@ -682,6 +645,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 )
 
             if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
+                await self.log("stdout", f"{icon} Installing inkyHyperPixel2r driver")
                 vendor_folder = inkyHyperPixel2r.vendor_folder or ""
                 local_vendor_path = os.path.join(build_dir, "vendor", vendor_folder)
                 await _sync_vendor_dir(
@@ -705,6 +669,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 )
 
             # 5. Upload frameos.service
+            await self.log("stdout", f"{icon} Swapping out the release")
             with open("../frameos/frameos.service", "r") as f:
                 service_contents = f.read().replace("%I", frame.ssh_user)
             await upload_file(
@@ -742,6 +707,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 "| tail -n +11 | xargs rm -rf"
             )
 
+        await self.log("stdout", f"{icon} Running final cleanup scripts")
         boot_config = "/boot/config.txt"
         if await self.exec_command("test -f /boot/firmware/config.txt", raise_on_error=False) == 0:
             boot_config = "/boot/firmware/config.txt"
@@ -807,11 +773,12 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
         if must_reboot:
             await update_frame(db, redis, frame)
-            await self.log("stdinfo", "Deployed! Rebooting device after boot config changes")
             await self.exec_command("sudo systemctl enable frameos.service")
+            await self.log("stdinfo", f"{icon} Deployed! Rebooting device after boot config changes")
             await self.exec_command("sudo reboot")
         else:
             await self.exec_command("sudo systemctl daemon-reload")
+            await self.log("stdinfo", f"{icon} Deployed! Restarting FrameOS")
             await self.restart_service("frameos")
             await update_frame(db, redis, frame)
 
@@ -820,8 +787,3 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         if frame:
             frame.status = 'uninitialized'
             await update_frame(db, redis, frame)
-
-def create_build_folder(temp_dir, build_id):
-    build_dir = os.path.join(temp_dir, f"build_{build_id}")
-    os.makedirs(build_dir, exist_ok=True)
-    return build_dir

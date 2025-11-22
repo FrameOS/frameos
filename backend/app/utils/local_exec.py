@@ -7,8 +7,8 @@ from app.models.log import new_log as log
 from app.models.frame import Frame
 
 async def exec_local_command(
-    db: Session,
-    redis: ArqRedis,
+    db: Session | None,
+    redis: ArqRedis | None,
     frame: Frame,
     command: str,
     log_command: str | bool = True,
@@ -16,7 +16,10 @@ async def exec_local_command(
 ) -> Tuple[int, Optional[str], Optional[str]]:
 
     if log_command:
-        await log(db, redis, int(frame.id), "stdout", f"$ {log_command if isinstance(log_command, str) else command}")
+        if db and redis:
+            await log(db, redis, int(frame.id), "stdout", f"$ {log_command if isinstance(log_command, str) else command}")
+        else:
+            print(f"$ {log_command if isinstance(log_command, str) else command}")
 
     proc = await asyncio.create_subprocess_shell(
         command,
@@ -32,7 +35,10 @@ async def exec_local_command(
                 return
             buf.append(segment)
             if log_output:
-                await log(db, redis, int(frame.id), tag, segment)
+                if db and redis:
+                    await log(db, redis, int(frame.id), tag, segment)
+                else:
+                    print(segment)
 
         while True:
             raw = await stream.read(1024)
@@ -74,8 +80,10 @@ async def exec_local_command(
 
     exit_code = await proc.wait()
     if exit_code:
-        await log(db, redis, int(frame.id), "exit_status",
-                  f"The command exited with status {exit_code}")
+        if db and redis:
+            await log(db, redis, int(frame.id), "exit_status", f"The command exited with status {exit_code}")
+        else:
+            print( f"The command exited with status {exit_code}")
 
     return (
         exit_code,
