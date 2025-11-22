@@ -123,9 +123,9 @@ export function NewFrame(): JSX.Element {
             <Field name="device" label="Display driver">
               <Select name="device" options={devices} />
             </Field>
-            <Field name="platform" label="Platform">
+            {/* <Field name="platform" label="Platform">
               <Select name="platform" options={rpiOSPlatforms} />
-            </Field>
+            </Field> */}
             <div className="flex gap-2">
               <Button type="submit">Add Frame</Button>
               <Button

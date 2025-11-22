@@ -55,9 +55,7 @@ export function Frame(props: FrameSceneProps) {
     frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && frame.agent.agentRunCommands
   // TODO
   const firstEverForNixOS = false && frame.mode === 'nixos' && frame.status === 'uninitialized'
-  const isLuckfoxBuildroot =
-    frame?.mode === 'buildroot' && luckfoxBuildrootPlatformValues.includes(frame.buildroot?.platform ?? '')
-  const canBuildSdImage = mode === 'nixos' || isLuckfoxBuildroot
+  const canBuildSdImage = mode === 'nixos' || mode === 'buildroot'
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
