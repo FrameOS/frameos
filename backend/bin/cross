@@ -68,6 +68,9 @@ class FrameStub:
     id: int = 0
     device: str = "framebuffer"
     device_config: dict[str, Any] = field(default_factory=dict)
+    network: dict[str, Any] | None = None
+    agent: dict[str, Any] | None = None
+    assets_path: str | None = None
     scenes: list[Any] = field(default_factory=list)
     gpio_buttons: list[Any] = field(default_factory=list)
     debug: bool = False
@@ -90,6 +93,9 @@ def load_frame_stub(frameos_root: Path) -> FrameStub:
     return FrameStub(
         device=str(data.get("device", "framebuffer")),
         device_config=dict(data.get("deviceConfig") or {}),
+        network=dict(data.get("network") or {}),
+        agent=dict(data.get("network") or {}),
+        assets_path=data.get("assetsPath") or '',
         scenes=list(data.get("scenes") or []),
         gpio_buttons=list(data.get("gpioButtons") or []),
         debug=bool(data.get("debug", False)),
