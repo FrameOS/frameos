@@ -250,7 +250,9 @@ class FrameDeployer:
             "elif [ -f /etc/rpi-issue ] || grep -q \"^ID=raspbian\" /etc/os-release ; then echo raspios ; "
             "else . /etc/os-release ; echo ${ID:-unknown} ; "
             "fi'",
-            distro_out
+            distro_out,
+            log_command=False,
+            log_output=False,
         )
         distro = distro_out[0].strip().lower()
         return distro if distro else "unknown"
@@ -269,6 +271,7 @@ class FrameDeployer:
             "else echo unknown; fi; "
             "else echo unknown; fi'",
             version_out,
+            log_command=False,
             log_output=False,
         )
         version = version_out[0].strip().lower() if version_out else ""
@@ -279,6 +282,8 @@ class FrameDeployer:
         await self.exec_command(
             "grep MemTotal /proc/meminfo | awk '{print $2}'",
             mem_output,
+            log_command=False,
+            log_output=False,
         )
         kib = int(mem_output[0].strip()) if mem_output else 0 # kB from the kernel
         total_memory = kib // 1024 # MiB
@@ -289,7 +294,7 @@ class FrameDeployer:
             return "armv7l" # 32bit arm, explicitly for now
 
         uname_output: list[str] = []
-        await self.exec_command("uname -m", uname_output)
+        await self.exec_command("uname -m", uname_output, log_command=False, log_output=False)
         arch = "".join(uname_output).strip()
         return arch
 
@@ -367,8 +372,6 @@ class FrameDeployer:
         with open(os.path.join(source_dir, "src", "scenes", "scenes.nim"), "w") as f:
             source = write_scenes_nim(frame)
             f.write(source)
-            if frame.debug:
-                await self.log("stdout", f"Generated scenes.nim (showing because debug=true):\n{source}")
 
         drivers = drivers_for_frame(frame)
         with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
