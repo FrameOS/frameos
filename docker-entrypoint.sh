@@ -2,14 +2,26 @@
 set -e  # exit as soon as a command fails
 
 BUILDKIT_SOCKET=${FRAMEOS_BUILDKIT_ADDR:-/tmp/buildkit/buildkitd.sock}
+# Normalize + export the address so downstream processes can discover it even if the
+# daemon was already running before this entrypoint executed.
+export FRAMEOS_BUILDKIT_ADDR="unix://${BUILDKIT_SOCKET#unix://}"
+
 if ! pgrep -f "buildkitd .*${BUILDKIT_SOCKET}" >/dev/null 2>&1; then
   echo "🔧 Starting rootless BuildKit daemon at ${BUILDKIT_SOCKET}"
   mkdir -p "$(dirname "${BUILDKIT_SOCKET}")" /var/lib/buildkit
-  buildkitd --oci-worker-no-process-sandbox --root /var/lib/buildkit --addr "unix://${BUILDKIT_SOCKET}" >/tmp/buildkit.log 2>&1 &
-  export FRAMEOS_BUILDKIT_ADDR="unix://${BUILDKIT_SOCKET}"
+  buildkitd --oci-worker-no-process-sandbox --root /var/lib/buildkit --addr "${FRAMEOS_BUILDKIT_ADDR}" >/tmp/buildkit.log 2>&1 &
 else
   echo "🔧 BuildKit daemon already running at ${BUILDKIT_SOCKET}"
 fi
+
+# Wait briefly for the daemon to accept connections so cross-compilation doesn't
+# immediately fail with connection refused when the container starts.
+for _ in {1..20}; do
+  if buildctl --addr "${FRAMEOS_BUILDKIT_ADDR}" debug workers >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.25
+done
 
 # 1. Conditionally start local Redis only if REDIS_URL is not set.
 if [ -z "$REDIS_URL" ]; then
