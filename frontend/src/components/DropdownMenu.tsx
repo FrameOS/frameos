@@ -5,6 +5,7 @@ import React, { useState } from 'react'
 import { usePopper } from 'react-popper'
 import clsx from 'clsx'
 import { ButtonProps, buttonColor } from './Button'
+import { Spinner } from './Spinner'
 
 export interface DropdownMenuItem {
   label: React.ReactNode
@@ -13,6 +14,7 @@ export interface DropdownMenuItem {
   title?: string
   keepOpen?: boolean
   onClick?: (e: React.MouseEvent) => void
+  loading?: boolean
 }
 
 export interface DropdownMenuProps {
@@ -26,6 +28,7 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
   const { styles, attributes } = usePopper(referenceElement, popperElement, { strategy: 'fixed' })
+  const isLoading = items.some((item) => item.loading)
 
   return (
     <Menu>
@@ -40,7 +43,9 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
               className
             )}
           >
-            {horizontal ? (
+            {isLoading ? (
+              <Spinner color="white" className="w-5 h-5" />
+            ) : horizontal ? (
               <EllipsisHorizontalIcon className="w-5 h-5" aria-label="Menu" />
             ) : (
               <EllipsisVerticalIcon className="w-5 h-5" aria-label="Menu" />
@@ -94,7 +99,7 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
                               : undefined
                           }
                         >
-                          {item.icon}
+                          {item.loading ? <Spinner color="white" className="w-4 h-4" /> : item.icon}
                           {item.label}
                         </a>
                       )}

@@ -1,4 +1,6 @@
-.PHONY: run build test debug
+.PHONY: run build test debug cross-list
+
+CROSS_OUT ?= build/cross
 
 run: build
 	./build/frameos --verbose
@@ -12,6 +14,12 @@ debug: apploaders
 
 apploaders:
 	FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
+
+cross-list:
+	python3 ../backend/bin/cross list
+
+cross-%: apploaders
+	python3 ../backend/bin/cross build --target $* --frameos-root $(CURDIR) --artifacts-dir $(CROSS_OUT)
 
 test:
 	nimble test

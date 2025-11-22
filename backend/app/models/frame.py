@@ -20,7 +20,7 @@ class Frame(Base):
     __tablename__ = 'frame'
     id = mapped_column(Integer, primary_key=True)
     name = mapped_column(String(256), nullable=False)
-    mode = mapped_column(String(32), nullable=True)
+    mode = mapped_column(String(32), nullable=True) # rpios, nixos, buildroot
     # sending commands to frame
     frame_host = mapped_column(String(256), nullable=False)
     frame_port = mapped_column(Integer, default=8787)
@@ -63,6 +63,8 @@ class Frame(Base):
     agent = mapped_column(JSON, nullable=True)
     palette = mapped_column(JSON, nullable=True)
     nix = mapped_column(JSON, nullable=True)
+    buildroot = mapped_column(JSON, nullable=True)
+    rpios = mapped_column(JSON, nullable=True)
 
     # not used
     apps = mapped_column(JSON, nullable=True)
@@ -112,6 +114,8 @@ class Frame(Base):
             'agent': self.agent,
             'palette': self.palette,
             'nix': self.nix,
+            'buildroot': self.buildroot,
+            'rpios': self.rpios,
             'last_successful_deploy': self.last_successful_deploy,
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }

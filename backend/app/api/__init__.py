@@ -23,6 +23,7 @@ from .log import *  # noqa: E402, F403
 from .repositories import *  # noqa: E402, F403
 from .scene_images import *  # noqa: E402, F403
 from .settings import *  # noqa: E402, F403
+from .system import *  # noqa: E402, F403
 from .ssh import *  # noqa: E402, F403
 from .templates import *  # noqa: E402, F403
 from .users import *  # noqa: E402, F403

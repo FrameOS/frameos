@@ -15,6 +15,7 @@ import { NumberTextInput } from '../../components/NumberTextInput'
 import { Switch } from '../../components/Switch'
 import { Select } from '../../components/Select'
 import { timezoneOptions } from '../../decorators/timezones'
+import { SystemInfo } from './SystemInfo'
 
 export function Settings() {
   const {
@@ -230,6 +231,8 @@ export function Settings() {
                   </Box>
                 </Group>
               </Form>
+              <H6 className="pt-4">System information</H6>
+              <SystemInfo />
               <div className="space-y-4 mt-4">
                 <H6 className="pt-4">Custom fonts</H6>
                 <Box className="p-2 space-y-2">

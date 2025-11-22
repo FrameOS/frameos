@@ -44,4 +44,5 @@ gpt.txt
 frameos/buildroot/output
 frameos/buildroot/sources
 frameos/buildroot/dl
+build/prebuilt-deps/
 

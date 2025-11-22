@@ -140,6 +140,9 @@ proc getFirstSceneId*(): SceneId =
     if len(compiledScenes) > 0:
       for key in keys(compiledScenes):
         return key
+    if len(interpretedScenes) > 0:
+      for key in keys(interpretedScenes):
+        return key
     if len(systemScenes) > 0:
       for key in keys(systemScenes):
         return key

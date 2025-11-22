@@ -82,7 +82,7 @@ def _scalar_getter(field_name: str, field_type: str, default_expr: str, required
   if params.hasKey("{field_name}"):
     let n = {k}
     if n.kind == JInt:
-      v = n.getInt()
+      v = n.getInt().int
     elif n.kind == JFloat:
       v = int(n.getFloat())
     elif n.kind == JString:
@@ -126,7 +126,7 @@ def _scalar_getter(field_name: str, field_type: str, default_expr: str, required
   if params.hasKey("{field_name}"):
     let n = {k}
     if n.kind == JInt:
-        v = n.getInt().NodeId
+      v = n.getInt().int.NodeId
     elif n.kind == JFloat:
         v = int(n.getFloat()).NodeId
     elif n.kind == JString:
@@ -195,7 +195,7 @@ def _size_expr(bound: Union[int, str], all_fields: Dict[str, Dict[str, Any]], de
   if params.hasKey("{ref}"):
     let n = {k}
     if n.kind == JInt:
-      v = n.getInt()
+      v = n.getInt().int
     elif n.kind == JFloat:
       v = int(n.getFloat())
     elif n.kind == JString:
@@ -253,7 +253,7 @@ def _seq_init_expr(field: Dict[str, Any], all_fields: Dict[str, Dict[str, Any]])
             return (
                 f'if params.hasKey({key_var}):\n'
                 f'      let n2 = params[{key_var}]\n'
-                f'      if n2.kind == JInt: {var_name} = n2.getInt()\n'
+                f'      if n2.kind == JInt: {var_name} = n2.getInt().int\n'
                 f'      elif n2.kind == JFloat: {var_name} = int(n2.getFloat())\n'
                 f'      elif n2.kind == JString:\n'
                 f'        try: {var_name} = parseInt(n2.getStr())\n'
@@ -287,7 +287,7 @@ def _seq_init_expr(field: Dict[str, Any], all_fields: Dict[str, Dict[str, Any]])
             return (
                 f'if params.hasKey({key_var}):\n'
                 f'      let n2 = params[{key_var}]\n'
-                f'      if n2.kind == JInt: {var_name} = n2.getInt().NodeId\n'
+                f'      if n2.kind == JInt: {var_name} = n2.getInt().int.NodeId\n'
                 f'      elif n2.kind == JFloat: {var_name} = int(n2.getFloat()).NodeId\n'
                 f'      elif n2.kind == JString:\n'
                 f'        try: {var_name} = int(parseFloat(n2.getStr())).NodeId\n'
@@ -405,7 +405,7 @@ def _set_field_seq_case(field: Dict[str, Any]) -> List[str]:
             parse_lines = ['if it.kind == JString: arr.add(it.getStr())']
         elif elem_type == "int":
             parse_lines = [
-                'if it.kind == JInt: arr.add(it.getInt())',
+                'if it.kind == JInt: arr.add(it.getInt().int)',
                 'elif it.kind == JFloat: arr.add(int(it.getFloat()))',
                 'elif it.kind == JString:',
                 '  try: arr.add(parseInt(it.getStr()))',
@@ -430,7 +430,7 @@ def _set_field_seq_case(field: Dict[str, Any]) -> List[str]:
             parse_lines = ['if it.kind == JString: arr.add(parseHtmlColor(it.getStr()))']
         elif elem_type == "NodeId":
             parse_lines = [
-                'if it.kind == JInt: arr.add(it.getInt().NodeId)',
+                'if it.kind == JInt: arr.add(it.getInt().int.NodeId)',
                 'elif it.kind == JFloat: arr.add(int(it.getFloat()).NodeId)',
                 'elif it.kind == JString:',
                 '  try: arr.add(int(parseFloat(it.getStr())).NodeId)',
@@ -459,7 +459,7 @@ def _set_field_seq_case(field: Dict[str, Any]) -> List[str]:
             parse_lines = ['if it.kind == JString: r.add(it.getStr())']
         elif elem_type == "int":
             parse_lines = [
-                'if it.kind == JInt: r.add(it.getInt())',
+                'if it.kind == JInt: r.add(it.getInt().int)',
                 'elif it.kind == JFloat: r.add(int(it.getFloat()))',
                 'elif it.kind == JString:',
                 '  try: r.add(parseInt(it.getStr()))',
@@ -484,7 +484,7 @@ def _set_field_seq_case(field: Dict[str, Any]) -> List[str]:
             parse_lines = ['if it.kind == JString: r.add(parseHtmlColor(it.getStr()))']
         elif elem_type == "NodeId":
             parse_lines = [
-                'if it.kind == JInt: r.add(it.getInt().NodeId)',
+                'if it.kind == JInt: r.add(it.getInt().int.NodeId)',
                 'elif it.kind == JFloat: r.add(int(it.getFloat()).NodeId)',
                 'elif it.kind == JString:',
                 '  try: r.add(int(parseFloat(it.getStr())).NodeId)',
@@ -585,7 +585,7 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
             if field_type in ("string", "text", "select", "font"):
                 app_set_lines.append(f"    app.appConfig.{field_name} = value.asString()")
             elif field_type == "integer":
-                app_set_lines.append(f"    app.appConfig.{field_name} = value.asInt()")
+                app_set_lines.append(f"    app.appConfig.{field_name} = value.asInt().int")
             elif field_type == "float":
                 app_set_lines.append(f"    app.appConfig.{field_name} = value.asFloat()")
             elif field_type == "boolean":

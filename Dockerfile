@@ -1,5 +1,5 @@
 # Use the official Python 3.12 image as the base
-FROM python:3.12-slim-bullseye
+FROM python:3.12-slim-bookworm
 
 # Set the working directory
 WORKDIR /app
@@ -10,8 +10,12 @@ RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-s
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && NODE_MAJOR=18 \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && chmod a+r /etc/apt/keyrings/docker.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" | tee /etc/apt/sources.list.d/docker.list \
     && apt-get update \
-    && apt-get install -y nodejs
+    && apt-get install -y nodejs docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 # Install Nim
 RUN apt-get update && \
@@ -25,9 +29,17 @@ RUN mkdir -p /opt/nim && \
     ./koch boot -d:release && \
     ./koch tools
 
+# ─── Install BuildKit (rootless daemon + client) ────────────────────────
+ARG BUILDKIT_VERSION=v0.26.2
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    url="https://github.com/moby/buildkit/releases/download/${BUILDKIT_VERSION}/buildkit-${BUILDKIT_VERSION}.linux-${arch}.tar.gz"; \
+    curl -L "$url" | tar -xz -C /usr/local && \
+    mkdir -p /var/lib/buildkit
+
 ENV PATH="/opt/nim/bin:${PATH}"
 
-RUN nim --version \
+RUN nim --version && \
     nimble --version
 
 # Install frameos nim deps
@@ -37,7 +49,7 @@ COPY frameos/frameos.nimble ./
 COPY frameos/nimble.lock ./
 COPY frameos/nim.cfg ./
 
-RUN nimble install -d -y && nimble setup
+RUN nimble setup && nimble install -d -y
 
 # Install frameos agent nim deps
 WORKDIR /app/frameos/agent
@@ -46,7 +58,7 @@ COPY frameos/agent/frameos_agent.nimble ./
 COPY frameos/agent/nimble.lock ./
 
 # Cache nimble deps for when deploying on frame
-RUN nimble install -d -y && nimble setup
+RUN nimble setup && nimble install -d -y
 
 # ─── Install Nix (single-user, root, flakes on) ──────────────────────
 ARG NIX_VERSION=2.30.2
@@ -120,6 +132,12 @@ WORKDIR /app
 COPY . .
 
 RUN rm -rf /app/frontend && mv /tmp/frontend /app/
+
+# Pre-generate FrameOS assets so deployments don't download them on first run
+WORKDIR /app/frameos
+RUN nimble assets -y && nimble setup
+
+WORKDIR /app
 
 EXPOSE 8989
 
