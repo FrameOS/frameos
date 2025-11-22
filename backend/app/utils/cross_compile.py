@@ -64,6 +64,8 @@ LUCKFOX_BUILDROOT_TOOLCHAIN_DIR = "/opt/luckfox/toolchain"
 
 
 PLATFORM_MAP = {
+    "amd64": "linux/amd64",
+    "x86_64": "linux/amd64",
     "aarch64": "linux/arm64",
     "arm64": "linux/arm64",
     "armv8": "linux/arm64",
