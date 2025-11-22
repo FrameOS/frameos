@@ -49,6 +49,7 @@ DEFAULT_FEATURE_CFLAGS = {
     "x86_64": ["-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"],
 }
 TOOLCHAIN_IMAGE_VERSION = "1"
+BUILDKIT_ADDR_ENV = "FRAMEOS_BUILDKIT_ADDR"
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 CROSS_TOOLCHAIN_DOCKERFILE = BACKEND_ROOT / "tools" / "cross-toolchain.Dockerfile"
 TOOLCHAIN_PACKAGES = (
@@ -173,6 +174,12 @@ class CrossCompiler:
                 f"{icon} Using default include/lib paths without remote sysroot synchronization",
             )
 
+    def _buildkit_addr(self) -> str | None:
+        addr = os.environ.get(BUILDKIT_ADDR_ENV)
+        if addr and not addr.startswith("unix://"):
+            addr = f"unix://{addr}"
+        return addr
+
     async def _run_docker_build(self, build_dir: str) -> str:
         build_dir = os.path.abspath(build_dir)
         script_path = self.temp_dir / "frameos-cross-build.sh"
@@ -262,6 +269,10 @@ class CrossCompiler:
         )
         os.chmod(script_path, 0o755)
 
+        buildkit_addr = self._buildkit_addr()
+        if buildkit_addr:
+            return await self._run_buildkit_build(build_dir, script_path, buildkit_addr)
+
         image = await self._ensure_toolchain_image()
 
         docker_cmd = " ".join(
@@ -287,6 +298,77 @@ class CrossCompiler:
         if status != 0:
             raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
         return os.path.join(build_dir, "frameos")
+
+    async def _run_buildkit_build(self, build_dir: str, script_path: Path, addr: str) -> str:
+        await self._log(
+            "stdout",
+            f"{icon} Using BuildKit at {addr} for cross compilation",
+        )
+        with tempfile.TemporaryDirectory(prefix="frameos-buildkit-") as tmp:
+            context_dir = Path(tmp) / "context"
+            dockerfile_dir = Path(tmp) / "dockerfile"
+            output_dir = Path(tmp) / "out"
+            shutil.copytree(build_dir, context_dir / "src")
+            shutil.copytree(self.sysroot_dir, context_dir / "sysroot")
+            shutil.copy2(script_path, context_dir / "build.sh")
+            dockerfile_dir.mkdir(parents=True, exist_ok=True)
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            dockerfile_contents = dedent(
+                f"""
+                FROM {self._docker_image()}
+                WORKDIR /src
+                ENV DEBIAN_FRONTEND=noninteractive
+                ARG TOOLCHAIN_PACKAGES="{TOOLCHAIN_PACKAGES}"
+                RUN set -eux \
+                    && apt-get update \
+                    && SSL_PACKAGE="libssl3" \
+                    && if apt-cache show libssl3t64 >/dev/null 2>&1; then \
+                        SSL_PACKAGE="libssl3t64"; \
+                    fi \
+                    && apt-get install -y --no-install-recommends $TOOLCHAIN_PACKAGES ${{SSL_PACKAGE:+$SSL_PACKAGE}} \
+                    && rm -rf /var/lib/apt/lists/*
+                COPY build.sh /tmp/build.sh
+                COPY sysroot /sysroot
+                COPY src /src
+                RUN chmod +x /tmp/build.sh && /tmp/build.sh
+                """
+            ).strip()
+            dockerfile_path = dockerfile_dir / "Dockerfile"
+            dockerfile_path.write_text(dockerfile_contents)
+
+            buildctl_cmd = [
+                "buildctl",
+                "--addr",
+                addr,
+                "build",
+                "--progress=plain",
+                "--frontend",
+                "dockerfile.v0",
+                "--local",
+                f"context={context_dir}",
+                "--local",
+                f"dockerfile={dockerfile_dir}",
+                "--output",
+                f"type=local,dest={output_dir}",
+            ]
+
+            status, _stdout, err = await exec_local_command(
+                self.db,
+                self.redis,
+                self.frame,
+                " ".join(shlex.quote(part) for part in buildctl_cmd),
+                log_command="buildctl build (cross compile)",
+            )
+            if status != 0:
+                raise RuntimeError(f"Cross compilation failed (BuildKit): {err or 'see logs'}")
+
+            built_binary = output_dir / "src" / "frameos"
+            if not built_binary.exists():
+                raise RuntimeError("BuildKit build completed without producing frameos binary")
+            final_path = Path(build_dir) / "frameos"
+            shutil.copy2(built_binary, final_path)
+            return str(final_path)
 
     def _cpu_feature_cflags(self) -> list[str]:
         arch = (self.target.arch or "").lower()

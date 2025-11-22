@@ -1,6 +1,16 @@
 #!/bin/bash
 set -e  # exit as soon as a command fails
 
+BUILDKIT_SOCKET=${FRAMEOS_BUILDKIT_ADDR:-/tmp/buildkit/buildkitd.sock}
+if ! pgrep -f "buildkitd .*${BUILDKIT_SOCKET}" >/dev/null 2>&1; then
+  echo "🔧 Starting rootless BuildKit daemon at ${BUILDKIT_SOCKET}"
+  mkdir -p "$(dirname "${BUILDKIT_SOCKET}")" /var/lib/buildkit
+  buildkitd --oci-worker-no-process-sandbox --root /var/lib/buildkit --addr "unix://${BUILDKIT_SOCKET}" >/tmp/buildkit.log 2>&1 &
+  export FRAMEOS_BUILDKIT_ADDR="unix://${BUILDKIT_SOCKET}"
+else
+  echo "🔧 BuildKit daemon already running at ${BUILDKIT_SOCKET}"
+fi
+
 # 1. Conditionally start local Redis only if REDIS_URL is not set.
 if [ -z "$REDIS_URL" ]; then
   echo "🥕 Starting local Redis (no REDIS_URL detected)."
