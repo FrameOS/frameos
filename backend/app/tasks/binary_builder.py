@@ -140,6 +140,7 @@ class FrameBinaryBuilder:
                     deployer=self.deployer,
                     source_dir=source_dir,
                     temp_dir=self.temp_dir,
+                    build_dir=build_dir,
                     prebuilt_entry=prebuilt_entry,
                     prebuilt_target=prebuilt_target,
                     target_override=target,

@@ -103,6 +103,7 @@ class CrossCompiler:
         prebuilt_entry: PrebuiltEntry | None = None,
         prebuilt_target: str | None = None,
         logger: LogFunc | None = None,
+        build_dir: str | Path | None = None,
     ) -> None:
         self.db = db
         self.redis = redis
@@ -121,6 +122,7 @@ class CrossCompiler:
         self.prebuilt_target = prebuilt_target
         self.prebuilt_dir = cache_root / "prebuilt" / key
         self.prebuilt_dir.mkdir(parents=True, exist_ok=True)
+        self.build_dir_override = Path(build_dir) if build_dir else None
         self.prebuilt_components: dict[str, Path] = {}
         self.prebuilt_timeout = PREBUILT_TIMEOUT
         self.logger = logger
@@ -136,7 +138,17 @@ class CrossCompiler:
         )
         await self._prepare_prebuilt_components()
         await self._ensure_quickjs_sources(source_dir)
-        build_dir = await self._generate_c_sources(source_dir)
+        build_dir = self.build_dir_override
+        if build_dir:
+            build_dir = Path(build_dir)
+            if not (build_dir / "compile_frameos.sh").exists():
+                await self._log(
+                    "stderr",
+                    f"{icon} Provided build directory {build_dir} is missing generated sources; regenerating",
+                )
+                build_dir = await self._generate_c_sources(source_dir)
+        else:
+            build_dir = await self._generate_c_sources(source_dir)
         await self._prepare_sysroot()
         await self._ensure_lgpio_in_sysroot()
         await self._ensure_quickjs_in_build_dir(source_dir, build_dir)
@@ -752,6 +764,7 @@ async def build_binary_with_cross_toolchain(
     deployer: FrameDeployer,
     source_dir: str,
     temp_dir: str,
+    build_dir: str | None = None,
     prebuilt_entry: PrebuiltEntry | None = None,
     prebuilt_target: str | None = None,
     target_override: TargetMetadata | None = None,
@@ -818,6 +831,7 @@ async def build_binary_with_cross_toolchain(
         deployer=deployer,
         target=target,
         temp_dir=temp_dir,
+        build_dir=build_dir,
         prebuilt_entry=prebuilt_entry,
         prebuilt_target=resolved_target,
         logger=logger,
