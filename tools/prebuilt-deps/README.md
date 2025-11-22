@@ -70,7 +70,26 @@ matrix as `build.sh`, bundles each target folder as a `tar.gz` archive and
 stores it under `prebuilt-deps/<target>/<versions>/` alongside a
 `metadata.json`. A manifest file (`prebuilt-deps/manifest.json`) keeps
 track of every target so the script can discover and download the latest
-builds automatically.
+builds automatically. Each manifest entry is shaped like:
+
+```json
+{
+  "target": "ubuntu-24.04-arm64",
+  "updated_at": "2025-11-17T21:39:25.921016+00:00",
+  "components": [
+    {
+      "name": "nim",
+      "versions": [
+        {
+          "version": "2.2.4",
+          "md5sum": "fa4e489a0f4ca97e111142cc1485eca0-3",
+          "path": "prebuilt-deps/ubuntu-24.04-arm64/nim-2.2.4.tar.gz"
+        }
+      ]
+    }
+  ]
+}
+```
 
 ### Prerequisites
 

@@ -97,7 +97,7 @@ for target in "${REQUESTED_TARGETS[@]}"; do
   dest="${OUTPUT_BASE}/${target}"
   mkdir -p "${dest}"
 
-  echo "\n=== Target ${target} (${distro} ${release}, platform ${platform}) ===" >&2
+  echo "=== Target ${target} (${distro} ${release}, platform ${platform}) ===" >&2
 
   for component in "${COMPONENTS[@]}"; do
     component_args=()

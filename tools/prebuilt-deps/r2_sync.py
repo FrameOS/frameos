@@ -99,39 +99,71 @@ TARGET_PLATFORMS = {
 
 
 @dataclass
+class ComponentVersion:
+    version: str
+    md5sum: Optional[str] = None
+    path: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, str]) -> "ComponentVersion":
+        return cls(
+            version=data.get("version", ""),
+            md5sum=data.get("md5sum"),
+            path=data.get("path"),
+        )
+
+    def to_dict(self) -> Dict[str, str]:
+        return {
+            "version": self.version,
+            "md5sum": self.md5sum,
+            "path": self.path,
+        }
+
+
+@dataclass
+class ComponentEntry:
+    name: str
+    versions: List[ComponentVersion]
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, str]) -> "ComponentEntry":
+        return cls(
+            name=data.get("name", ""),
+            versions=[ComponentVersion.from_dict(item) for item in data.get("versions", [])],
+        )
+
+    def to_dict(self) -> Dict[str, str]:
+        return {"name": self.name, "versions": [item.to_dict() for item in self.versions]}
+
+    def latest(self) -> Optional[ComponentVersion]:
+        if not self.versions:
+            return None
+        return self.versions[-1]
+
+
+@dataclass
 class ManifestEntry:
     target: str
-    versions: Dict[str, str]
-    object_key: Optional[str]
-    metadata_key: Optional[str] = None
-    updated_at: str = ""
-    component_keys: Optional[Dict[str, str]] = None
-    component_md5sums: Optional[Dict[str, str]] = None
+    updated_at: str
+    components: List[ComponentEntry]
 
     @classmethod
     def from_dict(cls, data: Dict[str, str]) -> "ManifestEntry":
         return cls(
             target=data["target"],
-            versions=data.get("versions", {}),
-            object_key=data.get("object_key"),
-            metadata_key=data.get("metadata_key"),
             updated_at=data.get("updated_at", ""),
-            component_keys=data.get("component_keys"),
-            component_md5sums=data.get("component_md5sums"),
+            components=[ComponentEntry.from_dict(item) for item in data.get("components", [])],
         )
 
     def to_dict(self) -> Dict[str, str]:
-        data = {
+        return {
             "target": self.target,
-            "versions": self.versions,
-            "object_key": self.object_key,
             "updated_at": self.updated_at,
-            "component_keys": self.component_keys,
-            "component_md5sums": self.component_md5sums,
+            "components": [component.to_dict() for component in self.components],
         }
-        if self.metadata_key:
-            data["metadata_key"] = self.metadata_key
-        return data
+
+    def component_map(self) -> Dict[str, ComponentEntry]:
+        return {component.name: component for component in self.components}
 
 
 @dataclass
@@ -139,7 +171,7 @@ class UploadPlan:
     target: str
     metadata: Dict[str, str]
     target_dir: Path
-    component_keys: Dict[str, str]
+    component_paths: Dict[str, str]
     component_md5sums: Dict[str, str]
     components_to_upload: List[Tuple[str, Path, str]]
 
@@ -262,19 +294,13 @@ def package_identifier(metadata: Dict[str, str]) -> str:
     )
 
 
-def versions_from_metadata(metadata: Dict[str, str]) -> Dict[str, str]:
-    return {
-        "nim": metadata.get("nim_version", ""),
-        "quickjs": metadata.get("quickjs_version", ""),
-        "lgpio": metadata.get("lgpio_version", ""),
-    }
-
-
 def metadata_matches_entry(metadata: Dict[str, str], entry: ManifestEntry) -> bool:
     if metadata.get("target") != entry.target:
         return False
-    for key, version in entry.versions.items():
-        if metadata.get(f"{key}_version") != version:
+    comp_map = entry.component_map()
+    for key in COMPONENTS:
+        expected_version = latest_component_version(comp_map, key)
+        if metadata.get(f"{key}_version") != expected_version:
             return False
     return True
 
@@ -291,18 +317,29 @@ def component_object_key(prefix: str, target: str, component: str, version: str)
     return f"{prefix}/{target}/{component}-{version}.tar.gz"
 
 
+def latest_component_version(
+    comp_map: Dict[str, ComponentEntry], component: str
+) -> Optional[str]:
+    comp_entry = comp_map.get(component)
+    if not comp_entry:
+        return None
+    latest = comp_entry.latest()
+    return latest.version if latest else None
+
+
 def write_local_metadata(entry: ManifestEntry, target_dir: Path) -> None:
     distro, release, arch = target_distro_release_arch(entry.target)
     platform = TARGET_PLATFORMS.get(arch, "")
+    comp_map = entry.component_map()
     payload = {
         "target": entry.target,
         "distribution": distro,
         "release": release,
         "arch": arch,
         "platform": platform,
-        "nim_version": entry.versions.get("nim", ""),
-        "quickjs_version": entry.versions.get("quickjs", ""),
-        "lgpio_version": entry.versions.get("lgpio", ""),
+        "nim_version": latest_component_version(comp_map, "nim") or "",
+        "quickjs_version": latest_component_version(comp_map, "quickjs") or "",
+        "lgpio_version": latest_component_version(comp_map, "lgpio") or "",
     }
     target_dir.mkdir(parents=True, exist_ok=True)
     target_file = target_dir / "metadata.json"
@@ -399,22 +436,19 @@ def ensure_manifest_md5sums(client, bucket: str, manifest: Dict[str, List[Manife
     cache: Dict[str, str] = {}
     for entry_list in manifest.values():
         for entry in entry_list:
-            if not entry.component_keys:
-                continue
-            if entry.component_md5sums is None:
-                entry.component_md5sums = {}
-            for component, key in entry.component_keys.items():
-                if entry.component_md5sums.get(component):
-                    continue
-                if key in cache:
-                    entry.component_md5sums[component] = cache[key]
-                    changed = True
-                    continue
-                md5sum = head_object_md5sum(client, bucket, key)
-                if md5sum:
-                    cache[key] = md5sum
-                    entry.component_md5sums[component] = md5sum
-                    changed = True
+            for component in entry.components:
+                for version in component.versions:
+                    if version.md5sum or not version.path:
+                        continue
+                    if version.path in cache:
+                        version.md5sum = cache[version.path]
+                        changed = True
+                        continue
+                    md5sum = head_object_md5sum(client, bucket, version.path)
+                    if md5sum:
+                        cache[version.path] = md5sum
+                        version.md5sum = md5sum
+                        changed = True
     return changed
 
 
@@ -430,7 +464,7 @@ def prepare_upload_target(
         print(f"Skipping {target_dir.name}: metadata.json missing", file=sys.stderr)
         return None
 
-    component_keys: Dict[str, str] = {}
+    component_paths: Dict[str, str] = {}
     component_md5sums: Dict[str, str] = {}
     components_to_upload = []
     for component in COMPONENTS:
@@ -456,7 +490,7 @@ def prepare_upload_target(
             )
             return None
         object_key = component_object_key(prefix, metadata["target"], component, version)
-        component_keys[component] = object_key
+        component_paths[component] = object_key
         needs_upload = True
         if not force:
             try:
@@ -481,7 +515,7 @@ def prepare_upload_target(
         target=metadata["target"],
         metadata=metadata,
         target_dir=target_dir,
-        component_keys=component_keys,
+        component_paths=component_paths,
         component_md5sums=component_md5sums,
         components_to_upload=components_to_upload,
     )
@@ -512,13 +546,26 @@ def upload_target(
             )
             print(f"Uploaded {comp_dir.name} -> s3://{bucket}/{object_key}")
 
+        components: List[ComponentEntry] = []
+        for name in COMPONENTS:
+            version = component_version(metadata, name)
+            components.append(
+                ComponentEntry(
+                    name=name,
+                    versions=[
+                        ComponentVersion(
+                            version=version or "",
+                            md5sum=component_md5sums.get(name),
+                            path=plan.component_paths.get(name),
+                        )
+                    ],
+                )
+            )
+
         entry = ManifestEntry(
             target=metadata["target"],
-            versions=versions_from_metadata(metadata),
-            object_key=None,
             updated_at=datetime.now(timezone.utc).isoformat(),
-            component_keys=plan.component_keys,
-            component_md5sums=component_md5sums or None,
+            components=components,
         )
         manifest[entry.target] = [entry]
     finally:
@@ -571,36 +618,33 @@ def download_entry(
     force: bool = False,
 ):
     target_dir = BUILD_DIR / entry.target
+    comp_map = entry.component_map()
     local_meta = read_local_metadata(target_dir)
     if local_meta and metadata_matches_entry(local_meta, entry) and not force:
-        version_summary = ", ".join(f"{k}={v}" for k, v in entry.versions.items())
+        version_summary = ", ".join(
+            f"{name}={latest_component_version(comp_map, name)}"
+            for name in COMPONENTS
+            if latest_component_version(comp_map, name)
+        )
         print(f"{entry.target} already matches ({version_summary}), skipping download")
         return
 
-    if entry.component_keys:
-        if target_dir.exists():
-            shutil.rmtree(target_dir)
-        target_dir.mkdir(parents=True, exist_ok=True)
-        for component, key in sorted(entry.component_keys.items()):
-            md5sum = (entry.component_md5sums or {}).get(component) if entry.component_md5sums else None
-            download_component_tarball(client, bucket, key, target_dir, expected_md5=md5sum)
-        write_local_metadata(entry, target_dir)
-        print(f"Downloaded {entry.target} components -> {target_dir}")
-        return
-
-    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
-    os.close(tmp_fd)
-    try:
-        client.download_file(bucket, entry.object_key, tmp_path)
-        if target_dir.exists():
-            shutil.rmtree(target_dir)
-        BUILD_DIR.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(tmp_path, "r:gz") as tar:
-            safe_extract(tar, BUILD_DIR)
-        write_local_metadata(entry, target_dir)
-        print(f"Downloaded {entry.target} -> {target_dir}")
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for component in sorted(comp_map):
+        latest = comp_map[component].latest()
+        if not latest or not latest.path:
+            raise RuntimeError(f"Missing path for component {component} in manifest entry {entry.target}")
+        download_component_tarball(
+            client,
+            bucket,
+            latest.path,
+            target_dir,
+            expected_md5=latest.md5sum,
+        )
+    write_local_metadata(entry, target_dir)
+    print(f"Downloaded {entry.target} components -> {target_dir}")
 
 
 def list_entries(entries: Dict[str, List[ManifestEntry]]):
@@ -609,14 +653,17 @@ def list_entries(entries: Dict[str, List[ManifestEntry]]):
         return
     for target in sorted(entries):
         for entry in sorted(entries[target], key=lambda e: e.updated_at, reverse=True):
-            versions = ", ".join(f"{k}={v}" for k, v in entry.versions.items())
-            if entry.component_keys:
-                destinations = ", ".join(
-                    f"{component}={key}"
-                    for component, key in sorted(entry.component_keys.items())
-                )
-            else:
-                destinations = entry.object_key or ""
+            comp_map = entry.component_map()
+            versions = ", ".join(
+                f"{name}={latest_component_version(comp_map, name)}"
+                for name in COMPONENTS
+                if latest_component_version(comp_map, name)
+            )
+            destinations = ", ".join(
+                f"{name}={comp_map[name].latest().path}"
+                for name in sorted(comp_map)
+                if comp_map[name].latest() and comp_map[name].latest().path
+            )
             print(f"{target}: ({versions}) -> {destinations}")
 
 
