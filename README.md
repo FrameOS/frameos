@@ -73,3 +73,13 @@ SECRET_KEY=$(openssl rand -base64 32)
 docker build -t frameos .
 docker run -d -p 8989:8989 -v ./db:/app/db --name frameos --restart always -e SECRET_KEY="$SECRET_KEY" frameos
 ```
+
+### Verifying BuildKit inside the container
+
+The backend uses BuildKit for cross-compilation. If cross builds fall back to on-device builds with errors like `dial unix /tmp/buildkit/buildkitd.sock: connect: connection refused`, exec into the container and run the helper script to check the daemon, socket, and log output:
+
+```bash
+docker exec -it frameos /bin/bash -lc "./tools/buildkit-debug.sh"
+```
+
+The script reports whether `buildkitd` is running, whether `/tmp/buildkit/buildkitd.sock` exists, and dumps the tail of `/tmp/buildkit.log` so you can see why the daemon might be failing to start.

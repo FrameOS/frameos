@@ -7,9 +7,18 @@ BUILDKIT_SOCKET=${FRAMEOS_BUILDKIT_ADDR:-/tmp/buildkit/buildkitd.sock}
 export FRAMEOS_BUILDKIT_ADDR="unix://${BUILDKIT_SOCKET#unix://}"
 
 if ! pgrep -f "buildkitd .*${BUILDKIT_SOCKET}" >/dev/null 2>&1; then
-  echo "🔧 Starting rootless BuildKit daemon at ${BUILDKIT_SOCKET}"
+  if [ "$(id -u)" -eq 0 ]; then
+    echo "🔧 Starting BuildKit daemon as root at ${BUILDKIT_SOCKET}"
+    buildkitd_args=(--root /var/lib/buildkit)
+  else
+    echo "🔧 Starting rootless BuildKit daemon at ${BUILDKIT_SOCKET}"
+    # NoProcessSandbox is only valid for rootless builds. Avoid passing it when
+    # running as root or buildkitd will abort before listening on the socket.
+    buildkitd_args=(--root /var/lib/buildkit --oci-worker-no-process-sandbox)
+  fi
+
   mkdir -p "$(dirname "${BUILDKIT_SOCKET}")" /var/lib/buildkit
-  buildkitd --oci-worker-no-process-sandbox --root /var/lib/buildkit --addr "${FRAMEOS_BUILDKIT_ADDR}" >/tmp/buildkit.log 2>&1 &
+  buildkitd "${buildkitd_args[@]}" --addr "${FRAMEOS_BUILDKIT_ADDR}" >/tmp/buildkit.log 2>&1 &
 else
   echo "🔧 BuildKit daemon already running at ${BUILDKIT_SOCKET}"
 fi
