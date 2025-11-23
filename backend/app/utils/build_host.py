@@ -146,7 +146,7 @@ class BuildHostSession:
         )
 
         status = await proc.wait()
-        if status and log_output:
+        if status and log_output and status.returncode != 0:
             await self._log("exit_status", f"The command exited with status {status.returncode}")
         return status.returncode or 0, "".join(out_buf) or None, "".join(err_buf) or None
 

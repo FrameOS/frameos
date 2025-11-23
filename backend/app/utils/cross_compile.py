@@ -141,12 +141,16 @@ class CrossCompiler:
 
     async def build(self, source_dir: str) -> str:
         if self.build_host:
+            await self._log(
+                "stdout",
+                f"{icon} Connecting to build host {self.build_host.user}@{self.build_host.host}:{self.build_host.port}",
+            )
             async with BuildHostSession(self.build_host, logger=self._log) as session:
                 self._build_host_session = session
                 self._remote_root = Path(await session.mktemp_dir("frameos-cross-"))
                 await self._log(
                     "stdout",
-                    f"{icon} Using build host {self.build_host.user}@{self.build_host.host}:{self.build_host.port} for cross compilation",
+                    f"{icon} Connnected to build host {self.build_host.user}@{self.build_host.host}:{self.build_host.port} for cross compilation",
                 )
                 try:
                     return await self._build_with_context(source_dir)

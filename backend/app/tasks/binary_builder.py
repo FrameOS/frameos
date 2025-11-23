@@ -171,7 +171,7 @@ class FrameBinaryBuilder:
                 if "permission denied" in str(exc).lower():
                     await self._log(
                         "stderr",
-                        f"{icon} Ensure the build host user has permission to run Docker commands (e.g., is in the 'docker' group)",
+                        f"{icon} Ensure you can connect to the build host and run Docker commands (e.g., is in the 'docker' group)",
                     )
                 if force_cross_compile:
                     raise
