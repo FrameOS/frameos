@@ -90,7 +90,7 @@ class BuildHostSession:
         )
         await self._log(
             "stdout",
-            f"🔶 Connected to build host {self.config.user}@{self.config.host}:{self.config.port}",
+            f"🟢 Connected to build host {self.config.user}@{self.config.host}:{self.config.port}",
         )
 
     async def _log(self, level: str, message: str) -> None:
@@ -152,7 +152,7 @@ class BuildHostSession:
 
     async def mktemp_dir(self, prefix: str = "frameos-build-") -> str:
         status, out, _err = await self.run(
-            f"mktemp -d -p /tmp {prefix}XXXXXX", log_output=True
+            f"mktemp -d -p /tmp {prefix}XXXXXX", log_output=False
         )
         if status != 0 or not out:
             raise RuntimeError("Failed to allocate temporary directory on build host")
