@@ -163,12 +163,17 @@ class FrameBinaryBuilder:
                     "stderr",
                     f"{icon} {failure_msg}",
                 )
-                if "command not found" in str(exc).lower() or "buildx" in str(exc).lower():
+                if "unix:///var/run/docker.sock" in str(exc).lower():
                     await self._log(
                         "stderr",
-                        f"{icon} Ensure Docker and the Docker Buildx plugin are installed on the build host with: sudo apt install docker.io docker-buildx-plugin",
+                        f"{icon} Read the README at https://github.com/FrameOS/frameos to learn how to enable docker-in-docker, or configure a build server from global settings.",
                     )
-                if "permission denied" in str(exc).lower():
+                elif "command not found" in str(exc).lower() or "buildx" in str(exc).lower():
+                    await self._log(
+                        "stderr",
+                        f"{icon} Ensure Docker and the Docker Buildx plugin are installed on the build host",
+                    )
+                elif "permission denied" in str(exc).lower():
                     await self._log(
                         "stderr",
                         f"{icon} Ensure you can connect to the build host and run Docker commands (e.g., is in the 'docker' group)",
