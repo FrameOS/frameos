@@ -56,12 +56,6 @@ TOOLCHAIN_PACKAGES = (
     "build-essential ca-certificates curl git make pkg-config python3 python3-pip "
     "unzip xz-utils zlib1g-dev libssl-dev libffi-dev libjpeg-dev libfreetype6-dev libevdev-dev"
 )
-LUCKFOX_BUILDROOT_TOOLCHAIN_URL = (
-    # "https://files.luckfox.com/wiki/Luckfox-Pico/Software/arm-rockchip830-linux-uclibcgnueabihf.tar.gz"
-    "https://archive.frameos.net/vendor/luckfox/arm-rockchip830-linux-uclibcgnueabihf.tar.gz"
-)
-LUCKFOX_BUILDROOT_TOOLCHAIN_PREFIX = "arm-rockchip830-linux-uclibcgnueabihf"
-LUCKFOX_BUILDROOT_TOOLCHAIN_DIR = "/opt/luckfox/toolchain"
 
 
 PLATFORM_MAP = {
@@ -133,7 +127,6 @@ class CrossCompiler:
         self.build_host = build_host
         self._build_host_session: BuildHostSession | None = None
         self._remote_root: Path | None = None
-        self._remote_toolchain_dockerfile: str | None = None
         self._sysroot_include_dirs: set[str] = set()
         self._sysroot_lib_dirs: set[str] = set()
         for rel in ("usr/include", "usr/local/include", "usr/lib", "usr/local/lib"):
@@ -157,7 +150,6 @@ class CrossCompiler:
                 finally:
                     self._build_host_session = None
                     self._remote_root = None
-                    self._remote_toolchain_dockerfile = None
         return await self._build_with_context(source_dir)
 
     async def _build_with_context(self, source_dir: str) -> str:
@@ -232,27 +224,6 @@ class CrossCompiler:
             shlex.quote(" ".join(extra_cflags_parts)) if extra_cflags_parts else "''"
         )
         extra_libs = shlex.quote(" ".join(f"-L{path}" for path in lib_dirs)) if lib_dirs else "''"
-        toolchain_setup = ""
-        if self._is_luckfox_buildroot():
-            toolchain_setup = (
-                dedent(
-                    f"""
-                    toolchain_prefix={LUCKFOX_BUILDROOT_TOOLCHAIN_PREFIX}
-                    if [ -d "{LUCKFOX_BUILDROOT_TOOLCHAIN_DIR}/bin" ]; then
-                        export PATH="{LUCKFOX_BUILDROOT_TOOLCHAIN_DIR}/bin:$PATH"
-                        export CC="$toolchain_prefix-gcc"
-                        export CXX="$toolchain_prefix-g++"
-                        export AR="$toolchain_prefix-ar"
-                        export STRIP="$toolchain_prefix-strip"
-                        export PKG_CONFIG_PATH="{LUCKFOX_BUILDROOT_TOOLCHAIN_DIR}/lib/pkgconfig:${{PKG_CONFIG_PATH:-}}"
-                        log_debug "Using Luckfox Buildroot toolchain from {LUCKFOX_BUILDROOT_TOOLCHAIN_DIR}"
-                    else
-                        log_debug "Luckfox toolchain not found at {LUCKFOX_BUILDROOT_TOOLCHAIN_DIR}; falling back to container defaults"
-                    fi
-                    """
-                ).strip()
-                + "\n\n"
-            )
         script_content = (
             dedent(
                 f"""
@@ -276,8 +247,6 @@ class CrossCompiler:
                     log_debug "Using extra LIBS: $extra_libs"
                     export EXTRA_LIBS="$extra_libs"
                 fi
-
-                {toolchain_setup}
 
                 cd /src
                 log_debug "Compiling generated C sources"
@@ -399,29 +368,18 @@ class CrossCompiler:
 
     async def _ensure_quickjs_sources(self, source_dir: str) -> None:
         quickjs_root = Path(source_dir) / "quickjs"
-        libquickjs = quickjs_root / "libquickjs.a"
         await self._log(
             "stdout",
             f"{icon} Ensuring QuickJS sources are available at {quickjs_root} (exists={quickjs_root.exists()})",
         )
-        prebuilt_path = self.prebuilt_components.get("quickjs")
-        if prebuilt_path and not libquickjs.exists():
-            await self._log(
-                "stdout",
-                f"{icon} Prebuilt QuickJS component detected at {prebuilt_path}; staging into source tree",
-            )
-            self._stage_quickjs(source_dir)
-        if libquickjs.exists():
-            await self._log("stdout", f"{icon} Found QuickJS archive at {libquickjs}")
-            return
-        await self._log("stderr", "  • QuickJS archive missing after initial stage; retrying")
-        self._stage_quickjs(source_dir)
-        if libquickjs.exists():
-            await self._log("stdout", f"{icon} QuickJS archive found after restage at {libquickjs}")
-            return
-        await self._log_quickjs_probe(Path(source_dir), "source directory")
-        raise RuntimeError(
-            "QuickJS sources are missing; run `nimble build_quickjs` or publish a prebuilt component.",
+        await self._ensure_quickjs_tree(
+            quickjs_root,
+            context="source directory",
+            fallback_src=None,
+            error_message=(
+                "QuickJS sources are missing; run `nimble build_quickjs` "
+                "or publish a prebuilt component."
+            ),
         )
 
     async def _generate_c_sources(self, source_dir: str) -> Path:
@@ -436,41 +394,53 @@ class CrossCompiler:
 
     async def _ensure_quickjs_in_build_dir(self, source_dir: str, build_dir: Path) -> None:
         dest = Path(build_dir) / "quickjs"
-        libquickjs = dest / "libquickjs.a"
+        source_quickjs = Path(source_dir) / "quickjs"
         await self._log(
             "stdout",
             f"{icon} Ensuring QuickJS assets exist within build dir {dest} (exists={dest.exists()})",
         )
+        fallback_src = source_quickjs if source_quickjs.exists() else None
+        await self._ensure_quickjs_tree(
+            dest,
+            context="build directory",
+            fallback_src=fallback_src,
+            error_message=(
+                "QuickJS libraries missing from generated C sources; unable to continue cross compilation"
+            ),
+        )
+
+    async def _ensure_quickjs_tree(
+        self,
+        dest: Path,
+        *,
+        context: str,
+        fallback_src: Path | None,
+        error_message: str,
+    ) -> None:
+        libquickjs = dest / "libquickjs.a"
+        prebuilt_quickjs = self.prebuilt_components.get("quickjs")
+        if prebuilt_quickjs:
+            await self._log(
+                "stdout",
+                f"{icon} Staging prebuilt QuickJS component from {prebuilt_quickjs} into {dest}",
+            )
+            self._stage_prebuilt_quickjs(dest)
+
+        if not libquickjs.exists() and fallback_src:
+            if dest.exists():
+                shutil.rmtree(dest)
+            await self._log(
+                "stdout",
+                f"{icon} Copying QuickJS tree from {fallback_src} into {dest}",
+            )
+            shutil.copytree(fallback_src, dest, dirs_exist_ok=True)
+
         if libquickjs.exists():
-            await self._log("stdout", f"Build directory already contains {libquickjs}")
+            await self._log("stdout", f"{icon} Found QuickJS archive at {libquickjs}")
             return
-        if self.prebuilt_components.get("quickjs"):
-            await self._log(
-                "stdout",
-                f"{icon} Staging prebuilt QuickJS component directly into build directory",
-            )
-            self._stage_quickjs(str(build_dir))
-            if libquickjs.exists():
-                await self._log("stdout", f"{icon} QuickJS archive staged into build directory at {libquickjs}")
-                return
-        source_quickjs = Path(source_dir) / "quickjs"
-        if source_quickjs.exists():
-            await self._log(
-                "stdout",
-                f"{icon} Copying QuickJS tree from source directory ({source_quickjs}) into build directory",
-            )
-            shutil.copytree(source_quickjs, dest, dirs_exist_ok=True)
-        else:
-            await self._log(
-                "stderr",
-                f"{icon} Source directory missing QuickJS folder at {source_quickjs}; attempting to restage",
-            )
-            self._stage_quickjs(str(build_dir))
-        if not libquickjs.exists():
-            await self._log_quickjs_probe(Path(build_dir), "build directory")
-            raise RuntimeError(
-                "QuickJS libraries missing from generated C sources; unable to continue cross compilation",
-            )
+
+        await self._log_quickjs_probe(dest.parent, context)
+        raise RuntimeError(error_message)
 
     async def _prepare_prebuilt_components(self) -> None:
         if not self.prebuilt_entry:
@@ -596,11 +566,10 @@ class CrossCompiler:
                 hasher.update(chunk)
         return hasher.hexdigest()
 
-    def _stage_quickjs(self, source_dir: str) -> None:
+    def _stage_prebuilt_quickjs(self, dest: Path) -> None:
         quickjs_dir = self.prebuilt_components.get("quickjs")
         if not quickjs_dir:
             return
-        dest = Path(source_dir) / "quickjs"
         if dest.exists():
             shutil.rmtree(dest)
         dest.mkdir(parents=True, exist_ok=True)
@@ -785,88 +754,7 @@ class CrossCompiler:
         platform = self._sanitize(self._platform().replace("/", "_"))
         return f"frameos-cross-{base}-{platform}-v{TOOLCHAIN_IMAGE_VERSION}"
 
-    def _is_luckfox_buildroot(self) -> bool:
-        return (self.target.distro or "").lower() == "buildroot" and str(self.target.version).startswith(
-            "luckfox"
-        )
-
-    async def _ensure_luckfox_toolchain_image(self) -> str:
-        image = self._toolchain_image()
-        inspect_cmd = f"docker image inspect {shlex.quote(image)} >/dev/null 2>&1"
-        status, _out, _err = await self._run_command(
-            inspect_cmd,
-            log_command=False,
-            log_output=False,
-        )
-        if status == 0:
-            return image
-
-        dockerfile_contents = dedent(
-            f"""
-            FROM {self._docker_image()}
-
-            ARG TOOLCHAIN_URL={LUCKFOX_BUILDROOT_TOOLCHAIN_URL}
-            ARG TOOLCHAIN_DIR={LUCKFOX_BUILDROOT_TOOLCHAIN_DIR}
-
-            RUN set -eux \\
-                && apt-get update \\
-                && apt-get install -y --no-install-recommends {TOOLCHAIN_PACKAGES} ca-certificates \\
-                && mkdir -p "${{TOOLCHAIN_DIR}}" \\
-                && curl -L "$TOOLCHAIN_URL" -o /tmp/toolchain.tar.gz \\
-                && tar -xzf /tmp/toolchain.tar.gz -C /opt \\
-                && mv /opt/arm-rockchip830-linux-uclibcgnueabihf "$TOOLCHAIN_DIR" \\
-                && rm -rf /tmp/toolchain.tar.gz /var/lib/apt/lists/*
-
-            ENV LUCKFOX_TOOLCHAIN={LUCKFOX_BUILDROOT_TOOLCHAIN_DIR}
-            ENV PATH=$LUCKFOX_TOOLCHAIN/bin:$PATH
-            """
-        ).strip()
-
-        if self._build_host_session:
-            if not self._remote_root:
-                raise RuntimeError("Build host workspace missing for toolchain build")
-            remote_dir = self._remote_root / "luckfox-toolchain"
-            dockerfile_path = remote_dir / "Dockerfile"
-            await self._build_host_session.ensure_dir(str(remote_dir))
-            await self._build_host_session.write_file(str(dockerfile_path), dockerfile_contents)
-            build_cmd = " ".join(
-                [
-                    "docker buildx build --load",
-                    "--platform linux/amd64",
-                    f"-t {shlex.quote(image)}",
-                    f"-f {shlex.quote(str(dockerfile_path))}",
-                    shlex.quote(str(remote_dir)),
-                ]
-            )
-            status, _stdout, err = await self._run_command(
-                build_cmd,
-                log_command="docker buildx build (luckfox toolchain)",
-            )
-        else:
-            with tempfile.TemporaryDirectory(prefix="frameos-cross-luckfox-") as tmp:
-                dockerfile_path = Path(tmp) / "Dockerfile"
-                dockerfile_path.write_text(dockerfile_contents)
-                build_cmd = " ".join(
-                    [
-                        "docker buildx build --load",
-                        "--platform linux/amd64",
-                        f"-t {shlex.quote(image)}",
-                        f"-f {shlex.quote(str(dockerfile_path))}",
-                        shlex.quote(tmp),
-                    ]
-                )
-
-                status, _stdout, err = await self._run_command(
-                    build_cmd,
-                    log_command="docker buildx build (luckfox toolchain)",
-                )
-        if status != 0:
-            raise RuntimeError(f"Failed to build Luckfox cross toolchain image: {err or 'see logs'}")
-        return image
-
     async def _ensure_toolchain_image(self) -> str:
-        if self._is_luckfox_buildroot():
-            return await self._ensure_luckfox_toolchain_image()
         image = self._toolchain_image()
         inspect_cmd = f"docker image inspect {shlex.quote(image)} >/dev/null 2>&1"
         status, _out, _err = await self._run_command(
