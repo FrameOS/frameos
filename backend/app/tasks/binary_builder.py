@@ -156,7 +156,7 @@ class FrameBinaryBuilder:
                     build_host=build_host,
                 )
             except Exception as exc:
-                failure_msg = f"Cross compilation failed ({exc}); falling back to on-device build"
+                failure_msg = f"Cross compilation failed ({exc})"
                 if build_host:
                     failure_msg = f"Cross compilation failed on build host ({exc})"
                 await self._log(
