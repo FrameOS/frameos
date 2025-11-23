@@ -558,6 +558,13 @@ export interface FrameOSSettings {
     buildServerPublicKey?: string
     buildServerMaxParallelJobs?: number
   }
+  buildHost?: {
+    enabled?: boolean
+    host?: string
+    user?: string
+    port?: number
+    sshKey?: string
+  }
 }
 
 export interface FrameStateRecord {

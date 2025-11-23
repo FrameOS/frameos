@@ -25,6 +25,7 @@ from app.tasks.prebuilt_deps import (
     fetch_prebuilt_manifest,
     resolve_prebuilt_target,
 )
+from app.utils.build_host import BuildHostConfig, BuildHostSession
 from app.utils.local_exec import exec_local_command
 
 icon = "🔶"
@@ -106,6 +107,7 @@ class CrossCompiler:
         prebuilt_target: str | None = None,
         logger: LogFunc | None = None,
         build_dir: str | Path | None = None,
+        build_host: BuildHostConfig | None = None,
     ) -> None:
         self.db = db
         self.redis = redis
@@ -128,12 +130,33 @@ class CrossCompiler:
         self.prebuilt_components: dict[str, Path] = {}
         self.prebuilt_timeout = PREBUILT_TIMEOUT
         self.logger = logger
+        self.build_host = build_host
+        self._build_host_session: BuildHostSession | None = None
+        self._remote_root: Path | None = None
+        self._remote_toolchain_dockerfile: str | None = None
         self._sysroot_include_dirs: set[str] = set()
         self._sysroot_lib_dirs: set[str] = set()
         for rel in ("usr/include", "usr/local/include", "usr/lib", "usr/local/lib"):
             (self.sysroot_dir / rel).mkdir(parents=True, exist_ok=True)
 
     async def build(self, source_dir: str) -> str:
+        if self.build_host:
+            async with BuildHostSession(self.build_host, logger=self._log) as session:
+                self._build_host_session = session
+                self._remote_root = Path(await session.mktemp_dir("frameos-cross-"))
+                await self._log(
+                    "stdout",
+                    f"{icon} Using build host {self.build_host.user}@{self.build_host.host}:{self.build_host.port} for cross compilation",
+                )
+                try:
+                    return await self._build_with_context(source_dir)
+                finally:
+                    self._build_host_session = None
+                    self._remote_root = None
+                    self._remote_toolchain_dockerfile = None
+        return await self._build_with_context(source_dir)
+
+    async def _build_with_context(self, source_dir: str) -> str:
         await self._log(
             "stdout",
             f"{icon} Cross compiling for {self.target.arch} on {self._docker_image()} via {self._platform()}",
@@ -226,7 +249,7 @@ class CrossCompiler:
                 ).strip()
                 + "\n\n"
             )
-        script_path.write_text(
+        script_content = (
             dedent(
                 f"""
                 #!/usr/bin/env bash
@@ -260,9 +283,14 @@ class CrossCompiler:
             ).strip()
             + "\n"
         )
-        os.chmod(script_path, 0o755)
 
         image = await self._ensure_toolchain_image()
+
+        if self._build_host_session:
+            return await self._run_remote_docker_build(build_dir, script_content, image)
+
+        script_path.write_text(script_content)
+        os.chmod(script_path, 0o755)
 
         docker_cmd = " ".join(
             [
@@ -287,6 +315,67 @@ class CrossCompiler:
         if status != 0:
             raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
         return os.path.join(build_dir, "frameos")
+
+    async def _run_remote_docker_build(
+        self, build_dir: str, script_content: str, image: str
+    ) -> str:
+        if not self._build_host_session or not self._remote_root:
+            raise RuntimeError("Build host session unavailable during cross compilation")
+
+        host = self._build_host_session
+        remote_build_dir = str(self._remote_root / "src")
+        remote_sysroot_dir = str(self._remote_root / "sysroot")
+        remote_script_path = str(self._remote_root / "build.sh")
+
+        await self._log("stdout", f"{icon} Syncing build directory to build host")
+        await host.sync_dir(build_dir, remote_build_dir)
+        await self._log("stdout", f"{icon} Syncing sysroot to build host")
+        await host.sync_dir(str(self.sysroot_dir), remote_sysroot_dir)
+        await host.write_file(remote_script_path, script_content, mode=0o755)
+
+        docker_cmd = " ".join(
+            [
+                "docker run --rm",
+                f"--platform {self._platform()}",
+                f"-v {shlex.quote(remote_build_dir)}:/src",
+                f"-v {shlex.quote(remote_sysroot_dir)}:/sysroot:ro",
+                f"-v {shlex.quote(remote_script_path)}:/tmp/build.sh:ro",
+                "-w /src",
+                shlex.quote(image),
+                "bash /tmp/build.sh",
+            ]
+        )
+
+        status, _, err = await host.run(
+            docker_cmd,
+            log_command="docker run (build host cross compile)",
+        )
+        if status != 0:
+            raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
+
+        local_binary = os.path.join(build_dir, "frameos")
+        await host.download_file(f"{remote_build_dir}/frameos", local_binary)
+        return local_binary
+
+    async def _run_command(
+        self,
+        command: str,
+        *,
+        log_command: str | bool = True,
+        log_output: bool = True,
+    ) -> tuple[int, str | None, str | None]:
+        if self._build_host_session:
+            return await self._build_host_session.run(
+                command, log_command=log_command, log_output=log_output
+            )
+        return await exec_local_command(
+            self.db,
+            self.redis,
+            self.frame,
+            command,
+            log_command=log_command,
+            log_output=log_output,
+        )
 
     def _cpu_feature_cflags(self) -> list[str]:
         arch = (self.target.arch or "").lower()
@@ -654,10 +743,7 @@ class CrossCompiler:
     async def _ensure_luckfox_toolchain_image(self) -> str:
         image = self._toolchain_image()
         inspect_cmd = f"docker image inspect {shlex.quote(image)} >/dev/null 2>&1"
-        status, _out, _err = await exec_local_command(
-            self.db,
-            self.redis,
-            self.frame,
+        status, _out, _err = await self._run_command(
             inspect_cmd,
             log_command=False,
             log_output=False,
@@ -686,28 +772,46 @@ class CrossCompiler:
             """
         ).strip()
 
-        with tempfile.TemporaryDirectory(prefix="frameos-cross-luckfox-") as tmp:
-            dockerfile_path = Path(tmp) / "Dockerfile"
-            dockerfile_path.write_text(dockerfile_contents)
+        if self._build_host_session:
+            if not self._remote_root:
+                raise RuntimeError("Build host workspace missing for toolchain build")
+            remote_dir = self._remote_root / "luckfox-toolchain"
+            dockerfile_path = remote_dir / "Dockerfile"
+            await self._build_host_session.ensure_dir(str(remote_dir))
+            await self._build_host_session.write_file(str(dockerfile_path), dockerfile_contents)
             build_cmd = " ".join(
                 [
                     "docker buildx build --load",
                     "--platform linux/amd64",
                     f"-t {shlex.quote(image)}",
                     f"-f {shlex.quote(str(dockerfile_path))}",
-                    shlex.quote(tmp),
+                    shlex.quote(str(remote_dir)),
                 ]
             )
-
-            status, _stdout, err = await exec_local_command(
-                self.db,
-                self.redis,
-                self.frame,
+            status, _stdout, err = await self._run_command(
                 build_cmd,
                 log_command="docker buildx build (luckfox toolchain)",
             )
-            if status != 0:
-                raise RuntimeError(f"Failed to build Luckfox cross toolchain image: {err or 'see logs'}")
+        else:
+            with tempfile.TemporaryDirectory(prefix="frameos-cross-luckfox-") as tmp:
+                dockerfile_path = Path(tmp) / "Dockerfile"
+                dockerfile_path.write_text(dockerfile_contents)
+                build_cmd = " ".join(
+                    [
+                        "docker buildx build --load",
+                        "--platform linux/amd64",
+                        f"-t {shlex.quote(image)}",
+                        f"-f {shlex.quote(str(dockerfile_path))}",
+                        shlex.quote(tmp),
+                    ]
+                )
+
+                status, _stdout, err = await self._run_command(
+                    build_cmd,
+                    log_command="docker buildx build (luckfox toolchain)",
+                )
+        if status != 0:
+            raise RuntimeError(f"Failed to build Luckfox cross toolchain image: {err or 'see logs'}")
         return image
 
     async def _ensure_toolchain_image(self) -> str:
@@ -715,10 +819,7 @@ class CrossCompiler:
             return await self._ensure_luckfox_toolchain_image()
         image = self._toolchain_image()
         inspect_cmd = f"docker image inspect {shlex.quote(image)} >/dev/null 2>&1"
-        status, _out, _err = await exec_local_command(
-            self.db,
-            self.redis,
-            self.frame,
+        status, _out, _err = await self._run_command(
             inspect_cmd,
             log_command=False,
             log_output=False,
@@ -731,7 +832,22 @@ class CrossCompiler:
             raise RuntimeError(
                 "Cross toolchain Dockerfile is missing; expected at backend/tools/cross-toolchain.Dockerfile",
             )
-        context_dir = str(Path(dockerfile).parent)
+
+        if self._build_host_session:
+            if not self._remote_root:
+                raise RuntimeError("Build host workspace missing for toolchain build")
+            remote_dir = self._remote_root / "cross-toolchain"
+            dockerfile_path = remote_dir / Path(dockerfile).name
+            await self._build_host_session.ensure_dir(str(remote_dir))
+            await self._build_host_session.write_file(
+                str(dockerfile_path), Path(dockerfile).read_text()
+            )
+            context_dir = str(remote_dir)
+            dockerfile_arg = str(dockerfile_path)
+        else:
+            context_dir = str(Path(dockerfile).parent)
+            dockerfile_arg = dockerfile
+
         build_cmd = " ".join(
             [
                 "docker buildx build --load",
@@ -739,17 +855,15 @@ class CrossCompiler:
                 f"--build-arg BASE_IMAGE={shlex.quote(self._docker_image())}",
                 f"--build-arg TOOLCHAIN_PACKAGES={shlex.quote(TOOLCHAIN_PACKAGES)}",
                 f"-t {shlex.quote(image)}",
-                f"-f {shlex.quote(dockerfile)}",
+                f"-f {shlex.quote(dockerfile_arg)}",
                 shlex.quote(context_dir),
             ]
         )
 
-        status, _stdout, err = await exec_local_command(
-            self.db,
-            self.redis,
-            self.frame,
+        status, _stdout, err = await self._run_command(
             build_cmd,
-            log_command="docker buildx build (cross toolchain)",
+
+            # log_command="docker buildx build (cross toolchain)",
         )
         if status != 0:
             raise RuntimeError(f"Failed to build cross toolchain image: {err or 'see logs'}")
@@ -774,6 +888,7 @@ async def build_binary_with_cross_toolchain(
     prebuilt_target: str | None = None,
     target_override: TargetMetadata | None = None,
     logger: LogFunc | None = None,
+    build_host: BuildHostConfig | None = None,
 ) -> str:
     arch: str | None
     distro: str | None
@@ -840,6 +955,7 @@ async def build_binary_with_cross_toolchain(
         prebuilt_entry=prebuilt_entry,
         prebuilt_target=resolved_target,
         logger=logger,
+        build_host=build_host,
     )
     return await compiler.build(source_dir)
 

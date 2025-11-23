@@ -230,6 +230,35 @@ export function Settings() {
                     ) : null}
                   </Box>
                 </Group>
+                <Group name="buildHost">
+                  <H6 className="pt-4">Cross-compilation build host</H6>
+                  <Box className="p-2 space-y-2">
+                    <p className="text-sm leading-loose">
+                      Configure a remote machine to perform cross-compilation after Nim sources are generated. The
+                      backend will upload generated sources and sysroot assets via SSH/SCP, run Docker Buildx on that
+                      host, and download the resulting binary.
+                    </p>
+                    <Field name="enabled" label="Enable build host">
+                      <Switch fullWidth />
+                    </Field>
+                    {settings?.buildHost?.enabled ? (
+                      <>
+                        <Field name="host" label="Build host address">
+                          <TextInput placeholder="builder.example.com" />
+                        </Field>
+                        <Field name="port" label="SSH port">
+                          <NumberTextInput placeholder="22" />
+                        </Field>
+                        <Field name="user" label="SSH user">
+                          <TextInput placeholder="ubuntu" />
+                        </Field>
+                        <Field name="sshKey" label="Private SSH key" secret={!!savedSettings?.buildHost?.sshKey}>
+                          <TextArea />
+                        </Field>
+                      </>
+                    ) : null}
+                  </Box>
+                </Group>
               </Form>
               <H6 className="pt-4">System information</H6>
               <SystemInfo />

@@ -13,6 +13,7 @@ from app.models.frame import Frame
 from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.prebuilt_deps import PrebuiltEntry, fetch_prebuilt_manifest, resolve_prebuilt_target
+from app.utils.build_host import get_build_host_config
 from app.utils.cross_compile import (
     TargetMetadata,
     build_binary_with_cross_toolchain,
@@ -113,6 +114,7 @@ class FrameBinaryBuilder:
             arch=target.arch,
             logger=self._log,
         )
+        build_host = get_build_host_config(self.db)
 
         source_dir = self.deployer.create_local_source_folder(
             self.temp_dir, source_root=self.source_root
@@ -131,7 +133,13 @@ class FrameBinaryBuilder:
         cross_compiled = False
         binary_path: str | None = None
         if allow_cross_compile and can_cross_compile_target(target.arch):
-            await self._log("stdout", f"{icon} Target supports cross compilation; building binary locally")
+            if build_host:
+                await self._log(
+                    "stdout",
+                    f"{icon} Target supports cross compilation; building binary via build host",
+                )
+            else:
+                await self._log("stdout", f"{icon} Target supports cross compilation; building binary locally")
             try:
                 binary_path = await build_binary_with_cross_toolchain(
                     db=self.db,
@@ -145,17 +153,21 @@ class FrameBinaryBuilder:
                     prebuilt_target=prebuilt_target,
                     target_override=target,
                     logger=self._log,
+                    build_host=build_host,
                 )
             except Exception as exc:
+                failure_msg = f"Cross compilation failed ({exc}); falling back to on-device build"
+                if build_host:
+                    failure_msg = f"Cross compilation failed on build host ({exc})"
                 await self._log(
                     "stderr",
-                    f"{icon} Cross compilation failed ({exc})",
+                    f"{icon} {failure_msg}",
                 )
                 await self._log(
                     "stderr",
                     f"{icon} Falling back to on-device build!",
                 )
-                if force_cross_compile:
+                if force_cross_compile or build_host:
                     raise
             else:
                 cross_compiled = True

@@ -17,6 +17,7 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     ssh_keys: settings.ssh_keys ?? {},
     unsplash: settings.unsplash ?? {},
     nix: settings.nix ?? {},
+    buildHost: settings.buildHost ?? {},
   }
 }
 
