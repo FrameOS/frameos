@@ -70,6 +70,7 @@ docker run -d -p 8989:8989 \
     --name frameos \
     --restart always \
     -e SECRET_KEY="$SECRET_KEY" \
+    -e TMPDIR=/tmp/frameos-cross \
     frameos/frameos
 
 # update daily to the latest release

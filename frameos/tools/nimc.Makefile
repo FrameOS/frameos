@@ -23,6 +23,8 @@ clean:
 pre-build:
 	@mkdir -p ../cache
 	@echo "Compiling, largest files first. This might take a while on the first run."
+	@echo "/sysroot/usr/local/lib -->"
+	@ls -l /sysroot/usr/local/lib
 
 $(OBJECTS): pre-build
 

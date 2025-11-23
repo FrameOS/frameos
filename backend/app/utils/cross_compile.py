@@ -304,7 +304,7 @@ class CrossCompiler:
             f"{icon} Ensuring QuickJS sources are available at {quickjs_root} (exists={quickjs_root.exists()})",
         )
         prebuilt_path = self.prebuilt_components.get("quickjs")
-        if prebuilt_path:
+        if prebuilt_path and not libquickjs.exists():
             await self._log(
                 "stdout",
                 f"{icon} Prebuilt QuickJS component detected at {prebuilt_path}; staging into source tree",
@@ -340,15 +340,18 @@ class CrossCompiler:
             "stdout",
             f"{icon} Ensuring QuickJS assets exist within build dir {dest} (exists={dest.exists()})",
         )
+        if libquickjs.exists():
+            await self._log("stdout", f"Build directory already contains {libquickjs}")
+            return
         if self.prebuilt_components.get("quickjs"):
             await self._log(
                 "stdout",
                 f"{icon} Staging prebuilt QuickJS component directly into build directory",
             )
             self._stage_quickjs(str(build_dir))
-        if libquickjs.exists():
-            await self._log("stdout", f"Build directory already contains {libquickjs}")
-            return
+            if libquickjs.exists():
+                await self._log("stdout", f"{icon} QuickJS archive staged into build directory at {libquickjs}")
+                return
         source_quickjs = Path(source_dir) / "quickjs"
         if source_quickjs.exists():
             await self._log(
