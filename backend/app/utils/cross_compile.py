@@ -270,10 +270,10 @@ class CrossCompiler:
                 f"--platform {self._platform()}",
                 f"-v {shlex.quote(build_dir)}:/src",
                 f"-v {shlex.quote(str(self.sysroot_dir))}:/sysroot:ro",
-                f"-v {shlex.quote(str(script_path))}:/tmp/build.sh:ro",
+                f"-v {shlex.quote(str(script_path))}:/tmp/frameos-cross/build.sh:ro",
                 "-w /src",
                 shlex.quote(image),
-                "bash /tmp/build.sh",
+                "bash /tmp/frameos-cross/build.sh",
             ]
         )
 

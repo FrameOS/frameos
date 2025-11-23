@@ -51,7 +51,26 @@ bash <(curl -fsSL https://frameos.net/install.sh)
 # running the latest release
 SECRET_KEY=$(openssl rand -base64 32)
 mkdir db
-docker run -d -p 8989:8989 -v ./db:/app/db --name frameos --restart always -e SECRET_KEY="$SECRET_KEY" frameos/frameos
+docker run -d -p 8989:8989 \
+    -v ./db:/app/db \ 
+    --name frameos \
+    --restart always \
+    -e SECRET_KEY="$SECRET_KEY" \
+    frameos/frameos
+
+# If you want to enable cross-compilation - needs to run docker containers on host
+SECRET_KEY=$(openssl rand -base64 32)
+mkdir -p db
+mkdir -p /tmp/frameos-cross
+docker run -d -p 8989:8989 \
+    -v ./db:/app/db \
+    -v /tmp/frameos-cross:/tmp/frameos-cross \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    --privileged \
+    --name frameos \
+    --restart always \
+    -e SECRET_KEY="$SECRET_KEY" \
+    frameos/frameos
 
 # update daily to the latest release
 docker run -d \
