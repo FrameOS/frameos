@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shlex
+import tarfile
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -141,8 +144,8 @@ class BuildHostSession:
         out_buf: list[str] = []
         err_buf: list[str] = []
         await asyncio.gather(
-            pump(proc.stdout, "stdout", out_buf),
-            pump(proc.stderr, "stderr", err_buf),
+            pump(proc.stdout, "stdout", out_buf), # type: ignore
+            pump(proc.stderr, "stderr", err_buf), # type: ignore
         )
 
         status = await proc.wait()
@@ -172,6 +175,40 @@ class BuildHostSession:
         await self.remove_path(remote_path)
         await self.ensure_dir(str(Path(remote_path).parent))
         await asyncssh.scp(local_path, (self._conn, remote_path), recurse=True, preserve=True)
+
+    async def sync_dir_tarball(self, local_path: str, remote_path: str) -> None:
+        if not self._conn:
+            raise RuntimeError("Build host session is not connected")
+
+        fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
+        os.close(fd)
+        archive_path = Path(tmp_path)
+        try:
+            with tarfile.open(archive_path, "w:gz") as tar:
+                tar.add(local_path, arcname=".")
+
+            remote_archive = f"{remote_path}.tar.gz"
+            await self.remove_path(remote_path)
+            await self.ensure_dir(str(Path(remote_path).parent))
+            await asyncssh.scp(str(archive_path), (self._conn, remote_archive))
+            await self.run(
+                " ".join(
+                    [
+                        "mkdir -p",
+                        shlex.quote(remote_path),
+                        "&& tar -xzf",
+                        shlex.quote(remote_archive),
+                        "-C",
+                        shlex.quote(remote_path),
+                        "&& rm -f",
+                        shlex.quote(remote_archive),
+                    ]
+                ),
+                log_command=False,
+                log_output=False,
+            )
+        finally:
+            archive_path.unlink(missing_ok=True)
 
     async def write_file(self, remote_path: str, content: str, mode: int = 0o644) -> None:
         if not self._conn:

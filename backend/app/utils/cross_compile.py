@@ -334,16 +334,17 @@ class CrossCompiler:
         build_dir_size = self._dir_size_bytes(Path(build_dir))
         await self._log(
             "stdout",
-            f"{icon} Syncing build directory to build host "
+            f"{icon} Syncing build directory to build host via tarball "
             f"({self._format_size(build_dir_size)})",
         )
-        await host.sync_dir(build_dir, remote_build_dir)
+        await host.sync_dir_tarball(build_dir, remote_build_dir)
         sysroot_size = self._dir_size_bytes(self.sysroot_dir)
         await self._log(
             "stdout",
-            f"{icon} Syncing sysroot to build host ({self._format_size(sysroot_size)})",
+            f"{icon} Syncing sysroot to build host via tarball "
+            f"({self._format_size(sysroot_size)})",
         )
-        await host.sync_dir(str(self.sysroot_dir), remote_sysroot_dir)
+        await host.sync_dir_tarball(str(self.sysroot_dir), remote_sysroot_dir)
         await host.write_file(remote_script_path, script_content, mode=0o755)
 
         docker_cmd = " ".join(
