@@ -149,7 +149,11 @@ class FrameBinaryBuilder:
             except Exception as exc:
                 await self._log(
                     "stderr",
-                    f"{icon} Cross compilation failed ({exc}); falling back to on-device build",
+                    f"{icon} Cross compilation failed ({exc})",
+                )
+                await self._log(
+                    "stderr",
+                    f"{icon} Falling back to on-device build!",
                 )
                 if force_cross_compile:
                     raise
