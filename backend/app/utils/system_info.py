@@ -14,6 +14,7 @@ from app.config import config
 from app.utils.cross_compile import CACHE_ENV as CROSS_CACHE_ENV, DEFAULT_CACHE as DEFAULT_CROSS_CACHE
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)
@@ -130,7 +131,7 @@ def _sqlite_path(database_url: str) -> Path | None:
 
     db_path = Path(url.database or "")
     if not db_path.is_absolute():
-        db_path = (BACKEND_ROOT / db_path).resolve()
+        db_path = (REPO_ROOT / db_path).resolve()
     return db_path
 
 

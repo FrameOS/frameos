@@ -34,6 +34,7 @@ export const settingsLogic = kea<settingsLogicType>([
     updateSavedSettings: (settings: Record<string, any>) => ({ settings }),
     newKey: true,
     newNixKey: true,
+    newBuildHostKey: true,
   }),
   loaders(({ values }) => ({
     savedSettings: [
@@ -170,6 +171,27 @@ export const settingsLogic = kea<settingsLogicType>([
       actions.setSettingsValue(
         ['nix', 'buildServerPublicKey'],
         `${data.public} frameos-build@${window.location.hostname}`
+      )
+    },
+    newBuildHostKey: async () => {
+      if (values.savedSettings.buildHost?.sshKey) {
+        if (
+          !confirm('Are you sure you want to generate a new key? You might lose access to the existing build host.')
+        ) {
+          return
+        }
+      }
+      const response = await apiFetch(`/api/generate_ssh_keys`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        throw new Error('Failed to generate new key')
+      }
+      const data = await response.json()
+      actions.setSettingsValue(['buildHost', 'sshKey'], data.private)
+      actions.setSettingsValue(
+        ['buildHost', 'sshPublicKey'],
+        `${data.public} frameos-buildhost@${window.location.hostname}`
       )
     },
   })),

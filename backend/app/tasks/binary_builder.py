@@ -163,12 +163,23 @@ class FrameBinaryBuilder:
                     "stderr",
                     f"{icon} {failure_msg}",
                 )
-                await self._log(
-                    "stderr",
-                    f"{icon} Falling back to on-device build!",
-                )
-                if force_cross_compile or build_host:
+                if "command not found" in str(exc).lower() or "buildx" in str(exc).lower():
+                    await self._log(
+                        "stderr",
+                        f"{icon} Ensure Docker and the Docker Buildx plugin are installed on the build host with: sudo apt install docker.io docker-buildx-plugin",
+                    )
+                if "permission denied" in str(exc).lower():
+                    await self._log(
+                        "stderr",
+                        f"{icon} Ensure the build host user has permission to run Docker commands (e.g., is in the 'docker' group)",
+                    )
+                if force_cross_compile:
                     raise
+                else:
+                    await self._log(
+                        "stderr",
+                        f"{icon} Falling back to on-device build!",
+                    )
             else:
                 cross_compiled = True
                 await self._log("stdout", f"{icon} Cross compilation succeeded; skipping remote build")

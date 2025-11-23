@@ -368,11 +368,30 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           {frameForm.mode === 'rpios' || !frameForm.mode ? (
             <Group name="rpios">
               <Field
-                name="disableCrossCompilation"
-                label="Disable cross compilation"
-                tooltip="Build directly on the frame instead of using the cross compiler. This is much  slower, but may be needed in some case."
+                name="crossCompilation"
+                label="Cross compilation"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>
+                      Choose how to build the FrameOS binary: auto will try to cross-compile and fall back to on-device
+                      builds, always will fail if cross compilation is unavailable, and never will always build on the
+                      device.
+                    </p>
+                    <p>
+                      If you're running FrameOS via Docker, you may need to configure a build host for cross-compilation
+                      on the global settings page.
+                    </p>
+                  </div>
+                }
               >
-                <Switch name="rpios.disableCrossCompilation" fullWidth />
+                <Select
+                  name="rpios.crossCompilation"
+                  options={[
+                    { value: 'auto', label: 'Auto (try to cross-compile, fallback if needed)' },
+                    { value: 'always', label: 'Always cross-compile (fail if unavailable)' },
+                    { value: 'never', label: 'Never cross-compile (build on device)' },
+                  ]}
+                />
               </Field>
             </Group>
           ) : null}

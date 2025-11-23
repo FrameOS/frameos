@@ -521,15 +521,22 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             drivers = drivers_for_frame(frame)
 
             rpios_settings = frame.rpios or {}
-            disable_cross_compilation = rpios_settings.get("disableCrossCompilation")
-            disable_cross_compilation = (
-                disable_cross_compilation is True
-                or (isinstance(disable_cross_compilation, str) and disable_cross_compilation.lower() == "true")
-            )
-            if disable_cross_compilation:
+            cross_compilation_setting = (rpios_settings.get("crossCompilation") or "auto").lower()
+            if cross_compilation_setting not in {"auto", "always", "never"}:
+                cross_compilation_setting = "auto"
+
+            allow_cross_compile = cross_compilation_setting != "never"
+            force_cross_compile = cross_compilation_setting == "always"
+
+            if cross_compilation_setting == "never":
                 await self.log(
                     "stdout",
                     f"{icon} Cross compilation disabled in frame settings; building on device",
+                )
+            elif cross_compilation_setting == "always":
+                await self.log(
+                    "stdout",
+                    f"{icon} Cross compilation required by frame settings",
                 )
 
             builder = FrameBinaryBuilder(
@@ -540,7 +547,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 temp_dir=temp_dir,
             )
             build_result = await builder.build(
-                allow_cross_compile=not disable_cross_compilation,
+                allow_cross_compile=allow_cross_compile,
+                force_cross_compile=force_cross_compile,
                 target_override=TargetMetadata(arch=arch, distro=distro, version=distro_version),
             )
 

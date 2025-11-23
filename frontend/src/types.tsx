@@ -564,6 +564,7 @@ export interface FrameOSSettings {
     user?: string
     port?: number
     sshKey?: string
+    sshPublicKey?: string
   }
 }
 
@@ -591,5 +592,5 @@ export interface FrameBuildrootConfig {
 
 export interface FrameRpiOSConfig {
   platform?: string
-  disableCrossCompilation?: boolean
+  crossCompilation?: '' | 'auto' | 'always' | 'never'
 }

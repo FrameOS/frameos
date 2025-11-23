@@ -152,7 +152,7 @@ class BuildHostSession:
 
     async def mktemp_dir(self, prefix: str = "frameos-build-") -> str:
         status, out, _err = await self.run(
-            f"mktemp -d -p /tmp {prefix}XXXXXX", log_output=False
+            f"mktemp -d -p /tmp {prefix}XXXXXX", log_output=False, log_command=False
         )
         if status != 0 or not out:
             raise RuntimeError("Failed to allocate temporary directory on build host")

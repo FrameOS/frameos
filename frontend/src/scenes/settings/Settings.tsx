@@ -27,7 +27,8 @@ export function Settings() {
     isCustomFontsFormSubmitting,
     customFonts,
   } = useValues(settingsLogic)
-  const { submitSettings, newKey, newNixKey, deleteCustomFont, setSettingsValue } = useActions(settingsLogic)
+  const { submitSettings, newKey, newNixKey, newBuildHostKey, deleteCustomFont, setSettingsValue } =
+    useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
 
@@ -234,9 +235,25 @@ export function Settings() {
                   <H6 className="pt-4">Cross-compilation build host</H6>
                   <Box className="p-2 space-y-2">
                     <p className="text-sm leading-loose">
-                      Configure a remote machine to perform cross-compilation after Nim sources are generated. The
-                      backend will upload generated sources and sysroot assets via SSH/SCP, run Docker Buildx on that
-                      host, and download the resulting binary.
+                      When deploying FrameOS, we compile it from source. We can compile on-device for maximal
+                      compatibility, but this is slow and inefficient. Therefore we also support cross-compilation,
+                      where we compile the FrameOS binary on this server, and only upload the resulting binary onto the
+                      device.
+                    </p>
+                    <p className="text-sm leading-loose">
+                      Cross-compilation is performed via Docker. We need to spin up new docker containers for the
+                      various build environments. If FrameOS itself is running in Docker, we will need to run
+                      Docker-in-Docker, which requires elevated privileges. See the{' '}
+                      <a href="https://github.com/FrameOS/frameos/blob/main/README.md" target="_blank">
+                        README
+                      </a>{' '}
+                      for more.
+                    </p>
+                    <p className="text-sm leading-loose">
+                      Alternatively you may configure a remote build host below. The backend will upload generated C
+                      sources and sysroot assets via SSH/SCP, run Docker Buildx on that host, and download the resulting
+                      binary. Ensure Docker and the Docker Buildx plugin are installed on your build host. For best
+                      performance, make sure this is an ARM-based system.
                     </p>
                     <Field name="enabled" label="Enable build host">
                       <Switch fullWidth />
@@ -253,8 +270,22 @@ export function Settings() {
                           <TextInput placeholder="ubuntu" />
                         </Field>
                         <Field name="sshKey" label="Private SSH key" secret={!!savedSettings?.buildHost?.sshKey}>
-                          <TextArea />
+                          <TextArea rows={3} />
                         </Field>
+                        <Field
+                          name="sshPublicKey"
+                          label="Public SSH key"
+                          secret={!!savedSettings?.buildHost?.sshPublicKey}
+                        >
+                          <TextArea rows={3} />
+                        </Field>
+                        <Button
+                          onClick={newBuildHostKey}
+                          color={savedSettings?.buildHost?.sshKey ? 'secondary' : 'primary'}
+                          size="small"
+                        >
+                          Generate new keypair
+                        </Button>
                       </>
                     ) : null}
                   </Box>
