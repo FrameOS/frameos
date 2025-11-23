@@ -88,6 +88,10 @@ ENV USER=root
 # Copy the requirements file and install using pip
 WORKDIR /app/frameos
 COPY frameos/ ./
+
+# Precompile Nim assets before copying the rest of the repository
+RUN nimble assets -y
+
 # Cache a build so that the nix libraries are already there
 # RUN make nix-bin
 # RUN make nix-update
