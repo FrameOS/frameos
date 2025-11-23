@@ -1,0 +1,204 @@
+{
+  "entries": [
+    {
+      "target": "ubuntu-24.04-arm64",
+      "versions": {
+        "nim": "2.2.4",
+        "quickjs": "2025-04-26",
+        "lgpio": "v0.2.2"
+      },
+      "object_key": null,
+      "updated_at": "2025-11-17T21:39:25.921016+00:00",
+      "component_keys": {
+        "nim": "prebuilt-deps/ubuntu-24.04-arm64/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/ubuntu-24.04-arm64/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/ubuntu-24.04-arm64/lgpio-v0.2.2.tar.gz"
+      },
+      "component_md5sums": {
+        "nim": "fa4e489a0f4ca97e111142cc1485eca0-3",
+        "quickjs": "c25b42ddcb3008a4892a4b6c97770e58",
+        "lgpio": "f4e6d5c87b0258012e0d9006086a8b7b"
+      }
+    },
+    {
+      "target": "ubuntu-22.04-arm64",
+      "versions": {
+        "nim": "2.2.4",
+        "quickjs": "2025-04-26",
+        "lgpio": "v0.2.2"
+      },
+      "object_key": null,
+      "updated_at": "2025-11-17T21:39:26.669545+00:00",
+      "component_keys": {
+        "nim": "prebuilt-deps/ubuntu-22.04-arm64/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/ubuntu-22.04-arm64/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/ubuntu-22.04-arm64/lgpio-v0.2.2.tar.gz"
+      },
+      "component_md5sums": {
+        "nim": "51a407214dc0bcdcf61e2b2f565aef8c-3",
+        "quickjs": "6d87c2076e3eaea00aa01a73f87095b5",
+        "lgpio": "e46b57abbbf4839949731adf31cfdcbb"
+      }
+    },
+    {
+      "target": "debian-bookworm-armhf",
+      "versions": {
+        "nim": "2.2.4",
+        "quickjs": "2025-04-26",
+        "lgpio": "v0.2.2"
+      },
+      "object_key": null,
+      "updated_at": "2025-11-17T21:39:27.192523+00:00",
+      "component_keys": {
+        "nim": "prebuilt-deps/debian-bookworm-armhf/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/debian-bookworm-armhf/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/debian-bookworm-armhf/lgpio-v0.2.2.tar.gz"
+      },
+      "component_md5sums": {
+        "nim": "fbe2322877d9927fbb7eba476a34c52b-3",
+        "quickjs": "04ac9f039f74e949e19b9e37d09903b5",
+        "lgpio": "d71357d6365ec2964d8aff6a0feb28b8"
+      }
+    },
+    {
+      "target": "debian-bookworm-arm64",
+      "versions": {
+        "nim": "2.2.4",
+        "quickjs": "2025-04-26",
+        "lgpio": "v0.2.2"
+      },
+      "object_key": null,
+      "updated_at": "2025-11-17T21:39:27.877740+00:00",
+      "component_keys": {
+        "nim": "prebuilt-deps/debian-bookworm-arm64/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/debian-bookworm-arm64/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/debian-bookworm-arm64/lgpio-v0.2.2.tar.gz"
+      },
+      "component_md5sums": {
+        "nim": "b3ba27f4c867591e03859f5120f89352-3",
+        "quickjs": "01c94c2e0dcafe67136d520d37198a1f",
+        "lgpio": "c8ec2d1c9b493b1b4d5d8a710086e96a"
+      }
+    },
+    {
+      "target": "debian-trixie-arm64",
+      "versions": {
+        "nim": "2.2.4",
+        "quickjs": "2025-04-26",
+        "lgpio": "v0.2.2"
+      },
+      "object_key": null,
+      "updated_at": "2025-11-17T21:39:29.148711+00:00",
+      "component_keys": {
+        "nim": "prebuilt-deps/debian-trixie-arm64/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/debian-trixie-arm64/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/debian-trixie-arm64/lgpio-v0.2.2.tar.gz"
+      },
+      "component_md5sums": {
+        "nim": "892ff34e6d5536384bb9fbecf370a8aa-3",
+        "quickjs": "a9bf56d3059d260922cf025e2766fe69",
+        "lgpio": "bdf4c15ebc9c2f85a5b37feb94e5c012"
+      }
+    },
+    {
+      "target": "debian-trixie-armhf",
+      "versions": {
+        "nim": "2.2.4",
+        "quickjs": "2025-04-26",
+        "lgpio": "v0.2.2"
+      },
+      "object_key": null,
+      "updated_at": "2025-11-17T21:39:29.815053+00:00",
+      "component_keys": {
+        "nim": "prebuilt-deps/debian-trixie-armhf/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/debian-trixie-armhf/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/debian-trixie-armhf/lgpio-v0.2.2.tar.gz"
+      },
+      "component_md5sums": {
+        "nim": "0babe0d65c35077c0ed348c6490a1dd6-3",
+        "quickjs": "6f387fb355ce71ae14df2e87ee2faa58",
+        "lgpio": "acda43f516f50a31ae70a30568847d09"
+      }
+    },
+    {
+      "target": "ubuntu-22.04-amd64",
+      "versions": {
+        "nim": "2.2.4",
+        "quickjs": "2025-04-26",
+        "lgpio": "v0.2.2"
+      },
+      "object_key": null,
+      "updated_at": "2025-11-17T21:39:30.568729+00:00",
+      "component_keys": {
+        "nim": "prebuilt-deps/ubuntu-22.04-amd64/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/ubuntu-22.04-amd64/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/ubuntu-22.04-amd64/lgpio-v0.2.2.tar.gz"
+      },
+      "component_md5sums": {
+        "nim": "c6b68b3c4cd391664ea5ffc9da7e99ae-3",
+        "quickjs": "59a40c74cea17e28d3c129ec88434613",
+        "lgpio": "88ca23ad6587f5e6f50086502fcf8223"
+      }
+    },
+    {
+      "target": "ubuntu-24.04-amd64",
+      "versions": {
+        "nim": "2.2.4",
+        "quickjs": "2025-04-26",
+        "lgpio": "v0.2.2"
+      },
+      "object_key": null,
+      "updated_at": "2025-11-17T21:39:28.525329+00:00",
+      "component_keys": {
+        "nim": "prebuilt-deps/ubuntu-24.04-amd64/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/ubuntu-24.04-amd64/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/ubuntu-24.04-amd64/lgpio-v0.2.2.tar.gz"
+      },
+      "component_md5sums": {
+        "nim": "10a5dea3514a653cc69750d5c795424d-3",
+        "quickjs": "6571376cb878a9f28813c22bed0d6c97",
+        "lgpio": "deab557f51390340d7b70536fa566b25"
+      }
+    },
+    {
+      "target": "debian-trixie-amd64",
+      "versions": {
+        "nim": "2.2.4",
+        "quickjs": "2025-04-26",
+        "lgpio": "v0.2.2"
+      },
+      "object_key": null,
+      "updated_at": "2025-11-18T00:13:04.871697+00:00",
+      "component_keys": {
+        "nim": "prebuilt-deps/debian-trixie-amd64/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/debian-trixie-amd64/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/debian-trixie-amd64/lgpio-v0.2.2.tar.gz"
+      },
+      "component_md5sums": {
+        "nim": "17e14bf8e1a5194a10759f57d0202095",
+        "quickjs": "985d8b4423677759a7a997cc342fef31",
+        "lgpio": "5832973096a91a5dbea1ff945f1fb812"
+      }
+    },
+    {
+      "target": "debian-bookworm-amd64",
+      "versions": {
+        "nim": "2.2.4",
+        "quickjs": "2025-04-26",
+        "lgpio": "v0.2.2"
+      },
+      "object_key": null,
+      "updated_at": "2025-11-18T00:13:21.982776+00:00",
+      "component_keys": {
+        "nim": "prebuilt-deps/debian-bookworm-amd64/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/debian-bookworm-amd64/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/debian-bookworm-amd64/lgpio-v0.2.2.tar.gz"
+      },
+      "component_md5sums": {
+        "nim": "4c7e7d7e35efe97a169cb54855f5b952",
+        "quickjs": "e32a7017603f170a8ae572ed85c9972c",
+        "lgpio": "e97547474452c2f478554fa0bc7ee67f"
+      }
+    }
+  ]
+}

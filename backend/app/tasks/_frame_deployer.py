@@ -11,9 +11,8 @@ import shlex
 import shutil
 import string
 import tempfile
-from typing import Optional
+from typing import Iterable, Optional
 from gzip import compress
-
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
@@ -22,6 +21,7 @@ from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
 from app.utils.remote_exec import upload_file, run_command
+from app.drivers.drivers import Driver
 from app.drivers.waveshare import write_waveshare_driver_nim, get_variant_folder
 from app.drivers.devices import drivers_for_frame
 from app.models import get_apps_from_scenes
@@ -68,6 +68,25 @@ class FrameDeployer:
 
     async def log(self, type: str, line: str, timestamp: Optional[datetime] = None):
         await log(self.db, self.redis, int(self.frame.id), type=type, line=line, timestamp=timestamp)
+
+    @staticmethod
+    def _dedupe_preserve_order(flags: Iterable[str]) -> list[str]:
+        seen: set[str] = set()
+        unique_flags: list[str] = []
+        for flag in flags:
+            if flag not in seen:
+                seen.add(flag)
+                unique_flags.append(flag)
+        return unique_flags
+
+    @staticmethod
+    def _driver_linker_flags(drivers: dict[str, Driver]) -> list[str]:
+        flags: list[str] = []
+        for driver in drivers.values():
+            for flag in driver.link_flags:
+                if flag not in flags:
+                    flags.append(flag)
+        return flags
 
     async def _store_paths_missing(self, paths: list[str]) -> list[str]:
         """
@@ -221,6 +240,9 @@ class FrameDeployer:
         return target_host
 
     async def get_distro(self) -> str:
+        if self.frame.mode == "buildroot":
+            return "buildroot" # explicitly for now
+
         distro_out: list[str] = []
         await self.exec_command(
             "bash -c '"
@@ -228,31 +250,58 @@ class FrameDeployer:
             "elif [ -f /etc/rpi-issue ] || grep -q \"^ID=raspbian\" /etc/os-release ; then echo raspios ; "
             "else . /etc/os-release ; echo ${ID:-unknown} ; "
             "fi'",
-            distro_out
+            distro_out,
+            log_command=False,
+            log_output=False,
         )
         distro = distro_out[0].strip().lower()
         return distro if distro else "unknown"
+
+    async def get_distro_version(self) -> str:
+        if self.frame.mode == "buildroot":
+            return "22.04" # explicitly for now
+
+        version_out: list[str] = []
+        await self.exec_command(
+            "bash -c '"
+            "if [ -f /etc/os-release ]; then "
+            ". /etc/os-release ; "
+            "if [ -n \"${VERSION_CODENAME}\" ]; then echo ${VERSION_CODENAME}; "
+            "elif [ -n \"${VERSION_ID}\" ]; then echo ${VERSION_ID}; "
+            "else echo unknown; fi; "
+            "else echo unknown; fi'",
+            version_out,
+            log_command=False,
+            log_output=False,
+        )
+        version = version_out[0].strip().lower() if version_out else ""
+        return version or "unknown"
 
     async def get_total_memory_mb(self) -> int:
         mem_output: list[str] = []
         await self.exec_command(
             "grep MemTotal /proc/meminfo | awk '{print $2}'",
             mem_output,
+            log_command=False,
+            log_output=False,
         )
         kib = int(mem_output[0].strip()) if mem_output else 0 # kB from the kernel
         total_memory = kib // 1024 # MiB
         return total_memory
 
     async def get_cpu_architecture(self) -> str:
+        if self.frame.mode == "buildroot":
+            return "armv7l" # 32bit arm, explicitly for now
+
         uname_output: list[str] = []
-        await self.exec_command("uname -m", uname_output)
+        await self.exec_command("uname -m", uname_output, log_command=False, log_output=False)
         arch = "".join(uname_output).strip()
         return arch
 
     async def arch_to_nim_cpu(self, arch: str) -> str:
         if arch in ("aarch64", "arm64"):
             return "arm64"
-        elif arch in ("armv6l", "armv7l"):
+        elif arch in ("armv6l", "armv7l", "armhf"):
             return "arm"
         elif arch == "i386":
             return "i386"
@@ -323,22 +372,16 @@ class FrameDeployer:
         with open(os.path.join(source_dir, "src", "scenes", "scenes.nim"), "w") as f:
             source = write_scenes_nim(frame)
             f.write(source)
-            if frame.debug:
-                await self.log("stdout", f"Generated scenes.nim (showing because debug=true):\n{source}")
 
         drivers = drivers_for_frame(frame)
         with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
             source = write_drivers_nim(drivers)
             f.write(source)
-            if frame.debug:
-                await self.log("stdout", f"Generated drivers.nim:\n{source}")
 
         if drivers.get("waveshare"):
             with open(os.path.join(source_dir, "src", "drivers", "waveshare", "driver.nim"), "w") as wf:
                 source = write_waveshare_driver_nim(drivers)
                 wf.write(source)
-                if frame.debug:
-                    await self.log("stdout", f"Generated waveshare driver:\n{source}")
 
         await self._update_flake_with_frame_settings(source_dir)
 
@@ -549,10 +592,11 @@ class FrameDeployer:
         with open(flake_path, "w", encoding="utf-8") as fh:
             fh.write(flake)
 
-    def create_local_source_folder(self, temp_dir: str) -> str:
+    def create_local_source_folder(self, temp_dir: str, source_root: str | None = None) -> str:
         source_dir = os.path.join(temp_dir, "frameos")
         os.makedirs(source_dir, exist_ok=True)
-        shutil.copytree("../frameos", source_dir, dirs_exist_ok=True)
+        base = Path(source_root or "../frameos").resolve()
+        shutil.copytree(base, source_dir, dirs_exist_ok=True)
         return source_dir
 
     async def create_local_build_archive(
@@ -591,8 +635,10 @@ class FrameDeployer:
             shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "env"), ignore_errors=True)
             shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
 
-        await self.log("stdout",
-                "- No cross compilation. Generating source code for compilation on frame.")
+        await self.log(
+            "stdout",
+            "🔥 Generating C sources from Nim sources.",
+        )
 
         cpu = await self.arch_to_nim_cpu(arch)
         debug_options = "--lineTrace:on" if frame.debug else ""
@@ -638,16 +684,9 @@ class FrameDeployer:
             if waveshare.variant:
                 variant_folder = get_variant_folder(waveshare.variant)
 
-                if variant_folder == "it8951":
-                    util_files = ["DEV_Config.c", "DEV_Config.h"]
-                else:
-                    util_files = ["Debug.h", "DEV_Config.c", "DEV_Config.h"]
-
-                for uf in util_files:
-                    shutil.copy(
-                        os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, uf),
-                        os.path.join(build_dir, uf)
-                    )
+                util_files = ["DEV_Config.c", "DEV_Config.h"]
+                if variant_folder != "it8951":
+                    util_files.insert(0, "Debug.h")
 
                 # color e-paper variants
                 if waveshare.variant in [
@@ -664,10 +703,12 @@ class FrameDeployer:
                 else:
                     variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
 
-                for vf in variant_files:
+                waveshare_files = list(dict.fromkeys(util_files + variant_files))
+
+                for wf in waveshare_files:
                     shutil.copy(
-                        os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, vf),
-                        os.path.join(build_dir, vf)
+                        os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, wf),
+                        os.path.join(build_dir, wf)
                     )
 
         with open(os.path.join(build_dir, "Makefile"), "w") as mk:
@@ -689,16 +730,27 @@ class FrameDeployer:
                         and fl not in ['-o', '-c', '-D']
                     ]
 
-            # add quickjs lib. this was just removed in the step above, but we know it's needed
-            linker_flags += ["quickjs/libquickjs.a"]
+            linker_flags = self._dedupe_preserve_order(
+                linker_flags
+                + ["quickjs/libquickjs.a"]
+                + self._driver_linker_flags(drivers)
+            )
 
             with open(os.path.join(source_dir, "tools", "nimc.Makefile"), "r") as mf_in:
                 lines_make = mf_in.readlines()
             for ln in lines_make:
                 if ln.startswith("LIBS = "):
-                    ln = "LIBS = -L. " + " ".join(linker_flags) + "\n"
+                    ln = (
+                        "LIBS = -L. "
+                        + " ".join(linker_flags)
+                        + " $(EXTRA_LIBS)\n"
+                    )
                 if ln.startswith("CFLAGS = "):
-                    ln = "CFLAGS = " + " ".join([f for f in compiler_flags if f != '-c']) + "\n"
+                    ln = (
+                        "CFLAGS = "
+                        + " ".join([f for f in compiler_flags if f != '-c'])
+                        + " $(EXTRA_CFLAGS)\n"
+                    )
                 mk.write(ln)
 
         archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")

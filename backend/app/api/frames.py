@@ -8,10 +8,12 @@ import asyncssh
 import hashlib
 import io
 import json
+import mimetypes
 import os
 import re
-import tempfile
 import shlex
+import shutil
+import tempfile
 import zipfile
 from tempfile import NamedTemporaryFile
 from typing import Any, Optional, Tuple
@@ -71,6 +73,7 @@ from app.ws.agent_ws import (
 )
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
+from app.tasks.binary_builder import FrameBinaryBuilder
 from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import create_scoped_token_response, validate_scoped_token
 from . import api_with_auth, api_no_auth
@@ -520,6 +523,142 @@ async def api_frame_local_build_zip(                 # noqa: D401
             )
         }
         return StreamingResponse(sender(), headers=headers, media_type="application/zip")
+
+
+@api_with_auth.post("/frames/{id:int}/download_c_source_zip")
+async def api_frame_local_c_source_zip(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    try:
+        nim_path = find_nim_v2()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Unable to locate Nim installation: {exc}",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        deployer = FrameDeployer(db, redis, frame, nim_path, tmp)
+
+        try:
+            arch = await deployer.get_cpu_architecture()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_GATEWAY,
+                detail=f"Unable to detect frame architecture: {exc}",
+            )
+
+        source_dir = deployer.create_local_source_folder(tmp)
+        await deployer.make_local_modifications(source_dir)
+        await copy_custom_fonts_to_local_source_folder(db, source_dir)
+
+        build_dir = os.path.join(tmp, f"build_{deployer.build_id}")
+        os.makedirs(build_dir, exist_ok=True)
+        await deployer.create_local_build_archive(build_dir, source_dir, arch)
+
+        zip_path = os.path.join(tmp, f"frameos_{deployer.build_id}_c_source.zip")
+        with zipfile.ZipFile(
+            zip_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            strict_timestamps=False,
+        ) as zf:
+            for root, _dirs, files in os.walk(build_dir):
+                for file in files:
+                    full = os.path.join(root, file)
+                    arc = os.path.relpath(full, build_dir)
+                    zf.write(full, arc)
+
+        async with aiofiles.open(zip_path, "rb") as fh:
+            zip_bytes = await fh.read()
+
+    async def sender():
+        yield zip_bytes
+
+    safe_name = (frame.name or "frame").replace(" ", "_").replace("/", "_")
+    filename = f"{safe_name}_{deployer.build_id}_c_source.zip"
+    headers = {
+        "Content-Disposition": (
+            f'attachment; filename="{_ascii_safe(filename)}"'
+        )
+    }
+    return StreamingResponse(sender(), headers=headers, media_type="application/zip")
+
+
+@api_with_auth.post("/frames/{id:int}/download_binary_zip")
+async def api_frame_local_binary_zip(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    try:
+        # Ensure Nim is available before attempting to build
+        nim_path = find_nim_v2()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Unable to locate Nim installation: {exc}",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        deployer = FrameDeployer(db, redis, frame, nim_path, tmp)
+        builder = FrameBinaryBuilder(db=db, redis=redis, frame=frame, deployer=deployer, temp_dir=tmp)
+
+        try:
+            build_result = await builder.build(force_cross_compile=True)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail=f"Failed to build FrameOS binary: {exc}",
+            ) from exc
+
+        binary_path = build_result.binary_path
+        if not binary_path:
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail="Cross compilation completed without producing a binary",
+            )
+
+        dist_dir = os.path.join(tmp, "dist")
+        os.makedirs(dist_dir, exist_ok=True)
+        bin_dir = os.path.join(dist_dir, "bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        shutil.copy2(binary_path, os.path.join(bin_dir, "frameos"))
+
+        zip_path = os.path.join(tmp, f"frameos_{deployer.build_id}_binary.zip")
+        with zipfile.ZipFile(
+            zip_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            strict_timestamps=False,
+        ) as zf:
+            for root, _dirs, files in os.walk(dist_dir):
+                for file in files:
+                    full = os.path.join(root, file)
+                    relative = os.path.relpath(full, dist_dir)
+                    arc = os.path.join("dist", relative)
+                    zf.write(full, arc)
+
+        async with aiofiles.open(zip_path, "rb") as fh:
+            zip_bytes = await fh.read()
+
+    async def sender():
+        yield zip_bytes
+
+    safe_name = (frame.name or "frame").replace(" ", "_").replace("/", "_")
+    filename = f"{safe_name}_{deployer.build_id}_binary.zip"
+    headers = {
+        "Content-Disposition": (
+            f'attachment; filename="{_ascii_safe(filename)}"'
+        )
+    }
+    return StreamingResponse(sender(), headers=headers, media_type="application/zip")
 
 
 @api_no_auth.get("/frames/{id:int}/asset")
@@ -1155,13 +1294,29 @@ async def api_frame_build_sd_image_event(id: int, db: Session = Depends(get_db),
         frame = db.get(Frame, id)
         if not frame:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-        name = (frame.name or "Untitled Frame").replace(" ", "_").replace("/", "_")
+        base_name = frame.name or f"frame{frame.id}"
+        sanitized = "".join(c if c.isalnum() or c in "-._" else "_" for c in base_name).strip("._-") or f"frame{frame.id}"
+        suffix = "".join(img_path.suffixes) or img_path.suffix or ".img"
+        filename = f"{sanitized}{suffix}"
+        quoted_filename = quote(filename)
 
-        filename = f"{name}.img.zst"
-        headers  = {
-            "Content-Disposition": f'attachment; filename="{filename}"'
+        mime, _ = mimetypes.guess_type(str(img_path))
+        if not mime and img_path.suffixes:
+            last_suffix = img_path.suffixes[-1]
+            if last_suffix == ".zst":
+                mime = "application/zstd"
+            elif last_suffix == ".gz":
+                mime = "application/gzip"
+            elif last_suffix == ".xz":
+                mime = "application/x-xz"
+            elif last_suffix == ".zip":
+                mime = "application/zip"
+
+        headers = {
+            "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quoted_filename}",
+            "Content-Length": str(img_path.stat().st_size),
         }
-        return StreamingResponse(sender(), headers=headers, media_type="application/zstd")
+        return StreamingResponse(sender(), headers=headers, media_type=mime or "application/octet-stream")
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -1258,18 +1413,21 @@ async def api_frame_new(
             data.device,
             data.interval,
         )
+
         frame.mode = data.mode
-        if data.mode == "nixos":
-            frame.mode = 'nixos'
+        if frame.mode == "nixos":
             frame.ssh_user = 'frame'
             frame.network = {} # mark as changed for the orm
             frame.network['wifiHotspot'] = 'bootOnly'
             frame.agent = {} # mark as changed for the orm
             frame.agent['agentEnabled'] = False
             frame.agent['agentRunCommands'] = True
+            platform = data.platform or (frame.nix or {}).get('platform') or 'pi-zero2'
             if timezone := settings.get('defaults', {}).get('timezone'):
                 frame.nix = {} # mark as changed for the orm
                 frame.nix['timezone'] = timezone
+            else:
+                frame.nix = frame.nix or {}
             if wifi_ssid := settings.get('defaults', {}).get('wifiSSID'):
                 frame.network['wifiSSID'] = wifi_ssid
             if wifi_password := settings.get('defaults', {}).get('wifiPassword'):
@@ -1277,8 +1435,29 @@ async def api_frame_new(
             db.add(frame)
             db.commit()
             db.refresh(frame)
-            frame.nix = { **frame.nix, 'hostname': f'frame{frame.id}' }
+            frame.nix = { **frame.nix, 'hostname': f'frame{frame.id}', 'platform': platform }
             frame.frame_host = f'frame{frame.id}.local'
+            db.add(frame)
+            db.commit()
+            db.refresh(frame)
+        elif frame.mode == "buildroot":
+            frame.ssh_user = 'root'
+            selected_platform = (data.platform or (frame.buildroot or {}).get('platform') or '').strip()
+            buildroot_settings = {**(frame.buildroot or {})}
+            if selected_platform:
+                buildroot_settings['platform'] = selected_platform
+            else:
+                buildroot_settings.pop('platform', None)
+            frame.buildroot = buildroot_settings
+            if not frame.frame_host:
+                frame.frame_host = f'frame{frame.id}.local'
+            db.add(frame)
+            db.commit()
+            db.refresh(frame)
+        elif frame.mode == "rpios":
+            rpios_settings = {**(frame.rpios or {})}
+            rpios_settings["platform"] = data.platform or (frame.rpios or {}).get('platform') or ''
+            frame.rpios = rpios_settings
             db.add(frame)
             db.commit()
             db.refresh(frame)

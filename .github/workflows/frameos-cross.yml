@@ -1,0 +1,112 @@
+name: FrameOS cross compilation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - frameos/**
+      - backend/app/utils/cross_compile.py
+      - backend/app/tasks/_frame_deployer.py
+      - backend/bin/cross
+      - backend/tools/cross-toolchain.Dockerfile
+      - .github/workflows/frameos-cross.yml
+
+jobs:
+  determine-matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      targets: ${{ steps.set-matrix.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: set-matrix
+        run: |
+          MATRIX=$(python backend/bin/cross matrix)
+          echo "targets=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  cross-build:
+    needs: determine-matrix
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.determine-matrix.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Install backend dependencies
+        run: |
+          pip install -r backend/requirements.txt
+      - name: Install Nim (prebuilt)
+        env:
+          NIM_VERSION: 2.2.4
+        run: |
+          set -euo pipefail
+          distro=$(lsb_release -si | tr '[:upper:]' '[:lower:]')
+          version=$(lsb_release -sr)
+          case "$(uname -m)" in
+            aarch64) host_arch=arm64 ;;
+            armv7l|armv6l) host_arch=armhf ;;
+            x86_64) host_arch=amd64 ;;
+            *) echo "Unsupported runner architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          nim_slug="${distro}-${version}-${host_arch}"
+          echo $nim_slug
+          mkdir -p "$HOME/.nim"
+          curl -L "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
+          tar -xzf /tmp/nim.tar.gz -C "$HOME/.nim"
+          rm -rf "$HOME/.nim/nim-2.2.4/nim/bin"
+          mv $HOME/.nim/nim-2.2.4/nim/* "$HOME/.nim/nim-2.2.4/"
+          echo "$HOME/.nim/nim-${NIM_VERSION}/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.nim/nim-${NIM_VERSION}/bin:$PATH"
+          nim --version
+      - name: Cross compile ${{ matrix.slug }}
+        run: |
+          cd frameos
+          cat frame.json
+          make cross-${{ matrix.slug }}
+
+  driver-variant-builds:
+    needs: determine-matrix
+    runs-on: ubuntu-24.04
+    env:
+      TARGET_SLUG: debian-trixie-amd64
+      TARGET_PLATFORM: linux/amd64
+      TARGET_IMAGE: debian:trixie
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: web-only
+            device: web_only
+          - label: hdmi
+            device: framebuffer
+          - label: waveshare-7.3e
+            device: waveshare.EPD_7in3e
+          - label: pimoroni-13.3
+            device: pimoroni.inky_impression_13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Install backend dependencies
+        run: |
+          pip install -r backend/requirements.txt
+      - name: Install Nim
+        env:
+          CHOOSENIM_NO_ANALYTICS: 1
+        run: |
+          curl https://nim-lang.org/choosenim/init.sh -sSf | sh -s -- -y
+          echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.nimble/bin:$PATH"
+          nim --version
+      - name: "Configure frame device (driver: ${{ matrix.label }})"
+        run: |
+          tmp=$(mktemp)
+          jq --arg device "${{ matrix.device }}" '.device = $device' frameos/frame.json > "$tmp"
+          mv "$tmp" frameos/frame.json
+          cat frameos/frame.json | jq '.device'
+      - name: Cross compile ${{ env.TARGET_SLUG }} (${{ matrix.label }})
+        run: |
+          cd frameos
+          cat frame.json
+          make cross-${TARGET_SLUG}

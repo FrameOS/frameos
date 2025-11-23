@@ -22,3 +22,7 @@ async def test_get_settings_dict(db):
     settings_map = get_settings_dict(db)
     assert settings_map["k1"] == "v1"
     assert settings_map["k2"] == {"nested": True}
+
+
+def test_get_settings_dict_without_db():
+    assert get_settings_dict(None) == {}

@@ -50,9 +50,11 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'agent',
   'palette',
   'nix',
+  'buildroot',
+  'rpios',
 ]
 
-const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot']
+const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot', 'rpios']
 const FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS: (keyof FrameType)[] = [
   'device',
   'scenes',
@@ -65,6 +67,20 @@ const FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS: (keyof FrameType)[] = [
   'network',
   'agent',
   'nix',
+]
+
+const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
+  'device',
+  'scenes',
+  'reboot',
+  'ssh_user',
+  'ssh_port',
+  'ssh_pass',
+  'log_to_file',
+  'assets_path',
+  'network',
+  'agent',
+  'buildroot',
 ]
 
 function cleanBackgroundColor(color: string): string {
@@ -260,7 +276,11 @@ export const frameLogic = kea<frameLogicType>([
           return true
         }
         const fields = (
-          mode === 'nixos' ? FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
+          mode === 'nixos'
+            ? FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS
+            : mode === 'buildroot'
+            ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT
+            : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
         ).filter((k) => k !== 'scenes')
         const resp = fields.some((key) => !equal(lastDeploy?.[key as keyof FrameType], frame?.[key as keyof FrameType]))
         if (resp) {

@@ -7,6 +7,7 @@ import { Header } from '../../components/Header'
 import { Panels } from './panels/Panels'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { panelsLogic } from './panels/panelsLogic'
+import { luckfoxBuildrootPlatformValues } from '../../devices'
 import { assetsLogic } from './panels/Assets/assetsLogic'
 import { FrameConnection } from '../frames/Frame'
 import { sdCardModalLogic } from './sdcard/sdCardModalLogic'
@@ -15,6 +16,8 @@ import { terminalLogic } from './panels/Terminal/terminalLogic'
 import { Switch } from '../../components/Switch'
 import { Form } from 'kea-forms'
 import { Field } from '../../components/Field'
+import { frameSettingsLogic } from './panels/FrameSettings/frameSettingsLogic'
+import { logsLogic } from './panels/Logs/logsLogic'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -42,6 +45,8 @@ export function Frame(props: FrameSceneProps) {
   const { openSDCardModal } = useActions(sdCardModalLogic(frameLogicProps))
   useMountedLogic(assetsLogic(frameLogicProps)) // Don't lose what we downloaded when navigating away from the tab
   useMountedLogic(terminalLogic(frameLogicProps))
+  useMountedLogic(frameSettingsLogic(frameLogicProps))
+  useMountedLogic(logsLogic(frameLogicProps))
   const { openLogs } = useActions(panelsLogic(frameLogicProps))
 
   const canDeployAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && mode === 'rpios'
@@ -50,6 +55,7 @@ export function Frame(props: FrameSceneProps) {
     frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && frame.agent.agentRunCommands
   // TODO
   const firstEverForNixOS = false && frame.mode === 'nixos' && frame.status === 'uninitialized'
+  const canBuildSdImage = mode === 'nixos' || mode === 'buildroot'
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -72,7 +78,7 @@ export function Frame(props: FrameSceneProps) {
                   buttonColor="secondary"
                   className="items-center"
                   items={[
-                    ...(mode === 'nixos' ? [{ label: 'Build SD card...', onClick: () => openSDCardModal() }] : []),
+                    ...(canBuildSdImage ? [{ label: 'Build SD card...', onClick: () => openSDCardModal() }] : []),
                     { label: 'Re-Render', onClick: () => renderFrame() },
                     { label: 'Restart FrameOS', onClick: () => restartFrame() },
                     { label: 'Stop FrameOS', onClick: () => stopFrame() },

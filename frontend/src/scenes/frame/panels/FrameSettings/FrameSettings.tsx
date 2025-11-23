@@ -8,7 +8,16 @@ import { frameControlUrl, frameImageUrl, frameUrl } from '../../../../decorators
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
-import { devices, spectraPalettes, withCustomPalette, platforms, modes, devicesNixOS } from '../../../../devices'
+import {
+  devices,
+  spectraPalettes,
+  withCustomPalette,
+  buildrootPlatforms,
+  rpiOSPlatforms,
+  modes,
+  devicesNixOS,
+  nixosPlatforms,
+} from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 import { appsLogic } from '../Apps/appsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
@@ -38,10 +47,22 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic)
-  const { nixCollectGarbageFrame, nixCollectGarbageBackend, clearBuildCache, downloadBuildZip } = useActions(
-    frameSettingsLogic({ frameId })
-  )
-  const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
+  const {
+    nixCollectGarbageFrame,
+    nixCollectGarbageBackend,
+    clearBuildCache,
+    downloadBuildZip,
+    downloadCSourceZip,
+    downloadBinaryZip,
+  } = useActions(frameSettingsLogic({ frameId }))
+  const {
+    buildCacheLoading,
+    buildZipLoading,
+    cSourceZipLoading,
+    binaryZipLoading,
+    collectGarbageFrameLoading,
+    collectGarbageBackendLoading,
+  } = useValues(frameSettingsLogic({ frameId }))
   const { openLogs } = useActions(panelsLogic({ frameId }))
   const url = frameUrl(frame)
   const controlUrl = frameControlUrl(frame)
@@ -74,25 +95,20 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                         clearBuildCache()
                         openLogs()
                       },
-                      icon: buildCacheLoading ? (
-                        <Spinner color="white" className="w-4 h-4" />
-                      ) : (
-                        <ArrowPathIcon className="w-5 h-5" />
-                      ),
+                      icon: <ArrowPathIcon className="w-5 h-5" />,
+                      loading: buildCacheLoading,
                     },
                   ]
-                : [
+                : mode === 'nixos'
+                ? [
                     {
                       label: 'Collect NixOS garbage (on frame)',
                       onClick: () => {
                         nixCollectGarbageFrame()
                         openLogs()
                       },
-                      icon: buildCacheLoading ? (
-                        <Spinner color="white" className="w-4 h-4" />
-                      ) : (
-                        <ArrowPathIcon className="w-5 h-5" />
-                      ),
+                      icon: <ArrowPathIcon className="w-5 h-5" />,
+                      loading: collectGarbageFrameLoading,
                     },
                     {
                       label: 'Collect NixOS garbage (on backend)',
@@ -100,15 +116,13 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                         nixCollectGarbageBackend()
                         openLogs()
                       },
-                      icon: buildCacheLoading ? (
-                        <Spinner color="white" className="w-4 h-4" />
-                      ) : (
-                        <ArrowPathIcon className="w-5 h-5" />
-                      ),
+                      icon: <ArrowPathIcon className="w-5 h-5" />,
+                      loading: collectGarbageBackendLoading,
                     },
-                  ]),
+                  ]
+                : []),
               {
-                label: 'Import .json',
+                label: 'Import frame .json',
                 onClick: () => {
                   function handleFileSelect(event: Event): void {
                     const inputElement = event.target as HTMLInputElement
@@ -147,20 +161,42 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   fileInput.click()
                 },
                 icon: <ArrowDownTrayIcon className="w-5 h-5" />,
+                loading: false,
               },
               {
-                label: 'Export .json',
+                label: 'Export frame .json',
                 onClick: () => {
                   downloadJson(frame, `${frame.name || `frame${frame.id}`}.json`)
                 },
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: false,
               },
               {
-                label: 'Download build .zip',
+                label: 'Download Nim build .zip',
                 onClick: () => {
                   downloadBuildZip()
+                  openLogs()
                 },
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: buildZipLoading,
+              },
+              {
+                label: 'Generate C sources .zip',
+                onClick: () => {
+                  downloadCSourceZip()
+                  openLogs()
+                },
+                icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: cSourceZipLoading,
+              },
+              {
+                label: 'Download built binary .zip',
+                onClick: () => {
+                  downloadBinaryZip()
+                  openLogs()
+                },
+                icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: binaryZipLoading,
               },
               {
                 label: 'Delete frame',
@@ -170,6 +206,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   }
                 },
                 icon: <TrashIcon className="w-5 h-5" />,
+                loading: false,
               },
             ]}
           />
@@ -182,7 +219,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
         className="space-y-4 @container"
         enableFormOnSubmit
       >
-        <H6 className="mt-2">Basic Settings</H6>
+        <H6 className="mt-2">Device settings</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field name="name" label="Name">
             <TextInput name="name" placeholder="Hallway frame" required />
@@ -194,10 +231,10 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           ) : null}
           <Field
             name="device"
-            label="Device"
+            label="Display driver"
             tooltip={
               frameForm.mode === 'nixos'
-                ? "We're adding support for all the devices into the NixOS version. Check back later for more."
+                ? 'Not all drivers work under NixOS. Check the "Raspberry Pi OS" deployment mode for more.'
                 : undefined
             }
           >
@@ -279,11 +316,25 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             <Field
               name="nix.platform"
               label="Platform"
-              tooltip='More coming soon... Try the generic "rpios" mode until then.'
+              tooltip='There are more options under the "Raspberry Pi OS" deployment mode.'
             >
-              <Select name="nix.platform" options={platforms} />
+              <Select name="nix.platform" options={nixosPlatforms} />
             </Field>
           ) : null}
+          {frameForm.mode === 'buildroot' ? (
+            <Group name="buildroot">
+              <Field name="platform" label="Platform">
+                <Select name="buildroot.platform" options={buildrootPlatforms} />
+              </Field>
+            </Group>
+          ) : null}
+          {/* {frameForm.mode === 'rpios' || !frameForm.mode ? (
+            <Group name="rpios">
+              <Field name="platform" label="Platform">
+                <Select name="rpios.platform" options={rpiOSPlatforms} />
+              </Field>
+            </Group>
+          ) : null} */}
           <Field name="rotate" label="Rotation">
             {({ value, onChange }) => (
               <Select
@@ -314,6 +365,36 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               />
             )}
           </Field>
+          {frameForm.mode === 'rpios' || !frameForm.mode ? (
+            <Group name="rpios">
+              <Field
+                name="crossCompilation"
+                label="Cross compilation"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>
+                      Choose how to build the FrameOS binary: auto will try to cross-compile and fall back to on-device
+                      builds, always will fail if cross compilation is unavailable, and never will always build on the
+                      device.
+                    </p>
+                    <p>
+                      If you're running FrameOS via Docker, you may need to configure a build host for cross-compilation
+                      on the global settings page.
+                    </p>
+                  </div>
+                }
+              >
+                <Select
+                  name="rpios.crossCompilation"
+                  options={[
+                    { value: 'auto', label: 'Auto (try to cross-compile, fallback if needed)' },
+                    { value: 'always', label: 'Always cross-compile (fail if unavailable)' },
+                    { value: 'never', label: 'Never cross-compile (build on device)' },
+                  ]}
+                />
+              </Field>
+            </Group>
+          ) : null}
           <Field name="debug" label="Debug mode (noisy)">
             <Select
               name="debug"

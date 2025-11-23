@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""FrameOS cross compilation helper."""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import shutil
+import sys
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Iterable
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_ROOT = REPO_ROOT / "backend"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+
+@dataclass(frozen=True)
+class TargetDefinition:
+    distro: str
+    version: str
+    arch: str
+    platform: str
+    image: str
+    runner: str = "ubuntu-24.04"
+
+    @property
+    def slug(self) -> str:
+        return f"{self.distro}-{self.version}-{self.arch}"
+
+    def to_matrix_entry(self) -> dict[str, str]:
+        return {
+            "slug": self.slug,
+            "distro": self.distro,
+            "version": self.version,
+            "arch": self.arch,
+            "platform": self.platform,
+            "image": self.image,
+            "runner": self.runner,
+        }
+
+
+TARGETS: tuple[TargetDefinition, ...] = (
+    TargetDefinition("debian", "bookworm", "armhf", "linux/arm/v7", "debian:bookworm", runner="ubuntu-24.04-arm"),
+    TargetDefinition("debian", "bookworm", "arm64", "linux/arm64", "debian:bookworm", runner="ubuntu-24.04-arm"),
+    TargetDefinition("debian", "bookworm", "amd64", "linux/amd64", "debian:bookworm"),
+    TargetDefinition("debian", "trixie", "armhf", "linux/arm/v7", "debian:trixie", runner="ubuntu-24.04-arm"),
+    TargetDefinition("debian", "trixie", "arm64", "linux/arm64", "debian:trixie", runner="ubuntu-24.04-arm"),
+    TargetDefinition("debian", "trixie", "amd64", "linux/amd64", "debian:trixie"),
+    TargetDefinition("ubuntu", "22.04", "arm64", "linux/arm64", "ubuntu:22.04", runner="ubuntu-24.04-arm"),
+    TargetDefinition("ubuntu", "22.04", "amd64", "linux/amd64", "ubuntu:22.04"),
+    TargetDefinition("ubuntu", "24.04", "arm64", "linux/arm64", "ubuntu:24.04", runner="ubuntu-24.04-arm"),
+    TargetDefinition("ubuntu", "24.04", "amd64", "linux/amd64", "ubuntu:24.04"),
+    # TargetDefinition("buildroot", "luckfox-pico-plus", "armv7l", "linux/amd64", "ubuntu:22.04"),
+)
+
+TARGET_MAP = {target.slug: target for target in TARGETS}
+
+
+@dataclass
+class FrameStub:
+    id: int = 0
+    device: str = "framebuffer"
+    device_config: dict[str, Any] = field(default_factory=dict)
+    network: dict[str, Any] | None = None
+    agent: dict[str, Any] | None = None
+    assets_path: str | None = None
+    scenes: list[Any] = field(default_factory=list)
+    gpio_buttons: list[Any] = field(default_factory=list)
+    debug: bool = False
+    nix: dict[str, Any] | None = None
+    rpios: dict[str, Any] | None = None
+    reboot: dict[str, Any] | None = None
+    ssh_pass: str | None = None
+    ssh_port: int = 22
+
+
+def load_frame_stub(frameos_root: Path) -> FrameStub:
+    config = frameos_root / "frame.json"
+    data: dict[str, Any] = {}
+    if config.exists():
+        with config.open("r", encoding="utf-8") as fh:
+            try:
+                data = json.loads(fh.read())
+            except json.JSONDecodeError:
+                data = {}
+    return FrameStub(
+        device=str(data.get("device", "framebuffer")),
+        device_config=dict(data.get("deviceConfig") or {}),
+        network=dict(data.get("network") or {}),
+        agent=dict(data.get("network") or {}),
+        assets_path=data.get("assetsPath") or '',
+        scenes=list(data.get("scenes") or []),
+        gpio_buttons=list(data.get("gpioButtons") or []),
+        debug=bool(data.get("debug", False)),
+        nix=dict(data.get("nix") or {}),
+        rpios=dict(data.get("rpios") or {}),
+        reboot=dict(data.get("reboot") or {}),
+    )
+
+
+def targets_matrix_json() -> str:
+    matrix = {"include": [target.to_matrix_entry() for target in TARGETS]}
+    return json.dumps(matrix, separators=(",", ":"))
+
+
+def list_targets() -> str:
+    return "\n".join(target.slug for target in TARGETS)
+
+
+async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Path:
+    if slug not in TARGET_MAP:
+        raise SystemExit(f"Unknown target '{slug}'. Run --list-targets to see available options.")
+
+    target = TARGET_MAP[slug]
+    frameos_root = frameos_root.resolve()
+    artifacts_dir = artifacts_dir.resolve()
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    from backend.app.tasks._frame_deployer import FrameDeployer  # type: ignore  # noqa: E402
+    from backend.app.tasks.binary_builder import FrameBinaryBuilder  # type: ignore  # noqa: E402
+    from backend.app.tasks.utils import find_nim_v2  # type: ignore  # noqa: E402
+    from backend.app.utils import local_exec  # type: ignore  # noqa: E402
+    from backend.app.utils.cross_compile import TargetMetadata  # type: ignore  # noqa: E402
+    from app.utils import local_exec as app_local_exec  # type: ignore  # noqa: E402
+
+    class StandaloneFrameDeployer(FrameDeployer):
+        def __init__(self, frame: FrameStub, nim_path: str, temp_dir: str, logger):
+            super().__init__(db=None, redis=None, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
+            self._logger = logger
+
+        async def log(self, type: str, line: str, timestamp=None):  # type: ignore[override]
+            await self._logger(type, line)
+
+    nim_path = find_nim_v2()
+    frame = load_frame_stub(frameos_root)
+
+    async def console_log(level: str, message: str) -> None:
+        print(f"[{slug}][{level}] {message}")
+
+    async def exec_log(_db, _redis, _frame_id, level: str, message: str, timestamp=None):
+        await console_log(level, message)
+
+    local_exec.log = exec_log  # type: ignore[assignment]
+    app_local_exec.log = exec_log  # type: ignore[assignment]
+
+    with tempfile.TemporaryDirectory(prefix=f"frameos-cross-{slug}-") as tmp:
+        deployer = StandaloneFrameDeployer(frame=frame, nim_path=nim_path, temp_dir=tmp, logger=console_log)
+        builder = FrameBinaryBuilder(
+            db=None,
+            redis=None,
+            frame=frame,
+            deployer=deployer,
+            temp_dir=tmp,
+            source_root=str(frameos_root),
+            logger=console_log,
+        )
+        target_override = TargetMetadata(
+            arch=target.arch,
+            distro=target.distro,
+            version=target.version,
+            platform=target.platform,
+            image=target.image,
+        )
+        build_result = await builder.build(
+            allow_cross_compile=True,
+            force_cross_compile=True,
+            target_override=target_override,
+        )
+        binary_path = build_result.binary_path
+        if not binary_path:
+            raise RuntimeError("Cross compilation completed without producing a binary")
+
+        target_dir = artifacts_dir / slug
+        target_dir.mkdir(parents=True, exist_ok=True)
+        destination = target_dir / "frameos"
+        shutil.copy2(binary_path, destination)
+        os.chmod(destination, 0o755)
+        metadata = {
+            "slug": slug,
+            "arch": target.arch,
+            "distro": target.distro,
+            "version": target.version,
+            "platform": target.platform,
+            "image": target.image,
+        }
+        with (target_dir / "metadata.json").open("w", encoding="utf-8") as fh:
+            json.dump(metadata, fh, indent=2)
+        print(f"Built {slug} → {destination}")
+        return destination
+
+
+def parse_args(argv: Iterable[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="FrameOS cross compilation helper")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    subparsers.add_parser("list", help="List available cross compilation targets")
+    subparsers.add_parser("matrix", help="Emit the GitHub Actions matrix JSON")
+
+    build = subparsers.add_parser("build", help="Build a specific cross compilation target")
+    build.add_argument("--target", required=True, help="Target slug (distro-version-arch)")
+    build.add_argument("--frameos-root", default=str(Path.cwd()), help="Path to the frameos source tree")
+    build.add_argument("--artifacts-dir", default="build/cross", help="Directory for compiled binaries")
+
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+    if args.command == "list":
+        print(list_targets())
+        return 0
+    if args.command == "matrix":
+        print(targets_matrix_json())
+        return 0
+    if args.command == "build":
+        frameos_root = Path(args.frameos_root)
+        artifacts_dir = Path(args.artifacts_dir)
+        if not artifacts_dir.is_absolute():
+            artifacts_dir = frameos_root / artifacts_dir
+
+        async def _build() -> Path:
+            return await build_target(args.target, frameos_root, artifacts_dir)
+
+        asyncio.run(_build())
+        return 0
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
