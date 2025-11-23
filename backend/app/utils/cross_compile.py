@@ -331,9 +331,18 @@ class CrossCompiler:
         remote_sysroot_dir = str(self._remote_root / "sysroot")
         remote_script_path = str(self._remote_root / "build.sh")
 
-        await self._log("stdout", f"{icon} Syncing build directory to build host")
+        build_dir_size = self._dir_size_bytes(Path(build_dir))
+        await self._log(
+            "stdout",
+            f"{icon} Syncing build directory to build host "
+            f"({self._format_size(build_dir_size)})",
+        )
         await host.sync_dir(build_dir, remote_build_dir)
-        await self._log("stdout", f"{icon} Syncing sysroot to build host")
+        sysroot_size = self._dir_size_bytes(self.sysroot_dir)
+        await self._log(
+            "stdout",
+            f"{icon} Syncing sysroot to build host ({self._format_size(sysroot_size)})",
+        )
         await host.sync_dir(str(self.sysroot_dir), remote_sysroot_dir)
         await host.write_file(remote_script_path, script_content, mode=0o755)
 
@@ -689,6 +698,44 @@ class CrossCompiler:
             seen.add(value)
             ordered.append(value)
         return ordered
+
+    def _dir_size_bytes(self, path: Path) -> int:
+        total = 0
+        if not path.exists():
+            return total
+
+        stack = [path]
+        while stack:
+            current = stack.pop()
+            try:
+                with os.scandir(current) as entries:
+                    for entry in entries:
+                        try:
+                            if entry.is_symlink():
+                                continue
+                            if entry.is_dir(follow_symlinks=False):
+                                stack.append(Path(entry.path))
+                            elif entry.is_file(follow_symlinks=False):
+                                total += entry.stat(follow_symlinks=False).st_size
+                        except FileNotFoundError:
+                            continue
+            except FileNotFoundError:
+                continue
+
+        return total
+
+    @staticmethod
+    def _format_size(size: int) -> str:
+        units = ["B", "KiB", "MiB", "GiB", "TiB"]
+        value = float(size)
+        for unit in units:
+            if value < 1024 or unit == units[-1]:
+                if unit == "B":
+                    return f"{int(value)} {unit}"
+                return f"{value:.1f} {unit}"
+            value /= 1024
+
+        return f"{value:.1f} TiB"
 
     async def _log_quickjs_probe(self, root: Path, context: str) -> None:
         await self._log(
