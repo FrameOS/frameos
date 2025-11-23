@@ -91,10 +91,6 @@ class BuildHostSession:
             client_keys=client_keys or None,
             known_hosts=None,
         )
-        await self._log(
-            "stdout",
-            f"🟢 Connected to build host {self.config.user}@{self.config.host}:{self.config.port}",
-        )
 
     async def _log(self, level: str, message: str) -> None:
         if self._logger:

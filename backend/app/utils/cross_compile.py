@@ -150,7 +150,7 @@ class CrossCompiler:
                 self._remote_root = Path(await session.mktemp_dir("frameos-cross-"))
                 await self._log(
                     "stdout",
-                    f"{icon} Connnected to build host {self.build_host.user}@{self.build_host.host}:{self.build_host.port} for cross compilation",
+                    f"🟢 Connected to build host {self.build_host.user}@{self.build_host.host}:{self.build_host.port} for cross compilation",
                 )
                 try:
                     return await self._build_with_context(source_dir)
