@@ -115,7 +115,7 @@ class CrossCompiler:
         self.deployer = deployer
         self.target = target
         self.temp_dir = Path(temp_dir)
-        cache_root = Path(os.environ.get(CACHE_ENV, DEFAULT_CACHE))
+        cache_root = self._cache_root()
         cache_root.mkdir(parents=True, exist_ok=True)
         key = "-".join(self._sanitize(part) for part in (target.distro, target.version, target.arch))
         self.toolchain_dir = cache_root / key
@@ -282,7 +282,7 @@ class CrossCompiler:
                 cd /src
                 log_debug "Compiling generated C sources"
                 make -j"$(nproc)"
-                log_debug "make completed"
+                log_debug "build completed"
                 """
             ).strip()
             + "\n"
@@ -334,15 +334,13 @@ class CrossCompiler:
         build_dir_size = self._dir_size_bytes(Path(build_dir))
         await self._log(
             "stdout",
-            f"{icon} Syncing build directory to build host via tarball "
-            f"({self._format_size(build_dir_size)})",
+            f"{icon} Syncing build directory ({self._format_size(build_dir_size)}) to build host"
         )
         await host.sync_dir_tarball(build_dir, remote_build_dir)
         sysroot_size = self._dir_size_bytes(self.sysroot_dir)
         await self._log(
             "stdout",
-            f"{icon} Syncing sysroot to build host via tarball "
-            f"({self._format_size(sysroot_size)})",
+            f"{icon} Syncing sysroot ({self._format_size(sysroot_size)}) to build host"
         )
         await host.sync_dir_tarball(str(self.sysroot_dir), remote_sysroot_dir)
         await host.write_file(remote_script_path, script_content, mode=0o755)
@@ -925,6 +923,28 @@ class CrossCompiler:
     def _sanitize(value: str) -> str:
         value = value or "unknown"
         return SAFE_SEGMENT.sub("_", value)
+
+    @staticmethod
+    def _cache_root() -> Path:
+        """Return the base cache directory for cross compilation artifacts.
+
+        When running inside a container that shells out to the host Docker daemon
+        (docker-in-docker via a mounted ``/var/run/docker.sock``), host paths must
+        be mountable by the daemon. Honour ``FRAMEOS_CROSS_CACHE`` when provided;
+        otherwise, prefer ``TMPDIR`` so operators can bind-mount a shared
+        directory (e.g. ``/tmp/frameos-cross``). Fall back to the legacy location
+        under ``~/.cache`` when no hints are available.
+        """
+
+        cache_root = os.environ.get(CACHE_ENV)
+        if cache_root:
+            return Path(cache_root)
+
+        tmpdir = os.environ.get("TMPDIR")
+        if tmpdir:
+            return Path(tmpdir) / "frameos-cross-cache"
+
+        return DEFAULT_CACHE
 
 
 async def build_binary_with_cross_toolchain(
