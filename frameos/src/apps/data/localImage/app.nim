@@ -5,6 +5,7 @@ import os
 import strutils
 import strformat
 import random
+import sequtils
 import frameos/utils/image
 import frameos/apps
 import frameos/types
@@ -24,6 +25,7 @@ type
     lastPath*: string
     images: seq[string]
     counter: int
+    lastImage*: Option[string]
 
 # Function to check if a file is an image
 proc isImage(file: string): bool =
@@ -61,26 +63,61 @@ proc init*(self: App) =
   self.lastPath = self.appConfig.path
   self.lastSearch = self.appConfig.search
   self.counter = 0
+  self.lastImage = none(string)
   if self.appConfig.search != "":
     self.log("Search query: " & self.appConfig.search)
   self.log("Found " & $self.images.len & " images in the folder: " & folder)
   if self.appConfig.order == "random":
     randomize()
     self.images.shuffle()
-  elif self.appConfig.counterStateKey != "":
+  elif self.appConfig.counterStateKey != "" and self.images.len > 0:
     self.counter = self.scene.state{self.appConfig.counterStateKey}.getInt() mod self.images.len
+
+proc refreshImages(self: App) =
+  let folder = if self.appConfig.path == "": self.frameConfig.assetsPath else: self.appConfig.path
+  let previousImage = self.lastImage
+  let newImages = getImagesInFolder(folder, self.appConfig.search)
+  let hasChanged = newImages != self.images
+  var nextImages = newImages
+  self.lastPath = self.appConfig.path
+  self.lastSearch = self.appConfig.search
+
+  if self.appConfig.order == "random":
+    randomize()
+    if hasChanged:
+      nextImages.shuffle()
+    else:
+      nextImages = self.images
+
+  self.images = nextImages
+
+  if self.images.len == 0:
+    return
+
+  if previousImage.isSome:
+    let lastIndex = self.images.find(previousImage.get())
+    if lastIndex >= 0:
+      self.counter = (lastIndex + 1) mod self.images.len
+    elif self.counter >= self.images.len:
+      self.counter = self.counter mod self.images.len
+  elif self.counter >= self.images.len:
+    self.counter = self.counter mod self.images.len
 
 proc get*(self: App, context: ExecutionContext): Image =
   if self.appConfig.search != self.lastSearch or self.appConfig.path != self.lastPath:
     self.init()
+
+  self.refreshImages()
 
   if self.images.len() == 0:
     if self.appConfig.search != "":
       return self.error(context, &"No images matching the search query \"{self.appConfig.search}\" found in the folder: {self.appConfig.path}")
     return self.error(context, &"No images found in the folder: {self.appConfig.path}")
 
+  let folder = if self.appConfig.path == "": self.frameConfig.assetsPath else: self.appConfig.path
+  let currentImage = self.images[self.counter]
   var nextImage: Option[Image] = none(Image)
-  let path = joinPath(self.appConfig.path, self.images[self.counter])
+  let path = joinPath(folder, currentImage)
   self.log("Loading image: " & path)
   self.counter = (self.counter + 1) mod len(self.images)
   if self.appConfig.counterStateKey != "":
@@ -91,4 +128,5 @@ proc get*(self: App, context: ExecutionContext): Image =
   except CatchableError as e:
     return self.error(context, "An error occurred while loading the image: " & path & "\n" & e.msg)
 
+  self.lastImage = some(currentImage)
   return nextImage.get()
