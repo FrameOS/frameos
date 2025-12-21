@@ -582,6 +582,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 self, prebuilt_entry=prebuilt_entry, build_id=build_id, cross_compiled=cross_compiled
             )
 
+            await self.exec_command("sudo mkdir -p /srv/frameos && sudo chown $(whoami):$(whoami) /srv/frameos")
             await self.exec_command("mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
             await self.exec_command(f"mkdir -p /srv/frameos/releases/release_{build_id}")
             release_frameos_path = f"/srv/frameos/releases/release_{build_id}/frameos"
