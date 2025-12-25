@@ -1,6 +1,54 @@
 {
   "entries": [
     {
+      "target": "debian-bullseye-armhf",
+      "versions": {
+        "nim": "2.2.4",
+        "quickjs": "2025-04-26",
+        "lgpio": "v0.2.2"
+      },
+      "object_key": null,
+      "updated_at": "",
+      "component_keys": {
+        "nim": "prebuilt-deps/debian-bullseye-armhf/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/debian-bullseye-armhf/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/debian-bullseye-armhf/lgpio-v0.2.2.tar.gz"
+      },
+      "component_md5sums": {}
+    },
+    {
+      "target": "debian-bullseye-arm64",
+      "versions": {
+        "nim": "2.2.4",
+        "quickjs": "2025-04-26",
+        "lgpio": "v0.2.2"
+      },
+      "object_key": null,
+      "updated_at": "",
+      "component_keys": {
+        "nim": "prebuilt-deps/debian-bullseye-arm64/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/debian-bullseye-arm64/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/debian-bullseye-arm64/lgpio-v0.2.2.tar.gz"
+      },
+      "component_md5sums": {}
+    },
+    {
+      "target": "debian-bullseye-amd64",
+      "versions": {
+        "nim": "2.2.4",
+        "quickjs": "2025-04-26",
+        "lgpio": "v0.2.2"
+      },
+      "object_key": null,
+      "updated_at": "",
+      "component_keys": {
+        "nim": "prebuilt-deps/debian-bullseye-amd64/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/debian-bullseye-amd64/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/debian-bullseye-amd64/lgpio-v0.2.2.tar.gz"
+      },
+      "component_md5sums": {}
+    },
+    {
       "target": "ubuntu-24.04-arm64",
       "versions": {
         "nim": "2.2.4",

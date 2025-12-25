@@ -13,6 +13,9 @@ LGPIO_REPO="${LGPIO_REPO:-https://github.com/joan2937/lg.git}"
 declare -a COMPONENTS=("nim" "quickjs" "lgpio")
 
 TARGET_MATRIX=(
+  "debian|bullseye|armhf|linux/arm/v7|debian:bullseye"
+  "debian|bullseye|arm64|linux/arm64|debian:bullseye"
+  "debian|bullseye|amd64|linux/amd64|debian:bullseye"
   "debian|bookworm|armhf|linux/arm/v7|debian:bookworm"
   "debian|bookworm|arm64|linux/arm64|debian:bookworm"
   "debian|bookworm|amd64|linux/amd64|debian:bookworm"
