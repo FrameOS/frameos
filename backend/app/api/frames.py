@@ -438,6 +438,14 @@ async def api_frame_get_states(
     return states
 
 
+@api_with_auth.get("/frames/{id:int}/ping")
+async def api_frame_ping(
+    id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+):
+    frame = db.get(Frame, id) or _not_found()
+    return await _forward_frame_request(frame, redis, path="/ping", method="GET")
+
+
 @api_with_auth.post("/frames/{id:int}/event/{event}")
 async def api_frame_event(
     id: int,

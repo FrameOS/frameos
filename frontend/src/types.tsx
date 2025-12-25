@@ -502,6 +502,7 @@ export enum Panel {
   Image = 'Image',
   Logs = 'Logs',
   Metrics = 'Metrics',
+  Ping = 'Ping',
   SceneJSON = 'SceneJSON',
   Scenes = 'Scenes',
   SceneSource = 'SceneSource',
