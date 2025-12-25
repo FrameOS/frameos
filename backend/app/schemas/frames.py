@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, RootModel
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from .common import ImageTokenResponse
 from datetime import datetime
@@ -125,3 +125,12 @@ class FrameStateResponse(RootModel):
 
 class FrameAssetsResponse(BaseModel):
     assets: List[Dict[str, Any]]
+
+
+class FramePingResponse(BaseModel):
+    ok: bool
+    mode: Literal["icmp", "http"]
+    target: str
+    elapsed_ms: Optional[float] = None
+    status: Optional[int] = None
+    message: str

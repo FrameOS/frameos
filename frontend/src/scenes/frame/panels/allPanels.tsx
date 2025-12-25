@@ -9,6 +9,7 @@ import { FrameSettings } from './FrameSettings/FrameSettings'
 import { Image } from './Image/Image'
 import { Logs } from './Logs/Logs'
 import { Metrics } from './Metrics/Metrics'
+import { Ping } from './Ping/Ping'
 import { Panel } from '../../../types'
 import { SceneJSON } from './SceneJSON/SceneJSON'
 import { Scenes } from './Scenes/Scenes'
@@ -31,6 +32,7 @@ export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   Image,
   Logs,
   Metrics,
+  Ping,
   SceneJSON,
   Scenes,
   SceneSource,
