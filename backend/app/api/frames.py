@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 # stdlib ---------------------------------------------------------------------
+import asyncio
 from datetime import datetime
 from http import HTTPStatus
+import contextlib
 import aiofiles
 import asyncssh
 import hashlib
@@ -13,7 +15,9 @@ import os
 import re
 import shlex
 import shutil
+import sys
 import tempfile
+import time
 import zipfile
 from tempfile import NamedTemporaryFile
 from typing import Any, Optional, Tuple
@@ -21,7 +25,7 @@ from urllib.parse import quote
 
 # third-party ---------------------------------------------------------------
 import httpx
-from fastapi import Depends, File, Form, Request, HTTPException, UploadFile, Header
+from fastapi import Depends, File, Form, HTTPException, Header, Query, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -48,6 +52,7 @@ from app.schemas.frames import (
     FrameAssetsResponse,
     FrameCreateRequest,
     FrameUpdateRequest,
+    FramePingResponse,
 )
 from app.api.auth import get_current_user
 from app.config import config
@@ -175,6 +180,63 @@ def _bytes_or_json(blob: bytes | str):
         except Exception:
             return blob  # truly binary
     return blob
+
+
+def _decode_bytes(data: bytes) -> str:
+    try:
+        return data.decode()
+    except Exception:
+        return data.decode("latin1", errors="replace")
+
+
+def _truncate_text(msg: str, limit: int = 400) -> str:
+    msg = msg.strip()
+    if len(msg) > limit:
+        msg = msg[: limit - 3].rstrip() + "..."
+    return msg
+
+
+def _format_body_preview(body: bytes) -> str:
+    if not body:
+        return ""
+    return _truncate_text(_decode_bytes(body))
+
+
+async def _icmp_ping_host(host: str, *, timeout: float = 2.0) -> tuple[bool, float | None, str]:
+    if not shutil.which("ping"):
+        return False, None, "ping command not available on server"
+
+    started = time.perf_counter()
+    timeout_arg = str(int(timeout * 1000)) if sys.platform == "darwin" else str(int(timeout))
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ping",
+            "-c",
+            "1",
+            "-W",
+            timeout_arg,
+            host,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        return False, None, "ping command not available on server"
+
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout + 1.0)
+    except asyncio.TimeoutError:
+        proc.kill()
+        with contextlib.suppress(Exception):
+            await proc.wait()
+        return False, None, f"Timeout after {timeout:.1f}s"
+
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    if proc.returncode == 0:
+        message = _decode_bytes(stdout or b"") or f"Reply from {host}"
+        return True, elapsed_ms, _truncate_text(message)
+
+    message = _decode_bytes(stderr or stdout or b"") or f"Unable to reach {host}"
+    return False, elapsed_ms, _truncate_text(message)
 
 
 async def _forward_frame_request(
@@ -438,12 +500,79 @@ async def api_frame_get_states(
     return states
 
 
-@api_with_auth.get("/frames/{id:int}/ping")
+@api_with_auth.get("/frames/{id:int}/ping", response_model=FramePingResponse)
 async def api_frame_ping(
-    id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+    id: int,
+    mode: str = Query("icmp"),
+    path: str | None = Query(None),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     frame = db.get(Frame, id) or _not_found()
-    return await _forward_frame_request(frame, redis, path="/ping", method="GET")
+
+    mode_normalised = (mode or "").strip().lower()
+    if mode_normalised not in {"icmp", "http"}:
+        _bad_request("Ping mode must be 'icmp' or 'http'")
+
+    if not is_safe_host(frame.frame_host):
+        raise HTTPException(status_code=400, detail="Unsafe frame host")
+
+    if mode_normalised == "icmp":
+        ok, elapsed_ms, message = await _icmp_ping_host(frame.frame_host)
+        return FramePingResponse(
+            ok=ok,
+            mode="icmp",
+            target=frame.frame_host,
+            elapsed_ms=elapsed_ms,
+            status=None,
+            message=message,
+        )
+
+    ping_path = (path or "/ping").strip() or "/ping"
+    if not ping_path.startswith("/"):
+        ping_path = f"/{ping_path}"
+    if len(ping_path) > 512:
+        _bad_request("Ping path is too long")
+
+    scheme = "https" if frame.frame_port % 1000 == 443 else "http"
+    display_target = f"{scheme}://{frame.frame_host}:{frame.frame_port}{ping_path}"
+    started = time.perf_counter()
+
+    try:
+        status, body, _hdrs = await _fetch_frame_http_bytes(
+            frame, redis, path=ping_path, method="GET"
+        )
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        message = _format_body_preview(body) or f"HTTP {status}"
+        return FramePingResponse(
+            ok=200 <= status < 400,
+            mode="http",
+            target=display_target,
+            elapsed_ms=elapsed_ms,
+            status=status,
+            message=message,
+        )
+    except HTTPException as exc:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        return FramePingResponse(
+            ok=False,
+            mode="http",
+            target=display_target,
+            elapsed_ms=elapsed_ms,
+            status=None,
+            message=_truncate_text(detail),
+        )
+    except Exception as exc:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        return FramePingResponse(
+            ok=False,
+            mode="http",
+            target=display_target,
+            elapsed_ms=elapsed_ms,
+            status=None,
+            message=_truncate_text(str(exc)),
+        )
 
 
 @api_with_auth.post("/frames/{id:int}/event/{event}")
