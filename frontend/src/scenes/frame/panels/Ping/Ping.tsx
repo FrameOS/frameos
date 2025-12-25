@@ -113,7 +113,6 @@ export function Ping() {
         } else {
           message = responseText || (ok ? 'pong' : `HTTP ${response.status}`)
         }
-
       } catch (error) {
         message = error instanceof Error ? error.message : String(error)
       }
@@ -237,13 +236,10 @@ export function Ping() {
               <li key={result.id} className="flex flex-col gap-1 rounded border border-gray-800 bg-black/80 p-2">
                 <div className="flex items-center justify-between text-xs text-gray-400">
                   <span>
-                    {result.timestamp} · {result.mode === 'http' ? 'HTTP' : 'ICMP'}
+                    {result.timestamp} · {result.mode === 'http' ? 'HTTP' : 'ICMP'} · {result.target}
+                    {result.status ? ` (status ${result.status})` : ''}
                   </span>
                   <span>{result.elapsedMs != null ? `${Math.round(result.elapsedMs)} ms` : '—'}</span>
-                </div>
-                <div className="text-xs text-gray-400 break-all">
-                  {result.target}
-                  {result.status ? ` (status ${result.status})` : ''}
                 </div>
                 <div className={result.ok ? 'text-green-300' : 'text-red-300'}>
                   {result.ok ? 'pong' : 'error'}: {result.message || 'No response body'}
