@@ -22,6 +22,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'ssh_user',
   'ssh_pass',
   'ssh_port',
+  'ssh_keys',
   'server_host',
   'server_port',
   'server_api_key',
@@ -62,6 +63,7 @@ const FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS: (keyof FrameType)[] = [
   'ssh_user',
   'ssh_port',
   'ssh_pass',
+  'ssh_keys',
   'log_to_file',
   'assets_path',
   'network',
@@ -178,6 +180,7 @@ export const frameLogic = kea<frameLogicType>([
     fullDeployFrame: true,
     deployAgent: true,
     restartAgent: true,
+    updateDeployedSshKeys: true,
     applyTemplate: (template: Partial<TemplateType>, replaceScenes?: boolean) => ({
       template,
       replaceScenes: replaceScenes ?? false,
@@ -246,6 +249,18 @@ export const frameLogic = kea<frameLogicType>([
       },
     ],
   }),
+  listeners(({ values }) => ({
+    updateDeployedSshKeys: async () => {
+      const response = await apiFetch(`/api/frames/${values.frameId}/ssh_keys`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ssh_keys: values.frameForm.ssh_keys ?? [] }),
+      })
+      if (!response.ok) {
+        throw new Error('Failed to update deployed SSH keys')
+      }
+    },
+  })),
   selectors(() => ({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
     frame: [(s) => [s.frames, s.frameId], (frames, frameId) => frames[frameId] || null],

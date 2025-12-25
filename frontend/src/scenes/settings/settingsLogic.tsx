@@ -3,8 +3,10 @@ import { loaders } from 'kea-loaders'
 import { socketLogic } from '../socketLogic'
 import type { settingsLogicType } from './settingsLogicType'
 import { forms } from 'kea-forms'
-import { FrameOSSettings } from '../../types'
+import { FrameOSSettings, SSHKeyEntry } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
+import { normalizeSshKeys } from '../../utils/sshKeys'
+import { v4 as uuidv4 } from 'uuid'
 
 function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, any>): FrameOSSettings {
   return {
@@ -14,7 +16,7 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     github: settings.github ?? {},
     openAI: settings.openAI ?? {},
     repositories: settings.repositories ?? [],
-    ssh_keys: settings.ssh_keys ?? {},
+    ssh_keys: normalizeSshKeys(settings.ssh_keys),
     unsplash: settings.unsplash ?? {},
     nix: settings.nix ?? {},
     buildHost: settings.buildHost ?? {},
@@ -32,7 +34,9 @@ export const settingsLogic = kea<settingsLogicType>([
   connect({ logic: [socketLogic] }),
   actions({
     updateSavedSettings: (settings: Record<string, any>) => ({ settings }),
-    newKey: true,
+    addSshKey: true,
+    generateSshKey: true,
+    removeSshKey: (id: string) => ({ id }),
     newNixKey: true,
     newBuildHostKey: true,
   }),
@@ -136,12 +140,24 @@ export const settingsLogic = kea<settingsLogicType>([
       actions.updateSavedSettings(setDefaultSettings(settings))
       actions.resetSettings(setDefaultSettings({ ...values.savedSettings, ...settings }))
     },
-    newKey: async () => {
-      if (values.savedSettings.ssh_keys?.default) {
-        if (!confirm('Are you sure you want to generate a new key? You might lose access to existing frames.')) {
-          return
-        }
-      }
+    addSshKey: async () => {
+      const keyId = uuidv4()
+      const keys = values.settings.ssh_keys?.keys ?? []
+      actions.setSettingsValue([
+        'ssh_keys',
+        'keys',
+      ] as any, [
+        ...keys,
+        {
+          id: keyId,
+          name: `Key ${keys.length + 1}`,
+          private: '',
+          public: '',
+          use_for_new_frames: keys.length === 0,
+        } satisfies SSHKeyEntry,
+      ])
+    },
+    generateSshKey: async () => {
       const response = await apiFetch(`/api/generate_ssh_keys`, {
         method: 'POST',
       })
@@ -149,11 +165,34 @@ export const settingsLogic = kea<settingsLogicType>([
         throw new Error('Failed to generate new key')
       }
       const data = await response.json()
-      actions.setSettingsValue(['ssh_keys', 'default'], data.private)
-      actions.setSettingsValue(['ssh_keys', 'default_public'], `${data.public} frameos@${window.location.hostname}`)
+      const keys = values.settings.ssh_keys?.keys ?? []
+      const keyId = uuidv4()
+      actions.setSettingsValue([
+        'ssh_keys',
+        'keys',
+      ] as any, [
+        ...keys,
+        {
+          id: keyId,
+          name: `Key ${keys.length + 1}`,
+          private: data.private,
+          public: `${data.public} frameos@${window.location.hostname}`,
+          use_for_new_frames: keys.length === 0,
+        } satisfies SSHKeyEntry,
+      ])
+    },
+    removeSshKey: async ({ id }) => {
+      const keys = values.settings.ssh_keys?.keys ?? []
+      if (keys.length <= 1) {
+        return
+      }
+      actions.setSettingsValue(
+        ['ssh_keys', 'keys'] as any,
+        keys.filter((key) => key.id !== id)
+      )
     },
     newNixKey: async () => {
-      if (values.savedSettings.ssh_keys?.default) {
+      if (values.savedSettings.nix?.buildServerPrivateKey) {
         if (
           !confirm('Are you sure you want to generate a new key? You might lose access to the existing build server.')
         ) {

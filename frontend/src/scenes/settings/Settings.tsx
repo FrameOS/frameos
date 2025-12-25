@@ -10,12 +10,13 @@ import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
 import { sceneLogic } from '../sceneLogic'
-import { TrashIcon } from '@heroicons/react/24/solid'
+import { PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { NumberTextInput } from '../../components/NumberTextInput'
 import { Switch } from '../../components/Switch'
 import { Select } from '../../components/Select'
 import { timezoneOptions } from '../../decorators/timezones'
 import { SystemInfo } from './SystemInfo'
+import { normalizeSshKeys } from '../../utils/sshKeys'
 
 export function Settings() {
   const {
@@ -27,8 +28,16 @@ export function Settings() {
     isCustomFontsFormSubmitting,
     customFonts,
   } = useValues(settingsLogic)
-  const { submitSettings, newKey, newNixKey, newBuildHostKey, deleteCustomFont, setSettingsValue } =
-    useActions(settingsLogic)
+  const {
+    submitSettings,
+    addSshKey,
+    generateSshKey,
+    removeSshKey,
+    newNixKey,
+    newBuildHostKey,
+    deleteCustomFont,
+    setSettingsValue,
+  } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
 
@@ -58,25 +67,63 @@ export function Settings() {
                   <H6 className="pt-4">SSH Keys</H6>
                   <Box className="p-2 space-y-2">
                     <p className="text-sm leading-loose">
-                      This SSH key will be used on all frames that don't have a password set for SSH.
+                      These SSH keys are available for frame access. Choose which ones should be installed on new
+                      frames.
                     </p>
-                    <Field name="default" label="Default private SSH key" secret={!!savedSettings?.ssh_keys?.default}>
-                      <TextArea />
-                    </Field>
-                    <Field
-                      name="default_public"
-                      label="Default public SSH key (use this in the RPi Imager)"
-                      secret={!!savedSettings?.ssh_keys?.default_public}
-                    >
-                      <TextArea />
-                    </Field>
-                    <Button
-                      onClick={newKey}
-                      color={savedSettings?.ssh_keys?.default ? 'secondary' : 'primary'}
-                      size="small"
-                    >
-                      Generate new keypair
-                    </Button>
+                    <div className="space-y-4">
+                      {(settings?.ssh_keys?.keys ?? []).map((key, index) => {
+                        const savedKey = normalizeSshKeys(savedSettings?.ssh_keys).keys.find(
+                          (saved) => saved.id === key.id
+                        )
+                        const isOnlyKey = (settings?.ssh_keys?.keys ?? []).length <= 1
+                        return (
+                          <Box key={key.id} className="border border-white/10 p-3 space-y-2">
+                            <Field name={`keys.${index}.name`} label="Key name">
+                              <TextInput />
+                            </Field>{' '}
+                            <Field
+                              name={`keys.${index}.use_for_new_frames`}
+                              label="Use for new frames"
+                              tooltip="Automatically install this key on new frames."
+                            >
+                              <Switch fullWidth />
+                            </Field>
+                            <Field name={`keys.${index}.private`} label="Private SSH key" secret={!!savedKey?.private}>
+                              <TextArea />
+                            </Field>
+                            <Field
+                              name={`keys.${index}.public`}
+                              label="Public SSH key (use this in the RPi Imager)"
+                              secret={!!savedKey?.public}
+                            >
+                              <TextArea />
+                            </Field>
+                            {!isOnlyKey ? (
+                              <div className="text-right">
+                                <Button
+                                  size="tiny"
+                                  color="secondary"
+                                  onClick={() => removeSshKey(key.id)}
+                                  disabled={isOnlyKey}
+                                  className="inline-flex gap-1"
+                                >
+                                  <TrashIcon className="w-4 h-4" /> Delete
+                                </Button>
+                              </div>
+                            ) : null}
+                          </Box>
+                        )
+                      })}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button onClick={addSshKey} color="secondary" size="small" className="flex gap-1">
+                        <PlusIcon className="w-4 h-4" />
+                        Add key
+                      </Button>
+                      <Button onClick={generateSshKey} color="secondary" size="small">
+                        Generate new keypair
+                      </Button>
+                    </div>
                   </Box>
                 </Group>
                 <Group name="defaults">
@@ -222,7 +269,7 @@ export function Settings() {
                         </Field>
                         <Button
                           onClick={newNixKey}
-                          color={savedSettings?.ssh_keys?.default ? 'secondary' : 'primary'}
+                          color={savedSettings?.nix?.buildServerPrivateKey ? 'secondary' : 'primary'}
                           size="small"
                         >
                           Generate new keypair

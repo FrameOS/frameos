@@ -29,6 +29,7 @@ from app.codegen.drivers_nim import write_drivers_nim
 from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.tasks.utils import find_nimbase_file
 from app.models.settings import get_settings_dict
+from app.utils.ssh_key_utils import select_ssh_keys_for_frame
 from app.codegen.apps_nim import write_apps_nim
 from app.codegen.app_loader_nim import write_app_loader_nim
 
@@ -410,9 +411,14 @@ class FrameDeployer:
             lines.append(f"  services.openssh.port = {ssh_port};")
         if ssh_pass:
             lines.append(f"  users.users.frame.password = {q(ssh_pass)};")
-        if key := all_settings.get("ssh_keys", {}).get("default_public"):
+        selected_keys = select_ssh_keys_for_frame(self.frame, all_settings)
+        public_keys = [key.get("public") for key in selected_keys if key.get("public")]
+        if public_keys:
+            keys_list = " ".join(q(key) for key in public_keys)
             lines.append(
-                f"  users.users.frame.openssh.authorizedKeys.keys = [ {q(key)} ];")
+                "  users.users.frame.openssh.authorizedKeys.keys = [ "
+                f"{keys_list} ];"
+            )
 
         # reboot
         reboot_cfg = self.frame.reboot or {}

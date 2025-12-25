@@ -19,6 +19,7 @@ import sys
 import tempfile
 import time
 import zipfile
+import uuid
 from tempfile import NamedTemporaryFile
 from typing import Any, Optional, Tuple
 from urllib.parse import quote
@@ -53,11 +54,13 @@ from app.schemas.frames import (
     FrameCreateRequest,
     FrameUpdateRequest,
     FramePingResponse,
+    FrameSSHKeysUpdateRequest,
 )
 from app.api.auth import get_current_user
 from app.config import config
 from app.utils.network import is_safe_host
 from app.utils.remote_exec import (
+    run_commands,
     upload_file,
     delete_path,
     rename_path,
@@ -78,6 +81,7 @@ from app.ws.agent_ws import (
 )
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
+from app.utils.ssh_key_utils import default_ssh_key_ids, ssh_key_map
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import create_scoped_token_response, validate_scoped_token
@@ -200,6 +204,36 @@ def _format_body_preview(body: bytes) -> str:
     if not body:
         return ""
     return _truncate_text(_decode_bytes(body))
+
+
+async def _install_authorized_keys(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    public_keys: list[str],
+) -> None:
+    key_blob = "\n".join(key.strip() for key in public_keys if key.strip())
+    if not key_blob:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="No valid SSH keys supplied.")
+
+    temp_path = f"/tmp/frameos_authorized_keys_{uuid.uuid4().hex}"
+    await upload_file(db, redis, frame, temp_path, f"{key_blob}\n".encode())
+
+    user = frame.ssh_user or "frame"
+    user_quoted = shlex.quote(user)
+    temp_quoted = shlex.quote(temp_path)
+    fallback_home = shlex.quote(f"/home/{user}")
+
+    command = (
+        "set -e; "
+        f"home_dir=$(getent passwd {user_quoted} | cut -d: -f6 || true); "
+        f"if [ -z \"$home_dir\" ]; then home_dir={fallback_home}; fi; "
+        "install -d -m 700 \"$home_dir/.ssh\"; "
+        f"install -m 600 {temp_quoted} \"$home_dir/.ssh/authorized_keys\"; "
+        f"chown -R {user_quoted}:{user_quoted} \"$home_dir/.ssh\"; "
+        f"rm -f {temp_quoted}"
+    )
+    await run_commands(db, redis, frame, [command], log_output=False)
 
 
 async def _icmp_ping_host(host: str, *, timeout: float = 2.0) -> tuple[bool, float | None, str]:
@@ -1551,6 +1585,8 @@ async def api_frame_new(
             data.interval,
         )
 
+        frame.ssh_keys = default_ssh_key_ids(settings) or None
+
         frame.mode = data.mode
         if frame.mode == "nixos":
             frame.ssh_user = 'frame'
@@ -1602,6 +1638,45 @@ async def api_frame_new(
         return {"frame": frame.to_dict()}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_with_auth.post("/frames/{id:int}/ssh_keys")
+async def api_frame_update_ssh_keys(
+    id: int,
+    data: FrameSSHKeysUpdateRequest,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id)
+    if not frame:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    new_keys = list(dict.fromkeys([key for key in data.ssh_keys if key]))
+    if not new_keys:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="At least one SSH key must remain installed.")
+
+    settings = get_settings_dict(db)
+    key_map = ssh_key_map(settings)
+    unknown_keys = [key for key in new_keys if key not in key_map]
+    if unknown_keys:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Unknown SSH key selected.")
+
+    current_keys = frame.ssh_keys or []
+    if current_keys and not set(current_keys).intersection(new_keys):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="At least one previously installed SSH key must remain.",
+        )
+
+    public_keys = [key_map[key].get("public") for key in new_keys if key_map[key].get("public")]
+    if not public_keys:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="No public SSH keys available to install.")
+
+    await _install_authorized_keys(db, redis, frame, public_keys)
+    frame.ssh_keys = new_keys
+    await update_frame(db, redis, frame)
+
+    return {"message": "SSH keys updated successfully"}
 
 
 @api_with_auth.post("/frames/import", response_model=FrameResponse)
