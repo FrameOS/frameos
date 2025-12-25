@@ -709,7 +709,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             # Clean old builds
             await self.exec_command("cd /srv/frameos/build && ls -dt1 build_* | tail -n +11 | xargs rm -rf")
-            await self.exec_command("cd /srv/frameos/build/cache && find . -type f \\( -atime +0 -a -mtime +0 \\) | xargs rm -rf")
+            await self.exec_command("mkdir -p /srv/frameos/build/cache && cd /srv/frameos/build/cache && find . -type f \\( -atime +0 -a -mtime +0 \\) | xargs rm -rf")
             await self.exec_command(
                 "cd /srv/frameos/releases && "
                 "ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" "
