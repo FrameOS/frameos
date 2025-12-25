@@ -242,7 +242,7 @@ export function Ping() {
                   <span>{result.elapsedMs != null ? `${Math.round(result.elapsedMs)} ms` : '—'}</span>
                 </div>
                 <div className={result.ok ? 'text-green-300' : 'text-red-300'}>
-                  {result.ok ? 'pong' : 'error'}: {result.message || 'No response body'}
+                  {result.ok ? 'reply' : 'error'}: {result.message || 'No response body'}
                 </div>
               </li>
             ))}

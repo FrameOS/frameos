@@ -23,8 +23,9 @@ function formatTimestamp(isoTimestamp: string): string {
 export function Logs() {
   const { frameId } = useValues(frameLogic)
   const { logs, logsLoading } = useValues(logsLogic({ frameId }))
-  const [atBottom, setAtBottom] = useState(false)
+  const [atBottom, setAtBottom] = useState(true)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
+  const shouldStickToBottomRef = useRef(true)
   const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
   const { clearBuildCache } = useActions(frameSettingsLogic({ frameId }))
 
@@ -49,8 +50,11 @@ export function Logs() {
   }
 
   useEffect(() => {
-    if (atBottom) {
-      // wait one frame so the new rows are measured
+    if (!shouldStickToBottomRef.current) {
+      return
+    }
+    // wait for layout/measurement so large bursts keep us pinned
+    requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         virtuosoRef.current?.scrollToIndex({
           index: logs.length - 1,
@@ -58,8 +62,8 @@ export function Logs() {
           behavior: 'auto',
         })
       })
-    }
-  }, [logs.length, atBottom])
+    })
+  }, [logs.length])
 
   return logsLoading ? (
     <div>...</div>
@@ -95,8 +99,12 @@ export function Logs() {
         ref={virtuosoRef}
         initialTopMostItemIndex={logs.length - 1}
         data={logs}
-        followOutput={(isBottom) => (isBottom ? 'smooth' : false)}
-        atBottomStateChange={(bottom) => setAtBottom(bottom)}
+        followOutput={(isBottom) => (isBottom ? 'auto' : false)}
+        atBottomStateChange={(bottom) => {
+          shouldStickToBottomRef.current = bottom
+          setAtBottom(bottom)
+        }}
+        atBottomThreshold={200}
         increaseViewportBy={{ top: 0, bottom: 600 }}
         itemContent={(index, log) => {
           let logLine: string | JSX.Element = String(log.line)

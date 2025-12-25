@@ -104,6 +104,8 @@ router myrouter:
         params.getOrDefault("serverPort", $globalFrameOS.frameConfig.serverPort),
       )
     resp Http200, netportal.confirmHtml()
+  get "/ping":
+    resp Http200, "pong"
   get "/setup":
     redirect "/"
   get "/wifi":

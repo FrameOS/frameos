@@ -70,10 +70,26 @@ export function Terminal() {
   const [cmd, setCmd] = useState('')
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const [atBottom, setAtBottom] = useState(true)
+  const shouldStickToBottomRef = useRef(true)
 
   useEffect(() => {
     connect()
   }, [])
+
+  useEffect(() => {
+    if (!shouldStickToBottomRef.current) {
+      return
+    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        virtuosoRef.current?.scrollToIndex({
+          index: lines.length - 1,
+          align: 'end',
+          behavior: 'auto',
+        })
+      })
+    })
+  }, [lines.length])
 
   const downloadTerminalLog = () => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -144,8 +160,12 @@ export function Terminal() {
         className="flex-1 bg-black text-white font-mono text-sm overflow-y-scroll overflow-x-hidden p-2 rounded"
         data={lines}
         ref={virtuosoRef}
-        followOutput={(isBottom) => (isBottom ? 'smooth' : false)}
-        atBottomStateChange={(bottom) => setAtBottom(bottom)}
+        followOutput={(isBottom) => (isBottom ? 'auto' : false)}
+        atBottomStateChange={(bottom) => {
+          shouldStickToBottomRef.current = bottom
+          setAtBottom(bottom)
+        }}
+        atBottomThreshold={200}
         increaseViewportBy={{ top: 0, bottom: 600 }}
         initialTopMostItemIndex={lines.length - 1}
         itemContent={(_index, line) => (
