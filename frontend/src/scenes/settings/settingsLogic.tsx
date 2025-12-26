@@ -35,10 +35,11 @@ export const settingsLogic = kea<settingsLogicType>([
   actions({
     updateSavedSettings: (settings: Record<string, any>) => ({ settings }),
     addSshKey: true,
-    generateSshKey: true,
+    generateSshKey: (id: string) => ({ id }),
     removeSshKey: (id: string) => ({ id }),
     newNixKey: true,
     newBuildHostKey: true,
+    setGeneratingSshKeyId: (id: string | null) => ({ id }),
   }),
   loaders(({ values }) => ({
     savedSettings: [
@@ -91,6 +92,12 @@ export const settingsLogic = kea<settingsLogicType>([
     savedSettings: {
       updateSavedSettings: (state, { settings }) => setDefaultSettings({ ...state, ...settings }),
     },
+    generatingSshKeyId: [
+      null as string | null,
+      {
+        setGeneratingSshKeyId: (_, { id }) => id,
+      },
+    ],
   }),
   forms(({ values, actions }) => ({
     settings: {
@@ -143,10 +150,7 @@ export const settingsLogic = kea<settingsLogicType>([
     addSshKey: async () => {
       const keyId = uuidv4()
       const keys = values.settings.ssh_keys?.keys ?? []
-      actions.setSettingsValue([
-        'ssh_keys',
-        'keys',
-      ] as any, [
+      actions.setSettingsValue(['ssh_keys', 'keys'] as any, [
         ...keys,
         {
           id: keyId,
@@ -157,29 +161,32 @@ export const settingsLogic = kea<settingsLogicType>([
         } satisfies SSHKeyEntry,
       ])
     },
-    generateSshKey: async () => {
-      const response = await apiFetch(`/api/generate_ssh_keys`, {
-        method: 'POST',
-      })
-      if (!response.ok) {
-        throw new Error('Failed to generate new key')
+    generateSshKey: async ({ id }) => {
+      actions.setGeneratingSshKeyId(id)
+      try {
+        const response = await apiFetch(`/api/generate_ssh_keys`, {
+          method: 'POST',
+        })
+        if (!response.ok) {
+          throw new Error('Failed to generate new key')
+        }
+        const data = await response.json()
+        const keys = values.settings.ssh_keys?.keys ?? []
+        actions.setSettingsValue(
+          ['ssh_keys', 'keys'] as any,
+          keys.map((key) =>
+            key.id === id
+              ? ({
+                  ...key,
+                  private: data.private,
+                  public: `${data.public} frameos@${window.location.hostname}`,
+                } satisfies SSHKeyEntry)
+              : key
+          )
+        )
+      } finally {
+        actions.setGeneratingSshKeyId(null)
       }
-      const data = await response.json()
-      const keys = values.settings.ssh_keys?.keys ?? []
-      const keyId = uuidv4()
-      actions.setSettingsValue([
-        'ssh_keys',
-        'keys',
-      ] as any, [
-        ...keys,
-        {
-          id: keyId,
-          name: `Key ${keys.length + 1}`,
-          private: data.private,
-          public: `${data.public} frameos@${window.location.hostname}`,
-          use_for_new_frames: keys.length === 0,
-        } satisfies SSHKeyEntry,
-      ])
     },
     removeSshKey: async ({ id }) => {
       const keys = values.settings.ssh_keys?.keys ?? []

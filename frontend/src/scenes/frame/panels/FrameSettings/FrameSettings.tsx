@@ -37,6 +37,7 @@ import { TextArea } from '../../../../components/TextArea'
 import { ColorInput } from '../../../../components/ColorInput'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { getDefaultSshKeyIds, normalizeSshKeys } from '../../../../utils/sshKeys'
+import { Label } from '../../../../components/Label'
 
 export interface FrameSettingsProps {
   className?: string
@@ -523,52 +524,52 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           <Field name="ssh_port" label="SSH port">
             <TextInput name="ssh_port" placeholder="22" required />
           </Field>
-          <div className="space-y-2">
-            <div className="text-sm text-gray-400">Authorized SSH keys</div>
-            {sshKeyOptions.length === 0 ? (
-              <div className="text-sm text-gray-500">No SSH keys configured in settings.</div>
-            ) : (
-              <div className="space-y-2">
-                {sshKeyOptions.map((key) => {
-                  const selectedKeys = new Set(frameForm.ssh_keys ?? initialSshKeyIds)
-                  return (
-                    <div key={key.id} className="flex items-center justify-between gap-2">
-                      <div className="flex flex-col">
+          <div className="@md:flex @md:gap-2">
+            <Label className="@md:w-1/3">SSH Keys</Label>
+            <div className="w-full space-y-2">
+              {sshKeyOptions.length === 0 ? (
+                <div className="text-sm text-gray-500">No SSH keys configured in settings.</div>
+              ) : (
+                <div className="space-y-2">
+                  {sshKeyOptions.map((key) => {
+                    const selectedKeys = new Set(frameForm.ssh_keys ?? initialSshKeyIds)
+                    return (
+                      <div key={key.id} className="flex flex-row gap-2">
+                        <Switch
+                          value={selectedKeys.has(key.id)}
+                          onChange={(value) => {
+                            const next = new Set(selectedKeys)
+                            if (value) {
+                              next.add(key.id)
+                            } else {
+                              next.delete(key.id)
+                            }
+                            setFrameFormValues({ ssh_keys: Array.from(next) })
+                          }}
+                        />
                         <div className="text-sm">{key.name || key.id}</div>
                         {key.use_for_new_frames ? (
                           <div className="text-xs text-gray-500">Default for new frames</div>
                         ) : null}
                       </div>
-                      <Switch
-                        value={selectedKeys.has(key.id)}
-                        onChange={(value) => {
-                          const next = new Set(selectedKeys)
-                          if (value) {
-                            next.add(key.id)
-                          } else {
-                            next.delete(key.id)
-                          }
-                          setFrameFormValues({ ssh_keys: Array.from(next) })
-                        }}
-                      />
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Button
+                  size="small"
+                  color="secondary"
+                  onClick={() => updateDeployedSshKeys()}
+                  disabled={(frameForm.ssh_keys ?? initialSshKeyIds).length === 0}
+                >
+                  Update deployed keys
+                </Button>
               </div>
-            )}
-            <div className="flex gap-2">
-              <Button
-                size="small"
-                color="secondary"
-                onClick={() => updateDeployedSshKeys()}
-                disabled={(frameForm.ssh_keys ?? initialSshKeyIds).length === 0}
-              >
-                Update deployed keys
-              </Button>
+              <p className="text-xs text-gray-500">
+                At least one previously installed key must remain when updating deployed keys.
+              </p>
             </div>
-            <p className="text-xs text-gray-500">
-              At least one previously installed key must remain when updating deployed keys.
-            </p>
           </div>
         </div>
 

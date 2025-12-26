@@ -27,6 +27,7 @@ export function Settings() {
     customFontsLoading,
     isCustomFontsFormSubmitting,
     customFonts,
+    generatingSshKeyId,
   } = useValues(settingsLogic)
   const {
     submitSettings,
@@ -76,6 +77,7 @@ export function Settings() {
                           (saved) => saved.id === key.id
                         )
                         const isOnlyKey = (settings?.ssh_keys?.keys ?? []).length <= 1
+                        const isGenerating = generatingSshKeyId === key.id
                         return (
                           <Box key={key.id} className="border border-white/10 p-3 space-y-2">
                             <Field name={`keys.${index}.name`} label="Key name">
@@ -98,8 +100,18 @@ export function Settings() {
                             >
                               <TextArea />
                             </Field>
-                            {!isOnlyKey ? (
-                              <div className="text-right">
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                size="tiny"
+                                color="secondary"
+                                onClick={() => generateSshKey(key.id)}
+                                className="inline-flex items-center gap-1"
+                                disabled={isGenerating}
+                              >
+                                {isGenerating ? <Spinner className="text-white" color="white" /> : null}
+                                Generate
+                              </Button>
+                              {!isOnlyKey ? (
                                 <Button
                                   size="tiny"
                                   color="secondary"
@@ -109,8 +121,8 @@ export function Settings() {
                                 >
                                   <TrashIcon className="w-4 h-4" /> Delete
                                 </Button>
-                              </div>
-                            ) : null}
+                              ) : null}
+                            </div>
                           </Box>
                         )
                       })}
@@ -119,9 +131,6 @@ export function Settings() {
                       <Button onClick={addSshKey} color="secondary" size="small" className="flex gap-1">
                         <PlusIcon className="w-4 h-4" />
                         Add key
-                      </Button>
-                      <Button onClick={generateSshKey} color="secondary" size="small">
-                        Generate new keypair
                       </Button>
                     </div>
                   </Box>
