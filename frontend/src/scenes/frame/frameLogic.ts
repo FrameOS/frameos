@@ -249,8 +249,9 @@ export const frameLogic = kea<frameLogicType>([
       },
     ],
   }),
-  listeners(({ values }) => ({
+  listeners(({ actions, values }) => ({
     updateDeployedSshKeys: async () => {
+      await actions.submitFrameForm()
       const response = await apiFetch(`/api/frames/${values.frameId}/ssh_keys`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

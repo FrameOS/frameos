@@ -560,10 +560,13 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 <Button
                   size="small"
                   color="secondary"
-                  onClick={() => updateDeployedSshKeys()}
+                  onClick={() => {
+                    updateDeployedSshKeys()
+                    openLogs()
+                  }}
                   disabled={(frameForm.ssh_keys ?? initialSshKeyIds).length === 0}
                 >
-                  Update deployed keys
+                  Save changes & update deployed keys
                 </Button>
               </div>
               <p className="text-xs text-gray-500">
