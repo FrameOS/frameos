@@ -211,17 +211,23 @@ async def _install_authorized_keys(
     redis: Redis,
     frame: Frame,
     public_keys: list[str],
+    known_public_keys: list[str],
 ) -> None:
-    key_blob = "\n".join(key.strip() for key in public_keys if key.strip())
-    if not key_blob:
+    unique_public_keys = list(dict.fromkeys([key.strip() for key in public_keys if key.strip()]))
+    unique_known_keys = list(dict.fromkeys([key.strip() for key in known_public_keys if key.strip()]))
+    key_blob = "\n".join(unique_public_keys)
+    if not unique_public_keys:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="No valid SSH keys supplied.")
 
     temp_path = f"/tmp/frameos_authorized_keys_{uuid.uuid4().hex}"
+    known_path = f"/tmp/frameos_known_authorized_keys_{uuid.uuid4().hex}"
     await upload_file(db, redis, frame, temp_path, f"{key_blob}\n".encode())
+    await upload_file(db, redis, frame, known_path, "\n".join(unique_known_keys).encode())
 
     user = frame.ssh_user or "frame"
     user_quoted = shlex.quote(user)
     temp_quoted = shlex.quote(temp_path)
+    known_quoted = shlex.quote(known_path)
     fallback_home = shlex.quote(f"/home/{user}")
 
     command = (
@@ -229,9 +235,21 @@ async def _install_authorized_keys(
         f"home_dir=$(getent passwd {user_quoted} | cut -d: -f6 || true); "
         f"if [ -z \"$home_dir\" ]; then home_dir={fallback_home}; fi; "
         "install -d -m 700 \"$home_dir/.ssh\"; "
-        f"install -m 600 {temp_quoted} \"$home_dir/.ssh/authorized_keys\"; "
+        "authorized_keys=\"$home_dir/.ssh/authorized_keys\"; "
+        "touch \"$authorized_keys\"; "
+        "merged_keys=$(mktemp); "
+        "awk 'FNR==NR { if (NF>=2) known[$1\" \"$2]=1; next } "
+        "{ "
+        "if ($0 ~ /^[[:space:]]*#/ || $0 ~ /^[[:space:]]*$/) { print; next } "
+        "if (($1\" \"$2) in known) { next } "
+        "if (NF>=3 && ($2\" \"$3) in known) { next } "
+        "print "
+        "}' "
+        f"{known_quoted} \"$authorized_keys\" > \"$merged_keys\"; "
+        f"cat {temp_quoted} >> \"$merged_keys\"; "
+        "install -m 600 \"$merged_keys\" \"$authorized_keys\"; "
         f"chown -R {user_quoted}:{user_quoted} \"$home_dir/.ssh\"; "
-        f"rm -f {temp_quoted}"
+        f"rm -f {temp_quoted} {known_quoted} \"$merged_keys\""
     )
     await run_commands(db, redis, frame, [command], log_output=False)
 
@@ -1672,7 +1690,8 @@ async def api_frame_update_ssh_keys(
     if not public_keys:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="No public SSH keys available to install.")
 
-    await _install_authorized_keys(db, redis, frame, public_keys)
+    known_public_keys = [key.get("public") for key in key_map.values() if key.get("public")]
+    await _install_authorized_keys(db, redis, frame, public_keys, known_public_keys)
     frame.ssh_keys = new_keys
     await update_frame(db, redis, frame)
 
