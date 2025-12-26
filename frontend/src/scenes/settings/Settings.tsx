@@ -16,7 +16,11 @@ import { Switch } from '../../components/Switch'
 import { Select } from '../../components/Select'
 import { timezoneOptions } from '../../decorators/timezones'
 import { SystemInfo } from './SystemInfo'
-import { normalizeSshKeys } from '../../utils/sshKeys'
+import { normalizeSshKeys, getDefaultSshKeyIds } from '../../utils/sshKeys'
+import { framesModel } from '../../models/framesModel'
+import { frameHost } from '../../decorators/frame'
+import { A } from 'kea-router'
+import { urls } from '../../urls'
 
 export function Settings() {
   const {
@@ -29,6 +33,7 @@ export function Settings() {
     customFonts,
     generatingSshKeyId,
   } = useValues(settingsLogic)
+  const { framesList } = useValues(framesModel)
   const {
     submitSettings,
     addSshKey,
@@ -41,6 +46,10 @@ export function Settings() {
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
+  const defaultSshKeyIds = getDefaultSshKeyIds(settings?.ssh_keys)
+
+  const framesUsingKey = (keyId: string) =>
+    framesList.filter((frame) => (frame.ssh_keys ?? defaultSshKeyIds).includes(keyId))
 
   return (
     <div className="h-full w-full overflow-hidden max-w-screen max-h-screen left-0 top-0 absolute">
@@ -78,6 +87,7 @@ export function Settings() {
                         )
                         const isOnlyKey = (settings?.ssh_keys?.keys ?? []).length <= 1
                         const isGenerating = generatingSshKeyId === key.id
+                        const matchingFrames = framesUsingKey(key.id)
                         return (
                           <Box key={key.id} className="border border-white/10 p-3 space-y-2">
                             <Field name={`keys.${index}.name`} label="Key name">
@@ -100,6 +110,24 @@ export function Settings() {
                             >
                               <TextArea />
                             </Field>
+                            <div className="text-xs text-gray-400 space-y-1">
+                              <span className="font-semibold text-gray-300">Frames using this key:</span>
+                              {matchingFrames.length === 0 ? (
+                                <div>None.</div>
+                              ) : (
+                                <div className="flex flex-wrap gap-2">
+                                  {matchingFrames.map((frame) => (
+                                    <A
+                                      key={frame.id}
+                                      href={urls.frame(frame.id)}
+                                      className="text-blue-400 hover:underline"
+                                    >
+                                      {frame.name || frameHost(frame)}
+                                    </A>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                             <div className="flex justify-end gap-2">
                               <Button
                                 size="tiny"

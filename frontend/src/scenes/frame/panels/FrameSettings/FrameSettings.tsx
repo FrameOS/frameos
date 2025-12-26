@@ -1,5 +1,6 @@
 import { useActions, useValues } from 'kea'
 import { useEffect } from 'react'
+import equal from 'fast-deep-equal'
 import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
@@ -77,6 +78,18 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
   const defaultSshKeyIds = getDefaultSshKeyIds(savedSettings?.ssh_keys)
   const initialSshKeyIds = frame.ssh_keys ?? defaultSshKeyIds
+  const normalizeKeyIds = (keys: string[]) => Array.from(new Set(keys)).sort()
+  const deployedSshKeyIds = normalizeKeyIds(
+    (frame.last_successful_deploy?.ssh_keys as string[]) ?? frame.ssh_keys ?? defaultSshKeyIds
+  )
+  const selectedSshKeyIds = normalizeKeyIds(frameForm.ssh_keys ?? initialSshKeyIds)
+  const hasSshKeyChangesToDeploy = !equal(deployedSshKeyIds, selectedSshKeyIds)
+
+  console.log({
+    deployedSshKeyIds,
+    selectedSshKeyIds,
+    hasSshKeyChangesToDeploy,
+  })
 
   useEffect(() => {
     if (!frameForm.ssh_keys && initialSshKeyIds.length > 0) {
@@ -559,7 +572,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               <div className="flex gap-2">
                 <Button
                   size="small"
-                  color="secondary"
+                  color={hasSshKeyChangesToDeploy ? 'primary' : 'secondary'}
                   onClick={() => {
                     updateDeployedSshKeys()
                     openLogs()

@@ -1675,12 +1675,13 @@ async def api_frame_update_ssh_keys(
 
     settings = get_settings_dict(db)
     key_map = ssh_key_map(settings)
-    unknown_keys = [key for key in new_keys if key not in key_map]
-    if unknown_keys:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Unknown SSH key selected.")
+    new_keys = [key for key in new_keys if key in key_map]
+    if not new_keys:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="At least one SSH key must remain installed.")
 
     current_keys = frame.ssh_keys or []
-    if current_keys and not set(current_keys).intersection(new_keys):
+    current_known_keys = [key for key in current_keys if key in key_map]
+    if current_known_keys and not set(current_known_keys).intersection(new_keys):
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail="At least one previously installed SSH key must remain.",
