@@ -176,20 +176,17 @@ async def _create_new_connection(db, redis, frame) -> asyncssh.SSHClientConnecti
     username = frame.ssh_user
     password = frame.ssh_pass
 
-    await log(
-        db, redis, frame.id, "stdinfo",
-        f"Connecting via SSH to {username}@{host} "
-        f"({'password' if password else 'keypair'})"
-    )
-
     # 1) If password is set, just do password-based auth
     # 2) Otherwise, load the private key from DB
     client_keys = []
+    keypair_label = None
     if not password:
         # Attempt to load SSH keys from DB
         ssh_keys_row = db.query(Settings).filter_by(key="ssh_keys").first()
         settings = {"ssh_keys": ssh_keys_row.value} if ssh_keys_row and ssh_keys_row.value else {}
         selected_keys = select_ssh_keys_for_frame(frame, settings)
+        keypair_names = [key.get("name") or key.get("id") for key in selected_keys]
+        keypair_label = ", ".join([name for name in keypair_names if name]) or "unknown"
         private_keys = [key.get("private") for key in selected_keys if key.get("private")]
         if not private_keys:
             raise Exception("No SSH private keys available for this frame.")
@@ -199,6 +196,12 @@ async def _create_new_connection(db, redis, frame) -> asyncssh.SSHClientConnecti
             except (asyncssh.KeyImportError, TypeError):
                 raise Exception("Could not parse the private key from DB. Check if it's valid PEM.")
             client_keys.append(private_key_obj)
+
+    await log(
+        db, redis, frame.id, "stdinfo",
+        f"Connecting via SSH to {username}@{host} "
+        f"({'password' if password else f'keypair: {keypair_label}'})"
+    )
 
     try:
         ssh = await asyncssh.connect(
