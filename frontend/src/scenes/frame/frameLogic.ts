@@ -181,6 +181,7 @@ export const frameLogic = kea<frameLogicType>([
     deployAgent: true,
     restartAgent: true,
     updateDeployedSshKeys: true,
+    clearNextAction: true,
     applyTemplate: (template: Partial<TemplateType>, replaceScenes?: boolean) => ({
       template,
       replaceScenes: replaceScenes ?? false,
@@ -228,6 +229,7 @@ export const frameLogic = kea<frameLogicType>([
       null as 'render' | 'restart' | 'reboot' | 'stop' | 'deploy' | null,
       {
         saveFrame: () => null,
+        clearNextAction: () => null,
         renderFrame: () => 'render',
         restartFrame: () => 'restart',
         rebootFrame: () => 'reboot',
@@ -251,6 +253,7 @@ export const frameLogic = kea<frameLogicType>([
   }),
   listeners(({ actions, values }) => ({
     updateDeployedSshKeys: async () => {
+      actions.clearNextAction()
       await actions.submitFrameForm()
       const response = await apiFetch(`/api/frames/${values.frameId}/ssh_keys`, {
         method: 'POST',
