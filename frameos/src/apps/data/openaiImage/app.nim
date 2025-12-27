@@ -2,6 +2,7 @@ import pixie
 import options
 import json
 import httpclient
+import base64
 import frameos/apps
 import frameos/types
 import frameos/utils/image
@@ -31,29 +32,52 @@ proc get*(self: App, context: ExecutionContext): Image =
   if apiKey == "":
     return self.error(context, "Please provide an OpenAI API key in the settings.")
 
-  var client = newHttpClient(timeout = 60000)
+  var client = newHttpClient(timeout = 300000) # 5 min timeout
   client.headers = newHttpHeaders([
       ("Authorization", "Bearer " & apiKey),
       ("Content-Type", "application/json"),
   ])
   let imageWidth = if context.hasImage: context.image.width else: self.frameConfig.renderWidth()
   let imageHeight = if context.hasImage: context.image.height else: self.frameConfig.renderHeight()
+  let defaultSize = "1024x1024"
+  let dalle3Sizes = @["1024x1024", "1792x1024", "1024x1792"]
+  let dalle2Sizes = @["256x256", "512x512", "1024x1024"]
+  let gptImageSizes = @["1024x1024", "1536x1024", "1024x1536"]
   let size = if self.appConfig.size == "best for orientation":
-                if self.appConfig.model == "dall-e-3":
-                  if imageWidth > imageHeight: "1792x1024"
-                  elif imageWidth < imageHeight: "1024x1792"
-                  else: "1024x1024"
-                else: "1024x1024"
-              elif self.appConfig.size != "": self.appConfig.size
-              else: "1024x1024"
-  let body = %*{
+               case self.appConfig.model
+               of "dall-e-3":
+                 if imageWidth > imageHeight: "1792x1024"
+                 elif imageWidth < imageHeight: "1024x1792"
+                 else: defaultSize
+               of "gpt-image-1":
+                 if imageWidth > imageHeight: "1536x1024"
+                 elif imageWidth < imageHeight: "1024x1536"
+                 else: defaultSize
+               else:
+                 defaultSize
+             elif self.appConfig.size != "":
+               case self.appConfig.model
+               of "dall-e-3":
+                 if self.appConfig.size in dalle3Sizes: self.appConfig.size else: defaultSize
+               of "dall-e-2":
+                 if self.appConfig.size in dalle2Sizes: self.appConfig.size else: defaultSize
+               of "gpt-image-1":
+                 if self.appConfig.size in gptImageSizes: self.appConfig.size else: defaultSize
+               else:
+                 defaultSize
+             else:
+               defaultSize
+  var body = %*{
       "prompt": prompt,
       "n": 1,
-      "style": self.appConfig.style,
       "size": size,
-      "quality": self.appConfig.quality,
       "model": self.appConfig.model
     }
+  if self.appConfig.model == "dall-e-3":
+    if self.appConfig.style != "":
+      body["style"] = %self.appConfig.style
+    if self.appConfig.quality != "":
+      body["quality"] = %self.appConfig.quality
   try:
     let response = client.request("https://api.openai.com/v1/images/generations",
         httpMethod = HttpPost, body = $body)
@@ -66,17 +90,24 @@ proc get*(self: App, context: ExecutionContext): Image =
       except:
         return self.error(context, "Error making request " & $response.status & ": " & response.body)
     let json = parseJson(response.body)
-    let imageUrl = json{"data"}{0}{"url"}.getStr
-    if imageUrl == "":
-      return self.error(context, "No image URL returned from OpenAI.")
-    var client2 = newHttpClient(timeout = 60000)
-    defer: client2.close()
-    let imageData = client2.request(imageUrl, httpMethod = HttpGet)
-    if imageData.code != Http200:
-      return self.error(context, "Error fetching image " & $imageData.status)
+    let imageNode = json{"data"}{0}
+    let imageBase64 = imageNode{"b64_json"}.getStr
+    var imageDataBody = ""
+    if imageBase64 != "":
+      imageDataBody = imageBase64.decode
+    else:
+      let imageUrl = imageNode{"url"}.getStr
+      if imageUrl == "":
+        return self.error(context, "No image data returned from OpenAI.")
+      var client2 = newHttpClient(timeout = 60000)
+      defer: client2.close()
+      let imageData = client2.request(imageUrl, httpMethod = HttpGet)
+      if imageData.code != Http200:
+        return self.error(context, "Error fetching image " & $imageData.status)
+      imageDataBody = imageData.body
     if self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always":
-      discard self.saveAsset(prompt, ".jpg", imageData.body, self.appConfig.saveAssets == "auto")
+      discard self.saveAsset(prompt, ".jpg", imageDataBody, self.appConfig.saveAssets == "auto")
 
-    result = decodeImage(imageData.body)
+    result = decodeImage(imageDataBody)
   except CatchableError as e:
     return self.error(context, "Error fetching image from OpenAI: " & $e.msg)
