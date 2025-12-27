@@ -273,6 +273,7 @@ type
     sleepFuture*: Option[Future[void]]
     isRendering*: bool = false
     triggerRenderNext*: bool = false
+    forceSceneReload*: bool = false
     controlCodeRender*: AppRoot
     controlCodeData*: AppRoot
 

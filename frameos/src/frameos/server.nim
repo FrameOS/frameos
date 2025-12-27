@@ -18,6 +18,7 @@ import frameos/types
 import frameos/channels
 import frameos/utils/image
 import frameos/utils/font
+import frameos/config
 import frameos/portal as netportal
 from net import Port
 from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates
@@ -171,6 +172,18 @@ router myrouter:
     let payload = parseJson(if request.body == "": "{}" else: request.body)
     sendEvent(@"name", payload)
     resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
+  post "/reload":
+    if not hasAccess(request, Write):
+      resp Http401, "Unauthorized"
+    try:
+      {.gcsafe.}: # TODO: implement an actual lock
+        let newConfig = loadConfig()
+        updateFrameConfigFrom(globalFrameOS.frameConfig, newConfig)
+      sendEvent("reload", %*{})
+      resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
+    except CatchableError as e:
+      log(%*{"event": "reload:error", "error": e.msg})
+      resp Http500, {"Content-Type": "application/json"}, $(%*{"status": "error", "error": e.msg})
   get "/states":
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"

@@ -149,6 +149,10 @@ var nodeMappingTable = initTable[string, NodeId]()
 var stateFieldTypesByScene = initTable[SceneId, Table[string, string]]()
 var allScenesLoaded = false
 var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
+
+proc resetInterpretedScenes*() =
+  allScenesLoaded = false
+  loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var compiledSceneExports = initTable[SceneId, ExportedScene]()
 
 proc registerCompiledScene*(sceneId: SceneId, exported: ExportedScene) =
