@@ -289,8 +289,8 @@ export const frameLogic = kea<frameLogicType>([
         FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], lastDeploy?.[key as keyof FrameType])),
     ],
     requiresRecompilation: [
-      (s) => [s.frame, s.lastDeploy, s.mode],
-      (frame, lastDeploy, mode) => {
+      (s) => [s.frame, s.frameForm, s.lastDeploy, s.mode],
+      (frame, frameForm, lastDeploy, mode) => {
         if (!lastDeploy) {
           return true
         }
@@ -301,12 +301,14 @@ export const frameLogic = kea<frameLogicType>([
             ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT
             : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
         ).filter((k) => k !== 'scenes')
-        const resp = fields.some((key) => !equal(lastDeploy?.[key as keyof FrameType], frame?.[key as keyof FrameType]))
+        const resp = fields.some(
+          (key) => !equal(lastDeploy?.[key as keyof FrameType], (frameForm || frame)?.[key as keyof FrameType])
+        )
         if (resp) {
           return true
         }
         // check scenes separately
-        const currentScenes: FrameScene[] = frame?.scenes ?? []
+        const currentScenes: FrameScene[] = (frameForm || frame)?.scenes ?? []
         const deployedScenes: FrameScene[] = lastDeploy?.scenes ?? []
 
         const needRedeploy = currentScenes.filter((scene) => {
