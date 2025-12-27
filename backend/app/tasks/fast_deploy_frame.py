@@ -42,12 +42,17 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
             await self._upload_frame_json("/srv/frameos/current/frame.json")
             await self._upload_scenes_json("/srv/frameos/current/scenes.json.gz", gzip=True)
 
-        status, body, _headers = await _fetch_frame_http_bytes(
-            frame, redis, path="/reload", method="POST"
-        )
-        if status >= 300:
-            message = body.decode("utf-8", errors="replace")
-            raise Exception(f"Reload failed with status {status}: {message}")
+        try:
+            status, body, _headers = await _fetch_frame_http_bytes(
+                frame, redis, path="/reload", method="POST"
+            )
+            if status >= 300:
+                message = body.decode("utf-8", errors="replace")
+                await log(db, redis, id, "stderr", f"Reload failed with status {status}: {message}. Restarting service.")
+                await self.restart_service("frameos")
+        except Exception as e:
+            await log(db, redis, id, "stderr", f"Reload request failed: {str(e)}. Restarting service.")
+            await self.restart_service("frameos")
 
         frame.status = 'starting'
         frame.last_successful_deploy = frame_dict
