@@ -1,0 +1,9 @@
+{
+  "name": "Counter",
+  "description": "Press GPIO buttons to show funny numbers.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "scenes": "./scenes.json"
+}
