@@ -21,6 +21,7 @@ import { Modal } from '../../../../components/Modal'
 import { urls } from '../../../../urls'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { TextInput } from '../../../../components/TextInput'
+import { SecretField } from '../../../../components/SecretField'
 
 const settingsDetails: Record<
   string,
@@ -335,11 +336,13 @@ export function TemplateRow({
                             ) : null}
                           </div>
                         </div>
-                        <TextInput
-                          type={field.secret ? 'password' : 'text'}
-                          value={value ?? ''}
-                          onChange={(nextValue) => setSettingsValue(field.path, nextValue)}
-                        />
+                        <SecretField value={value ?? ''}>
+                          <TextInput
+                            value={value ?? ''}
+                            onChange={(nextValue) => setSettingsValue(field.path, nextValue)}
+                            autoFocus
+                          />
+                        </SecretField>
                       </div>
                     </div>
                   )
