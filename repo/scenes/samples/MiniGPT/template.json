@@ -1,6 +1,6 @@
 {
   "name": "MiniGPT",
-  "description": "Ask GPT a question, see the answer. OpenAI API key required.",
+  "description": "Ask GPT a question, see the answer.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 480,

@@ -1,6 +1,6 @@
 {
   "name": "OpenAI Image",
-  "description": "Generate an image with Dall-E. Requires an API key under settings and enough API credits.",
+  "description": "Generate an image with Dall-E.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 1280,
