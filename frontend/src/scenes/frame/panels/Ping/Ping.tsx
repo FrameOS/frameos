@@ -12,7 +12,9 @@ type PingMode = 'icmp' | 'http'
 type PingResult = {
   id: number
   timestamp: string
-  elapsedMs: number | null
+  clientElapsedMs: number | null
+  serverElapsedMs: number | null
+  icmpTimeMs: number | null
   ok: boolean
   message: string
   mode: PingMode
@@ -21,6 +23,21 @@ type PingResult = {
 }
 
 const MAX_RESULTS = 200
+const ICMP_TIME_REGEX = /time[=<]\s*([\d.]+)\s*ms/i
+
+const formatMs = (value: number, precision = 0) => {
+  const fixed = value.toFixed(precision)
+  return fixed.replace(/\.?0+$/, '')
+}
+
+const extractIcmpTime = (message: string) => {
+  const match = message.match(ICMP_TIME_REGEX)
+  if (!match) {
+    return null
+  }
+  const parsed = Number(match[1])
+  return Number.isFinite(parsed) ? parsed : null
+}
 
 export function Ping() {
   const { frameId, frame } = useValues(frameLogic)
@@ -118,12 +135,17 @@ export function Ping() {
       }
 
       const elapsed = Date.now() - startedAt
+      const clientElapsedMs = elapsed
+      const serverElapsedMs = payload?.elapsed_ms ?? null
+      const icmpTimeMs = mode === 'icmp' ? extractIcmpTime(message) : null
       setResults((previous) => {
         const next = [
           {
             id,
             timestamp: new Date().toLocaleTimeString(),
-            elapsedMs: payload?.elapsed_ms ?? elapsed,
+            clientElapsedMs,
+            serverElapsedMs,
+            icmpTimeMs,
             ok,
             message,
             mode,
@@ -239,7 +261,27 @@ export function Ping() {
                     {result.timestamp} · {result.mode === 'http' ? 'HTTP' : 'ICMP'} · {result.target}
                     {result.status ? ` (status ${result.status})` : ''}
                   </span>
-                  <span>{result.elapsedMs != null ? `${Math.round(result.elapsedMs)} ms` : '—'}</span>
+                  <span className="text-right">
+                    {result.mode === 'icmp' && result.icmpTimeMs != null && result.clientElapsedMs != null ? (
+                      <span className="inline-flex items-center gap-1">
+                        <span className="font-semibold text-emerald-300" title="ICMP reply time reported by the host">
+                          {formatMs(result.icmpTimeMs, 3)} ms
+                        </span>
+                        <span className="text-gray-500">/</span>
+                        <span className="text-sky-300" title="Browser round-trip time (request/response)">
+                          {formatMs(result.clientElapsedMs, 0)} ms
+                        </span>
+                      </span>
+                    ) : result.clientElapsedMs != null ? (
+                      <span title="Browser round-trip time (request/response)">
+                        {formatMs(result.clientElapsedMs, 0)} ms
+                      </span>
+                    ) : result.serverElapsedMs != null ? (
+                      <span title="Server-measured round-trip time">{formatMs(result.serverElapsedMs, 0)} ms</span>
+                    ) : (
+                      '—'
+                    )}
+                  </span>
                 </div>
                 <div className={result.ok ? 'text-green-300' : 'text-red-300'}>
                   {result.ok ? 'reply' : 'error'}: {result.message || 'No response body'}
