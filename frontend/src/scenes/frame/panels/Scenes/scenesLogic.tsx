@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { panelsLogic } from '../panelsLogic'
 import { controlLogic } from './controlLogic'
 import equal from 'fast-deep-equal'
+import { collectSecretSettingsFromScenes } from '../secretSettings'
 
 export interface ScenesLogicProps {
   frameId: number
@@ -201,6 +202,19 @@ export const scenesLogic = kea<scenesLogicType>([
           })
         })
         return result
+      },
+    ],
+    sceneSecretSettings: [
+      (s) => [s.scenes, s.apps],
+      (scenes, apps): Map<string, string[]> => {
+        const settingsByScene = new Map<string, string[]>()
+        for (const scene of scenes) {
+          const secretSettings = collectSecretSettingsFromScenes([scene], apps)
+          if (secretSettings.length) {
+            settingsByScene.set(scene.id, secretSettings)
+          }
+        }
+        return settingsByScene
       },
     ],
   }),

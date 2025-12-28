@@ -33,6 +33,8 @@ import { ExpandedScene } from './ExpandedScene'
 import { controlLogic } from './controlLogic'
 import { Tooltip } from '../../../../components/Tooltip'
 import { FrameImage } from '../../../../components/FrameImage'
+import { settingsLogic } from '../../../settings/settingsLogic'
+import { getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
@@ -51,12 +53,14 @@ export function Scenes() {
     sceneTitles,
     undeployedSceneIds,
     unsavedSceneIds,
+    sceneSecretSettings,
   } = useValues(scenesLogic({ frameId }))
   const { setSearch, toggleSettings, submitNewScene, toggleNewScene, createNewScene, closeNewScene, expandScene } =
     useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
   const { sceneId, sceneChanging, loading } = useValues(controlLogic({ frameId }))
   const { setCurrentScene, sync } = useActions(controlLogic({ frameId }))
+  const { savedSettings } = useValues(settingsLogic)
 
   if (scenes.length === 0 && !showNewSceneForm) {
     return (
@@ -141,8 +145,12 @@ export function Scenes() {
         {filteredScenes.length === 0 && search ? (
           <div className="text-center text-gray-400">No scenes matching "{search}"</div>
         ) : null}
-        {filteredScenes.map((scene) => (
-          <React.Fragment key={scene.id}>
+        {filteredScenes.map((scene) => {
+          const secretSettings = sceneSecretSettings.get(scene.id) ?? []
+          const missingSecretSettings = getMissingSecretSettingKeys(secretSettings, savedSettings)
+
+          return (
+            <React.Fragment key={scene.id}>
             <div
               className={clsx(
                 'border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1',
@@ -255,8 +263,19 @@ export function Scenes() {
                   </div>
 
                   <div className="flex items-center gap-2 w-full pl-7 justify-between">
-                    <div className="text-xs text-gray-400 flex gap-1 items-center">
+                    <div className="text-xs text-gray-400 flex flex-wrap gap-1 items-center">
                       <div>{scene.id}</div>
+                      {secretSettings.map((settingKey) => (
+                        <span
+                          key={settingKey}
+                          className="inline-flex items-center rounded border border-gray-400/80 bg-gray-950 px-2 py-0.5 text-[10px] font-semibold uppercase text-gray-300"
+                        >
+                          {missingSecretSettings.has(settingKey) ? (
+                            <ExclamationTriangleIcon className="mr-1 h-3 w-3 text-yellow-300" />
+                          ) : null}
+                          {settingsDetails[settingKey].tagLabel}
+                        </span>
+                      ))}
 
                       {linksToOtherScenes[scene.id]?.size ? (
                         <Tooltip
@@ -327,7 +346,8 @@ export function Scenes() {
               </Box>
             ) : null}
           </React.Fragment>
-        ))}
+          )
+        })}
 
         {showNewSceneForm ? (
           <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">

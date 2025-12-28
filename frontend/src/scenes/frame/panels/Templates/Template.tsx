@@ -16,72 +16,17 @@ import clsx from 'clsx'
 import { Tooltip } from '../../../../components/Tooltip'
 import { appsModel } from '../../../../models/appsModel'
 import { useActions, useValues } from 'kea'
-import { AppConfig, FrameOSSettings } from '../../../../types'
 import { Modal } from '../../../../components/Modal'
 import { urls } from '../../../../urls'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { TextInput } from '../../../../components/TextInput'
 import { SecretField } from '../../../../components/SecretField'
-
-const settingsDetails: Record<
-  string,
-  {
-    title: string
-    tagLabel: string
-    description?: string
-    fields: { label: string; secret?: boolean; path: (keyof FrameOSSettings | string)[] }[]
-  }
-> = {
-  openAI: {
-    title: 'OpenAI',
-    tagLabel: 'Uses OpenAI API key',
-    description: 'The OpenAI API key is used within OpenAI apps.',
-    fields: [{ label: 'API key', secret: true, path: ['openAI', 'apiKey'] }],
-  },
-  unsplash: {
-    title: 'Unsplash API',
-    tagLabel: 'Uses Unsplash access key',
-    fields: [{ label: 'Access key', secret: true, path: ['unsplash', 'accessKey'] }],
-  },
-  homeAssistant: {
-    title: 'Home Assistant',
-    tagLabel: 'Uses Home Assistant access token',
-    fields: [
-      { label: 'Home assistant URL', path: ['homeAssistant', 'url'] },
-      {
-        label: 'Access token (Profile → Long-Lived Access Tokens)',
-        secret: true,
-        path: ['homeAssistant', 'accessToken'],
-      },
-    ],
-  },
-  // frameOS: {
-  //   title: 'FrameOS Gallery',
-  //   tagLabel: 'Uses FrameOS Gallery API key',
-  //   description: 'Premium AI slop to get you started.',
-  //   fields: [{ label: 'API key', secret: true, path: ['frameOS', 'apiKey'] }],
-  // },
-}
-
-function resolveAppConfig(apps: Record<string, AppConfig>, keyword?: string): AppConfig | undefined {
-  if (!keyword) {
-    return undefined
-  }
-  if (apps[keyword]) {
-    return apps[keyword]
-  }
-  if (!keyword.includes('/')) {
-    const match = Object.keys(apps).find((key) => key.endsWith(`/${keyword}`))
-    if (match) {
-      return apps[match]
-    }
-  }
-  return undefined
-}
-
-function getSettingsValue(settings: FrameOSSettings | null | undefined, path: (keyof FrameOSSettings | string)[]) {
-  return path.reduce<any>((acc, key) => (acc ? acc[key as keyof typeof acc] : undefined), settings)
-}
+import {
+  collectSecretSettingsFromScenes,
+  getMissingSecretSettingKeys,
+  getSettingsValue,
+  settingsDetails,
+} from '../secretSettings'
 
 interface TemplateProps {
   template: TemplateType
@@ -125,23 +70,14 @@ export function TemplateRow({
   const { imageUrl: managedImageUrl } = useEntityImage(imageEntity, 'image')
   const fallbackImageUrl = managedImageUrl ?? (typeof template.image === 'string' ? template.image : null)
   const imageUrl = fallbackImageUrl
-  const secretSettings = useMemo(() => {
-    const settingsKeys = new Set<string>()
-    for (const scene of template.scenes ?? []) {
-      for (const node of scene.nodes ?? []) {
-        if (node.type === 'app') {
-          const keyword = (node.data as { keyword?: string } | undefined)?.keyword
-          const appConfig = resolveAppConfig(apps, keyword)
-          for (const setting of appConfig?.settings ?? []) {
-            if (settingsDetails[setting]) {
-              settingsKeys.add(setting)
-            }
-          }
-        }
-      }
-    }
-    return Array.from(settingsKeys)
-  }, [apps, template.scenes])
+  const secretSettings = useMemo(
+    () => collectSecretSettingsFromScenes(template.scenes ?? [], apps),
+    [apps, template.scenes]
+  )
+  const missingSecretSettings = useMemo(
+    () => getMissingSecretSettingKeys(secretSettings, savedSettings),
+    [savedSettings, secretSettings]
+  )
   const activeSettings = activeSettingsKey ? settingsDetails[activeSettingsKey] : null
 
   return (
@@ -271,6 +207,9 @@ export function TemplateRow({
                   className="inline-flex items-center rounded border border-gray-400/80 bg-gray-950 px-2 py-0.5 text-xs font-semibold uppercase text-gray-300 hover:bg-gray-900"
                   onClick={() => setActiveSettingsKey(settingKey)}
                 >
+                  {missingSecretSettings.has(settingKey) ? (
+                    <ExclamationTriangleIcon className="mr-1 h-3 w-3 text-yellow-300" />
+                  ) : null}
                   {settingsDetails[settingKey].tagLabel}
                 </button>
               ))}
@@ -283,7 +222,9 @@ export function TemplateRow({
           <div className="space-y-4 p-5 text-gray-100">
             <div className="rounded border border-orange-500/70 bg-gray-800 p-3">
               <div className="text-xs font-semibold uppercase text-orange-300">Global setting</div>
-              <div className="text-sm text-orange-100">Changing this will affect all frames.</div>
+              <div className="text-sm text-orange-100">
+                Changing this will affect all frames. Redeploy to update the persisted value.
+              </div>
             </div>
             {activeSettings.description ? <p className="text-sm text-gray-200">{activeSettings.description}</p> : null}
             <div className="space-y-2">
