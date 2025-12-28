@@ -85,12 +85,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const selectedSshKeyIds = normalizeKeyIds(frameForm.ssh_keys ?? initialSshKeyIds)
   const hasSshKeyChangesToDeploy = !equal(deployedSshKeyIds, selectedSshKeyIds)
 
-  console.log({
-    deployedSshKeyIds,
-    selectedSshKeyIds,
-    hasSshKeyChangesToDeploy,
-  })
-
   useEffect(() => {
     if (!frameForm.ssh_keys && initialSshKeyIds.length > 0) {
       setFrameFormValues({ ssh_keys: initialSshKeyIds })
