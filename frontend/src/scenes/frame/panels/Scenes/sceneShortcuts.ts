@@ -384,3 +384,22 @@ export function buildSdCardImageScene(imageFilename: string, assetsPath: string,
     }),
   }
 }
+
+export function buildLocalImageScene(imageFilename: string, imageFolder: string, sceneId: string): FrameScene {
+  const normalizedFolder = imageFolder.replace(/\/+$/, '') || '/srv/assets'
+  const safeFilename = imageFilename || 'image'
+
+  return {
+    ...baseSdCardImageScene,
+    id: sceneId,
+    fields: baseSdCardImageScene.fields?.map((field) => {
+      if (field.name === 'imageFolder') {
+        return { ...field, value: normalizedFolder }
+      }
+      if (field.name === 'search') {
+        return { ...field, value: safeFilename }
+      }
+      return field
+    }),
+  }
+}
