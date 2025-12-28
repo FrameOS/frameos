@@ -14,7 +14,6 @@ import {
   spectraPalettes,
   withCustomPalette,
   buildrootPlatforms,
-  rpiOSPlatforms,
   modes,
   devicesNixOS,
   nixosPlatforms,
@@ -554,19 +553,21 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   })}
                 </div>
               )}
-              <div className="flex gap-2">
-                <Button
-                  size="small"
-                  color={hasSshKeyChangesToDeploy ? 'primary' : 'secondary'}
-                  onClick={() => {
-                    updateDeployedSshKeys()
-                    openLogs()
-                  }}
-                  disabled={(frameForm.ssh_keys ?? frame.ssh_keys ?? []).length === 0}
-                >
-                  Save changes & update deployed keys
-                </Button>
-              </div>
+              {mode === 'rpios' ? (
+                <div className="flex gap-2">
+                  <Button
+                    size="small"
+                    color={hasSshKeyChangesToDeploy ? 'primary' : 'secondary'}
+                    onClick={() => {
+                      updateDeployedSshKeys()
+                      openLogs()
+                    }}
+                    disabled={(frameForm.ssh_keys ?? frame.ssh_keys ?? []).length === 0}
+                  >
+                    Save changes & update deployed keys
+                  </Button>
+                </div>
+              ) : null}
               <p className="text-xs text-gray-500">
                 At least one previously installed key must remain when updating deployed keys.
               </p>
