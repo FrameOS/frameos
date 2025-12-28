@@ -1,4 +1,4 @@
-import json, pixie, times, options, strformat, strutils, locks, tables
+import json, pixie, times, options, strformat, strutils, locks, tables, sequtils
 import pixie/fileformats/png
 import scenes/scenes
 import system/scenes
@@ -12,6 +12,7 @@ const SCENE_STATE_JSON_FOLDER = "./state"
 var systemScenes*: Table[SceneId, ExportedScene] = getSystemScenes()
 var compiledScenes*: Table[SceneId, ExportedScene] = getExportedScenes()
 var interpretedScenes*: Table[SceneId, ExportedInterpretedScene] = getInterpretedScenes()
+var uploadedScenes*: Table[SceneId, ExportedInterpretedScene] = initTable[SceneId, ExportedInterpretedScene]()
 
 var exportedScenes*: Table[SceneId, ExportedScene] = initTable[SceneId, ExportedScene]()
 for sceneId, scene in systemScenes:
@@ -22,6 +23,8 @@ for sceneId, scene in interpretedScenes:
 for sceneId, scene in compiledScenes:
   exportedScenes[sceneId] = scene
   registerCompiledScene(sceneId, scene)
+for sceneId, scene in uploadedScenes:
+  exportedScenes[sceneId] = scene.ExportedScene
 
 proc reloadInterpretedScenes*() =
   let oldInterpreted = interpretedScenes
@@ -32,6 +35,78 @@ proc reloadInterpretedScenes*() =
       exportedScenes.del(sceneId)
   for sceneId, scene in interpretedScenes:
     exportedScenes[sceneId] = scene.ExportedScene
+
+proc updateUploadedScenes*(newScenes: Table[SceneId, ExportedInterpretedScene]) =
+  let oldUploaded = getUploadedInterpretedScenes()
+  for sceneId in keys(oldUploaded):
+    if newScenes.hasKey(sceneId):
+      continue
+    if compiledScenes.hasKey(sceneId):
+      exportedScenes[sceneId] = compiledScenes[sceneId]
+    elif interpretedScenes.hasKey(sceneId):
+      exportedScenes[sceneId] = interpretedScenes[sceneId].ExportedScene
+    elif systemScenes.hasKey(sceneId):
+      exportedScenes[sceneId] = systemScenes[sceneId]
+    elif exportedScenes.hasKey(sceneId):
+      exportedScenes.del(sceneId)
+  setUploadedInterpretedScenes(newScenes)
+  uploadedScenes = newScenes
+  for sceneId, scene in newScenes:
+    exportedScenes[sceneId] = scene.ExportedScene
+
+proc normalizeUploadedSceneInputs*(sceneInputs: seq[FrameSceneInput]): seq[FrameSceneInput] =
+  var uploadedIdMap = initTable[SceneId, SceneId]()
+  for scene in sceneInputs:
+    uploadedIdMap[scene.id] = SceneId("uploaded/" & scene.id.string)
+
+  for scene in sceneInputs:
+    let originalId = scene.id
+    if uploadedIdMap.hasKey(originalId):
+      scene.id = uploadedIdMap[originalId]
+    for node in scene.nodes:
+      if node.data.isNil or node.data.kind != JObject:
+        continue
+      if node.nodeType == "scene":
+        if node.data.hasKey("keyword") and node.data["keyword"].kind == JString:
+          let keywordId = SceneId(node.data["keyword"].getStr())
+          if uploadedIdMap.hasKey(keywordId):
+            node.data["keyword"] = %*(uploadedIdMap[keywordId].string)
+      elif node.nodeType == "dispatch":
+        if node.data.hasKey("keyword") and node.data["keyword"].kind == JString:
+          let eventName = node.data["keyword"].getStr()
+          if eventName == "setCurrentScene":
+            if node.data.hasKey("config") and node.data["config"].kind == JObject:
+              let config = node.data["config"]
+              if config.hasKey("sceneId") and config["sceneId"].kind == JString:
+                let sceneId = SceneId(config["sceneId"].getStr())
+                if uploadedIdMap.hasKey(sceneId):
+                  config["sceneId"] = %*(uploadedIdMap[sceneId].string)
+  sceneInputs
+
+proc updateUploadedScenesFromPayload*(
+    payload: JsonNode
+  ): tuple[mainScene: Option[SceneId], sceneIds: seq[SceneId]] =
+  var scenePayload: JsonNode
+  if payload.kind == JArray:
+    scenePayload = payload
+  elif payload.kind == JObject and payload.hasKey("scenes") and payload["scenes"].kind == JArray:
+    scenePayload = payload["scenes"]
+  elif payload.kind == JObject:
+    scenePayload = %* [payload]
+  else:
+    return (none(SceneId), @[])
+
+  let sceneInputs = normalizeUploadedSceneInputs(parseInterpretedSceneInputs($scenePayload))
+  if sceneInputs.len == 0:
+    return (none(SceneId), @[])
+
+  let newScenes = buildInterpretedScenes(sceneInputs)
+  let oldUploaded = getUploadedInterpretedScenes()
+  updateUploadedScenes(newScenes)
+
+  let sceneIds = sceneInputs.mapIt(it.id)
+  let oldSceneIds = oldUploaded.keys.toSeq()
+  return (some(sceneInputs[0].id), sceneIds & oldSceneIds)
 
 var
   lastImageLock: Lock

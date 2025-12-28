@@ -247,9 +247,8 @@ export const frameLogic = kea<frameLogicType>([
     restartAgent: true,
     updateDeployedSshKeys: true,
     clearNextAction: true,
-    applyTemplate: (template: Partial<TemplateType>, replaceScenes?: boolean) => ({
+    applyTemplate: (template: Partial<TemplateType>) => ({
       template,
-      replaceScenes: replaceScenes ?? false,
     }),
     closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
     sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
@@ -469,7 +468,7 @@ export const frameLogic = kea<frameLogicType>([
         console.error(`Node ${nodeId} not found in scene ${sceneId}`)
       }
     },
-    applyTemplate: async ({ template, replaceScenes }) => {
+    applyTemplate: async ({ template }) => {
       if ('scenes' in template) {
         const oldScenes = values.frameForm?.scenes || []
         const newScenes = duplicateScenes(
@@ -478,19 +477,15 @@ export const frameLogic = kea<frameLogicType>([
         if (newScenes.length === 1) {
           newScenes[0].name = template?.name || newScenes[0].name || 'Untitled scene'
         }
-        if (replaceScenes) {
-          actions.closeScenePanels(oldScenes.map((scene) => scene.id))
-          actions.setFrameFormValues({ scenes: newScenes })
-        } else {
-          for (const scene of newScenes) {
-            if ('default' in scene) {
-              delete scene.default
-            }
+        for (const scene of newScenes) {
+          if ('default' in scene) {
+            delete scene.default
           }
-          actions.setFrameFormValues({
-            scenes: [...oldScenes, ...newScenes],
-          })
         }
+        actions.setFrameFormValues({
+          scenes: [...oldScenes, ...newScenes],
+        })
+
         if (newScenes.length) {
           try {
             const imageBlob = await fetchTemplateImageBlob(template)

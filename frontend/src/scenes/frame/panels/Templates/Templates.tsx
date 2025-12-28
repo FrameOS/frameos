@@ -142,6 +142,7 @@ export function Templates() {
               <TemplateRow
                 key={template.id ?? -index}
                 template={template}
+                frameId={frameId}
                 exportTemplate={exportTemplate}
                 removeTemplate={removeTemplate}
                 applyTemplate={(template: TemplateType, wipe?: boolean) => {
@@ -206,6 +207,7 @@ export function Templates() {
                 <TemplateRow
                   key={template.id ?? -index}
                   template={template}
+                  frameId={frameId}
                   saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
                   applyTemplate={(template, replace) => {
                     applyRemoteToFrame(repository, template, replace)

@@ -104,6 +104,66 @@ def _bad_request(msg: str):
 _ascii_re = re.compile(r"[^A-Za-z0-9._-]")
 
 
+def _normalize_upload_scene_payload(body: Any) -> tuple[list[dict[str, Any]], Any]:
+    if isinstance(body, (bytes, bytearray)):
+        try:
+            body = json.loads(body)
+        except json.JSONDecodeError:
+            _bad_request("uploadScene payload must be valid JSON")
+
+    if isinstance(body, dict) and isinstance(body.get("scenes"), list):
+        scenes = body["scenes"]
+        return scenes, body["scenes"]
+    if isinstance(body, list):
+        return body, body
+    if isinstance(body, dict):
+        return [body], body
+
+    _bad_request("uploadScene payload must be a scene or list of scenes")
+    return [], body  # for mypy
+
+
+def _validate_upload_scene_payload(scenes: list[dict[str, Any]]) -> None:
+    if not scenes:
+        _bad_request("uploadScene payload must include at least one scene")
+
+    scene_ids: set[str] = set()
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            _bad_request("uploadScene scenes must be objects")
+        scene_id = scene.get("id")
+        if not isinstance(scene_id, str) or not scene_id:
+            _bad_request("uploadScene scenes must include an id")
+        scene_ids.add(scene_id)
+
+    for scene in scenes:
+        nodes = scene.get("nodes") or []
+        if not isinstance(nodes, list):
+            _bad_request(f"Scene '{scene.get('id')}' has invalid nodes list")
+        for node in nodes:
+            if not isinstance(node, dict):
+                _bad_request(f"Scene '{scene.get('id')}' has invalid node entry")
+            node_type = node.get("type")
+            data = node.get("data") or {}
+            if not isinstance(data, dict):
+                _bad_request(f"Scene '{scene.get('id')}' has invalid node data")
+            if node_type == "scene":
+                keyword = data.get("keyword")
+                if not isinstance(keyword, str) or not keyword:
+                    _bad_request(f"Scene '{scene.get('id')}' has invalid scene reference")
+                if keyword not in scene_ids:
+                    _bad_request(f"Scene '{scene.get('id')}' references missing scene '{keyword}'")
+            elif node_type == "dispatch" and data.get("keyword") == "setCurrentScene":
+                config = data.get("config") or {}
+                if not isinstance(config, dict):
+                    _bad_request(f"Scene '{scene.get('id')}' has invalid dispatch config")
+                target_scene_id = config.get("sceneId")
+                if isinstance(target_scene_id, str) and target_scene_id and target_scene_id not in scene_ids:
+                    _bad_request(
+                        f"Scene '{scene.get('id')}' references missing scene '{target_scene_id}'"
+                    )
+
+
 def _ascii_safe(name: str) -> str:
     """Return a stripped ASCII fallback (for very old clients)."""
     return _ascii_re.sub("_", name)[:150] or "download"
@@ -509,6 +569,9 @@ async def api_frame_event(
         if request.headers.get("content-type") == "application/json"
         else request.body()
     )
+    if event == "uploadScene":
+        scenes, body = _normalize_upload_scene_payload(body)
+        _validate_upload_scene_payload(scenes)
     try:
         await _forward_frame_request(
             frame, redis, path=f"/event/{event}", method="POST", json_body=body

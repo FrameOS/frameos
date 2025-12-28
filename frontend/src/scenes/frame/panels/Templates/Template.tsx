@@ -9,6 +9,7 @@ import {
   DocumentIcon,
   CheckIcon,
 } from '@heroicons/react/24/outline'
+import { PlayIcon } from '@heroicons/react/24/solid'
 import { Button } from '../../../../components/Button'
 import { useEntityImage } from '../../../../models/entityImagesModel'
 import { useMemo, useState } from 'react'
@@ -17,15 +18,13 @@ import { Tooltip } from '../../../../components/Tooltip'
 import { appsModel } from '../../../../models/appsModel'
 import { useActions, useValues } from 'kea'
 import { settingsLogic } from '../../../settings/settingsLogic'
-import {
-  collectSecretSettingsFromScenes,
-  getMissingSecretSettingKeys,
-  settingsDetails,
-} from '../secretSettings'
+import { collectSecretSettingsFromScenes, getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
 import { SecretSettingsModal } from '../SecretSettingsModal'
+import { templateRowLogic } from './templateRowLogic'
 
 interface TemplateProps {
   template: TemplateType
+  frameId?: number
   applyTemplate?: (template: TemplateType, wipe?: boolean) => void
   saveRemoteAsLocal?: (template: TemplateType) => void
   exportTemplate?: (id: string, format?: string) => void
@@ -36,6 +35,7 @@ interface TemplateProps {
 
 export function TemplateRow({
   template,
+  frameId,
   exportTemplate,
   removeTemplate,
   applyTemplate,
@@ -47,6 +47,8 @@ export function TemplateRow({
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const [activeSettingsKey, setActiveSettingsKey] = useState<string | null>(null)
+  const { trySceneConfig, tryLoading } = useValues(templateRowLogic({ frameId, template }))
+  const { tryScene } = useActions(templateRowLogic({ frameId, template }))
   const imageEntity = useMemo(() => {
     if (template.id) {
       return `templates/${template.id}`
@@ -125,6 +127,18 @@ export function TemplateRow({
                   </span>
                 </Button>
               ) : null}
+              {trySceneConfig ? (
+                <Button
+                  className="!px-2 flex gap-1"
+                  size="small"
+                  color="primary"
+                  onClick={tryScene}
+                  disabled={tryLoading || !frameId}
+                  title="Try this interpreted scene on the frame"
+                >
+                  <PlayIcon className="w-5 h-5" />
+                </Button>
+              ) : null}
               <DropdownMenu
                 buttonColor="secondary"
                 items={[
@@ -139,12 +153,6 @@ export function TemplateRow({
                               : 'Install onto frame',
                           onClick: () => applyTemplate(template),
                           icon: <DocumentPlusIcon className="w-5 h-5" />,
-                        },
-                        {
-                          label: `Clear frame & install`,
-                          confirm: 'Are you sure? This will erase all scenes from the frame and install this template.',
-                          onClick: () => applyTemplate(template, true),
-                          icon: <DocumentIcon className="w-5 h-5" />,
                         },
                       ]
                     : []),

@@ -149,6 +149,7 @@ var nodeMappingTable = initTable[string, NodeId]()
 var stateFieldTypesByScene = initTable[SceneId, Table[string, string]]()
 var allScenesLoaded = false
 var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
+var uploadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 
 proc resetInterpretedScenes*() =
   allScenesLoaded = false
@@ -157,6 +158,12 @@ var compiledSceneExports = initTable[SceneId, ExportedScene]()
 
 proc registerCompiledScene*(sceneId: SceneId, exported: ExportedScene) =
   compiledSceneExports[sceneId] = exported
+
+proc setUploadedInterpretedScenes*(scenes: Table[SceneId, ExportedInterpretedScene]) =
+  uploadedScenes = scenes
+
+proc getUploadedInterpretedScenes*(): Table[SceneId, ExportedInterpretedScene] =
+  uploadedScenes
 
 # -------------------------
 # Forward decl
@@ -512,6 +519,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           let interpretedExport = loadedScenes[childSceneId]
           exportedChild = ExportedScene(interpretedExport)
           needsInitEvent = true
+        elif uploadedScenes.hasKey(childSceneId):
+          let interpretedExport = uploadedScenes[childSceneId]
+          exportedChild = ExportedScene(interpretedExport)
+          needsInitEvent = true
         elif compiledSceneExports.hasKey(childSceneId):
           exportedChild = compiledSceneExports[childSceneId]
         else:
@@ -618,8 +629,12 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
   if TRACING:
     logger.log(%*{"event": "initInterpreted", "sceneId": sceneId.string})
 
-  let exportedScene = loadedScenes[sceneId]
-  if exportedScene == nil:
+  var exportedScene: ExportedInterpretedScene
+  if loadedScenes.hasKey(sceneId):
+    exportedScene = loadedScenes[sceneId]
+  elif uploadedScenes.hasKey(sceneId):
+    exportedScene = uploadedScenes[sceneId]
+  else:
     raise newException(Exception, "Scene not found: " & sceneId.string)
 
   let scene = InterpretedFrameScene(
@@ -825,6 +840,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         let interpretedExport = loadedScenes[childSceneId]
         exportedChild = ExportedScene(interpretedExport)
         isInterpretedChild = true
+      elif uploadedScenes.hasKey(childSceneId):
+        let interpretedExport = uploadedScenes[childSceneId]
+        exportedChild = ExportedScene(interpretedExport)
+        isInterpretedChild = true
       elif compiledSceneExports.hasKey(childSceneId):
         exportedChild = compiledSceneExports[childSceneId]
       else:
@@ -974,26 +993,38 @@ proc parseHook*(s: string, i: var int, v: var Color) =
 # Scene registry (loader)
 # -------------------------
 
-proc parseInterpretedScenes*(data: string): void =
+proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedScene =
+  let refreshInterval = if scene.settings != nil: scene.settings.refreshInterval else: 300.0
+  let backgroundColor = if scene.settings != nil: scene.settings.backgroundColor else: parseHtmlColor("#000000")
+  ExportedInterpretedScene(
+    nodes: scene.nodes,
+    edges: scene.edges,
+    publicStateFields: scene.fields,
+    persistedStateKeys: scene.fields.mapIt(it.name),
+    init: init,
+    render: render,
+    runEvent: runEvent,
+    refreshInterval: if refreshInterval > 0.0: refreshInterval else: 300.0,
+    backgroundColor: backgroundColor
+  )
+
+proc parseInterpretedSceneInputs*(data: string): seq[FrameSceneInput] =
   if data == "":
+    return @[]
+  data.fromJson(seq[FrameSceneInput])
+
+proc buildInterpretedScenes*(scenes: seq[FrameSceneInput]): Table[SceneId, ExportedInterpretedScene] =
+  result = initTable[SceneId, ExportedInterpretedScene]()
+  for scene in scenes:
+    result[scene.id] = buildInterpretedSceneExport(scene)
+
+proc parseInterpretedScenes*(data: string): void =
+  let scenes = parseInterpretedSceneInputs(data)
+  if scenes.len == 0:
     return
-  let scenes = data.fromJson(seq[FrameSceneInput])
   for scene in scenes:
     try:
-      let refreshInterval = if scene.settings != nil: scene.settings.refreshInterval else: 300.0
-      let backgroundColor = if scene.settings != nil: scene.settings.backgroundColor else: parseHtmlColor("#000000")
-      let exported = ExportedInterpretedScene(
-        nodes: scene.nodes,
-        edges: scene.edges,
-        publicStateFields: scene.fields,
-        persistedStateKeys: scene.fields.mapIt(it.name),
-        init: init,
-        render: render,
-        runEvent: runEvent,
-        refreshInterval: if refreshInterval > 0.0: refreshInterval else: 300.0,
-        backgroundColor: backgroundColor
-      )
-      loadedScenes[scene.id] = exported
+      loadedScenes[scene.id] = buildInterpretedSceneExport(scene)
     except Exception as e:
       echo "Warning: Failed to load interpreted scene: ", e.msg
 

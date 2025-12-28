@@ -1,4 +1,4 @@
-import json, pixie, times, options, asyncdispatch, strformat, strutils, tables
+import json, pixie, times, options, asyncdispatch, strformat, strutils, tables, sequtils
 import std/monotimes
 import apps/render/image/app as render_imageApp
 import apps/data/qr/app as data_qrApp
@@ -292,6 +292,21 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
             if not exportedScenes.hasKey(self.currentSceneId):
               self.currentSceneId = getFirstSceneId()
             self.configureControlCode()
+            self.forceSceneReload = true
+            self.triggerRenderNext = true
+            continue # don't dispatch this event to the scene
+          of "uploadScene":
+            let (mainSceneId, sceneIds) = updateUploadedScenesFromPayload(payload)
+            if mainSceneId.isNone:
+              self.logger.log(%*{"event": "uploadScene:error", "error": "No scenes provided"})
+              continue
+            for sceneId in sceneIds:
+              if self.scenes.hasKey(sceneId):
+                self.scenes.del(sceneId)
+            for sceneId in self.scenes.keys.toSeq():
+              if sceneId.string.startsWith("uploaded/"):
+                self.scenes.del(sceneId)
+            self.currentSceneId = mainSceneId.get()
             self.forceSceneReload = true
             self.triggerRenderNext = true
             continue # don't dispatch this event to the scene
