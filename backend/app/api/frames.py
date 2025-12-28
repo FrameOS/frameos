@@ -63,6 +63,7 @@ from app.utils.remote_exec import (
     delete_path,
     rename_path,
     make_dir,
+    run_command,
     _use_agent,
 )
 from app.utils.frame_http import (
@@ -1183,6 +1184,57 @@ async def api_frame_assets_sync(
         return {"message": "Assets synced successfully"}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_with_auth.post("/frames/{id:int}/assets/upload_image")
+async def api_frame_assets_upload_image(
+    id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    data = await file.read()
+    if not data:
+        _bad_request("Uploaded file is empty")
+
+    original_name = os.path.basename(file.filename or "image")
+    base_name, extension = os.path.splitext(original_name)
+    safe_base = _ascii_re.sub("_", base_name).strip("._") or "image"
+    safe_extension = _ascii_re.sub("", extension)
+    md5sum = hashlib.md5(data).hexdigest()
+    filename = f"{safe_base}.{md5sum}{safe_extension}"
+
+    assets_path = frame.assets_path or "/srv/assets"
+    upload_dir = os.path.normpath(os.path.join(assets_path, "uploads"))
+    combined_path = os.path.normpath(os.path.join(upload_dir, filename))
+
+    if not combined_path.startswith(os.path.normpath(assets_path) + os.sep):
+        _bad_request("Invalid asset path")
+
+    await make_dir(db, redis, frame, upload_dir)
+
+    exists_status, _, _ = await run_command(
+        db,
+        redis,
+        frame,
+        f"test -f {shlex.quote(combined_path)}",
+        log_output=False,
+        log_command=False,
+    )
+    uploaded = False
+    if exists_status != 0:
+        await upload_file(db, redis, frame, combined_path, data)
+        uploaded = True
+
+    rel = os.path.relpath(combined_path, assets_path)
+    return {
+        "path": rel,
+        "filename": filename,
+        "size": len(data),
+        "uploaded": uploaded,
+    }
 
 
 @api_with_auth.post("/frames/{id:int}/assets/upload")

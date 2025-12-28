@@ -5,7 +5,6 @@ import os
 import strutils
 import strformat
 import random
-import sequtils
 import frameos/utils/image
 import frameos/apps
 import frameos/types
@@ -30,7 +29,7 @@ type
 # Function to check if a file is an image
 proc isImage(file: string): bool =
   for ext in imageExtensions:
-    if file.endsWith(ext):
+    if file.toLower().endsWith(ext):
       return true
   return false
 
