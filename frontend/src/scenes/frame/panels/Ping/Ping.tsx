@@ -1,195 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useValues } from 'kea'
+import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { Button } from '../../../../components/Button'
-import { apiFetch } from '../../../../utils/apiFetch'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Select } from '../../../../components/Select'
 import { TextInput } from '../../../../components/TextInput'
-
-type PingMode = 'icmp' | 'http'
-
-type PingResult = {
-  id: number
-  timestamp: string
-  clientElapsedMs: number | null
-  serverElapsedMs: number | null
-  icmpTimeMs: number | null
-  ok: boolean
-  message: string
-  mode: PingMode
-  target: string
-  status?: number | null
-}
-
-const MAX_RESULTS = 200
-const ICMP_TIME_REGEX = /time[=<]\s*([\d.]+)\s*ms/i
-
-const formatMs = (value: number, precision = 0) => {
-  const fixed = value.toFixed(precision)
-  return fixed.replace(/\.?0+$/, '')
-}
-
-const extractIcmpTime = (message: string) => {
-  const match = message.match(ICMP_TIME_REGEX)
-  if (!match) {
-    return null
-  }
-  const parsed = Number(match[1])
-  return Number.isFinite(parsed) ? parsed : null
-}
+import { formatMs, pingLogic, PingMode } from './pingLogic'
 
 export function Ping() {
-  const { frameId, frame } = useValues(frameLogic)
-  const [intervalSeconds, setIntervalSeconds] = useState(1)
-  const [pingMode, setPingMode] = useState<PingMode>('icmp')
-  const [httpPath, setHttpPath] = useState('/ping')
-  const [isRunning, setIsRunning] = useState(false)
-  const [isPinging, setIsPinging] = useState(false)
-  const [results, setResults] = useState<PingResult[]>([])
-  const requestId = useRef(0)
-  const timeoutId = useRef<number | null>(null)
-
-  const intervalMs = useMemo(() => Math.max(1, intervalSeconds) * 1000, [intervalSeconds])
-  const normalisedPath = useMemo(() => {
-    const trimmed = (httpPath || '').trim() || '/ping'
-    return trimmed.startsWith('/') ? trimmed : `/${trimmed}`
-  }, [httpPath])
-  const targetLabel = useMemo(() => {
-    const host = frame?.frame_host || 'frame'
-    const port = frame?.frame_port ? `:${frame.frame_port}` : ''
-    return pingMode === 'http' ? `${host}${port}${normalisedPath}` : host
-  }, [frame, normalisedPath, pingMode])
-
-  useEffect(() => {
-    if (!isRunning) {
-      if (timeoutId.current) {
-        window.clearTimeout(timeoutId.current)
-        timeoutId.current = null
-      }
-      setIsPinging(false)
-      return
-    }
-
-    let cancelled = false
-
-    const scheduleNext = (elapsed: number) => {
-      if (cancelled) {
-        return
-      }
-      const delay = Math.max(intervalMs - elapsed, 0)
-      timeoutId.current = window.setTimeout(() => {
-        void runPing()
-      }, delay)
-    }
-
-    const runPing = async () => {
-      const startedAt = Date.now()
-      setIsPinging(true)
-      const id = ++requestId.current
-      let ok = false
-      let message = ''
-      let mode: PingMode = pingMode
-      let target = targetLabel
-      let status: number | null | undefined = null
-      let payload: {
-        elapsed_ms?: number | null
-        ok?: boolean
-        mode?: PingMode
-        target?: string
-        status?: number | null
-        message?: string
-      } | null = null
-      let responseText: string | null = null
-
-      try {
-        const params = new URLSearchParams({ mode: pingMode })
-        if (pingMode === 'http') {
-          params.set('path', normalisedPath)
-        }
-        const response = await apiFetch(`/api/frames/${frameId}/ping?${params.toString()}`)
-        const contentType = response.headers.get('content-type') ?? ''
-        if (contentType.includes('application/json')) {
-          try {
-            payload = await response.json()
-          } catch (error) {
-            message = error instanceof Error ? error.message : String(error)
-          }
-        } else {
-          responseText = (await response.text()).trim()
-        }
-
-        ok = payload?.ok ?? response.ok
-        mode = (payload?.mode as PingMode) || pingMode
-        target = payload?.target ?? targetLabel
-        status = mode === 'http' ? (payload ? payload.status ?? null : response.status) : null
-        if (payload?.message) {
-          message = payload.message
-        } else if (payload && Object.keys(payload).length > 0) {
-          message = JSON.stringify(payload)
-        } else {
-          message = responseText || (ok ? 'pong' : `HTTP ${response.status}`)
-        }
-      } catch (error) {
-        message = error instanceof Error ? error.message : String(error)
-      }
-
-      const elapsed = Date.now() - startedAt
-      const clientElapsedMs = elapsed
-      const serverElapsedMs = payload?.elapsed_ms ?? null
-      const icmpTimeMs = mode === 'icmp' ? extractIcmpTime(message) : null
-      setResults((previous) => {
-        const next = [
-          {
-            id,
-            timestamp: new Date().toLocaleTimeString(),
-            clientElapsedMs,
-            serverElapsedMs,
-            icmpTimeMs,
-            ok,
-            message,
-            mode,
-            target,
-            status,
-          },
-          ...previous,
-        ]
-        return next.slice(0, MAX_RESULTS)
-      })
-      setIsPinging(false)
-      scheduleNext(elapsed)
-    }
-
-    void runPing()
-
-    return () => {
-      cancelled = true
-      if (timeoutId.current) {
-        window.clearTimeout(timeoutId.current)
-        timeoutId.current = null
-      }
-    }
-  }, [frameId, intervalMs, isRunning, pingMode, normalisedPath, targetLabel])
-
-  useEffect(
-    () => () => {
-      if (timeoutId.current) {
-        window.clearTimeout(timeoutId.current)
-        timeoutId.current = null
-      }
-    },
-    []
+  const { frameId } = useValues(frameLogic)
+  const { intervalSeconds, pingMode, httpPath, isRunning, isPinging, results, targetLabel } = useValues(
+    pingLogic({ frameId })
   )
+  const { setIntervalSeconds, setPingMode, setHttpPath, toggleRunning } = useActions(pingLogic({ frameId }))
 
   return (
     <div className="flex flex-col h-full space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex items-center gap-2">
-          <Button
-            color={isRunning ? 'secondary' : 'primary'}
-            size="small"
-            onClick={() => setIsRunning((value) => !value)}
-          >
+          <Button color={isRunning ? 'secondary' : 'primary'} size="small" onClick={() => toggleRunning()}>
             {isRunning ? 'Stop' : 'Start'}
           </Button>
           {isPinging ? (
