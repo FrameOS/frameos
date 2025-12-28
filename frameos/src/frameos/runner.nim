@@ -22,6 +22,32 @@ const SERVER_RENDER_DELAY_SECONDS = 1.0
 
 var thread: Thread[(FrameConfig, Logger, Option[SceneId])]
 
+proc configureControlCode(self: RunnerThread) =
+  if self.frameConfig.controlCode.enabled:
+    let controlCode = self.frameConfig.controlCode
+    self.controlCodeRender = render_imageApp.App(nodeName: "render/image", nodeId: -1.NodeId,
+      frameConfig: self.frameConfig, appConfig: render_imageApp.AppConfig(
+      offsetX: controlCode.offsetX,
+      offsetY: controlCode.offsetY,
+      placement: controlCode.position,
+    ))
+    self.controlCodeData = data_qrApp.App(nodeName: "data/qr", nodeId: -1.NodeId,
+      frameConfig: self.frameConfig, appConfig: data_qrApp.AppConfig(
+      backgroundColor: controlCode.backgroundColor,
+      qrCodeColor: controlCode.qrCodeColor,
+      padding: controlCode.padding,
+      size: controlCode.size,
+      codeType: "Frame Control URL",
+      code: "",
+      sizeUnit: "pixels per dot",
+      alRad: 30.0,
+      moRad: 0.0,
+      moSep: 0.0
+    ))
+  else:
+    self.controlCodeRender = nil
+    self.controlCodeData = nil
+
 proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene): (Image, float) =
   let sceneTimer = getMonoTime()
   let requiredWidth = self.frameConfig.renderWidth()
@@ -91,6 +117,9 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   while true:
     timer = getMonoTime()
     self.isRendering = true
+    if self.forceSceneReload:
+      lastSceneId = "".SceneId
+      self.forceSceneReload = false
     let sceneId = if exportedScenes.hasKey(self.currentSceneId): self.currentSceneId else: getFirstSceneId()
     let exportedScene = exportedScenes[sceneId]
     if lastSceneId != sceneId:
@@ -256,6 +285,16 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
               self.triggerRenderNext = true
               self.dispatchSceneEvent(some(sceneId), event, payload)
             continue # don't dispatch this event to the scene
+          of "reload":
+            self.logger.log(%*{"event": "reload", "message": "Reloading config and interpreted scenes"})
+            reloadInterpretedScenes()
+            self.scenes = initTable[SceneId, FrameScene]()
+            if not exportedScenes.hasKey(self.currentSceneId):
+              self.currentSceneId = getFirstSceneId()
+            self.configureControlCode()
+            self.forceSceneReload = true
+            self.triggerRenderNext = true
+            continue # don't dispatch this event to the scene
           else: discard
         self.dispatchSceneEvent(sceneId, event, payload)
       except Exception as e:
@@ -283,27 +322,7 @@ proc createRunnerThread*(args: (FrameConfig, Logger, Option[SceneId])) =
       triggerRenderNext: false,
       logger: args[1]
     )
-    if args[0].controlCode.enabled:
-      let controlCode = args[0].controlCode
-      runnerThread.controlCodeRender = render_imageApp.App(nodeName: "render/image", nodeId: -1.NodeId,
-        frameConfig: args[0], appConfig: render_imageApp.AppConfig(
-        offsetX: controlCode.offsetX,
-        offsetY: controlCode.offsetY,
-        placement: controlCode.position,
-      ))
-      runnerThread.controlCodeData = data_qrApp.App(nodeName: "data/qr", nodeId: -1.NodeId,
-        frameConfig: args[0], appConfig: data_qrApp.AppConfig(
-        backgroundColor: controlCode.backgroundColor,
-        qrCodeColor: controlCode.qrCodeColor,
-        padding: controlCode.padding,
-        size: controlCode.size,
-        codeType: "Frame Control URL",
-        code: "",
-        sizeUnit: "pixels per dot",
-        alRad: 30.0,
-        moRad: 0.0,
-        moSep: 0.0
-      ))
+    runnerThread.configureControlCode()
 
     waitFor runnerThread.startRenderLoop() and runnerThread.startMessageLoop()
 

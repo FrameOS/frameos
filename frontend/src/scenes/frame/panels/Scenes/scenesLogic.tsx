@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { panelsLogic } from '../panelsLogic'
 import { controlLogic } from './controlLogic'
 import equal from 'fast-deep-equal'
+import { collectSecretSettingsFromScenes } from '../secretSettings'
 
 export interface ScenesLogicProps {
   frameId: number
@@ -40,6 +41,7 @@ export const scenesLogic = kea<scenesLogicType>([
     setAsDefault: (sceneId: string) => ({ sceneId }),
     removeDefault: true,
     deleteScene: (sceneId: string) => ({ sceneId }),
+    deleteSelectedScenes: true,
     renameScene: (sceneId: string) => ({ sceneId }),
     duplicateScene: (sceneId: string) => ({ sceneId }),
     toggleNewScene: true,
@@ -49,6 +51,11 @@ export const scenesLogic = kea<scenesLogicType>([
     expandScene: (sceneId: string) => ({ sceneId }),
     copySceneJSON: (sceneId: string) => ({ sceneId }),
     setSearch: (search: string) => ({ search }),
+    setActiveSettingsKey: (activeSettingsKey: string | null) => ({ activeSettingsKey }),
+    enableMultiSelect: true,
+    disableMultiSelect: true,
+    clearSceneSelection: true,
+    toggleSceneSelection: (sceneId: string) => ({ sceneId }),
   }),
   forms(({ actions, values, props }) => ({
     newScene: {
@@ -121,6 +128,40 @@ export const scenesLogic = kea<scenesLogicType>([
       {} as Record<string, boolean>,
       {
         expandScene: (state, { sceneId }) => ({ ...state, [sceneId]: !state[sceneId] }),
+      },
+    ],
+    activeSettingsKey: [
+      null as string | null,
+      {
+        setActiveSettingsKey: (_, { activeSettingsKey }) => activeSettingsKey,
+      },
+    ],
+    multiSelectEnabled: [
+      false,
+      {
+        enableMultiSelect: () => true,
+        disableMultiSelect: () => false,
+      },
+    ],
+    selectedSceneIds: [
+      new Set<string>(),
+      {
+        toggleSceneSelection: (state, { sceneId }) => {
+          const next = new Set(state)
+          if (next.has(sceneId)) {
+            next.delete(sceneId)
+          } else {
+            next.add(sceneId)
+          }
+          return next
+        },
+        clearSceneSelection: () => new Set<string>(),
+        disableMultiSelect: () => new Set<string>(),
+        deleteScene: (state, { sceneId }) => {
+          const next = new Set(state)
+          next.delete(sceneId)
+          return next
+        },
       },
     ],
   }),
@@ -203,6 +244,19 @@ export const scenesLogic = kea<scenesLogicType>([
         return result
       },
     ],
+    sceneSecretSettings: [
+      (s) => [s.scenes, s.apps],
+      (scenes, apps): Map<string, string[]> => {
+        const settingsByScene = new Map<string, string[]>()
+        for (const scene of scenes) {
+          const secretSettings = collectSecretSettingsFromScenes([scene], apps)
+          if (secretSettings.length) {
+            settingsByScene.set(scene.id, secretSettings)
+          }
+        }
+        return settingsByScene
+      },
+    ],
   }),
   listeners(({ actions, props, values }) => ({
     setAsDefault: ({ sceneId }) => {
@@ -246,6 +300,19 @@ export const scenesLogic = kea<scenesLogicType>([
         scenes: values.scenes.filter((s) => s.id !== sceneId),
       })
       actions.closePanel({ panel: Panel.Diagram, key: sceneId })
+    },
+    deleteSelectedScenes: () => {
+      const selectedIds = Array.from(values.selectedSceneIds)
+      if (selectedIds.length === 0) {
+        return
+      }
+      frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
+        scenes: values.scenes.filter((scene) => !values.selectedSceneIds.has(scene.id)),
+      })
+      selectedIds.forEach((sceneId) => {
+        actions.closePanel({ panel: Panel.Diagram, key: sceneId })
+      })
+      actions.clearSceneSelection()
     },
     toggleNewScene: () => {
       actions.resetNewScene({ name: '' })

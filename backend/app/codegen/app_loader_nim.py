@@ -551,8 +551,13 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
     app_config_lines: List[str] = []
     app_set_lines: List[str] = []
 
+    inserted_fields: set[str] = set() # prevent duplicate keys
+
     for field in fields:
         field_name = field["name"]  # NOTE: assumes name matches AppConfig slot
+        if field_name in inserted_fields:
+            continue
+        inserted_fields.add(field_name)
         field_type = field["type"]
         field_default = field.get("value")
         field_required = bool(field.get("required", False))

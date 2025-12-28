@@ -7,6 +7,7 @@ from arq import ArqRedis as Redis
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame
 from app.tasks._frame_deployer import FrameDeployer
+from app.utils.frame_http import _fetch_frame_http_bytes
 
 async def fast_deploy_frame(id: int, redis: Redis):
     await redis.enqueue_job("fast_deploy_frame", id=id)
@@ -22,12 +23,10 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
             await log(db, redis, id, "stderr", "Frame not found")
             return
 
-        frame.status = "restarting"
+        frame.status = "deploying"
         await update_frame(db, redis, frame)
 
         self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir="")
-
-        await self.stop_service('frameos')
 
         frame_dict = frame.to_dict() # persisted as frame.last_successful_deploy if successful
         if "last_successful_deploy" in frame_dict:
@@ -43,7 +42,17 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
             await self._upload_frame_json("/srv/frameos/current/frame.json")
             await self._upload_scenes_json("/srv/frameos/current/scenes.json.gz", gzip=True)
 
-        await self.restart_service('frameos')
+        try:
+            status, body, _headers = await _fetch_frame_http_bytes(
+                frame, redis, path="/reload", method="POST"
+            )
+            if status >= 300:
+                message = body.decode("utf-8", errors="replace")
+                await log(db, redis, id, "stderr", f"Reload failed with status {status}: {message}. Restarting service.")
+                await self.restart_service("frameos")
+        except Exception as e:
+            await log(db, redis, id, "stderr", f"Reload request failed: {str(e)}. Restarting service.")
+            await self.restart_service("frameos")
 
         frame.status = 'starting'
         frame.last_successful_deploy = frame_dict

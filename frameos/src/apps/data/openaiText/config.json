@@ -26,7 +26,7 @@
     {
       "name": "model",
       "type": "string",
-      "value": "gpt-4",
+      "value": "gpt-5",
       "required": true,
       "label": "Model"
     }

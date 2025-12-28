@@ -23,6 +23,16 @@ for sceneId, scene in compiledScenes:
   exportedScenes[sceneId] = scene
   registerCompiledScene(sceneId, scene)
 
+proc reloadInterpretedScenes*() =
+  let oldInterpreted = interpretedScenes
+  resetInterpretedScenes()
+  interpretedScenes = getInterpretedScenes()
+  for sceneId in keys(oldInterpreted):
+    if exportedScenes.hasKey(sceneId):
+      exportedScenes.del(sceneId)
+  for sceneId, scene in interpretedScenes:
+    exportedScenes[sceneId] = scene.ExportedScene
+
 var
   lastImageLock: Lock
   lastImage {.guard: lastImageLock.} = newImage(1, 1)

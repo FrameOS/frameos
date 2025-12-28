@@ -4,7 +4,7 @@ These scripts produce Nim, QuickJS and lgpio builds for the Raspberry Pi OS and
 Ubuntu LTS variants we care about. They run each build inside a container
 matching one of the following releases and architectures:
 
-- Raspberry Pi OS (Debian **buster**, **bookworm**, **trixie** preview)
+- Raspberry Pi OS (Debian **buster**, **bullseye**, **bookworm**, **trixie** preview)
 - Ubuntu **22.04** LTS (Jammy Jellyfish)
 - Ubuntu **24.04** LTS (Noble Numbat)
 - **armhf** (32‑bit ARMv7), **arm64** (AArch64) and **amd64** (x86_64)

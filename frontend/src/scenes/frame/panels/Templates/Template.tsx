@@ -1,6 +1,6 @@
 import { TemplateType } from '../../../../types'
 import { H6 } from '../../../../components/H6'
-import { ArrowDownTrayIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { ArrowDownTrayIcon, PencilSquareIcon, TrashIcon, ExclamationTriangleIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import {
   FolderPlusIcon,
@@ -11,9 +11,18 @@ import {
 } from '@heroicons/react/24/outline'
 import { Button } from '../../../../components/Button'
 import { useEntityImage } from '../../../../models/entityImagesModel'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { Tooltip } from '../../../../components/Tooltip'
+import { appsModel } from '../../../../models/appsModel'
+import { useActions, useValues } from 'kea'
+import { settingsLogic } from '../../../settings/settingsLogic'
+import {
+  collectSecretSettingsFromScenes,
+  getMissingSecretSettingKeys,
+  settingsDetails,
+} from '../secretSettings'
+import { SecretSettingsModal } from '../SecretSettingsModal'
 
 interface TemplateProps {
   template: TemplateType
@@ -34,15 +43,17 @@ export function TemplateRow({
   saveRemoteAsLocal,
   installedTemplatesByName,
 }: TemplateProps): JSX.Element {
+  const { apps } = useValues(appsModel)
+  const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
+  const { setSettingsValue, submitSettings } = useActions(settingsLogic)
+  const [activeSettingsKey, setActiveSettingsKey] = useState<string | null>(null)
   const imageEntity = useMemo(() => {
     if (template.id) {
       return `templates/${template.id}`
     }
 
     if (typeof template.image === 'string') {
-      const match = template.image.match(
-        /^\/api\/(repositories\/system\/[^/]+\/templates\/[^/]+)\/image$/
-      )
+      const match = template.image.match(/^\/api\/(repositories\/system\/[^/]+\/templates\/[^/]+)\/image$/)
       if (match) {
         return match[1]
       }
@@ -53,9 +64,16 @@ export function TemplateRow({
 
   // I know the order of hooks is weird here, but the "if" should never change for this component
   const { imageUrl: managedImageUrl } = useEntityImage(imageEntity, 'image')
-  const fallbackImageUrl =
-    managedImageUrl ?? (typeof template.image === 'string' ? template.image : null)
+  const fallbackImageUrl = managedImageUrl ?? (typeof template.image === 'string' ? template.image : null)
   const imageUrl = fallbackImageUrl
+  const secretSettings = useMemo(
+    () => collectSecretSettingsFromScenes(template.scenes ?? [], apps),
+    [apps, template.scenes]
+  )
+  const missingSecretSettings = useMemo(
+    () => getMissingSecretSettingKeys(secretSettings, savedSettings),
+    [savedSettings, secretSettings]
+  )
 
   return (
     <div
@@ -175,8 +193,34 @@ export function TemplateRow({
           <div className="flex items-center gap-2 w-full justify-between">
             {template.description && <div className="text-white text-sm">{template.description}</div>}
           </div>
+          {missingSecretSettings.size ? (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {secretSettings
+                .filter((settingKey) => missingSecretSettings.has(settingKey))
+                .map((settingKey) => (
+                  <button
+                    key={settingKey}
+                    type="button"
+                    className="inline-flex items-center rounded border border-gray-400/80 bg-gray-950 px-2 py-0.5 text-xs font-semibold uppercase text-gray-300 hover:bg-gray-900"
+                    onClick={() => setActiveSettingsKey(settingKey)}
+                  >
+                    <ExclamationTriangleIcon className="mr-1 h-3 w-3 text-yellow-300" />
+                    {settingsDetails[settingKey].tagLabel}
+                  </button>
+                ))}
+            </div>
+          ) : null}
         </div>
       </div>
+      <SecretSettingsModal
+        activeSettingsKey={activeSettingsKey}
+        onClose={() => setActiveSettingsKey(null)}
+        settings={settings}
+        savedSettings={savedSettings}
+        settingsChanged={settingsChanged}
+        setSettingsValue={setSettingsValue}
+        submitSettings={submitSettings}
+      />
     </div>
   )
 }

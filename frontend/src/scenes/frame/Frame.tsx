@@ -74,6 +74,14 @@ export function Frame(props: FrameSceneProps) {
             }
             buttons={
               <div className="flex divide-x divide-gray-700 space-x-2">
+                {unsavedChanges ? (
+                  <div className="pr-2 text-[#9a9ad0] flex items-center">
+                    Unsaved changes{requiresRecompilation ? ', requires recompilation!' : ''}
+                  </div>
+                ) : undeployedChanges ? (
+                  <div className="pr-2 text-[#9a9ad0] flex items-center">Undeployed changes</div>
+                ) : null}
+
                 <DropdownMenu
                   buttonColor="secondary"
                   className="items-center"
@@ -84,7 +92,7 @@ export function Frame(props: FrameSceneProps) {
                     { label: 'Stop FrameOS', onClick: () => stopFrame() },
                     { label: 'Reboot device', onClick: () => rebootFrame() },
                     {
-                      label: 'Fast deploy',
+                      label: 'Fast deploy (reload)',
                       onClick: () => {
                         fastDeployFrame()
                         openLogs()
@@ -155,15 +163,15 @@ export function Frame(props: FrameSceneProps) {
                     </Button>
                   ) : (
                     <Button
-                      color={undeployedChanges ? 'primary' : 'secondary'}
+                      color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
                       type="button"
                       onClick={() => {
+                        saveFrame()
                         deployFrame()
                         openLogs()
                       }}
                     >
-                      {requiresRecompilation ? 'Full ' : 'Fast '}
-                      deploy
+                      Save & {requiresRecompilation ? 'recompile' : 'deploy'}
                     </Button>
                   )}
                 </div>

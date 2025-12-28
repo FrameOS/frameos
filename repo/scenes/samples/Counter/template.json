@@ -1,6 +1,6 @@
 {
-  "name": "OpenAI Image",
-  "description": "Generate an image with Dall-E.",
+  "name": "Counter",
+  "description": "Press GPIO buttons to show funny numbers.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 1280,

@@ -11,6 +11,7 @@ export interface FrameType {
   ssh_user?: string
   ssh_pass?: string
   ssh_port: number
+  ssh_keys?: string[]
   server_host?: string
   server_port: number
   server_api_key?: string
@@ -543,6 +544,7 @@ export interface FrameOSSettings {
   }
   repositories?: RepositoryType[]
   ssh_keys?: {
+    keys?: SSHKeyEntry[]
     default?: string
     default_public?: string
   }
@@ -567,6 +569,14 @@ export interface FrameOSSettings {
     sshKey?: string
     sshPublicKey?: string
   }
+}
+
+export interface SSHKeyEntry {
+  id: string
+  name?: string
+  private?: string
+  public?: string
+  use_for_new_frames?: boolean
 }
 
 export interface FrameStateRecord {

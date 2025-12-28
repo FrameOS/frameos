@@ -53,6 +53,7 @@ from app.schemas.frames import (
     FrameCreateRequest,
     FrameUpdateRequest,
     FramePingResponse,
+    FrameSSHKeysUpdateRequest,
 )
 from app.api.auth import get_current_user
 from app.config import config
@@ -63,6 +64,12 @@ from app.utils.remote_exec import (
     rename_path,
     make_dir,
     _use_agent,
+)
+from app.utils.frame_http import (
+    _build_frame_path,
+    _build_frame_url,
+    _auth_headers,
+    _fetch_frame_http_bytes,
 )
 from app.tasks.utils import find_nim_v2
 from app.tasks.deploy_frame import FrameDeployer
@@ -78,6 +85,8 @@ from app.ws.agent_ws import (
 )
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
+from app.utils.ssh_key_utils import default_ssh_key_ids
+from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import create_scoped_token_response, validate_scoped_token
@@ -98,55 +107,6 @@ _ascii_re = re.compile(r"[^A-Za-z0-9._-]")
 def _ascii_safe(name: str) -> str:
     """Return a stripped ASCII fallback (for very old clients)."""
     return _ascii_re.sub("_", name)[:150] or "download"
-
-
-def _build_frame_path(
-    frame: Frame,
-    path: str,
-    method: str = "GET",
-) -> str:
-    """
-    Build the relative path used when talking to the device.
-
-    * For **GET** we keep the historical `?k=` query parameter so the
-      WebSocket agent (which cannot add headers) can authenticate.
-    * For **POST** and every other verb we **omit** the query parameter
-      – the plain-HTTP fallback is able to use the `Authorization`
-      header instead.
-    """
-    if not is_safe_host(frame.frame_host):
-        raise HTTPException(status_code=400, detail="Unsafe frame host")
-
-    if (
-        method == "GET"
-        and frame.frame_access not in ("public", "protected")
-        and frame.frame_access_key
-    ):
-        sep = "&" if "?" in path else "?"
-        path = f"{path}{sep}k={frame.frame_access_key}"
-    return path
-
-
-def _build_frame_url(frame: Frame, path: str, method: str) -> str:
-    """Return full http://host:port/… URL (adds access key when required)."""
-    if not is_safe_host(frame.frame_host):
-        raise HTTPException(status_code=400, detail="Unsafe frame host")
-
-    scheme = "https" if frame.frame_port % 1000 == 443 else "http"
-    url = f"{scheme}://{frame.frame_host}:{frame.frame_port}{_build_frame_path(frame, path, method)}"
-    return url
-
-
-def _auth_headers(
-    frame: Frame, hdrs: Optional[dict[str, str]] = None
-) -> dict[str, str]:
-    """
-    Inject HTTP Authorization header when the frame is not public.
-    """
-    hdrs = dict(hdrs or {})
-    if frame.frame_access != "public" and frame.frame_access_key:
-        hdrs.setdefault("Authorization", f"Bearer {frame.frame_access_key}")
-    return hdrs
 
 
 def _normalise_agent_response(resp: Any) -> tuple[int, Any]:
@@ -200,6 +160,8 @@ def _format_body_preview(body: bytes) -> str:
     if not body:
         return ""
     return _truncate_text(_decode_bytes(body))
+
+
 
 
 async def _icmp_ping_host(host: str, *, timeout: float = 2.0) -> tuple[bool, float | None, str]:
@@ -401,48 +363,6 @@ async def _remote_download_file(
         return data
     finally:
         await remove_ssh_connection(db, redis, ssh, frame)
-
-
-async def _fetch_frame_http_bytes(
-    frame: Frame,
-    redis: Redis,
-    *,
-    path: str,
-    method: str = "GET",
-) -> tuple[int, bytes, dict[str, str]]:
-    """Fetch *path* from the frame returning (status, body-bytes, headers)."""
-
-    if await _use_agent(frame, redis):
-        resp = await http_get_on_frame(frame.id, _build_frame_path(frame, path, method))
-        if isinstance(resp, dict):
-            status = int(resp.get("status", 0))
-            if resp.get("binary"):
-                body = resp.get("body", b"")  # already bytes
-            else:
-                raw = resp.get("body", "")
-                body = raw.encode("latin1") if isinstance(raw, str) else raw
-            hdrs = {
-                str(k).lower(): str(v) for k, v in (resp.get("headers") or {}).items()
-            }
-            return status, body, hdrs
-        else:
-            raise HTTPException(status_code=500, detail="Bad agent response")
-
-    url = _build_frame_url(frame, path, method)
-    hdrs = _auth_headers(frame)
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(url, headers=hdrs, timeout=60.0)
-        except httpx.ReadTimeout:
-            raise HTTPException(
-                status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Timeout to {url}"
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
-            )
-
-    return response.status_code, response.content, dict(response.headers)
 
 
 # ---------------------------------------------------------------------------
@@ -1551,6 +1471,8 @@ async def api_frame_new(
             data.interval,
         )
 
+        frame.ssh_keys = default_ssh_key_ids(settings) or None
+
         frame.mode = data.mode
         if frame.mode == "nixos":
             frame.ssh_user = 'frame'
@@ -1602,6 +1524,33 @@ async def api_frame_new(
         return {"frame": frame.to_dict()}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_with_auth.post("/frames/{id:int}/ssh_keys")
+async def api_frame_update_ssh_keys(
+    id: int,
+    data: FrameSSHKeysUpdateRequest,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id)
+    if not frame:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    settings = get_settings_dict(db)
+    try:
+        new_keys, public_keys, known_public_keys = resolve_authorized_keys_update(
+            data.ssh_keys,
+            frame.ssh_keys,
+            settings,
+        )
+        await _install_authorized_keys(db, redis, frame, public_keys, known_public_keys)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    frame.ssh_keys = new_keys
+    await update_frame(db, redis, frame)
+
+    return {"message": "SSH keys updated successfully"}
 
 
 @api_with_auth.post("/frames/import", response_model=FrameResponse)

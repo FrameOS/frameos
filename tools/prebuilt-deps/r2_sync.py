@@ -79,6 +79,9 @@ DEFAULT_PREFIX = os.environ.get("R2_PREFIX", "prebuilt-deps")
 
 # Keep the target matrix in sync with tools/prebuilt-deps/build.sh
 DEFAULT_TARGETS = [
+    "debian-bullseye-armhf",
+    "debian-bullseye-arm64",
+    "debian-bullseye-amd64",
     "debian-bookworm-armhf",
     "debian-bookworm-arm64",
     "debian-bookworm-amd64",

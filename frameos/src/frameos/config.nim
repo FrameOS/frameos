@@ -162,3 +162,42 @@ proc loadConfig*(): FrameConfig =
   if result.assetsPath.endswith("/"):
     result.assetsPath = result.assetsPath.strip(leading = false, trailing = true, chars = {'/'})
   setConfigDefaults(result)
+
+proc updateSchedule(target: var FrameSchedule, source: FrameSchedule) =
+  if target == nil:
+    target = source
+  else:
+    target.events = source.events
+
+proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
+  if target == nil:
+    return
+  target.name = source.name
+  target.mode = source.mode
+  target.serverHost = source.serverHost
+  target.serverPort = source.serverPort
+  target.serverApiKey = source.serverApiKey
+  target.frameHost = source.frameHost
+  target.framePort = source.framePort
+  target.frameAccessKey = source.frameAccessKey
+  target.frameAccess = source.frameAccess
+  target.width = source.width
+  target.height = source.height
+  target.device = source.device
+  target.deviceConfig = source.deviceConfig
+  target.metricsInterval = source.metricsInterval
+  target.rotate = source.rotate
+  target.flip = source.flip
+  target.scalingMode = source.scalingMode
+  target.settings = source.settings
+  target.assetsPath = source.assetsPath
+  target.saveAssets = source.saveAssets
+  target.logToFile = source.logToFile
+  target.debug = source.debug
+  target.timeZone = source.timeZone
+  target.gpioButtons = source.gpioButtons
+  target.controlCode = source.controlCode
+  target.network = source.network
+  target.agent = source.agent
+  target.palette = source.palette
+  updateSchedule(target.schedule, source.schedule)

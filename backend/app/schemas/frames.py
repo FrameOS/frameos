@@ -17,6 +17,7 @@ class FrameBase(BaseModel):
     ssh_user: Optional[str]
     ssh_pass: Optional[str]
     ssh_port: int
+    ssh_keys: Optional[List[str]] = None
     server_host: Optional[str]
     server_port: int
     server_api_key: Optional[str]
@@ -80,6 +81,7 @@ class FrameUpdateRequest(BaseModel):
     ssh_user: Optional[str] = None
     ssh_pass: Optional[str] = None
     ssh_port: Optional[int] = None
+    ssh_keys: Optional[List[str]] = None
     server_host: Optional[str] = None
     server_port: Optional[int] = None
     server_api_key: Optional[str] = None
@@ -109,6 +111,10 @@ class FrameUpdateRequest(BaseModel):
     buildroot: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None
     next_action: Optional[str] = None
+
+
+class FrameSSHKeysUpdateRequest(BaseModel):
+    ssh_keys: List[str]
 
 class FrameLogsResponse(BaseModel):
     logs: List[Dict[str, Any]]

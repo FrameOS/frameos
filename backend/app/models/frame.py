@@ -29,6 +29,7 @@ class Frame(Base):
     ssh_user = mapped_column(String(50), nullable=True)
     ssh_pass = mapped_column(String(50), nullable=True)
     ssh_port = mapped_column(Integer, default=22)
+    ssh_keys = mapped_column(JSON, nullable=True)
     # receiving logs, connection from frame to us
     server_host = mapped_column(String(256), nullable=True)
     server_port = mapped_column(Integer, default=8989)
@@ -83,6 +84,7 @@ class Frame(Base):
             'ssh_user': self.ssh_user,
             'ssh_pass': self.ssh_pass,
             'ssh_port': self.ssh_port,
+            'ssh_keys': self.ssh_keys,
             'server_host': self.server_host,
             'server_port': self.server_port,
             'server_api_key': self.server_api_key,

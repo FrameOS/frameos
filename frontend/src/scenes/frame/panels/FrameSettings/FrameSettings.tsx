@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import equal from 'fast-deep-equal'
 import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
@@ -13,7 +14,6 @@ import {
   spectraPalettes,
   withCustomPalette,
   buildrootPlatforms,
-  rpiOSPlatforms,
   modes,
   devicesNixOS,
   nixosPlatforms,
@@ -34,6 +34,9 @@ import { A } from 'kea-router'
 import { timezoneOptions } from '../../../../decorators/timezones'
 import { TextArea } from '../../../../components/TextArea'
 import { ColorInput } from '../../../../components/ColorInput'
+import { settingsLogic } from '../../../settings/settingsLogic'
+import { normalizeSshKeys } from '../../../../utils/sshKeys'
+import { Label } from '../../../../components/Label'
 
 export interface FrameSettingsProps {
   className?: string
@@ -44,7 +47,7 @@ export interface FrameSettingsProps {
 const customModule = `{ lib, ... }:\n{\n  # boot.kernelParams = [ \"quiet\" ];\n}\n`
 export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: FrameSettingsProps) {
   const { mode, frameId, frame, frameForm, frameFormTouches } = useValues(frameLogic)
-  const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
+  const { touchFrameFormField, setFrameFormValues, updateDeployedSshKeys } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic)
   const {
@@ -64,11 +67,19 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
     collectGarbageBackendLoading,
   } = useValues(frameSettingsLogic({ frameId }))
   const { openLogs } = useActions(panelsLogic({ frameId }))
+  const { savedSettings } = useValues(settingsLogic)
   const url = frameUrl(frame)
   const controlUrl = frameControlUrl(frame)
   const imageUrl = frameImageUrl(frame)
 
   const palette = withCustomPalette[frame.device || '']
+  const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
+  const normalizeKeyIds = (keys: string[]) => Array.from(new Set(keys)).sort()
+  const deployedSshKeyIds = normalizeKeyIds(
+    (frame.last_successful_deploy?.ssh_keys as string[]) ?? frame.ssh_keys ?? []
+  )
+  const selectedSshKeyIds = normalizeKeyIds(frameForm.ssh_keys ?? frame.ssh_keys ?? [])
+  const hasSshKeyChangesToDeploy = !equal(deployedSshKeyIds, selectedSshKeyIds)
 
   if (!frame) {
     return (
@@ -510,6 +521,58 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           <Field name="ssh_port" label="SSH port">
             <TextInput name="ssh_port" placeholder="22" required />
           </Field>
+          <div className="@md:flex @md:gap-2">
+            <Label className="@md:w-1/3">SSH Keys</Label>
+            <div className="w-full space-y-2">
+              {sshKeyOptions.length === 0 ? (
+                <div className="text-sm text-gray-500">No SSH keys configured in settings.</div>
+              ) : (
+                <div className="space-y-2">
+                  {sshKeyOptions.map((key) => {
+                    const selectedKeys = new Set(frameForm.ssh_keys ?? frame.ssh_keys ?? [])
+                    return (
+                      <div key={key.id} className="flex flex-row gap-2">
+                        <Switch
+                          value={selectedKeys.has(key.id)}
+                          onChange={(value) => {
+                            const next = new Set(selectedKeys)
+                            if (value) {
+                              next.add(key.id)
+                            } else {
+                              next.delete(key.id)
+                            }
+                            setFrameFormValues({ ssh_keys: Array.from(next) })
+                          }}
+                        />
+                        <div className="text-sm">{key.name || key.id}</div>
+                        {key.use_for_new_frames ? (
+                          <div className="text-xs text-gray-500">Default for new frames</div>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {mode === 'rpios' ? (
+                <div className="flex gap-2">
+                  <Button
+                    size="small"
+                    color={hasSshKeyChangesToDeploy ? 'primary' : 'secondary'}
+                    onClick={() => {
+                      updateDeployedSshKeys()
+                      openLogs()
+                    }}
+                    disabled={(frameForm.ssh_keys ?? frame.ssh_keys ?? []).length === 0}
+                  >
+                    Save changes & update deployed keys
+                  </Button>
+                </div>
+              ) : null}
+              <p className="text-xs text-gray-500">
+                At least one previously installed key must remain when updating deployed keys.
+              </p>
+            </div>
+          </div>
         </div>
 
         <H6>
