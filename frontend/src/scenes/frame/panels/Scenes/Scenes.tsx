@@ -219,6 +219,7 @@ export function Scenes() {
                       onClick={() => (multiSelectEnabled ? toggleSceneSelection(scene.id) : expandScene(scene.id))}
                       refreshable={false}
                       thumb
+                      objectFit="cover"
                     />
                   </div>
                   <div className="break-inside-avoid space-y-1 w-full">

@@ -11,6 +11,7 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
   /** If true, user can click on the image to request a refresh of the signed URL */
   refreshable?: boolean
   thumb?: boolean
+  objectFit?: React.CSSProperties['objectFit']
 }
 
 /**
@@ -27,6 +28,7 @@ export function FrameImage({
   className,
   refreshable = true,
   onClick,
+  objectFit,
   ...props
 }: FrameImageProps) {
   const { frames } = useValues(framesModel)
@@ -76,13 +78,14 @@ export function FrameImage({
             frame.width && frame.height
               ? {
                   aspectRatio:
-                    frame.rotate === 90 || frame.rotate === 270
-                      ? `${frame.height} / ${frame.width}`
-                      : `${frame.width} / ${frame.height}`,
-                  maxWidth: 'inherit',
-                  maxHeight: 'inherit',
-                }
-              : {}
+                frame.rotate === 90 || frame.rotate === 270
+                  ? `${frame.height} / ${frame.width}`
+                  : `${frame.width} / ${frame.height}`,
+                objectFit,
+                maxWidth: 'inherit',
+                maxHeight: 'inherit',
+              }
+            : {}
           }
           alt=""
         />
