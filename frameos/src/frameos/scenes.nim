@@ -89,14 +89,26 @@ proc updateUploadedScenesFromPayload*(
   var scenePayload: JsonNode
   if payload.kind == JArray:
     scenePayload = payload
-  elif payload.kind == JObject and payload.hasKey("scenes") and payload["scenes"].kind == JArray:
-    scenePayload = payload["scenes"]
+  elif payload.kind == JObject and payload.hasKey("scenes"):
+    if payload["scenes"].kind == JArray:
+      scenePayload = payload["scenes"]
+    elif payload["scenes"].kind == JObject:
+      scenePayload = %* [payload["scenes"]]
+    else:
+      return (none(SceneId), @[])
+  elif payload.kind == JObject and payload.hasKey("scene") and payload["scene"].kind == JObject:
+    scenePayload = %* [payload["scene"]]
   elif payload.kind == JObject:
     scenePayload = %* [payload]
   else:
     return (none(SceneId), @[])
 
-  let sceneInputs = normalizeUploadedSceneInputs(parseInterpretedSceneInputs($scenePayload))
+  let rawSceneInputs = parseInterpretedSceneInputs($scenePayload)
+  var uploadedIdMap = initTable[SceneId, SceneId]()
+  for scene in rawSceneInputs:
+    uploadedIdMap[scene.id] = SceneId("uploaded/" & scene.id.string)
+
+  let sceneInputs = normalizeUploadedSceneInputs(rawSceneInputs)
   if sceneInputs.len == 0:
     return (none(SceneId), @[])
 
@@ -106,7 +118,17 @@ proc updateUploadedScenesFromPayload*(
 
   let sceneIds = sceneInputs.mapIt(it.id)
   let oldSceneIds = oldUploaded.keys.toSeq()
-  return (some(sceneInputs[0].id), sceneIds & oldSceneIds)
+  var mainSceneId = sceneInputs[0].id
+  if payload.kind == JObject and payload.hasKey("sceneId") and payload["sceneId"].kind == JString:
+    let requestedId = SceneId(payload["sceneId"].getStr())
+    if uploadedIdMap.hasKey(requestedId):
+      mainSceneId = uploadedIdMap[requestedId]
+    else:
+      for scene in sceneInputs:
+        if scene.id == requestedId:
+          mainSceneId = requestedId
+          break
+  return (some(mainSceneId), sceneIds & oldSceneIds)
 
 var
   lastImageLock: Lock

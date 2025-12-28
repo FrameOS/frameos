@@ -47,13 +47,16 @@ export const templateRowLogic = kea<templateRowLogicType>([
       if (!props.frameId || !values.trySceneConfig) {
         return
       }
-      const payload =
-        values.trySceneConfig.payloadScenes.length > 1
-          ? values.trySceneConfig.payloadScenes
-          : values.trySceneConfig.payloadScenes[0]
       try {
         actions.setTryLoading(true)
-        const response = await apiFetch(`/api/frames/${props.frameId}/event/uploadScene`, {
+        const payload = {
+          scenes: values.trySceneConfig.payloadScenes,
+          sceneId:
+            values.trySceneConfig.payloadScenes.length > 1
+              ? values.trySceneConfig.mainScene.id
+              : values.trySceneConfig.payloadScenes[0]?.id,
+        }
+        const response = await apiFetch(`/api/frames/${props.frameId}/upload_scenes`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),

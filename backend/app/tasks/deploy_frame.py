@@ -459,9 +459,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         raise Exception("Frame not found")
 
     try:
-        if not frame.scenes or len(frame.scenes) == 0:
-            raise Exception("You must have at least one installed scene to deploy. Make sure to press the \"Save\" button as well.")
-
         if frame.status == 'deploying':
             raise Exception("Already deploying. Request again to force redeploy.")
 

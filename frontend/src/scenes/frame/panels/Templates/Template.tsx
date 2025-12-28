@@ -25,7 +25,7 @@ import { templateRowLogic } from './templateRowLogic'
 interface TemplateProps {
   template: TemplateType
   frameId?: number
-  applyTemplate?: (template: TemplateType, wipe?: boolean) => void
+  applyTemplate?: (template: TemplateType) => void
   saveRemoteAsLocal?: (template: TemplateType) => void
   exportTemplate?: (id: string, format?: string) => void
   removeTemplate?: (id: string) => void
