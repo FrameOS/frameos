@@ -3,11 +3,50 @@ from __future__ import annotations
 import shlex
 import uuid
 
+from typing import Any
+
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.models.frame import Frame
 from app.utils.remote_exec import run_commands, upload_file
+from app.utils.ssh_key_utils import ssh_key_map
+
+
+def resolve_authorized_keys_update(
+    ssh_keys: list[str],
+    current_keys: list[str] | None,
+    settings: dict[str, Any],
+) -> tuple[list[str], list[str], list[str]]:
+    new_keys = list(dict.fromkeys([key for key in ssh_keys if key]))
+    if not new_keys:
+        raise ValueError("At least one SSH key must remain installed.")
+
+    key_map = ssh_key_map(settings)
+    new_keys = [key for key in new_keys if key in key_map]
+    if not new_keys:
+        raise ValueError("At least one SSH key must remain installed.")
+
+    current_keys = current_keys or []
+    current_known_keys = [key for key in current_keys if key in key_map]
+    if current_known_keys and not set(current_known_keys).intersection(new_keys):
+        raise ValueError("At least one previously installed SSH key must remain.")
+
+    public_keys = [
+        key_map[key].get("public")
+        for key in new_keys
+        if key_map[key].get("public") and isinstance(key_map[key].get("public"), str)
+    ]
+    if not public_keys:
+        raise ValueError("No public SSH keys available to install.")
+
+    known_public_keys = [
+        key.get("public")
+        for key in key_map.values()
+        if key.get("public") and isinstance(key.get("public"), str)
+    ]
+
+    return new_keys, public_keys, known_public_keys
 
 
 async def _install_authorized_keys(

@@ -85,8 +85,8 @@ from app.ws.agent_ws import (
 )
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
-from app.utils.ssh_key_utils import default_ssh_key_ids, ssh_key_map
-from app.utils.ssh_authorized_keys import _install_authorized_keys
+from app.utils.ssh_key_utils import default_ssh_key_ids
+from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import create_scoped_token_response, validate_scoped_token
@@ -1537,30 +1537,13 @@ async def api_frame_update_ssh_keys(
     if not frame:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
-    new_keys = list(dict.fromkeys([key for key in data.ssh_keys if key]))
-    if not new_keys:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="At least one SSH key must remain installed.")
-
     settings = get_settings_dict(db)
-    key_map = ssh_key_map(settings)
-    new_keys = [key for key in new_keys if key in key_map]
-    if not new_keys:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="At least one SSH key must remain installed.")
-
-    current_keys = frame.ssh_keys or []
-    current_known_keys = [key for key in current_keys if key in key_map]
-    if current_known_keys and not set(current_known_keys).intersection(new_keys):
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail="At least one previously installed SSH key must remain.",
-        )
-
-    public_keys = [key_map[key].get("public") for key in new_keys if key_map[key].get("public") and isinstance(key_map[key].get("public"), str)]
-    if not public_keys:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="No public SSH keys available to install.")
-
-    known_public_keys = [key.get("public") for key in key_map.values() if key.get("public") and isinstance(key.get("public"), str)]
     try:
+        new_keys, public_keys, known_public_keys = resolve_authorized_keys_update(
+            data.ssh_keys,
+            frame.ssh_keys,
+            settings,
+        )
         await _install_authorized_keys(db, redis, frame, public_keys, known_public_keys)
     except ValueError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
