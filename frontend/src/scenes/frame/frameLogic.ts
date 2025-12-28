@@ -2,12 +2,14 @@ import { actions, afterMount, connect, kea, key, listeners, path, props, reducer
 import { framesModel } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
-import { AppNodeData, DiagramNode, FrameScene, FrameType, TemplateType } from '../../types'
+import { AppNodeData, DiagramNode, FrameScene, FrameType, SceneNodeData, TemplateType } from '../../types'
 import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
 import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
+import { getBasePath } from '../../utils/getBasePath'
+import { entityImagesModel } from '../../models/entityImagesModel'
 
 export interface FrameLogicProps {
   frameId: number
@@ -84,6 +86,69 @@ const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
   'agent',
   'buildroot',
 ]
+
+async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise<string | null> {
+  if (template.id) {
+    const response = await apiFetch(`/api/templates/${template.id}/image_token`)
+    if (response.ok) {
+      const data = await response.json()
+      return `/api/templates/${template.id}/image?token=${encodeURIComponent(data.token)}`
+    }
+  }
+
+  if (typeof template.image === 'string') {
+    const match = template.image.match(/^\/api\/(repositories\/system\/[^/]+\/templates\/[^/]+)\/image$/)
+    if (match) {
+      const response = await apiFetch(`/api/${match[1]}/image_token`)
+      if (response.ok) {
+        const data = await response.json()
+        return `/api/${match[1]}/image?token=${encodeURIComponent(data.token)}`
+      }
+    }
+    return template.image
+  }
+
+  return null
+}
+
+async function fetchTemplateImageBlob(template: Partial<TemplateType>): Promise<Blob | null> {
+  if (template.image instanceof Blob) {
+    return template.image
+  }
+
+  const imageUrl = await resolveTemplateImageUrl(template)
+  if (!imageUrl) {
+    return null
+  }
+
+  const basePath = getBasePath()
+  const resolvedUrl = imageUrl.startsWith('/api/') && basePath ? `${basePath}${imageUrl}` : imageUrl
+  const response = await fetch(resolvedUrl)
+  if (!response.ok) {
+    return null
+  }
+  return await response.blob()
+}
+
+function getScenesWithoutParents(scenes: FrameScene[]): FrameScene[] {
+  if (scenes.length <= 1) {
+    return scenes
+  }
+
+  const linkedSceneIds = new Set<string>()
+  for (const scene of scenes) {
+    for (const node of scene.nodes) {
+      if (node.type === 'scene') {
+        const linkedSceneId = (node.data as SceneNodeData)?.keyword
+        if (linkedSceneId) {
+          linkedSceneIds.add(linkedSceneId)
+        }
+      }
+    }
+  }
+
+  return scenes.filter((scene) => !linkedSceneIds.has(scene.id))
+}
 
 function cleanBackgroundColor(color: string): string {
   // convert the format "(r: 0, g: 0, b: 0)"
@@ -404,7 +469,7 @@ export const frameLogic = kea<frameLogicType>([
         console.error(`Node ${nodeId} not found in scene ${sceneId}`)
       }
     },
-    applyTemplate: ({ template, replaceScenes }) => {
+    applyTemplate: async ({ template, replaceScenes }) => {
       if ('scenes' in template) {
         const oldScenes = values.frameForm?.scenes || []
         const newScenes = duplicateScenes(
@@ -425,6 +490,30 @@ export const frameLogic = kea<frameLogicType>([
           actions.setFrameFormValues({
             scenes: [...oldScenes, ...newScenes],
           })
+        }
+        if (newScenes.length) {
+          try {
+            const imageBlob = await fetchTemplateImageBlob(template)
+            if (imageBlob) {
+              const targetScenes = getScenesWithoutParents(newScenes)
+              if (!targetScenes.length) {
+                return
+              }
+              await Promise.all(
+                targetScenes.map((scene) =>
+                  apiFetch(`/api/frames/${props.frameId}/scene_images/${scene.id}`, {
+                    method: 'POST',
+                    body: imageBlob,
+                  })
+                )
+              )
+              targetScenes.forEach((scene) =>
+                entityImagesModel.actions.updateEntityImage(`frames/${props.frameId}`, `scene_images/${scene.id}`)
+              )
+            }
+          } catch (error) {
+            console.error('Failed to save template image for scenes', error)
+          }
         }
       }
     },
