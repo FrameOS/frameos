@@ -171,7 +171,7 @@ export function Frame(props: FrameSceneProps) {
                         openLogs()
                       }}
                     >
-                      Save & {requiresRecompilation ? 'recompile' : 'reload'}
+                      Save & {requiresRecompilation ? 'recompile' : 'deploy'}
                     </Button>
                   )}
                 </div>

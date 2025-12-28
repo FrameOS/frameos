@@ -35,6 +35,7 @@ import { Tooltip } from '../../../../components/Tooltip'
 import { FrameImage } from '../../../../components/FrameImage'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
+import { SecretSettingsModal } from '../SecretSettingsModal'
 
 export function Scenes() {
   const { frameId, frameForm } = useValues(frameLogic)
@@ -54,13 +55,23 @@ export function Scenes() {
     undeployedSceneIds,
     unsavedSceneIds,
     sceneSecretSettings,
+    activeSettingsKey,
   } = useValues(scenesLogic({ frameId }))
-  const { setSearch, toggleSettings, submitNewScene, toggleNewScene, createNewScene, closeNewScene, expandScene } =
-    useActions(scenesLogic({ frameId }))
+  const {
+    setSearch,
+    toggleSettings,
+    submitNewScene,
+    toggleNewScene,
+    createNewScene,
+    closeNewScene,
+    expandScene,
+    setActiveSettingsKey,
+  } = useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
   const { sceneId, sceneChanging, loading } = useValues(controlLogic({ frameId }))
   const { setCurrentScene, sync } = useActions(controlLogic({ frameId }))
-  const { savedSettings } = useValues(settingsLogic)
+  const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
+  const { setSettingsValue, submitSettings } = useActions(settingsLogic)
 
   if (scenes.length === 0 && !showNewSceneForm) {
     return (
@@ -151,201 +162,203 @@ export function Scenes() {
 
           return (
             <React.Fragment key={scene.id}>
-            <div
-              className={clsx(
-                'border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1',
-                sceneId === scene.id
-                  ? 'border border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
-                  : 'border-gray-700'
-              )}
-            >
-              <div className="flex items-start justify-between gap-1">
-                <div className="overflow-hidden">
-                  <FrameImage
-                    frameId={frameId}
-                    sceneId={scene.id}
-                    className="cursor-pointer max-w-[120px] max-h-[120px]"
-                    onClick={() => expandScene(scene.id)}
-                    refreshable={false}
-                    thumb
-                  />
-                </div>
-                <div className="break-inside-avoid space-y-1 w-full">
-                  <div className="flex items-start justify-between gap-1">
-                    <div onClick={() => expandScene(scene.id)} className="cursor-pointer">
-                      {expandedScenes[scene.id] ? (
-                        <ChevronDownIcon className="w-6 h-6" />
-                      ) : (
-                        <ChevronRightIcon className="w-6 h-6" />
-                      )}
-                    </div>
-                    <div className="flex-1">
-                      <H6 onClick={() => expandScene(scene.id)} className="cursor-pointer">
-                        {unsavedSceneIds.has(scene.id) ? '* ' : null}
-                        <span className="cursor-pointer">{scene.name || scene.id}</span>
-                        {undeployedSceneIds.has(scene.id) ? (
-                          <Tooltip
-                            containerClassName="inline-block align-middle"
-                            title="This scene has saved changes that haven't been deployed to the frame yet."
-                          >
-                            <Tag className="ml-2" color="yellow">
-                              <ExclamationTriangleIcon className="w-4 h-4 inline-block" />
+              <div
+                className={clsx(
+                  'border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1',
+                  sceneId === scene.id
+                    ? 'border border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
+                    : 'border-gray-700'
+                )}
+              >
+                <div className="flex items-start justify-between gap-1">
+                  <div className="overflow-hidden">
+                    <FrameImage
+                      frameId={frameId}
+                      sceneId={scene.id}
+                      className="cursor-pointer max-w-[120px] max-h-[120px]"
+                      onClick={() => expandScene(scene.id)}
+                      refreshable={false}
+                      thumb
+                    />
+                  </div>
+                  <div className="break-inside-avoid space-y-1 w-full">
+                    <div className="flex items-start justify-between gap-1">
+                      <div onClick={() => expandScene(scene.id)} className="cursor-pointer">
+                        {expandedScenes[scene.id] ? (
+                          <ChevronDownIcon className="w-6 h-6" />
+                        ) : (
+                          <ChevronRightIcon className="w-6 h-6" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <H6 onClick={() => expandScene(scene.id)} className="cursor-pointer">
+                          {unsavedSceneIds.has(scene.id) ? '* ' : null}
+                          <span className="cursor-pointer">{scene.name || scene.id}</span>
+                          {undeployedSceneIds.has(scene.id) ? (
+                            <Tooltip
+                              containerClassName="inline-block align-middle"
+                              title="This scene has saved changes that haven't been deployed to the frame yet."
+                            >
+                              <Tag className="ml-2" color="yellow">
+                                <ExclamationTriangleIcon className="w-4 h-4 inline-block" />
+                              </Tag>
+                            </Tooltip>
+                          ) : null}
+                          {scene.settings?.execution !== 'interpreted' ? (
+                            <Tooltip
+                              containerClassName="inline-block align-middle"
+                              title={
+                                <>
+                                  This is a compiled scene. All changes require a full redeploy. Click{' '}
+                                  <PencilSquareIcon className="w-5 h-5 inline-block" /> and then
+                                  <AdjustmentsHorizontalIcon className="w-5 h-5 inline-block" /> in to change.
+                                </>
+                              }
+                            >
+                              <Tag className="ml-2" color="none">
+                                🕖 COMPILED
+                              </Tag>
+                            </Tooltip>
+                          ) : null}
+                          {scene.default ? (
+                            <Tag className="ml-2" color="primary">
+                              start on boot
                             </Tag>
-                          </Tooltip>
-                        ) : null}
-                        {scene.settings?.execution !== 'interpreted' ? (
-                          <Tooltip
-                            containerClassName="inline-block align-middle"
-                            title={
-                              <>
-                                This is a compiled scene. All changes require a full redeploy. Click{' '}
-                                <PencilSquareIcon className="w-5 h-5 inline-block" /> and then
-                                <AdjustmentsHorizontalIcon className="w-5 h-5 inline-block" /> in to change.
-                              </>
-                            }
+                          ) : null}
+                        </H6>
+                      </div>
+                      <div className="flex gap-1">
+                        {sceneId !== scene.id ? (
+                          <Button
+                            size="small"
+                            className="!px-1"
+                            color="primary"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setCurrentScene(scene.id)
+                            }}
+                            title="Activate"
                           >
-                            <Tag className="ml-2" color="none">
-                              🕖 COMPILED
-                            </Tag>
-                          </Tooltip>
-                        ) : null}
-                        {scene.default ? (
-                          <Tag className="ml-2" color="primary">
-                            start on boot
+                            {sceneChanging === scene.id ? (
+                              <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
+                            ) : (
+                              <PlayIcon className="w-5 h-5" />
+                            )}
+                          </Button>
+                        ) : (
+                          <Tag
+                            className="ml-2 cursor-pointer items-center inline-flex"
+                            color="primary"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              expandScene(scene.id)
+                            }}
+                          >
+                            active
                           </Tag>
-                        ) : null}
-                      </H6>
-                    </div>
-                    <div className="flex gap-1">
-                      {sceneId !== scene.id ? (
+                        )}
                         <Button
                           size="small"
                           className="!px-1"
-                          color="primary"
+                          color="secondary"
                           onClick={(e) => {
                             e.stopPropagation()
-                            setCurrentScene(scene.id)
+                            editScene(scene.id)
                           }}
-                          title="Activate"
+                          title="Edit"
                         >
-                          {sceneChanging === scene.id ? (
-                            <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
-                          ) : (
-                            <PlayIcon className="w-5 h-5" />
-                          )}
+                          <PencilSquareIcon className="w-5 h-5" />
                         </Button>
-                      ) : (
-                        <Tag
-                          className="ml-2 cursor-pointer items-center inline-flex"
-                          color="primary"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            expandScene(scene.id)
-                          }}
-                        >
-                          active
-                        </Tag>
-                      )}
-                      <Button
-                        size="small"
-                        className="!px-1"
-                        color="secondary"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          editScene(scene.id)
-                        }}
-                        title="Edit"
-                      >
-                        <PencilSquareIcon className="w-5 h-5" />
-                      </Button>
-                      <SceneDropDown context="scenes" sceneId={scene.id} />
+                        <SceneDropDown context="scenes" sceneId={scene.id} />
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-2 w-full pl-7 justify-between">
-                    <div className="text-xs text-gray-400 flex flex-wrap gap-1 items-center">
-                      <div>{scene.id}</div>
-                      {secretSettings.map((settingKey) => (
-                        <span
-                          key={settingKey}
-                          className="inline-flex items-center rounded border border-gray-400/80 bg-gray-950 px-2 py-0.5 text-[10px] font-semibold uppercase text-gray-300"
-                        >
-                          {missingSecretSettings.has(settingKey) ? (
-                            <ExclamationTriangleIcon className="mr-1 h-3 w-3 text-yellow-300" />
-                          ) : null}
-                          {settingsDetails[settingKey].tagLabel}
-                        </span>
-                      ))}
+                    <div className="flex items-center gap-2 w-full pl-7 justify-between">
+                      <div className="text-xs text-gray-400 flex flex-wrap gap-1 items-center">
+                        <div>{scene.id}</div>
+                        {secretSettings
+                          .filter((settingKey) => missingSecretSettings.has(settingKey))
+                          .map((settingKey) => (
+                            <button
+                              key={settingKey}
+                              type="button"
+                              className="inline-flex items-center rounded border border-gray-400/80 bg-gray-950 px-2 py-0.5 text-[10px] font-semibold uppercase text-gray-300 hover:bg-gray-900"
+                              onClick={() => setActiveSettingsKey(settingKey)}
+                            >
+                              <ExclamationTriangleIcon className="mr-1 h-3 w-3 text-yellow-300" />
+                              {settingsDetails[settingKey].tagLabel}
+                            </button>
+                          ))}
 
-                      {linksToOtherScenes[scene.id]?.size ? (
-                        <Tooltip
-                          title={
-                            <div>
-                              <div className="mb-2">This scene uses the following scenes:</div>
-                              <ol>
-                                {Array.from(linksToOtherScenes[scene.id]).map((sceneId) => (
-                                  <li
-                                    key={sceneId}
-                                    onClick={() => editScene(sceneId)}
-                                    className="cursor-pointer hover:underline"
-                                  >
-                                    {sceneTitles[sceneId] || sceneId}
-                                  </li>
-                                ))}
-                              </ol>
-                            </div>
-                          }
-                        >
-                          <Tag color="orange">+{linksToOtherScenes[scene.id].size} scenes</Tag>
-                        </Tooltip>
-                      ) : null}
+                        {linksToOtherScenes[scene.id]?.size ? (
+                          <Tooltip
+                            title={
+                              <div>
+                                <div className="mb-2">This scene uses the following scenes:</div>
+                                <ol>
+                                  {Array.from(linksToOtherScenes[scene.id]).map((sceneId) => (
+                                    <li
+                                      key={sceneId}
+                                      onClick={() => editScene(sceneId)}
+                                      className="cursor-pointer hover:underline"
+                                    >
+                                      {sceneTitles[sceneId] || sceneId}
+                                    </li>
+                                  ))}
+                                </ol>
+                              </div>
+                            }
+                          >
+                            <Tag color="orange">+{linksToOtherScenes[scene.id].size} scenes</Tag>
+                          </Tooltip>
+                        ) : null}
 
-                      {otherScenesLinkingToScene[scene.id]?.size ? (
-                        <Tooltip
-                          title={
-                            <div>
-                              <div className="mb-2">This scene is used by the following scenes:</div>
-                              <ol>
-                                {Array.from(otherScenesLinkingToScene[scene.id]).map((sceneId) => (
-                                  <li
-                                    key={sceneId}
-                                    onClick={() => editScene(sceneId)}
-                                    className="cursor-pointer hover:underline"
-                                  >
-                                    {sceneTitles[sceneId] || sceneId}
-                                  </li>
-                                ))}
-                              </ol>
-                            </div>
-                          }
-                        >
-                          <Tag color="blue">
-                            Used by {otherScenesLinkingToScene[scene.id].size} scene
-                            {otherScenesLinkingToScene[scene.id].size !== 1 ? 's' : ''}
-                          </Tag>
-                        </Tooltip>
+                        {otherScenesLinkingToScene[scene.id]?.size ? (
+                          <Tooltip
+                            title={
+                              <div>
+                                <div className="mb-2">This scene is used by the following scenes:</div>
+                                <ol>
+                                  {Array.from(otherScenesLinkingToScene[scene.id]).map((sceneId) => (
+                                    <li
+                                      key={sceneId}
+                                      onClick={() => editScene(sceneId)}
+                                      className="cursor-pointer hover:underline"
+                                    >
+                                      {sceneTitles[sceneId] || sceneId}
+                                    </li>
+                                  ))}
+                                </ol>
+                              </div>
+                            }
+                          >
+                            <Tag color="blue">
+                              Used by {otherScenesLinkingToScene[scene.id].size} scene
+                              {otherScenesLinkingToScene[scene.id].size !== 1 ? 's' : ''}
+                            </Tag>
+                          </Tooltip>
+                        ) : null}
+                      </div>
+                      {scene?.settings?.refreshInterval && Number.isFinite(scene.settings.refreshInterval) ? (
+                        <div className="text-xs ml-2 uppercase">{showAsFps(scene.settings.refreshInterval)}</div>
                       ) : null}
                     </div>
-                    {scene?.settings?.refreshInterval && Number.isFinite(scene.settings.refreshInterval) ? (
-                      <div className="text-xs ml-2 uppercase">{showAsFps(scene.settings.refreshInterval)}</div>
+
+                    {expandedScenes[scene.id] ? (
+                      <div className="pl-7">
+                        <ExpandedScene sceneId={scene.id} frameId={frameId} />
+                      </div>
                     ) : null}
                   </div>
-
-                  {expandedScenes[scene.id] ? (
-                    <div className="pl-7">
-                      <ExpandedScene sceneId={scene.id} frameId={frameId} />
-                    </div>
-                  ) : null}
                 </div>
               </div>
-            </div>
 
-            {showingSettings[scene.id] ? (
-              <Box className="p-2 pl-4 pr-3 space-y-2 bg-gray-900 flex items-start justify-between gap-1 ml-4">
-                <SceneSettings sceneId={scene.id} onClose={() => toggleSettings(scene.id)} />
-              </Box>
-            ) : null}
-          </React.Fragment>
+              {showingSettings[scene.id] ? (
+                <Box className="p-2 pl-4 pr-3 space-y-2 bg-gray-900 flex items-start justify-between gap-1 ml-4">
+                  <SceneSettings sceneId={scene.id} onClose={() => toggleSettings(scene.id)} />
+                </Box>
+              ) : null}
+            </React.Fragment>
           )
         })}
 
@@ -379,6 +392,15 @@ export function Scenes() {
           </div>
         )}
       </div>
+      <SecretSettingsModal
+        activeSettingsKey={activeSettingsKey}
+        onClose={() => setActiveSettingsKey(null)}
+        settings={settings}
+        savedSettings={savedSettings}
+        settingsChanged={settingsChanged}
+        setSettingsValue={setSettingsValue}
+        submitSettings={submitSettings}
+      />
     </div>
   )
 }

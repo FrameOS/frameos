@@ -50,6 +50,7 @@ export const scenesLogic = kea<scenesLogicType>([
     expandScene: (sceneId: string) => ({ sceneId }),
     copySceneJSON: (sceneId: string) => ({ sceneId }),
     setSearch: (search: string) => ({ search }),
+    setActiveSettingsKey: (activeSettingsKey: string | null) => ({ activeSettingsKey }),
   }),
   forms(({ actions, values, props }) => ({
     newScene: {
@@ -122,6 +123,12 @@ export const scenesLogic = kea<scenesLogicType>([
       {} as Record<string, boolean>,
       {
         expandScene: (state, { sceneId }) => ({ ...state, [sceneId]: !state[sceneId] }),
+      },
+    ],
+    activeSettingsKey: [
+      null as string | null,
+      {
+        setActiveSettingsKey: (_, { activeSettingsKey }) => activeSettingsKey,
       },
     ],
   }),

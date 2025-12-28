@@ -11,18 +11,18 @@ export const settingsDetails: Record<
 > = {
   openAI: {
     title: 'OpenAI',
-    tagLabel: 'Uses OpenAI API key',
+    tagLabel: 'OpenAI API key missing',
     description: 'The OpenAI API key is used within OpenAI apps.',
     fields: [{ label: 'API key', secret: true, path: ['openAI', 'apiKey'] }],
   },
   unsplash: {
     title: 'Unsplash API',
-    tagLabel: 'Uses Unsplash access key',
+    tagLabel: 'Unsplash access key missing',
     fields: [{ label: 'Access key', secret: true, path: ['unsplash', 'accessKey'] }],
   },
   homeAssistant: {
     title: 'Home Assistant',
-    tagLabel: 'Uses Home Assistant access token',
+    tagLabel: 'Home Assistant access token missing',
     fields: [
       { label: 'Home assistant URL', path: ['homeAssistant', 'url'] },
       {
