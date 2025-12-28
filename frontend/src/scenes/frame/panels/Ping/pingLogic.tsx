@@ -2,6 +2,8 @@ import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path,
 import { frameLogic } from '../../frameLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 
+import type { pingLogicType } from './pingLogicType'
+
 export type PingMode = 'icmp' | 'http'
 
 export type PingResult = {
@@ -47,7 +49,7 @@ const extractIcmpTime = (message: string) => {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-export const pingLogic = kea([
+export const pingLogic = kea<pingLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Ping', 'pingLogic']),
   props({} as PingLogicProps),
   key((props: PingLogicProps) => props.frameId),
