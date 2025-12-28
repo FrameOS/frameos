@@ -1555,11 +1555,11 @@ async def api_frame_update_ssh_keys(
             detail="At least one previously installed SSH key must remain.",
         )
 
-    public_keys = [key_map[key].get("public") for key in new_keys if key_map[key].get("public")]
+    public_keys = [key_map[key].get("public") for key in new_keys if key_map[key].get("public") and isinstance(key_map[key].get("public"), str)]
     if not public_keys:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="No public SSH keys available to install.")
 
-    known_public_keys = [key.get("public") for key in key_map.values() if key.get("public")]
+    known_public_keys = [key.get("public") for key in key_map.values() if key.get("public") and isinstance(key.get("public"), str)]
     try:
         await _install_authorized_keys(db, redis, frame, public_keys, known_public_keys)
     except ValueError as exc:
