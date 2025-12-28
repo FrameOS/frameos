@@ -250,6 +250,10 @@ proc getFirstSceneId*(): SceneId =
     if len(interpretedScenes) > 0:
       for key in keys(interpretedScenes):
         return key
+    if len(compiledScenes) == 0 and len(interpretedScenes) == 0 and len(uploadedScenes) == 0:
+      let indexSceneId = "system/index".SceneId
+      if systemScenes.hasKey(indexSceneId):
+        return indexSceneId
     if len(systemScenes) > 0:
       for key in keys(systemScenes):
         return key
