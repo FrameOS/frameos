@@ -92,7 +92,7 @@ export function Settings() {
                           <Box key={key.id} className="border border-white/10 p-3 space-y-2">
                             <Field name={`keys.${index}.name`} label="Key name">
                               <TextInput />
-                            </Field>{' '}
+                            </Field>
                             <Field
                               name={`keys.${index}.use_for_new_frames`}
                               label="Use for new frames"
