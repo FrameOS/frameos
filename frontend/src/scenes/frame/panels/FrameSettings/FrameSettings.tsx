@@ -1,5 +1,4 @@
 import { useActions, useValues } from 'kea'
-import { useEffect } from 'react'
 import equal from 'fast-deep-equal'
 import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
@@ -37,7 +36,7 @@ import { timezoneOptions } from '../../../../decorators/timezones'
 import { TextArea } from '../../../../components/TextArea'
 import { ColorInput } from '../../../../components/ColorInput'
 import { settingsLogic } from '../../../settings/settingsLogic'
-import { getDefaultSshKeyIds, normalizeSshKeys } from '../../../../utils/sshKeys'
+import { normalizeSshKeys } from '../../../../utils/sshKeys'
 import { Label } from '../../../../components/Label'
 
 export interface FrameSettingsProps {
@@ -76,20 +75,12 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
 
   const palette = withCustomPalette[frame.device || '']
   const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
-  const defaultSshKeyIds = getDefaultSshKeyIds(savedSettings?.ssh_keys)
-  const initialSshKeyIds = frame.ssh_keys ?? defaultSshKeyIds
   const normalizeKeyIds = (keys: string[]) => Array.from(new Set(keys)).sort()
   const deployedSshKeyIds = normalizeKeyIds(
-    (frame.last_successful_deploy?.ssh_keys as string[]) ?? frame.ssh_keys ?? defaultSshKeyIds
+    (frame.last_successful_deploy?.ssh_keys as string[]) ?? frame.ssh_keys ?? []
   )
-  const selectedSshKeyIds = normalizeKeyIds(frameForm.ssh_keys ?? initialSshKeyIds)
+  const selectedSshKeyIds = normalizeKeyIds(frameForm.ssh_keys ?? frame.ssh_keys ?? [])
   const hasSshKeyChangesToDeploy = !equal(deployedSshKeyIds, selectedSshKeyIds)
-
-  useEffect(() => {
-    if (!frameForm.ssh_keys && initialSshKeyIds.length > 0) {
-      setFrameFormValues({ ssh_keys: initialSshKeyIds })
-    }
-  }, [frameForm.ssh_keys, initialSshKeyIds.join('|')])
 
   if (!frame) {
     return (
@@ -539,7 +530,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               ) : (
                 <div className="space-y-2">
                   {sshKeyOptions.map((key) => {
-                    const selectedKeys = new Set(frameForm.ssh_keys ?? initialSshKeyIds)
+                    const selectedKeys = new Set(frameForm.ssh_keys ?? frame.ssh_keys ?? [])
                     return (
                       <div key={key.id} className="flex flex-row gap-2">
                         <Switch
@@ -571,7 +562,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                     updateDeployedSshKeys()
                     openLogs()
                   }}
-                  disabled={(frameForm.ssh_keys ?? initialSshKeyIds).length === 0}
+                  disabled={(frameForm.ssh_keys ?? frame.ssh_keys ?? []).length === 0}
                 >
                   Save changes & update deployed keys
                 </Button>
