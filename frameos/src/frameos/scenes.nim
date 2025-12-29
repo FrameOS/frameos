@@ -55,7 +55,8 @@ proc updateUploadedScenes*(newScenes: Table[SceneId, ExportedInterpretedScene]) 
   for sceneId, scene in newScenes:
     exportedScenes[sceneId] = scene.ExportedScene
 
-proc normalizeUploadedSceneInputs*(sceneInputs: seq[FrameSceneInput]): seq[FrameSceneInput] =
+proc normalizeUploadedScenePayload*(sceneInputs: seq[FrameSceneInput]): seq[FrameSceneInput] =
+  # Add "uploaded/" in front of every scene ID to make sure we don't conflict with existing scenes
   var uploadedIdMap = initTable[SceneId, SceneId]()
   for scene in sceneInputs:
     uploadedIdMap[scene.id] = SceneId("uploaded/" & scene.id.string)
@@ -94,17 +95,18 @@ var
   lastPublicStateUpdates {.guard: lastPublicStatesLock.} = initTable[SceneId, float]()
   lastPersistedStates = %*{}
   lastPersistedSceneId: Option[SceneId] = none(SceneId)
-  uploadedSceneInputsLock: Lock
-  uploadedSceneInputs {.guard: uploadedSceneInputsLock.} = %*[]
+  uploadedScenePayloadLock: Lock
+  uploadedScenePayload {.guard: uploadedScenePayloadLock.} = ""
 
-proc setUploadedSceneInputs*(sceneInputs: seq[FrameSceneInput]) =
-  let jsonData = parseJson(sceneInputs.toJson())
-  withLock uploadedSceneInputsLock:
-    uploadedSceneInputs = jsonData
+proc setUploadedScenePayload*(payload: string) =
+  withLock uploadedScenePayloadLock:
+    uploadedScenePayload = payload
 
-proc getUploadedSceneInputs*(): JsonNode =
-  withLock uploadedSceneInputsLock:
-    return uploadedSceneInputs.copy()
+proc getUploadedScenePayload*(): JsonNode =
+  withLock uploadedScenePayloadLock:
+    if uploadedScenePayload.len == 0:
+      return %*[]
+    return parseJson(uploadedScenePayload)
 
 proc pruneUploadedPublicStates*(keepSceneIds: seq[SceneId], mainSceneId: Option[SceneId]) =
   var keepLookup = initTable[string, bool]()
@@ -145,19 +147,20 @@ proc updateUploadedScenesFromPayload*(
 
   # nim json -> jsony -> FrameSceneInput
   # clunky but works...
-  let rawSceneInputs = parseInterpretedSceneInputs($scenePayload)
+  let payloadString = $scenePayload
+  let rawSceneInputs = parseInterpretedSceneInputs(payloadString)
   var uploadedIdMap = initTable[SceneId, SceneId]()
   for scene in rawSceneInputs:
     uploadedIdMap[scene.id] = SceneId("uploaded/" & scene.id.string)
 
-  let sceneInputs = normalizeUploadedSceneInputs(rawSceneInputs)
+  let sceneInputs = normalizeUploadedScenePayload(rawSceneInputs)
   if sceneInputs.len == 0:
     return (none(SceneId), @[])
 
   let newScenes = buildInterpretedScenes(sceneInputs)
   let oldUploaded = getUploadedInterpretedScenes()
   updateUploadedScenes(newScenes)
-  setUploadedSceneInputs(sceneInputs)
+  setUploadedScenePayload(payloadString)
 
   let sceneIds = sceneInputs.mapIt(it.id)
   let oldSceneIds = oldUploaded.keys.toSeq()

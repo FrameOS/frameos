@@ -21,7 +21,7 @@ import frameos/utils/font
 import frameos/config
 import frameos/portal as netportal
 from net import Port
-from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedSceneInputs
+from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload
 from scenes/scenes import sceneOptions
 
 var globalFrameOS: FrameOS
@@ -203,7 +203,7 @@ router myrouter:
       resp Http401, "Unauthorized"
     log(%*{"event": "http", "get": request.pathInfo})
     {.gcsafe.}:
-      var payload = %*{"scenes": getUploadedSceneInputs()}
+      var payload = %*{"scenes": getUploadedScenePayload()}
       resp Http200, {"Content-Type": "application/json"}, $payload
   get "/state":
     if not hasAccess(request, Write):

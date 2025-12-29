@@ -2,7 +2,6 @@ import { actions, afterMount, connect, kea, key, listeners, path, props, reducer
 
 import { frameLogic } from '../../frameLogic'
 
-import { forms } from 'kea-forms'
 import { FrameScene, FrameStateRecord } from '../../../../types'
 
 import { loaders } from 'kea-loaders'
@@ -14,6 +13,8 @@ import { apiFetch } from '../../../../utils/apiFetch'
 export interface ControlLogicProps {
   frameId: number
 }
+
+const UPLOADED_SCENE_PREFIX = 'uploaded/'
 
 export const controlLogic = kea<controlLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Scenes', 'controlLogic']),
@@ -51,6 +52,19 @@ export const controlLogic = kea<controlLogicType>([
           console.error('Failed to fetch frame states, but could load one state. You might need to redeploy the frame.')
           const resp = await response.json()
           return { states: { [resp.sceneId]: resp.state }, sceneId: resp.sceneId }
+        },
+      },
+    ],
+    uploadedScenes: [
+      [] as FrameScene[],
+      {
+        loadUploadedScenes: async () => {
+          const response = await apiFetch(`/api/frames/${props.frameId}/uploaded_scenes`)
+          if (!response.ok) {
+            throw new Error('Failed to fetch uploaded scenes')
+          }
+          const payload = await response.json()
+          return (payload?.scenes ?? []) as FrameScene[]
         },
       },
     ],
@@ -103,6 +117,11 @@ export const controlLogic = kea<controlLogicType>([
         body: JSON.stringify({ sceneId }),
       })
       await response.text()
+    },
+    syncSuccess: ({ stateRecord }) => {
+      if (stateRecord?.sceneId?.startsWith(UPLOADED_SCENE_PREFIX)) {
+        actions.loadUploadedScenes()
+      }
     },
     [socketLogic.actionTypes.newLog]: ({ log }) => {
       try {

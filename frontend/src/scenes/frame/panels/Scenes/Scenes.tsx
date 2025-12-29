@@ -79,7 +79,9 @@ export function Scenes() {
     deleteSelectedScenes,
   } = useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
-  const { sceneId, sceneChanging, loading } = useValues(controlLogic({ frameId }))
+  const { sceneId, sceneChanging, loading, uploadedScenes, uploadedScenesLoading } = useValues(
+    controlLogic({ frameId })
+  )
   const { setCurrentScene, sync } = useActions(controlLogic({ frameId }))
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
@@ -87,6 +89,9 @@ export function Scenes() {
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const activeScene = scenes.find((scene) => scene.id === sceneId) ?? null
   const missingActiveSceneId = !activeScene && sceneId ? sceneId : null
+  const activeUploadedScene = missingActiveSceneId
+    ? uploadedScenes.find((scene) => 'uploaded/' + scene.id === missingActiveSceneId)
+    : null
 
   const uploadImage = () => {
     uploadInputRef.current?.click()
@@ -267,14 +272,22 @@ export function Scenes() {
                 objectFit="cover"
               />
               <div className="w-full space-y-2">
-                <div>
-                  <H6>Active scene (not installed)</H6>
-                  <div className="text-xs text-gray-400">{missingActiveSceneId}</div>
-                </div>
-
+                <H6>{activeUploadedScene?.name || 'Active scene'} (not installed)</H6>
                 <div className="text-xs text-gray-400">
                   This scene is currently running on the frame, but it is not in the installed scenes list.
                 </div>
+                {uploadedScenes.length > 0 ? (
+                  <div>
+                    <Button
+                      size="small"
+                      color="secondary"
+                      onClick={() => applyTemplate({ scenes: uploadedScenes })}
+                      disabled={uploadedScenesLoading}
+                    >
+                      {uploadedScenesLoading ? <Spinner color="white" /> : 'Install on frame'}
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>

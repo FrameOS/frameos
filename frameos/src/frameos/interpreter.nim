@@ -991,6 +991,11 @@ proc parseHook*(s: string, i: var int, v: var Color) =
   parseHook(s, i, tmp)
   v = parseHtmlColor(tmp)
 
+proc dumpHook*(s: var string, v: Color) =
+  s.add('"')
+  s.add(toHtmlHex(v))
+  s.add('"')
+
 # -------------------------
 # Scene registry (loader)
 # -------------------------
