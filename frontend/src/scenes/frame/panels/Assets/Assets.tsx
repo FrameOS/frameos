@@ -15,8 +15,7 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { Spinner } from '../../../../components/Spinner'
 import { DropdownMenu, DropdownMenuItem } from '../../../../components/DropdownMenu'
 import { DeferredImage } from '../../../../components/DeferredImage'
-import { Button } from '../../../../components/Button'
-import { buildLocalImageScene } from '../Scenes/sceneShortcuts'
+import { buildLocalImageFolderScene, buildLocalImageScene } from '../Scenes/sceneShortcuts'
 import { v4 as uuidv4 } from 'uuid'
 
 function humaniseSize(size: number) {
@@ -57,6 +56,7 @@ function TreeNode({
   createFolder,
   imageToken,
   createImageScene,
+  createImageFolderScene,
 }: {
   node: AssetNode
   frameId: number
@@ -67,6 +67,7 @@ function TreeNode({
   createFolder: (path: string) => void
   imageToken: string | null
   createImageScene: (path: string) => void
+  createImageFolderScene: (path: string) => void
 }): JSX.Element {
   const [expanded, setExpanded] = useState(node.path === '')
   const [isDownloading, setIsDownloading] = useState(false)
@@ -101,6 +102,11 @@ function TreeNode({
                       createFolder(newPath)
                     }
                   },
+                },
+                {
+                  label: 'Play all images in this folder',
+                  icon: <PlayIcon className="w-5 h-5" />,
+                  onClick: () => createImageFolderScene(node.path),
                 },
                 node.path
                   ? {
@@ -142,6 +148,7 @@ function TreeNode({
                 createFolder={createFolder}
                 imageToken={imageToken}
                 createImageScene={createImageScene}
+                createImageFolderScene={createImageFolderScene}
               />
             ))}
           </div>
@@ -269,6 +276,22 @@ export function Assets(): JSX.Element {
     }
   }
 
+  const createImageFolderScene = async (path: string): Promise<void> => {
+    const assetsPath = frameForm.assets_path || frame.assets_path || '/srv/assets'
+    const normalizedPath = path.replace(/^\.\//, '')
+    const parts = normalizedPath.split('/').filter(Boolean)
+    const folderPath = parts.join('/')
+    const imageFolder = folderPath ? `${assetsPath}/${folderPath}` : assetsPath
+    const sceneId = uuidv4()
+    const scene = buildLocalImageFolderScene(imageFolder, sceneId)
+    try {
+      await sendEvent('uploadScene', { scenes: [scene], sceneId })
+    } catch (error) {
+      console.error(error)
+      alert('Failed to create image scene')
+    }
+  }
+
   useEffect(() => {
     loadAssets()
   }, [])
@@ -330,6 +353,7 @@ export function Assets(): JSX.Element {
             createFolder={createFolder}
             imageToken={imageToken}
             createImageScene={createImageScene}
+            createImageFolderScene={createImageFolderScene}
           />
         </div>
       )}

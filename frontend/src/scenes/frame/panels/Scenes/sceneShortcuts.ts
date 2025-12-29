@@ -403,3 +403,21 @@ export function buildLocalImageScene(imageFilename: string, imageFolder: string,
     }),
   }
 }
+
+export function buildLocalImageFolderScene(imageFolder: string, sceneId: string): FrameScene {
+  const normalizedFolder = imageFolder.replace(/\/+$/, '') || '/srv/assets'
+
+  return {
+    ...baseSdCardImageScene,
+    id: sceneId,
+    fields: baseSdCardImageScene.fields?.map((field) => {
+      if (field.name === 'imageFolder') {
+        return { ...field, value: normalizedFolder }
+      }
+      if (field.name === 'search') {
+        return { ...field, value: '' }
+      }
+      return field
+    }),
+  }
+}
