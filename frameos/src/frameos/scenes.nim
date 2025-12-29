@@ -7,6 +7,7 @@ import frameos/interpreter
 
 # Where to store the persisted states
 const SCENE_STATE_JSON_FOLDER = "./state"
+const UPLOADED_SCENES_JSON_PATH = &"{SCENE_STATE_JSON_FOLDER}/uploaded.json"
 
 # All scenes that are compiled into the FrameOS binary
 var systemScenes*: Table[SceneId, ExportedScene] = getSystemScenes()
@@ -126,7 +127,8 @@ proc pruneUploadedPublicStates*(keepSceneIds: seq[SceneId], mainSceneId: Option[
         lastPublicSceneId = "".SceneId
 
 proc updateUploadedScenesFromPayload*(
-    payload: JsonNode
+    payload: JsonNode,
+    persistPayload: bool = true
   ): tuple[mainScene: Option[SceneId], sceneIds: seq[SceneId]] =
   var scenePayload: JsonNode
   if payload.kind == JArray:
@@ -161,6 +163,15 @@ proc updateUploadedScenesFromPayload*(
   let oldUploaded = getUploadedInterpretedScenes()
   updateUploadedScenes(newScenes)
   setUploadedScenePayload(payloadString)
+  if persistPayload:
+    var payloadToPersist: JsonNode
+    if payload.kind == JArray:
+      payloadToPersist = %*{"scenes": payload}
+    elif payload.kind == JObject:
+      payloadToPersist = payload
+    else:
+      payloadToPersist = %*{"scenes": %*[]}
+    writeFile(UPLOADED_SCENES_JSON_PATH, $payloadToPersist)
 
   let sceneIds = sceneInputs.mapIt(it.id)
   let oldSceneIds = oldUploaded.keys.toSeq()
@@ -309,8 +320,16 @@ proc getFirstSceneId*(): SceneId =
     if defaultSceneId.isSome():
       return defaultSceneId.get()
     let lastSceneId = loadLastScene()
-    if lastSceneId.isSome() and exportedScenes.hasKey(lastSceneId.get()):
-      return lastSceneId.get()
+    if lastSceneId.isSome():
+      let persistedSceneId = lastSceneId.get()
+      if persistedSceneId.string.startsWith("uploaded/") and not exportedScenes.hasKey(persistedSceneId):
+        try:
+          let uploadedPayload = parseJson(readFile(UPLOADED_SCENES_JSON_PATH))
+          discard updateUploadedScenesFromPayload(uploadedPayload, false)
+        except JsonParsingError, IOError:
+          discard
+      if exportedScenes.hasKey(persistedSceneId):
+        return persistedSceneId
     # This array never changes and is read only
     if len(compiledScenes) > 0:
       for key in keys(compiledScenes):
