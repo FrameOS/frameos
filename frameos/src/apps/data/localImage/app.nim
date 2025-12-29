@@ -9,7 +9,7 @@ import frameos/utils/image
 import frameos/apps
 import frameos/types
 
-let imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", "*.qoi", ".ppm", ".svg"]
+let imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".qoi", ".ppm", ".svg"]
 
 type
   AppConfig* = object
