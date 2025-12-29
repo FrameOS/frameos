@@ -104,6 +104,15 @@ def _bad_request(msg: str):
 
 
 _ascii_re = re.compile(r"[^A-Za-z0-9._-]")
+_frame_image_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_frame_image_lock(frame_id: int) -> asyncio.Lock:
+    lock = _frame_image_locks.get(frame_id)
+    if not lock:
+        lock = asyncio.Lock()
+        _frame_image_locks[frame_id] = lock
+    return lock
 
 
 def _normalize_upload_scene_payload(body: Any) -> tuple[list[dict[str, Any]], Any]:
@@ -1036,103 +1045,119 @@ async def api_frame_get_image(
             body = render_line_of_text_png("no image", width, height)
             return Response(content=body, media_type="image/png")
 
-    # Use shared semaphore and client
-    status = 0
-    body = b""
-    try:
-        status, body, headers = await _fetch_frame_http_bytes(frame, redis, path=path)
+    frame_image_lock = _get_frame_image_lock(id)
+    waited_for_lock = frame_image_lock.locked()
+    async with frame_image_lock:
+        if waited_for_lock:
+            cached = await redis.get(cache_key)
+            if cached:
+                return Response(content=cached, media_type="image/png")
 
-        if status == 200:
-            await redis.set(cache_key, body, ex=86400 * 30)
-            scene_id = headers.get("x-scene-id")
-            if not scene_id:
-                encoded_scene_id = await redis.get(f"frame:{id}:active_scene")
-                if encoded_scene_id:
-                    scene_id = encoded_scene_id.decode("utf-8")
-            if scene_id:
-                # dimensions (best‑effort – don’t crash if Pillow missing)
-                width = height = None
-                try:
-                    from PIL import Image
-
-                    img = Image.open(io.BytesIO(body))
-                    width, height = img.width, img.height
-                except Exception:
-                    pass
-
-                # upsert into SceneImage
-                from app.models.scene_image import SceneImage
-                from app.api.scene_images import _generate_thumbnail
-
-                now = datetime.utcnow()
-                img_row = (
-                    db.query(SceneImage)
-                    .filter_by(frame_id=id, scene_id=scene_id)
-                    .first()
-                )
-                thumb, t_width, t_height = _generate_thumbnail(body)
-                if img_row:
-                    img_row.image = body
-                    img_row.timestamp = now
-                    img_row.width = width
-                    img_row.height = height
-                    img_row.thumb_image = thumb
-                    img_row.thumb_width = t_width
-                    img_row.thumb_height = t_height
-                else:
-                    img_row = SceneImage(
-                        frame_id=id,
-                        scene_id=scene_id,
-                        image=body,
-                        timestamp=now,
-                        width=width,
-                        height=height,
-                        thumb_image=thumb,
-                        thumb_width=t_width,
-                        thumb_height=t_height,
-                    )
-                    db.add(img_row)
-                db.commit()
-
-            await publish_message(
-                redis,
-                "new_scene_image",
-                {
-                    "frameId": id,
-                    "sceneId": scene_id,
-                    "timestamp": now.isoformat(),
-                    "width": width,
-                    "height": height,
-                },
+        # Use shared semaphore and client
+        status = 0
+        body = b""
+        try:
+            status, body, headers = await _fetch_frame_http_bytes(
+                frame, redis, path=path
             )
 
-            return Response(content=body, media_type="image/png")
-        else:
+            if status == 200:
+                await redis.set(cache_key, body, ex=86400 * 30)
+                scene_id = headers.get("x-scene-id")
+                if not scene_id:
+                    encoded_scene_id = await redis.get(f"frame:{id}:active_scene")
+                    if encoded_scene_id:
+                        scene_id = encoded_scene_id.decode("utf-8")
+                if scene_id:
+                    # dimensions (best‑effort – don’t crash if Pillow missing)
+                    width = height = None
+                    try:
+                        from PIL import Image
+
+                        img = Image.open(io.BytesIO(body))
+                        width, height = img.width, img.height
+                    except Exception:
+                        pass
+
+                    # upsert into SceneImage
+                    from app.models.scene_image import SceneImage
+                    from app.api.scene_images import _generate_thumbnail
+
+                    now = datetime.utcnow()
+                    img_row = (
+                        db.query(SceneImage)
+                        .filter_by(frame_id=id, scene_id=scene_id)
+                        .first()
+                    )
+                    thumb, t_width, t_height = _generate_thumbnail(body)
+                    if img_row:
+                        img_row.image = body
+                        img_row.timestamp = now
+                        img_row.width = width
+                        img_row.height = height
+                        img_row.thumb_image = thumb
+                        img_row.thumb_width = t_width
+                        img_row.thumb_height = t_height
+                    else:
+                        img_row = SceneImage(
+                            frame_id=id,
+                            scene_id=scene_id,
+                            image=body,
+                            timestamp=now,
+                            width=width,
+                            height=height,
+                            thumb_image=thumb,
+                            thumb_width=t_width,
+                            thumb_height=t_height,
+                        )
+                        db.add(img_row)
+                    db.commit()
+
+                await publish_message(
+                    redis,
+                    "new_scene_image",
+                    {
+                        "frameId": id,
+                        "sceneId": scene_id,
+                        "timestamp": now.isoformat(),
+                        "width": width,
+                        "height": height,
+                    },
+                )
+
+                return Response(content=body, media_type="image/png")
+            else:
+                await log(
+                    db,
+                    redis,
+                    id,
+                    "stderr",
+                    f"Error fetching image from frame {id}: {status} {body.decode(errors='ignore')}",
+                )
+                raise HTTPException(status_code=status, detail="Unable to fetch image")
+
+        except httpx.ReadTimeout:
             await log(
                 db,
                 redis,
                 id,
                 "stderr",
-                f"Error fetching image from frame {id}: {status} {body.decode(errors='ignore')}",
+                f"Error fetching image from frame {id}: request timeout",
             )
-            raise HTTPException(status_code=status, detail="Unable to fetch image")
-
-    except httpx.ReadTimeout:
-        await log(
-            db,
-            redis,
-            id,
-            "stderr",
-            f"Error fetching image from frame {id}: request timeout",
-        )
-        raise HTTPException(
-            status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout"
-        )
-    except Exception as e:
-        await log(
-            db, redis, id, "stderr", f"Error fetching image from frame {id}: {str(e)}"
-        )
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+            raise HTTPException(
+                status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout"
+            )
+        except Exception as e:
+            await log(
+                db,
+                redis,
+                id,
+                "stderr",
+                f"Error fetching image from frame {id}: {str(e)}",
+            )
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e)
+            )
 
 
 @api_with_auth.get("/frames/{id:int}/scene_source/{scene}")
