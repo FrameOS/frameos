@@ -49,6 +49,7 @@ from app.schemas.frames import (
     FrameMetricsResponse,
     FrameImageLinkResponse,
     FrameStateResponse,
+    FrameUploadedScenesResponse,
     FrameAssetsResponse,
     FrameCreateRequest,
     FrameUpdateRequest,
@@ -63,6 +64,7 @@ from app.utils.remote_exec import (
     delete_path,
     rename_path,
     make_dir,
+    run_command,
     _use_agent,
 )
 from app.utils.frame_http import (
@@ -102,6 +104,79 @@ def _bad_request(msg: str):
 
 
 _ascii_re = re.compile(r"[^A-Za-z0-9._-]")
+_frame_image_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_frame_image_lock(frame_id: int) -> asyncio.Lock:
+    lock = _frame_image_locks.get(frame_id)
+    if not lock:
+        lock = asyncio.Lock()
+        _frame_image_locks[frame_id] = lock
+    return lock
+
+
+def _normalize_upload_scenes_payload(body: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if isinstance(body, (bytes, bytearray)):
+        try:
+            body = json.loads(body)
+        except json.JSONDecodeError:
+            _bad_request("uploadScenes payload must be valid JSON")
+
+    if not isinstance(body, dict):
+        _bad_request("uploadScenes payload must be a JSON object")
+
+    scenes_payload = body.get("scenes")
+    if not isinstance(scenes_payload, list):
+        _bad_request("uploadScenes payload must include scenes as an array")
+    return scenes_payload, body
+    return [], body  # for mypy
+
+
+def _validate_upload_scenes_payload(
+    scenes: list[dict[str, Any]],
+    scene_id: str | None = None,
+) -> None:
+    if not scenes:
+        _bad_request("uploadScenes payload must include at least one scene")
+
+    scene_ids: set[str] = set()
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            _bad_request("uploadScenes scenes must be objects")
+        scene_id = scene.get("id")
+        if not isinstance(scene_id, str) or not scene_id:
+            _bad_request("uploadScenes scenes must include an id")
+        scene_ids.add(scene_id)
+
+    if scene_id and scene_id not in scene_ids:
+        _bad_request("uploadScenes sceneId must reference one of the uploaded scenes")
+
+    for scene in scenes:
+        nodes = scene.get("nodes") or []
+        if not isinstance(nodes, list):
+            _bad_request(f"Scene '{scene.get('id')}' has invalid nodes list")
+        for node in nodes:
+            if not isinstance(node, dict):
+                _bad_request(f"Scene '{scene.get('id')}' has invalid node entry")
+            node_type = node.get("type")
+            data = node.get("data") or {}
+            if not isinstance(data, dict):
+                _bad_request(f"Scene '{scene.get('id')}' has invalid node data")
+            if node_type == "scene":
+                keyword = data.get("keyword")
+                if not isinstance(keyword, str) or not keyword:
+                    _bad_request(f"Scene '{scene.get('id')}' has invalid scene reference")
+                if keyword not in scene_ids:
+                    _bad_request(f"Scene '{scene.get('id')}' references missing scene '{keyword}'")
+            elif node_type == "dispatch" and data.get("keyword") == "setCurrentScene":
+                config = data.get("config") or {}
+                if not isinstance(config, dict):
+                    _bad_request(f"Scene '{scene.get('id')}' has invalid dispatch config")
+                target_scene_id = config.get("sceneId")
+                if isinstance(target_scene_id, str) and target_scene_id and target_scene_id not in scene_ids:
+                    _bad_request(
+                        f"Scene '{scene.get('id')}' references missing scene '{target_scene_id}'"
+                    )
 
 
 def _ascii_safe(name: str) -> str:
@@ -420,6 +495,24 @@ async def api_frame_get_states(
     return states
 
 
+@api_with_auth.get(
+    "/frames/{id:int}/uploaded_scenes", response_model=FrameUploadedScenesResponse
+)
+async def api_frame_get_uploaded_scenes(
+    id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+):
+    frame = db.get(Frame, id) or _not_found()
+    payload = await _forward_frame_request(
+        frame,
+        redis,
+        path="/getUploadedScenes",
+        cache_key=f"frame:{frame.frame_host}:{frame.frame_port}:uploaded_scenes",
+    )
+    if isinstance(payload, dict) and payload.get("sceneId"):
+        await redis.set(f"frame:{frame.id}:active_scene", payload["sceneId"])
+    return payload
+
+
 @api_with_auth.get("/frames/{id:int}/ping", response_model=FramePingResponse)
 async def api_frame_ping(
     id: int,
@@ -509,6 +602,10 @@ async def api_frame_event(
         if request.headers.get("content-type") == "application/json"
         else request.body()
     )
+    if event == "uploadScenes":
+        scenes, body = _normalize_upload_scenes_payload(body)
+        scene_id = body.get("sceneId")
+        _validate_upload_scenes_payload(scenes, scene_id)
     try:
         await _forward_frame_request(
             frame, redis, path=f"/event/{event}", method="POST", json_body=body
@@ -521,6 +618,41 @@ async def api_frame_event(
         raise exc
     except RuntimeError as exc:
         await log(db, redis, id, "stderr", f"Error on frame event {event}: {str(exc)}")
+        raise exc
+
+
+@api_with_auth.post("/frames/{id:int}/upload_scenes")
+async def api_frame_upload_scenes(
+    id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+    body = await (
+        request.json()
+        if request.headers.get("content-type") == "application/json"
+        else request.body()
+    )
+    scenes, body = _normalize_upload_scenes_payload(body)
+    scene_id = body.get("sceneId")
+    _validate_upload_scenes_payload(scenes, scene_id)
+    try:
+        await _forward_frame_request(
+            frame, redis, path="/uploadScenes", method="POST", json_body=body
+        )
+        return "OK"
+    except HTTPException as exc:
+        await log(
+            db,
+            redis,
+            id,
+            "stderr",
+            f"Error on upload scenes request: {exc.detail}",
+        )
+        raise exc
+    except RuntimeError as exc:
+        await log(db, redis, id, "stderr", f"Error on upload scenes request: {str(exc)}")
         raise exc
 
 
@@ -900,103 +1032,119 @@ async def api_frame_get_image(
             body = render_line_of_text_png("no image", width, height)
             return Response(content=body, media_type="image/png")
 
-    # Use shared semaphore and client
-    status = 0
-    body = b""
-    try:
-        status, body, headers = await _fetch_frame_http_bytes(frame, redis, path=path)
+    frame_image_lock = _get_frame_image_lock(id)
+    waited_for_lock = frame_image_lock.locked()
+    async with frame_image_lock:
+        if waited_for_lock:
+            cached = await redis.get(cache_key)
+            if cached:
+                return Response(content=cached, media_type="image/png")
 
-        if status == 200:
-            await redis.set(cache_key, body, ex=86400 * 30)
-            scene_id = headers.get("x-scene-id")
-            if not scene_id:
-                encoded_scene_id = await redis.get(f"frame:{id}:active_scene")
-                if encoded_scene_id:
-                    scene_id = encoded_scene_id.decode("utf-8")
-            if scene_id:
-                # dimensions (best‑effort – don’t crash if Pillow missing)
-                width = height = None
-                try:
-                    from PIL import Image
-
-                    img = Image.open(io.BytesIO(body))
-                    width, height = img.width, img.height
-                except Exception:
-                    pass
-
-                # upsert into SceneImage
-                from app.models.scene_image import SceneImage
-                from app.api.scene_images import _generate_thumbnail
-
-                now = datetime.utcnow()
-                img_row = (
-                    db.query(SceneImage)
-                    .filter_by(frame_id=id, scene_id=scene_id)
-                    .first()
-                )
-                thumb, t_width, t_height = _generate_thumbnail(body)
-                if img_row:
-                    img_row.image = body
-                    img_row.timestamp = now
-                    img_row.width = width
-                    img_row.height = height
-                    img_row.thumb_image = thumb
-                    img_row.thumb_width = t_width
-                    img_row.thumb_height = t_height
-                else:
-                    img_row = SceneImage(
-                        frame_id=id,
-                        scene_id=scene_id,
-                        image=body,
-                        timestamp=now,
-                        width=width,
-                        height=height,
-                        thumb_image=thumb,
-                        thumb_width=t_width,
-                        thumb_height=t_height,
-                    )
-                    db.add(img_row)
-                db.commit()
-
-            await publish_message(
-                redis,
-                "new_scene_image",
-                {
-                    "frameId": id,
-                    "sceneId": scene_id,
-                    "timestamp": now.isoformat(),
-                    "width": width,
-                    "height": height,
-                },
+        # Use shared semaphore and client
+        status = 0
+        body = b""
+        try:
+            status, body, headers = await _fetch_frame_http_bytes(
+                frame, redis, path=path
             )
 
-            return Response(content=body, media_type="image/png")
-        else:
+            if status == 200:
+                await redis.set(cache_key, body, ex=86400 * 30)
+                scene_id = headers.get("x-scene-id")
+                if not scene_id:
+                    encoded_scene_id = await redis.get(f"frame:{id}:active_scene")
+                    if encoded_scene_id:
+                        scene_id = encoded_scene_id.decode("utf-8")
+                if scene_id:
+                    # dimensions (best‑effort – don’t crash if Pillow missing)
+                    width = height = None
+                    try:
+                        from PIL import Image
+
+                        img = Image.open(io.BytesIO(body))
+                        width, height = img.width, img.height
+                    except Exception:
+                        pass
+
+                    # upsert into SceneImage
+                    from app.models.scene_image import SceneImage
+                    from app.api.scene_images import _generate_thumbnail
+
+                    now = datetime.utcnow()
+                    img_row = (
+                        db.query(SceneImage)
+                        .filter_by(frame_id=id, scene_id=scene_id)
+                        .first()
+                    )
+                    thumb, t_width, t_height = _generate_thumbnail(body)
+                    if img_row:
+                        img_row.image = body
+                        img_row.timestamp = now
+                        img_row.width = width
+                        img_row.height = height
+                        img_row.thumb_image = thumb
+                        img_row.thumb_width = t_width
+                        img_row.thumb_height = t_height
+                    else:
+                        img_row = SceneImage(
+                            frame_id=id,
+                            scene_id=scene_id,
+                            image=body,
+                            timestamp=now,
+                            width=width,
+                            height=height,
+                            thumb_image=thumb,
+                            thumb_width=t_width,
+                            thumb_height=t_height,
+                        )
+                        db.add(img_row)
+                    db.commit()
+
+                await publish_message(
+                    redis,
+                    "new_scene_image",
+                    {
+                        "frameId": id,
+                        "sceneId": scene_id,
+                        "timestamp": now.isoformat(),
+                        "width": width,
+                        "height": height,
+                    },
+                )
+
+                return Response(content=body, media_type="image/png")
+            else:
+                await log(
+                    db,
+                    redis,
+                    id,
+                    "stderr",
+                    f"Error fetching image from frame {id}: {status} {body.decode(errors='ignore')}",
+                )
+                raise HTTPException(status_code=status, detail="Unable to fetch image")
+
+        except httpx.ReadTimeout:
             await log(
                 db,
                 redis,
                 id,
                 "stderr",
-                f"Error fetching image from frame {id}: {status} {body.decode(errors='ignore')}",
+                f"Error fetching image from frame {id}: request timeout",
             )
-            raise HTTPException(status_code=status, detail="Unable to fetch image")
-
-    except httpx.ReadTimeout:
-        await log(
-            db,
-            redis,
-            id,
-            "stderr",
-            f"Error fetching image from frame {id}: request timeout",
-        )
-        raise HTTPException(
-            status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout"
-        )
-    except Exception as e:
-        await log(
-            db, redis, id, "stderr", f"Error fetching image from frame {id}: {str(e)}"
-        )
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+            raise HTTPException(
+                status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout"
+            )
+        except Exception as e:
+            await log(
+                db,
+                redis,
+                id,
+                "stderr",
+                f"Error fetching image from frame {id}: {str(e)}",
+            )
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e)
+            )
 
 
 @api_with_auth.get("/frames/{id:int}/scene_source/{scene}")
@@ -1069,6 +1217,57 @@ async def api_frame_assets_sync(
         return {"message": "Assets synced successfully"}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_with_auth.post("/frames/{id:int}/assets/upload_image")
+async def api_frame_assets_upload_image(
+    id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    data = await file.read()
+    if not data:
+        _bad_request("Uploaded file is empty")
+
+    original_name = os.path.basename(file.filename or "image")
+    base_name, extension = os.path.splitext(original_name)
+    safe_base = _ascii_re.sub("_", base_name).strip("._") or "image"
+    safe_extension = _ascii_re.sub("", extension)
+    md5sum = hashlib.md5(data).hexdigest()
+    filename = f"{safe_base}.{md5sum}{safe_extension}"
+
+    assets_path = frame.assets_path or "/srv/assets"
+    upload_dir = os.path.normpath(os.path.join(assets_path, "uploads"))
+    combined_path = os.path.normpath(os.path.join(upload_dir, filename))
+
+    if not combined_path.startswith(os.path.normpath(assets_path) + os.sep):
+        _bad_request("Invalid asset path")
+
+    await make_dir(db, redis, frame, upload_dir)
+
+    exists_status, _, _ = await run_command(
+        db,
+        redis,
+        frame,
+        f"test -f {shlex.quote(combined_path)}",
+        log_output=False,
+        log_command=False,
+    )
+    uploaded = False
+    if exists_status != 0:
+        await upload_file(db, redis, frame, combined_path, data)
+        uploaded = True
+
+    rel = os.path.relpath(combined_path, assets_path)
+    return {
+        "path": rel,
+        "filename": filename,
+        "size": len(data),
+        "uploaded": uploaded,
+    }
 
 
 @api_with_auth.post("/frames/{id:int}/assets/upload")

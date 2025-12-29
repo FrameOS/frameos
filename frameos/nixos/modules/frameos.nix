@@ -12,7 +12,12 @@ in
   time.timeZone       = lib.mkDefault "UTC";
 
   environment.systemPackages = with pkgs; [
-    cacert openssl frameosPkg frameosAgentPkg frameosAssetsPkg
+    cacert
+    imagemagick
+    openssl
+    frameosPkg
+    frameosAgentPkg
+    frameosAssetsPkg
   ];
   environment.variables.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
 

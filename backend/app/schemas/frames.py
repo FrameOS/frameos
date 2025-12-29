@@ -129,6 +129,9 @@ class FrameStateResponse(RootModel):
     # The state is returned as JSON
     pass
 
+class FrameUploadedScenesResponse(BaseModel):
+    scenes: List[Dict[str, Any]]
+
 class FrameAssetsResponse(BaseModel):
     assets: List[Dict[str, Any]]
 

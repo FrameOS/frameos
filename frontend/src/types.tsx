@@ -584,6 +584,10 @@ export interface FrameStateRecord {
   states: Record<string, Record<string, any>>
 }
 
+export interface FrameUploadedScenesRecord {
+  scenes: FrameScene[]
+}
+
 export interface Palette {
   name?: string
   colors: string[]

@@ -10,8 +10,12 @@ interface AssetProps {
 
 export function Asset({ path }: AssetProps) {
   const { frame } = useValues(frameLogic)
-
-  const isImage = path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.jpeg') || path.endsWith('.gif')
+  const lowerPath = path.toLowerCase()
+  const isImage =
+    lowerPath.endsWith('.png') ||
+    lowerPath.endsWith('.jpg') ||
+    lowerPath.endsWith('.jpeg') ||
+    lowerPath.endsWith('.gif')
   const [isLoading, setIsLoading] = useState(true)
   const [asset, setAsset] = useState<string | null>(null)
 

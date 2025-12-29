@@ -21,7 +21,7 @@ import frameos/utils/font
 import frameos/config
 import frameos/portal as netportal
 from net import Port
-from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates
+from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload
 from scenes/scenes import sceneOptions
 
 var globalFrameOS: FrameOS
@@ -172,6 +172,13 @@ router myrouter:
     let payload = parseJson(if request.body == "": "{}" else: request.body)
     sendEvent(@"name", payload)
     resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
+  post "/uploadScenes":
+    if not hasAccess(request, Write):
+      resp Http401, "Unauthorized"
+    log(%*{"event": "http", "post": request.pathInfo})
+    let payload = parseJson(if request.body == "": "{}" else: request.body)
+    sendEvent("uploadScenes", payload)
+    resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
   post "/reload":
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"
@@ -191,6 +198,13 @@ router myrouter:
     {.gcsafe.}: # It's a copy of the state, so it's fine.
       let (sceneId, states) = getAllPublicStates()
       resp Http200, {"Content-Type": "application/json"}, $(%*{"sceneId": $sceneId, "states": states})
+  get "/getUploadedScenes":
+    if not hasAccess(request, Write):
+      resp Http401, "Unauthorized"
+    log(%*{"event": "http", "get": request.pathInfo})
+    {.gcsafe.}:
+      var payload = %*{"scenes": getUploadedScenePayload()}
+      resp Http200, {"Content-Type": "application/json"}, $payload
   get "/state":
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"

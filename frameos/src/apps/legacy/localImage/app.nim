@@ -8,7 +8,7 @@ import frameos/types
 import os, strutils
 import std/random
 
-let imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", "*.qoi", ".ppm", ".svg"]
+let imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".qoi", ".ppm", ".svg"]
 
 type
   AppConfig* = object

@@ -171,7 +171,9 @@ export function Frame(props: FrameSceneProps) {
                         openLogs()
                       }}
                     >
-                      Save & {requiresRecompilation ? 'recompile' : 'deploy'}
+                      {requiresRecompilation && !frame.last_successful_deploy_at
+                        ? 'First deploy'
+                        : `Save & ${requiresRecompilation ? 'recompile' : 'deploy'}`}
                     </Button>
                   )}
                 </div>

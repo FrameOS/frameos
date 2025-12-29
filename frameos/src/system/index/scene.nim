@@ -72,9 +72,33 @@ proc buildSceneList(self: Scene): seq[(string, string)] =
 
 proc buildSceneListText(self: Scene): string =
   let entries = self.buildSceneList()
+  let frameConfig = self.frameConfig
+  let resolution = &"{frameConfig.width}x{frameConfig.height}"
+  let deviceName = if frameConfig.name.len > 0: frameConfig.name else: "Unnamed frame"
+  let deviceType = if frameConfig.device.len > 0: frameConfig.device else: "unknown device"
+  let serverHost = if frameConfig.serverHost.len > 0: frameConfig.serverHost else: "not configured"
+  let serverPort = if frameConfig.serverPort > 0: $frameConfig.serverPort else: "?"
+  let frameHost = if frameConfig.frameHost.len > 0: frameConfig.frameHost else: "0.0.0.0"
+  let framePort = if frameConfig.framePort > 0: $frameConfig.framePort else: "?"
+  let agentAccess = if frameConfig.agent != nil and frameConfig.agent.agentEnabled: "enabled" else: "disabled"
+  var lines: seq[string] = @[
+    "FrameOS System Info",
+    "",
+    &"Name: {deviceName}",
+    &"Device: {deviceType}",
+    &"Resolution: {resolution}",
+    &"Rotation: {frameConfig.rotate}°",
+    &"Time zone: {frameConfig.timeZone}",
+    &"Server: {serverHost}:{serverPort}",
+    &"Frame: {frameHost}:{framePort}",
+    &"Agent access: {agentAccess}",
+    ""
+  ]
   if entries.len == 0:
-    return "No scenes found."
-  var lines: seq[string] = @["Installed Scenes", ""]
+    lines.add("No scenes found.")
+    return lines.join("\n")
+  lines.add("Installed Scenes")
+  lines.add("")
   for idx, (sceneId, sceneName) in entries.pairs:
     lines.add(&"{idx + 1}. {sceneName}")
   return lines.join("\n")

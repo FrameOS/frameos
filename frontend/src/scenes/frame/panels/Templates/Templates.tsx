@@ -142,10 +142,11 @@ export function Templates() {
               <TemplateRow
                 key={template.id ?? -index}
                 template={template}
+                frameId={frameId}
                 exportTemplate={exportTemplate}
                 removeTemplate={removeTemplate}
-                applyTemplate={(template: TemplateType, wipe?: boolean) => {
-                  applyTemplate(template, wipe)
+                applyTemplate={(template: TemplateType) => {
+                  applyTemplate(template)
                   disableFullscreenPanel()
                 }}
                 editTemplate={editLocalTemplate}
@@ -206,9 +207,10 @@ export function Templates() {
                 <TemplateRow
                   key={template.id ?? -index}
                   template={template}
+                  frameId={frameId}
                   saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
-                  applyTemplate={(template, replace) => {
-                    applyRemoteToFrame(repository, template, replace)
+                  applyTemplate={(template) => {
+                    applyRemoteToFrame(repository, template)
                     disableFullscreenPanel()
                   }}
                   installedTemplatesByName={installedTemplatesByName}

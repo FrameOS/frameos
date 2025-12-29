@@ -1,13 +1,88 @@
 import pixie
 import httpclient
+import os
+import osproc
+import options
+import strutils
+import streams
 
 import frameos/utils/font
+
+proc imageMagickCommand(): string =
+  let magick = findExe("magick")
+  if magick != "":
+    return magick
+  let convert = findExe("convert")
+  if convert != "":
+    return convert
+  return ""
+
+proc isJpegData(data: string): bool =
+  data.len >= 2 and data[0].byte == 0xFF and data[1].byte == 0xD8
+
+proc isJpegPath(path: string): bool =
+  let lowerPath = path.toLowerAscii()
+  lowerPath.endsWith(".jpg") or lowerPath.endsWith(".jpeg")
+
+proc decodeJpegWithImageMagick(data: string): Option[Image] =
+  let cmd = imageMagickCommand()
+  if cmd == "":
+    return none(Image)
+  var p = startProcess(cmd,
+    args = @["-quiet", "-", "-auto-orient", "bmp:-"],
+    options = {poUsePath})
+  try:
+    p.inputStream.write(data)
+    p.inputStream.close()
+    let output = p.outputStream.readAll()
+    let rc = p.waitForExit()
+    if rc == 0 and output.len > 0:
+      try:
+        return some(decodeImage(output))
+      except CatchableError:
+        return none(Image)
+  finally:
+    p.close()
+  return none(Image)
+
+proc decodeJpegFileWithImageMagick(path: string): Option[Image] =
+  let cmd = imageMagickCommand()
+  if cmd == "":
+    return none(Image)
+  var p = startProcess(cmd,
+    args = @["-quiet", path, "-auto-orient", "bmp:-"],
+    options = {poUsePath})
+  try:
+    let output = p.outputStream.readAll()
+    let rc = p.waitForExit()
+    if rc == 0 and output.len > 0:
+      try:
+        return some(decodeImage(output))
+      except CatchableError:
+        return none(Image)
+  finally:
+    p.close()
+  return none(Image)
+
+proc decodeImageWithFallback*(data: string): Image =
+  if isJpegData(data):
+    let converted = decodeJpegWithImageMagick(data)
+    if converted.isSome:
+      return converted.get()
+  return decodeImage(data)
+
+proc readImageWithFallback*(path: string): Image =
+  if isJpegPath(path):
+    let converted = decodeJpegFileWithImageMagick(path)
+    if converted.isSome:
+      return converted.get()
+  return readImage(path)
 
 proc downloadImage*(url: string): Image =
   let client = newHttpClient(timeout = 30000)
   try:
     let content = client.getContent(url)
-    result = decodeImage(content)
+    result = decodeImageWithFallback(content)
   finally:
     client.close()
 

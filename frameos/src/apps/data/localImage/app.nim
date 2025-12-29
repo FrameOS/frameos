@@ -5,12 +5,11 @@ import os
 import strutils
 import strformat
 import random
-import sequtils
 import frameos/utils/image
 import frameos/apps
 import frameos/types
 
-let imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", "*.qoi", ".ppm", ".svg"]
+let imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".qoi", ".ppm", ".svg"]
 
 type
   AppConfig* = object
@@ -30,7 +29,7 @@ type
 # Function to check if a file is an image
 proc isImage(file: string): bool =
   for ext in imageExtensions:
-    if file.endsWith(ext):
+    if file.toLower().endsWith(ext):
       return true
   return false
 
@@ -124,7 +123,7 @@ proc get*(self: App, context: ExecutionContext): Image =
     self.scene.state[self.appConfig.counterStateKey] = %*(self.counter)
 
   try:
-    nextImage = some(readImage(path))
+    nextImage = some(readImageWithFallback(path))
   except CatchableError as e:
     return self.error(context, "An error occurred while loading the image: " & path & "\n" & e.msg)
 

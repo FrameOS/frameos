@@ -1,4 +1,4 @@
-import json, pixie, times, options, strformat, strutils, locks, tables
+import json, jsony, pixie, times, options, strformat, strutils, locks, tables, sequtils, os
 import pixie/fileformats/png
 import scenes/scenes
 import system/scenes
@@ -7,11 +7,13 @@ import frameos/interpreter
 
 # Where to store the persisted states
 const SCENE_STATE_JSON_FOLDER = "./state"
+const UPLOADED_SCENES_JSON_PATH = &"{SCENE_STATE_JSON_FOLDER}/uploaded.json"
 
 # All scenes that are compiled into the FrameOS binary
 var systemScenes*: Table[SceneId, ExportedScene] = getSystemScenes()
 var compiledScenes*: Table[SceneId, ExportedScene] = getExportedScenes()
 var interpretedScenes*: Table[SceneId, ExportedInterpretedScene] = getInterpretedScenes()
+var uploadedScenes*: Table[SceneId, ExportedInterpretedScene] = initTable[SceneId, ExportedInterpretedScene]()
 
 var exportedScenes*: Table[SceneId, ExportedScene] = initTable[SceneId, ExportedScene]()
 for sceneId, scene in systemScenes:
@@ -22,6 +24,8 @@ for sceneId, scene in interpretedScenes:
 for sceneId, scene in compiledScenes:
   exportedScenes[sceneId] = scene
   registerCompiledScene(sceneId, scene)
+for sceneId, scene in uploadedScenes:
+  exportedScenes[sceneId] = scene.ExportedScene
 
 proc reloadInterpretedScenes*() =
   let oldInterpreted = interpretedScenes
@@ -33,6 +37,55 @@ proc reloadInterpretedScenes*() =
   for sceneId, scene in interpretedScenes:
     exportedScenes[sceneId] = scene.ExportedScene
 
+proc updateUploadedScenes*(newScenes: Table[SceneId, ExportedInterpretedScene]) =
+  # this is likely overkill as we prefix all uploaded scenes with "uploaded/"
+  let oldUploaded = getUploadedInterpretedScenes()
+  for sceneId in keys(oldUploaded):
+    if newScenes.hasKey(sceneId):
+      continue
+    if compiledScenes.hasKey(sceneId):
+      exportedScenes[sceneId] = compiledScenes[sceneId]
+    elif interpretedScenes.hasKey(sceneId):
+      exportedScenes[sceneId] = interpretedScenes[sceneId].ExportedScene
+    elif systemScenes.hasKey(sceneId):
+      exportedScenes[sceneId] = systemScenes[sceneId]
+    elif exportedScenes.hasKey(sceneId):
+      exportedScenes.del(sceneId)
+  setUploadedInterpretedScenes(newScenes)
+  uploadedScenes = newScenes
+  for sceneId, scene in newScenes:
+    exportedScenes[sceneId] = scene.ExportedScene
+
+proc normalizeUploadedScenePayload*(sceneInputs: seq[FrameSceneInput]): seq[FrameSceneInput] =
+  # Add "uploaded/" in front of every scene ID to make sure we don't conflict with existing scenes
+  var uploadedIdMap = initTable[SceneId, SceneId]()
+  for scene in sceneInputs:
+    uploadedIdMap[scene.id] = SceneId("uploaded/" & scene.id.string)
+
+  for scene in sceneInputs:
+    let originalId = scene.id
+    if uploadedIdMap.hasKey(originalId):
+      scene.id = uploadedIdMap[originalId]
+    for node in scene.nodes:
+      if node.data.isNil or node.data.kind != JObject:
+        continue
+      if node.nodeType == "scene":
+        if node.data.hasKey("keyword") and node.data["keyword"].kind == JString:
+          let keywordId = SceneId(node.data["keyword"].getStr())
+          if uploadedIdMap.hasKey(keywordId):
+            node.data["keyword"] = %*(uploadedIdMap[keywordId].string)
+      elif node.nodeType == "dispatch":
+        if node.data.hasKey("keyword") and node.data["keyword"].kind == JString:
+          let eventName = node.data["keyword"].getStr()
+          if eventName == "setCurrentScene":
+            if node.data.hasKey("config") and node.data["config"].kind == JObject:
+              let config = node.data["config"]
+              if config.hasKey("sceneId") and config["sceneId"].kind == JString:
+                let sceneId = SceneId(config["sceneId"].getStr())
+                if uploadedIdMap.hasKey(sceneId):
+                  config["sceneId"] = %*(uploadedIdMap[sceneId].string)
+  sceneInputs
+
 var
   lastImageLock: Lock
   lastImage {.guard: lastImageLock.} = newImage(1, 1)
@@ -43,6 +96,119 @@ var
   lastPublicStateUpdates {.guard: lastPublicStatesLock.} = initTable[SceneId, float]()
   lastPersistedStates = %*{}
   lastPersistedSceneId: Option[SceneId] = none(SceneId)
+  uploadedScenePayloadLock: Lock
+  uploadedScenePayload {.guard: uploadedScenePayloadLock.} = ""
+  uploadedStateCleanupRan = false
+
+proc setUploadedScenePayload*(payload: string) =
+  withLock uploadedScenePayloadLock:
+    uploadedScenePayload = payload
+
+proc getUploadedScenePayload*(): JsonNode =
+  withLock uploadedScenePayloadLock:
+    if uploadedScenePayload.len == 0:
+      return %*[]
+    return parseJson(uploadedScenePayload)
+
+proc pruneUploadedPublicStates*(keepSceneIds: seq[SceneId], mainSceneId: Option[SceneId]) =
+  var keepLookup = initTable[string, bool]()
+  for sceneId in keepSceneIds:
+    keepLookup[sceneId.string] = true
+  withLock lastPublicStatesLock:
+    for sceneKey in lastPublicStates.keys.toSeq():
+      if sceneKey.startsWith("uploaded/") and not keepLookup.hasKey(sceneKey):
+        lastPublicStates.delete(sceneKey)
+    for sceneId in lastPublicStateUpdates.keys.toSeq():
+      if sceneId.string.startsWith("uploaded/") and not keepLookup.hasKey(sceneId.string):
+        lastPublicStateUpdates.del(sceneId)
+    if lastPublicSceneId.string.startsWith("uploaded/") and not keepLookup.hasKey(lastPublicSceneId.string):
+      if mainSceneId.isSome:
+        lastPublicSceneId = mainSceneId.get()
+      else:
+        lastPublicSceneId = "".SceneId
+
+proc sanitizePathString*(s: string): string =
+  var sanitized = newStringOfCap(s.len)
+  for ch in s:
+    if ch.isAlphaNumeric or ch in ['-', '_', '.']:
+      sanitized.add(ch)
+    else:
+      sanitized.add('_')
+
+  var collapsed = newStringOfCap(sanitized.len)
+  var lastWasUnderscore = false
+  for ch in sanitized:
+    if ch == '_':
+      if not lastWasUnderscore:
+        collapsed.add(ch)
+      lastWasUnderscore = true
+    else:
+      collapsed.add(ch)
+      lastWasUnderscore = false
+
+  var trimmed = collapsed.strip(chars = {'_', '.'})
+  if trimmed.len == 0:
+    return "untitled"
+  if trimmed.len > 120:
+    trimmed = trimmed[0 ..< 120]
+  return trimmed
+
+proc removePersistedState*(sceneId: SceneId) =
+  if lastPersistedStates.hasKey(sceneId.string):
+    lastPersistedStates.delete(sceneId.string)
+  let statePath = &"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json"
+  try:
+    if fileExists(statePath):
+      removeFile(statePath)
+  except OSError:
+    discard
+
+proc updateUploadedScenesFromPayload*(
+    payload: JsonNode,
+    persistPayload: bool = true
+  ): tuple[mainScene: Option[SceneId], sceneIds: seq[SceneId]] =
+  var scenePayload: JsonNode
+  if payload.kind == JObject and payload.hasKey("scenes") and payload["scenes"].kind == JArray:
+    scenePayload = payload["scenes"]
+  else:
+    return (none(SceneId), @[])
+
+  # nim json -> jsony -> FrameSceneInput
+  # clunky but works...
+  let payloadString = $scenePayload
+  let rawSceneInputs = parseInterpretedSceneInputs(payloadString)
+  var uploadedIdMap = initTable[SceneId, SceneId]()
+  for scene in rawSceneInputs:
+    uploadedIdMap[scene.id] = SceneId("uploaded/" & scene.id.string)
+
+  let sceneInputs = normalizeUploadedScenePayload(rawSceneInputs)
+  if sceneInputs.len == 0:
+    return (none(SceneId), @[])
+
+  let newScenes = buildInterpretedScenes(sceneInputs)
+  let oldUploaded = getUploadedInterpretedScenes()
+  updateUploadedScenes(newScenes)
+  setUploadedScenePayload(payloadString)
+  for sceneId in oldUploaded.keys:
+    if sceneId.string.startsWith("uploaded/") and not newScenes.hasKey(sceneId):
+      removePersistedState(sceneId)
+  if persistPayload:
+    writeFile(UPLOADED_SCENES_JSON_PATH, $payload)
+
+  let sceneIds = sceneInputs.mapIt(it.id)
+  let oldSceneIds = oldUploaded.keys.toSeq()
+  var mainSceneId = sceneInputs[0].id
+  if payload.kind == JObject and payload.hasKey("sceneId") and payload["sceneId"].kind == JString:
+    let requestedId = SceneId(payload["sceneId"].getStr())
+    if uploadedIdMap.hasKey(requestedId):
+      mainSceneId = uploadedIdMap[requestedId]
+    else:
+      for scene in sceneInputs:
+        if scene.id == requestedId:
+          mainSceneId = requestedId
+          break
+  pruneUploadedPublicStates(sceneIds, some(mainSceneId))
+  return (some(mainSceneId), sceneIds & oldSceneIds)
 
 proc setLastImage*(image: Image) =
   withLock lastImageLock:
@@ -99,9 +265,36 @@ proc updateLastPublicState*(self: FrameScene) =
     lastPublicStateUpdates[self.id] = epochTime()
   self.lastPublicStateUpdate = epochTime()
 
-proc sanitizePathString*(s: string): string =
-  return s.multiReplace(("/", "_"), ("\\", "_"), (":", "_"), ("*", "_"), ("?", "_"), ("\"", "_"), ("<", "_"), (">",
-      "_"), ("|", "_"))
+proc setPersistedStateFromPayload*(sceneId: SceneId, payload: JsonNode) =
+  if payload.isNil or payload.kind != JObject:
+    return
+  if not lastPersistedStates.hasKey(sceneId.string):
+    lastPersistedStates[sceneId.string] = %*{}
+  let persistedState = lastPersistedStates[sceneId.string]
+  for key in payload.keys:
+    persistedState[key] = copy(payload[key])
+  writeFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json", $persistedState)
+
+proc cleanupOrphanedUploadedStateFiles*() =
+  if uploadedStateCleanupRan:
+    return
+  uploadedStateCleanupRan = true
+  var keepFiles = initTable[string, bool]()
+  try:
+    if fileExists(UPLOADED_SCENES_JSON_PATH):
+      let uploadedPayload = parseJson(readFile(UPLOADED_SCENES_JSON_PATH))
+      let (_, sceneIds) = updateUploadedScenesFromPayload(uploadedPayload, false)
+      for sceneId in sceneIds:
+        let filename = &"scene-{sanitizePathString(sceneId.string)}.json"
+        keepFiles[filename] = true
+  except JsonParsingError, IOError:
+    discard
+  for filePath in walkFiles(&"{SCENE_STATE_JSON_FOLDER}/scene-uploaded_*.json"):
+    try:
+      if not keepFiles.hasKey(splitFile(filePath).name & ".json"):
+        removeFile(filePath)
+    except OSError:
+      discard
 
 proc updateLastPersistedState*(self: FrameScene) =
   if not exportedScenes.hasKey(self.id):
@@ -141,11 +334,20 @@ proc loadLastScene*(): Option[SceneId] =
 
 proc getFirstSceneId*(): SceneId =
   {.gcsafe.}:
+    cleanupOrphanedUploadedStateFiles()
     if defaultSceneId.isSome():
       return defaultSceneId.get()
     let lastSceneId = loadLastScene()
-    if lastSceneId.isSome() and exportedScenes.hasKey(lastSceneId.get()):
-      return lastSceneId.get()
+    if lastSceneId.isSome():
+      let persistedSceneId = lastSceneId.get()
+      if persistedSceneId.string.startsWith("uploaded/") and not exportedScenes.hasKey(persistedSceneId):
+        try:
+          let uploadedPayload = parseJson(readFile(UPLOADED_SCENES_JSON_PATH))
+          discard updateUploadedScenesFromPayload(uploadedPayload, false)
+        except JsonParsingError, IOError:
+          discard
+      if exportedScenes.hasKey(persistedSceneId):
+        return persistedSceneId
     # This array never changes and is read only
     if len(compiledScenes) > 0:
       for key in keys(compiledScenes):
@@ -153,6 +355,10 @@ proc getFirstSceneId*(): SceneId =
     if len(interpretedScenes) > 0:
       for key in keys(interpretedScenes):
         return key
+    if len(compiledScenes) == 0 and len(interpretedScenes) == 0 and len(uploadedScenes) == 0:
+      let indexSceneId = "system/index".SceneId
+      if systemScenes.hasKey(indexSceneId):
+        return indexSceneId
     if len(systemScenes) > 0:
       for key in keys(systemScenes):
         return key

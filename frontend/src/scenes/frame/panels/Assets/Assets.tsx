@@ -5,6 +5,7 @@ import { panelsLogic } from '../panelsLogic'
 import {
   CloudArrowDownIcon,
   DocumentArrowUpIcon,
+  PlayIcon,
   PencilSquareIcon,
   TrashIcon,
   FolderPlusIcon,
@@ -14,6 +15,8 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { Spinner } from '../../../../components/Spinner'
 import { DropdownMenu, DropdownMenuItem } from '../../../../components/DropdownMenu'
 import { DeferredImage } from '../../../../components/DeferredImage'
+import { buildLocalImageFolderScene, buildLocalImageScene } from '../Scenes/sceneShortcuts'
+import { v4 as uuidv4 } from 'uuid'
 
 function humaniseSize(size: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -23,6 +26,13 @@ function humaniseSize(size: number) {
     unitIndex++
   }
   return `${size.toFixed(2)} ${units[unitIndex]}`
+}
+
+const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '*.qoi', '.ppm', '.svg']
+const normalizedImageExtensions = imageExtensions.map((extension) => extension.replace('*', '').toLowerCase())
+const hasImageExtension = (fileName: string): boolean => {
+  const normalizedName = fileName.toLowerCase()
+  return normalizedImageExtensions.some((extension) => normalizedName.endsWith(extension))
 }
 
 // Define the shape of the node we get back from buildAssetTree
@@ -45,6 +55,8 @@ function TreeNode({
   renameAsset,
   createFolder,
   imageToken,
+  createImageScene,
+  createImageFolderScene,
 }: {
   node: AssetNode
   frameId: number
@@ -54,6 +66,8 @@ function TreeNode({
   renameAsset: (oldPath: string, newPath: string) => void
   createFolder: (path: string) => void
   imageToken: string | null
+  createImageScene: (path: string) => void
+  createImageFolderScene: (path: string) => void
 }): JSX.Element {
   const [expanded, setExpanded] = useState(node.path === '')
   const [isDownloading, setIsDownloading] = useState(false)
@@ -88,6 +102,11 @@ function TreeNode({
                       createFolder(newPath)
                     }
                   },
+                },
+                {
+                  label: 'Play all images in this folder',
+                  icon: <PlayIcon className="w-5 h-5" />,
+                  onClick: () => createImageFolderScene(node.path),
                 },
                 node.path
                   ? {
@@ -128,6 +147,8 @@ function TreeNode({
                 renameAsset={renameAsset}
                 createFolder={createFolder}
                 imageToken={imageToken}
+                createImageScene={createImageScene}
+                createImageFolderScene={createImageFolderScene}
               />
             ))}
           </div>
@@ -137,6 +158,8 @@ function TreeNode({
   } else {
     // This is a file
     const isImage = node.name.match(/\.(png|jpe?g|gif|bmp|webp)$/i)
+    const isPlayableImage =
+      hasImageExtension(node.name) && !node.path.startsWith('.thumbs/') && !node.path.includes('/.thumbs/')
     return (
       <div className="ml-1 flex items-center space-x-2">
         {isImage && imageToken && !node.path.startsWith('.thumbs/') && !node.path.includes('/.thumbs/') && (
@@ -154,6 +177,16 @@ function TreeNode({
             {node.name}
           </span>
         </div>
+        {isPlayableImage ? (
+          <button
+            type="button"
+            className="rounded-full border border-purple-500/40 bg-purple-500/10 p-1 text-purple-300 hover:bg-purple-500/20 hover:text-purple-200"
+            title="Run image scene"
+            onClick={() => createImageScene(node.path)}
+          >
+            <PlayIcon className="w-4 h-4" />
+          </button>
+        ) : null}
         {node.size && node.size > 0 && <span className="text-xs text-gray-400">{humaniseSize(node.size)}</span>}
         {node.mtime && node.mtime > 0 && (
           <span className="text-xs text-gray-500" title={new Date(node.mtime * 1000).toLocaleString()}>
@@ -216,7 +249,8 @@ function TreeNode({
 }
 
 export function Assets(): JSX.Element {
-  const { frame } = useValues(frameLogic)
+  const { frame, frameForm } = useValues(frameLogic)
+  const { sendEvent } = useActions(frameLogic)
   const { openLogs } = useActions(panelsLogic)
   const { assetsLoading, assetTree } = useValues(assetsLogic({ frameId: frame.id }))
   const { loadAssets, syncAssets, uploadAssets, deleteAsset, renameAsset, createFolder } = useActions(
@@ -224,6 +258,39 @@ export function Assets(): JSX.Element {
   )
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
   const [imageToken, setImageToken] = useState<string | null>(null)
+
+  const createImageScene = async (path: string): Promise<void> => {
+    const assetsPath = frameForm.assets_path || frame.assets_path || '/srv/assets'
+    const normalizedPath = path.replace(/^\.\//, '')
+    const parts = normalizedPath.split('/').filter(Boolean)
+    const filename = parts.pop() || normalizedPath
+    const folderPath = parts.join('/')
+    const imageFolder = folderPath ? `${assetsPath}/${folderPath}` : assetsPath
+    const sceneId = uuidv4()
+    const scene = buildLocalImageScene(filename, imageFolder, sceneId)
+    try {
+      await sendEvent('uploadScenes', { scenes: [scene], sceneId })
+    } catch (error) {
+      console.error(error)
+      alert('Failed to create image scene')
+    }
+  }
+
+  const createImageFolderScene = async (path: string): Promise<void> => {
+    const assetsPath = frameForm.assets_path || frame.assets_path || '/srv/assets'
+    const normalizedPath = path.replace(/^\.\//, '')
+    const parts = normalizedPath.split('/').filter(Boolean)
+    const folderPath = parts.join('/')
+    const imageFolder = folderPath ? `${assetsPath}/${folderPath}` : assetsPath
+    const sceneId = uuidv4()
+    const scene = buildLocalImageFolderScene(imageFolder, sceneId)
+    try {
+      await sendEvent('uploadScenes', { scenes: [scene], sceneId })
+    } catch (error) {
+      console.error(error)
+      alert('Failed to create image scene')
+    }
+  }
 
   useEffect(() => {
     loadAssets()
@@ -285,6 +352,8 @@ export function Assets(): JSX.Element {
             renameAsset={renameAsset}
             createFolder={createFolder}
             imageToken={imageToken}
+            createImageScene={createImageScene}
+            createImageFolderScene={createImageFolderScene}
           />
         </div>
       )}
