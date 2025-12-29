@@ -84,6 +84,34 @@ proc normalizeUploadedSceneInputs*(sceneInputs: seq[FrameSceneInput]): seq[Frame
                   config["sceneId"] = %*(uploadedIdMap[sceneId].string)
   sceneInputs
 
+var
+  lastImageLock: Lock
+  lastImage {.guard: lastImageLock.} = newImage(1, 1)
+  lastImagePresent = false
+  lastPublicStatesLock: Lock
+  lastPublicStates {.guard: lastPublicStatesLock.} = %*{}
+  lastPublicSceneId {.guard: lastPublicStatesLock.} = "".SceneId
+  lastPublicStateUpdates {.guard: lastPublicStatesLock.} = initTable[SceneId, float]()
+  lastPersistedStates = %*{}
+  lastPersistedSceneId: Option[SceneId] = none(SceneId)
+
+proc pruneUploadedPublicStates*(keepSceneIds: seq[SceneId], mainSceneId: Option[SceneId]) =
+  var keepLookup = initTable[string, bool]()
+  for sceneId in keepSceneIds:
+    keepLookup[sceneId.string] = true
+  withLock lastPublicStatesLock:
+    for sceneKey in lastPublicStates.keys.toSeq():
+      if sceneKey.startsWith("uploaded/") and not keepLookup.hasKey(sceneKey):
+        lastPublicStates.delete(sceneKey)
+    for sceneId in lastPublicStateUpdates.keys.toSeq():
+      if sceneId.string.startsWith("uploaded/") and not keepLookup.hasKey(sceneId.string):
+        lastPublicStateUpdates.del(sceneId)
+    if lastPublicSceneId.string.startsWith("uploaded/") and not keepLookup.hasKey(lastPublicSceneId.string):
+      if mainSceneId.isSome:
+        lastPublicSceneId = mainSceneId.get()
+      else:
+        lastPublicSceneId = "".SceneId
+
 proc updateUploadedScenesFromPayload*(
     payload: JsonNode
   ): tuple[mainScene: Option[SceneId], sceneIds: seq[SceneId]] =
@@ -131,18 +159,8 @@ proc updateUploadedScenesFromPayload*(
         if scene.id == requestedId:
           mainSceneId = requestedId
           break
+  pruneUploadedPublicStates(sceneIds, some(mainSceneId))
   return (some(mainSceneId), sceneIds & oldSceneIds)
-
-var
-  lastImageLock: Lock
-  lastImage {.guard: lastImageLock.} = newImage(1, 1)
-  lastImagePresent = false
-  lastPublicStatesLock: Lock
-  lastPublicStates {.guard: lastPublicStatesLock.} = %*{}
-  lastPublicSceneId {.guard: lastPublicStatesLock.} = "".SceneId
-  lastPublicStateUpdates {.guard: lastPublicStatesLock.} = initTable[SceneId, float]()
-  lastPersistedStates = %*{}
-  lastPersistedSceneId: Option[SceneId] = none(SceneId)
 
 proc setLastImage*(image: Image) =
   withLock lastImageLock:
@@ -200,8 +218,30 @@ proc updateLastPublicState*(self: FrameScene) =
   self.lastPublicStateUpdate = epochTime()
 
 proc sanitizePathString*(s: string): string =
-  return s.multiReplace(("/", "_"), ("\\", "_"), (":", "_"), ("*", "_"), ("?", "_"), ("\"", "_"), ("<", "_"), (">",
-      "_"), ("|", "_"))
+  var sanitized = newStringOfCap(s.len)
+  for ch in s:
+    if ch.isAlphaNumeric or ch in ['-', '_', '.']:
+      sanitized.add(ch)
+    else:
+      sanitized.add('_')
+
+  var collapsed = newStringOfCap(sanitized.len)
+  var lastWasUnderscore = false
+  for ch in sanitized:
+    if ch == '_':
+      if not lastWasUnderscore:
+        collapsed.add(ch)
+      lastWasUnderscore = true
+    else:
+      collapsed.add(ch)
+      lastWasUnderscore = false
+
+  var trimmed = collapsed.strip(chars = {'_', '.'})
+  if trimmed.len == 0:
+    return "untitled"
+  if trimmed.len > 120:
+    trimmed = trimmed[0 ..< 120]
+  return trimmed
 
 proc setPersistedStateFromPayload*(sceneId: SceneId, payload: JsonNode) =
   if payload.isNil or payload.kind != JObject:
