@@ -49,6 +49,7 @@ from app.schemas.frames import (
     FrameMetricsResponse,
     FrameImageLinkResponse,
     FrameStateResponse,
+    FrameUploadedScenesResponse,
     FrameAssetsResponse,
     FrameCreateRequest,
     FrameUpdateRequest,
@@ -491,6 +492,24 @@ async def api_frame_get_states(
     if isinstance(states, dict) and states.get("sceneId"):
         await redis.set(f"frame:{frame.id}:active_scene", states["sceneId"])
     return states
+
+
+@api_with_auth.get(
+    "/frames/{id:int}/uploaded_scenes", response_model=FrameUploadedScenesResponse
+)
+async def api_frame_get_uploaded_scenes(
+    id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+):
+    frame = db.get(Frame, id) or _not_found()
+    payload = await _forward_frame_request(
+        frame,
+        redis,
+        path="/getUploadedScenes",
+        cache_key=f"frame:{frame.frame_host}:{frame.frame_port}:uploaded_scenes",
+    )
+    if isinstance(payload, dict) and payload.get("sceneId"):
+        await redis.set(f"frame:{frame.id}:active_scene", payload["sceneId"])
+    return payload
 
 
 @api_with_auth.get("/frames/{id:int}/ping", response_model=FramePingResponse)

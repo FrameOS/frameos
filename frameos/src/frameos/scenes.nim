@@ -1,4 +1,4 @@
-import json, pixie, times, options, strformat, strutils, locks, tables, sequtils
+import json, jsony, pixie, times, options, strformat, strutils, locks, tables, sequtils
 import pixie/fileformats/png
 import scenes/scenes
 import system/scenes
@@ -94,6 +94,17 @@ var
   lastPublicStateUpdates {.guard: lastPublicStatesLock.} = initTable[SceneId, float]()
   lastPersistedStates = %*{}
   lastPersistedSceneId: Option[SceneId] = none(SceneId)
+  uploadedSceneInputsLock: Lock
+  uploadedSceneInputs {.guard: uploadedSceneInputsLock.} = %*[]
+
+proc setUploadedSceneInputs*(sceneInputs: seq[FrameSceneInput]) =
+  let jsonData = parseJson(sceneInputs.toJson())
+  withLock uploadedSceneInputsLock:
+    uploadedSceneInputs = jsonData
+
+proc getUploadedSceneInputs*(): JsonNode =
+  withLock uploadedSceneInputsLock:
+    return uploadedSceneInputs.copy()
 
 proc pruneUploadedPublicStates*(keepSceneIds: seq[SceneId], mainSceneId: Option[SceneId]) =
   var keepLookup = initTable[string, bool]()
@@ -146,6 +157,7 @@ proc updateUploadedScenesFromPayload*(
   let newScenes = buildInterpretedScenes(sceneInputs)
   let oldUploaded = getUploadedInterpretedScenes()
   updateUploadedScenes(newScenes)
+  setUploadedSceneInputs(sceneInputs)
 
   let sceneIds = sceneInputs.mapIt(it.id)
   let oldSceneIds = oldUploaded.keys.toSeq()
