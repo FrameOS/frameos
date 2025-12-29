@@ -620,6 +620,8 @@ async def api_frame_upload_scenes(
     payload: dict[str, Any] = {"scenes": scenes}
     if scene_id:
         payload["sceneId"] = scene_id
+    if isinstance(body, dict) and "state" in body:
+        payload["state"] = body["state"]
     try:
         await _forward_frame_request(
             frame, redis, path="/uploadScenes", method="POST", json_body=payload

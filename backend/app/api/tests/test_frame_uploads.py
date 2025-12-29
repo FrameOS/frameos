@@ -57,6 +57,7 @@ async def test_api_frame_upload_scenes_forwards_payload(async_client, db, redis)
     payload = {
         "scenes": [{"id": "scene-a", "nodes": []}],
         "sceneId": "scene-a",
+        "state": {"search": "nature"},
     }
 
     with patch(
