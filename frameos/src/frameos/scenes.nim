@@ -1,4 +1,4 @@
-import json, jsony, pixie, times, options, strformat, strutils, locks, tables, sequtils
+import json, jsony, pixie, times, options, strformat, strutils, locks, tables, sequtils, os
 import pixie/fileformats/png
 import scenes/scenes
 import system/scenes
@@ -98,6 +98,7 @@ var
   lastPersistedSceneId: Option[SceneId] = none(SceneId)
   uploadedScenePayloadLock: Lock
   uploadedScenePayload {.guard: uploadedScenePayloadLock.} = ""
+  uploadedStateCleanupRan = false
 
 proc setUploadedScenePayload*(payload: string) =
   withLock uploadedScenePayloadLock:
@@ -125,6 +126,42 @@ proc pruneUploadedPublicStates*(keepSceneIds: seq[SceneId], mainSceneId: Option[
         lastPublicSceneId = mainSceneId.get()
       else:
         lastPublicSceneId = "".SceneId
+
+proc sanitizePathString*(s: string): string =
+  var sanitized = newStringOfCap(s.len)
+  for ch in s:
+    if ch.isAlphaNumeric or ch in ['-', '_', '.']:
+      sanitized.add(ch)
+    else:
+      sanitized.add('_')
+
+  var collapsed = newStringOfCap(sanitized.len)
+  var lastWasUnderscore = false
+  for ch in sanitized:
+    if ch == '_':
+      if not lastWasUnderscore:
+        collapsed.add(ch)
+      lastWasUnderscore = true
+    else:
+      collapsed.add(ch)
+      lastWasUnderscore = false
+
+  var trimmed = collapsed.strip(chars = {'_', '.'})
+  if trimmed.len == 0:
+    return "untitled"
+  if trimmed.len > 120:
+    trimmed = trimmed[0 ..< 120]
+  return trimmed
+
+proc removePersistedState*(sceneId: SceneId) =
+  if lastPersistedStates.hasKey(sceneId.string):
+    lastPersistedStates.delete(sceneId.string)
+  let statePath = &"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json"
+  try:
+    if fileExists(statePath):
+      removeFile(statePath)
+  except OSError:
+    discard
 
 proc updateUploadedScenesFromPayload*(
     payload: JsonNode,
@@ -163,6 +200,9 @@ proc updateUploadedScenesFromPayload*(
   let oldUploaded = getUploadedInterpretedScenes()
   updateUploadedScenes(newScenes)
   setUploadedScenePayload(payloadString)
+  for sceneId in oldUploaded.keys:
+    if sceneId.string.startsWith("uploaded/") and not newScenes.hasKey(sceneId):
+      removePersistedState(sceneId)
   if persistPayload:
     var payloadToPersist: JsonNode
     if payload.kind == JArray:
@@ -243,32 +283,6 @@ proc updateLastPublicState*(self: FrameScene) =
     lastPublicStateUpdates[self.id] = epochTime()
   self.lastPublicStateUpdate = epochTime()
 
-proc sanitizePathString*(s: string): string =
-  var sanitized = newStringOfCap(s.len)
-  for ch in s:
-    if ch.isAlphaNumeric or ch in ['-', '_', '.']:
-      sanitized.add(ch)
-    else:
-      sanitized.add('_')
-
-  var collapsed = newStringOfCap(sanitized.len)
-  var lastWasUnderscore = false
-  for ch in sanitized:
-    if ch == '_':
-      if not lastWasUnderscore:
-        collapsed.add(ch)
-      lastWasUnderscore = true
-    else:
-      collapsed.add(ch)
-      lastWasUnderscore = false
-
-  var trimmed = collapsed.strip(chars = {'_', '.'})
-  if trimmed.len == 0:
-    return "untitled"
-  if trimmed.len > 120:
-    trimmed = trimmed[0 ..< 120]
-  return trimmed
-
 proc setPersistedStateFromPayload*(sceneId: SceneId, payload: JsonNode) =
   if payload.isNil or payload.kind != JObject:
     return
@@ -278,6 +292,27 @@ proc setPersistedStateFromPayload*(sceneId: SceneId, payload: JsonNode) =
   for key in payload.keys:
     persistedState[key] = copy(payload[key])
   writeFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json", $persistedState)
+
+proc cleanupOrphanedUploadedStateFiles*() =
+  if uploadedStateCleanupRan:
+    return
+  uploadedStateCleanupRan = true
+  var keepFiles = initTable[string, bool]()
+  try:
+    if fileExists(UPLOADED_SCENES_JSON_PATH):
+      let uploadedPayload = parseJson(readFile(UPLOADED_SCENES_JSON_PATH))
+      let (_, sceneIds) = updateUploadedScenesFromPayload(uploadedPayload, false)
+      for sceneId in sceneIds:
+        let filename = &"scene-{sanitizePathString(sceneId.string)}.json"
+        keepFiles[filename] = true
+  except JsonParsingError, IOError:
+    discard
+  for filePath in walkFiles(&"{SCENE_STATE_JSON_FOLDER}/scene-uploaded_*.json"):
+    try:
+      if not keepFiles.hasKey(splitFile(filePath).name & ".json"):
+        removeFile(filePath)
+    except OSError:
+      discard
 
 proc updateLastPersistedState*(self: FrameScene) =
   if not exportedScenes.hasKey(self.id):
@@ -317,6 +352,7 @@ proc loadLastScene*(): Option[SceneId] =
 
 proc getFirstSceneId*(): SceneId =
   {.gcsafe.}:
+    cleanupOrphanedUploadedStateFiles()
     if defaultSceneId.isSome():
       return defaultSceneId.get()
     let lastSceneId = loadLastScene()
