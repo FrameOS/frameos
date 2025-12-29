@@ -108,6 +108,6 @@ proc get*(self: App, context: ExecutionContext): Image =
     if self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always":
       discard self.saveAsset(prompt, ".jpg", imageDataBody, self.appConfig.saveAssets == "auto")
 
-    result = decodeImage(imageDataBody)
+    result = decodeImageWithFallback(imageDataBody)
   except CatchableError as e:
     return self.error(context, "Error fetching image from OpenAI: " & $e.msg)

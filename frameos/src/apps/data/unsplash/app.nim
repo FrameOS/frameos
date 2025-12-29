@@ -77,7 +77,6 @@ proc get*(self: App, context: ExecutionContext): Image =
     if self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always":
       discard self.saveAsset(&"{search} {width}x{height}", ".jpg", imageData.body, self.appConfig.saveAssets == "auto")
 
-    result = decodeImage(imageData.body)
+    result = decodeImageWithFallback(imageData.body)
   except CatchableError as e:
     return self.error(context, "Error fetching image from Unsplash: " & $e.msg)
-

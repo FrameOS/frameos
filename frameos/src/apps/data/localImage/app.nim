@@ -123,7 +123,7 @@ proc get*(self: App, context: ExecutionContext): Image =
     self.scene.state[self.appConfig.counterStateKey] = %*(self.counter)
 
   try:
-    nextImage = some(readImage(path))
+    nextImage = some(readImageWithFallback(path))
   except CatchableError as e:
     return self.error(context, "An error occurred while loading the image: " & path & "\n" & e.msg)
 

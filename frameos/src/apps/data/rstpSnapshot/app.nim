@@ -42,7 +42,7 @@ proc get*(self: App, context: ExecutionContext): Image =
       return renderError(self, context, "ffmpeg failed to run (exit code " & $exitCode & ")")
 
     try:
-      return decodeImage(data)
+      return decodeImageWithFallback(data)
     except CatchableError as decodeErr:
       self.logError "Failed to decode image: " & decodeErr.msg
       return renderError(self, context, "Could not decode image from ffmpeg output")

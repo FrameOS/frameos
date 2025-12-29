@@ -103,7 +103,7 @@ proc run*(self: App, context: ExecutionContext) =
           self.error "Error fetching image " & $imageData.status
           return
 
-        downloadedImage = some(decodeImage(imageData.body))
+        downloadedImage = some(decodeImageWithFallback(imageData.body))
       finally:
         client2.close()
     except CatchableError as e:
