@@ -45,8 +45,9 @@ export const templateRowLogic = kea<templateRowLogicType>([
         }
         const state: Record<string, any> = {}
         for (const field of values.trySceneFields) {
-          if (field.name in formValues) {
-            state[field.name] = String(formValues[field.name] ?? field.value)
+          const value = formValues[field.name] ?? field.value
+          if (value !== undefined && value !== null) {
+            state[field.name] = String(value)
           }
         }
         actions.tryScene(state)

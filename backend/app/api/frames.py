@@ -55,6 +55,7 @@ from app.schemas.frames import (
     FrameUpdateRequest,
     FramePingResponse,
     FrameSSHKeysUpdateRequest,
+    FrameSetNextSceneRequest,
 )
 from app.api.auth import get_current_user
 from app.config import config
@@ -101,6 +102,35 @@ def _not_found():
 
 def _bad_request(msg: str):
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=msg)
+
+
+def _sanitize_scene_state_filename(scene_id: str) -> str:
+    sanitized = []
+    for ch in scene_id:
+        if ch.isalnum() or ch in ["-", "_", "."]:
+            sanitized.append(ch)
+        else:
+            sanitized.append("_")
+    collapsed = []
+    last_was_underscore = False
+    for ch in sanitized:
+        if ch == "_":
+            if not last_was_underscore:
+                collapsed.append(ch)
+            last_was_underscore = True
+        else:
+            collapsed.append(ch)
+            last_was_underscore = False
+    trimmed = "".join(collapsed).strip("_.")
+    if not trimmed:
+        trimmed = "untitled"
+    return trimmed[:120]
+
+
+def _frame_state_dir(frame: Frame) -> str:
+    if frame.mode == "nixos":
+        return "/var/lib/frameos/state"
+    return "/srv/frameos/state"
 
 
 _ascii_re = re.compile(r"[^A-Za-z0-9._-]")
@@ -1596,6 +1626,62 @@ async def api_frame_fast_deploy_event(id: int, redis: Redis = Depends(get_redis)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_with_auth.post("/frames/{id:int}/set_next_scene")
+async def api_frame_set_next_scene(
+    id: int,
+    data: FrameSetNextSceneRequest,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id)
+    if not frame:
+        _not_found()
+
+    if not any(scene.get("id") == data.sceneId for scene in (frame.scenes or [])):
+        _bad_request(f"Scene {data.sceneId} not found on frame")
+
+    if data.state is not None and not isinstance(data.state, dict):
+        _bad_request("State must be an object")
+
+    state_dir = _frame_state_dir(frame)
+    await make_dir(db, redis, frame, state_dir)
+
+    scene_payload = {"sceneId": data.sceneId}
+    state_payload = data.state or {}
+    scene_state_path = os.path.join(
+        state_dir, f"scene-{_sanitize_scene_state_filename(data.sceneId)}.json"
+    )
+
+    await upload_file(
+        db,
+        redis,
+        frame,
+        os.path.join(state_dir, "scene.json"),
+        (json.dumps(scene_payload, indent=2) + "\n").encode("utf-8"),
+    )
+    await upload_file(
+        db,
+        redis,
+        frame,
+        scene_state_path,
+        (json.dumps(state_payload, indent=2) + "\n").encode("utf-8"),
+    )
+
+    try:
+        if data.fastDeploy:
+            from app.tasks import fast_deploy_frame
+
+            await fast_deploy_frame(id, redis)
+        else:
+            from app.tasks import deploy_frame
+
+            await deploy_frame(id, redis)
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+    return {"message": "Next scene queued for boot"}
 
 
 @api_with_auth.post("/frames/{id:int}")
