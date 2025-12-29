@@ -55,18 +55,6 @@ export const templateRowLogic = kea<templateRowLogicType>([
   })),
   selectors({
     scenes: [() => [(_, props: TemplateRowLogicProps) => props.template?.scenes], (scenes) => scenes ?? []],
-    trySceneStateAsStrings: [
-      (s) => [s.trySceneState, s.trySceneFields],
-      (trySceneState, trySceneFields) => {
-        const state: Record<string, any> = {}
-        for (const field of trySceneFields) {
-          if (field.name in trySceneState) {
-            state[field.name] = String(trySceneState[field.name] ?? field.value)
-          }
-        }
-        return state
-      },
-    ],
     trySceneConfig: [
       (s) => [s.scenes],
       (scenes) => {
@@ -122,7 +110,7 @@ export const templateRowLogic = kea<templateRowLogicType>([
     openTrySceneModal: () => {
       actions.resetTrySceneState(values.defaultTrySceneState)
     },
-    tryScene: async () => {
+    tryScene: async ({ state }) => {
       if (!props.frameId || !values.trySceneConfig) {
         return
       }
@@ -135,8 +123,8 @@ export const templateRowLogic = kea<templateRowLogicType>([
               ? values.trySceneConfig.mainScene.id
               : values.trySceneConfig.payloadScenes[0]?.id,
         }
-        if (Object.keys(values.trySceneStateAsStrings).length > 0) {
-          payload.state = values.trySceneStateAsStrings
+        if (state && Object.keys(state).length > 0) {
+          payload.state = state
         }
         const response = await apiFetch(`/api/frames/${props.frameId}/upload_scenes`, {
           method: 'POST',
