@@ -1,6 +1,6 @@
 import { actions, kea, key, path, props, reducers, selectors, listeners } from 'kea'
 import { forms } from 'kea-forms'
-import { TemplateType } from '../../../../types'
+import { SceneNodeData, TemplateType } from '../../../../types'
 import { findConnectedScenes } from '../Scenes/utils'
 import { apiFetch } from '../../../../utils/apiFetch'
 
@@ -70,7 +70,28 @@ export const templateRowLogic = kea<templateRowLogicType>([
         if (!interpretedScenes.length) {
           return null
         }
-        const mainScene = interpretedScenes[0]
+        const parentCounts = new Map<string, number>()
+        for (const scene of scenes) {
+          for (const node of scene.nodes) {
+            if (node.type !== 'scene') {
+              continue
+            }
+            const linkedSceneId = (node.data as SceneNodeData)?.keyword
+            if (linkedSceneId) {
+              parentCounts.set(linkedSceneId, (parentCounts.get(linkedSceneId) ?? 0) + 1)
+            }
+          }
+        }
+
+        let mainScene = interpretedScenes[0]
+        let lowestParents = parentCounts.get(mainScene.id) ?? 0
+        for (const scene of interpretedScenes.slice(1)) {
+          const parents = parentCounts.get(scene.id) ?? 0
+          if (parents < lowestParents) {
+            lowestParents = parents
+            mainScene = scene
+          }
+        }
         const connectedIds = new Set(findConnectedScenes(scenes, mainScene.id))
         const payloadScenes = scenes.filter((scene) => connectedIds.has(scene.id))
         return { mainScene, payloadScenes }
