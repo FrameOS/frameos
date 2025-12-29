@@ -114,7 +114,11 @@ export const controlLogic = kea<controlLogicType>([
           } else {
             actions.currentSceneChanged(sceneId)
           }
-        } else if (event === 'event:setSceneState' || event === 'event:setCurrentScene') {
+        } else if (
+          event === 'event:setSceneState' ||
+          event === 'event:setCurrentScene' ||
+          event === 'event:uploadScene'
+        ) {
           actions.sync()
         }
       } catch (error) {}

@@ -41,10 +41,11 @@ import { SecretSettingsModal } from '../SecretSettingsModal'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { buildSdCardImageScene } from './sceneShortcuts'
 import { v4 as uuidv4 } from 'uuid'
+import { FrameScene } from '../../../../types'
 
 export function Scenes() {
-  const { frameId, frameForm } = useValues(frameLogic)
-  const { applyTemplate, sendEvent } = useActions(frameLogic)
+  const { frameId, frameForm, frame } = useValues(frameLogic)
+  const { applyTemplate, sendEvent, updateScene } = useActions(frameLogic)
   const { editScene, openTemplates } = useActions(panelsLogic)
   const {
     filteredScenes,
@@ -85,6 +86,8 @@ export function Scenes() {
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const [isUploadingImage, setIsUploadingImage] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement>(null)
+  const activeScene = scenes.find((scene) => scene.id === sceneId) ?? null
+  const missingActiveSceneId = !activeScene && sceneId ? sceneId : null
 
   const uploadImage = () => {
     uploadInputRef.current?.click()
@@ -123,7 +126,12 @@ export function Scenes() {
   }
 
   const renderShortcuts = (className?: string, onNewScene: () => void = toggleNewScene) => (
-    <div className={clsx('flex flex-wrap items-center gap-2 rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-2', className)}>
+    <div
+      className={clsx(
+        'flex flex-wrap items-center gap-2 rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-2',
+        className
+      )}
+    >
       <span className="text-xs uppercase text-gray-400">Shortcuts</span>
       <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={onNewScene}>
         <PlusIcon className="w-4 h-4" />
@@ -251,6 +259,29 @@ export function Scenes() {
         ) : null}
         {filteredScenes.length === 0 && search ? (
           <div className="text-center text-gray-400">No scenes matching "{search}"</div>
+        ) : null}
+        {missingActiveSceneId ? (
+          <div className="border rounded-lg shadow bg-gray-900 break-inside-avoid p-3 space-y-2 border-blue-700/60">
+            <div className="flex items-start justify-between gap-3">
+              <FrameImage
+                frameId={frameId}
+                className="max-w-[120px] max-h-[120px]"
+                refreshable={false}
+                thumb
+                objectFit="cover"
+              />
+              <div className="w-full space-y-2">
+                <div>
+                  <H6>Active scene (not installed)</H6>
+                  <div className="text-xs text-gray-400">{missingActiveSceneId}</div>
+                </div>
+
+                <div className="text-xs text-gray-400">
+                  This scene is currently running on the frame, but it is not in the installed scenes list.
+                </div>
+              </div>
+            </div>
+          </div>
         ) : null}
         {filteredScenes.map((scene) => {
           const secretSettings = sceneSecretSettings.get(scene.id) ?? []
