@@ -41,6 +41,7 @@ import { SecretSettingsModal } from '../SecretSettingsModal'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { buildSdCardImageScene } from './sceneShortcuts'
 import { v4 as uuidv4 } from 'uuid'
+import { entityImagesModel } from '../../../../models/entityImagesModel'
 
 export function Scenes() {
   const { frameId, frameForm, frame } = useValues(frameLogic)
@@ -83,9 +84,12 @@ export function Scenes() {
     controlLogic({ frameId })
   )
   const { setCurrentScene, sync } = useActions(controlLogic({ frameId }))
+  const { updateEntityImage } = useActions(entityImagesModel)
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const [isUploadingImage, setIsUploadingImage] = useState(false)
+  const [isInstallingMissingActiveScene, setIsInstallingMissingActiveScene] = useState(false)
+  const [missingActiveExpanded, setMissingActiveExpanded] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const activeScene = scenes.find((scene) => scene.id === sceneId) ?? null
   const missingActiveSceneId = !activeScene && sceneId ? sceneId : null
@@ -126,6 +130,54 @@ export function Scenes() {
     } finally {
       setIsUploadingImage(false)
       event.target.value = ''
+    }
+  }
+
+  const fetchCurrentFrameImage = async (): Promise<Blob | null> => {
+    try {
+      const tokenResponse = await apiFetch(`/api/frames/${frameId}/image_token`)
+      if (!tokenResponse.ok) {
+        return null
+      }
+      const tokenPayload = await tokenResponse.json()
+      const token = encodeURIComponent(tokenPayload.token)
+      const imageResponse = await apiFetch(`/api/frames/${frameId}/image?token=${token}`)
+      if (!imageResponse.ok) {
+        return null
+      }
+      return await imageResponse.blob()
+    } catch (error) {
+      console.error('Failed to fetch current frame image', error)
+      return null
+    }
+  }
+
+  const installMissingActiveScene = async () => {
+    if (!uploadedScenes.length) {
+      return
+    }
+    setIsInstallingMissingActiveScene(true)
+    try {
+      uploadedScenes.forEach((scene) => updateScene(scene.id, scene))
+      if (activeUploadedScene?.id) {
+        const imageBlob = await fetchCurrentFrameImage()
+        if (imageBlob) {
+          const response = await apiFetch(`/api/frames/${frameId}/scene_images/${activeUploadedScene.id}`, {
+            method: 'POST',
+            body: imageBlob,
+          })
+          if (response.ok) {
+            updateEntityImage(`frames/${frameId}`, `scene_images/${activeUploadedScene.id}`)
+          } else {
+            console.error('Failed to save active scene image', await response.text())
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to install uploaded scenes', error)
+      alert('Failed to install the active scene')
+    } finally {
+      setIsInstallingMissingActiveScene(false)
     }
   }
 
@@ -262,30 +314,73 @@ export function Scenes() {
           <div className="text-center text-gray-400">No scenes matching "{search}"</div>
         ) : null}
         {missingActiveSceneId ? (
-          <div className="border rounded-lg shadow bg-gray-900 break-inside-avoid p-3 space-y-2 border-blue-700/60">
-            <div className="flex items-start justify-between gap-3">
-              <FrameImage
-                frameId={frameId}
-                className="max-w-[120px] max-h-[120px]"
-                refreshable={false}
-                thumb
-                objectFit="cover"
-              />
-              <div className="w-full space-y-2">
-                <H6>{activeUploadedScene?.name || 'Active scene'} (not installed)</H6>
-                <div className="text-xs text-gray-400">
-                  This scene is currently running on the frame, but it is not in the installed scenes list.
+          <div
+            className={clsx(
+              'border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1 border-blue-700/60',
+              missingActiveExpanded ? 'shadow-[0_0_3px_3px_rgba(128,0,255,0.3)]' : null
+            )}
+          >
+            <div className="flex items-start justify-between gap-1">
+              <div className="overflow-hidden">
+                <FrameImage
+                  frameId={frameId}
+                  className="max-w-[120px] max-h-[120px]"
+                  refreshable={false}
+                  thumb
+                  objectFit="cover"
+                />
+              </div>
+              <div className="break-inside-avoid space-y-1 w-full">
+                <div className="flex items-start justify-between gap-1">
+                  <div onClick={() => setMissingActiveExpanded((expanded) => !expanded)} className="cursor-pointer">
+                    {missingActiveExpanded ? (
+                      <ChevronDownIcon className="w-6 h-6" />
+                    ) : (
+                      <ChevronRightIcon className="w-6 h-6" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <H6 onClick={() => setMissingActiveExpanded((expanded) => !expanded)} className="cursor-pointer">
+                      {activeUploadedScene?.name || 'Active scene'}
+                      <Tag className="ml-2" color="primary">
+                        active
+                      </Tag>
+                      <Tag className="ml-2" color="none">
+                        not installed
+                      </Tag>
+                    </H6>
+                  </div>
+                  <div className="flex gap-1">
+                    {uploadedScenes.length > 0 ? (
+                      <Button
+                        size="small"
+                        color="secondary"
+                        onClick={installMissingActiveScene}
+                        disabled={uploadedScenesLoading || isInstallingMissingActiveScene}
+                      >
+                        {uploadedScenesLoading || isInstallingMissingActiveScene ? (
+                          <Spinner color="white" />
+                        ) : (
+                          'Install on frame'
+                        )}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
-                {uploadedScenes.length > 0 ? (
-                  <div>
-                    <Button
-                      size="small"
-                      color="secondary"
-                      onClick={() => applyTemplate({ scenes: uploadedScenes })}
-                      disabled={uploadedScenesLoading}
-                    >
-                      {uploadedScenesLoading ? <Spinner color="white" /> : 'Install on frame'}
-                    </Button>
+                <div className="flex items-center gap-2 w-full pl-7 justify-between">
+                  <div className="text-xs text-gray-400 flex flex-wrap gap-1 items-center">
+                    <div>{activeUploadedScene?.id || missingActiveSceneId}</div>
+                    <div>This scene is currently running, but it is not installed yet.</div>
+                  </div>
+                </div>
+                {missingActiveExpanded ? (
+                  <div className="pl-7">
+                    <ExpandedScene
+                      sceneId={missingActiveSceneId}
+                      scene={activeUploadedScene}
+                      frameId={frameId}
+                      showEditButton={false}
+                    />
                   </div>
                 ) : null}
               </div>

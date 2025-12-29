@@ -10,6 +10,7 @@ import { controlLogic } from './controlLogic'
 export interface ExpandedSceneLogicProps {
   frameId: number
   sceneId: string
+  scene?: FrameScene | null
 }
 
 export const expandedSceneLogic = kea<expandedSceneLogicType>([
@@ -51,8 +52,9 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
   selectors({
     scenes: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm.scenes ?? frame.scenes],
     scene: [
-      (s) => [s.scenes, (_, props) => props.sceneId],
-      (scenes, sceneId): FrameScene | null => scenes?.find((scene) => scene.id === sceneId) ?? null,
+      (s, p) => [s.scenes, p.sceneId, p.scene],
+      (scenes, sceneId, sceneOverride): FrameScene | null =>
+        sceneOverride ?? scenes?.find((scene) => scene.id === sceneId) ?? null,
     ],
     fields: [(s) => [s.scene], (scene) => (scene?.fields ?? []).filter((field) => field.access === 'public')],
     scenesAsOptions: [

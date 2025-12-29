@@ -6,16 +6,19 @@ import { Button } from '../../../../components/Button'
 import { controlLogic } from './controlLogic'
 import { panelsLogic } from '../panelsLogic'
 import { StateFieldEdit } from './StateFieldEdit'
+import { FrameScene } from '../../../../types'
 
 export interface ExpandedSceneProps {
   sceneId: string
   frameId: number
+  scene?: FrameScene | null
+  showEditButton?: boolean
 }
 
-export function ExpandedScene({ frameId, sceneId }: ExpandedSceneProps) {
-  const { stateChanges, hasStateChanges, fields } = useValues(expandedSceneLogic({ frameId, sceneId }))
+export function ExpandedScene({ frameId, sceneId, scene, showEditButton = true }: ExpandedSceneProps) {
+  const { stateChanges, hasStateChanges, fields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
   const { states, sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
-  const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId }))
+  const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId, scene }))
   const { editScene } = useActions(panelsLogic)
   const fieldCount = fields.length ?? 0
 
@@ -30,9 +33,11 @@ export function ExpandedScene({ frameId, sceneId }: ExpandedSceneProps) {
             <Button onClick={submitStateChanges} color={sceneId !== currentSceneId ? 'primary' : 'secondary'}>
               Activate scene
             </Button>
-            <Button onClick={() => editScene(sceneId)} color="secondary">
-              Edit scene
-            </Button>
+            {showEditButton ? (
+              <Button onClick={() => editScene(sceneId)} color="secondary">
+                Edit scene
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : (
@@ -79,9 +84,11 @@ export function ExpandedScene({ frameId, sceneId }: ExpandedSceneProps) {
                 <Button onClick={() => resetStateChanges()} color="secondary">
                   Reset
                 </Button>
-                <Button onClick={() => editScene(sceneId)} color="secondary">
-                  Edit scene
-                </Button>
+                {showEditButton ? (
+                  <Button onClick={() => editScene(sceneId)} color="secondary">
+                    Edit scene
+                  </Button>
+                ) : null}
               </div>
             </div>
           ) : null}
