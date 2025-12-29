@@ -270,7 +270,7 @@ export function Scenes() {
                         active
                       </Tag>
                       <Tag className="ml-2" color="orange">
-                        not installed
+                        not saved
                       </Tag>
                     </H6>
                   </div>
@@ -285,7 +285,7 @@ export function Scenes() {
                         {uploadedScenesLoading || isInstallingMissingActiveScene ? (
                           <Spinner color="white" />
                         ) : (
-                          'Install on frame'
+                          'Save on frame'
                         )}
                       </Button>
                     ) : null}
@@ -293,7 +293,7 @@ export function Scenes() {
                 </div>
                 <div className="flex items-center gap-2 w-full pl-7 justify-between">
                   <div className="text-xs text-gray-400 flex flex-wrap gap-1 items-center">
-                    <div>This scene is currently running, but it is not installed yet.</div>
+                    <div>This scene is currently running, but it is not saved on the frame.</div>
                   </div>
                 </div>
                 {missingActiveExpanded ? (

@@ -11,7 +11,6 @@ import equal from 'fast-deep-equal'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { buildSdCardImageScene } from './sceneShortcuts'
-import { entityImagesModel } from '../../../../models/entityImagesModel'
 
 export interface ScenesLogicProps {
   frameId: number
@@ -28,17 +27,15 @@ export const scenesLogic = kea<scenesLogicType>([
       appsModel,
       ['apps'],
       controlLogic({ frameId }),
-      ['sceneId as activeSceneId', 'uploadedScenes', 'uploadedScenesLoading'],
+      ['sceneId as activeSceneId', 'uploadedScenes', 'uploadedScenesLoading', 'states'],
     ],
     actions: [
       frameLogic({ frameId }),
-      ['applyTemplate', 'sendEvent', 'updateScene'],
+      ['applyTemplate', 'sendEvent'],
       panelsLogic({ frameId }),
       ['editScene', 'closePanel'],
       controlLogic({ frameId }),
       ['sync as syncActiveScene'],
-      entityImagesModel,
-      ['updateEntityImage'],
     ],
   })),
   actions({
@@ -339,38 +336,47 @@ export const scenesLogic = kea<scenesLogicType>([
         return
       }
       try {
-        values.uploadedScenes.forEach((scene) => actions.updateScene(scene.id, scene))
-        if (values.activeUploadedScene?.id) {
-          try {
-            const tokenResponse = await apiFetch(`/api/frames/${props.frameId}/image_token`)
-            if (!tokenResponse.ok) {
-              actions.installMissingActiveSceneSuccess()
-              return
+        const currentState =
+          values.missingActiveSceneId && values.states ? values.states[values.missingActiveSceneId] : null
+        const uploadedScenes = values.uploadedScenes.map((scene) => {
+          if (!values.activeUploadedScene || scene.id !== values.activeUploadedScene.id) {
+            return scene
+          }
+          if (!currentState || !scene.fields?.length) {
+            return scene
+          }
+          const fields = scene.fields.map((field) => {
+            if (!field?.name) {
+              return field
             }
+            if (Object.prototype.hasOwnProperty.call(currentState, field.name)) {
+              return { ...field, value: String(currentState[field.name]) }
+            }
+            return field
+          })
+          return { ...scene, fields }
+        })
+
+        let imageBlob: Blob | null = null
+        try {
+          const tokenResponse = await apiFetch(`/api/frames/${props.frameId}/image_token`)
+          if (tokenResponse.ok) {
             const tokenPayload = await tokenResponse.json()
             const token = encodeURIComponent(tokenPayload.token)
             const imageResponse = await apiFetch(`/api/frames/${props.frameId}/image?token=${token}`)
-            if (!imageResponse.ok) {
-              actions.installMissingActiveSceneSuccess()
-              return
+            if (imageResponse.ok) {
+              imageBlob = await imageResponse.blob()
             }
-            const imageBlob = await imageResponse.blob()
-            const response = await apiFetch(
-              `/api/frames/${props.frameId}/scene_images/${values.activeUploadedScene.id}`,
-              {
-                method: 'POST',
-                body: imageBlob,
-              }
-            )
-            if (response.ok) {
-              actions.updateEntityImage(`frames/${props.frameId}`, `scene_images/${values.activeUploadedScene.id}`)
-            } else {
-              console.error('Failed to save active scene image', await response.text())
-            }
-          } catch (error) {
-            console.error('Failed to fetch current frame image', error)
           }
+        } catch (error) {
+          console.error('Failed to fetch current frame image', error)
         }
+
+        actions.applyTemplate({
+          scenes: uploadedScenes,
+          name: values.activeUploadedScene?.name || 'Active scene',
+          image: imageBlob ?? undefined,
+        })
         actions.installMissingActiveSceneSuccess()
       } catch (error) {
         console.error('Failed to install uploaded scenes', error)
