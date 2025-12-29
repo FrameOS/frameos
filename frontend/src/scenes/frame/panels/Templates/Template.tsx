@@ -54,7 +54,7 @@ export function TemplateRow({
   const { trySceneConfig, tryLoading, trySceneModalOpen, trySceneFields, trySceneState } = useValues(
     templateRowLogic({ frameId, template })
   )
-  const { openTrySceneModal, closeTrySceneModal, submitTrySceneState } = useActions(
+  const { openTrySceneModal, closeTrySceneModal, submitTrySceneState, resetTrySceneState } = useActions(
     templateRowLogic({ frameId, template })
   )
   const imageEntity = useMemo(() => {
@@ -140,7 +140,14 @@ export function TemplateRow({
                   className="!px-2 flex gap-1"
                   size="small"
                   color="primary"
-                  onClick={openTrySceneModal}
+                  onClick={() => {
+                    if (trySceneFields.length === 0) {
+                      resetTrySceneState({})
+                      submitTrySceneState()
+                      return
+                    }
+                    openTrySceneModal()
+                  }}
                   disabled={tryLoading || !frameId}
                   title="Try this interpreted scene on the frame"
                 >
