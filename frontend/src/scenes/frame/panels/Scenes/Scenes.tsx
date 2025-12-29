@@ -41,7 +41,6 @@ import { SecretSettingsModal } from '../SecretSettingsModal'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { buildSdCardImageScene } from './sceneShortcuts'
 import { v4 as uuidv4 } from 'uuid'
-import { FrameScene } from '../../../../types'
 
 export function Scenes() {
   const { frameId, frameForm, frame } = useValues(frameLogic)
