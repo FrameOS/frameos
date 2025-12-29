@@ -269,7 +269,7 @@ export function Assets(): JSX.Element {
     const sceneId = uuidv4()
     const scene = buildLocalImageScene(filename, imageFolder, sceneId)
     try {
-      await sendEvent('uploadScene', { scenes: [scene], sceneId })
+      await sendEvent('uploadScenes', { scenes: [scene], sceneId })
     } catch (error) {
       console.error(error)
       alert('Failed to create image scene')
@@ -285,7 +285,7 @@ export function Assets(): JSX.Element {
     const sceneId = uuidv4()
     const scene = buildLocalImageFolderScene(imageFolder, sceneId)
     try {
-      await sendEvent('uploadScene', { scenes: [scene], sceneId })
+      await sendEvent('uploadScenes', { scenes: [scene], sceneId })
     } catch (error) {
       console.error(error)
       alert('Failed to create image scene')

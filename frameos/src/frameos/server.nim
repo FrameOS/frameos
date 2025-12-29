@@ -177,7 +177,7 @@ router myrouter:
       resp Http401, "Unauthorized"
     log(%*{"event": "http", "post": request.pathInfo})
     let payload = parseJson(if request.body == "": "{}" else: request.body)
-    sendEvent("uploadScene", payload)
+    sendEvent("uploadScenes", payload)
     resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
   post "/reload":
     if not hasAccess(request, Write):

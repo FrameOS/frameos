@@ -168,19 +168,8 @@ proc updateUploadedScenesFromPayload*(
     persistPayload: bool = true
   ): tuple[mainScene: Option[SceneId], sceneIds: seq[SceneId]] =
   var scenePayload: JsonNode
-  if payload.kind == JArray:
-    scenePayload = payload
-  elif payload.kind == JObject and payload.hasKey("scenes"):
-    if payload["scenes"].kind == JArray:
-      scenePayload = payload["scenes"]
-    elif payload["scenes"].kind == JObject:
-      scenePayload = %* [payload["scenes"]]
-    else:
-      return (none(SceneId), @[])
-  elif payload.kind == JObject and payload.hasKey("scene") and payload["scene"].kind == JObject:
-    scenePayload = %* [payload["scene"]]
-  elif payload.kind == JObject:
-    scenePayload = %* [payload]
+  if payload.kind == JObject and payload.hasKey("scenes") and payload["scenes"].kind == JArray:
+    scenePayload = payload["scenes"]
   else:
     return (none(SceneId), @[])
 
@@ -204,14 +193,7 @@ proc updateUploadedScenesFromPayload*(
     if sceneId.string.startsWith("uploaded/") and not newScenes.hasKey(sceneId):
       removePersistedState(sceneId)
   if persistPayload:
-    var payloadToPersist: JsonNode
-    if payload.kind == JArray:
-      payloadToPersist = %*{"scenes": payload}
-    elif payload.kind == JObject:
-      payloadToPersist = payload
-    else:
-      payloadToPersist = %*{"scenes": %*[]}
-    writeFile(UPLOADED_SCENES_JSON_PATH, $payloadToPersist)
+    writeFile(UPLOADED_SCENES_JSON_PATH, $payload)
 
   let sceneIds = sceneInputs.mapIt(it.id)
   let oldSceneIds = oldUploaded.keys.toSeq()

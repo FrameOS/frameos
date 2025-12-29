@@ -115,49 +115,41 @@ def _get_frame_image_lock(frame_id: int) -> asyncio.Lock:
     return lock
 
 
-def _normalize_upload_scene_payload(body: Any) -> tuple[list[dict[str, Any]], Any]:
+def _normalize_upload_scenes_payload(body: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if isinstance(body, (bytes, bytearray)):
         try:
             body = json.loads(body)
         except json.JSONDecodeError:
-            _bad_request("uploadScene payload must be valid JSON")
+            _bad_request("uploadScenes payload must be valid JSON")
 
-    if isinstance(body, dict) and "scenes" in body:
-        scenes_payload = body["scenes"]
-        if isinstance(scenes_payload, list):
-            return scenes_payload, body
-        if isinstance(scenes_payload, dict):
-            return [scenes_payload], body
-        _bad_request("uploadScene payload must include scenes as objects")
-    if isinstance(body, dict) and isinstance(body.get("scene"), dict):
-        return [body["scene"]], body
-    if isinstance(body, list):
-        return body, body
-    if isinstance(body, dict):
-        return [body], body
+    if not isinstance(body, dict):
+        _bad_request("uploadScenes payload must be a JSON object")
 
-    _bad_request("uploadScene payload must be a scene or list of scenes")
+    scenes_payload = body.get("scenes")
+    if not isinstance(scenes_payload, list):
+        _bad_request("uploadScenes payload must include scenes as an array")
+    return scenes_payload, body
     return [], body  # for mypy
 
 
-def _validate_upload_scene_payload(
+def _validate_upload_scenes_payload(
     scenes: list[dict[str, Any]],
     scene_id: str | None = None,
 ) -> None:
     if not scenes:
-        _bad_request("uploadScene payload must include at least one scene")
+        _bad_request("uploadScenes payload must include at least one scene")
 
     scene_ids: set[str] = set()
     for scene in scenes:
         if not isinstance(scene, dict):
-            _bad_request("uploadScene scenes must be objects")
+            _bad_request("uploadScenes scenes must be objects")
         scene_id = scene.get("id")
         if not isinstance(scene_id, str) or not scene_id:
-            _bad_request("uploadScene scenes must include an id")
+            _bad_request("uploadScenes scenes must include an id")
         scene_ids.add(scene_id)
 
     if scene_id and scene_id not in scene_ids:
-        _bad_request("uploadScene sceneId must reference one of the uploaded scenes")
+        _bad_request("uploadScenes sceneId must reference one of the uploaded scenes")
 
     for scene in scenes:
         nodes = scene.get("nodes") or []
@@ -610,10 +602,10 @@ async def api_frame_event(
         if request.headers.get("content-type") == "application/json"
         else request.body()
     )
-    if event == "uploadScene":
-        scenes, body = _normalize_upload_scene_payload(body)
-        scene_id = body.get("sceneId") if isinstance(body, dict) else None
-        _validate_upload_scene_payload(scenes, scene_id)
+    if event == "uploadScenes":
+        scenes, body = _normalize_upload_scenes_payload(body)
+        scene_id = body.get("sceneId")
+        _validate_upload_scenes_payload(scenes, scene_id)
     try:
         await _forward_frame_request(
             frame, redis, path=f"/event/{event}", method="POST", json_body=body
@@ -642,17 +634,12 @@ async def api_frame_upload_scenes(
         if request.headers.get("content-type") == "application/json"
         else request.body()
     )
-    scenes, body = _normalize_upload_scene_payload(body)
-    scene_id = body.get("sceneId") if isinstance(body, dict) else None
-    _validate_upload_scene_payload(scenes, scene_id)
-    payload: dict[str, Any] = {"scenes": scenes}
-    if scene_id:
-        payload["sceneId"] = scene_id
-    if isinstance(body, dict) and "state" in body:
-        payload["state"] = body["state"]
+    scenes, body = _normalize_upload_scenes_payload(body)
+    scene_id = body.get("sceneId")
+    _validate_upload_scenes_payload(scenes, scene_id)
     try:
         await _forward_frame_request(
-            frame, redis, path="/uploadScenes", method="POST", json_body=payload
+            frame, redis, path="/uploadScenes", method="POST", json_body=body
         )
         return "OK"
     except HTTPException as exc:

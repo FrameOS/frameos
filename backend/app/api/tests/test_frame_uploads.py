@@ -7,16 +7,16 @@ from app.models import new_frame
 
 
 @pytest.mark.asyncio
-async def test_api_frame_event_upload_scene_valid(async_client, db, redis):
+async def test_api_frame_event_upload_scenes_valid(async_client, db, redis):
     frame = await new_frame(db, redis, "SceneEventFrame", "localhost", "localhost")
-    payload = {"scene": {"id": "scene-a", "nodes": []}}
+    payload = {"scenes": [{"id": "scene-a", "nodes": []}]}
 
     with patch(
         "app.api.frames._forward_frame_request",
         new=AsyncMock(return_value="OK"),
     ) as forward_request:
         response = await async_client.post(
-            f"/api/frames/{frame.id}/event/uploadScene",
+            f"/api/frames/{frame.id}/event/uploadScenes",
             json=payload,
         )
 
@@ -24,12 +24,12 @@ async def test_api_frame_event_upload_scene_valid(async_client, db, redis):
     assert response.json() == "OK"
     forward_request.assert_awaited_once()
     _, kwargs = forward_request.call_args
-    assert kwargs["path"] == "/event/uploadScene"
+    assert kwargs["path"] == "/event/uploadScenes"
     assert kwargs["json_body"] == payload
 
 
 @pytest.mark.asyncio
-async def test_api_frame_event_upload_scene_invalid_reference(async_client, db, redis):
+async def test_api_frame_event_upload_scenes_invalid_reference(async_client, db, redis):
     frame = await new_frame(db, redis, "SceneEventInvalid", "localhost", "localhost")
     payload = {
         "scenes": [
@@ -43,7 +43,7 @@ async def test_api_frame_event_upload_scene_invalid_reference(async_client, db, 
     }
 
     response = await async_client.post(
-        f"/api/frames/{frame.id}/event/uploadScene",
+        f"/api/frames/{frame.id}/event/uploadScenes",
         json=payload,
     )
 

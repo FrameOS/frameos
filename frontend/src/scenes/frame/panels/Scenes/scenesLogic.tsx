@@ -322,7 +322,7 @@ export const scenesLogic = kea<scenesLogicType>([
         const filename = payload?.filename || relativePath.split('/').pop() || file.name
         const sceneId = uuidv4()
         const scene = buildSdCardImageScene(filename, assetsPath, sceneId)
-        await actions.sendEvent('uploadScene', { scenes: [scene], sceneId })
+        await actions.sendEvent('uploadScenes', { scenes: [scene], sceneId })
         actions.uploadImageSuccess()
       } catch (error) {
         console.error(error)

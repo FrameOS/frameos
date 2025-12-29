@@ -295,18 +295,15 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
             self.forceSceneReload = true
             self.triggerRenderNext = true
             continue # don't dispatch this event to the scene
-          of "uploadScene":
+          of "uploadScenes":
             let (mainSceneId, sceneIds) = updateUploadedScenesFromPayload(payload)
             if mainSceneId.isNone:
-              self.logger.log(%*{"event": "uploadScene:error", "error": "No scenes provided"})
+              self.logger.log(%*{"event": "uploadScenes:error", "error": "No scenes provided"})
               continue
             if payload.hasKey("state") and payload["state"].kind == JObject:
               setPersistedStateFromPayload(mainSceneId.get(), payload["state"])
             for sceneId in sceneIds:
               if self.scenes.hasKey(sceneId):
-                self.scenes.del(sceneId)
-            for sceneId in self.scenes.keys.toSeq():
-              if sceneId.string.startsWith("uploaded/"):
                 self.scenes.del(sceneId)
             self.currentSceneId = mainSceneId.get()
             self.forceSceneReload = true

@@ -136,7 +136,7 @@ export const controlLogic = kea<controlLogicType>([
         } else if (
           event === 'event:setSceneState' ||
           event === 'event:setCurrentScene' ||
-          event === 'event:uploadScene'
+          event === 'event:uploadScenes'
         ) {
           actions.sync()
         }
