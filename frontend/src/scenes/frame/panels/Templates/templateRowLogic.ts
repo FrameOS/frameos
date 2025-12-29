@@ -46,15 +46,7 @@ export const templateRowLogic = kea<templateRowLogicType>([
         const state: Record<string, any> = {}
         for (const field of values.trySceneFields) {
           if (field.name in formValues) {
-            if (field.type === 'boolean') {
-              state[field.name] = formValues[field.name] === 'true' || field.value
-            } else if (field.type === 'integer') {
-              state[field.name] = parseInt(formValues[field.name] ?? field.value)
-            } else if (field.type === 'float') {
-              state[field.name] = parseFloat(formValues[field.name] ?? field.value)
-            } else {
-              state[field.name] = formValues[field.name] ?? field.value
-            }
+            state[field.name] = String(formValues[field.name] ?? field.value)
           }
         }
         actions.tryScene(state)
@@ -63,6 +55,18 @@ export const templateRowLogic = kea<templateRowLogicType>([
   })),
   selectors({
     scenes: [() => [(_, props: TemplateRowLogicProps) => props.template?.scenes], (scenes) => scenes ?? []],
+    trySceneStateAsStrings: [
+      (s) => [s.trySceneState, s.trySceneFields],
+      (trySceneState, trySceneFields) => {
+        const state: Record<string, any> = {}
+        for (const field of trySceneFields) {
+          if (field.name in trySceneState) {
+            state[field.name] = String(trySceneState[field.name] ?? field.value)
+          }
+        }
+        return state
+      },
+    ],
     trySceneConfig: [
       (s) => [s.scenes],
       (scenes) => {
@@ -131,8 +135,8 @@ export const templateRowLogic = kea<templateRowLogicType>([
               ? values.trySceneConfig.mainScene.id
               : values.trySceneConfig.payloadScenes[0]?.id,
         }
-        if (Object.keys(values.trySceneState).length > 0) {
-          payload.state = values.trySceneState
+        if (Object.keys(values.trySceneStateAsStrings).length > 0) {
+          payload.state = values.trySceneStateAsStrings
         }
         const response = await apiFetch(`/api/frames/${props.frameId}/upload_scenes`, {
           method: 'POST',
