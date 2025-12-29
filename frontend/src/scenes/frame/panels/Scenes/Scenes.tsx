@@ -125,13 +125,7 @@ export function Scenes() {
   }
 
   const renderShortcuts = (className?: string, onNewScene: () => void = toggleNewScene) => (
-    <div
-      className={clsx(
-        'flex flex-wrap items-center gap-2 rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-2',
-        className
-      )}
-    >
-      <span className="text-xs uppercase text-gray-400">Shortcuts</span>
+    <div className={clsx('flex flex-wrap items-center gap-2 rounded-lg', className)}>
       <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={onNewScene}>
         <PlusIcon className="w-4 h-4" />
         New blank scene
@@ -140,16 +134,18 @@ export function Scenes() {
         <SparklesIcon className="w-4 h-4" />
         Explore available scenes
       </Button>
-      <Button
-        size="small"
-        color="secondary"
-        className="flex gap-1 items-center"
-        onClick={uploadImage}
-        disabled={isUploadingImage}
-      >
-        {isUploadingImage ? <Spinner color="white" /> : <ArrowUpTrayIcon className="w-4 h-4" />}
-        Upload image
-      </Button>
+      {frame.last_successful_deploy_at ? (
+        <Button
+          size="small"
+          color="secondary"
+          className="flex gap-1 items-center"
+          onClick={uploadImage}
+          disabled={isUploadingImage}
+        >
+          {isUploadingImage ? <Spinner color="white" /> : <ArrowUpTrayIcon className="w-4 h-4" />}
+          Upload image
+        </Button>
+      ) : null}
       <input ref={uploadInputRef} type="file" accept="image/*" className="hidden" onChange={handleUploadImage} />
     </div>
   )
@@ -158,10 +154,11 @@ export function Scenes() {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center space-y-4 mb-8">
-          <H6>No scenes installed yet</H6>
+          <H6>{frame.last_successful_deploy_at ? 'No scenes installed' : 'Not deployed yet'}</H6>
           <p className="text-gray-400">
-            Scenes are the building blocks of your frame. They can be anything from a simple clock to a complex
-            interactive thermostat.
+            {frame.last_successful_deploy_at
+              ? 'Scenes are the building blocks of your frame. They can be anything from a simple clock to a complex interactive thermostat.'
+              : 'Press the purple "First deploy" button to deploy FrameOS for the first time.'}
           </p>
           {renderShortcuts('justify-center', createNewScene)}
         </div>

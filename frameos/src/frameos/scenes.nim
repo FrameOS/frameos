@@ -37,6 +37,7 @@ proc reloadInterpretedScenes*() =
     exportedScenes[sceneId] = scene.ExportedScene
 
 proc updateUploadedScenes*(newScenes: Table[SceneId, ExportedInterpretedScene]) =
+  # this is likely overkill as we prefix all uploaded scenes with "uploaded/"
   let oldUploaded = getUploadedInterpretedScenes()
   for sceneId in keys(oldUploaded):
     if newScenes.hasKey(sceneId):
@@ -103,6 +104,8 @@ proc updateUploadedScenesFromPayload*(
   else:
     return (none(SceneId), @[])
 
+  # nim json -> jsony -> FrameSceneInput
+  # clunky but works...
   let rawSceneInputs = parseInterpretedSceneInputs($scenePayload)
   var uploadedIdMap = initTable[SceneId, SceneId]()
   for scene in rawSceneInputs:

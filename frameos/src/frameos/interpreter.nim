@@ -519,12 +519,14 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           let interpretedExport = loadedScenes[childSceneId]
           exportedChild = ExportedScene(interpretedExport)
           needsInitEvent = true
+        elif compiledSceneExports.hasKey(childSceneId):
+          exportedChild = compiledSceneExports[childSceneId]
         elif uploadedScenes.hasKey(childSceneId):
+          # uploaded scene id-s start with "uploaded/"
+          # we should implement isloated scopes/applications later, but this will do for now
           let interpretedExport = uploadedScenes[childSceneId]
           exportedChild = ExportedScene(interpretedExport)
           needsInitEvent = true
-        elif compiledSceneExports.hasKey(childSceneId):
-          exportedChild = compiledSceneExports[childSceneId]
         else:
           raise newException(Exception,
             "Scene node references unknown scene id: " & childSceneId.string)
@@ -840,12 +842,12 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         let interpretedExport = loadedScenes[childSceneId]
         exportedChild = ExportedScene(interpretedExport)
         isInterpretedChild = true
+      elif compiledSceneExports.hasKey(childSceneId):
+        exportedChild = compiledSceneExports[childSceneId]
       elif uploadedScenes.hasKey(childSceneId):
         let interpretedExport = uploadedScenes[childSceneId]
         exportedChild = ExportedScene(interpretedExport)
         isInterpretedChild = true
-      elif compiledSceneExports.hasKey(childSceneId):
-        exportedChild = compiledSceneExports[childSceneId]
       else:
         raise newException(Exception,
           "Scene node references unknown scene id: " & childSceneId.string)
