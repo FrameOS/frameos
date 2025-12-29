@@ -52,7 +52,7 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
   selectors({
     scenes: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm.scenes ?? frame.scenes],
     scene: [
-      (s, p) => [s.scenes, p.sceneId, p.scene],
+      (s) => [s.scenes, (_, p) => p.sceneId, (_, p) => p.scene],
       (scenes, sceneId, sceneOverride): FrameScene | null =>
         sceneOverride ?? scenes?.find((scene) => scene.id === sceneId) ?? null,
     ],
