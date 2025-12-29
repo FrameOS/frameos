@@ -25,7 +25,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
 import { SceneSettings } from './SceneSettings'
-import React, { useRef, useState } from 'react'
+import React, { useRef } from 'react'
 import { SceneDropDown } from './SceneDropDown'
 import { showAsFps } from '../../../../decorators/refreshInterval'
 import clsx from 'clsx'
@@ -38,14 +38,10 @@ import { FrameImage } from '../../../../components/FrameImage'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
 import { SecretSettingsModal } from '../SecretSettingsModal'
-import { apiFetch } from '../../../../utils/apiFetch'
-import { buildSdCardImageScene } from './sceneShortcuts'
-import { v4 as uuidv4 } from 'uuid'
-import { entityImagesModel } from '../../../../models/entityImagesModel'
 
 export function Scenes() {
   const { frameId, frameForm, frame } = useValues(frameLogic)
-  const { applyTemplate, sendEvent, updateScene } = useActions(frameLogic)
+  const { applyTemplate } = useActions(frameLogic)
   const { editScene, openTemplates } = useActions(panelsLogic)
   const {
     filteredScenes,
@@ -64,6 +60,11 @@ export function Scenes() {
     activeSettingsKey,
     multiSelectEnabled,
     selectedSceneIds,
+    activeUploadedScene,
+    missingActiveSceneId,
+    missingActiveExpanded,
+    isUploadingImage,
+    isInstallingMissingActiveScene,
   } = useValues(scenesLogic({ frameId }))
   const {
     setSearch,
@@ -78,107 +79,30 @@ export function Scenes() {
     disableMultiSelect,
     toggleSceneSelection,
     deleteSelectedScenes,
+    toggleMissingActiveExpanded,
+    uploadImage,
+    installMissingActiveScene,
   } = useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
   const { sceneId, sceneChanging, loading, uploadedScenes, uploadedScenesLoading } = useValues(
     controlLogic({ frameId })
   )
   const { setCurrentScene, sync } = useActions(controlLogic({ frameId }))
-  const { updateEntityImage } = useActions(entityImagesModel)
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
-  const [isUploadingImage, setIsUploadingImage] = useState(false)
-  const [isInstallingMissingActiveScene, setIsInstallingMissingActiveScene] = useState(false)
-  const [missingActiveExpanded, setMissingActiveExpanded] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement>(null)
-  const activeScene = scenes.find((scene) => scene.id === sceneId) ?? null
-  const missingActiveSceneId = !activeScene && sceneId ? sceneId : null
-  const activeUploadedScene = missingActiveSceneId
-    ? uploadedScenes.find((scene) => 'uploaded/' + scene.id === missingActiveSceneId)
-    : null
 
-  const uploadImage = () => {
+  const triggerUploadInput = () => {
     uploadInputRef.current?.click()
   }
 
-  const handleUploadImage = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadImage = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) {
       return
     }
-    setIsUploadingImage(true)
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      const response = await apiFetch(`/api/frames/${frameId}/assets/upload_image`, {
-        method: 'POST',
-        body: formData,
-      })
-      if (!response.ok) {
-        throw new Error('Image upload failed')
-      }
-      const payload = await response.json()
-      const assetsPath = frameForm.assets_path || '/srv/assets'
-      const relativePath = payload?.path || ''
-      const filename = payload?.filename || relativePath.split('/').pop() || file.name
-      const sceneId = uuidv4()
-      const scene = buildSdCardImageScene(filename, assetsPath, sceneId)
-      await sendEvent('uploadScene', { scenes: [scene], sceneId })
-    } catch (error) {
-      console.error(error)
-      alert('Failed to upload image')
-    } finally {
-      setIsUploadingImage(false)
-      event.target.value = ''
-    }
-  }
-
-  const fetchCurrentFrameImage = async (): Promise<Blob | null> => {
-    try {
-      const tokenResponse = await apiFetch(`/api/frames/${frameId}/image_token`)
-      if (!tokenResponse.ok) {
-        return null
-      }
-      const tokenPayload = await tokenResponse.json()
-      const token = encodeURIComponent(tokenPayload.token)
-      const imageResponse = await apiFetch(`/api/frames/${frameId}/image?token=${token}`)
-      if (!imageResponse.ok) {
-        return null
-      }
-      return await imageResponse.blob()
-    } catch (error) {
-      console.error('Failed to fetch current frame image', error)
-      return null
-    }
-  }
-
-  const installMissingActiveScene = async () => {
-    if (!uploadedScenes.length) {
-      return
-    }
-    setIsInstallingMissingActiveScene(true)
-    try {
-      uploadedScenes.forEach((scene) => updateScene(scene.id, scene))
-      if (activeUploadedScene?.id) {
-        const imageBlob = await fetchCurrentFrameImage()
-        if (imageBlob) {
-          const response = await apiFetch(`/api/frames/${frameId}/scene_images/${activeUploadedScene.id}`, {
-            method: 'POST',
-            body: imageBlob,
-          })
-          if (response.ok) {
-            updateEntityImage(`frames/${frameId}`, `scene_images/${activeUploadedScene.id}`)
-          } else {
-            console.error('Failed to save active scene image', await response.text())
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Failed to install uploaded scenes', error)
-      alert('Failed to install the active scene')
-    } finally {
-      setIsInstallingMissingActiveScene(false)
-    }
+    uploadImage(file)
+    event.target.value = ''
   }
 
   const renderShortcuts = (className?: string, onNewScene: () => void = toggleNewScene) => (
@@ -196,7 +120,7 @@ export function Scenes() {
           size="small"
           color="secondary"
           className="flex gap-1 items-center"
-          onClick={uploadImage}
+          onClick={triggerUploadInput}
           disabled={isUploadingImage}
         >
           {isUploadingImage ? <Spinner color="white" /> : <ArrowUpTrayIcon className="w-4 h-4" />}
@@ -332,7 +256,7 @@ export function Scenes() {
               </div>
               <div className="break-inside-avoid space-y-1 w-full">
                 <div className="flex items-start justify-between gap-1">
-                  <div onClick={() => setMissingActiveExpanded((expanded) => !expanded)} className="cursor-pointer">
+                  <div onClick={toggleMissingActiveExpanded} className="cursor-pointer">
                     {missingActiveExpanded ? (
                       <ChevronDownIcon className="w-6 h-6" />
                     ) : (
@@ -340,12 +264,12 @@ export function Scenes() {
                     )}
                   </div>
                   <div className="flex-1">
-                    <H6 onClick={() => setMissingActiveExpanded((expanded) => !expanded)} className="cursor-pointer">
+                    <H6 onClick={toggleMissingActiveExpanded} className="cursor-pointer">
                       {activeUploadedScene?.name || 'Active scene'}
                       <Tag className="ml-2" color="primary">
                         active
                       </Tag>
-                      <Tag className="ml-2" color="none">
+                      <Tag className="ml-2" color="orange">
                         not installed
                       </Tag>
                     </H6>
@@ -369,7 +293,6 @@ export function Scenes() {
                 </div>
                 <div className="flex items-center gap-2 w-full pl-7 justify-between">
                   <div className="text-xs text-gray-400 flex flex-wrap gap-1 items-center">
-                    <div>{activeUploadedScene?.id || missingActiveSceneId}</div>
                     <div>This scene is currently running, but it is not installed yet.</div>
                   </div>
                 </div>

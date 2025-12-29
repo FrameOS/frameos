@@ -1,6 +1,6 @@
 import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import type { scenesLogicType } from './scenesLogicType'
-import { FrameScene, FrameType, Panel, SceneNodeData } from '../../../../types'
+import { FrameScene, Panel, SceneNodeData } from '../../../../types'
 import { frameLogic, sanitizeScene } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { forms } from 'kea-forms'
@@ -9,6 +9,9 @@ import { panelsLogic } from '../panelsLogic'
 import { controlLogic } from './controlLogic'
 import equal from 'fast-deep-equal'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
+import { apiFetch } from '../../../../utils/apiFetch'
+import { buildSdCardImageScene } from './sceneShortcuts'
+import { entityImagesModel } from '../../../../models/entityImagesModel'
 
 export interface ScenesLogicProps {
   frameId: number
@@ -25,15 +28,17 @@ export const scenesLogic = kea<scenesLogicType>([
       appsModel,
       ['apps'],
       controlLogic({ frameId }),
-      ['sceneId as activeSceneId'],
+      ['sceneId as activeSceneId', 'uploadedScenes', 'uploadedScenesLoading'],
     ],
     actions: [
       frameLogic({ frameId }),
-      ['applyTemplate'],
+      ['applyTemplate', 'sendEvent', 'updateScene'],
       panelsLogic({ frameId }),
       ['editScene', 'closePanel'],
       controlLogic({ frameId }),
       ['sync as syncActiveScene'],
+      entityImagesModel,
+      ['updateEntityImage'],
     ],
   })),
   actions({
@@ -56,6 +61,13 @@ export const scenesLogic = kea<scenesLogicType>([
     disableMultiSelect: true,
     clearSceneSelection: true,
     toggleSceneSelection: (sceneId: string) => ({ sceneId }),
+    toggleMissingActiveExpanded: true,
+    uploadImage: (file: File) => ({ file }),
+    uploadImageSuccess: true,
+    uploadImageFailure: true,
+    installMissingActiveScene: true,
+    installMissingActiveSceneSuccess: true,
+    installMissingActiveSceneFailure: true,
   }),
   forms(({ actions, values, props }) => ({
     newScene: {
@@ -141,6 +153,28 @@ export const scenesLogic = kea<scenesLogicType>([
       {
         enableMultiSelect: () => true,
         disableMultiSelect: () => false,
+      },
+    ],
+    isUploadingImage: [
+      false,
+      {
+        uploadImage: () => true,
+        uploadImageSuccess: () => false,
+        uploadImageFailure: () => false,
+      },
+    ],
+    isInstallingMissingActiveScene: [
+      false,
+      {
+        installMissingActiveScene: () => true,
+        installMissingActiveSceneSuccess: () => false,
+        installMissingActiveSceneFailure: () => false,
+      },
+    ],
+    missingActiveExpanded: [
+      false,
+      {
+        toggleMissingActiveExpanded: (state) => !state,
       },
     ],
     selectedSceneIds: [
@@ -257,8 +291,93 @@ export const scenesLogic = kea<scenesLogicType>([
         return settingsByScene
       },
     ],
+    activeScene: [
+      (s) => [s.scenes, s.activeSceneId],
+      (scenes, activeSceneId) => scenes.find((scene) => scene.id === activeSceneId) ?? null,
+    ],
+    missingActiveSceneId: [
+      (s) => [s.activeScene, s.activeSceneId],
+      (activeScene, activeSceneId) => (!activeScene && activeSceneId ? activeSceneId : null),
+    ],
+    activeUploadedScene: [
+      (s) => [s.missingActiveSceneId, s.uploadedScenes],
+      (missingActiveSceneId, uploadedScenes) =>
+        missingActiveSceneId
+          ? uploadedScenes.find((scene) => `uploaded/${scene.id}` === missingActiveSceneId) ?? null
+          : null,
+    ],
   }),
   listeners(({ actions, props, values }) => ({
+    uploadImage: async ({ file }) => {
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+        const response = await apiFetch(`/api/frames/${props.frameId}/assets/upload_image`, {
+          method: 'POST',
+          body: formData,
+        })
+        if (!response.ok) {
+          throw new Error('Image upload failed')
+        }
+        const payload = await response.json()
+        const assetsPath = values.frameForm.assets_path || '/srv/assets'
+        const relativePath = payload?.path || ''
+        const filename = payload?.filename || relativePath.split('/').pop() || file.name
+        const sceneId = uuidv4()
+        const scene = buildSdCardImageScene(filename, assetsPath, sceneId)
+        await actions.sendEvent('uploadScene', { scenes: [scene], sceneId })
+        actions.uploadImageSuccess()
+      } catch (error) {
+        console.error(error)
+        alert('Failed to upload image')
+        actions.uploadImageFailure()
+      }
+    },
+    installMissingActiveScene: async () => {
+      if (!values.uploadedScenes.length) {
+        actions.installMissingActiveSceneFailure()
+        return
+      }
+      try {
+        values.uploadedScenes.forEach((scene) => actions.updateScene(scene.id, scene))
+        if (values.activeUploadedScene?.id) {
+          try {
+            const tokenResponse = await apiFetch(`/api/frames/${props.frameId}/image_token`)
+            if (!tokenResponse.ok) {
+              actions.installMissingActiveSceneSuccess()
+              return
+            }
+            const tokenPayload = await tokenResponse.json()
+            const token = encodeURIComponent(tokenPayload.token)
+            const imageResponse = await apiFetch(`/api/frames/${props.frameId}/image?token=${token}`)
+            if (!imageResponse.ok) {
+              actions.installMissingActiveSceneSuccess()
+              return
+            }
+            const imageBlob = await imageResponse.blob()
+            const response = await apiFetch(
+              `/api/frames/${props.frameId}/scene_images/${values.activeUploadedScene.id}`,
+              {
+                method: 'POST',
+                body: imageBlob,
+              }
+            )
+            if (response.ok) {
+              actions.updateEntityImage(`frames/${props.frameId}`, `scene_images/${values.activeUploadedScene.id}`)
+            } else {
+              console.error('Failed to save active scene image', await response.text())
+            }
+          } catch (error) {
+            console.error('Failed to fetch current frame image', error)
+          }
+        }
+        actions.installMissingActiveSceneSuccess()
+      } catch (error) {
+        console.error('Failed to install uploaded scenes', error)
+        alert('Failed to install the active scene')
+        actions.installMissingActiveSceneFailure()
+      }
+    },
     setAsDefault: ({ sceneId }) => {
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
         scenes: values.scenes.map((s) =>
