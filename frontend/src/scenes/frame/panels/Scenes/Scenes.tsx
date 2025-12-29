@@ -152,7 +152,6 @@ export function Scenes() {
       <div className="space-y-2">
         {scenes.length > 0 ? (
           <>
-            {renderShortcuts()}
             <div className="flex justify-between w-full items-center">
               <TextInput placeholder="Filter scenes..." className="flex-1 mr-2" onChange={setSearch} value={search} />
               <div className="flex gap-1">
@@ -232,6 +231,7 @@ export function Scenes() {
                 )}
               </div>
             </div>
+            {renderShortcuts()}
           </>
         ) : null}
         {filteredScenes.length === 0 && search ? (
