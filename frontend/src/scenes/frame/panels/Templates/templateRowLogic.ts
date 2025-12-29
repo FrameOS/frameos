@@ -1,4 +1,5 @@
 import { actions, kea, key, path, props, reducers, selectors, listeners } from 'kea'
+import { forms } from 'kea-forms'
 import { TemplateType } from '../../../../types'
 import { findConnectedScenes } from '../Scenes/utils'
 import { apiFetch } from '../../../../utils/apiFetch'
@@ -15,8 +16,10 @@ export const templateRowLogic = kea<templateRowLogicType>([
   props({} as TemplateRowLogicProps),
   key((props: TemplateRowLogicProps) => `${props.frameId ?? 'no-frame'}-${props.template.id ?? props.template.name}`),
   actions({
-    tryScene: true,
+    tryScene: (state?: Record<string, any>) => ({ state }),
     setTryLoading: (tryLoading: boolean) => ({ tryLoading }),
+    openTrySceneModal: true,
+    closeTrySceneModal: true,
   }),
   reducers({
     tryLoading: [
@@ -25,7 +28,39 @@ export const templateRowLogic = kea<templateRowLogicType>([
         setTryLoading: (_, { tryLoading }) => tryLoading,
       },
     ],
+    trySceneModalOpen: [
+      false,
+      {
+        openTrySceneModal: () => true,
+        closeTrySceneModal: () => false,
+      },
+    ],
   }),
+  forms(({ values, props, actions }) => ({
+    trySceneState: {
+      defaults: {} as Record<string, any>,
+      submit: async (formValues) => {
+        if (!props.frameId || !values.trySceneConfig) {
+          return
+        }
+        const state: Record<string, any> = {}
+        for (const field of values.trySceneFields) {
+          if (field.name in formValues) {
+            if (field.type === 'boolean') {
+              state[field.name] = formValues[field.name] === 'true' || field.value
+            } else if (field.type === 'integer') {
+              state[field.name] = parseInt(formValues[field.name] ?? field.value)
+            } else if (field.type === 'float') {
+              state[field.name] = parseFloat(formValues[field.name] ?? field.value)
+            } else {
+              state[field.name] = formValues[field.name] ?? field.value
+            }
+          }
+        }
+        actions.tryScene(state)
+      },
+    },
+  })),
   selectors({
     scenes: [() => [(_, props: TemplateRowLogicProps) => props.template?.scenes], (scenes) => scenes ?? []],
     trySceneConfig: [
@@ -41,20 +76,42 @@ export const templateRowLogic = kea<templateRowLogicType>([
         return { mainScene, payloadScenes }
       },
     ],
+    trySceneFields: [
+      (s) => [s.trySceneConfig],
+      (trySceneConfig) => (trySceneConfig?.mainScene?.fields ?? []).filter((field) => field.access === 'public'),
+    ],
+    defaultTrySceneState: [
+      (s) => [s.trySceneFields],
+      (trySceneFields) => {
+        const defaults: Record<string, any> = {}
+        for (const field of trySceneFields) {
+          if (field.value !== undefined) {
+            defaults[field.name] = field.value
+          }
+        }
+        return defaults
+      },
+    ],
   }),
   listeners(({ actions, values, props }) => ({
+    openTrySceneModal: () => {
+      actions.resetTrySceneState(values.defaultTrySceneState)
+    },
     tryScene: async () => {
       if (!props.frameId || !values.trySceneConfig) {
         return
       }
       try {
         actions.setTryLoading(true)
-        const payload = {
+        const payload: Record<string, any> = {
           scenes: values.trySceneConfig.payloadScenes,
           sceneId:
             values.trySceneConfig.payloadScenes.length > 1
               ? values.trySceneConfig.mainScene.id
               : values.trySceneConfig.payloadScenes[0]?.id,
+        }
+        if (Object.keys(values.trySceneState).length > 0) {
+          payload.state = values.trySceneState
         }
         const response = await apiFetch(`/api/frames/${props.frameId}/upload_scenes`, {
           method: 'POST',
@@ -64,7 +121,9 @@ export const templateRowLogic = kea<templateRowLogicType>([
         if (!response.ok) {
           const message = await response.text()
           alert(message || 'Failed to send scene to frame')
+          return
         }
+        actions.closeTrySceneModal()
       } catch (error) {
         console.error('Failed to send scene to frame', error)
         alert('Failed to send scene to frame')

@@ -300,6 +300,8 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
             if mainSceneId.isNone:
               self.logger.log(%*{"event": "uploadScene:error", "error": "No scenes provided"})
               continue
+            if payload.hasKey("state") and payload["state"].kind == JObject:
+              setPersistedStateFromPayload(mainSceneId.get(), payload["state"])
             for sceneId in sceneIds:
               if self.scenes.hasKey(sceneId):
                 self.scenes.del(sceneId)

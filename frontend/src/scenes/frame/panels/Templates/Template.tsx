@@ -21,6 +21,10 @@ import { settingsLogic } from '../../../settings/settingsLogic'
 import { collectSecretSettingsFromScenes, getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
 import { SecretSettingsModal } from '../SecretSettingsModal'
 import { templateRowLogic } from './templateRowLogic'
+import { Modal } from '../../../../components/Modal'
+import { Form } from 'kea-forms'
+import { Field } from '../../../../components/Field'
+import { StateFieldEdit } from '../Scenes/StateFieldEdit'
 
 interface TemplateProps {
   template: TemplateType
@@ -47,8 +51,12 @@ export function TemplateRow({
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const [activeSettingsKey, setActiveSettingsKey] = useState<string | null>(null)
-  const { trySceneConfig, tryLoading } = useValues(templateRowLogic({ frameId, template }))
-  const { tryScene } = useActions(templateRowLogic({ frameId, template }))
+  const { trySceneConfig, tryLoading, trySceneModalOpen, trySceneFields, trySceneState } = useValues(
+    templateRowLogic({ frameId, template })
+  )
+  const { openTrySceneModal, closeTrySceneModal, submitTrySceneState } = useActions(
+    templateRowLogic({ frameId, template })
+  )
   const imageEntity = useMemo(() => {
     if (template.id) {
       return `templates/${template.id}`
@@ -132,7 +140,7 @@ export function TemplateRow({
                   className="!px-2 flex gap-1"
                   size="small"
                   color="primary"
-                  onClick={tryScene}
+                  onClick={openTrySceneModal}
                   disabled={tryLoading || !frameId}
                   title="Try this interpreted scene on the frame"
                 >
@@ -229,6 +237,48 @@ export function TemplateRow({
         setSettingsValue={setSettingsValue}
         submitSettings={submitSettings}
       />
+      {trySceneConfig ? (
+        <Modal
+          open={trySceneModalOpen}
+          onClose={closeTrySceneModal}
+          title={`Try "${trySceneConfig.mainScene.name || template.name}"`}
+        >
+          <Form
+            logic={templateRowLogic}
+            props={{ frameId, template }}
+            formKey="trySceneState"
+            className="space-y-4 p-5"
+          >
+            {trySceneFields.length ? (
+              <div className="space-y-2 @container">
+                {trySceneFields.map((field) => (
+                  <Field key={field.name} name={field.name} label={field.label || field.name}>
+                    {({ value, onChange }) => (
+                      <StateFieldEdit
+                        field={field}
+                        value={value}
+                        onChange={onChange}
+                        currentState={{}}
+                        stateChanges={trySceneState}
+                      />
+                    )}
+                  </Field>
+                ))}
+              </div>
+            ) : (
+              <div>This scene does not export publicly controllable state.</div>
+            )}
+            <div className="flex justify-end gap-2 border-t border-gray-600 pt-4">
+              <Button onClick={closeTrySceneModal} color="secondary">
+                Cancel
+              </Button>
+              <Button onClick={submitTrySceneState} color="primary" disabled={tryLoading}>
+                {tryLoading ? 'Running…' : 'Run scene'}
+              </Button>
+            </div>
+          </Form>
+        </Modal>
+      ) : null}
     </div>
   )
 }

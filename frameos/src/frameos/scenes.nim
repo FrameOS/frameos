@@ -200,6 +200,16 @@ proc sanitizePathString*(s: string): string =
   return s.multiReplace(("/", "_"), ("\\", "_"), (":", "_"), ("*", "_"), ("?", "_"), ("\"", "_"), ("<", "_"), (">",
       "_"), ("|", "_"))
 
+proc setPersistedStateFromPayload*(sceneId: SceneId, payload: JsonNode) =
+  if payload.isNil or payload.kind != JObject:
+    return
+  if not lastPersistedStates.hasKey(sceneId.string):
+    lastPersistedStates[sceneId.string] = %*{}
+  let persistedState = lastPersistedStates[sceneId.string]
+  for key in payload.keys:
+    persistedState[key] = copy(payload[key])
+  writeFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json", $persistedState)
+
 proc updateLastPersistedState*(self: FrameScene) =
   if not exportedScenes.hasKey(self.id):
     return
