@@ -297,7 +297,7 @@ export function Scenes() {
                     <div>This scene is currently running, but it is not saved on the frame.</div>
                   </div>
                 </div>
-                {missingActiveExpanded ? (
+                {missingActiveExpanded && missingActiveSceneId ? (
                   <div className="pl-7">
                     <ExpandedScene
                       sceneId={missingActiveSceneId}
