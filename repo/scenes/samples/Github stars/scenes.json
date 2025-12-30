@@ -144,7 +144,7 @@
       { "name": "response", "label": "response", "type": "json", "persist": "disk", "access": "private" },
       {
         "name": "seconds",
-        "label": "Seconds between checks",
+        "label": "Refresh interval in seconds",
         "type": "float",
         "persist": "disk",
         "access": "public",

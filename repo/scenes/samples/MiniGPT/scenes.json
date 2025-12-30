@@ -1,12 +1,8 @@
 [
   {
-    "id": "ca494ef1-4d07-4a0a-ac83-abea7833dbc8",
+    "id": "10618681-5eb4-4b34-8292-ad6ecec8e109",
     "name": "MiniGPT",
-    "settings": {
-      "backgroundColor": "#ffffff",
-      "refreshInterval": 3600,
-      "execution": "interpreted"
-    },
+    "settings": { "backgroundColor": "#ffffff", "refreshInterval": 3600, "execution": "interpreted" },
     "fields": [
       {
         "access": "public",
@@ -17,33 +13,28 @@
         "type": "text",
         "value": "Generate ideas for a smart e-ink display around the house."
       },
+      { "access": "private", "label": "Reply", "name": "reply", "persist": "disk", "type": "text" },
+      { "name": "model", "label": "Model", "type": "string", "value": "gpt-5", "persist": "disk", "access": "public" },
       {
-        "access": "private",
-        "label": "Reply",
-        "name": "reply",
+        "name": "seconds",
+        "label": "Refresh after (seconds)",
+        "type": "float",
         "persist": "disk",
-        "type": "text"
+        "access": "public",
+        "value": "3600"
       }
     ],
     "nodes": [
       {
-        "data": {
-          "keyword": "render"
-        },
+        "data": { "keyword": "render" },
         "dragging": false,
-        "height": 161,
+        "height": 134,
         "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
-        "position": {
-          "x": 609.7521646377853,
-          "y": 91.39649711881316
-        },
-        "positionAbsolute": {
-          "x": 609.7521646377853,
-          "y": 91.39649711881316
-        },
+        "position": { "x": 609.7521646377853, "y": 91.39649711881316 },
+        "positionAbsolute": { "x": 609.7521646377853, "y": 91.39649711881316 },
         "selected": false,
         "type": "event",
-        "width": 212
+        "width": 237
       },
       {
         "data": {
@@ -58,159 +49,103 @@
           "keyword": "render/text"
         },
         "dragging": false,
-        "height": 364,
+        "height": 414,
         "id": "a825a9fc-175b-4ea6-b07b-f433e7e63b51",
-        "position": {
-          "x": 963.7030255952195,
-          "y": 92.84111016544779
-        },
-        "positionAbsolute": {
-          "x": 963.7030255952195,
-          "y": 92.84111016544779
-        },
+        "position": { "x": 963.7030255952195, "y": 92.84111016544779 },
+        "positionAbsolute": { "x": 963.7030255952195, "y": 92.84111016544779 },
         "selected": false,
         "type": "app",
-        "width": 341
+        "width": 418
       },
       {
         "data": {
           "code": "\"> \" & prompt & \"\\n\\n\" & reply",
           "codeJS": "'> ' + prompt + '\\n\\n' + reply",
           "codeArgs": [
-            {
-              "name": "prompt",
-              "type": "string"
-            },
-            {
-              "name": "reply",
-              "type": "string"
-            }
+            { "name": "prompt", "type": "string" },
+            { "name": "reply", "type": "string" }
           ]
         },
         "dragging": false,
         "height": 119,
         "id": "578a95b3-83c8-4d32-9b71-e37f95472a99",
-        "position": {
-          "x": 925.9537104668107,
-          "y": -78.28446163478942
-        },
-        "positionAbsolute": {
-          "x": 925.9537104668107,
-          "y": -78.28446163478942
-        },
+        "position": { "x": 925.9537104668107, "y": -78.28446163478942 },
+        "positionAbsolute": { "x": 925.9537104668107, "y": -78.28446163478942 },
         "resizing": false,
         "selected": false,
-        "style": {
-          "height": 119,
-          "width": 357
-        },
+        "style": { "height": 119, "width": 357 },
         "type": "code",
         "width": 357
       },
       {
         "data": {
-          "cache": {
-            "duration": "3600",
-            "durationEnabled": true,
-            "enabled": true,
-            "inputEnabled": true
-          },
+          "cache": { "duration": "3600", "durationEnabled": true, "enabled": false, "inputEnabled": true },
           "config": {},
           "keyword": "data/openaiText"
         },
         "dragging": false,
         "height": 288,
         "id": "b1fd8c5b-c2ec-4c8d-8031-d9b90be0273d",
-        "position": {
-          "x": 1054.510206309392,
-          "y": -427.1008646987811
-        },
-        "positionAbsolute": {
-          "x": 1054.510206309392,
-          "y": -427.1008646987811
-        },
+        "position": { "x": 1054.510206309392, "y": -427.1008646987811 },
+        "positionAbsolute": { "x": 1054.510206309392, "y": -427.1008646987811 },
         "selected": false,
         "type": "app",
-        "width": 388
+        "width": 380
       },
       {
         "data": {
-          "config": {
-            "borderColor": "#ffffff",
-            "fontColor": "#000000",
-            "position": "right",
-            "vAlign": "bottom"
-          },
+          "config": { "borderColor": "#ffffff", "fontColor": "#000000", "position": "right", "vAlign": "bottom" },
           "keyword": "render/text"
         },
-        "height": 364,
+        "height": 414,
         "id": "f2e326b1-a913-40a8-822b-9db4c3f621ca",
-        "position": {
-          "x": 1526.2545148893385,
-          "y": 82.84844173887186
-        },
+        "position": { "x": 1526.2545148893385, "y": 82.84844173887186 },
         "selected": false,
         "type": "app",
-        "width": 334
+        "width": 418
       },
       {
-        "data": {
-          "config": {
-            "format": "yyyy-MM-dd"
-          },
-          "keyword": "data/clock"
-        },
+        "data": { "config": { "format": "yyyy-MM-dd" }, "keyword": "data/clock" },
         "dragging": false,
         "height": 140,
         "id": "ff68a0c8-7ca4-44ec-bf75-13a8d3769554",
-        "position": {
-          "x": 1498.5605368441798,
-          "y": -151.28498110254804
-        },
-        "positionAbsolute": {
-          "x": 1498.5605368441798,
-          "y": -151.28498110254804
-        },
+        "position": { "x": 1498.5605368441798, "y": -151.28498110254804 },
+        "positionAbsolute": { "x": 1498.5605368441798, "y": -151.28498110254804 },
         "selected": false,
         "type": "app",
         "width": 354
       },
       {
         "id": "0df3af8f-8ee5-4210-b870-02bfd5d88085",
-        "position": {
-          "x": 1012.1940030907762,
-          "y": -519.0210638340682
-        },
-        "data": {
-          "keyword": "prompt"
-        },
+        "position": { "x": 1012.1940030907762, "y": -519.0210638340682 },
+        "data": { "keyword": "prompt" },
         "type": "state",
-        "width": 162,
+        "width": 148,
         "height": 48,
         "selected": false,
-        "positionAbsolute": {
-          "x": 1012.1940030907762,
-          "y": -519.0210638340682
-        },
+        "positionAbsolute": { "x": 1012.1940030907762, "y": -519.0210638340682 },
         "dragging": false
       },
       {
         "id": "e7743cc7-060f-4d81-9b45-be911acbe649",
-        "position": {
-          "x": 849.9461898685558,
-          "y": -157.65093438457743
-        },
-        "data": {
-          "keyword": "prompt"
-        },
+        "position": { "x": 849.9461898685558, "y": -157.65093438457743 },
+        "data": { "keyword": "prompt" },
         "type": "state",
-        "width": 162,
+        "width": 148,
         "height": 48,
         "selected": false,
-        "positionAbsolute": {
-          "x": 849.9461898685558,
-          "y": -157.65093438457743
-        },
+        "positionAbsolute": { "x": 849.9461898685558, "y": -157.65093438457743 },
+        "dragging": false
+      },
+      {
+        "id": "87bef793-2b5c-49b3-94bd-7672d1fc0332",
+        "position": { "x": 832.1593532805099, "y": -272.17772777049606 },
+        "data": { "keyword": "model" },
+        "type": "state",
+        "width": 154,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": { "x": 832.1593532805099, "y": -272.17772777049606 },
         "dragging": false
       }
     ],
@@ -269,6 +204,14 @@
         "targetHandle": "codeField/prompt",
         "source": "e7743cc7-060f-4d81-9b45-be911acbe649",
         "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "f44829e6-f718-4013-8cda-4d6aa4925e7c",
+        "source": "87bef793-2b5c-49b3-94bd-7672d1fc0332",
+        "sourceHandle": "fieldOutput",
+        "target": "b1fd8c5b-c2ec-4c8d-8031-d9b90be0273d",
+        "targetHandle": "fieldInput/model",
         "type": "codeNodeEdge"
       }
     ]

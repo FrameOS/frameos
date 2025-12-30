@@ -96,16 +96,26 @@
         "source": "56136c72-8744-4db2-a966-87869cd29ad9",
         "sourceHandle": "fieldOutput",
         "type": "codeNodeEdge"
+      },
+      {
+        "id": "74f2f844-672d-4b38-b1ee-f714e53e63b4",
+        "target": "26050cc2-7e3e-46ca-9fcf-a60c33a8c622",
+        "targetHandle": "prev",
+        "source": "cf744507-48e4-4b09-87ee-6e1b208a4cf6",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "50365aff-ba2c-446b-9b83-00f6881205af",
+        "source": "3d912d3c-9aa9-434f-9f13-28b40a9bf54a",
+        "sourceHandle": "fieldOutput",
+        "target": "26050cc2-7e3e-46ca-9fcf-a60c33a8c622",
+        "targetHandle": "fieldInput/duration",
+        "type": "codeNodeEdge"
       }
     ],
     "fields": [
-      {
-        "access": "public",
-        "label": "iCal URL",
-        "name": "iCalURL",
-        "persist": "disk",
-        "type": "string"
-      },
+      { "access": "public", "label": "iCal URL", "name": "iCalURL", "persist": "disk", "type": "string" },
       {
         "access": "public",
         "label": "Font size",
@@ -121,29 +131,29 @@
         "persist": "disk",
         "type": "float",
         "value": "48"
+      },
+      {
+        "name": "seconds",
+        "label": "Refresh interval in seconds",
+        "type": "float",
+        "persist": "disk",
+        "access": "public",
+        "value": "60"
       }
     ],
-    "id": "6855b741-76b0-4e8d-a1a2-0b9e7660915b",
+    "id": "b4006bf9-e24c-4bec-9835-80013a753192",
     "name": "Split agenda",
     "nodes": [
       {
-        "data": {
-          "keyword": "render"
-        },
+        "data": { "keyword": "render" },
         "dragging": false,
-        "height": 199,
+        "height": 134,
         "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
-        "position": {
-          "x": -678.7968292694732,
-          "y": 513.3910957685507
-        },
-        "positionAbsolute": {
-          "x": -678.7968292694732,
-          "y": 513.3910957685507
-        },
+        "position": { "x": -678.7968292694732, "y": 513.3910957685507 },
+        "positionAbsolute": { "x": -678.7968292694732, "y": 513.3910957685507 },
         "selected": false,
         "type": "event",
-        "width": 212
+        "width": 237
       },
       {
         "data": {
@@ -160,148 +170,84 @@
           "keyword": "render/text"
         },
         "dragging": false,
-        "height": 392,
+        "height": 414,
         "id": "38541584-fef2-4306-ba02-c3d77bd316b4",
-        "position": {
-          "x": 564.3983123871726,
-          "y": 683.7491829571068
-        },
-        "positionAbsolute": {
-          "x": 564.3983123871726,
-          "y": 683.7491829571068
-        },
+        "position": { "x": 564.3983123871726, "y": 683.7491829571068 },
+        "positionAbsolute": { "x": 564.3983123871726, "y": 683.7491829571068 },
         "selected": false,
         "type": "app",
-        "width": 372
+        "width": 424
       },
       {
         "data": {
-          "cache": {
-            "duration": "600",
-            "durationEnabled": true,
-            "enabled": true,
-            "inputEnabled": true
-          },
+          "cache": { "duration": "600", "durationEnabled": true, "enabled": false, "inputEnabled": true },
           "config": {},
           "keyword": "data/downloadUrl"
         },
         "dragging": false,
         "height": 112,
         "id": "15b4d501-7833-4088-a0b0-178eb24bbac9",
-        "position": {
-          "x": 365.3333593057796,
-          "y": -223.62393254609623
-        },
-        "positionAbsolute": {
-          "x": 365.3333593057796,
-          "y": -223.62393254609623
-        },
+        "position": { "x": 365.3333593057796, "y": -223.62393254609623 },
+        "positionAbsolute": { "x": 365.3333593057796, "y": -223.62393254609623 },
         "selected": false,
         "type": "app",
-        "width": 251
+        "width": 227
       },
       {
         "data": {
-          "cache": {
-            "enabled": true,
-            "inputEnabled": true
-          },
-          "config": {
-            "addLocation": "false",
-            "addTimezone": "true",
-            "addUrl": "false",
-            "exportCount": "20"
-          },
+          "cache": { "enabled": true, "inputEnabled": true },
+          "config": { "addLocation": "false", "addTimezone": "true", "addUrl": "false", "exportCount": "20" },
           "keyword": "data/icalJson"
         },
         "dragging": false,
         "height": 364,
         "id": "6db1ffd3-e809-42db-8416-9e048df66788",
-        "position": {
-          "x": 432.205268576237,
-          "y": -83.24529232598451
-        },
-        "positionAbsolute": {
-          "x": 432.205268576237,
-          "y": -83.24529232598451
-        },
+        "position": { "x": 432.205268576237, "y": -83.24529232598451 },
+        "positionAbsolute": { "x": 432.205268576237, "y": -83.24529232598451 },
         "selected": false,
         "type": "app",
         "width": 531
       },
       {
-        "data": {
-          "config": {
-            "columns": "2"
-          },
-          "keyword": "render/split"
-        },
+        "data": { "config": { "columns": "2" }, "keyword": "render/split" },
         "height": 358,
         "id": "cf744507-48e4-4b09-87ee-6e1b208a4cf6",
-        "position": {
-          "x": -349.6809742584811,
-          "y": 519.3618683177809
-        },
+        "position": { "x": -379.2353429332261, "y": 525.2727420527299 },
         "type": "app",
-        "width": 310
+        "width": 310,
+        "selected": false,
+        "positionAbsolute": { "x": -379.2353429332261, "y": 525.2727420527299 },
+        "dragging": false
       },
       {
-        "data": {
-          "config": {},
-          "keyword": "render/color"
-        },
+        "data": { "config": {}, "keyword": "render/color" },
         "dragging": false,
-        "height": 81,
+        "height": 78,
         "id": "d8b1f15b-b673-4eb1-8e9c-dc6ee2023cf6",
-        "position": {
-          "x": 182.23547594127814,
-          "y": 607.0962947110556
-        },
-        "positionAbsolute": {
-          "x": 182.23547594127814,
-          "y": 607.0962947110556
-        },
+        "position": { "x": 190.11664092121015, "y": 652.4129933456646 },
+        "positionAbsolute": { "x": 190.11664092121015, "y": 652.4129933456646 },
         "selected": false,
         "type": "app",
         "width": 195
       },
       {
-        "data": {
-          "config": {
-            "color": "#000000"
-          },
-          "keyword": "render/color"
-        },
+        "data": { "config": { "color": "#000000" }, "keyword": "render/color" },
         "dragging": false,
-        "height": 81,
+        "height": 78,
         "id": "ccbf9c4c-4a6f-412b-9e2c-952edba32d6e",
-        "position": {
-          "x": 751.9446659519555,
-          "y": 1138.4247562496714
-        },
-        "positionAbsolute": {
-          "x": 751.9446659519555,
-          "y": 1138.4247562496714
-        },
+        "position": { "x": 751.9446659519555, "y": 1138.4247562496714 },
+        "positionAbsolute": { "x": 751.9446659519555, "y": 1138.4247562496714 },
         "selected": false,
         "type": "app",
         "width": 196
       },
       {
-        "data": {
-          "keyword": "iCalURL"
-        },
+        "data": { "keyword": "iCalURL" },
         "dragging": false,
         "height": 48,
         "id": "5c65d5dc-c327-4aad-a5e5-25d2268aee2c",
-        "position": {
-          "x": 332.34448098535285,
-          "y": -308.8282487667512
-        },
-        "positionAbsolute": {
-          "x": 332.34448098535285,
-          "y": -308.8282487667512
-        },
+        "position": { "x": 332.34448098535285, "y": -308.8282487667512 },
+        "positionAbsolute": { "x": 332.34448098535285, "y": -308.8282487667512 },
         "selected": false,
         "type": "state",
         "width": 172
@@ -309,116 +255,88 @@
       {
         "data": {
           "cache": {},
-          "config": {
-            "textColor": "#000000",
-            "titleColor": "#000000"
-          },
+          "config": { "textColor": "#000000", "titleColor": "#000000" },
           "keyword": "data/eventsToAgenda"
         },
         "dragging": false,
         "height": 282,
         "id": "f354fc8e-9f82-42f9-9de1-c85fe7a3f0e6",
-        "position": {
-          "x": 521.0911747817175,
-          "y": 299.6283046931287
-        },
-        "positionAbsolute": {
-          "x": 532.0911747817175,
-          "y": 299.6283046931287
-        },
+        "position": { "x": 521.0911747817175, "y": 299.6283046931287 },
+        "positionAbsolute": { "x": 532.0911747817175, "y": 299.6283046931287 },
         "resizing": false,
         "selected": false,
-        "style": {
-          "height": 282,
-          "width": 279
-        },
+        "style": { "height": 282, "width": 279 },
         "type": "app",
         "width": 279
       },
       {
-        "data": {
-          "keyword": "fontSize"
-        },
+        "data": { "keyword": "fontSize" },
         "dragging": false,
         "height": 48,
         "id": "c9408446-948d-4846-a158-8d8836840618",
-        "position": {
-          "x": 245.73426280393653,
-          "y": 311.31270229817983
-        },
-        "positionAbsolute": {
-          "x": 245.73426280393653,
-          "y": 311.31270229817983
-        },
+        "position": { "x": 245.73426280393653, "y": 311.31270229817983 },
+        "positionAbsolute": { "x": 245.73426280393653, "y": 311.31270229817983 },
         "selected": false,
         "type": "state",
         "width": 170
       },
       {
-        "data": {
-          "keyword": "titleFontSize"
-        },
+        "data": { "keyword": "titleFontSize" },
         "dragging": false,
         "height": 48,
         "id": "fd3331ec-6c0f-4799-8c0f-5bcd03c0510c",
-        "position": {
-          "x": 13.289202798026622,
-          "y": 341.8975786147469
-        },
-        "positionAbsolute": {
-          "x": 13.289202798026622,
-          "y": 341.8975786147469
-        },
+        "position": { "x": 13.289202798026622, "y": 341.8975786147469 },
+        "positionAbsolute": { "x": 13.289202798026622, "y": 341.8975786147469 },
         "selected": false,
         "type": "state",
         "width": 209
       },
       {
         "id": "378c6086-257f-461d-9dec-b093abdad809",
-        "position": {
-          "x": 1279.2084499918114,
-          "y": 817.7854624383936
-        },
-        "data": {
-          "keyword": "render/image",
-          "config": {}
-        },
+        "position": { "x": 1279.2084499918114, "y": 817.7854624383936 },
+        "data": { "keyword": "render/image", "config": {} },
         "type": "app",
         "width": 325,
         "height": 134
       },
       {
         "id": "56136c72-8744-4db2-a966-87869cd29ad9",
-        "position": {
-          "x": 1208.1751112338095,
-          "y": 601.340587096623
-        },
+        "position": { "x": 1208.1751112338095, "y": 601.340587096623 },
         "data": {
           "keyword": "data/frameOSGallery",
           "config": {},
-          "cache": {
-            "duration": "900",
-            "durationEnabled": true,
-            "enabled": true,
-            "inputEnabled": true
-          }
+          "cache": { "duration": "900", "durationEnabled": true, "enabled": true, "inputEnabled": true }
         },
         "type": "app",
         "width": 330,
         "height": 140,
         "selected": false,
-        "positionAbsolute": {
-          "x": 1208.1751112338095,
-          "y": 601.340587096623
-        },
+        "positionAbsolute": { "x": 1208.1751112338095, "y": 601.340587096623 },
+        "dragging": false
+      },
+      {
+        "id": "26050cc2-7e3e-46ca-9fcf-a60c33a8c622",
+        "position": { "x": 25.20130698061888, "y": 532.9274968408106 },
+        "data": { "keyword": "logic/nextSleepDuration", "config": {} },
+        "type": "app",
+        "width": 289,
+        "height": 78,
+        "selected": false,
+        "positionAbsolute": { "x": 25.20130698061888, "y": 532.9274968408106 },
+        "dragging": false
+      },
+      {
+        "id": "3d912d3c-9aa9-434f-9f13-28b40a9bf54a",
+        "position": { "x": -27.996556633922154, "y": 471.8484682463375 },
+        "data": { "keyword": "seconds" },
+        "type": "state",
+        "width": 328,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": { "x": -27.996556633922154, "y": 471.8484682463375 },
         "dragging": false
       }
     ],
-    "settings": {
-      "backgroundColor": "#000000",
-      "refreshInterval": 60,
-      "execution": "interpreted"
-    },
-    "default": false
+    "settings": { "backgroundColor": "#000000", "refreshInterval": 60, "execution": "interpreted" }
   }
 ]
