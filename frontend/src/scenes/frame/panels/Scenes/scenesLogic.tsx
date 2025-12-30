@@ -303,6 +303,26 @@ export const scenesLogic = kea<scenesLogicType>([
           ? uploadedScenes.find((scene) => `uploaded/${scene.id}` === missingActiveSceneId) ?? null
           : null,
     ],
+    missingActiveMatchesSearch: [
+      (s) => [s.search, s.missingActiveSceneId, s.activeUploadedScene],
+      (search, missingActiveSceneId, activeUploadedScene) => {
+        if (!missingActiveSceneId) {
+          return false
+        }
+        const searchPieces = search
+          .toLowerCase()
+          .split(' ')
+          .filter((s) => s)
+        if (searchPieces.length === 0) {
+          return true
+        }
+        const sceneName = activeUploadedScene?.name?.toLowerCase() ?? ''
+        if (!sceneName) {
+          return false
+        }
+        return searchPieces.every((piece) => sceneName.includes(piece))
+      },
+    ],
   }),
   listeners(({ actions, props, values }) => ({
     uploadImage: async ({ file }) => {

@@ -62,6 +62,7 @@ export function Scenes() {
     selectedSceneIds,
     activeUploadedScene,
     missingActiveSceneId,
+    missingActiveMatchesSearch,
     missingActiveExpanded,
     isUploadingImage,
     isInstallingMissingActiveScene,
@@ -234,10 +235,10 @@ export function Scenes() {
             {renderShortcuts()}
           </>
         ) : null}
-        {filteredScenes.length === 0 && search ? (
+        {filteredScenes.length === 0 && search && !missingActiveMatchesSearch ? (
           <div className="text-center text-gray-400">No scenes matching "{search}"</div>
         ) : null}
-        {missingActiveSceneId ? (
+        {missingActiveMatchesSearch ? (
           <div
             className={clsx(
               'border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1 border-blue-700/60',
