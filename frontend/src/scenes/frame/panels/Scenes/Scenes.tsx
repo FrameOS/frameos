@@ -131,7 +131,7 @@ export function Scenes() {
     </div>
   )
 
-  if (scenes.length === 0 && !showNewSceneForm) {
+  if (scenes.length === 0 && !showNewSceneForm && !missingActiveSceneId) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center space-y-4 mb-8">
@@ -150,7 +150,7 @@ export function Scenes() {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        {scenes.length > 0 ? (
+        {scenes.length > 0 || missingActiveSceneId ? (
           <>
             <div className="flex justify-between w-full items-center">
               <TextInput placeholder="Filter scenes..." className="flex-1 mr-2" onChange={setSearch} value={search} />
