@@ -112,6 +112,22 @@
         "target": "d86b1289-1a9e-4121-84cb-221f8f69914a",
         "targetHandle": "fieldInput/valueJson",
         "type": "codeNodeEdge"
+      },
+      {
+        "id": "d718d6f9-e569-484c-b98f-5caae807fd06",
+        "target": "1b4a231b-bb77-4070-8628-698e0f718d36",
+        "targetHandle": "prev",
+        "source": "a5ec0784-99ef-45bc-b7fb-1350bcfed5fa",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "252754ca-56db-4d3f-ac45-a43be8a3b353",
+        "source": "b42f3fb0-ef8a-4e78-8475-3836d5b6d831",
+        "sourceHandle": "fieldOutput",
+        "target": "1b4a231b-bb77-4070-8628-698e0f718d36",
+        "targetHandle": "fieldInput/duration",
+        "type": "codeNodeEdge"
       }
     ],
     "fields": [
@@ -124,38 +140,30 @@
         "type": "string",
         "value": "FrameOS/frameos"
       },
+      { "access": "private", "label": "Stars", "name": "stars", "persist": "disk", "type": "integer", "value": "0" },
+      { "name": "response", "label": "response", "type": "json", "persist": "disk", "access": "private" },
       {
-        "access": "private",
-        "label": "Stars",
-        "name": "stars",
+        "name": "seconds",
+        "label": "Refresh interval in seconds",
+        "type": "float",
         "persist": "disk",
-        "type": "integer",
-        "value": "0"
-      },
-      {
-        "name": "response",
-        "label": "response",
-        "type": "json",
-        "persist": "disk",
-        "access": "private"
+        "access": "public",
+        "value": "300"
       }
     ],
-    "id": "7be4f87f-cb33-4adc-9088-e1f8e6b1dd15",
-    "name": "Github Stars",
+    "id": "11537a0c-0dc6-4753-9c24-ad944619fb0d",
+    "name": "GitHub stars",
     "nodes": [
       {
         "data": { "keyword": "render" },
         "dragging": false,
-        "height": 161,
+        "height": 134,
         "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
         "position": { "x": -240.2665292262411, "y": -12.066144998763349 },
-        "positionAbsolute": {
-          "x": -240.2665292262411,
-          "y": -12.066144998763349
-        },
+        "positionAbsolute": { "x": -240.2665292262411, "y": -12.066144998763349 },
         "selected": false,
         "type": "event",
-        "width": 212
+        "width": 237
       },
       {
         "data": { "config": {}, "keyword": "render/text" },
@@ -169,35 +177,18 @@
         "width": 418
       },
       {
-        "data": {
-          "config": {
-            "fontSize": "16",
-            "position": "top-left",
-            "vAlign": "top"
-          },
-          "keyword": "render/text"
-        },
+        "data": { "config": { "fontSize": "16", "position": "top-left", "vAlign": "top" }, "keyword": "render/text" },
         "dragging": false,
         "height": 414,
         "id": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
         "position": { "x": 28.693455855844093, "y": -1.4476375735820852 },
-        "positionAbsolute": {
-          "x": 28.693455855844093,
-          "y": -1.4476375735820852
-        },
+        "positionAbsolute": { "x": 28.693455855844093, "y": -1.4476375735820852 },
         "selected": false,
         "type": "app",
         "width": 418
       },
       {
-        "data": {
-          "config": {
-            "fontSize": "16",
-            "position": "right",
-            "vAlign": "bottom"
-          },
-          "keyword": "render/text"
-        },
+        "data": { "config": { "fontSize": "16", "position": "right", "vAlign": "bottom" }, "keyword": "render/text" },
         "dragging": false,
         "height": 414,
         "id": "a5ec0784-99ef-45bc-b7fb-1350bcfed5fa",
@@ -208,18 +199,12 @@
         "width": 418
       },
       {
-        "data": {
-          "config": { "format": "yyyy-MM-dd" },
-          "keyword": "data/clock"
-        },
+        "data": { "config": { "format": "yyyy-MM-dd" }, "keyword": "data/clock" },
         "dragging": false,
         "height": 140,
         "id": "3a48f3b9-2c00-4547-95e4-64ac1429b05e",
         "position": { "x": 1888.4164476374804, "y": -169.31892344351013 },
-        "positionAbsolute": {
-          "x": 1888.4164476374804,
-          "y": -169.31892344351013
-        },
+        "positionAbsolute": { "x": 1888.4164476374804, "y": -169.31892344351013 },
         "selected": false,
         "type": "app",
         "width": 354
@@ -235,10 +220,7 @@
         "height": 146,
         "id": "aafa48a0-4b6a-4023-9ed1-18e443a539fa",
         "position": { "x": 1349.1031999557708, "y": -147.36992754157697 },
-        "positionAbsolute": {
-          "x": 1349.1031999557708,
-          "y": -147.36992754157697
-        },
+        "positionAbsolute": { "x": 1349.1031999557708, "y": -147.36992754157697 },
         "resizing": false,
         "selected": false,
         "style": { "height": 146, "width": 486 },
@@ -251,10 +233,7 @@
         "height": 48,
         "id": "e4740c02-cac4-4744-adc6-cbde64b81dc0",
         "position": { "x": -1.9547642767449531, "y": -107.81168948374423 },
-        "positionAbsolute": {
-          "x": -1.9547642767449531,
-          "y": -107.81168948374423
-        },
+        "positionAbsolute": { "x": -1.9547642767449531, "y": -107.81168948374423 },
         "selected": false,
         "type": "state",
         "width": 192
@@ -264,11 +243,8 @@
         "dragging": false,
         "height": 48,
         "id": "ae79d8ed-f602-4a40-9b23-b9797072725a",
-        "position": { "x": 1345.540499473972, "y": -233.93665556744182 },
-        "positionAbsolute": {
-          "x": 1345.540499473972,
-          "y": -233.93665556744182
-        },
+        "position": { "x": 1345.540499473972, "y": -236.50327220731674 },
+        "positionAbsolute": { "x": 1345.540499473972, "y": -236.50327220731674 },
         "selected": false,
         "type": "state",
         "width": 147
@@ -276,12 +252,9 @@
       {
         "id": "d86b1289-1a9e-4121-84cb-221f8f69914a",
         "position": { "x": 908.7696242005394, "y": 1.4379972373182568 },
-        "data": {
-          "keyword": "logic/setAsState",
-          "config": { "stateKey": "stars", "debugLog": "true" }
-        },
+        "data": { "keyword": "logic/setAsState", "config": { "stateKey": "stars", "debugLog": "true" } },
         "type": "app",
-        "width": 350,
+        "width": 354,
         "height": 162,
         "selected": false,
         "positionAbsolute": { "x": 908.7696242005394, "y": 1.4379972373182568 },
@@ -290,12 +263,9 @@
       {
         "id": "ed5bcd16-4ad2-453c-8e1e-33ceb5ecb474",
         "position": { "x": 478.74683629875585, "y": -2.783445113100804 },
-        "data": {
-          "keyword": "logic/setAsState",
-          "config": { "stateKey": "response", "debugLog": "true" }
-        },
+        "data": { "keyword": "logic/setAsState", "config": { "stateKey": "response", "debugLog": "true" } },
         "type": "app",
-        "width": 350,
+        "width": 354,
         "height": 162,
         "selected": false
       },
@@ -307,10 +277,7 @@
         "width": 204,
         "height": 112,
         "selected": false,
-        "positionAbsolute": {
-          "x": 448.6032760678311,
-          "y": -135.34238227525793
-        },
+        "positionAbsolute": { "x": 448.6032760678311, "y": -135.34238227525793 },
         "dragging": false
       },
       {
@@ -320,7 +287,7 @@
           "keyword": "data/downloadUrl",
           "config": {},
           "cache": {
-            "enabled": true,
+            "enabled": false,
             "inputEnabled": true,
             "durationEnabled": true,
             "duration": "300",
@@ -330,13 +297,10 @@
           }
         },
         "type": "app",
-        "width": 244,
+        "width": 227,
         "height": 112,
         "selected": false,
-        "positionAbsolute": {
-          "x": 407.69887301982334,
-          "y": -274.30497720026017
-        },
+        "positionAbsolute": { "x": 407.69887301982334, "y": -274.30497720026017 },
         "dragging": false
       },
       {
@@ -364,10 +328,7 @@
         "width": 192,
         "height": 48,
         "selected": false,
-        "positionAbsolute": {
-          "x": 370.94040298154374,
-          "y": -482.3908512189293
-        },
+        "positionAbsolute": { "x": 370.94040298154374, "y": -482.3908512189293 },
         "dragging": false
       },
       {
@@ -384,19 +345,33 @@
         "width": 334,
         "height": 119,
         "selected": false,
-        "positionAbsolute": {
-          "x": 878.0620839771876,
-          "y": -145.12543465164183
-        },
+        "positionAbsolute": { "x": 878.0620839771876, "y": -145.12543465164183 },
         "dragging": false,
         "resizing": false
+      },
+      {
+        "id": "1b4a231b-bb77-4070-8628-698e0f718d36",
+        "position": { "x": 2454.505777309091, "y": 38.689704882968755 },
+        "data": { "keyword": "logic/nextSleepDuration", "config": {} },
+        "type": "app",
+        "width": 289,
+        "height": 78,
+        "selected": false,
+        "positionAbsolute": { "x": 2454.505777309091, "y": 38.689704882968755 },
+        "dragging": false
+      },
+      {
+        "id": "b42f3fb0-ef8a-4e78-8475-3836d5b6d831",
+        "position": { "x": 2401.890136191655, "y": -38.308794313278554 },
+        "data": { "keyword": "seconds" },
+        "type": "state",
+        "width": 315,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": { "x": 2401.890136191655, "y": -38.308794313278554 },
+        "dragging": false
       }
     ],
-    "settings": {
-      "backgroundColor": "#000000",
-      "refreshInterval": 60,
-      "execution": "interpreted"
-    },
-    "default": false
+    "settings": { "backgroundColor": "#000000", "refreshInterval": 300, "execution": "interpreted" }
   }
 ]

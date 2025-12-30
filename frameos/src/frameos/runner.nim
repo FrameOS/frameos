@@ -289,8 +289,7 @@ proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
             self.logger.log(%*{"event": "reload", "message": "Reloading config and interpreted scenes"})
             reloadInterpretedScenes()
             self.scenes = initTable[SceneId, FrameScene]()
-            if not exportedScenes.hasKey(self.currentSceneId):
-              self.currentSceneId = getFirstSceneId()
+            self.currentSceneId = getFirstSceneId()
             self.configureControlCode()
             self.forceSceneReload = true
             self.triggerRenderNext = true

@@ -143,3 +143,9 @@ class FramePingResponse(BaseModel):
     elapsed_ms: Optional[float] = None
     status: Optional[int] = None
     message: str
+
+
+class FrameSetNextSceneRequest(BaseModel):
+    sceneId: str
+    state: Optional[Dict[str, Any]] = None
+    fastDeploy: Optional[bool] = True

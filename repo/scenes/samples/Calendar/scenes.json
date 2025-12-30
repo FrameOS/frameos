@@ -1,6 +1,6 @@
 [
   {
-    "id": "ea50234d-b1f0-4d47-9915-5a9d6a679ae7",
+    "id": "404bc39f-e0df-4281-b9bc-e166f978ab14",
     "name": "Calendar",
     "nodes": [
       {
@@ -8,8 +8,8 @@
         "type": "event",
         "position": { "x": 189.39661853806825, "y": -941.1436002264414 },
         "data": { "keyword": "render" },
-        "width": 212,
-        "height": 161,
+        "width": 237,
+        "height": 134,
         "selected": false,
         "dragging": false,
         "positionAbsolute": { "x": 189.39661853806825, "y": -941.1436002264414 }
@@ -19,13 +19,10 @@
         "position": { "x": 488.50294164668446, "y": -944.3037524942042 },
         "data": { "keyword": "render/image", "config": {} },
         "type": "app",
-        "width": 324,
+        "width": 325,
         "height": 134,
         "selected": false,
-        "positionAbsolute": {
-          "x": 488.50294164668446,
-          "y": -944.3037524942042
-        },
+        "positionAbsolute": { "x": 488.50294164668446, "y": -944.3037524942042 },
         "dragging": false
       },
       {
@@ -33,11 +30,7 @@
         "position": { "x": 412.99216331939056, "y": -1672.956117364947 },
         "data": {
           "keyword": "data/icalJson",
-          "config": {
-            "exportFrom": "last month",
-            "exportUntil": "next month",
-            "exportCount": "500"
-          },
+          "config": { "exportFrom": "last month", "exportUntil": "next month", "exportCount": "500" },
           "cache": {
             "enabled": true,
             "inputEnabled": true,
@@ -49,13 +42,10 @@
           }
         },
         "type": "app",
-        "width": 527,
+        "width": 531,
         "height": 364,
         "selected": false,
-        "positionAbsolute": {
-          "x": 412.99216331939056,
-          "y": -1672.956117364947
-        },
+        "positionAbsolute": { "x": 412.99216331939056, "y": -1672.956117364947 },
         "dragging": false
       },
       {
@@ -65,7 +55,7 @@
           "keyword": "data/downloadUrl",
           "config": {},
           "cache": {
-            "enabled": true,
+            "enabled": false,
             "inputEnabled": true,
             "durationEnabled": true,
             "duration": "900",
@@ -75,13 +65,10 @@
           }
         },
         "type": "app",
-        "width": 251,
+        "width": 227,
         "height": 112,
         "selected": false,
-        "positionAbsolute": {
-          "x": 373.99811023404675,
-          "y": -1808.5933935362077
-        },
+        "positionAbsolute": { "x": 373.99811023404675, "y": -1808.5933935362077 },
         "dragging": false
       },
       {
@@ -92,10 +79,7 @@
         "width": 158,
         "height": 48,
         "selected": false,
-        "positionAbsolute": {
-          "x": 343.3176768050232,
-          "y": -1885.0526805287366
-        },
+        "positionAbsolute": { "x": 343.3176768050232, "y": -1885.0526805287366 },
         "dragging": false
       },
       {
@@ -106,10 +90,7 @@
         "width": 430,
         "height": 308,
         "selected": false,
-        "positionAbsolute": {
-          "x": 462.51011908806345,
-          "y": -1275.9185007950603
-        },
+        "positionAbsolute": { "x": 462.51011908806345, "y": -1275.9185007950603 },
         "dragging": false
       },
       {
@@ -120,10 +101,7 @@
         "width": 486,
         "height": 48,
         "selected": false,
-        "positionAbsolute": {
-          "x": -78.07355134708706,
-          "y": -1147.9975362594241
-        },
+        "positionAbsolute": { "x": -78.07355134708706, "y": -1147.9975362594241 },
         "dragging": false
       },
       {
@@ -134,10 +112,7 @@
         "width": 240,
         "height": 48,
         "selected": false,
-        "positionAbsolute": {
-          "x": 162.47296616211986,
-          "y": -1085.6640886767232
-        },
+        "positionAbsolute": { "x": 162.47296616211986, "y": -1085.6640886767232 },
         "dragging": false
       },
       {
@@ -148,10 +123,29 @@
         "width": 323,
         "height": 48,
         "selected": false,
-        "positionAbsolute": {
-          "x": 85.51891621784415,
-          "y": -1211.7570963274093
-        },
+        "positionAbsolute": { "x": 85.51891621784415, "y": -1211.7570963274093 },
+        "dragging": false
+      },
+      {
+        "id": "80ecbe58-3dfd-4ae7-a720-fffe1ff5ceeb",
+        "position": { "x": 1004.884056306661, "y": -910.8781682670921 },
+        "data": { "keyword": "logic/nextSleepDuration", "config": {} },
+        "type": "app",
+        "width": 289,
+        "height": 78,
+        "selected": false,
+        "positionAbsolute": { "x": 1004.884056306661, "y": -910.8781682670921 },
+        "dragging": false
+      },
+      {
+        "id": "cd5fee62-61d0-4869-848a-fa8295e71306",
+        "position": { "x": 967.4116805536628, "y": -998.3137116907546 },
+        "data": { "keyword": "seconds" },
+        "type": "state",
+        "width": 328,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": { "x": 967.4116805536628, "y": -998.3137116907546 },
         "dragging": false
       }
     ],
@@ -219,17 +213,26 @@
         "target": "b4819c14-ede2-42f3-b248-362e943c30db",
         "targetHandle": "fieldInput/startWeekOnMonday",
         "type": "codeNodeEdge"
+      },
+      {
+        "id": "97a3f413-e52e-4577-84cf-e1f3d302bfa7",
+        "target": "80ecbe58-3dfd-4ae7-a720-fffe1ff5ceeb",
+        "targetHandle": "prev",
+        "source": "51170b30-80e7-4e36-b2d4-b1a1b3e633d2",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "c8947dcd-d626-4ec2-b119-69c9a0039440",
+        "source": "cd5fee62-61d0-4869-848a-fa8295e71306",
+        "sourceHandle": "fieldOutput",
+        "target": "80ecbe58-3dfd-4ae7-a720-fffe1ff5ceeb",
+        "targetHandle": "fieldInput/duration",
+        "type": "codeNodeEdge"
       }
     ],
     "fields": [
-      {
-        "name": "url",
-        "label": "iCal URL",
-        "type": "text",
-        "value": "",
-        "persist": "disk",
-        "access": "public"
-      },
+      { "name": "url", "label": "iCal URL", "type": "text", "value": "", "persist": "disk", "access": "public" },
       {
         "name": "startWeekOnMonday",
         "label": "Week starts on Monday",
@@ -254,6 +257,14 @@
         "persist": "disk",
         "access": "public",
         "options": ["light", "dark"]
+      },
+      {
+        "name": "seconds",
+        "label": "Refresh interval in seconds",
+        "type": "float",
+        "persist": "disk",
+        "access": "public",
+        "value": "900"
       }
     ],
     "settings": { "refreshInterval": 900, "backgroundColor": "#000000", "execution": "interpreted" }

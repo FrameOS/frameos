@@ -1,54 +1,39 @@
 [
   {
-    "id": "3c161900-1da2-42ab-8eee-ac669dcdb5c1",
+    "id": "028c3146-c3af-4158-ba9b-3dd139f744bf",
     "name": "Webcam RSTP",
     "nodes": [
       {
         "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
         "type": "event",
-        "position": {
-          "x": 162,
-          "y": -60
-        },
-        "data": {
-          "keyword": "render"
-        },
-        "width": 212,
-        "height": 298,
+        "position": { "x": 166, "y": 118 },
+        "data": { "keyword": "render" },
+        "width": 237,
+        "height": 134,
         "selected": false,
-        "positionAbsolute": {
-          "x": 162,
-          "y": -60
-        },
+        "positionAbsolute": { "x": 166, "y": 118 },
         "dragging": false
       },
       {
         "id": "27b8ec1c-db13-416c-bc09-ee07bcadda77",
-        "position": {
-          "x": 512.5,
-          "y": 117
-        },
-        "data": {
-          "keyword": "render/image",
-          "config": {}
-        },
+        "position": { "x": 529.5, "y": 125 },
+        "data": { "keyword": "render/image", "config": {} },
         "type": "app",
         "width": 325,
         "height": 134,
-        "selected": false
+        "selected": false,
+        "positionAbsolute": { "x": 529.5, "y": 125 },
+        "dragging": false
       },
       {
         "id": "46430b0e-8a20-420c-a735-6a8b8f7fef5b",
         "type": "app",
-        "position": {
-          "x": 482.25,
-          "y": -22.11100171274424
-        },
+        "position": { "x": 482.25, "y": -22.11100171274424 },
         "data": {
           "keyword": "data/rstpSnapshot",
           "config": {},
           "cache": {
-            "enabled": true,
+            "enabled": false,
             "inputEnabled": true,
             "durationEnabled": true,
             "duration": "900",
@@ -57,32 +42,43 @@
             "expressionType": null
           }
         },
-        "width": 254,
+        "width": 230,
         "height": 112,
         "selected": false,
-        "positionAbsolute": {
-          "x": 482.25,
-          "y": -22.11100171274424
-        },
+        "positionAbsolute": { "x": 482.25, "y": -22.11100171274424 },
         "dragging": false
       },
       {
         "id": "8eb3fce0-90e7-4580-b59d-608d841570f2",
-        "position": {
-          "x": 454.25,
-          "y": -104.11100171274424
-        },
-        "data": {
-          "keyword": "url"
-        },
+        "position": { "x": 454.25, "y": -104.11100171274424 },
+        "data": { "keyword": "url" },
         "type": "state",
         "width": 203,
         "height": 48,
         "selected": false,
-        "positionAbsolute": {
-          "x": 454.25,
-          "y": -104.11100171274424
-        },
+        "positionAbsolute": { "x": 454.25, "y": -104.11100171274424 },
+        "dragging": false
+      },
+      {
+        "id": "d1fcef56-e22d-49c1-86f6-ee754cb1225e",
+        "position": { "x": 935.25, "y": 117.44449914362792 },
+        "data": { "keyword": "logic/nextSleepDuration", "config": {} },
+        "type": "app",
+        "width": 289,
+        "height": 78,
+        "selected": false,
+        "positionAbsolute": { "x": 935.25, "y": 117.44449914362792 },
+        "dragging": false
+      },
+      {
+        "id": "1eb617bf-69a1-45a2-944e-ee1996012599",
+        "position": { "x": 898.0690073385704, "y": 41.340381726500425 },
+        "data": { "keyword": "seconds" },
+        "type": "state",
+        "width": 328,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": { "x": 898.0690073385704, "y": 41.340381726500425 },
         "dragging": false
       }
     ],
@@ -110,22 +106,35 @@
         "target": "46430b0e-8a20-420c-a735-6a8b8f7fef5b",
         "targetHandle": "fieldInput/url",
         "type": "codeNodeEdge"
+      },
+      {
+        "id": "f5af825f-acde-49ba-b5d9-5de82d78ab42",
+        "target": "d1fcef56-e22d-49c1-86f6-ee754cb1225e",
+        "targetHandle": "prev",
+        "source": "27b8ec1c-db13-416c-bc09-ee07bcadda77",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "9a304d9c-48e4-4eec-aa47-741e96ea6e2f",
+        "source": "1eb617bf-69a1-45a2-944e-ee1996012599",
+        "sourceHandle": "fieldOutput",
+        "target": "d1fcef56-e22d-49c1-86f6-ee754cb1225e",
+        "targetHandle": "fieldInput/duration",
+        "type": "codeNodeEdge"
       }
     ],
     "fields": [
+      { "name": "url", "label": "Webcam URL", "type": "text", "value": "", "persist": "disk", "access": "public" },
       {
-        "name": "url",
-        "label": "Webcam URL",
-        "type": "text",
-        "value": "",
+        "name": "seconds",
+        "label": "Refresh interval in seconds",
+        "type": "float",
         "persist": "disk",
-        "access": "public"
+        "access": "public",
+        "value": "300"
       }
     ],
-    "settings": {
-      "refreshInterval": 300,
-      "backgroundColor": "#000000",
-      "execution": "interpreted"
-    }
+    "settings": { "refreshInterval": 300, "backgroundColor": "#000000", "execution": "interpreted" }
   }
 ]

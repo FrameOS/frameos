@@ -1,12 +1,8 @@
 [
   {
-    "id": "cf88f114-6229-456f-ab5a-25d23ac87b83",
+    "id": "e8453561-4f50-4cd6-829f-4109547ea810",
     "name": "Unsplash image",
-    "settings": {
-      "backgroundColor": "#000000",
-      "refreshInterval": 600,
-      "execution": "interpreted"
-    },
+    "settings": { "backgroundColor": "#000000", "refreshInterval": 600, "execution": "interpreted" },
     "fields": [
       {
         "access": "public",
@@ -16,85 +12,104 @@
         "placeholder": "e.g. nature, fish, city",
         "type": "string",
         "value": "nature"
+      },
+      {
+        "name": "secondsBetweenImages",
+        "label": "Seconds between images",
+        "type": "float",
+        "persist": "disk",
+        "access": "public",
+        "value": "600"
       }
     ],
     "nodes": [
       {
-        "data": {
-          "keyword": "render"
-        },
+        "data": { "keyword": "render" },
         "dragging": false,
-        "height": 161,
+        "height": 134,
         "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
-        "position": {
-          "x": 146,
-          "y": 79
-        },
-        "positionAbsolute": {
-          "x": 146,
-          "y": 79
-        },
+        "position": { "x": 146, "y": 79 },
+        "positionAbsolute": { "x": 146, "y": 79 },
         "selected": false,
         "type": "event",
-        "width": 212
+        "width": 237
       },
       {
-        "data": {
-          "config": {},
-          "keyword": "render/image"
-        },
+        "data": { "config": {}, "keyword": "render/image" },
         "height": 134,
         "id": "7d4ca5fe-cb1a-413c-8ac1-c7c12c8dcd12",
-        "position": {
-          "x": 472.75,
-          "y": 97
-        },
+        "position": { "x": 472.75, "y": 97 },
         "type": "app",
-        "width": 324
+        "width": 325
       },
       {
         "data": {
-          "cache": {
-            "duration": "3600",
-            "durationEnabled": true,
-            "enabled": true,
-            "inputEnabled": true
-          },
+          "cache": { "duration": "3600", "durationEnabled": true, "enabled": false, "inputEnabled": true },
           "config": {},
           "keyword": "data/unsplash"
         },
         "dragging": false,
         "height": 168,
         "id": "c03a1fe5-5806-45a4-8a61-16c9c0ce1bc8",
-        "position": {
-          "x": 448.75,
-          "y": -99
-        },
-        "positionAbsolute": {
-          "x": 448.75,
-          "y": -99
-        },
+        "position": { "x": 448.75, "y": -99 },
+        "positionAbsolute": { "x": 448.75, "y": -99 },
         "selected": false,
         "type": "app",
-        "width": 299
+        "width": 300
       },
       {
         "id": "69a6d642-cfe5-49ea-9286-f3e8be061264",
-        "position": {
-          "x": 413.885067114094,
-          "y": -166.40939597315435
-        },
-        "data": {
-          "keyword": "search"
-        },
+        "position": { "x": 413.885067114094, "y": -166.40939597315435 },
+        "data": { "keyword": "search" },
         "type": "state",
         "width": 204,
         "height": 48,
         "selected": false,
-        "positionAbsolute": {
-          "x": 413.885067114094,
-          "y": -166.40939597315435
-        },
+        "positionAbsolute": { "x": 413.885067114094, "y": -166.40939597315435 },
+        "dragging": false
+      },
+      {
+        "id": "b37c9037-74bc-4b31-ac50-b11a1ef9c7bb",
+        "position": { "x": 855.375, "y": 78.79530201342277 },
+        "data": { "keyword": "logic/nextSleepDuration", "config": {} },
+        "type": "app",
+        "width": 289,
+        "height": 78,
+        "selected": false,
+        "positionAbsolute": { "x": 855.375, "y": 78.79530201342277 },
+        "dragging": false
+      },
+      {
+        "id": "21e68640-8dd8-4295-9db0-ae1a3315e32e",
+        "position": { "x": 821.375, "y": 1.79530201342277 },
+        "data": { "keyword": "secondsBetweenImages" },
+        "type": "state",
+        "width": 320,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": { "x": 821.375, "y": 1.79530201342277 },
+        "dragging": false
+      },
+      {
+        "id": "4d36077c-2202-47ae-a479-1dcba01dfe28",
+        "type": "event",
+        "position": { "x": 667.6875, "y": -235.70469798657717 },
+        "data": { "keyword": "button" },
+        "width": 209,
+        "height": 98,
+        "selected": false,
+        "positionAbsolute": { "x": 667.6875, "y": -235.70469798657717 },
+        "dragging": false
+      },
+      {
+        "id": "b913208e-09b1-412a-917f-493b1fb1f5ed",
+        "position": { "x": 904.6875, "y": -238.70469798657717 },
+        "data": { "keyword": "render", "config": {} },
+        "type": "dispatch",
+        "width": 260,
+        "height": 40,
+        "selected": false,
+        "positionAbsolute": { "x": 904.6875, "y": -238.70469798657717 },
         "dragging": false
       }
     ],
@@ -122,6 +137,30 @@
         "source": "69a6d642-cfe5-49ea-9286-f3e8be061264",
         "sourceHandle": "fieldOutput",
         "type": "codeNodeEdge"
+      },
+      {
+        "id": "188ab18d-cab5-4753-bfc5-b4b2ef330329",
+        "target": "b37c9037-74bc-4b31-ac50-b11a1ef9c7bb",
+        "targetHandle": "prev",
+        "source": "7d4ca5fe-cb1a-413c-8ac1-c7c12c8dcd12",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "6fa5abe1-12eb-47a7-ab00-d5650ede0792",
+        "source": "21e68640-8dd8-4295-9db0-ae1a3315e32e",
+        "sourceHandle": "fieldOutput",
+        "target": "b37c9037-74bc-4b31-ac50-b11a1ef9c7bb",
+        "targetHandle": "fieldInput/duration",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "47b7fb81-9624-4732-be1d-18fcb1e42c49",
+        "target": "b913208e-09b1-412a-917f-493b1fb1f5ed",
+        "targetHandle": "prev",
+        "source": "4d36077c-2202-47ae-a479-1dcba01dfe28",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
       }
     ]
   }

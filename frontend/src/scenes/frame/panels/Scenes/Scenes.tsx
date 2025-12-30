@@ -62,6 +62,7 @@ export function Scenes() {
     selectedSceneIds,
     activeUploadedScene,
     missingActiveSceneId,
+    missingActiveMatchesSearch,
     missingActiveExpanded,
     isUploadingImage,
     isInstallingMissingActiveScene,
@@ -131,7 +132,7 @@ export function Scenes() {
     </div>
   )
 
-  if (scenes.length === 0 && !showNewSceneForm) {
+  if (scenes.length === 0 && !showNewSceneForm && !missingActiveSceneId) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center space-y-4 mb-8">
@@ -150,9 +151,8 @@ export function Scenes() {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        {scenes.length > 0 ? (
+        {scenes.length > 0 || missingActiveSceneId ? (
           <>
-            {renderShortcuts()}
             <div className="flex justify-between w-full items-center">
               <TextInput placeholder="Filter scenes..." className="flex-1 mr-2" onChange={setSearch} value={search} />
               <div className="flex gap-1">
@@ -232,12 +232,13 @@ export function Scenes() {
                 )}
               </div>
             </div>
+            {renderShortcuts()}
           </>
         ) : null}
-        {filteredScenes.length === 0 && search ? (
+        {filteredScenes.length === 0 && search && !missingActiveMatchesSearch ? (
           <div className="text-center text-gray-400">No scenes matching "{search}"</div>
         ) : null}
-        {missingActiveSceneId ? (
+        {missingActiveMatchesSearch ? (
           <div
             className={clsx(
               'border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1 border-blue-700/60',
@@ -296,7 +297,7 @@ export function Scenes() {
                     <div>This scene is currently running, but it is not saved on the frame.</div>
                   </div>
                 </div>
-                {missingActiveExpanded ? (
+                {missingActiveExpanded && missingActiveSceneId ? (
                   <div className="pl-7">
                     <ExpandedScene
                       sceneId={missingActiveSceneId}

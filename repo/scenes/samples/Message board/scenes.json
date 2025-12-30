@@ -1,12 +1,8 @@
 [
   {
-    "id": "350497f4-e022-4a10-85b5-53de8be63eb4",
+    "id": "2e0b2c3b-58d4-4c4e-a5cb-0ca95d2fd2f8",
     "name": "Message board",
-    "settings": {
-      "backgroundColor": "#000000",
-      "refreshInterval": 3600,
-      "execution": "interpreted"
-    },
+    "settings": { "backgroundColor": "#000000", "refreshInterval": 3600, "execution": "interpreted" },
     "fields": [
       {
         "access": "public",
@@ -25,13 +21,7 @@
         "type": "text",
         "value": "Keep at it!"
       },
-      {
-        "name": "font",
-        "label": "Font",
-        "type": "font",
-        "persist": "disk",
-        "access": "public"
-      },
+      { "name": "font", "label": "Font", "type": "font", "persist": "disk", "access": "public" },
       {
         "name": "fontSize",
         "label": "Font size",
@@ -39,218 +29,154 @@
         "persist": "disk",
         "access": "public",
         "value": "90"
+      },
+      {
+        "name": "seconds",
+        "label": "Refresh background after (seconds)",
+        "type": "float",
+        "persist": "disk",
+        "access": "public",
+        "value": "3600"
       }
     ],
     "nodes": [
       {
-        "data": {
-          "keyword": "render"
-        },
+        "data": { "keyword": "render" },
         "dragging": false,
-        "height": 198,
+        "height": 134,
         "id": "8174a506-d5d4-4264-8472-8ae5a0b5f645",
-        "position": {
-          "x": 5.588973116178522,
-          "y": 269.13891897006386
-        },
-        "positionAbsolute": {
-          "x": 5.588973116178522,
-          "y": 269.13891897006386
-        },
+        "position": { "x": 5.588973116178522, "y": 269.13891897006386 },
+        "positionAbsolute": { "x": 5.588973116178522, "y": 269.13891897006386 },
         "selected": false,
         "type": "event",
-        "width": 212
+        "width": 237
       },
       {
-        "data": {
-          "config": {
-            "borderWidth": "4",
-            "fontSize": "90.0"
-          },
-          "keyword": "render/text"
-        },
+        "data": { "config": { "borderWidth": "4", "fontSize": "90.0" }, "keyword": "render/text" },
         "dragging": false,
-        "height": 420,
+        "height": 414,
         "id": "eb54d359-2986-4012-8b49-a034437ebdeb",
-        "position": {
-          "x": 777.1611003728354,
-          "y": 269.86248790081424
-        },
-        "positionAbsolute": {
-          "x": 777.1611003728354,
-          "y": 269.86248790081424
-        },
+        "position": { "x": 777.1611003728354, "y": 269.86248790081424 },
+        "positionAbsolute": { "x": 777.1611003728354, "y": 269.86248790081424 },
         "selected": false,
         "type": "app",
         "width": 366
       },
       {
-        "data": {
-          "config": {},
-          "keyword": "render/image"
-        },
+        "data": { "config": {}, "keyword": "render/image" },
         "dragging": false,
         "height": 134,
         "id": "a79fd056-118f-4e94-9794-82497cd6a46a",
-        "position": {
-          "x": 329.3514370955975,
-          "y": 282.6687579534606
-        },
-        "positionAbsolute": {
-          "x": 329.3514370955975,
-          "y": 282.6687579534606
-        },
+        "position": { "x": 329.3514370955975, "y": 282.6687579534606 },
+        "positionAbsolute": { "x": 329.3514370955975, "y": 282.6687579534606 },
         "selected": false,
         "type": "app",
         "width": 325
       },
       {
         "data": {
-          "cache": {
-            "duration": "900",
-            "durationEnabled": true,
-            "enabled": true,
-            "inputEnabled": true
-          },
+          "cache": { "duration": "900", "durationEnabled": true, "enabled": false, "inputEnabled": true },
           "config": {},
           "keyword": "data/unsplash"
         },
         "dragging": false,
         "height": 168,
         "id": "106c8fc5-df79-4b5c-978d-e7f2a9445bb7",
-        "position": {
-          "x": 311.46309213379726,
-          "y": 91.8545165572396
-        },
-        "positionAbsolute": {
-          "x": 311.46309213379726,
-          "y": 91.8545165572396
-        },
+        "position": { "x": 302.9196029598132, "y": 89.41351965038706 },
+        "positionAbsolute": { "x": 302.9196029598132, "y": 89.41351965038706 },
         "selected": false,
         "type": "app",
         "width": 300
       },
       {
         "data": {
-          "config": {
-            "fontSize": "24",
-            "padding": "5",
-            "position": "left",
-            "vAlign": "top"
-          },
+          "config": { "fontSize": "24", "padding": "5", "position": "left", "vAlign": "top" },
           "keyword": "render/text"
         },
         "dragging": false,
-        "height": 420,
+        "height": 414,
         "id": "e096ca13-bbab-45e3-8e8c-c34b2f2ac450",
-        "position": {
-          "x": 1197.629849594364,
-          "y": 269.95732979979834
-        },
-        "positionAbsolute": {
-          "x": 1197.629849594364,
-          "y": 269.95732979979834
-        },
+        "position": { "x": 1197.629849594364, "y": 269.95732979979834 },
+        "positionAbsolute": { "x": 1197.629849594364, "y": 269.95732979979834 },
         "selected": false,
         "type": "app",
         "width": 418
       },
       {
-        "data": {
-          "config": {
-            "format": "HH:mm:ss"
-          },
-          "keyword": "data/clock"
-        },
+        "data": { "config": { "format": "HH:mm:ss" }, "keyword": "data/clock" },
         "dragging": false,
         "height": 140,
         "id": "59df2876-6c74-49df-8090-e62cbbd7f8ff",
-        "position": {
-          "x": 1146.7730975282718,
-          "y": 45.91520833414032
-        },
-        "positionAbsolute": {
-          "x": 1146.7730975282718,
-          "y": 45.91520833414032
-        },
+        "position": { "x": 1146.7730975282718, "y": 45.91520833414032 },
+        "positionAbsolute": { "x": 1146.7730975282718, "y": 45.91520833414032 },
         "selected": false,
         "type": "app",
         "width": 351
       },
       {
         "id": "f4280494-f122-4880-b1b7-a3bc29b5cb60",
-        "position": {
-          "x": 271.3205040972592,
-          "y": 6.356991919457727
-        },
-        "data": {
-          "keyword": "background"
-        },
+        "position": { "x": 271.3205040972592, "y": 6.356991919457727 },
+        "data": { "keyword": "background" },
         "type": "state",
         "width": 375,
         "height": 48,
         "selected": false,
-        "positionAbsolute": {
-          "x": 271.3205040972592,
-          "y": 6.356991919457727
-        },
+        "positionAbsolute": { "x": 271.3205040972592, "y": 6.356991919457727 },
         "dragging": false
       },
       {
         "id": "0aee5313-ddd7-446c-9d8f-20c0a99341ab",
-        "position": {
-          "x": 746.3279249427724,
-          "y": 188.83784860790996
-        },
-        "data": {
-          "keyword": "text"
-        },
+        "position": { "x": 746.3279249427724, "y": 188.83784860790996 },
+        "data": { "keyword": "text" },
         "type": "state",
         "width": 211,
         "height": 48,
         "selected": false,
-        "positionAbsolute": {
-          "x": 746.3279249427724,
-          "y": 188.83784860790996
-        },
+        "positionAbsolute": { "x": 746.3279249427724, "y": 188.83784860790996 },
         "dragging": false
       },
       {
         "id": "6e23a5e8-f3fc-47d9-8515-dadd03a33452",
-        "position": {
-          "x": 709.3377495215731,
-          "y": 123.13092305188974
-        },
-        "data": {
-          "keyword": "font"
-        },
+        "position": { "x": 709.3377495215731, "y": 123.13092305188974 },
+        "data": { "keyword": "font" },
         "type": "state",
         "width": 128,
         "height": 48,
         "selected": false,
-        "positionAbsolute": {
-          "x": 709.3377495215731,
-          "y": 123.13092305188974
-        },
+        "positionAbsolute": { "x": 709.3377495215731, "y": 123.13092305188974 },
         "dragging": false
       },
       {
         "id": "c5062224-449e-4c87-b0dd-1d3b360071c6",
-        "position": {
-          "x": 679.7844179456829,
-          "y": 49.247594112164165
-        },
-        "data": {
-          "keyword": "fontSize"
-        },
+        "position": { "x": 679.7844179456829, "y": 49.247594112164165 },
+        "data": { "keyword": "fontSize" },
         "type": "state",
         "width": 170,
         "height": 48,
         "selected": false,
-        "positionAbsolute": {
-          "x": 679.7844179456829,
-          "y": 49.247594112164165
-        },
+        "positionAbsolute": { "x": 679.7844179456829, "y": 49.247594112164165 },
+        "dragging": false
+      },
+      {
+        "id": "e87735f9-4b5f-44a3-8430-3514bd10d9ae",
+        "position": { "x": 1671.1990455023422, "y": 272.6757273622973 },
+        "data": { "keyword": "logic/nextSleepDuration", "config": {} },
+        "type": "app",
+        "width": 289,
+        "height": 78,
+        "selected": false,
+        "positionAbsolute": { "x": 1671.1990455023422, "y": 272.6757273622973 },
+        "dragging": false
+      },
+      {
+        "id": "54fc5dfa-3c83-475a-a59a-240cd5f04ec6",
+        "position": { "x": 1638.2455872598323, "y": 200.666318610146 },
+        "data": { "keyword": "seconds" },
+        "type": "state",
+        "width": 404,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": { "x": 1638.2455872598323, "y": 200.666318610146 },
         "dragging": false
       }
     ],
@@ -325,6 +251,22 @@
         "sourceHandle": "fieldOutput",
         "target": "eb54d359-2986-4012-8b49-a034437ebdeb",
         "targetHandle": "fieldInput/fontSize",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "0394c979-3fe4-4819-a819-d66377c4c242",
+        "target": "e87735f9-4b5f-44a3-8430-3514bd10d9ae",
+        "targetHandle": "prev",
+        "source": "e096ca13-bbab-45e3-8e8c-c34b2f2ac450",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "8fd96a60-a00c-4f4c-a66c-3ef4614393df",
+        "source": "54fc5dfa-3c83-475a-a59a-240cd5f04ec6",
+        "sourceHandle": "fieldOutput",
+        "target": "e87735f9-4b5f-44a3-8430-3514bd10d9ae",
+        "targetHandle": "fieldInput/duration",
         "type": "codeNodeEdge"
       }
     ]
