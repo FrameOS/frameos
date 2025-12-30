@@ -2,7 +2,7 @@
   {
     "id": "c1d7e9ed-9cd4-4375-b767-ae3b678d935e",
     "name": "Masterpieces",
-    "settings": { "backgroundColor": "#000000", "refreshInterval": 3600, "execution": "interpreted" },
+    "settings": { "backgroundColor": "#000000", "refreshInterval": 86400, "execution": "interpreted" },
     "fields": [
       {
         "name": "seconds",
@@ -10,7 +10,7 @@
         "type": "float",
         "persist": "disk",
         "access": "public",
-        "value": "86400"
+        "value": "3600"
       }
     ],
     "nodes": [

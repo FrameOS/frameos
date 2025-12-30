@@ -10,7 +10,7 @@
         "type": "float",
         "persist": "disk",
         "access": "public",
-        "value": "86400"
+        "value": "3600"
       }
     ],
     "nodes": [

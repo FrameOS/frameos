@@ -2,7 +2,7 @@
   {
     "id": "1963a421-55ab-477b-bb5b-74c2f58f90c0",
     "name": "Made in Space",
-    "settings": { "backgroundColor": "#000000", "refreshInterval": 3600, "execution": "interpreted" },
+    "settings": { "backgroundColor": "#000000", "refreshInterval": 86400, "execution": "interpreted" },
     "fields": [
       {
         "name": "seconds",
@@ -10,7 +10,7 @@
         "type": "float",
         "persist": "disk",
         "access": "public",
-        "value": "86400"
+        "value": "3600"
       }
     ],
     "nodes": [
