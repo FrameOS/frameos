@@ -59,6 +59,8 @@ type
     wifiHotspotSsid*: string
     wifiHotspotPassword*: string
     wifiHotspotTimeoutSeconds*: float
+    reverseProxyEnabled*: bool
+    reverseProxyPort*: int
 
   # Part of FrameConfig
   AgentConfig* = ref object

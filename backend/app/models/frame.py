@@ -178,6 +178,8 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
             "wifiHotspotSsid": "FrameOS-Setup",
             "wifiHotspotPassword": "frame1234",
             "wifiHotspotTimeoutSeconds": 300,
+            "reverseProxyEnabled": False,
+            "reverseProxyPort": 443,
         },
         agent={
             "agentEnabled": False,
@@ -295,6 +297,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "wifiHotspotSsid": network.get('wifiHotspotSsid', "FrameOS-Setup"),
             "wifiHotspotPassword": network.get('wifiHotspotPassword', "frame1234"),
             "wifiHotspotTimeoutSeconds": int(network.get('wifiHotspotTimeoutSeconds', 300)),
+            "reverseProxyEnabled": bool(network.get('reverseProxyEnabled', False)),
+            "reverseProxyPort": int(network.get('reverseProxyPort', 443)),
         },
         "agent": {
             "agentEnabled": bool(agent.get('agentEnabled', False)),

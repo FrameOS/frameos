@@ -59,7 +59,11 @@ proc loadControlCode*(data: JsonNode): ControlCode =
 
 proc loadNetwork*(data: JsonNode): NetworkConfig =
   if data == nil or data.kind != JObject:
-    result = NetworkConfig(networkCheck: false)
+    result = NetworkConfig(
+      networkCheck: false,
+      reverseProxyEnabled: false,
+      reverseProxyPort: 443,
+    )
   else:
     result = NetworkConfig(
       networkCheck: data{"networkCheck"}.getBool(),
@@ -69,6 +73,8 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
       wifiHotspotSsid: data{"wifiHotspotSsid"}.getStr("FrameOS-Setup"),
       wifiHotspotPassword: data{"wifiHotspotPassword"}.getStr("frame1234"),
       wifiHotspotTimeoutSeconds: data{"wifiHotspotTimeoutSeconds"}.getFloat(300),
+      reverseProxyEnabled: data{"reverseProxyEnabled"}.getBool(false),
+      reverseProxyPort: data{"reverseProxyPort"}.getInt(443),
     )
 
 proc loadDeviceConfig*(data: JsonNode): DeviceConfig =

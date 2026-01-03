@@ -1,6 +1,7 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { framePublicPort } from '../../../../decorators/frame'
 
 import type { pingLogicType } from './pingLogicType'
 
@@ -115,7 +116,8 @@ export const pingLogic = kea<pingLogicType>([
       (s) => [s.frame, s.normalisedPath, s.pingMode],
       (frame, normalisedPath, pingMode) => {
         const host = frame?.frame_host || 'frame'
-        const port = frame?.frame_port ? `:${frame.frame_port}` : ''
+        const portValue = frame ? framePublicPort(frame) : null
+        const port = portValue ? `:${portValue}` : ''
         return pingMode === 'http' ? `${host}${port}${normalisedPath}` : host
       },
     ],

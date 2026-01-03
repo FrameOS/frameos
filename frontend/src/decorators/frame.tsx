@@ -10,6 +10,18 @@ export function frameHost(frame: FrameType): string {
 
 export const frameStatusWithSpinner = ['deploying', 'preparing', 'rendering', 'restarting', 'starting']
 
+export function framePublicPort(frame: FrameType): number {
+  if (frame.network?.reverseProxyEnabled) {
+    return frame.network.reverseProxyPort || 443
+  }
+  return frame.frame_port
+}
+
+export function framePublicScheme(frame: FrameType): string {
+  const publicPort = framePublicPort(frame)
+  return frame.network?.reverseProxyEnabled || publicPort % 1000 === 443 ? 'https' : 'http'
+}
+
 export function frameStatus(frame: FrameType): JSX.Element {
   let status = frame.status
   if (frame.last_log_at) {
@@ -33,7 +45,7 @@ export function frameStatus(frame: FrameType): JSX.Element {
 }
 
 export function frameUrl(frame: FrameType): string | null {
-  const url = `http${frame.frame_port % 1000 === 443 ? 's' : ''}://${frame.frame_host}:${frame.frame_port}/`
+  const url = `${framePublicScheme(frame)}://${frame.frame_host}:${framePublicPort(frame)}/`
   if (frame.frame_access === 'public' || frame.frame_access === 'protected') {
     return url
   } else {
@@ -42,7 +54,7 @@ export function frameUrl(frame: FrameType): string | null {
 }
 
 export function frameControlUrl(frame: FrameType): string | null {
-  const url = `http${frame.frame_port % 1000 === 443 ? 's' : ''}://${frame.frame_host}:${frame.frame_port}/c`
+  const url = `${framePublicScheme(frame)}://${frame.frame_host}:${framePublicPort(frame)}/c`
   if (frame.frame_access === 'public') {
     return url
   } else {
@@ -51,7 +63,7 @@ export function frameControlUrl(frame: FrameType): string | null {
 }
 
 export function frameImageUrl(frame: FrameType): string | null {
-  const url = `http${frame.frame_port % 1000 === 443 ? 's' : ''}://${frame.frame_host}:${frame.frame_port}/image`
+  const url = `${framePublicScheme(frame)}://${frame.frame_host}:${framePublicPort(frame)}/image`
   if (frame.frame_access === 'public' || frame.frame_access === 'protected') {
     return url
   } else {

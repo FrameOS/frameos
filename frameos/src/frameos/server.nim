@@ -294,7 +294,11 @@ proc newServer*(frameOS: FrameOS): Server =
   globalRunner = frameOS.runner
 
   let port = (if frameOS.frameConfig.framePort == 0: 8787 else: frameOS.frameConfig.framePort).Port
-  let settings = newSettings(port = port)
+  let settings =
+    if frameOS.frameConfig.network != nil and frameOS.frameConfig.network.reverseProxyEnabled:
+      newSettings(port = port, bindAddr = "127.0.0.1")
+    else:
+      newSettings(port = port)
   var jester = initJester(myrouter, settings)
 
   result = Server(
