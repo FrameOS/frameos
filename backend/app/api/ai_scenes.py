@@ -9,7 +9,10 @@ from app.schemas.ai_scenes import AiSceneGenerateRequest, AiSceneGenerateRespons
 from app.utils.ai_scene import (
     EMBEDDING_MODEL,
     SCENE_MODEL,
+    DEFAULT_APP_CONTEXT_K,
+    DEFAULT_SCENE_CONTEXT_K,
     create_embeddings,
+    expand_prompt,
     generate_scene_json,
     rank_embeddings,
 )
@@ -30,14 +33,38 @@ async def generate_scene(data: AiSceneGenerateRequest, db: Session = Depends(get
     embeddings = db.query(AiEmbedding).all()
     context_items: list[AiEmbedding] = []
     if embeddings:
+        expanded_prompt = await expand_prompt(prompt, api_key)
         query_embedding = (
             await create_embeddings(
-                [prompt],
+                [expanded_prompt],
                 api_key,
                 model=openai_settings.get("embeddingModel") or EMBEDDING_MODEL,
             )
         )[0]
-        context_items = rank_embeddings(query_embedding, embeddings, top_k=8)
+        app_embeddings = [item for item in embeddings if item.source_type == "app"]
+        scene_embeddings = [item for item in embeddings if item.source_type == "scene"]
+        ranked_items = [
+            *rank_embeddings(
+                query_embedding,
+                app_embeddings,
+                prompt=expanded_prompt,
+                top_k=DEFAULT_APP_CONTEXT_K,
+            ),
+            *rank_embeddings(
+                query_embedding,
+                scene_embeddings,
+                prompt=expanded_prompt,
+                top_k=DEFAULT_SCENE_CONTEXT_K,
+            ),
+        ]
+        seen: set[tuple[str, str]] = set()
+        context_items = []
+        for item in ranked_items:
+            key = (item.source_type, item.source_path)
+            if key in seen:
+                continue
+            seen.add(key)
+            context_items.append(item)
 
     response_payload = await generate_scene_json(
         prompt=prompt,

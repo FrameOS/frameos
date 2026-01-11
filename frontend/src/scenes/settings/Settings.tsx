@@ -10,7 +10,7 @@ import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
 import { sceneLogic } from '../sceneLogic'
-import { PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { ArrowPathIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { NumberTextInput } from '../../components/NumberTextInput'
 import { Switch } from '../../components/Switch'
 import { Select } from '../../components/Select'
@@ -33,6 +33,7 @@ export function Settings() {
     embeddingsMissing,
     isGeneratingEmbeddings,
     isDeletingEmbeddings,
+    embeddingsPollingIntervalId,
     customFontsLoading,
     isCustomFontsFormSubmitting,
     customFonts,
@@ -50,6 +51,7 @@ export function Settings() {
     setSettingsValue,
     generateMissingEmbeddings,
     deleteEmbeddings,
+    loadAiEmbeddingsStatus,
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
@@ -242,15 +244,26 @@ export function Settings() {
                       <TextInput name="embeddingModel" placeholder="text-embedding-3-large" />
                     </Field>
                     <Field name="sceneModel" label="Scene generation model">
-                      <TextInput name="sceneModel" placeholder="gpt-5" />
+                      <TextInput name="sceneModel" placeholder="gpt-5.2" />
                     </Field>
                     <Field name="appEnhanceModel" label="App edit model">
-                      <TextInput name="appEnhanceModel" placeholder="gpt-4" />
+                      <TextInput name="appEnhanceModel" placeholder="gpt-5.2" />
                     </Field>
                     <div className="flex flex-wrap items-center gap-2 text-sm text-gray-300">
                       <span>
                         Embeddings: {embeddingsCount}/{embeddingsTotal}
                       </span>
+                      {embeddingsPollingIntervalId === null ? (
+                        <Button
+                          size="small"
+                          color="secondary"
+                          onClick={loadAiEmbeddingsStatus}
+                          aria-label="Reload embeddings status"
+                          title="Reload embeddings status"
+                        >
+                          <ArrowPathIcon className="h-4 w-4" />
+                        </Button>
+                      ) : null}
                       <Button
                         size="small"
                         color="secondary"

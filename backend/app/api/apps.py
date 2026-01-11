@@ -81,7 +81,7 @@ async def enhance_python_frame_source(data: EnhanceSourceRequest, db: Session = 
             {"role": "system", "content": ai_context},
             {"role": "user", "content": prompt}
         ],
-        "model": openai_settings.get("appEnhanceModel") or "gpt-4",
+        "model": openai_settings.get("appEnhanceModel") or "gpt-5.2",
     }
 
     headers = {

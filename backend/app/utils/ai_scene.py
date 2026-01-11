@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, Iterable
 
 import httpx
@@ -7,8 +8,14 @@ import numpy as np
 from app.models.ai_embeddings import AiEmbedding
 
 SUMMARY_MODEL = "gpt-5-mini"
-SCENE_MODEL = "gpt-5"
+SCENE_MODEL = "gpt-5.2"
 EMBEDDING_MODEL = "text-embedding-3-large"
+EXPANSION_MODEL = "gpt-5-mini"
+
+DEFAULT_APP_CONTEXT_K = 6
+DEFAULT_SCENE_CONTEXT_K = 4
+DEFAULT_MIN_SCORE = 0.15
+MMR_LAMBDA = 0.7
 
 SUMMARY_SYSTEM_PROMPT = """
 You are summarizing FrameOS scene templates and app modules so they can be retrieved for prompt grounding.
@@ -16,6 +23,14 @@ Return JSON with keys:
 - summary: 2-4 sentences describing what it does and which apps or data it uses.
 - keywords: 5-10 short keywords or phrases.
 Keep the summary concise and technical. Do not include markdown.
+""".strip()
+
+EXPANSION_SYSTEM_PROMPT = """
+You expand a short user request into a clearer FrameOS scene intent for retrieval.
+Return JSON with keys:
+- expanded_prompt: 1-3 sentences, preserving the user's intent.
+Include relevant app/function hints only if they can be inferred from the request.
+Do not mention embeddings or internal tools.
 """.strip()
 
 SCENE_SYSTEM_PROMPT = """
@@ -69,11 +84,29 @@ def _format_context_items(items: list[AiEmbedding]) -> str:
     for item in items:
         metadata = item.metadata_json or {}
         header = f"[{item.source_type}] {item.name or item.source_path}"
+        keyword_list = metadata.get("keywords") or []
+        app_keywords = metadata.get("appKeywords") or []
+        event_keywords = metadata.get("eventKeywords") or []
+        node_types = metadata.get("nodeTypes") or []
+        fields = metadata.get("fieldDetails") or metadata.get("fields") or []
+        outputs = metadata.get("outputDetails") or metadata.get("outputs") or []
+        preview_nodes = metadata.get("previewNodes") or []
+        config_snippet = metadata.get("configSnippet")
         lines.append(
             "\n".join(
                 [
                     header,
                     f"Summary: {item.summary}",
+                    f"Keywords: {', '.join(keyword_list)}" if keyword_list else "Keywords: (none)",
+                    f"App keywords: {', '.join(app_keywords)}" if app_keywords else "App keywords: (none)",
+                    f"Event keywords: {', '.join(event_keywords)}" if event_keywords else "Event keywords: (none)",
+                    f"Node types: {', '.join(node_types)}" if node_types else "Node types: (none)",
+                    f"Fields: {json.dumps(fields, ensure_ascii=False)}" if fields else "Fields: (none)",
+                    f"Outputs: {json.dumps(outputs, ensure_ascii=False)}" if outputs else "Outputs: (none)",
+                    f"Preview nodes: {json.dumps(preview_nodes, ensure_ascii=False)}"
+                    if preview_nodes
+                    else "Preview nodes: (none)",
+                    f"Config snippet: {config_snippet}" if config_snippet else "Config snippet: (none)",
                     f"Metadata: {json.dumps(metadata, ensure_ascii=False)}",
                 ]
             )
@@ -91,13 +124,86 @@ def _cosine_similarity(query_vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
     return np.dot(matrix, query_vec) / denom
 
 
-def rank_embeddings(query_embedding: list[float], items: list[AiEmbedding], top_k: int = 8) -> list[AiEmbedding]:
+def _tokenize_prompt(prompt: str) -> list[str]:
+    return re.findall(r"[a-z0-9_/.-]+", prompt.lower())
+
+
+def _keyword_score(prompt_tokens: list[str], item: AiEmbedding) -> float:
+    if not prompt_tokens:
+        return 0.0
+    metadata = item.metadata_json or {}
+    keyword_sources = [
+        item.name or "",
+        item.source_path or "",
+        item.summary or "",
+        " ".join(metadata.get("keywords") or []),
+        " ".join(metadata.get("appKeywords") or []),
+        " ".join(metadata.get("eventKeywords") or []),
+        " ".join(metadata.get("nodeTypes") or []),
+        metadata.get("category") or "",
+    ]
+    haystack = " ".join(keyword_sources).lower()
+    hits = sum(1 for token in prompt_tokens if token in haystack)
+    return hits / max(len(prompt_tokens), 1)
+
+
+def _mmr_select(
+    items: list[AiEmbedding],
+    embeddings: np.ndarray,
+    scores: np.ndarray,
+    top_k: int,
+    lambda_param: float = MMR_LAMBDA,
+) -> list[AiEmbedding]:
+    if top_k <= 0 or not items:
+        return []
+    selected: list[int] = []
+    candidate_indices = list(range(len(items)))
+    while candidate_indices and len(selected) < top_k:
+        if not selected:
+            best_idx = max(candidate_indices, key=lambda idx: scores[idx])
+            selected.append(best_idx)
+            candidate_indices.remove(best_idx)
+            continue
+        best_idx = None
+        best_score = -1.0
+        for idx in candidate_indices:
+            similarity_to_query = scores[idx]
+            similarity_to_selected = max(
+                _cosine_similarity(embeddings[idx], embeddings[selected]) if selected else np.array([0.0])
+            )
+            mmr_score = lambda_param * similarity_to_query - (1 - lambda_param) * similarity_to_selected
+            if mmr_score > best_score:
+                best_score = mmr_score
+                best_idx = idx
+        if best_idx is None:
+            break
+        selected.append(best_idx)
+        candidate_indices.remove(best_idx)
+    return [items[idx] for idx in selected]
+
+
+def rank_embeddings(
+    query_embedding: list[float],
+    items: list[AiEmbedding],
+    *,
+    prompt: str,
+    top_k: int = 8,
+    min_score: float = DEFAULT_MIN_SCORE,
+) -> list[AiEmbedding]:
     if not items:
         return []
     embeddings = np.array([item.embedding for item in items], dtype=float)
-    scores = _cosine_similarity(np.array(query_embedding, dtype=float), embeddings)
-    ranked_indices = np.argsort(scores)[::-1][:top_k]
-    return [items[i] for i in ranked_indices]
+    cosine_scores = _cosine_similarity(np.array(query_embedding, dtype=float), embeddings)
+    prompt_tokens = _tokenize_prompt(prompt)
+    keyword_scores = np.array([_keyword_score(prompt_tokens, item) for item in items], dtype=float)
+    combined_scores = (0.7 * cosine_scores) + (0.3 * keyword_scores)
+    filtered_indices = [idx for idx, score in enumerate(combined_scores) if score >= min_score]
+    if not filtered_indices:
+        filtered_indices = list(range(len(items)))
+    filtered_items = [items[idx] for idx in filtered_indices]
+    filtered_embeddings = embeddings[filtered_indices]
+    filtered_scores = combined_scores[filtered_indices]
+    return _mmr_select(filtered_items, filtered_embeddings, filtered_scores, top_k=top_k)
 
 
 async def create_embeddings(texts: list[str], api_key: str, model: str) -> list[list[float]]:
@@ -122,7 +228,7 @@ async def create_embeddings(texts: list[str], api_key: str, model: str) -> list[
     return embeddings
 
 
-async def summarize_text(text: str, api_key: str) -> dict[str, Any]:
+async def summarize_text(text: str, api_key: str, *, model: str = SUMMARY_MODEL) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(
             "https://api.openai.com/v1/chat/completions",
@@ -131,7 +237,7 @@ async def summarize_text(text: str, api_key: str) -> dict[str, Any]:
                 "Content-Type": "application/json",
             },
             json={
-                "model": SUMMARY_MODEL,
+                "model": model or SUMMARY_MODEL,
                 "messages": [
                     {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
                     {"role": "user", "content": text},
@@ -144,6 +250,33 @@ async def summarize_text(text: str, api_key: str) -> dict[str, Any]:
     message = payload.get("choices", [{}])[0].get("message", {})
     content = message.get("content", "{}")
     return json.loads(content)
+
+
+async def expand_prompt(prompt: str, api_key: str, *, model: str = EXPANSION_MODEL) -> str:
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model or EXPANSION_MODEL,
+                "messages": [
+                    {"role": "system", "content": EXPANSION_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                "response_format": {"type": "json_object"},
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+    message = payload.get("choices", [{}])[0].get("message", {})
+    content = message.get("content", "{}")
+    expanded = json.loads(content).get("expanded_prompt")
+    if isinstance(expanded, str) and expanded.strip():
+        return expanded.strip()
+    return prompt
 
 
 async def generate_scene_json(

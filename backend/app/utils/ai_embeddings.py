@@ -7,6 +7,14 @@ from sqlalchemy.orm import Session
 from app.models.ai_embeddings import AiEmbedding, upsert_ai_embedding
 from app.utils.ai_scene import create_embeddings, summarize_text
 
+MAX_SNIPPET_LENGTH = 1200
+
+
+def _truncate_text(value: str, max_length: int = MAX_SNIPPET_LENGTH) -> str:
+    if len(value) <= max_length:
+        return value
+    return f"{value[:max_length]}…"
+
 
 def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -27,9 +35,13 @@ def _summarize_scene_template(template_path: Path, repo_root: Path) -> tuple[str
     scene_count = len(scenes_data) if isinstance(scenes_data, list) else 0
     app_keywords: set[str] = set()
     event_keywords: set[str] = set()
+    node_types: set[str] = set()
+    preview_nodes: list[dict[str, Any]] = []
     if isinstance(scenes_data, list):
         for scene in scenes_data:
             for node in scene.get("nodes", []):
+                if node.get("type"):
+                    node_types.add(node.get("type"))
                 data = node.get("data") or {}
                 keyword = data.get("keyword")
                 if not keyword:
@@ -38,6 +50,15 @@ def _summarize_scene_template(template_path: Path, repo_root: Path) -> tuple[str
                     event_keywords.add(keyword)
                 else:
                     app_keywords.add(keyword)
+            if not preview_nodes and scene.get("nodes"):
+                preview_nodes = [
+                    {
+                        "id": node.get("id"),
+                        "type": node.get("type"),
+                        "keyword": (node.get("data") or {}).get("keyword"),
+                    }
+                    for node in scene.get("nodes", [])[:8]
+                ]
 
     summary_input = "\n".join(
         [
@@ -46,6 +67,7 @@ def _summarize_scene_template(template_path: Path, repo_root: Path) -> tuple[str
             f"Scene count: {scene_count}",
             f"App keywords: {', '.join(sorted(app_keywords))}",
             f"Event keywords: {', '.join(sorted(event_keywords))}",
+            f"Node types: {', '.join(sorted(node_types))}",
             f"Template path: {template_path.relative_to(repo_root)}",
         ]
     )
@@ -55,6 +77,8 @@ def _summarize_scene_template(template_path: Path, repo_root: Path) -> tuple[str
         "sceneCount": scene_count,
         "appKeywords": sorted(app_keywords),
         "eventKeywords": sorted(event_keywords),
+        "nodeTypes": sorted(node_types),
+        "previewNodes": preview_nodes,
         "templatePath": str(template_path.relative_to(repo_root)),
     }
     return summary_input, metadata
@@ -67,6 +91,26 @@ def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict
     category = config.get("category") or ""
     fields = [field.get("name") for field in config.get("fields", []) if field.get("name")]
     outputs = [field.get("name") for field in config.get("output", []) if field.get("name")]
+    field_details = [
+        {
+            "name": field.get("name"),
+            "type": field.get("type"),
+            "label": field.get("label"),
+            "required": field.get("required"),
+        }
+        for field in config.get("fields", [])
+        if field.get("name")
+    ]
+    output_details = [
+        {
+            "name": field.get("name"),
+            "type": field.get("type"),
+            "label": field.get("label"),
+        }
+        for field in config.get("output", [])
+        if field.get("name")
+    ]
+    config_snippet = _truncate_text(json.dumps(config, ensure_ascii=False))
 
     summary_input = "\n".join(
         [
@@ -84,9 +128,12 @@ def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict
         "description": description,
         "category": category,
         "fields": fields,
+        "fieldDetails": field_details,
         "outputs": outputs,
+        "outputDetails": output_details,
         "configPath": str(config_path.relative_to(repo_root)),
         "keyword": f"{config_path.parent.parent.name}/{config_path.parent.name}",
+        "configSnippet": config_snippet,
     }
     return summary_input, metadata
 
@@ -164,7 +211,17 @@ async def build_ai_embeddings(
         summary_payload = await summarize_text(summary_input, api_key, model=summary_model)
         summary = summary_payload.get("summary") or ""
         keywords = summary_payload.get("keywords") or []
-        embedding_input = "\n".join([summary, f"Keywords: {', '.join(keywords)}", summary_input])
+        metadata_block = "\n".join(
+            [
+                f"Metadata fields: {json.dumps(metadata.get('fieldDetails') or metadata.get('fields') or [], ensure_ascii=False)}",
+                f"Metadata outputs: {json.dumps(metadata.get('outputDetails') or metadata.get('outputs') or [], ensure_ascii=False)}",
+                f"Metadata app keywords: {', '.join(metadata.get('appKeywords') or [])}",
+                f"Metadata event keywords: {', '.join(metadata.get('eventKeywords') or [])}",
+                f"Metadata node types: {', '.join(metadata.get('nodeTypes') or [])}",
+                f"Metadata preview nodes: {json.dumps(metadata.get('previewNodes') or [], ensure_ascii=False)}",
+            ]
+        )
+        embedding_input = "\n".join([summary, f"Keywords: {', '.join(keywords)}", summary_input, metadata_block])
         embedding = (await create_embeddings([embedding_input], api_key, model=embedding_model))[0]
         metadata["keywords"] = keywords
         upsert_ai_embedding(
