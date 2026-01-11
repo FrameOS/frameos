@@ -65,6 +65,7 @@ Follow these rules:
   - If you include "scene" nodes (to embed another scene), set data.keyword to the referenced scene id and connect them
     from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
     "field/render_functions[row][col]" and targetHandle "prev".
+- Every edge must reference nodes that exist in the "nodes" list. Do not include dangling edges.
 """.strip()
 
 
