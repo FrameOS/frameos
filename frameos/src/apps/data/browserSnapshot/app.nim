@@ -31,9 +31,25 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
+proc ensureSystemDependencies(self: App) =
+  let requiredCommands = @["python3", "chromium-browser"]
+  var missingCommands: seq[string] = @[]
+  for command in requiredCommands:
+    let (_, response) = execCmdEx("command -v " & command)
+    if response != 0:
+      missingCommands.add(command)
+  if missingCommands.len == 0:
+    return
+  self.log "Installing Browser Snapshot system dependencies..."
+  try:
+    discard execShellCmd("sudo apt-get update")
+    discard execShellCmd("sudo apt-get install -y python3 python3-pip python3-venv chromium-browser")
+  except OSError as e:
+    self.logError &"Error installing system dependencies: {e.msg}"
+
 proc init*(self: App) =
   ## (Initialization if needed)
-  discard
+  self.ensureSystemDependencies()
 
 # Ensure the virtual environment exists and is set up
 proc ensureVenvExists(self: App): string =
