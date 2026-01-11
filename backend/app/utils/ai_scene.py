@@ -34,7 +34,22 @@ Include relevant app/function hints only if they can be inferred from the reques
 Do not mention embeddings or internal tools.
 """.strip()
 
-SCENE_SYSTEM_PROMPT = """
+SCENE_BLUEPRINT_SYSTEM_PROMPT = """
+You are a FrameOS scene planner. Produce a clear, structured blueprint for the scene before JSON generation.
+Return JSON only (no markdown) with keys:
+- title: short title for the overall response
+- scenes: array of scene blueprints
+Each scene blueprint must include:
+- id: string
+- name: string
+- nodes: array of node plans (id, type, keyword or app, purpose, field hints, config hints)
+- edges: array of edge plans (source, target, kind, sourceHandle, targetHandle, reason)
+- checks: array of brief validation statements confirming the flow and required nodes.
+Focus on correctness: pick node types, app keywords, and connections that satisfy the user request and constraints.
+Double-check reasoning in the checks list (e.g. render event present, data apps not chained via appNodeEdge).
+""".strip()
+
+SCENE_JSON_SYSTEM_PROMPT = """
 You are a FrameOS scene generator. Build scenes JSON that can be uploaded to FrameOS.
 Follow these rules:
 - Output a JSON object with a top-level "title" string and "scenes" array. No markdown or code fences.
@@ -67,6 +82,7 @@ Follow these rules:
     from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
     "field/render_functions[row][col]" and targetHandle "prev".
 - Every edge must reference nodes that exist in the "nodes" list. Do not include dangling edges.
+You will be given a scene blueprint JSON; convert it into valid FrameOS scene JSON following the blueprint exactly.
 """.strip()
 
 SCENE_REVIEW_SYSTEM_PROMPT = """
@@ -81,10 +97,10 @@ Respond with JSON only, using keys:
 - issues: array of short strings describing any problems
 """.strip()
 
-SCENE_FIX_SYSTEM_PROMPT = """
-You fix FrameOS scene JSON based on reviewer issues.
-Return only valid JSON with the same top-level format: {"title": "...", "scenes": [...]}.
-Ensure all edges connect existing nodes, include render event, and keep settings.execution = "interpreted".
+SCENE_BLUEPRINT_FIX_SYSTEM_PROMPT = """
+You fix a FrameOS scene blueprint based on reviewer issues.
+Return JSON only with keys: title, scenes (blueprint format).
+Ensure checks confirm render event presence, valid node ids, and correct edge types.
 Do not include markdown or code fences.
 """.strip()
 
@@ -308,19 +324,34 @@ async def generate_scene_json(
     model: str,
 ) -> dict[str, Any]:
     context_block = _format_context_items(context_items)
-    user_prompt = "\n\n".join(
+    blueprint_prompt = "\n\n".join(
         [
             f"User request: {prompt}",
             "Relevant context:",
             context_block or "(no context available)",
         ]
     )
+    blueprint = await _request_scene_json(
+        api_key=api_key,
+        model=model,
+        messages=[
+            {"role": "system", "content": SCENE_BLUEPRINT_SYSTEM_PROMPT},
+            {"role": "user", "content": blueprint_prompt},
+        ],
+    )
+    scene_prompt = "\n\n".join(
+        [
+            f"User request: {prompt}",
+            "Scene blueprint JSON:",
+            json.dumps(blueprint, ensure_ascii=False),
+        ]
+    )
     return await _request_scene_json(
         api_key=api_key,
         model=model,
         messages=[
-            {"role": "system", "content": SCENE_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
+            {"role": "system", "content": SCENE_JSON_SYSTEM_PROMPT},
+            {"role": "user", "content": scene_prompt},
         ],
     )
 
@@ -419,7 +450,7 @@ async def repair_scene_json(
     issues: list[str],
 ) -> dict[str, Any]:
     context_block = _format_context_items(context_items)
-    user_prompt = "\n\n".join(
+    blueprint_prompt = "\n\n".join(
         [
             f"User request: {prompt}",
             f"Reviewer issues: {json.dumps(issues, ensure_ascii=False)}",
@@ -429,12 +460,28 @@ async def repair_scene_json(
             json.dumps(payload, ensure_ascii=False),
         ]
     )
+    blueprint = await _request_scene_json(
+        api_key=api_key,
+        model=model,
+        messages=[
+            {"role": "system", "content": SCENE_BLUEPRINT_FIX_SYSTEM_PROMPT},
+            {"role": "user", "content": blueprint_prompt},
+        ],
+    )
+    scene_prompt = "\n\n".join(
+        [
+            f"User request: {prompt}",
+            f"Reviewer issues: {json.dumps(issues, ensure_ascii=False)}",
+            "Scene blueprint JSON:",
+            json.dumps(blueprint, ensure_ascii=False),
+        ]
+    )
     return await _request_scene_json(
         api_key=api_key,
         model=model,
         messages=[
-            {"role": "system", "content": SCENE_FIX_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
+            {"role": "system", "content": SCENE_JSON_SYSTEM_PROMPT},
+            {"role": "user", "content": scene_prompt},
         ],
     )
 
