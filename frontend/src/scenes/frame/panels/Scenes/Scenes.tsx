@@ -511,10 +511,21 @@ export function Scenes() {
                               className="!px-1"
                               color="primary"
                               onClick={(e) => {
+                                if (unsavedSceneIds.has(scene.id) || undeployedSceneIds.has(scene.id)) {
+                                  e.stopPropagation()
+                                  return
+                                }
                                 e.stopPropagation()
                                 setCurrentScene(scene.id)
                               }}
-                              title="Activate"
+                              disabled={unsavedSceneIds.has(scene.id) || undeployedSceneIds.has(scene.id)}
+                              title={
+                                unsavedSceneIds.has(scene.id)
+                                  ? 'Save this scene before running it.'
+                                  : undeployedSceneIds.has(scene.id)
+                                  ? 'Deploy this scene before running it.'
+                                  : 'Activate'
+                              }
                             >
                               {sceneChanging === scene.id ? (
                                 <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
