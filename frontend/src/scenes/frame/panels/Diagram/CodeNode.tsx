@@ -47,7 +47,7 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
                   style={{
                     position: 'relative',
                     transform: 'none',
-                    right: 0,
+                    left: 0,
                     top: 0,
                     background: 'black',
                     borderColor: 'white',
@@ -173,7 +173,7 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
               style={{
                 position: 'relative',
                 transform: 'none',
-                right: 0,
+                left: 0,
                 top: 0,
                 background: 'black',
                 borderColor: 'white',

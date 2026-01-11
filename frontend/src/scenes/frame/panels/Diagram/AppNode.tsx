@@ -454,7 +454,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                     style={{
                       position: 'relative',
                       transform: 'none',
-                      right: 0,
+                      left: 0,
                       top: 0,
                       background: 'black',
                       borderColor: 'white',

@@ -108,6 +108,13 @@ export function Scenes() {
   const selectableSceneIds = filteredScenes.map((scene) => scene.id)
   const allSelectableScenesSelected =
     selectableSceneIds.length > 0 && selectableSceneIds.every((sceneId) => selectedSceneIds.has(sceneId))
+  const promptSuggestions = [
+    { label: 'Banana', prompt: 'Display a high-resolution image of a banana on a white background.' },
+    { label: 'Minimal clock', prompt: 'Design a minimalist analog clock for an e-ink frame.' },
+    { label: 'Weather panel', prompt: 'Show a clean weather dashboard with temperature, forecast, and icons.' },
+    { label: 'Photo spotlight', prompt: 'Create a photo spotlight with a caption and subtle border.' },
+    { label: 'Daily quote', prompt: 'Display a large inspirational quote with author attribution.' },
+  ]
 
   const triggerUploadInput = () => {
     uploadInputRef.current?.click()
@@ -155,6 +162,20 @@ export function Scenes() {
           onChange={setAiPrompt}
           disabled={!hasEmbeddings}
         />
+        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
+          <span>Try:</span>
+          {promptSuggestions.map((suggestion) => (
+            <button
+              key={suggestion.label}
+              type="button"
+              className="text-blue-300 hover:text-blue-200 hover:underline"
+              onClick={() => setAiPrompt(suggestion.prompt)}
+              disabled={!hasEmbeddings}
+            >
+              {suggestion.label}
+            </button>
+          ))}
+        </div>
       </div>
       {!hasEmbeddings ? (
         <div className="text-xs text-gray-400">
