@@ -11,6 +11,7 @@ SUMMARY_MODEL = "gpt-5-mini"
 SCENE_MODEL = "gpt-5.2"
 EMBEDDING_MODEL = "text-embedding-3-large"
 EXPANSION_MODEL = "gpt-5-mini"
+SCENE_REVIEW_MODEL = "gpt-5-mini"
 
 DEFAULT_APP_CONTEXT_K = 6
 DEFAULT_SCENE_CONTEXT_K = 4
@@ -66,6 +67,25 @@ Follow these rules:
     from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
     "field/render_functions[row][col]" and targetHandle "prev".
 - Every edge must reference nodes that exist in the "nodes" list. Do not include dangling edges.
+""".strip()
+
+SCENE_REVIEW_SYSTEM_PROMPT = """
+You are a strict reviewer for FrameOS scene JSON.
+Check the scene against the user request and ensure it is valid:
+- It has a top-level "scenes" array with at least one scene.
+- Each scene has id, name, nodes, edges, and settings.execution = "interpreted".
+- There is at least one event node with data.keyword = "render".
+- Every edge references existing node ids for source and target.
+Respond with JSON only, using keys:
+- solves: boolean (true only if the scene matches the user request)
+- issues: array of short strings describing any problems
+""".strip()
+
+SCENE_FIX_SYSTEM_PROMPT = """
+You fix FrameOS scene JSON based on reviewer issues.
+Return only valid JSON with the same top-level format: {"title": "...", "scenes": [...]}.
+Ensure all edges connect existing nodes, include render event, and keep settings.execution = "interpreted".
+Do not include markdown or code fences.
 """.strip()
 
 
@@ -295,6 +315,136 @@ async def generate_scene_json(
             context_block or "(no context available)",
         ]
     )
+    return await _request_scene_json(
+        api_key=api_key,
+        model=model,
+        messages=[
+            {"role": "system", "content": SCENE_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+
+
+def validate_scene_payload(payload: dict[str, Any]) -> list[str]:
+    issues: list[str] = []
+    scenes = payload.get("scenes")
+    if not isinstance(scenes, list) or not scenes:
+        return ["Scene payload must include a non-empty scenes array."]
+    for index, scene in enumerate(scenes):
+        if not isinstance(scene, dict):
+            issues.append(f"Scene {index} is not an object.")
+            continue
+        scene_id = scene.get("id")
+        scene_name = scene.get("name")
+        nodes = scene.get("nodes")
+        edges = scene.get("edges")
+        settings = scene.get("settings") or {}
+        if not scene_id or not scene_name:
+            issues.append(f"Scene {index} is missing id or name.")
+        if not isinstance(nodes, list) or not nodes:
+            issues.append(f"Scene {index} must include nodes.")
+            continue
+        if not isinstance(edges, list):
+            issues.append(f"Scene {index} must include edges.")
+            continue
+        if settings.get("execution") != "interpreted":
+            issues.append(f"Scene {index} settings.execution must be 'interpreted'.")
+        node_ids: set[str] = set()
+        render_event_found = False
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            node_id = node.get("id")
+            if isinstance(node_id, str):
+                if node_id in node_ids:
+                    issues.append(f"Scene {index} has duplicate node id {node_id}.")
+                node_ids.add(node_id)
+            node_type = node.get("type")
+            data = node.get("data") or {}
+            if node_type == "event" and data.get("keyword") == "render":
+                render_event_found = True
+        if not render_event_found:
+            issues.append(f"Scene {index} is missing a render event node.")
+        for edge in edges:
+            if not isinstance(edge, dict):
+                issues.append(f"Scene {index} has an edge that is not an object.")
+                continue
+            source = edge.get("source")
+            target = edge.get("target")
+            if source not in node_ids:
+                issues.append(f"Scene {index} edge source '{source}' is not a valid node id.")
+            if target not in node_ids:
+                issues.append(f"Scene {index} edge target '{target}' is not a valid node id.")
+    return issues
+
+
+async def review_scene_solution(
+    *,
+    prompt: str,
+    payload: dict[str, Any],
+    api_key: str,
+    model: str = SCENE_REVIEW_MODEL,
+) -> list[str]:
+    review_prompt = "\n\n".join(
+        [
+            f"User request: {prompt}",
+            "Scene JSON:",
+            json.dumps(payload, ensure_ascii=False),
+        ]
+    )
+    response = await _request_scene_json(
+        api_key=api_key,
+        model=model,
+        messages=[
+            {"role": "system", "content": SCENE_REVIEW_SYSTEM_PROMPT},
+            {"role": "user", "content": review_prompt},
+        ],
+    )
+    solves = response.get("solves")
+    issues = response.get("issues")
+    if solves is True:
+        return []
+    if isinstance(issues, list) and issues:
+        return [str(issue) for issue in issues]
+    return ["Scene review did not confirm the response solves the request."]
+
+
+async def repair_scene_json(
+    *,
+    prompt: str,
+    context_items: list[AiEmbedding],
+    api_key: str,
+    model: str,
+    payload: dict[str, Any],
+    issues: list[str],
+) -> dict[str, Any]:
+    context_block = _format_context_items(context_items)
+    user_prompt = "\n\n".join(
+        [
+            f"User request: {prompt}",
+            f"Reviewer issues: {json.dumps(issues, ensure_ascii=False)}",
+            "Relevant context:",
+            context_block or "(no context available)",
+            "Previous scene JSON:",
+            json.dumps(payload, ensure_ascii=False),
+        ]
+    )
+    return await _request_scene_json(
+        api_key=api_key,
+        model=model,
+        messages=[
+            {"role": "system", "content": SCENE_FIX_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+
+
+async def _request_scene_json(
+    *,
+    api_key: str,
+    model: str,
+    messages: list[dict[str, str]],
+) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=90) as client:
         response = await client.post(
             "https://api.openai.com/v1/chat/completions",
@@ -304,10 +454,7 @@ async def generate_scene_json(
             },
             json={
                 "model": model or SCENE_MODEL,
-                "messages": [
-                    {"role": "system", "content": SCENE_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
+                "messages": messages,
                 "response_format": {"type": "json_object"},
             },
         )

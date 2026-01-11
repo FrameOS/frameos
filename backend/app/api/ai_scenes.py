@@ -13,12 +13,16 @@ from app.schemas.ai_scenes import AiSceneGenerateRequest, AiSceneGenerateRespons
 from app.utils.ai_scene import (
     EMBEDDING_MODEL,
     SCENE_MODEL,
+    SCENE_REVIEW_MODEL,
     DEFAULT_APP_CONTEXT_K,
     DEFAULT_SCENE_CONTEXT_K,
     create_embeddings,
     expand_prompt,
     generate_scene_json,
+    repair_scene_json,
     rank_embeddings,
+    review_scene_solution,
+    validate_scene_payload,
 )
 from app.websockets import publish_message
 from . import api_with_auth
@@ -129,13 +133,82 @@ async def generate_scene(
                 stage="context:skip",
             )
 
-        await _publish_ai_scene_log(redis, "Generating scene JSON.", request_id, stage="generate")
-        response_payload = await generate_scene_json(
-            prompt=prompt,
-            context_items=context_items,
-            api_key=api_key,
-            model=openai_settings.get("sceneModel") or SCENE_MODEL,
-        )
+        response_payload = None
+        validation_issues: list[str] = []
+        review_issues: list[str] = []
+        max_attempts = 2
+        scene_model = openai_settings.get("sceneModel") or SCENE_MODEL
+        review_model = openai_settings.get("reviewModel") or SCENE_REVIEW_MODEL
+        for attempt in range(1, max_attempts + 1):
+            if attempt == 1:
+                await _publish_ai_scene_log(
+                    redis,
+                    f"Generating scene JSON (attempt {attempt}/{max_attempts}).",
+                    request_id,
+                    stage="generate",
+                )
+                response_payload = await generate_scene_json(
+                    prompt=prompt,
+                    context_items=context_items,
+                    api_key=api_key,
+                    model=scene_model,
+                )
+            else:
+                await _publish_ai_scene_log(
+                    redis,
+                    f"Fixing scene JSON (attempt {attempt}/{max_attempts}).",
+                    request_id,
+                    stage="generate",
+                )
+                response_payload = await repair_scene_json(
+                    prompt=prompt,
+                    context_items=context_items,
+                    api_key=api_key,
+                    model=scene_model,
+                    payload=response_payload or {},
+                    issues=validation_issues + review_issues,
+                )
+
+            validation_issues = validate_scene_payload(response_payload or {})
+            if validation_issues:
+                await _publish_ai_scene_log(
+                    redis,
+                    f"Scene validation issues: {validation_issues}",
+                    request_id,
+                    status="warning",
+                    stage="validate",
+                )
+                continue
+
+            review_issues = await review_scene_solution(
+                prompt=prompt,
+                payload=response_payload or {},
+                api_key=api_key,
+                model=review_model,
+            )
+            if review_issues:
+                await _publish_ai_scene_log(
+                    redis,
+                    f"Scene review issues: {review_issues}",
+                    request_id,
+                    status="warning",
+                    stage="validate",
+                )
+                continue
+            break
+
+        if validation_issues or review_issues:
+            await _publish_ai_scene_log(
+                redis,
+                "AI scene generation did not pass validation after retries.",
+                request_id,
+                status="error",
+                stage="validate",
+            )
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail="AI scene generation did not pass validation",
+            )
     except HTTPException:
         raise
     except Exception as exc:
