@@ -3,7 +3,6 @@
     "description": "Capture a snapshot of a website with playwright and headless chromium. Needs a 64-bit system.",
     "category": "data",
     "version": "1.0.0",
-    "nixpkgs": [],
     "fields": [
       {
         "name": "url",
