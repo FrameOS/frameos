@@ -1,10 +1,14 @@
 from http import HTTPStatus
+from datetime import datetime
+from uuid import uuid4
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
+from arq import ArqRedis as Redis
 
 from app.database import get_db
 from app.models.ai_embeddings import AiEmbedding
 from app.models.settings import get_settings_dict
+from app.redis import get_redis
 from app.schemas.ai_scenes import AiSceneGenerateRequest, AiSceneGenerateResponse, AiSceneContextItem
 from app.utils.ai_scene import (
     EMBEDDING_MODEL,
@@ -16,66 +20,144 @@ from app.utils.ai_scene import (
     generate_scene_json,
     rank_embeddings,
 )
+from app.websockets import publish_message
 from . import api_with_auth
 
 
+async def _publish_ai_scene_log(
+    redis: Redis,
+    message: str,
+    request_id: str,
+    status: str = "info",
+    stage: str | None = None,
+) -> None:
+    await publish_message(
+        redis,
+        "ai_scene_log",
+        {
+            "message": message,
+            "requestId": request_id,
+            "status": status,
+            "stage": stage,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+
 @api_with_auth.post("/ai/scenes/generate", response_model=AiSceneGenerateResponse)
-async def generate_scene(data: AiSceneGenerateRequest, db: Session = Depends(get_db)):
+async def generate_scene(
+    data: AiSceneGenerateRequest,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    request_id = data.request_id or str(uuid4())
+    await _publish_ai_scene_log(redis, "Starting AI scene generation.", request_id, stage="start")
     prompt = data.prompt.strip()
     if not prompt:
+        await _publish_ai_scene_log(
+            redis,
+            "Prompt is required to generate a scene.",
+            request_id,
+            status="error",
+            stage="validate",
+        )
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Prompt is required")
 
     openai_settings = get_settings_dict(db).get("openAI", {})
     api_key = openai_settings.get("apiKey")
     if not api_key:
+        await _publish_ai_scene_log(
+            redis,
+            "OpenAI API key not set.",
+            request_id,
+            status="error",
+            stage="validate",
+        )
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI API key not set")
 
-    embeddings = db.query(AiEmbedding).all()
-    context_items: list[AiEmbedding] = []
-    if embeddings:
-        expanded_prompt = await expand_prompt(prompt, api_key)
-        query_embedding = (
-            await create_embeddings(
-                [expanded_prompt],
-                api_key,
-                model=openai_settings.get("embeddingModel") or EMBEDDING_MODEL,
+    try:
+        await _publish_ai_scene_log(redis, "Loading embeddings.", request_id, stage="context:load")
+        embeddings = db.query(AiEmbedding).all()
+        context_items: list[AiEmbedding] = []
+        if embeddings:
+            await _publish_ai_scene_log(redis, "Expanding prompt for retrieval.", request_id, stage="context:expand")
+            expanded_prompt = await expand_prompt(prompt, api_key)
+            await _publish_ai_scene_log(redis, "Creating retrieval embedding.", request_id, stage="context:embed")
+            query_embedding = (
+                await create_embeddings(
+                    [expanded_prompt],
+                    api_key,
+                    model=openai_settings.get("embeddingModel") or EMBEDDING_MODEL,
+                )
+            )[0]
+            app_embeddings = [item for item in embeddings if item.source_type == "app"]
+            scene_embeddings = [item for item in embeddings if item.source_type == "scene"]
+            await _publish_ai_scene_log(redis, "Ranking relevant context.", request_id, stage="context:rank")
+            ranked_items = [
+                *rank_embeddings(
+                    query_embedding,
+                    app_embeddings,
+                    prompt=expanded_prompt,
+                    top_k=DEFAULT_APP_CONTEXT_K,
+                ),
+                *rank_embeddings(
+                    query_embedding,
+                    scene_embeddings,
+                    prompt=expanded_prompt,
+                    top_k=DEFAULT_SCENE_CONTEXT_K,
+                ),
+            ]
+            seen: set[tuple[str, str]] = set()
+            context_items = []
+            for item in ranked_items:
+                key = (item.source_type, item.source_path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                context_items.append(item)
+            await _publish_ai_scene_log(
+                redis,
+                f"Selected {len(context_items)} context items.",
+                request_id,
+                stage="context:ready",
             )
-        )[0]
-        app_embeddings = [item for item in embeddings if item.source_type == "app"]
-        scene_embeddings = [item for item in embeddings if item.source_type == "scene"]
-        ranked_items = [
-            *rank_embeddings(
-                query_embedding,
-                app_embeddings,
-                prompt=expanded_prompt,
-                top_k=DEFAULT_APP_CONTEXT_K,
-            ),
-            *rank_embeddings(
-                query_embedding,
-                scene_embeddings,
-                prompt=expanded_prompt,
-                top_k=DEFAULT_SCENE_CONTEXT_K,
-            ),
-        ]
-        seen: set[tuple[str, str]] = set()
-        context_items = []
-        for item in ranked_items:
-            key = (item.source_type, item.source_path)
-            if key in seen:
-                continue
-            seen.add(key)
-            context_items.append(item)
+        else:
+            await _publish_ai_scene_log(
+                redis,
+                "No embeddings found; generating without retrieval context.",
+                request_id,
+                stage="context:skip",
+            )
 
-    response_payload = await generate_scene_json(
-        prompt=prompt,
-        context_items=context_items,
-        api_key=api_key,
-        model=openai_settings.get("sceneModel") or SCENE_MODEL,
-    )
+        await _publish_ai_scene_log(redis, "Generating scene JSON.", request_id, stage="generate")
+        response_payload = await generate_scene_json(
+            prompt=prompt,
+            context_items=context_items,
+            api_key=api_key,
+            model=openai_settings.get("sceneModel") or SCENE_MODEL,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await _publish_ai_scene_log(
+            redis,
+            f"AI scene generation failed: {exc}",
+            request_id,
+            status="error",
+            stage="error",
+        )
+        raise
 
     title = response_payload.get("title")
     scenes = response_payload.get("scenes")
     if not isinstance(scenes, list):
+        await _publish_ai_scene_log(
+            redis,
+            "AI response did not include scenes.",
+            request_id,
+            status="error",
+            stage="validate",
+        )
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="AI response did not include scenes",
@@ -91,5 +173,7 @@ async def generate_scene(data: AiSceneGenerateRequest, db: Session = Depends(get
         )
         for item in context_items
     ]
+
+    await _publish_ai_scene_log(redis, "Scene generation complete.", request_id, status="success", stage="done")
 
     return AiSceneGenerateResponse(title=title, scenes=scenes, context=context_response)

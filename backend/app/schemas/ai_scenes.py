@@ -1,10 +1,13 @@
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AiSceneGenerateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     prompt: str
+    request_id: Optional[str] = Field(default=None, alias="requestId")
 
 
 class AiSceneContextItem(BaseModel):

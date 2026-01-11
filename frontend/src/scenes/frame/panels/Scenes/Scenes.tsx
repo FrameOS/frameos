@@ -71,6 +71,7 @@ export function Scenes() {
     isUploadingImage,
     aiPrompt,
     aiError,
+    aiSceneLastLog,
     isGeneratingAiScene,
     isInstallingMissingActiveScene,
   } = useValues(scenesLogic({ frameId }))
@@ -164,7 +165,7 @@ export function Scenes() {
         </div>
       ) : null}
       {aiError ? <span className="text-xs text-red-400">{aiError}</span> : null}
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2">
         <Button
           size="small"
           color="secondary"
@@ -175,9 +176,17 @@ export function Scenes() {
           {isGeneratingAiScene ? <Spinner color="white" /> : <SparklesIcon className="w-4 h-4" />}
           {isGeneratingAiScene ? 'Generating...' : 'Generate scene'}
         </Button>
-        <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={closeAiScene}>
-          Close
-        </Button>
+        {!isGeneratingAiScene ? (
+          <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={closeAiScene}>
+            Close
+          </Button>
+        ) : null}
+        <div
+          className="text-xs text-gray-400 truncate max-w-[240px]"
+          title={aiSceneLastLog?.message || (isGeneratingAiScene ? 'Awaiting updates.' : '')}
+        >
+          {aiSceneLastLog?.message || (isGeneratingAiScene ? 'Awaiting updates.' : '')}
+        </div>
       </div>
     </Box>
   )

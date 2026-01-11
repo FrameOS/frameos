@@ -144,6 +144,14 @@ export interface LogType {
   frame_id: number
 }
 
+export interface AiSceneLogType {
+  message: string
+  requestId?: string
+  status?: string
+  stage?: string
+  timestamp: string
+}
+
 export interface AssetType {
   path: string
   size: number

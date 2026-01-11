@@ -11,6 +11,7 @@ import equal from 'fast-deep-equal'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { buildSdCardImageScene } from './sceneShortcuts'
+import { socketLogic } from '../../../socketLogic'
 
 export interface ScenesLogicProps {
   frameId: number
@@ -21,6 +22,7 @@ export const scenesLogic = kea<scenesLogicType>([
   props({} as ScenesLogicProps),
   key((props) => props.frameId),
   connect(({ frameId }: ScenesLogicProps) => ({
+    logic: [socketLogic],
     values: [
       frameLogic({ frameId }),
       ['frame', 'frameForm', 'lastDeploy'],
@@ -69,6 +71,16 @@ export const scenesLogic = kea<scenesLogicType>([
     generateAiScene: true,
     generateAiSceneSuccess: true,
     generateAiSceneFailure: (error: string) => ({ error }),
+    setAiSceneRequestId: (requestId: string | null) => ({ requestId }),
+    setAiSceneLogMessage: (log: {
+      requestId: string
+      message: string
+      status?: string
+      stage?: string
+      timestamp: string
+    }) => ({
+      log,
+    }),
     installMissingActiveScene: true,
     installMissingActiveSceneSuccess: true,
     installMissingActiveSceneFailure: true,
@@ -189,6 +201,29 @@ export const scenesLogic = kea<scenesLogicType>([
         generateAiScene: () => null,
         generateAiSceneFailure: (_, { error }) => error,
         closeAiScene: () => null,
+      },
+    ],
+    aiSceneRequestId: [
+      null as string | null,
+      {
+        setAiSceneRequestId: (_, { requestId }) => requestId,
+        closeAiScene: () => null,
+      },
+    ],
+    aiSceneLogsByRequestId: [
+      {} as Record<string, { message: string; status?: string; stage?: string; timestamp: string }>,
+      {
+        setAiSceneLogMessage: (state, { log }) => ({
+          ...state,
+          [log.requestId]: log,
+        }),
+        [socketLogic.actionTypes.aiSceneLog]: (state, { log }) =>
+          log.requestId
+            ? {
+                ...state,
+                [log.requestId]: log,
+              }
+            : state,
       },
     ],
     isGeneratingAiScene: [
@@ -363,6 +398,10 @@ export const scenesLogic = kea<scenesLogicType>([
         return searchPieces.every((piece) => sceneName.includes(piece))
       },
     ],
+    aiSceneLastLog: [
+      (s) => [s.aiSceneRequestId, s.aiSceneLogsByRequestId],
+      (requestId, logsByRequestId) => (requestId ? logsByRequestId[requestId] : null),
+    ],
   }),
   listeners(({ actions, props, values }) => ({
     generateAiScene: async () => {
@@ -371,11 +410,19 @@ export const scenesLogic = kea<scenesLogicType>([
         actions.generateAiSceneFailure('Add a prompt to generate a scene.')
         return
       }
+      const requestId = uuidv4()
+      actions.setAiSceneRequestId(requestId)
+      actions.setAiSceneLogMessage({
+        requestId,
+        message: 'Preparing AI scene generation…',
+        status: 'info',
+        timestamp: new Date().toISOString(),
+      })
       try {
         const response = await apiFetch('/api/ai/scenes/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, requestId }),
         })
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}))
@@ -390,9 +437,21 @@ export const scenesLogic = kea<scenesLogicType>([
         const sanitizedScenes = scenes.map((scene: Partial<FrameScene>) => sanitizeScene(scene, values.frameForm))
         actions.applyTemplate({ scenes: sanitizedScenes, name: title || 'AI Generated Scene' })
         actions.generateAiSceneSuccess()
+        actions.setAiSceneLogMessage({
+          requestId,
+          message: 'Scene applied to the editor.',
+          status: 'success',
+          timestamp: new Date().toISOString(),
+        })
       } catch (error) {
         console.error(error)
         actions.generateAiSceneFailure(error instanceof Error ? error.message : 'Failed to generate scene')
+        actions.setAiSceneLogMessage({
+          requestId,
+          message: error instanceof Error ? error.message : 'Failed to generate scene',
+          status: 'error',
+          timestamp: new Date().toISOString(),
+        })
       }
     },
     uploadImage: async ({ file }) => {

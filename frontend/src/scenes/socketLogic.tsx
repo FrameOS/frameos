@@ -1,5 +1,5 @@
 import { actions, afterMount, kea, path } from 'kea'
-import { FrameType, LogType } from '../types'
+import { AiSceneLogType, FrameType, LogType } from '../types'
 
 import type { socketLogicType } from './socketLogicType'
 import { inHassioIngress } from '../utils/inHassioIngress'
@@ -9,6 +9,7 @@ export const socketLogic = kea<socketLogicType>([
   path(['src', 'scenes', 'socketLogic']),
   actions({
     newLog: (log: LogType) => ({ log }),
+    aiSceneLog: (log: AiSceneLogType) => ({ log }),
     newFrame: (frame: FrameType) => ({ frame }),
     newSceneImage: (frameId: number, sceneId: string, width: number, height: number) => ({
       frameId,
@@ -41,6 +42,9 @@ export const socketLogic = kea<socketLogicType>([
           switch (data.event) {
             case 'new_log':
               actions.newLog(data.data)
+              break
+            case 'ai_scene_log':
+              actions.aiSceneLog(data.data)
               break
             case 'new_frame':
               actions.newFrame(data.data)
