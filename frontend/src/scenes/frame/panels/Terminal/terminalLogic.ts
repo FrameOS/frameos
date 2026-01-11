@@ -62,7 +62,7 @@ export const terminalLogic = kea<terminalLogicType>([
   key((props) => props.frameId),
   connect(() => ({
     values: [frameLogic, ['frame']],
-  }),
+  })),
   actions({
     connect: true,
     disconnect: true,
