@@ -97,7 +97,7 @@ def rank_embeddings(query_embedding: list[float], items: list[AiEmbedding], top_
     return [items[i] for i in ranked_indices]
 
 
-async def create_embeddings(texts: list[str], api_key: str) -> list[list[float]]:
+async def create_embeddings(texts: list[str], api_key: str, model: str) -> list[list[float]]:
     embeddings: list[list[float]] = []
     async with httpx.AsyncClient(timeout=60) as client:
         for batch in _chunk_texts(texts):
@@ -108,7 +108,7 @@ async def create_embeddings(texts: list[str], api_key: str) -> list[list[float]]
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": EMBEDDING_MODEL,
+                    "model": model or EMBEDDING_MODEL,
                     "input": batch,
                 },
             )
@@ -148,6 +148,7 @@ async def generate_scene_json(
     prompt: str,
     context_items: list[AiEmbedding],
     api_key: str,
+    model: str,
 ) -> dict[str, Any]:
     context_block = _format_context_items(context_items)
     user_prompt = "\n\n".join(
@@ -165,7 +166,7 @@ async def generate_scene_json(
                 "Content-Type": "application/json",
             },
             json={
-                "model": SCENE_MODEL,
+                "model": model or SCENE_MODEL,
                 "messages": [
                     {"role": "system", "content": SCENE_SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},

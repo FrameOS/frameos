@@ -142,6 +142,8 @@ async def build_ai_embeddings(
     *,
     clear_existing: bool = False,
     only_missing: bool = False,
+    summary_model: str,
+    embedding_model: str,
 ) -> int:
     repo_root = _resolve_repo_root()
     items = _collect_ai_embedding_items(repo_root)
@@ -159,11 +161,11 @@ async def build_ai_embeddings(
     for source_type, source_path, name, summary_input, metadata in items:
         if only_missing and (source_type, source_path) in existing_sources:
             continue
-        summary_payload = await summarize_text(summary_input, api_key)
+        summary_payload = await summarize_text(summary_input, api_key, model=summary_model)
         summary = summary_payload.get("summary") or ""
         keywords = summary_payload.get("keywords") or []
         embedding_input = "\n".join([summary, f"Keywords: {', '.join(keywords)}", summary_input])
-        embedding = (await create_embeddings([embedding_input], api_key))[0]
+        embedding = (await create_embeddings([embedding_input], api_key, model=embedding_model))[0]
         metadata["keywords"] = keywords
         upsert_ai_embedding(
             db,

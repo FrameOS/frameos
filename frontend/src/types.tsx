@@ -542,6 +542,10 @@ export interface FrameOSSettings {
   }
   openAI?: {
     apiKey?: string
+    summaryModel?: string
+    embeddingModel?: string
+    sceneModel?: string
+    appEnhanceModel?: string
   }
   repositories?: RepositoryType[]
   ssh_keys?: {

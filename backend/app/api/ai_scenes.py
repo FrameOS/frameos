@@ -6,7 +6,13 @@ from app.database import get_db
 from app.models.ai_embeddings import AiEmbedding
 from app.models.settings import get_settings_dict
 from app.schemas.ai_scenes import AiSceneGenerateRequest, AiSceneGenerateResponse, AiSceneContextItem
-from app.utils.ai_scene import create_embeddings, generate_scene_json, rank_embeddings
+from app.utils.ai_scene import (
+    EMBEDDING_MODEL,
+    SCENE_MODEL,
+    create_embeddings,
+    generate_scene_json,
+    rank_embeddings,
+)
 from . import api_with_auth
 
 
@@ -16,20 +22,28 @@ async def generate_scene(data: AiSceneGenerateRequest, db: Session = Depends(get
     if not prompt:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Prompt is required")
 
-    api_key = get_settings_dict(db).get("openAI", {}).get("apiKey")
+    openai_settings = get_settings_dict(db).get("openAI", {})
+    api_key = openai_settings.get("apiKey")
     if not api_key:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI API key not set")
 
     embeddings = db.query(AiEmbedding).all()
     context_items: list[AiEmbedding] = []
     if embeddings:
-        query_embedding = (await create_embeddings([prompt], api_key))[0]
+        query_embedding = (
+            await create_embeddings(
+                [prompt],
+                api_key,
+                model=openai_settings.get("embeddingModel") or EMBEDDING_MODEL,
+            )
+        )[0]
         context_items = rank_embeddings(query_embedding, embeddings, top_k=8)
 
     response_payload = await generate_scene_json(
         prompt=prompt,
         context_items=context_items,
         api_key=api_key,
+        model=openai_settings.get("sceneModel") or SCENE_MODEL,
     )
 
     title = response_payload.get("title")

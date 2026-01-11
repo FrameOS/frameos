@@ -60,7 +60,8 @@ async def validate_python_frame_source(data: ValidateSourceRequest):
 async def enhance_python_frame_source(data: EnhanceSourceRequest, db: Session = Depends(get_db)):
     source = data.source
     prompt = data.prompt
-    api_key = get_settings_dict(db).get('openAI', {}).get('apiKey', None)
+    openai_settings = get_settings_dict(db).get("openAI", {})
+    api_key = openai_settings.get("apiKey")
 
     if api_key is None:
         raise HTTPException(status_code=400, detail="OpenAI API key not set")
@@ -80,7 +81,7 @@ async def enhance_python_frame_source(data: EnhanceSourceRequest, db: Session = 
             {"role": "system", "content": ai_context},
             {"role": "user", "content": prompt}
         ],
-        "model": "gpt-4",
+        "model": openai_settings.get("appEnhanceModel") or "gpt-4",
     }
 
     headers = {
