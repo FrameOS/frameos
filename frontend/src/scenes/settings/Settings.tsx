@@ -255,7 +255,7 @@ export function Settings() {
                       >
                         {isDeletingEmbeddings ? <Spinner color="white" /> : 'Delete all'}
                       </Button>
-                      {isGeneratingEmbeddings ? 'Generating embeddings. Please stay on this page until done.' : null}
+                      {isGeneratingEmbeddings ? 'Generating embeddings' : null}
                     </div>
                   </Box>
                 </Group>

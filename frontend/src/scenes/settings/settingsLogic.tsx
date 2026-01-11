@@ -8,6 +8,8 @@ import { apiFetch } from '../../utils/apiFetch'
 import { normalizeSshKeys } from '../../utils/sshKeys'
 import { v4 as uuidv4 } from 'uuid'
 
+const embeddingsGeneratingStorageKey = 'frameos.embeddings.generating'
+
 function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, any>): FrameOSSettings {
   return {
     ...settings,
@@ -213,6 +215,10 @@ export const settingsLogic = kea<settingsLogicType>([
     actions.loadSettings()
     actions.loadAiEmbeddingsStatus()
     actions.loadCustomFonts()
+    if (window.localStorage.getItem(embeddingsGeneratingStorageKey) === 'true') {
+      actions.setIsGeneratingEmbeddings(true)
+      actions.startEmbeddingsPolling()
+    }
   }),
   events(({ actions }) => ({
     beforeUnmount: () => {
@@ -228,6 +234,7 @@ export const settingsLogic = kea<settingsLogicType>([
       if (values.isGeneratingEmbeddings && missing === 0) {
         actions.setIsGeneratingEmbeddings(false)
         actions.stopEmbeddingsPolling()
+        window.localStorage.removeItem(embeddingsGeneratingStorageKey)
       }
     },
     startEmbeddingsPolling: () => {
@@ -252,12 +259,14 @@ export const settingsLogic = kea<settingsLogicType>([
         return
       }
       actions.setIsGeneratingEmbeddings(true)
+      window.localStorage.setItem(embeddingsGeneratingStorageKey, 'true')
       actions.startEmbeddingsPolling()
       try {
         await actions.generateMissingAiEmbeddings()
       } catch (error) {
         actions.setIsGeneratingEmbeddings(false)
         actions.stopEmbeddingsPolling()
+        window.localStorage.removeItem(embeddingsGeneratingStorageKey)
         throw error
       }
     },
