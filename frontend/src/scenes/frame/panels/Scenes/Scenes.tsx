@@ -191,46 +191,54 @@ export function Scenes() {
     </Box>
   )
 
-  const renderShortcuts = (location: string, className?: string, onNewScene: (() => void) | null = null) => (
+  const renderShortcuts = (
+    location: string,
+    className?: string,
+    onNewScene: (() => void) | null = null,
+    rightComponent: React.ReactNode = null
+  ) => (
     <>
-      <div className={clsx('flex flex-wrap items-center gap-2 rounded-lg', className)}>
-        <Button
-          size="small"
-          color="secondary"
-          className="flex gap-1 items-center"
-          onClick={() => (onNewScene ? onNewScene() : openNewScene(location))}
-        >
-          <PlusIcon className="w-4 h-4" />
-          New blank scene
-        </Button>
-        <Button
-          size="small"
-          color="secondary"
-          className="flex gap-1 items-center"
-          onClick={() => openAiScene(location)}
-        >
-          <SparklesIcon className="w-4 h-4" />
-          Generate scene
-        </Button>
-        {!frame.scenes?.length ? (
-          <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={openTemplates}>
-            <SparklesIcon className="w-4 h-4" />
-            Explore available scenes
-          </Button>
-        ) : null}
-        {frame.last_successful_deploy_at ? (
+      <div className="flex items-top justify-between">
+        <div className={clsx('flex flex-wrap items-center gap-2 rounded-lg', className)}>
           <Button
             size="small"
             color="secondary"
             className="flex gap-1 items-center"
-            onClick={triggerUploadInput}
-            disabled={isUploadingImage}
+            onClick={() => (onNewScene ? onNewScene() : openNewScene(location))}
           >
-            {isUploadingImage ? <Spinner color="white" /> : <ArrowUpTrayIcon className="w-4 h-4" />}
-            Upload image
+            <PlusIcon className="w-4 h-4" />
+            New blank scene
           </Button>
-        ) : null}
-        <input ref={uploadInputRef} type="file" accept="image/*" className="hidden" onChange={handleUploadImage} />
+          <Button
+            size="small"
+            color="secondary"
+            className="flex gap-1 items-center"
+            onClick={() => openAiScene(location)}
+          >
+            <SparklesIcon className="w-4 h-4" />
+            Generate scene
+          </Button>
+          {!frame.scenes?.length ? (
+            <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={openTemplates}>
+              <SparklesIcon className="w-4 h-4" />
+              Explore available scenes
+            </Button>
+          ) : null}
+          {frame.last_successful_deploy_at ? (
+            <Button
+              size="small"
+              color="secondary"
+              className="flex gap-1 items-center"
+              onClick={triggerUploadInput}
+              disabled={isUploadingImage}
+            >
+              {isUploadingImage ? <Spinner color="white" /> : <ArrowUpTrayIcon className="w-4 h-4" />}
+              Upload image
+            </Button>
+          ) : null}
+          <input ref={uploadInputRef} type="file" accept="image/*" className="hidden" onChange={handleUploadImage} />
+        </div>
+        {rightComponent ?? null}
       </div>
       {newSceneFormLocation === location ? renderNewSceneForm() : null}
       {aiSceneFormLocation === location ? renderAiSceneForm() : null}
@@ -256,98 +264,100 @@ export function Scenes() {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        {scenes.length > 0 || missingActiveSceneId ? (
-          <>
-            <div className="flex justify-between w-full items-center">
-              <TextInput placeholder="Filter scenes..." className="flex-1 mr-2" onChange={setSearch} value={search} />
-              <div className="flex gap-1">
-                {multiSelectEnabled ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-300">{selectedSceneIds.size} selected</span>
-                    <Button
-                      size="small"
-                      color="secondary"
-                      disabled={selectableSceneIds.length === 0}
-                      onClick={() => setSelectedSceneIds(allSelectableScenesSelected ? [] : selectableSceneIds)}
-                    >
-                      {allSelectableScenesSelected ? 'Clear all' : 'Select all'}
-                    </Button>
-                    <Button
-                      size="small"
-                      color="red"
-                      disabled={selectedSceneIds.size === 0}
-                      onClick={() => {
-                        if (selectedSceneIds.size === 0) {
-                          return
-                        }
-                        if (confirm('Are you sure you want to delete the selected scenes?')) {
-                          deleteSelectedScenes()
-                        }
-                      }}
-                    >
-                      Delete
-                    </Button>
-                    <Button size="small" color="secondary" onClick={disableMultiSelect} title="Exit multi-select">
-                      X
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <Button size="small" color="secondary" onClick={() => sync()} title="Sync active scene">
-                      {loading ? <Spinner color="white" /> : <ArrowPathIcon className="w-5 h-5" />}
-                    </Button>
-                    <DropdownMenu
-                      buttonColor="secondary"
-                      className="mr-2"
-                      items={[
-                        {
-                          label: 'Sync active scene',
-                          onClick: () => sync(),
-                          icon: <ArrowPathIcon className="w-5 h-5" />,
-                        },
-                        {
-                          label: 'Save to "My scenes"',
-                          onClick: () => saveAsTemplate({ name: frameForm.name }),
-                          icon: <FolderArrowDownIcon className="w-5 h-5" />,
-                        },
-                        {
-                          label: 'Download as .zip',
-                          onClick: () => saveAsZip({ name: frameForm.name || 'Exported scenes' }),
-                          icon: <CloudArrowDownIcon className="w-5 h-5" />,
-                        },
-                        {
-                          label: 'Paste scene JSON',
-                          onClick: () => {
-                            const json = prompt('Paste your scene JSON here:')
-                            if (json) {
-                              try {
-                                const scene = JSON.parse(json)
-                                if (Array.isArray(scene)) {
-                                  applyTemplate({ scenes: scene })
-                                } else {
-                                  applyTemplate({ scenes: [scene] })
-                                }
-                              } catch (error) {
-                                alert('Invalid JSON')
-                              }
-                            }
+        {scenes.length > 0 || missingActiveSceneId
+          ? renderShortcuts(
+              'top',
+              undefined,
+              null,
+              <div className="flex justify-between items-center">
+                <TextInput placeholder="Filter scenes..." className="mr-2" onChange={setSearch} value={search} />
+                <div className="flex gap-1">
+                  {multiSelectEnabled ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-300">{selectedSceneIds.size} selected</span>
+                      <Button
+                        size="small"
+                        color="secondary"
+                        disabled={selectableSceneIds.length === 0}
+                        onClick={() => setSelectedSceneIds(allSelectableScenesSelected ? [] : selectableSceneIds)}
+                      >
+                        {allSelectableScenesSelected ? 'Clear all' : 'Select all'}
+                      </Button>
+                      <Button
+                        size="small"
+                        color="red"
+                        disabled={selectedSceneIds.size === 0}
+                        onClick={() => {
+                          if (selectedSceneIds.size === 0) {
+                            return
+                          }
+                          if (confirm('Are you sure you want to delete the selected scenes?')) {
+                            deleteSelectedScenes()
+                          }
+                        }}
+                      >
+                        Delete
+                      </Button>
+                      <Button size="small" color="secondary" onClick={disableMultiSelect} title="Exit multi-select">
+                        X
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <Button size="small" color="secondary" onClick={() => sync()} title="Sync active scene">
+                        {loading ? <Spinner color="white" /> : <ArrowPathIcon className="w-5 h-5" />}
+                      </Button>
+                      <DropdownMenu
+                        buttonColor="secondary"
+                        className="mr-2"
+                        items={[
+                          {
+                            label: 'Sync active scene',
+                            onClick: () => sync(),
+                            icon: <ArrowPathIcon className="w-5 h-5" />,
                           },
-                          icon: <FolderOpenIcon className="w-5 h-5" />,
-                        },
-                        {
-                          label: 'Select multiple',
-                          onClick: () => enableMultiSelect(),
-                          icon: <Squares2X2Icon className="w-5 h-5" />,
-                        },
-                      ]}
-                    />
-                  </>
-                )}
+                          {
+                            label: 'Save to "My scenes"',
+                            onClick: () => saveAsTemplate({ name: frameForm.name }),
+                            icon: <FolderArrowDownIcon className="w-5 h-5" />,
+                          },
+                          {
+                            label: 'Download as .zip',
+                            onClick: () => saveAsZip({ name: frameForm.name || 'Exported scenes' }),
+                            icon: <CloudArrowDownIcon className="w-5 h-5" />,
+                          },
+                          {
+                            label: 'Paste scene JSON',
+                            onClick: () => {
+                              const json = prompt('Paste your scene JSON here:')
+                              if (json) {
+                                try {
+                                  const scene = JSON.parse(json)
+                                  if (Array.isArray(scene)) {
+                                    applyTemplate({ scenes: scene })
+                                  } else {
+                                    applyTemplate({ scenes: [scene] })
+                                  }
+                                } catch (error) {
+                                  alert('Invalid JSON')
+                                }
+                              }
+                            },
+                            icon: <FolderOpenIcon className="w-5 h-5" />,
+                          },
+                          {
+                            label: 'Select multiple',
+                            onClick: () => enableMultiSelect(),
+                            icon: <Squares2X2Icon className="w-5 h-5" />,
+                          },
+                        ]}
+                      />
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
-            {renderShortcuts('top')}
-          </>
-        ) : null}
+            )
+          : null}
         {filteredScenes.length === 0 && search && !missingActiveMatchesSearch ? (
           <div className="text-center text-gray-400">No scenes matching "{search}"</div>
         ) : null}
