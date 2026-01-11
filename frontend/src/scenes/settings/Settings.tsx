@@ -21,6 +21,7 @@ import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { A } from 'kea-router'
 import { urls } from '../../urls'
+import { Tag } from '../../components/Tag'
 
 export function Settings() {
   const {
@@ -38,6 +39,7 @@ export function Settings() {
     isCustomFontsFormSubmitting,
     customFonts,
     generatingSshKeyId,
+    sshKeyExpandedIds,
   } = useValues(settingsLogic)
   const { framesList } = useValues(framesModel)
   const {
@@ -52,6 +54,7 @@ export function Settings() {
     generateMissingEmbeddings,
     deleteEmbeddings,
     loadAiEmbeddingsStatus,
+    toggleSshKeyExpanded,
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
@@ -96,69 +99,98 @@ export function Settings() {
                         const isOnlyKey = (settings?.ssh_keys?.keys ?? []).length <= 1
                         const isGenerating = generatingSshKeyId === key.id
                         const matchingFrames = framesUsingKey(key.id)
+                        const isExpanded = sshKeyExpandedIds.includes(key.id)
+                        const hasKey = !!(key.private || key.public)
+                        const isUsedForNewFrames = key.use_for_new_frames ?? false
                         return (
                           <Box key={key.id} className="border border-white/10 p-3 space-y-2">
-                            <Field name={`keys.${index}.name`} label="Key name">
-                              <TextInput />
-                            </Field>
-                            <Field
-                              name={`keys.${index}.use_for_new_frames`}
-                              label="Use for new frames"
-                              tooltip="Automatically install this key on new frames."
-                            >
-                              <Switch fullWidth />
-                            </Field>
-                            <Field name={`keys.${index}.private`} label="Private SSH key" secret={!!savedKey?.private}>
-                              <TextArea />
-                            </Field>
-                            <Field
-                              name={`keys.${index}.public`}
-                              label="Public SSH key (use this in the RPi Imager)"
-                              secret={!!savedKey?.public}
-                            >
-                              <TextArea />
-                            </Field>
-                            <div className="text-xs text-gray-400 space-y-1">
-                              <span className="font-semibold text-gray-300">Frames using this key:</span>
-                              {matchingFrames.length === 0 ? (
-                                <div>None.</div>
-                              ) : (
-                                <div className="flex flex-wrap gap-2">
-                                  {matchingFrames.map((frame) => (
-                                    <A
-                                      key={frame.id}
-                                      href={urls.frame(frame.id)}
-                                      className="text-blue-400 hover:underline"
-                                    >
-                                      {frame.name || frameHost(frame)}
-                                    </A>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex justify-end gap-2">
+                            <div className="flex items-center justify-between">
+                              <div className="text-sm font-semibold text-gray-200">
+                                {key.name || `Key ${index + 1}`}
+                                {isUsedForNewFrames ? (
+                                  <Tag color="purple" className="ml-2">
+                                    Default on new frames
+                                  </Tag>
+                                ) : null}
+                              </div>
                               <Button
                                 size="tiny"
                                 color="secondary"
-                                onClick={() => generateSshKey(key.id)}
+                                onClick={() => toggleSshKeyExpanded(key.id)}
                                 className="inline-flex items-center gap-1"
-                                disabled={isGenerating}
                               >
-                                {isGenerating ? <Spinner className="text-white" color="white" /> : null}
-                                Generate
+                                {isExpanded ? 'Hide details' : 'Show details'}
                               </Button>
-                              {!isOnlyKey ? (
-                                <Button
-                                  size="tiny"
-                                  color="secondary"
-                                  onClick={() => removeSshKey(key.id)}
-                                  disabled={isOnlyKey}
-                                  className="inline-flex gap-1"
-                                >
-                                  <TrashIcon className="w-4 h-4" /> Delete
-                                </Button>
-                              ) : null}
                             </div>
+                            {isExpanded ? (
+                              <>
+                                <Field name={`keys.${index}.name`} label="Key name">
+                                  <TextInput />
+                                </Field>
+                                <Field
+                                  name={`keys.${index}.use_for_new_frames`}
+                                  label="Use for new frames"
+                                  tooltip="Automatically install this key on new frames."
+                                >
+                                  <Switch fullWidth />
+                                </Field>
+                                <Field
+                                  name={`keys.${index}.private`}
+                                  label="Private SSH key"
+                                  secret={!!savedKey?.private}
+                                >
+                                  <TextArea />
+                                </Field>
+                                <Field
+                                  name={`keys.${index}.public`}
+                                  label="Public SSH key (use this in the RPi Imager)"
+                                  secret={!!savedKey?.public}
+                                >
+                                  <TextArea />
+                                </Field>
+                                <div className="text-xs text-gray-400 space-y-1">
+                                  <span className="font-semibold text-gray-300">Frames using this key:</span>
+                                  {matchingFrames.length === 0 ? (
+                                    <div>None.</div>
+                                  ) : (
+                                    <div className="flex flex-wrap gap-2">
+                                      {matchingFrames.map((frame) => (
+                                        <A
+                                          key={frame.id}
+                                          href={urls.frame(frame.id)}
+                                          className="text-blue-400 hover:underline"
+                                        >
+                                          {frame.name || frameHost(frame)}
+                                        </A>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex justify-end gap-2">
+                                  <Button
+                                    size="tiny"
+                                    color="secondary"
+                                    onClick={() => generateSshKey(key.id)}
+                                    className="inline-flex items-center gap-1"
+                                    disabled={isGenerating}
+                                  >
+                                    {isGenerating ? <Spinner className="text-white" color="white" /> : null}
+                                    {hasKey ? 'Regenerate' : 'Generate'}
+                                  </Button>
+                                  {!isOnlyKey ? (
+                                    <Button
+                                      size="tiny"
+                                      color="secondary"
+                                      onClick={() => removeSshKey(key.id)}
+                                      disabled={isOnlyKey}
+                                      className="inline-flex gap-1"
+                                    >
+                                      <TrashIcon className="w-4 h-4" /> Delete
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              </>
+                            ) : null}
                           </Box>
                         )
                       })}

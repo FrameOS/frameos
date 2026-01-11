@@ -39,6 +39,9 @@ export const settingsLogic = kea<settingsLogicType>([
     addSshKey: true,
     generateSshKey: (id: string) => ({ id }),
     removeSshKey: (id: string) => ({ id }),
+    setSshKeyExpandedIds: (ids: string[]) => ({ ids }),
+    setSshKeyExpanded: (id: string, expanded: boolean) => ({ id, expanded }),
+    toggleSshKeyExpanded: (id: string) => ({ id }),
     newNixKey: true,
     newBuildHostKey: true,
     setGeneratingSshKeyId: (id: string | null) => ({ id }),
@@ -142,6 +145,16 @@ export const settingsLogic = kea<settingsLogicType>([
         setGeneratingSshKeyId: (_, { id }) => id,
       },
     ],
+    sshKeyExpandedIds: [
+      [] as string[],
+      {
+        setSshKeyExpandedIds: (_, { ids }) => ids,
+        setSshKeyExpanded: (state, { id, expanded }) =>
+          expanded ? (state.includes(id) ? state : [...state, id]) : state.filter((keyId) => keyId !== id),
+        toggleSshKeyExpanded: (state, { id }) =>
+          state.includes(id) ? state.filter((keyId) => keyId !== id) : [...state, id],
+      },
+    ],
     isGeneratingEmbeddings: [
       false,
       {
@@ -228,6 +241,9 @@ export const settingsLogic = kea<settingsLogicType>([
   listeners(({ values, asyncActions, actions }) => ({
     loadSettingsSuccess: ({ savedSettings }) => {
       actions.resetSettings(setDefaultSettings(savedSettings))
+      const savedKeys = normalizeSshKeys(savedSettings.ssh_keys).keys
+      const expandedIds = savedKeys.filter((key) => !key.private && !key.public).map((key) => key.id)
+      actions.setSshKeyExpandedIds(expandedIds)
     },
     loadAiEmbeddingsStatusSuccess: ({ aiEmbeddingsStatus }) => {
       const missing = Math.max(aiEmbeddingsStatus.total - aiEmbeddingsStatus.count, 0)
@@ -304,6 +320,7 @@ export const settingsLogic = kea<settingsLogicType>([
           use_for_new_frames: keys.length === 0,
         } satisfies SSHKeyEntry,
       ])
+      actions.setSshKeyExpanded(keyId, true)
     },
     generateSshKey: async ({ id }) => {
       actions.setGeneratingSshKeyId(id)
@@ -341,6 +358,7 @@ export const settingsLogic = kea<settingsLogicType>([
         ['ssh_keys', 'keys'] as any,
         keys.filter((key) => key.id !== id)
       )
+      actions.setSshKeyExpanded(id, false)
     },
     newNixKey: async () => {
       if (values.savedSettings.nix?.buildServerPrivateKey) {
