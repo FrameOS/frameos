@@ -39,6 +39,9 @@ Follow these rules:
     and to connect each subsequent app node in order.
   - When an app outputs data into another app's input (e.g. data app into render/image), add a "codeNodeEdge" from
     sourceHandle "fieldOutput" to targetHandle "fieldInput/<fieldName>".
+  - Data apps (like image generation) should NOT be chained into the render flow using "appNodeEdge". Instead,
+    connect the render event directly to the render app (e.g. "render/image") with "appNodeEdge" and separately
+    connect the data app output via "codeNodeEdge". This keeps the render flow triggered by the event.
   - If you include a "code" node, connect its outputs to app inputs using "codeNodeEdge" with targetHandle
     "fieldInput/<fieldName>".
   - If you include scene fields, add matching "state" nodes with data.keyword = field name, and connect them via

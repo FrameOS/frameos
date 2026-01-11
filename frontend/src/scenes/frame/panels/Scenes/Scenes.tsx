@@ -144,7 +144,7 @@ export function Scenes() {
 
   const renderAiSceneForm = () => (
     <Box className="p-4 space-y-3 bg-gray-900">
-      <H6>Generate scene</H6>
+      <H6>Generate scene (alpha)</H6>
       <div className="space-y-1">
         <div className="text-xs font-semibold uppercase text-gray-400">Prompt</div>
         <TextArea
