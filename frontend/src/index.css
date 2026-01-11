@@ -63,9 +63,9 @@ body {
 }
 .react-flow__resize-control.line {
   border-color: rgba(0, 0, 0, 0.1);
-  &:hover {
-    border-color: rgba(255, 255, 255, 0.3);
-  }
+}
+.react-flow__resize-control.line:hover {
+  border-color: rgba(255, 255, 255, 0.3);
 }
 .react-flow__resize-control.handle {
   width: 12px;

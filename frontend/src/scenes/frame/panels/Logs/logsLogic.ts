@@ -1,4 +1,4 @@
-import { afterMount, connect, kea, key, path, props, reducers } from 'kea'
+import { afterMount, connect, kea, key, path, props, reducers, selectors } from 'kea'
 
 import { LogType } from '../../../../types'
 import { loaders } from 'kea-loaders'
@@ -43,7 +43,22 @@ export const logsLogic = kea<logsLogicType>([
         log.frame_id === props.frameId ? [...state, log].slice(-MAX_LOG_LINES) : state,
     },
   })),
-  afterMount(({ actions, cache }) => {
+  selectors({
+    ipAddresses: [
+      (selectors) => [selectors.logs],
+      (logs) => {
+        const ips = new Set<string>()
+        logs.forEach((log) => {
+          if (log.ip) {
+            ips.add(log.ip)
+          }
+        })
+        return Array.from(ips).sort()
+      },
+      { resultEqualityCheck: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
+    ],
+  }),
+  afterMount(({ actions }) => {
     actions.loadLogs()
   }),
 ])

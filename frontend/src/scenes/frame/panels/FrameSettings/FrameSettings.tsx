@@ -37,6 +37,7 @@ import { ColorInput } from '../../../../components/ColorInput'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { normalizeSshKeys } from '../../../../utils/sshKeys'
 import { Label } from '../../../../components/Label'
+import { logsLogic } from '../Logs/logsLogic'
 
 export interface FrameSettingsProps {
   className?: string
@@ -67,6 +68,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
     collectGarbageBackendLoading,
   } = useValues(frameSettingsLogic({ frameId }))
   const { openLogs } = useActions(panelsLogic({ frameId }))
+  const { logs, ipAddresses } = useValues(logsLogic({ frameId }))
   const { savedSettings } = useValues(settingsLogic)
   const url = frameUrl(frame)
   const controlUrl = frameControlUrl(frame)
@@ -80,6 +82,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   )
   const selectedSshKeyIds = normalizeKeyIds(frameForm.ssh_keys ?? frame.ssh_keys ?? [])
   const hasSshKeyChangesToDeploy = !equal(deployedSshKeyIds, selectedSshKeyIds)
+  const showFrameInfo = logs.length > 0 || !!frame.frame_host
 
   if (!frame) {
     return (
@@ -230,6 +233,47 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
         className="space-y-4 @container"
         enableFormOnSubmit
       >
+        {showFrameInfo ? (
+          <>
+            <H6 className="mt-2">Frame info</H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              {frame.frame_host ? (
+                <Field name="_noop" label="Load">
+                  <div className="w-full">
+                    <A href={url} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
+                      Frame URL
+                    </A>
+                    {', '}
+                    <A
+                      href={controlUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-blue-400 hover:underline"
+                    >
+                      Control URL
+                    </A>
+                    {', '}
+                    <A
+                      href={imageUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-blue-400 hover:underline"
+                    >
+                      Image URL
+                    </A>
+                  </div>
+                </Field>
+              ) : null}
+              {logs.length > 0 ? (
+                <Field name="_noop" label="Last seen IPs">
+                  <div className="text-sm text-gray-200 break-words w-full">
+                    {ipAddresses.length > 0 ? ipAddresses.join(', ') : 'No logs have been sent for the frame yet.'}
+                  </div>
+                </Field>
+              ) : null}
+            </div>
+          </>
+        ) : null}
         <H6 className="mt-2">Device settings</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field name="name" label="Name">
@@ -779,28 +823,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               required
             />
           </Field>
-          {frame.frame_host ? (
-            <Field name="_noop" label="Load">
-              <div className="w-full">
-                <A href={url} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
-                  Frame URL
-                </A>
-                {', '}
-                <A
-                  href={controlUrl}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="text-blue-400 hover:underline"
-                >
-                  Control URL
-                </A>
-                {', '}
-                <A href={imageUrl} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
-                  Image URL
-                </A>
-              </div>
-            </Field>
-          ) : null}
         </div>
 
         <H6>Network</H6>

@@ -138,6 +138,7 @@ export interface RepositoryType {
 export interface LogType {
   id: number
   timestamp: string
+  ip: string
   type: string
   line: string
   frame_id: number
