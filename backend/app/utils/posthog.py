@@ -48,6 +48,14 @@ def initialize_posthog(settings: Optional[dict[str, Any]] = None) -> None:
         posthog_client = None
 
 
+def get_posthog_client() -> Posthog | None:
+    return posthog_client
+
+
+def llm_analytics_enabled() -> bool:
+    return posthog_client is not None and posthog_settings.get("enable_llm_analytics", False)
+
+
 def _get_email_from_request(request: Request) -> Optional[str]:
     auth = request.headers.get("Authorization")
     if not auth or not auth.startswith("Bearer ") or not config.SECRET_KEY:
@@ -73,24 +81,6 @@ def capture_exception(exc: Exception, request: Optional[Request] = None) -> None
             kwargs["properties"] = {"email": email}  # TODO: decouple
     try:
         posthog_client.capture_exception(exc, **kwargs)
-    except Exception:
-        # Avoid raising exceptions from PostHog itself
-        pass
-
-
-def llm_analytics_enabled() -> bool:
-    return posthog_client is not None and posthog_settings.get("enable_llm_analytics", False)
-
-
-def capture_llm_event(event: str, properties: Optional[dict[str, Any]] = None) -> None:
-    if not llm_analytics_enabled():
-        return
-    try:
-        posthog_client.capture(
-            distinct_id=config.INSTANCE_ID,
-            event=event,
-            properties=properties or {},
-        )
     except Exception:
         # Avoid raising exceptions from PostHog itself
         pass

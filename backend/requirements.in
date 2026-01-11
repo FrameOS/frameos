@@ -11,7 +11,7 @@ jwt
 mypy
 pillow
 pip-tools
-posthog
+posthog>=7.5.1
 pre-commit
 pytest
 pytest-asyncio
@@ -26,3 +26,4 @@ types-redis
 types-requests
 types-python-jose
 werkzeug
+openai

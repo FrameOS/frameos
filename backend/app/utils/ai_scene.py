@@ -2,11 +2,12 @@ import json
 import re
 from typing import Any, Iterable
 
-import httpx
 import numpy as np
+from posthog.ai.openai import AsyncOpenAI
 
 from app.models.ai_embeddings import AiEmbedding
-from app.utils.posthog import capture_llm_event
+from app.config import config
+from app.utils.posthog import get_posthog_client, llm_analytics_enabled
 
 SUMMARY_MODEL = "gpt-5-mini"
 SCENE_MODEL = "gpt-5.2"
@@ -187,6 +188,15 @@ def _keyword_score(prompt_tokens: list[str], item: AiEmbedding) -> float:
     return hits / max(len(prompt_tokens), 1)
 
 
+def _openai_client(api_key: str, *, timeout: float) -> AsyncOpenAI:
+    posthog_client = get_posthog_client() if llm_analytics_enabled() else None
+    return AsyncOpenAI(
+        api_key=api_key,
+        posthog_client=posthog_client,
+        timeout=timeout,
+    )
+
+
 def _mmr_select(
     items: list[AiEmbedding],
     embeddings: np.ndarray,
@@ -248,95 +258,60 @@ def rank_embeddings(
 
 async def create_embeddings(texts: list[str], api_key: str, model: str) -> list[list[float]]:
     embeddings: list[list[float]] = []
-    async with httpx.AsyncClient(timeout=60) as client:
-        for batch in _chunk_texts(texts):
-            response = await client.post(
-                "https://api.openai.com/v1/embeddings",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model or EMBEDDING_MODEL,
-                    "input": batch,
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-            capture_llm_event(
-                "$ai_embedding",
-                {
-                    "provider": "openai",
-                    "model": model or EMBEDDING_MODEL,
-                    "input_count": len(batch),
-                },
-            )
-            for entry in sorted(payload.get("data", []), key=lambda item: item.get("index", 0)):
-                embeddings.append(entry["embedding"])
+    client = _openai_client(api_key, timeout=60)
+    for batch in _chunk_texts(texts):
+        response = await client.embeddings.create(
+            model=model or EMBEDDING_MODEL,
+            input=batch,
+            posthog_distinct_id=config.INSTANCE_ID,
+            posthog_properties={
+                "operation": "create_embeddings",
+                "model": model or EMBEDDING_MODEL,
+                "input_count": len(batch),
+            },
+        )
+        for entry in sorted(response.data, key=lambda item: item.index):
+            embeddings.append(entry.embedding)
     return embeddings
 
 
 async def summarize_text(text: str, api_key: str, *, model: str = SUMMARY_MODEL) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model or SUMMARY_MODEL,
-                "messages": [
-                    {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
-                    {"role": "user", "content": text},
-                ],
-                "response_format": {"type": "json_object"},
-            },
-        )
-        response.raise_for_status()
-        payload = response.json()
-    capture_llm_event(
-        "$ai_generation",
-        {
-            "provider": "openai",
-            "model": model or SUMMARY_MODEL,
+    client = _openai_client(api_key, timeout=60)
+    response = await client.chat.completions.create(
+        model=model or SUMMARY_MODEL,
+        messages=[
+            {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
+            {"role": "user", "content": text},
+        ],
+        response_format={"type": "json_object"},
+        posthog_distinct_id=config.INSTANCE_ID,
+        posthog_properties={
             "operation": "summarize_text",
+            "model": model or SUMMARY_MODEL,
         },
     )
-    message = payload.get("choices", [{}])[0].get("message", {})
-    content = message.get("content", "{}")
+    message = response.choices[0].message if response.choices else None
+    content = message.content if message else "{}"
     return json.loads(content)
 
 
 async def expand_prompt(prompt: str, api_key: str, *, model: str = EXPANSION_MODEL) -> str:
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model or EXPANSION_MODEL,
-                "messages": [
-                    {"role": "system", "content": EXPANSION_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                "response_format": {"type": "json_object"},
-            },
-        )
-        response.raise_for_status()
-        payload = response.json()
-    capture_llm_event(
-        "$ai_generation",
-        {
-            "provider": "openai",
-            "model": model or EXPANSION_MODEL,
+    client = _openai_client(api_key, timeout=60)
+    response = await client.chat.completions.create(
+        model=model or EXPANSION_MODEL,
+        messages=[
+            {"role": "system", "content": EXPANSION_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+        posthog_distinct_id=config.INSTANCE_ID,
+        posthog_properties={
             "operation": "expand_prompt",
+            "model": model or EXPANSION_MODEL,
         },
     )
-    message = payload.get("choices", [{}])[0].get("message", {})
-    content = message.get("content", "{}")
+    message = response.choices[0].message if response.choices else None
+    content = message.content if message else "{}"
     expanded = json.loads(content).get("expanded_prompt")
     if isinstance(expanded, str) and expanded.strip():
         return expanded.strip()
@@ -566,29 +541,18 @@ async def _request_scene_json(
     messages: list[dict[str, str]],
     context_items: list[AiEmbedding],
 ) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=90) as client:
-        response = await client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model or SCENE_MODEL,
-                "messages": messages,
-                "response_format": {"type": "json_object"},
-            },
-        )
-        response.raise_for_status()
-        payload = response.json()
-    capture_llm_event(
-        "$ai_generation",
-        {
-            "provider": "openai",
-            "model": model or SCENE_MODEL,
+    client = _openai_client(api_key, timeout=90)
+    response = await client.chat.completions.create(
+        model=model or SCENE_MODEL,
+        messages=messages,
+        response_format={"type": "json_object"},
+        posthog_distinct_id=config.INSTANCE_ID,
+        posthog_properties={
             "operation": "generate_scene_json",
+            "model": model or SCENE_MODEL,
             "context_items": len(context_items),
         },
     )
-    content = payload.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+    message = response.choices[0].message if response.choices else None
+    content = message.content if message else "{}"
     return json.loads(content)
