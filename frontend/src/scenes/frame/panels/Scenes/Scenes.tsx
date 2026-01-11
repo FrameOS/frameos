@@ -79,6 +79,7 @@ export function Scenes() {
     enableMultiSelect,
     disableMultiSelect,
     toggleSceneSelection,
+    setSelectedSceneIds,
     deleteSelectedScenes,
     toggleMissingActiveExpanded,
     uploadImage,
@@ -92,6 +93,9 @@ export function Scenes() {
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const uploadInputRef = useRef<HTMLInputElement>(null)
+  const selectableSceneIds = filteredScenes.map((scene) => scene.id)
+  const allSelectableScenesSelected =
+    selectableSceneIds.length > 0 && selectableSceneIds.every((sceneId) => selectedSceneIds.has(sceneId))
 
   const triggerUploadInput = () => {
     uploadInputRef.current?.click()
@@ -161,6 +165,14 @@ export function Scenes() {
                     <span className="text-xs text-gray-300">{selectedSceneIds.size} selected</span>
                     <Button
                       size="small"
+                      color="secondary"
+                      disabled={selectableSceneIds.length === 0}
+                      onClick={() => setSelectedSceneIds(allSelectableScenesSelected ? [] : selectableSceneIds)}
+                    >
+                      {allSelectableScenesSelected ? 'Clear all' : 'Select all'}
+                    </Button>
+                    <Button
+                      size="small"
                       color="red"
                       disabled={selectedSceneIds.size === 0}
                       onClick={() => {
@@ -172,10 +184,10 @@ export function Scenes() {
                         }
                       }}
                     >
-                      Delete selected
+                      Delete
                     </Button>
-                    <Button size="small" color="secondary" onClick={disableMultiSelect}>
-                      Cancel
+                    <Button size="small" color="secondary" onClick={disableMultiSelect} title="Exit multi-select">
+                      X
                     </Button>
                   </div>
                 ) : (

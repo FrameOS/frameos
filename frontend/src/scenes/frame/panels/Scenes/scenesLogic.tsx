@@ -58,6 +58,7 @@ export const scenesLogic = kea<scenesLogicType>([
     disableMultiSelect: true,
     clearSceneSelection: true,
     toggleSceneSelection: (sceneId: string) => ({ sceneId }),
+    setSelectedSceneIds: (sceneIds: string[]) => ({ sceneIds }),
     toggleMissingActiveExpanded: true,
     uploadImage: (file: File) => ({ file }),
     uploadImageSuccess: true,
@@ -187,6 +188,7 @@ export const scenesLogic = kea<scenesLogicType>([
           return next
         },
         clearSceneSelection: () => new Set<string>(),
+        setSelectedSceneIds: (_, { sceneIds }) => new Set(sceneIds),
         disableMultiSelect: () => new Set<string>(),
         deleteScene: (state, { sceneId }) => {
           const next = new Set(state)
