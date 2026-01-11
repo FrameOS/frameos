@@ -61,7 +61,7 @@ export const settingsLogic = kea<settingsLogicType>([
       },
     ],
     aiEmbeddingsStatus: [
-      { count: 0 },
+      { count: 0, total: 0 },
       {
         loadAiEmbeddingsStatus: async () => {
           try {
@@ -75,12 +75,21 @@ export const settingsLogic = kea<settingsLogicType>([
             return values.aiEmbeddingsStatus
           }
         },
-        regenerateAiEmbeddings: async () => {
-          const response = await apiFetch(`/api/ai/embeddings/regenerate`, {
+        generateMissingAiEmbeddings: async () => {
+          const response = await apiFetch(`/api/ai/embeddings/generate-missing`, {
             method: 'POST',
           })
           if (!response.ok) {
             throw new Error('Failed to regenerate AI embeddings')
+          }
+          return await response.json()
+        },
+        deleteAiEmbeddings: async () => {
+          const response = await apiFetch(`/api/ai/embeddings`, {
+            method: 'DELETE',
+          })
+          if (!response.ok) {
+            throw new Error('Failed to delete AI embeddings')
           }
           return await response.json()
         },

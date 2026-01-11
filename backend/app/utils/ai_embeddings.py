@@ -95,14 +95,9 @@ def _resolve_repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-async def build_ai_embeddings(db: Session, api_key: str, *, clear_existing: bool = False) -> int:
-    repo_root = _resolve_repo_root()
+def _collect_ai_embedding_items(repo_root: Path) -> list[tuple[str, str, str | None, str, dict[str, Any]]]:
     scenes_root = repo_root / "repo" / "scenes"
     apps_root = repo_root / "frameos" / "src" / "apps"
-
-    if clear_existing:
-        db.query(AiEmbedding).delete(synchronize_session=False)
-        db.commit()
 
     items: list[tuple[str, str, str | None, str, dict[str, Any]]] = []
 
@@ -132,7 +127,38 @@ async def build_ai_embeddings(db: Session, api_key: str, *, clear_existing: bool
             )
         )
 
+    return items
+
+
+def get_ai_embeddings_total(repo_root: Path | None = None) -> int:
+    if repo_root is None:
+        repo_root = _resolve_repo_root()
+    return len(_collect_ai_embedding_items(repo_root))
+
+
+async def build_ai_embeddings(
+    db: Session,
+    api_key: str,
+    *,
+    clear_existing: bool = False,
+    only_missing: bool = False,
+) -> int:
+    repo_root = _resolve_repo_root()
+    items = _collect_ai_embedding_items(repo_root)
+
+    if clear_existing:
+        db.query(AiEmbedding).delete(synchronize_session=False)
+        db.commit()
+
+    existing_sources: set[tuple[str, str]] = set()
+    if only_missing and not clear_existing:
+        existing_sources = {
+            (row.source_type, row.source_path) for row in db.query(AiEmbedding.source_type, AiEmbedding.source_path)
+        }
+
     for source_type, source_path, name, summary_input, metadata in items:
+        if only_missing and (source_type, source_path) in existing_sources:
+            continue
         summary_payload = await summarize_text(summary_input, api_key)
         summary = summary_payload.get("summary") or ""
         keywords = summary_payload.get("keywords") or []

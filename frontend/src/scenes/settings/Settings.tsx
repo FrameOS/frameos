@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import { useEffect, useState } from 'react'
 import { Form, Group } from 'kea-forms'
 import { Header } from '../../components/Header'
 import { Box } from '../../components/Box'
@@ -29,7 +30,6 @@ export function Settings() {
     savedSettingsLoading,
     settingsChanged,
     aiEmbeddingsStatus,
-    aiEmbeddingsStatusLoading,
     customFontsLoading,
     isCustomFontsFormSubmitting,
     customFonts,
@@ -45,12 +45,28 @@ export function Settings() {
     newBuildHostKey,
     deleteCustomFont,
     setSettingsValue,
-    regenerateAiEmbeddings,
+    generateMissingAiEmbeddings,
+    deleteAiEmbeddings,
+    loadAiEmbeddingsStatus,
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
   const defaultSshKeyIds = getDefaultSshKeyIds(settings?.ssh_keys)
   const embeddingsCount = aiEmbeddingsStatus?.count ?? 0
+  const embeddingsTotal = aiEmbeddingsStatus?.total ?? 0
+  const embeddingsMissing = Math.max(embeddingsTotal - embeddingsCount, 0)
+  const [isGeneratingEmbeddings, setIsGeneratingEmbeddings] = useState(false)
+  const [isDeletingEmbeddings, setIsDeletingEmbeddings] = useState(false)
+
+  useEffect(() => {
+    if (!isGeneratingEmbeddings) {
+      return
+    }
+    const interval = window.setInterval(() => {
+      loadAiEmbeddingsStatus()
+    }, 1000)
+    return () => window.clearInterval(interval)
+  }, [isGeneratingEmbeddings, loadAiEmbeddingsStatus])
 
   const framesUsingKey = (keyId: string) =>
     framesList.filter((frame) => (frame.ssh_keys ?? defaultSshKeyIds).includes(keyId))
@@ -234,20 +250,43 @@ export function Settings() {
                       <TextInput name="apiKey" />
                     </Field>
                     <div className="flex flex-wrap items-center gap-2 text-sm text-gray-300">
-                      <span>Embeddings generated: {embeddingsCount}</span>
+                      <span>
+                        Embeddings: {embeddingsCount}/{embeddingsTotal}
+                      </span>
                       <Button
                         size="small"
                         color="secondary"
-                        onClick={regenerateAiEmbeddings}
-                        disabled={aiEmbeddingsStatusLoading}
+                        onClick={async () => {
+                          setIsGeneratingEmbeddings(true)
+                          try {
+                            await generateMissingAiEmbeddings()
+                          } finally {
+                            setIsGeneratingEmbeddings(false)
+                            loadAiEmbeddingsStatus()
+                          }
+                        }}
+                        disabled={isGeneratingEmbeddings || isDeletingEmbeddings || embeddingsMissing === 0}
                       >
-                        {aiEmbeddingsStatusLoading ? (
-                          <Spinner />
-                        ) : embeddingsCount > 0 ? (
-                          'Regenerate embeddings'
-                        ) : (
-                          'Generate embeddings'
-                        )}
+                        {isGeneratingEmbeddings ? <Spinner /> : 'Generate missing'}
+                      </Button>
+                      <Button
+                        size="small"
+                        color="secondary"
+                        onClick={async () => {
+                          if (!window.confirm('Delete all embeddings? This might be costly to redo.')) {
+                            return
+                          }
+                          setIsDeletingEmbeddings(true)
+                          try {
+                            await deleteAiEmbeddings()
+                          } finally {
+                            setIsDeletingEmbeddings(false)
+                            loadAiEmbeddingsStatus()
+                          }
+                        }}
+                        disabled={isGeneratingEmbeddings || isDeletingEmbeddings || embeddingsCount === 0}
+                      >
+                        {isDeletingEmbeddings ? <Spinner /> : 'Delete all'}
                       </Button>
                     </div>
                   </Box>
