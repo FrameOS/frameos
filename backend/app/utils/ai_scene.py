@@ -23,7 +23,8 @@ You are a FrameOS scene generator. Build scenes JSON that can be uploaded to Fra
 Follow these rules:
 - Output a JSON object with a top-level "title" string and "scenes" array. No markdown or code fences.
 - Each scene must include: id (string), name (string), nodes (array), edges (array).
-- Each node must include: id (string), type ("event" or "app"), data (object).
+- Each node must include: id (string), type (see below), data (object).
+- Supported node types in examples: "event", "app", "state", "code", "scene".
 - Include at least one event node with data.keyword = "render" to trigger rendering.
 - Use ONLY app keywords from the provided context. If none match, use "render/text" and a simple message.
 - Prefer minimal but valid configs; omit fields when not needed.
@@ -33,6 +34,14 @@ Follow these rules:
     and to connect each subsequent app node in order.
   - When an app outputs data into another app's input (e.g. data app into render/image), add a "codeNodeEdge" from
     sourceHandle "fieldOutput" to targetHandle "fieldInput/<fieldName>".
+  - If you include a "code" node, connect its outputs to app inputs using "codeNodeEdge" with targetHandle
+    "fieldInput/<fieldName>".
+  - If you include scene fields, add matching "state" nodes with data.keyword = field name, and connect them via
+    "codeNodeEdge" to "code" nodes using targetHandle "codeField/<argName>" or directly to app inputs using
+    "fieldInput/<fieldName>".
+  - If you include "scene" nodes (to embed another scene), set data.keyword to the referenced scene id and connect them
+    from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
+    "field/render_functions[row][col]" and targetHandle "prev".
 """.strip()
 
 
