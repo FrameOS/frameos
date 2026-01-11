@@ -63,6 +63,10 @@ export const scenesLogic = kea<scenesLogicType>([
     uploadImage: (file: File) => ({ file }),
     uploadImageSuccess: true,
     uploadImageFailure: true,
+    setAiPrompt: (prompt: string) => ({ prompt }),
+    generateAiScene: true,
+    generateAiSceneSuccess: true,
+    generateAiSceneFailure: (error: string) => ({ error }),
     installMissingActiveScene: true,
     installMissingActiveSceneSuccess: true,
     installMissingActiveSceneFailure: true,
@@ -159,6 +163,28 @@ export const scenesLogic = kea<scenesLogicType>([
         uploadImage: () => true,
         uploadImageSuccess: () => false,
         uploadImageFailure: () => false,
+      },
+    ],
+    aiPrompt: [
+      '',
+      {
+        setAiPrompt: (_, { prompt }) => prompt,
+        generateAiSceneSuccess: () => '',
+      },
+    ],
+    aiError: [
+      null as string | null,
+      {
+        generateAiScene: () => null,
+        generateAiSceneFailure: (_, { error }) => error,
+      },
+    ],
+    isGeneratingAiScene: [
+      false,
+      {
+        generateAiScene: () => true,
+        generateAiSceneSuccess: () => false,
+        generateAiSceneFailure: () => false,
       },
     ],
     isInstallingMissingActiveScene: [
@@ -327,6 +353,35 @@ export const scenesLogic = kea<scenesLogicType>([
     ],
   }),
   listeners(({ actions, props, values }) => ({
+    generateAiScene: async () => {
+      const prompt = values.aiPrompt.trim()
+      if (!prompt) {
+        actions.generateAiSceneFailure('Add a prompt to generate a scene.')
+        return
+      }
+      try {
+        const response = await apiFetch('/api/ai/scenes/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt }),
+        })
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}))
+          throw new Error(payload?.detail || 'Failed to generate scene')
+        }
+        const payload = await response.json()
+        const scenes = Array.isArray(payload?.scenes) ? payload.scenes : []
+        if (!scenes.length) {
+          throw new Error('No scenes returned from AI')
+        }
+        const sanitizedScenes = scenes.map((scene: Partial<FrameScene>) => sanitizeScene(scene, values.frameForm))
+        actions.applyTemplate({ scenes: sanitizedScenes, name: 'AI Generated Scene' })
+        actions.generateAiSceneSuccess()
+      } catch (error) {
+        console.error(error)
+        actions.generateAiSceneFailure(error instanceof Error ? error.message : 'Failed to generate scene')
+      }
+    },
     uploadImage: async ({ file }) => {
       try {
         const formData = new FormData()

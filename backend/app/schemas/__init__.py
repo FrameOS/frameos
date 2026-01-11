@@ -1,4 +1,5 @@
 from .auth import *
+from .ai_scenes import *
 from .apps import *
 from .frames import *
 from .log import *

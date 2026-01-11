@@ -65,6 +65,9 @@ export function Scenes() {
     missingActiveMatchesSearch,
     missingActiveExpanded,
     isUploadingImage,
+    aiPrompt,
+    aiError,
+    isGeneratingAiScene,
     isInstallingMissingActiveScene,
   } = useValues(scenesLogic({ frameId }))
   const {
@@ -83,6 +86,8 @@ export function Scenes() {
     deleteSelectedScenes,
     toggleMissingActiveExpanded,
     uploadImage,
+    setAiPrompt,
+    generateAiScene,
     installMissingActiveScene,
   } = useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
@@ -115,6 +120,25 @@ export function Scenes() {
       <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={onNewScene}>
         <PlusIcon className="w-4 h-4" />
         New blank scene
+      </Button>
+      <div className="flex flex-col gap-1 min-w-[220px]">
+        <TextInput
+          placeholder='e.g. "show an analog clock"'
+          value={aiPrompt}
+          onChange={setAiPrompt}
+          className="min-w-[220px]"
+        />
+        {aiError ? <span className="text-xs text-red-400">{aiError}</span> : null}
+      </div>
+      <Button
+        size="small"
+        color="secondary"
+        className="flex gap-1 items-center"
+        onClick={() => generateAiScene()}
+        disabled={isGeneratingAiScene}
+      >
+        {isGeneratingAiScene ? <Spinner color="white" /> : <SparklesIcon className="w-4 h-4" />}
+        Generate scene
       </Button>
       <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={openTemplates}>
         <SparklesIcon className="w-4 h-4" />
