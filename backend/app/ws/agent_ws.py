@@ -23,6 +23,7 @@ from app.redis import get_redis, create_redis_connection   # create_… gives a 
 from app.websockets import publish_message
 from app.models.frame import Frame
 from app.models.log import new_log as log
+from app.utils.request_ip import extract_client_ip
 from app.ws.agent_bridge import CMD_KEY, RESP_KEY, STREAM_KEY, send_cmd
 
 router = APIRouter()
@@ -321,6 +322,11 @@ async def ws_agent_endpoint(
         pump_commands(ws, frame.id, server_api_key, shared_secret, redis)
     )
 
+    client_ip = extract_client_ip(
+        ws.headers,
+        ws.client.host if ws.client else None,
+    )
+
     # ----- bookkeeping -----------------------------------------------------
     active_sockets.add(ws)
     active_sockets_by_frame.setdefault(frame.id, []).append(ws)
@@ -334,7 +340,7 @@ async def ws_agent_endpoint(
         {"active_connections": await number_of_connections_for_frame(redis, frame.id),
          "id": frame.id}
     )
-    await log(db, redis, frame.id, "agent", f'☎️ Frame "{frame.name}" connected ☎️')
+    await log(db, redis, frame.id, "agent", f'☎️ Frame "{frame.name}" connected ☎️', ip=client_ip)
 
     # =======================================================================
     #                           RECEIVE LOOP
@@ -427,7 +433,7 @@ async def ws_agent_endpoint(
 
                 for line in data.splitlines():
                     if line:
-                        await log(db, redis, frame.id, stream, line)
+                        await log(db, redis, frame.id, stream, line, ip=client_ip)
                         await redis.rpush(STREAM_KEY.format(id=pl["id"]),
                                           json.dumps({"stream": stream, "data": line}).encode())
                 await redis.expire(STREAM_KEY.format(id=pl["id"]), 300)
@@ -457,4 +463,4 @@ async def ws_agent_endpoint(
             {"active_connections": await number_of_connections_for_frame(redis, frame.id),
              "id": frame.id}
         )
-        await log(db, redis, frame.id, "agent", f'👋 Frame "{frame.name}" disconnected 👋')
+        await log(db, redis, frame.id, "agent", f'👋 Frame "{frame.name}" disconnected 👋', ip=client_ip)
