@@ -1,5 +1,4 @@
 import { useActions, useValues } from 'kea'
-import { useEffect, useState } from 'react'
 import { Form, Group } from 'kea-forms'
 import { Header } from '../../components/Header'
 import { Box } from '../../components/Box'
@@ -29,7 +28,11 @@ export function Settings() {
     savedSettings,
     savedSettingsLoading,
     settingsChanged,
-    aiEmbeddingsStatus,
+    embeddingsCount,
+    embeddingsTotal,
+    embeddingsMissing,
+    isGeneratingEmbeddings,
+    isDeletingEmbeddings,
     customFontsLoading,
     isCustomFontsFormSubmitting,
     customFonts,
@@ -45,29 +48,12 @@ export function Settings() {
     newBuildHostKey,
     deleteCustomFont,
     setSettingsValue,
-    generateMissingAiEmbeddings,
-    deleteAiEmbeddings,
-    loadAiEmbeddingsStatus,
+    generateMissingEmbeddings,
+    deleteEmbeddings,
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
   const defaultSshKeyIds = getDefaultSshKeyIds(settings?.ssh_keys)
-  const embeddingsCount = aiEmbeddingsStatus?.count ?? 0
-  const embeddingsTotal = aiEmbeddingsStatus?.total ?? 0
-  const embeddingsMissing = Math.max(embeddingsTotal - embeddingsCount, 0)
-  const [isGeneratingEmbeddings, setIsGeneratingEmbeddings] = useState(false)
-  const [isDeletingEmbeddings, setIsDeletingEmbeddings] = useState(false)
-
-  useEffect(() => {
-    if (!isGeneratingEmbeddings) {
-      return
-    }
-    const interval = window.setInterval(() => {
-      loadAiEmbeddingsStatus()
-    }, 1000)
-    return () => window.clearInterval(interval)
-  }, [isGeneratingEmbeddings, loadAiEmbeddingsStatus])
-
   const framesUsingKey = (keyId: string) =>
     framesList.filter((frame) => (frame.ssh_keys ?? defaultSshKeyIds).includes(keyId))
 
@@ -256,38 +242,20 @@ export function Settings() {
                       <Button
                         size="small"
                         color="secondary"
-                        onClick={async () => {
-                          setIsGeneratingEmbeddings(true)
-                          try {
-                            await generateMissingAiEmbeddings()
-                          } finally {
-                            setIsGeneratingEmbeddings(false)
-                            loadAiEmbeddingsStatus()
-                          }
-                        }}
+                        onClick={generateMissingEmbeddings}
                         disabled={isGeneratingEmbeddings || isDeletingEmbeddings || embeddingsMissing === 0}
                       >
-                        {isGeneratingEmbeddings ? <Spinner /> : 'Generate missing'}
+                        {isGeneratingEmbeddings ? <Spinner color="white" /> : 'Generate missing'}
                       </Button>
                       <Button
                         size="small"
                         color="secondary"
-                        onClick={async () => {
-                          if (!window.confirm('Delete all embeddings? This might be costly to redo.')) {
-                            return
-                          }
-                          setIsDeletingEmbeddings(true)
-                          try {
-                            await deleteAiEmbeddings()
-                          } finally {
-                            setIsDeletingEmbeddings(false)
-                            loadAiEmbeddingsStatus()
-                          }
-                        }}
+                        onClick={deleteEmbeddings}
                         disabled={isGeneratingEmbeddings || isDeletingEmbeddings || embeddingsCount === 0}
                       >
-                        {isDeletingEmbeddings ? <Spinner /> : 'Delete all'}
+                        {isDeletingEmbeddings ? <Spinner color="white" /> : 'Delete all'}
                       </Button>
+                      {isGeneratingEmbeddings ? 'Generating embeddings. Please stay on this page until done.' : null}
                     </div>
                   </Box>
                 </Group>

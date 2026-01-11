@@ -1,4 +1,4 @@
-import { actions, afterMount, connect, defaults, kea, listeners, path, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, defaults, events, kea, listeners, path, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../socketLogic'
 import type { settingsLogicType } from './settingsLogicType'
@@ -40,6 +40,13 @@ export const settingsLogic = kea<settingsLogicType>([
     newNixKey: true,
     newBuildHostKey: true,
     setGeneratingSshKeyId: (id: string | null) => ({ id }),
+    setIsGeneratingEmbeddings: (isGenerating: boolean) => ({ isGenerating }),
+    setIsDeletingEmbeddings: (isDeleting: boolean) => ({ isDeleting }),
+    setEmbeddingsPollingIntervalId: (id: number | null) => ({ id }),
+    startEmbeddingsPolling: true,
+    stopEmbeddingsPolling: true,
+    generateMissingEmbeddings: true,
+    deleteEmbeddings: true,
   }),
   loaders(({ values }) => ({
     savedSettings: [
@@ -133,6 +140,38 @@ export const settingsLogic = kea<settingsLogicType>([
         setGeneratingSshKeyId: (_, { id }) => id,
       },
     ],
+    isGeneratingEmbeddings: [
+      false,
+      {
+        setIsGeneratingEmbeddings: (_, { isGenerating }) => isGenerating,
+      },
+    ],
+    isDeletingEmbeddings: [
+      false,
+      {
+        setIsDeletingEmbeddings: (_, { isDeleting }) => isDeleting,
+      },
+    ],
+    embeddingsPollingIntervalId: [
+      null as number | null,
+      {
+        setEmbeddingsPollingIntervalId: (_, { id }) => id,
+      },
+    ],
+  }),
+  selectors({
+    embeddingsCount: [
+      (selectors) => [selectors.aiEmbeddingsStatus],
+      (aiEmbeddingsStatus) => aiEmbeddingsStatus?.count ?? 0,
+    ],
+    embeddingsTotal: [
+      (selectors) => [selectors.aiEmbeddingsStatus],
+      (aiEmbeddingsStatus) => aiEmbeddingsStatus?.total ?? 0,
+    ],
+    embeddingsMissing: [
+      (selectors) => [selectors.aiEmbeddingsStatus],
+      (aiEmbeddingsStatus) => Math.max((aiEmbeddingsStatus?.total ?? 0) - (aiEmbeddingsStatus?.count ?? 0), 0),
+    ],
   }),
   forms(({ values, actions }) => ({
     settings: {
@@ -175,9 +214,69 @@ export const settingsLogic = kea<settingsLogicType>([
     actions.loadAiEmbeddingsStatus()
     actions.loadCustomFonts()
   }),
+  events(({ actions }) => ({
+    beforeUnmount: () => {
+      actions.stopEmbeddingsPolling()
+    },
+  })),
   listeners(({ values, actions }) => ({
     loadSettingsSuccess: ({ savedSettings }) => {
       actions.resetSettings(setDefaultSettings(savedSettings))
+    },
+    loadAiEmbeddingsStatusSuccess: ({ aiEmbeddingsStatus }) => {
+      const missing = Math.max(aiEmbeddingsStatus.total - aiEmbeddingsStatus.count, 0)
+      if (values.isGeneratingEmbeddings && missing === 0) {
+        actions.setIsGeneratingEmbeddings(false)
+        actions.stopEmbeddingsPolling()
+      }
+    },
+    startEmbeddingsPolling: () => {
+      if (values.embeddingsPollingIntervalId !== null) {
+        return
+      }
+      actions.loadAiEmbeddingsStatus()
+      const intervalId = window.setInterval(() => {
+        actions.loadAiEmbeddingsStatus()
+      }, 1000)
+      actions.setEmbeddingsPollingIntervalId(intervalId)
+    },
+    stopEmbeddingsPolling: () => {
+      if (values.embeddingsPollingIntervalId === null) {
+        return
+      }
+      window.clearInterval(values.embeddingsPollingIntervalId)
+      actions.setEmbeddingsPollingIntervalId(null)
+    },
+    generateMissingEmbeddings: async () => {
+      if (values.isGeneratingEmbeddings) {
+        return
+      }
+      actions.setIsGeneratingEmbeddings(true)
+      actions.startEmbeddingsPolling()
+      try {
+        await actions.generateMissingAiEmbeddings()
+      } catch (error) {
+        actions.setIsGeneratingEmbeddings(false)
+        actions.stopEmbeddingsPolling()
+        throw error
+      }
+    },
+    deleteEmbeddings: async () => {
+      if (values.isDeletingEmbeddings) {
+        return
+      }
+      if (!window.confirm('Delete all embeddings? This might be costly to redo.')) {
+        return
+      }
+      actions.setIsDeletingEmbeddings(true)
+      actions.startEmbeddingsPolling()
+      try {
+        await actions.deleteAiEmbeddings()
+      } finally {
+        actions.setIsDeletingEmbeddings(false)
+        actions.loadAiEmbeddingsStatus()
+        actions.stopEmbeddingsPolling()
+      }
     },
     [socketLogic.actionTypes.updateSettings]: ({ settings }) => {
       actions.updateSavedSettings(setDefaultSettings(settings))
