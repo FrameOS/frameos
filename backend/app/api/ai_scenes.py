@@ -20,6 +20,7 @@ from app.utils.ai_scene import (
     expand_prompt,
     generate_scene_json,
     repair_scene_json,
+    validate_scene_blueprint,
     rank_embeddings,
     review_scene_solution,
     validate_scene_payload,
@@ -119,6 +120,12 @@ async def generate_scene(
                     continue
                 seen.add(key)
                 context_items.append(item)
+            for item in embeddings:
+                key = (item.source_type, item.source_path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                context_items.append(item)
             await _publish_ai_scene_log(
                 redis,
                 f"Selected {len(context_items)} context items.",
@@ -134,6 +141,8 @@ async def generate_scene(
             )
 
         response_payload = None
+        blueprint_payload = None
+        blueprint_issues: list[str] = []
         validation_issues: list[str] = []
         review_issues: list[str] = []
         max_attempts = 2
@@ -143,11 +152,11 @@ async def generate_scene(
             if attempt == 1:
                 await _publish_ai_scene_log(
                     redis,
-                    f"Generating scene JSON (attempt {attempt}/{max_attempts}).",
+                    "Generating scene JSON.",
                     request_id,
                     stage="generate",
                 )
-                response_payload = await generate_scene_json(
+                response_payload, blueprint_payload = await generate_scene_json(
                     prompt=prompt,
                     context_items=context_items,
                     api_key=api_key,
@@ -156,19 +165,28 @@ async def generate_scene(
             else:
                 await _publish_ai_scene_log(
                     redis,
-                    f"Fixing scene JSON (attempt {attempt}/{max_attempts}).",
+                    "Fixing scene JSON.",
                     request_id,
                     stage="generate",
                 )
-                response_payload = await repair_scene_json(
+                response_payload, blueprint_payload = await repair_scene_json(
                     prompt=prompt,
                     context_items=context_items,
                     api_key=api_key,
                     model=scene_model,
                     payload=response_payload or {},
-                    issues=validation_issues + review_issues,
+                    issues=validation_issues + review_issues + blueprint_issues,
                 )
 
+            blueprint_issues = validate_scene_blueprint(blueprint_payload or {})
+            if blueprint_issues:
+                await _publish_ai_scene_log(
+                    redis,
+                    f"Scene blueprint issues: {blueprint_issues}",
+                    request_id,
+                    status="warning",
+                    stage="validate",
+                )
             validation_issues = validate_scene_payload(response_payload or {})
             if validation_issues:
                 await _publish_ai_scene_log(
@@ -178,6 +196,7 @@ async def generate_scene(
                     status="warning",
                     stage="validate",
                 )
+            if blueprint_issues or validation_issues:
                 continue
 
             review_issues = await review_scene_solution(
@@ -197,7 +216,7 @@ async def generate_scene(
                 continue
             break
 
-        if validation_issues or review_issues:
+        if blueprint_issues or validation_issues or review_issues:
             await _publish_ai_scene_log(
                 redis,
                 "AI scene generation did not pass validation after retries.",

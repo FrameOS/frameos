@@ -47,6 +47,7 @@ Each scene blueprint must include:
 - edges: array of edge plans (source, target, kind, sourceHandle, targetHandle, reason)
 - checks: array of brief validation statements confirming the flow and required nodes.
 Focus on correctness: pick node types, app keywords, and connections that satisfy the user request and constraints.
+Use any relevant scene examples from the provided context as guidance.
 Double-check reasoning in the checks list (e.g. render event present, data apps not chained via appNodeEdge).
 """.strip()
 
@@ -71,7 +72,7 @@ Follow these rules:
     and to connect each subsequent app node in order.
   - When an app outputs data into another app's input (e.g. data app into render/image), add a "codeNodeEdge" from
     sourceHandle "fieldOutput" to targetHandle "fieldInput/<fieldName>".
-  - Data apps (like image generation) should NOT be chained into the render flow using "appNodeEdge". Instead,
+- Data apps (like image generation) should NOT be chained into the render flow using "appNodeEdge". Instead,
     connect the render event directly to the render app (e.g. "render/image") with "appNodeEdge" and separately
     connect the data app output via "codeNodeEdge". This keeps the render flow triggered by the event.
   - If you include a "code" node, connect its outputs to app inputs using "codeNodeEdge" with targetHandle
@@ -83,6 +84,7 @@ Follow these rules:
     from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
     "field/render_functions[row][col]" and targetHandle "prev".
 - Every edge must reference nodes that exist in the "nodes" list. Do not include dangling edges.
+Use any relevant scene examples from the provided context as guidance.
 You will be given a scene blueprint JSON; convert it into valid FrameOS scene JSON following the blueprint exactly.
 """.strip()
 
@@ -347,7 +349,7 @@ async def generate_scene_json(
     context_items: list[AiEmbedding],
     api_key: str,
     model: str,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     context_block = _format_context_items(context_items)
     blueprint_prompt = "\n\n".join(
         [
@@ -372,7 +374,7 @@ async def generate_scene_json(
             json.dumps(blueprint, ensure_ascii=False),
         ]
     )
-    return await _request_scene_json(
+    scene_payload = await _request_scene_json(
         api_key=api_key,
         model=model,
         messages=[
@@ -381,6 +383,46 @@ async def generate_scene_json(
         ],
         context_items=context_items,
     )
+    return scene_payload, blueprint
+
+
+def validate_scene_blueprint(payload: dict[str, Any]) -> list[str]:
+    issues: list[str] = []
+    scenes = payload.get("scenes")
+    if not isinstance(scenes, list) or not scenes:
+        return ["Scene blueprint must include a non-empty scenes array."]
+    for index, scene in enumerate(scenes):
+        if not isinstance(scene, dict):
+            issues.append(f"Blueprint scene {index} is not an object.")
+            continue
+        scene_id = scene.get("id")
+        scene_name = scene.get("name")
+        nodes = scene.get("nodes")
+        edges = scene.get("edges")
+        checks = scene.get("checks")
+        if not scene_id or not scene_name:
+            issues.append(f"Blueprint scene {index} is missing id or name.")
+        if not isinstance(nodes, list) or not nodes:
+            issues.append(f"Blueprint scene {index} must include nodes.")
+        if not isinstance(edges, list):
+            issues.append(f"Blueprint scene {index} must include edges.")
+        if not isinstance(checks, list) or not checks:
+            issues.append(f"Blueprint scene {index} must include checks.")
+        for node in nodes or []:
+            if not isinstance(node, dict):
+                issues.append(f"Blueprint scene {index} has a node that is not an object.")
+                continue
+            if not node.get("id") or not node.get("type"):
+                issues.append(f"Blueprint scene {index} has a node missing id or type.")
+                break
+        for edge in edges or []:
+            if not isinstance(edge, dict):
+                issues.append(f"Blueprint scene {index} has an edge that is not an object.")
+                continue
+            if not edge.get("source") or not edge.get("target"):
+                issues.append(f"Blueprint scene {index} has an edge missing source or target.")
+                break
+    return issues
 
 
 def validate_scene_payload(payload: dict[str, Any]) -> list[str]:
@@ -476,7 +518,7 @@ async def repair_scene_json(
     model: str,
     payload: dict[str, Any],
     issues: list[str],
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     context_block = _format_context_items(context_items)
     blueprint_prompt = "\n\n".join(
         [
@@ -505,7 +547,7 @@ async def repair_scene_json(
             json.dumps(blueprint, ensure_ascii=False),
         ]
     )
-    return await _request_scene_json(
+    scene_payload = await _request_scene_json(
         api_key=api_key,
         model=model,
         messages=[
@@ -514,6 +556,7 @@ async def repair_scene_json(
         ],
         context_items=context_items,
     )
+    return scene_payload, blueprint
 
 
 async def _request_scene_json(
