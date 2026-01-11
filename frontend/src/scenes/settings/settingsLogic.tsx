@@ -225,7 +225,7 @@ export const settingsLogic = kea<settingsLogicType>([
       actions.stopEmbeddingsPolling()
     },
   })),
-  listeners(({ values, actions }) => ({
+  listeners(({ values, asyncActions, actions }) => ({
     loadSettingsSuccess: ({ savedSettings }) => {
       actions.resetSettings(setDefaultSettings(savedSettings))
     },
@@ -262,7 +262,7 @@ export const settingsLogic = kea<settingsLogicType>([
       window.localStorage.setItem(embeddingsGeneratingStorageKey, 'true')
       actions.startEmbeddingsPolling()
       try {
-        await actions.generateMissingAiEmbeddings()
+        await asyncActions.generateMissingAiEmbeddings()
       } catch (error) {
         actions.setIsGeneratingEmbeddings(false)
         actions.stopEmbeddingsPolling()
@@ -280,7 +280,7 @@ export const settingsLogic = kea<settingsLogicType>([
       actions.setIsDeletingEmbeddings(true)
       actions.startEmbeddingsPolling()
       try {
-        await actions.deleteAiEmbeddings()
+        await asyncActions.deleteAiEmbeddings()
       } finally {
         actions.setIsDeletingEmbeddings(false)
         actions.loadAiEmbeddingsStatus()
