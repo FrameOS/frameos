@@ -15,7 +15,7 @@ const MAX_LOG_LINES = 50000
 export const logsLogic = kea<logsLogicType>([
   path(['src', 'scenes', 'frame', 'logsLogic']),
   props({} as LogsLogicProps),
-  connect({ logic: [socketLogic] }),
+  connect(() => ({ logic: [socketLogic] })),
   key((props) => props.frameId),
   loaders(({ props }) => ({
     logs: [

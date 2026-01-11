@@ -231,7 +231,7 @@ export const frameLogic = kea<frameLogicType>([
   path(['src', 'scenes', 'frame', 'frameLogic']),
   props({} as FrameLogicProps),
   key((props) => props.frameId),
-  connect({ values: [framesModel, ['frames']] }),
+  connect(() => ({ values: [framesModel, ['frames']] })),
   actions({
     updateScene: (sceneId: string, scene: Partial<FrameScene>) => ({ sceneId, scene }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Record<string, any>) => ({ sceneId, nodeId, nodeData }),

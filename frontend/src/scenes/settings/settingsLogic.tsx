@@ -31,7 +31,7 @@ export interface CustomFont {
 
 export const settingsLogic = kea<settingsLogicType>([
   path(['src', 'scenes', 'settings', 'settingsLogic']),
-  connect({ logic: [socketLogic] }),
+  connect(() => ({ logic: [socketLogic] })),
   actions({
     updateSavedSettings: (settings: Record<string, any>) => ({ settings }),
     addSshKey: true,

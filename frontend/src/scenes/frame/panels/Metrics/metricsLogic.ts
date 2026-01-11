@@ -14,7 +14,7 @@ export interface metricsLogicProps {
 export const metricsLogic = kea<metricsLogicType>([
   path(['src', 'scenes', 'frame', 'metricsLogic']),
   props({} as metricsLogicProps),
-  connect({ logic: [socketLogic] }),
+  connect(() => ({ logic: [socketLogic] })),
   key((props) => props.frameId),
   loaders(({ props }) => ({
     metrics: [
