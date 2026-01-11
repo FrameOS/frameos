@@ -53,27 +53,34 @@ else:
 # Serve HTML and static files in all cases except for public HASSIO_RUN_MODE
 serve_html = config.HASSIO_RUN_MODE != "public"
 if serve_html:
-    app.mount("/assets", StaticFiles(directory="../frontend/dist/assets"), name="assets")
-    app.mount("/img", StaticFiles(directory="../frontend/dist/img"), name="img")
-    app.mount("/static", StaticFiles(directory="../frontend/dist/static"), name="static")
+    # only if frontend/dist exists, might not if we're using vite
+    if os.path.exists("../frontend/dist"):
+        app.mount("/assets", StaticFiles(directory="../frontend/dist/assets"), name="assets")
+        app.mount("/img", StaticFiles(directory="../frontend/dist/img"), name="img")
+        app.mount("/static", StaticFiles(directory="../frontend/dist/static"), name="static")
 
-    # Public config for the frontend
-    frameos_app_config = {}
-    try:
-        index_html = open("../frontend/dist/index.html").read()
-    except FileNotFoundError:
-        if config.TEST:
-            # don't need the compiled frontend when testing
-            index_html = open("../frontend/src/index.html").read()
-        else:
-            raise
+        # Public config for the frontend
+        frameos_app_config = {}
+        try:
+            index_html = open("../frontend/dist/index.html").read()
+        except FileNotFoundError:
+            if config.TEST:
+                # don't need the compiled frontend when testing
+                index_html = open("../frontend/src/index.html").read()
+            else:
+                raise
 
-    if config.HASSIO_RUN_MODE:
-        frameos_app_config["HASSIO_RUN_MODE"] = config.HASSIO_RUN_MODE
-    if config.ingress_path:
-        frameos_app_config["ingress_path"] = config.ingress_path
+        if config.HASSIO_RUN_MODE:
+            frameos_app_config["HASSIO_RUN_MODE"] = config.HASSIO_RUN_MODE
+        if config.ingress_path:
+            frameos_app_config["ingress_path"] = config.ingress_path
 
-    index_html = index_html.replace('<head>', f'<head><script>window.FRAMEOS_APP_CONFIG={json.dumps(frameos_app_config)}</script>')
+        index_html = index_html.replace('<head>', f'<head><script>window.FRAMEOS_APP_CONFIG={json.dumps(frameos_app_config)}</script>')
+    else:
+        dev_url = "http://localhost:8616"
+        index_html = "<html><body><h1>Frontend not built</h1>"
+        index_html += f'<p>Please run the frontend dev server: <a href="{dev_url}">{dev_url}</a></p>'
+        index_html += "</body></html>"
 
     @app.get("/")
     async def read_index():
