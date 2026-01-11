@@ -722,35 +722,11 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             tooltip={
               <div className="space-y-2">
                 <p>The port on which the frame accepts HTTP API requests and serves a simple control interface.</p>
-                <p>
-                  When the reverse proxy is enabled, the HTTP server binds to localhost only, and the proxy exposes the
-                  public HTTPS port instead.
-                </p>
               </div>
             }
           >
             <TextInput name="frame_port" placeholder="8787" required />
           </Field>
-          <Group name="network">
-            <Field
-              name="reverseProxyEnabled"
-              label="Enable HTTPS reverse proxy (Caddy)"
-              tooltip="Serve FrameOS over HTTPS via Caddy and keep the HTTP server bound to localhost."
-            >
-              <Switch name="reverseProxyEnabled" fullWidth />
-            </Field>
-            {frameForm.network?.reverseProxyEnabled ? (
-              <Field
-                name="reverseProxyPort"
-                label="Public HTTPS port"
-                tooltip="The port exposed by Caddy when the reverse proxy is enabled."
-              >
-                {({ onChange, value }) => (
-                  <NumberTextInput name="reverseProxyPort" onChange={onChange} value={value ?? 443} placeholder="443" />
-                )}
-              </Field>
-            ) : null}
-          </Group>
           <Field
             name="frame_access"
             label="HTTP access level"

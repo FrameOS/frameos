@@ -153,87 +153,6 @@ async def _sync_vendor_dir(
         )
 
 
-async def _configure_caddy_proxy(
-    deployer: FrameDeployer,
-    build_id: str,
-    *,
-    enabled: bool,
-    public_port: int,
-) -> None:
-    if not enabled:
-        await deployer.log("stdout", f"{icon} Caddy reverse proxy disabled; stopping service")
-        await deployer.exec_command(
-            "sudo systemctl disable --now caddy.service",
-            raise_on_error=False,
-            log_command=False,
-        )
-        return
-
-    await deployer.log("stdout", f"{icon} Configuring Caddy reverse proxy")
-    await _install_if_necessary(deployer, "caddy")
-
-    upstream_port = int(deployer.frame.frame_port or 8787)
-    caddyfile = "\n".join(
-        [
-            f":{public_port} {{",
-            f"    reverse_proxy 127.0.0.1:{upstream_port}",
-            "}",
-            "",
-        ]
-    )
-
-    current_lines: list[str] = []
-    status = await deployer.exec_command(
-        "sudo cat /etc/caddy/Caddyfile 2>/dev/null",
-        output=current_lines,
-        raise_on_error=False,
-        log_command=False,
-        log_output=False,
-    )
-    current_contents = "\n".join(current_lines).strip()
-    desired_contents = caddyfile.strip()
-    needs_update = status != 0 or current_contents != desired_contents
-
-    is_active = (
-        await deployer.exec_command(
-            "systemctl is-active --quiet caddy.service",
-            raise_on_error=False,
-            log_command=False,
-            log_output=False,
-        )
-        == 0
-    )
-    is_enabled = (
-        await deployer.exec_command(
-            "systemctl is-enabled --quiet caddy.service",
-            raise_on_error=False,
-            log_command=False,
-            log_output=False,
-        )
-        == 0
-    )
-
-    if needs_update:
-        remote_caddyfile = f"/tmp/Caddyfile_{build_id}"
-        await upload_file(
-            deployer.db,
-            deployer.redis,
-            deployer.frame,
-            remote_caddyfile,
-            caddyfile.encode("utf-8"),
-        )
-        await deployer.exec_command("sudo mkdir -p /etc/caddy")
-        await deployer.exec_command(
-            "sudo cp -a "
-            f"{shlex.quote(remote_caddyfile)} /etc/caddy/Caddyfile && sudo chown root:root /etc/caddy/Caddyfile && sudo chmod 644 /etc/caddy/Caddyfile"
-        )
-
-    if not is_enabled:
-        await deployer.exec_command("sudo systemctl enable caddy.service")
-    if needs_update or not is_active:
-        await deployer.exec_command("sudo systemctl restart caddy.service")
-
-
 async def _deploy_with_nixos(
     deployer: FrameDeployer,
     settings: dict[str, Any],
@@ -786,17 +705,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             )
             await self.exec_command("sudo chown root:root /etc/systemd/system/frameos.service")
             await self.exec_command("sudo chmod 644 /etc/systemd/system/frameos.service")
-
-            # 5a. Configure Caddy reverse proxy
-            network_cfg = frame.network or {}
-            reverse_proxy_enabled = bool(network_cfg.get("reverseProxyEnabled", False))
-            reverse_proxy_port = int(network_cfg.get("reverseProxyPort", 443) or 443)
-            await _configure_caddy_proxy(
-                self,
-                build_id,
-                enabled=reverse_proxy_enabled,
-                public_port=reverse_proxy_port,
-            )
 
             # 6. Link new release
             await self.exec_command(

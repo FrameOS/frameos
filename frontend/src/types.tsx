@@ -68,8 +68,6 @@ export interface FrameType {
     wifiHotspotSsid?: string
     wifiHotspotPassword?: string
     wifiHotspotTimeoutSeconds?: number
-    reverseProxyEnabled?: boolean
-    reverseProxyPort?: number
   }
   agent?: {
     agentEnabled?: boolean

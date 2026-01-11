@@ -486,32 +486,6 @@ class FrameDeployer:
                 "  };"
             ])
 
-        reverse_proxy_enabled = bool(network_cfg.get("reverseProxyEnabled", False))
-        reverse_proxy_port = int(network_cfg.get("reverseProxyPort", 443) or 443)
-        frame_port = int(self.frame.frame_port or 8787)
-
-        if reverse_proxy_enabled:
-            lines.extend([
-                "",
-                "  # Caddy reverse proxy for FrameOS HTTP API",
-                "  services.caddy = {",
-                "    enable = true;",
-                "    config = ''",
-                f"      :{reverse_proxy_port} {{",
-                f"        reverse_proxy 127.0.0.1:{frame_port}",
-                "      }",
-                "    '';",
-                "  };",
-                "  networking.firewall.allowedTCPPorts = [ "
-                + str(reverse_proxy_port) + " ];",
-            ])
-        else:
-            lines.extend([
-                "",
-                "  # Caddy reverse proxy disabled",
-                "  services.caddy.enable = false;",
-            ])
-
         # nixpkgs
         if extra_nixpkgs := self.get_nixpkgs():
             lines.extend([

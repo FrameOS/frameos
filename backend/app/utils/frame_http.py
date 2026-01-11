@@ -45,11 +45,8 @@ def _build_frame_url(frame: Frame, path: str, method: str) -> str:
     if not is_safe_host(frame.frame_host):
         raise HTTPException(status_code=400, detail="Unsafe frame host")
 
-    network_cfg = frame.network or {}
-    reverse_proxy_enabled = bool(network_cfg.get("reverseProxyEnabled", False))
-    public_port = int(network_cfg.get("reverseProxyPort", 443) or 443) if reverse_proxy_enabled else frame.frame_port
-    scheme = "https" if reverse_proxy_enabled or public_port % 1000 == 443 else "http"
-    url = f"{scheme}://{frame.frame_host}:{public_port}{_build_frame_path(frame, path, method)}"
+    scheme = "https" if frame.frame_port % 1000 == 443 else "http"
+    url = f"{scheme}://{frame.frame_host}:{frame.frame_port}{_build_frame_path(frame, path, method)}"
     return url
 
 
