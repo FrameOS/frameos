@@ -316,6 +316,27 @@ export function Settings() {
                     </div>
                   </Box>
                 </Group>
+                <Group name="posthog">
+                  <H6 className="pt-4">PostHog</H6>
+                  <Box className="p-2 space-y-2">
+                    <Field
+                      name="backendApiKey"
+                      label="Backend API key"
+                      secret={!!savedSettings?.posthog?.backendApiKey}
+                    >
+                      <TextInput />
+                    </Field>
+                    <Field name="backendHost" label="Backend host">
+                      <TextInput placeholder="https://us.i.posthog.com" />
+                    </Field>
+                    <Field name="backendEnableErrorTracking" label="Backend - enable error tracking">
+                      <Switch fullWidth />
+                    </Field>
+                    <Field name="backendEnableLlmAnalytics" label="Backend - enable llm analytics">
+                      <Switch fullWidth />
+                    </Field>
+                  </Box>
+                </Group>
                 <Group name="homeAssistant">
                   <H6 className="pt-4">Home Assistant</H6>
                   <Box className="p-2 space-y-2">

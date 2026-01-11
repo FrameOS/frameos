@@ -6,6 +6,7 @@ import httpx
 import numpy as np
 
 from app.models.ai_embeddings import AiEmbedding
+from app.utils.posthog import capture_llm_event
 
 SUMMARY_MODEL = "gpt-5-mini"
 SCENE_MODEL = "gpt-5.2"
@@ -260,6 +261,14 @@ async def create_embeddings(texts: list[str], api_key: str, model: str) -> list[
             )
             response.raise_for_status()
             payload = response.json()
+            capture_llm_event(
+                "$ai_embedding",
+                {
+                    "provider": "openai",
+                    "model": model or EMBEDDING_MODEL,
+                    "input_count": len(batch),
+                },
+            )
             for entry in sorted(payload.get("data", []), key=lambda item: item.get("index", 0)):
                 embeddings.append(entry["embedding"])
     return embeddings
@@ -284,6 +293,14 @@ async def summarize_text(text: str, api_key: str, *, model: str = SUMMARY_MODEL)
         )
         response.raise_for_status()
         payload = response.json()
+    capture_llm_event(
+        "$ai_generation",
+        {
+            "provider": "openai",
+            "model": model or SUMMARY_MODEL,
+            "operation": "summarize_text",
+        },
+    )
     message = payload.get("choices", [{}])[0].get("message", {})
     content = message.get("content", "{}")
     return json.loads(content)
@@ -308,6 +325,14 @@ async def expand_prompt(prompt: str, api_key: str, *, model: str = EXPANSION_MOD
         )
         response.raise_for_status()
         payload = response.json()
+    capture_llm_event(
+        "$ai_generation",
+        {
+            "provider": "openai",
+            "model": model or EXPANSION_MODEL,
+            "operation": "expand_prompt",
+        },
+    )
     message = payload.get("choices", [{}])[0].get("message", {})
     content = message.get("content", "{}")
     expanded = json.loads(content).get("expanded_prompt")
@@ -338,6 +363,7 @@ async def generate_scene_json(
             {"role": "system", "content": SCENE_BLUEPRINT_SYSTEM_PROMPT},
             {"role": "user", "content": blueprint_prompt},
         ],
+        context_items=context_items,
     )
     scene_prompt = "\n\n".join(
         [
@@ -353,6 +379,7 @@ async def generate_scene_json(
             {"role": "system", "content": SCENE_JSON_SYSTEM_PROMPT},
             {"role": "user", "content": scene_prompt},
         ],
+        context_items=context_items,
     )
 
 
@@ -430,6 +457,7 @@ async def review_scene_solution(
             {"role": "system", "content": SCENE_REVIEW_SYSTEM_PROMPT},
             {"role": "user", "content": review_prompt},
         ],
+        context_items=[],
     )
     solves = response.get("solves")
     issues = response.get("issues")
@@ -467,6 +495,7 @@ async def repair_scene_json(
             {"role": "system", "content": SCENE_BLUEPRINT_FIX_SYSTEM_PROMPT},
             {"role": "user", "content": blueprint_prompt},
         ],
+        context_items=context_items,
     )
     scene_prompt = "\n\n".join(
         [
@@ -483,6 +512,7 @@ async def repair_scene_json(
             {"role": "system", "content": SCENE_JSON_SYSTEM_PROMPT},
             {"role": "user", "content": scene_prompt},
         ],
+        context_items=context_items,
     )
 
 
@@ -491,6 +521,7 @@ async def _request_scene_json(
     api_key: str,
     model: str,
     messages: list[dict[str, str]],
+    context_items: list[AiEmbedding],
 ) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=90) as client:
         response = await client.post(
@@ -507,5 +538,14 @@ async def _request_scene_json(
         )
         response.raise_for_status()
         payload = response.json()
+    capture_llm_event(
+        "$ai_generation",
+        {
+            "provider": "openai",
+            "model": model or SCENE_MODEL,
+            "operation": "generate_scene_json",
+            "context_items": len(context_items),
+        },
+    )
     content = payload.get("choices", [{}])[0].get("message", {}).get("content", "{}")
     return json.loads(content)

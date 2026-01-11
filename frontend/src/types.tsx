@@ -555,6 +555,12 @@ export interface FrameOSSettings {
     sceneModel?: string
     appEnhanceModel?: string
   }
+  posthog?: {
+    backendApiKey?: string
+    backendHost?: string
+    backendEnableErrorTracking?: boolean
+    backendEnableLlmAnalytics?: boolean
+  }
   repositories?: RepositoryType[]
   ssh_keys?: {
     keys?: SSHKeyEntry[]
