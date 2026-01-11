@@ -32,6 +32,7 @@ async def generate_scene(data: AiSceneGenerateRequest, db: Session = Depends(get
         api_key=api_key,
     )
 
+    title = response_payload.get("title")
     scenes = response_payload.get("scenes")
     if not isinstance(scenes, list):
         raise HTTPException(
@@ -50,4 +51,4 @@ async def generate_scene(data: AiSceneGenerateRequest, db: Session = Depends(get
         for item in context_items
     ]
 
-    return AiSceneGenerateResponse(scenes=scenes, context=context_response)
+    return AiSceneGenerateResponse(title=title, scenes=scenes, context=context_response)

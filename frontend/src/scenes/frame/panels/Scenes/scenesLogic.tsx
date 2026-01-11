@@ -46,9 +46,11 @@ export const scenesLogic = kea<scenesLogicType>([
     deleteSelectedScenes: true,
     renameScene: (sceneId: string) => ({ sceneId }),
     duplicateScene: (sceneId: string) => ({ sceneId }),
-    toggleNewScene: true,
+    openNewScene: (location: string) => ({ location }),
     closeNewScene: true,
     createNewScene: true,
+    openAiScene: (location: string) => ({ location }),
+    closeAiScene: true,
     sync: true,
     expandScene: (sceneId: string) => ({ sceneId }),
     copySceneJSON: (sceneId: string) => ({ sceneId }),
@@ -124,12 +126,20 @@ export const scenesLogic = kea<scenesLogicType>([
         setSearch: (_, { search }) => search,
       },
     ],
-    showNewSceneForm: [
-      false,
+    newSceneFormLocation: [
+      null as string | null,
       {
-        toggleNewScene: (state) => !state,
-        closeNewScene: () => false,
-        submitNewSceneSuccess: () => false,
+        openNewScene: (_, { location }) => location,
+        closeNewScene: () => null,
+        submitNewSceneSuccess: () => null,
+      },
+    ],
+    aiSceneFormLocation: [
+      null as string | null,
+      {
+        openAiScene: (_, { location }) => location,
+        closeAiScene: () => null,
+        generateAiSceneSuccess: () => null,
       },
     ],
     showingSettings: [
@@ -170,6 +180,7 @@ export const scenesLogic = kea<scenesLogicType>([
       {
         setAiPrompt: (_, { prompt }) => prompt,
         generateAiSceneSuccess: () => '',
+        closeAiScene: () => '',
       },
     ],
     aiError: [
@@ -177,6 +188,7 @@ export const scenesLogic = kea<scenesLogicType>([
       {
         generateAiScene: () => null,
         generateAiSceneFailure: (_, { error }) => error,
+        closeAiScene: () => null,
       },
     ],
     isGeneratingAiScene: [
@@ -371,11 +383,12 @@ export const scenesLogic = kea<scenesLogicType>([
         }
         const payload = await response.json()
         const scenes = Array.isArray(payload?.scenes) ? payload.scenes : []
+        const title = typeof payload?.title === 'string' ? payload.title : undefined
         if (!scenes.length) {
           throw new Error('No scenes returned from AI')
         }
         const sanitizedScenes = scenes.map((scene: Partial<FrameScene>) => sanitizeScene(scene, values.frameForm))
-        actions.applyTemplate({ scenes: sanitizedScenes, name: 'AI Generated Scene' })
+        actions.applyTemplate({ scenes: sanitizedScenes, name: title || 'AI Generated Scene' })
         actions.generateAiSceneSuccess()
       } catch (error) {
         console.error(error)
@@ -516,11 +529,15 @@ export const scenesLogic = kea<scenesLogicType>([
       })
       actions.clearSceneSelection()
     },
-    toggleNewScene: () => {
-      actions.resetNewScene({ name: '' })
-    },
     closeNewScene: () => {
       actions.resetNewScene({ name: '' })
+    },
+    openNewScene: () => {
+      actions.resetNewScene({ name: '' })
+      actions.closeAiScene()
+    },
+    openAiScene: () => {
+      actions.closeNewScene()
     },
     createNewScene: () => {
       const scenes: FrameScene[] = values.frameForm.scenes || []

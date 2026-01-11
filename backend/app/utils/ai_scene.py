@@ -21,7 +21,7 @@ Keep the summary concise and technical. Do not include markdown.
 SCENE_SYSTEM_PROMPT = """
 You are a FrameOS scene generator. Build scenes JSON that can be uploaded to FrameOS.
 Follow these rules:
-- Output a JSON object with a top-level "scenes" array. No markdown or code fences.
+- Output a JSON object with a top-level "title" string and "scenes" array. No markdown or code fences.
 - Each scene must include: id (string), name (string), nodes (array).
 - Each node must include: id (string), type ("event" or "app"), data (object).
 - Include at least one event node with data.keyword = "render" to trigger rendering.

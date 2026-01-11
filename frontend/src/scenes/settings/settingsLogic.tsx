@@ -60,6 +60,32 @@ export const settingsLogic = kea<settingsLogicType>([
         },
       },
     ],
+    aiEmbeddingsStatus: [
+      { count: 0 },
+      {
+        loadAiEmbeddingsStatus: async () => {
+          try {
+            const response = await apiFetch(`/api/ai/embeddings/status`)
+            if (!response.ok) {
+              throw new Error('Failed to fetch AI embeddings status')
+            }
+            return await response.json()
+          } catch (error) {
+            console.error(error)
+            return values.aiEmbeddingsStatus
+          }
+        },
+        regenerateAiEmbeddings: async () => {
+          const response = await apiFetch(`/api/ai/embeddings/regenerate`, {
+            method: 'POST',
+          })
+          if (!response.ok) {
+            throw new Error('Failed to regenerate AI embeddings')
+          }
+          return await response.json()
+        },
+      },
+    ],
     customFonts: [
       [] as CustomFont[],
       {
@@ -137,6 +163,7 @@ export const settingsLogic = kea<settingsLogicType>([
   })),
   afterMount(({ actions }) => {
     actions.loadSettings()
+    actions.loadAiEmbeddingsStatus()
     actions.loadCustomFonts()
   }),
   listeners(({ values, actions }) => ({

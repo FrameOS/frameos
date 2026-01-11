@@ -38,6 +38,9 @@ import { FrameImage } from '../../../../components/FrameImage'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
 import { SecretSettingsModal } from '../SecretSettingsModal'
+import { TextArea } from '../../../../components/TextArea'
+import { A } from 'kea-router'
+import { urls } from '../../../../urls'
 
 export function Scenes() {
   const { frameId, frameForm, frame } = useValues(frameLogic)
@@ -47,7 +50,8 @@ export function Scenes() {
     filteredScenes,
     scenes,
     search,
-    showNewSceneForm,
+    newSceneFormLocation,
+    aiSceneFormLocation,
     isNewSceneSubmitting,
     showingSettings,
     expandedScenes,
@@ -74,7 +78,7 @@ export function Scenes() {
     setSearch,
     toggleSettings,
     submitNewScene,
-    toggleNewScene,
+    openNewScene,
     createNewScene,
     closeNewScene,
     expandScene,
@@ -88,6 +92,8 @@ export function Scenes() {
     uploadImage,
     setAiPrompt,
     generateAiScene,
+    openAiScene,
+    closeAiScene,
     installMissingActiveScene,
   } = useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
@@ -95,7 +101,7 @@ export function Scenes() {
     controlLogic({ frameId })
   )
   const { setCurrentScene, sync } = useActions(controlLogic({ frameId }))
-  const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
+  const { settings, savedSettings, settingsChanged, aiEmbeddingsStatus } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const selectableSceneIds = filteredScenes.map((scene) => scene.id)
@@ -115,52 +121,114 @@ export function Scenes() {
     event.target.value = ''
   }
 
-  const renderShortcuts = (className?: string, onNewScene: () => void = toggleNewScene) => (
-    <div className={clsx('flex flex-wrap items-center gap-2 rounded-lg', className)}>
-      <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={onNewScene}>
-        <PlusIcon className="w-4 h-4" />
-        New blank scene
-      </Button>
-      <div className="flex flex-col gap-1 min-w-[220px]">
-        <TextInput
+  const hasEmbeddings = (aiEmbeddingsStatus?.count ?? 0) > 0
+
+  const renderNewSceneForm = () => (
+    <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">
+      <Box className="p-4 space-y-4 bg-gray-900">
+        <H6>New scene</H6>
+        <Field label="Name" name="name">
+          <TextInput placeholder="e.g. Camera view" />
+        </Field>
+        <div className="flex gap-2">
+          <Button size="small" color="primary" onClick={submitNewScene} disabled={isNewSceneSubmitting}>
+            Add Scene
+          </Button>
+          <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={closeNewScene}>
+            Close
+          </Button>
+        </div>
+      </Box>
+    </Form>
+  )
+
+  const renderAiSceneForm = () => (
+    <Box className="p-4 space-y-3 bg-gray-900">
+      <H6>Generate scene</H6>
+      <div className="space-y-1">
+        <div className="text-xs font-semibold uppercase text-gray-400">Prompt</div>
+        <TextArea
+          rows={3}
           placeholder='e.g. "show an analog clock"'
           value={aiPrompt}
           onChange={setAiPrompt}
-          className="min-w-[220px]"
+          disabled={!hasEmbeddings}
         />
-        {aiError ? <span className="text-xs text-red-400">{aiError}</span> : null}
       </div>
-      <Button
-        size="small"
-        color="secondary"
-        className="flex gap-1 items-center"
-        onClick={() => generateAiScene()}
-        disabled={isGeneratingAiScene}
-      >
-        {isGeneratingAiScene ? <Spinner color="white" /> : <SparklesIcon className="w-4 h-4" />}
-        Generate scene
-      </Button>
-      <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={openTemplates}>
-        <SparklesIcon className="w-4 h-4" />
-        Explore available scenes
-      </Button>
-      {frame.last_successful_deploy_at ? (
+      {!hasEmbeddings ? (
+        <div className="text-xs text-gray-400">
+          No embeddings generated.{' '}
+          <A className="text-blue-400 hover:underline" href={urls.settings()}>
+            Open settings
+          </A>
+        </div>
+      ) : null}
+      {aiError ? <span className="text-xs text-red-400">{aiError}</span> : null}
+      <div className="flex gap-2">
         <Button
           size="small"
           color="secondary"
           className="flex gap-1 items-center"
-          onClick={triggerUploadInput}
-          disabled={isUploadingImage}
+          onClick={() => generateAiScene()}
+          disabled={isGeneratingAiScene || !hasEmbeddings}
         >
-          {isUploadingImage ? <Spinner color="white" /> : <ArrowUpTrayIcon className="w-4 h-4" />}
-          Upload image
+          {isGeneratingAiScene ? <Spinner color="white" /> : <SparklesIcon className="w-4 h-4" />}
+          {isGeneratingAiScene ? 'Generating...' : 'Generate scene'}
         </Button>
-      ) : null}
-      <input ref={uploadInputRef} type="file" accept="image/*" className="hidden" onChange={handleUploadImage} />
-    </div>
+        <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={closeAiScene}>
+          Close
+        </Button>
+      </div>
+    </Box>
   )
 
-  if (scenes.length === 0 && !showNewSceneForm && !missingActiveSceneId) {
+  const renderShortcuts = (location: string, className?: string, onNewScene: (() => void) | null = null) => (
+    <>
+      <div className={clsx('flex flex-wrap items-center gap-2 rounded-lg', className)}>
+        <Button
+          size="small"
+          color="secondary"
+          className="flex gap-1 items-center"
+          onClick={() => (onNewScene ? onNewScene() : openNewScene(location))}
+        >
+          <PlusIcon className="w-4 h-4" />
+          New blank scene
+        </Button>
+        <Button
+          size="small"
+          color="secondary"
+          className="flex gap-1 items-center"
+          onClick={() => openAiScene(location)}
+        >
+          <SparklesIcon className="w-4 h-4" />
+          Generate scene
+        </Button>
+        {!frame.scenes?.length ? (
+          <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={openTemplates}>
+            <SparklesIcon className="w-4 h-4" />
+            Explore available scenes
+          </Button>
+        ) : null}
+        {frame.last_successful_deploy_at ? (
+          <Button
+            size="small"
+            color="secondary"
+            className="flex gap-1 items-center"
+            onClick={triggerUploadInput}
+            disabled={isUploadingImage}
+          >
+            {isUploadingImage ? <Spinner color="white" /> : <ArrowUpTrayIcon className="w-4 h-4" />}
+            Upload image
+          </Button>
+        ) : null}
+        <input ref={uploadInputRef} type="file" accept="image/*" className="hidden" onChange={handleUploadImage} />
+      </div>
+      {newSceneFormLocation === location ? renderNewSceneForm() : null}
+      {aiSceneFormLocation === location ? renderAiSceneForm() : null}
+    </>
+  )
+
+  if (scenes.length === 0 && !newSceneFormLocation && !missingActiveSceneId) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center space-y-4 mb-8">
@@ -170,7 +238,7 @@ export function Scenes() {
               ? 'Scenes are the building blocks of your frame. They can be anything from a simple clock to a complex interactive thermostat.'
               : 'Press the purple "First deploy" button to deploy FrameOS for the first time.'}
           </p>
-          {renderShortcuts('justify-center', createNewScene)}
+          {renderShortcuts('empty', 'justify-center', createNewScene)}
         </div>
       </div>
     )
@@ -268,7 +336,7 @@ export function Scenes() {
                 )}
               </div>
             </div>
-            {renderShortcuts()}
+            {renderShortcuts('top')}
           </>
         ) : null}
         {filteredScenes.length === 0 && search && !missingActiveMatchesSearch ? (
@@ -593,26 +661,7 @@ export function Scenes() {
           )
         })}
 
-        {showNewSceneForm ? (
-          <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">
-            <Box className="p-4 space-y-4 bg-gray-900">
-              <H6>New scene</H6>
-              <Field label="Name" name="name">
-                <TextInput placeholder="e.g. Camera view" />
-              </Field>
-              <div className="flex gap-2">
-                <Button size="small" color="primary" onClick={submitNewScene} disabled={isNewSceneSubmitting}>
-                  Add Scene
-                </Button>
-                <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={closeNewScene}>
-                  Close
-                </Button>
-              </div>
-            </Box>
-          </Form>
-        ) : (
-          renderShortcuts()
-        )}
+        {renderShortcuts('bottom')}
       </div>
       <SecretSettingsModal
         activeSettingsKey={activeSettingsKey}

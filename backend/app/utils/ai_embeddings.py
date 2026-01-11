@@ -1,12 +1,10 @@
-#!/usr/bin/env python3
-import asyncio
 import json
 from pathlib import Path
 from typing import Any
 
-from app.database import SessionLocal
-from app.models.ai_embeddings import upsert_ai_embedding
-from app.models.settings import get_settings_dict
+from sqlalchemy.orm import Session
+
+from app.models.ai_embeddings import AiEmbedding, upsert_ai_embedding
 from app.utils.ai_scene import create_embeddings, summarize_text
 
 
@@ -93,74 +91,63 @@ def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict
     return summary_input, metadata
 
 
-async def _build_embeddings() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+def _resolve_repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+async def build_ai_embeddings(db: Session, api_key: str, *, clear_existing: bool = False) -> int:
+    repo_root = _resolve_repo_root()
     scenes_root = repo_root / "repo" / "scenes"
     apps_root = repo_root / "frameos" / "src" / "apps"
 
-    db = SessionLocal()
-    try:
-        api_key = get_settings_dict(db).get("openAI", {}).get("apiKey")
-        if not api_key:
-            raise RuntimeError("OpenAI API key not set in settings")
+    if clear_existing:
+        db.query(AiEmbedding).delete(synchronize_session=False)
+        db.commit()
 
-        items: list[tuple[str, str, str | None, str, dict[str, Any]]] = []
+    items: list[tuple[str, str, str | None, str, dict[str, Any]]] = []
 
-        for template_path in scenes_root.rglob("template.json"):
-            summary_input, metadata = _summarize_scene_template(template_path, repo_root)
-            items.append(
-                (
-                    "scene",
-                    str(template_path.parent.relative_to(repo_root)),
-                    metadata.get("name"),
-                    summary_input,
-                    metadata,
-                )
+    for template_path in scenes_root.rglob("template.json"):
+        summary_input, metadata = _summarize_scene_template(template_path, repo_root)
+        items.append(
+            (
+                "scene",
+                str(template_path.parent.relative_to(repo_root)),
+                metadata.get("name"),
+                summary_input,
+                metadata,
             )
+        )
 
-        print("Found {} scene templates for embedding.".format(len(items)))
-
-        for config_path in apps_root.rglob("config.json"):
-            # ignore src/apps/legacy folder
-            if config_path.parts[-3] == "legacy" and config_path.parts[-4] == "apps" and config_path.parts[-5] == "src":
-                continue
-            summary_input, metadata = _summarize_app_config(config_path, repo_root)
-            items.append(
-                (
-                    "app",
-                    str(config_path.parent.relative_to(repo_root)),
-                    metadata.get("name"),
-                    summary_input,
-                    metadata,
-                )
+    for config_path in apps_root.rglob("config.json"):
+        if config_path.parts[-3] == "legacy" and config_path.parts[-4] == "apps" and config_path.parts[-5] == "src":
+            continue
+        summary_input, metadata = _summarize_app_config(config_path, repo_root)
+        items.append(
+            (
+                "app",
+                str(config_path.parent.relative_to(repo_root)),
+                metadata.get("name"),
+                summary_input,
+                metadata,
             )
+        )
 
-        print("Found {} app configs for embedding.".format(len(items)))
+    for source_type, source_path, name, summary_input, metadata in items:
+        summary_payload = await summarize_text(summary_input, api_key)
+        summary = summary_payload.get("summary") or ""
+        keywords = summary_payload.get("keywords") or []
+        embedding_input = "\n".join([summary, f"Keywords: {', '.join(keywords)}", summary_input])
+        embedding = (await create_embeddings([embedding_input], api_key))[0]
+        metadata["keywords"] = keywords
+        upsert_ai_embedding(
+            db,
+            source_type=source_type,
+            source_path=source_path,
+            name=name,
+            summary=summary,
+            embedding=embedding,
+            metadata=metadata,
+        )
+        db.commit()
 
-        for source_type, source_path, name, summary_input, metadata in items:
-            print(f"Processing embedding for {source_type} at {source_path}...")
-            summary_payload = await summarize_text(summary_input, api_key)
-            summary = summary_payload.get("summary") or ""
-            keywords = summary_payload.get("keywords") or []
-            embedding_input = "\n".join(
-                [summary, f"Keywords: {', '.join(keywords)}", summary_input]
-            )
-            embedding = (await create_embeddings([embedding_input], api_key))[0]
-            metadata["keywords"] = keywords
-            upsert_ai_embedding(
-                db,
-                source_type=source_type,
-                source_path=source_path,
-                name=name,
-                summary=summary,
-                embedding=embedding,
-                metadata=metadata,
-            )
-            db.commit()
-    finally:
-        db.close()
-
-
-if __name__ == "__main__":
-    asyncio.run(_build_embeddings())
-    print("AI embeddings build complete.")
+    return len(items)

@@ -28,6 +28,8 @@ export function Settings() {
     savedSettings,
     savedSettingsLoading,
     settingsChanged,
+    aiEmbeddingsStatus,
+    aiEmbeddingsStatusLoading,
     customFontsLoading,
     isCustomFontsFormSubmitting,
     customFonts,
@@ -43,10 +45,12 @@ export function Settings() {
     newBuildHostKey,
     deleteCustomFont,
     setSettingsValue,
+    regenerateAiEmbeddings,
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
   const defaultSshKeyIds = getDefaultSshKeyIds(settings?.ssh_keys)
+  const embeddingsCount = aiEmbeddingsStatus?.count ?? 0
 
   const framesUsingKey = (keyId: string) =>
     framesList.filter((frame) => (frame.ssh_keys ?? defaultSshKeyIds).includes(keyId))
@@ -229,6 +233,23 @@ export function Settings() {
                     <Field name="apiKey" label="API key" secret={!!savedSettings?.openAI?.apiKey}>
                       <TextInput name="apiKey" />
                     </Field>
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-gray-300">
+                      <span>Embeddings generated: {embeddingsCount}</span>
+                      <Button
+                        size="small"
+                        color="secondary"
+                        onClick={regenerateAiEmbeddings}
+                        disabled={aiEmbeddingsStatusLoading}
+                      >
+                        {aiEmbeddingsStatusLoading ? (
+                          <Spinner />
+                        ) : embeddingsCount > 0 ? (
+                          'Regenerate embeddings'
+                        ) : (
+                          'Generate embeddings'
+                        )}
+                      </Button>
+                    </div>
                   </Box>
                 </Group>
                 <Group name="homeAssistant">

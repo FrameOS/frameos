@@ -18,5 +18,6 @@ class AiSceneContextItem(BaseModel):
 
 
 class AiSceneGenerateResponse(BaseModel):
+    title: Optional[str] = None
     scenes: list[dict[str, Any]]
     context: list[AiSceneContextItem]
