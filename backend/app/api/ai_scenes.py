@@ -145,7 +145,7 @@ async def generate_scene(
         blueprint_issues: list[str] = []
         validation_issues: list[str] = []
         review_issues: list[str] = []
-        max_attempts = 2
+        max_attempts = 3
         scene_model = openai_settings.get("sceneModel") or SCENE_MODEL
         review_model = openai_settings.get("reviewModel") or SCENE_REVIEW_MODEL
         for attempt in range(1, max_attempts + 1):
@@ -217,16 +217,21 @@ async def generate_scene(
             break
 
         if blueprint_issues or validation_issues or review_issues:
+            issue_summary = {
+                "blueprint": blueprint_issues,
+                "validation": validation_issues,
+                "review": review_issues,
+            }
             await _publish_ai_scene_log(
                 redis,
-                "AI scene generation did not pass validation after retries.",
+                f"AI scene generation did not pass validation after retries. Issues: {issue_summary}",
                 request_id,
                 status="error",
                 stage="validate",
             )
             raise HTTPException(
                 status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                detail="AI scene generation did not pass validation",
+                detail=f"AI scene generation did not pass validation: {issue_summary}",
             )
     except HTTPException:
         raise
@@ -238,21 +243,24 @@ async def generate_scene(
             status="error",
             stage="error",
         )
-        raise
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"AI scene generation failed: {exc}",
+        ) from exc
 
     title = response_payload.get("title")
     scenes = response_payload.get("scenes")
     if not isinstance(scenes, list):
         await _publish_ai_scene_log(
             redis,
-            "AI response did not include scenes.",
+            f"AI response did not include scenes (got {type(scenes).__name__}).",
             request_id,
             status="error",
             stage="validate",
         )
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="AI response did not include scenes",
+            detail=f"AI response did not include scenes (got {type(scenes).__name__}).",
         )
 
     context_response = [

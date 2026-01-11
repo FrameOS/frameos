@@ -85,6 +85,24 @@ Follow these rules:
     from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
     "field/render_functions[row][col]" and targetHandle "prev".
 - Every edge must reference nodes that exist in the "nodes" list. Do not include dangling edges.
+- Interpreted scenes can include quick JavaScript snippets in code nodes:
+  - Put JS in data.codeJS (not data.code) for interpreted scenes.
+  - The QuickJS environment exposes: state.<field>, args.<argName>, context.<event|payload|loopIndex|loopKey|hasImage>.
+  - Console logging is available via console.log/warn/error.
+  - Time helpers: parseTs(format, text), format(timestamp, format), now().
+  - Keep snippets as expressions that return a value (e.g. "state.title ?? 'Hello'" or "args.url").
+Reference TypeScript shapes (for structure sanity):
+- Scene: { id: string, name: string, nodes: Node[], edges: Edge[], settings: { execution: "interpreted", ... }, fields?: Field[] }
+- Node: { id: string, type: "event"|"app"|"state"|"code"|"scene", data: NodeData, position?: { x:number, y:number } }
+- Edge: { id?: string, type?: "appNodeEdge"|"codeNodeEdge", source: string, target: string, sourceHandle?: string, targetHandle?: string }
+- Field: { name: string, type: FieldType, label?: string, description?: string, required?: boolean, defaultValue?: any }
+- NodeData:
+  - EventNodeData: { keyword: string }
+  - AppNodeData: { keyword: string, config: object, sources?: object, cache?: object }
+  - StateNodeData: { keyword: string }
+  - CodeNodeData: { codeJS?: string, code?: string, codeArgs?: { name: string, type: FieldType }[], codeOutputs?: { name: string, type: FieldType }[], cache?: object, logOutput?: boolean }
+  - SceneNodeData: { keyword: string, config: object }
+  - FieldType: "string"|"text"|"float"|"integer"|"boolean"|"color"|"date"|"json"|"node"|"scene"|"image"|"font"|"select"
 Use any relevant scene examples from the provided context as guidance.
 You will be given a scene blueprint JSON; convert it into valid FrameOS scene JSON following the blueprint exactly.
 """.strip()
@@ -107,6 +125,25 @@ Return JSON only with keys: title, scenes (blueprint format).
 Ensure checks confirm render event presence, valid node ids, and correct edge types.
 Do not include markdown or code fences.
 """.strip()
+
+GENERATION_STEPS = [
+    "Understand the user request and available context.",
+    "Draft a scene blueprint that maps nodes and edges.",
+    "Generate scenes JSON that follows the blueprint.",
+    "Validate + review the generated JSON.",
+    "Repair issues and finalize output.",
+]
+
+
+def _format_generation_steps(current_step: str) -> str:
+    steps = "\n".join(f"{index + 1}. {step}" for index, step in enumerate(GENERATION_STEPS))
+    return "\n".join(
+        [
+            "Overall steps:",
+            steps,
+            f"We are here now: {current_step}",
+        ]
+    )
 
 
 def _chunk_texts(texts: Iterable[str], batch_size: int = 64) -> Iterable[list[str]]:
@@ -331,6 +368,7 @@ async def generate_scene_json(
             f"User request: {prompt}",
             "Relevant context:",
             context_block or "(no context available)",
+            _format_generation_steps("Draft a scene blueprint that maps nodes and edges."),
         ]
     )
     blueprint = await _request_scene_json(
@@ -347,6 +385,7 @@ async def generate_scene_json(
             f"User request: {prompt}",
             "Scene blueprint JSON:",
             json.dumps(blueprint, ensure_ascii=False),
+            _format_generation_steps("Generate scenes JSON that follows the blueprint."),
         ]
     )
     scene_payload = await _request_scene_json(
@@ -465,6 +504,7 @@ async def review_scene_solution(
             f"User request: {prompt}",
             "Scene JSON:",
             json.dumps(payload, ensure_ascii=False),
+            _format_generation_steps("Validate + review the generated JSON."),
         ]
     )
     response = await _request_scene_json(
@@ -503,6 +543,7 @@ async def repair_scene_json(
             context_block or "(no context available)",
             "Previous scene JSON:",
             json.dumps(payload, ensure_ascii=False),
+            _format_generation_steps("Repair issues and finalize output."),
         ]
     )
     blueprint = await _request_scene_json(
@@ -520,6 +561,7 @@ async def repair_scene_json(
             f"Reviewer issues: {json.dumps(issues, ensure_ascii=False)}",
             "Scene blueprint JSON:",
             json.dumps(blueprint, ensure_ascii=False),
+            _format_generation_steps("Generate scenes JSON that follows the blueprint."),
         ]
     )
     scene_payload = await _request_scene_json(
