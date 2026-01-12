@@ -130,7 +130,7 @@ Check the scene against the user request and ensure it is valid:
 - There is at least one event node with data.keyword = "render".
 - Every edge references existing node ids for source and target.
 - Every app node is connected via prev/next or a field output/input edge.
-- All scene fields include a defaultValue.
+- All scene fields include a default "value" field which is a string.
 - The render flow does not branch: no multiple "next" edges point to the same "prev" handle.
 - No image output is stored as state in JSON; image outputs must be wired directly into app inputs.
 Respond with JSON only, using keys:
