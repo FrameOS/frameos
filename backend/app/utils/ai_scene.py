@@ -68,6 +68,9 @@ Follow these rules:
 - Available data field types: string, text, float, integer, boolean, color, date, json, node, scene, image, font, select.
 - When defining scene fields, set access = "public" and persist = "disk" unless there is a specific reason not to.
 - Text apps can render rich text using the simple caret syntax (basic-caret) to display dynamic text.
+  Use caret tokens like ^(16) for font size, ^(#FF00FF) for color, ^(PTSans-Bold.ttf) for font,
+  ^(underline)/^(no-underline), ^(strikethrough)/^(no-strikethrough), combine styles via ^(16,#FF0000),
+  and reset styles with ^(reset).
 - State nodes are used to supply scene fields into code/app inputs: set data.keyword to the scene field name and connect
   them via codeNodeEdge with sourceHandle "fieldOutput" to targetHandle "fieldInput/<fieldName>" or "codeField/<argName>".
 - Create edges that link the nodes into a valid flow:
