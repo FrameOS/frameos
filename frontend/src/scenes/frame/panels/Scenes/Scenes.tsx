@@ -113,6 +113,11 @@ export function Scenes() {
     selectableSceneIds.length > 0 && selectableSceneIds.every((sceneId) => selectedSceneIds.has(sceneId))
   const promptSuggestions = [
     { label: 'Banana', prompt: 'Display an image of a banana on a white background.' },
+    {
+      label: 'Health message',
+      prompt:
+        'create a scene that shows a random generated message each day. the message is about being healthy. show healthy things via unsplash in the background',
+    },
     { label: 'Minimal clock', prompt: 'Design a minimalist analog clock for an e-ink frame.' },
     { label: 'Weather panel', prompt: 'Show a clean weather dashboard with temperature, forecast, and icons.' },
     { label: 'Photo spotlight', prompt: 'Create a photo spotlight with a caption and subtle border.' },

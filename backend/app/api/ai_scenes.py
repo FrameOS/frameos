@@ -224,14 +224,17 @@ async def generate_scene(
             }
             await _publish_ai_scene_log(
                 redis,
-                f"AI scene generation did not pass validation after retries. Issues: {issue_summary}",
+                "AI scene generation did not pass validation after retries. Saving anyway; please fix the issues.",
                 request_id,
-                status="error",
+                status="warning",
                 stage="validate",
             )
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                detail=f"AI scene generation did not pass validation: {issue_summary}",
+            await _publish_ai_scene_log(
+                redis,
+                f"Issues: {issue_summary}",
+                request_id,
+                status="warning",
+                stage="validate",
             )
     except HTTPException:
         raise

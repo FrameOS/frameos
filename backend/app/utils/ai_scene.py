@@ -78,9 +78,11 @@ Follow these rules:
     and to connect each subsequent app node in order.
   - When an app outputs data into another app's input (e.g. data app into render/image), add a "codeNodeEdge" from
     sourceHandle "fieldOutput" to targetHandle "fieldInput/<fieldName>".
+  - Every app node must be connected either through the render flow (prev/next) or via a field output/input edge.
 - Data apps (like image generation) should NOT be chained into the render flow using "appNodeEdge". Instead,
     connect the render event directly to the render app (e.g. "render/image") with "appNodeEdge" and separately
     connect the data app output via "codeNodeEdge". This keeps the render flow triggered by the event.
+  - Never store an image output node as state in JSON; pass image outputs directly into app inputs via codeNodeEdge.
   - If you include an OpenAI image app (keyword "data/openaiImage" or legacy "openai"), enable cache with
     duration "3600" (one hour) and do not set scene refreshInterval below 3600 unless the user explicitly
     asks for a faster update cadence.
@@ -124,6 +126,8 @@ Check the scene against the user request and ensure it is valid:
 - Each scene has id, name, nodes, edges, and settings.execution = "interpreted".
 - There is at least one event node with data.keyword = "render".
 - Every edge references existing node ids for source and target.
+- Every app node is connected via prev/next or a field output/input edge.
+- No image output is stored as state in JSON; image outputs must be wired directly into app inputs.
 Respond with JSON only, using keys:
 - solves: boolean (true only if the scene matches the user request)
 - issues: array of short strings describing any problems
