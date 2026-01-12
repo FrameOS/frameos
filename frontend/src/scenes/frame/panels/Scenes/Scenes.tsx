@@ -72,6 +72,8 @@ export function Scenes() {
     aiPrompt,
     aiError,
     aiSceneLastLog,
+    aiSceneLogs,
+    aiSceneLogsExpanded,
     isGeneratingAiScene,
     isInstallingMissingActiveScene,
   } = useValues(scenesLogic({ frameId }))
@@ -95,6 +97,7 @@ export function Scenes() {
     generateAiScene,
     openAiScene,
     closeAiScene,
+    toggleAiSceneLogsExpanded,
     installMissingActiveScene,
   } = useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
@@ -130,6 +133,45 @@ export function Scenes() {
   }
 
   const hasEmbeddings = (aiEmbeddingsStatus?.count ?? 0) > 0
+  const hasAiSceneHistory =
+    aiSceneLogs.length > 0 &&
+    (isGeneratingAiScene || aiSceneLastLog?.status === 'success' || aiSceneLastLog?.status === 'error')
+
+  const formatTimestamp = (value: string) => {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) {
+      return value
+    }
+    return date.toLocaleTimeString()
+  }
+
+  const formatDuration = (durationMs: number | null) => {
+    if (durationMs === null) {
+      return '—'
+    }
+    if (durationMs < 1000) {
+      return `${durationMs}ms`
+    }
+    const totalSeconds = Math.round(durationMs / 1000)
+    if (totalSeconds < 60) {
+      return `${totalSeconds}s`
+    }
+    const minutes = Math.floor(totalSeconds / 60)
+    const seconds = totalSeconds % 60
+    return `${minutes}m ${seconds}s`
+  }
+
+  const aiSceneLogRows = aiSceneLogs.map((log, index) => {
+    const start = new Date(log.timestamp).getTime()
+    const end =
+      index < aiSceneLogs.length - 1
+        ? new Date(aiSceneLogs[index + 1].timestamp).getTime()
+        : isGeneratingAiScene
+        ? Date.now()
+        : start
+    const duration = Number.isNaN(start) || Number.isNaN(end) ? null : Math.max(0, end - start)
+    return { log, duration }
+  })
 
   const renderNewSceneForm = () => (
     <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">
@@ -186,28 +228,59 @@ export function Scenes() {
         </div>
       ) : null}
       {aiError ? <span className="text-xs text-red-400">{aiError}</span> : null}
-      <div className="flex items-center gap-2">
-        <Button
-          size="small"
-          color="secondary"
-          className="flex gap-1 items-center"
-          onClick={() => generateAiScene()}
-          disabled={isGeneratingAiScene || !hasEmbeddings}
-        >
-          {isGeneratingAiScene ? <Spinner color="white" /> : <SparklesIcon className="w-4 h-4" />}
-          {isGeneratingAiScene ? 'Generating...' : 'Generate scene'}
-        </Button>
-        {!isGeneratingAiScene ? (
-          <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={closeAiScene}>
-            Close
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Button
+            size="small"
+            color="secondary"
+            className="flex gap-1 items-center"
+            onClick={() => generateAiScene()}
+            disabled={isGeneratingAiScene || !hasEmbeddings}
+          >
+            {isGeneratingAiScene ? <Spinner color="white" /> : <SparklesIcon className="w-4 h-4" />}
+            {isGeneratingAiScene ? 'Generating...' : 'Generate scene'}
           </Button>
-        ) : null}
-        <div
-          className="text-xs text-gray-400 truncate max-w-[240px]"
-          title={aiSceneLastLog?.message || (isGeneratingAiScene ? 'Awaiting updates.' : '')}
-        >
-          {aiSceneLastLog?.message || (isGeneratingAiScene ? 'Awaiting updates.' : '')}
+          {!isGeneratingAiScene ? (
+            <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={closeAiScene}>
+              Close
+            </Button>
+          ) : null}
+          {hasAiSceneHistory ? (
+            <button
+              type="button"
+              className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200"
+              onClick={toggleAiSceneLogsExpanded}
+              title={aiSceneLastLog?.message || (isGeneratingAiScene ? 'Awaiting updates.' : '')}
+            >
+              {aiSceneLogsExpanded ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
+              <span className="truncate max-w-[220px]">
+                {aiSceneLastLog?.message || (isGeneratingAiScene ? 'Awaiting updates.' : '')}
+              </span>
+            </button>
+          ) : null}
         </div>
+        {hasAiSceneHistory && aiSceneLogsExpanded ? (
+          <div className="rounded-md border border-gray-800 bg-gray-950/60 p-2">
+            <table className="w-full text-xs text-gray-300">
+              <thead className="text-[11px] uppercase text-gray-500">
+                <tr>
+                  <th className="py-1 text-left font-semibold">Event</th>
+                  <th className="py-1 text-left font-semibold">Timestamp</th>
+                  <th className="py-1 text-left font-semibold">Duration</th>
+                </tr>
+              </thead>
+              <tbody>
+                {aiSceneLogRows.map(({ log, duration }, index) => (
+                  <tr key={`${log.timestamp}-${index}`} className="border-t border-gray-900">
+                    <td className="py-1 pr-2 text-gray-200">{log.message}</td>
+                    <td className="py-1 pr-2 text-gray-400">{formatTimestamp(log.timestamp)}</td>
+                    <td className="py-1 text-gray-400">{formatDuration(duration)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </div>
     </Box>
   )

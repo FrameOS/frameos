@@ -81,6 +81,7 @@ export const scenesLogic = kea<scenesLogicType>([
     }) => ({
       log,
     }),
+    toggleAiSceneLogsExpanded: true,
     installMissingActiveScene: true,
     installMissingActiveSceneSuccess: true,
     installMissingActiveSceneFailure: true,
@@ -211,19 +212,28 @@ export const scenesLogic = kea<scenesLogicType>([
       },
     ],
     aiSceneLogsByRequestId: [
-      {} as Record<string, { message: string; status?: string; stage?: string; timestamp: string }>,
+      {} as Record<string, { message: string; status?: string; stage?: string; timestamp: string }[]>,
       {
         setAiSceneLogMessage: (state, { log }) => ({
           ...state,
-          [log.requestId]: log,
+          [log.requestId]: [...(state[log.requestId] ?? []), log],
         }),
-        [socketLogic.actionTypes.aiSceneLog]: (state, { log }) =>
-          log.requestId
-            ? {
-                ...state,
-                [log.requestId]: log,
-              }
-            : state,
+        [socketLogic.actionTypes.aiSceneLog]: (state, { log }) => {
+          if (!log.requestId) {
+            return state
+          }
+          return {
+            ...state,
+            [log.requestId]: [...(state[log.requestId] ?? []), log],
+          }
+        },
+      },
+    ],
+    aiSceneLogsExpanded: [
+      false,
+      {
+        toggleAiSceneLogsExpanded: (state) => !state,
+        closeAiScene: () => false,
       },
     ],
     isGeneratingAiScene: [
@@ -400,7 +410,22 @@ export const scenesLogic = kea<scenesLogicType>([
     ],
     aiSceneLastLog: [
       (s) => [s.aiSceneRequestId, s.aiSceneLogsByRequestId],
-      (requestId, logsByRequestId) => (requestId ? logsByRequestId[requestId] : null),
+      (requestId, logsByRequestId) => {
+        if (!requestId) {
+          return null
+        }
+        const logs = logsByRequestId[requestId] ?? []
+        return logs.length ? logs[logs.length - 1] : null
+      },
+    ],
+    aiSceneLogs: [
+      (s) => [s.aiSceneRequestId, s.aiSceneLogsByRequestId],
+      (requestId, logsByRequestId) =>
+        requestId
+          ? [...(logsByRequestId[requestId] ?? [])].toSorted(
+              (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime()
+            )
+          : [],
     ],
   }),
   listeners(({ actions, props, values }) => ({
@@ -412,12 +437,6 @@ export const scenesLogic = kea<scenesLogicType>([
       }
       const requestId = uuidv4()
       actions.setAiSceneRequestId(requestId)
-      actions.setAiSceneLogMessage({
-        requestId,
-        message: 'Preparing AI scene generation…',
-        status: 'info',
-        timestamp: new Date().toISOString(),
-      })
       try {
         const response = await apiFetch('/api/ai/scenes/generate', {
           method: 'POST',
