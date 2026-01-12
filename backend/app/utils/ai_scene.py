@@ -76,6 +76,8 @@ Follow these rules:
 - Create edges that link the nodes into a valid flow:
   - Use "appNodeEdge" with sourceHandle "next" and targetHandle "prev" to connect the render event to the first app,
     and to connect each subsequent app node in order.
+  - Do not connect multiple "next" edges to the same "prev" handle. The render flow must be a single linear chain
+    where each app node connects to exactly one next node in sequence.
   - When an app outputs data into another app's input (e.g. data app into render/image), add a "codeNodeEdge" from
     sourceHandle "fieldOutput" to targetHandle "fieldInput/<fieldName>".
   - Every app node must be connected either through the render flow (prev/next) or via a field output/input edge.
@@ -97,6 +99,7 @@ Follow these rules:
     from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
     "field/render_functions[row][col]" and targetHandle "prev".
 - Every edge must reference nodes that exist in the "nodes" list. Do not include dangling edges.
+- Every scene field must include a defaultValue.
 - Interpreted scenes can include quick JavaScript snippets in code nodes:
   - Put JS in data.codeJS (not data.code) for interpreted scenes.
   - The QuickJS environment exposes: state.<field>, args.<argName>, context.<event|payload|loopIndex|loopKey|hasImage>.
@@ -107,7 +110,7 @@ Reference TypeScript shapes (for structure sanity):
 - Scene: { id: string, name: string, nodes: Node[], edges: Edge[], settings: { execution: "interpreted", ... }, fields?: Field[] }
 - Node: { id: string, type: "event"|"app"|"state"|"code"|"scene", data: NodeData, position?: { x:number, y:number } }
 - Edge: { id?: string, type?: "appNodeEdge"|"codeNodeEdge", source: string, target: string, sourceHandle?: string, targetHandle?: string }
-- Field: { name: string, type: FieldType, label?: string, description?: string, required?: boolean, defaultValue?: any }
+- Field: { name: string, type: FieldType, label?: string, description?: string, required?: boolean, value?: any }
 - NodeData:
   - EventNodeData: { keyword: string }
   - AppNodeData: { keyword: string, config: object, sources?: object, cache?: object }
@@ -127,6 +130,8 @@ Check the scene against the user request and ensure it is valid:
 - There is at least one event node with data.keyword = "render".
 - Every edge references existing node ids for source and target.
 - Every app node is connected via prev/next or a field output/input edge.
+- All scene fields include a defaultValue.
+- The render flow does not branch: no multiple "next" edges point to the same "prev" handle.
 - No image output is stored as state in JSON; image outputs must be wired directly into app inputs.
 Respond with JSON only, using keys:
 - solves: boolean (true only if the scene matches the user request)
