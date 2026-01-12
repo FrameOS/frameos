@@ -66,6 +66,8 @@ Follow these rules:
 - Prefer minimal but valid configs; omit fields when not needed.
 - Keep node positions optional; if provided, use simple x/y numbers.
 - Available data field types: string, text, float, integer, boolean, color, date, json, node, scene, image, font, select.
+- When defining scene fields, set access = "public" and persist = "disk" unless there is a specific reason not to.
+- Text apps can render rich text using the simple caret syntax (basic-caret) to display dynamic text.
 - State nodes are used to supply scene fields into code/app inputs: set data.keyword to the scene field name and connect
   them via codeNodeEdge with sourceHandle "fieldOutput" to targetHandle "fieldInput/<fieldName>" or "codeField/<argName>".
 - Create edges that link the nodes into a valid flow:
@@ -81,6 +83,8 @@ Follow these rules:
   - If you include scene fields, add matching "state" nodes with data.keyword = field name, and connect them via
     "codeNodeEdge" to "code" nodes using targetHandle "codeField/<argName>" or directly to app inputs using
     "fieldInput/<fieldName>".
+  - Code nodes can be added anywhere for most fields (see "Haiku of the hour" for an example); only data.codeJS
+    needs to be filled in for interpreted scenes.
   - If you include "scene" nodes (to embed another scene), set data.keyword to the referenced scene id and connect them
     from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
     "field/render_functions[row][col]" and targetHandle "prev".
