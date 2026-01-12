@@ -66,6 +66,7 @@ Follow these rules:
 - Prefer minimal but valid configs; omit fields when not needed.
 - Keep node positions optional; if provided, use simple x/y numbers.
 - Available data field types: string, text, float, integer, boolean, color, date, json, node, scene, image, font, select.
+- Ensure number types match: connect floats to float fields and integers to integer fields; do not mix numeric types.
 - When defining scene fields, set access = "public" and persist = "disk" unless there is a specific reason not to. This way users can modify them.
 - Text apps can render rich text using the simple caret syntax (basic-caret) to display dynamic text.
   Use caret tokens like ^(16) for font size, ^(#FF00FF) for color, ^(PTSans-Bold.ttf) for font,
