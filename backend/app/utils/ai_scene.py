@@ -66,7 +66,7 @@ Follow these rules:
 - Prefer minimal but valid configs; omit fields when not needed.
 - Keep node positions optional; if provided, use simple x/y numbers.
 - Available data field types: string, text, float, integer, boolean, color, date, json, node, scene, image, font, select.
-- When defining scene fields, set access = "public" and persist = "disk" unless there is a specific reason not to.
+- When defining scene fields, set access = "public" and persist = "disk" unless there is a specific reason not to. This way users can modify them.
 - Text apps can render rich text using the simple caret syntax (basic-caret) to display dynamic text.
   Use caret tokens like ^(16) for font size, ^(#FF00FF) for color, ^(PTSans-Bold.ttf) for font,
   ^(underline)/^(no-underline), ^(strikethrough)/^(no-strikethrough), combine styles via ^(16,#FF0000),
@@ -81,6 +81,9 @@ Follow these rules:
 - Data apps (like image generation) should NOT be chained into the render flow using "appNodeEdge". Instead,
     connect the render event directly to the render app (e.g. "render/image") with "appNodeEdge" and separately
     connect the data app output via "codeNodeEdge". This keeps the render flow triggered by the event.
+  - If you include an OpenAI image app (keyword "data/openaiImage" or legacy "openai"), enable cache with
+    duration "3600" (one hour) and do not set scene refreshInterval below 3600 unless the user explicitly
+    asks for a faster update cadence.
   - If you include a "code" node, connect its outputs to app inputs using "codeNodeEdge" with targetHandle
     "fieldInput/<fieldName>".
   - If you include scene fields, add matching "state" nodes with data.keyword = field name, and connect them via
