@@ -152,7 +152,6 @@ export const scenesLogic = kea<scenesLogicType>([
       {
         openAiScene: (_, { location }) => location,
         closeAiScene: () => null,
-        generateAiSceneSuccess: () => null,
       },
     ],
     showingSettings: [
@@ -192,7 +191,6 @@ export const scenesLogic = kea<scenesLogicType>([
       '',
       {
         setAiPrompt: (_, { prompt }) => prompt,
-        generateAiSceneSuccess: () => '',
         closeAiScene: () => '',
       },
     ],

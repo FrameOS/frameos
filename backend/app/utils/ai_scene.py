@@ -78,6 +78,8 @@ Follow these rules:
     and to connect each subsequent app node in order.
   - Do not connect multiple "next" edges to the same "prev" handle. The render flow must be a single linear chain
     where each app node connects to exactly one next node in sequence.
+  - Only apps with category "logic" or "render" can be connected left/right using appNodeEdge. Apps with category
+    "data" must not be connected left/right and must only connect via field outputs into inputs.
   - When an app outputs data into another app's input (e.g. data app into render/image), add a "codeNodeEdge" from
     sourceHandle "fieldOutput" to targetHandle "fieldInput/<fieldName>".
   - Every app node must be connected either through the render flow (prev/next) or via a field output/input edge.
@@ -129,7 +131,7 @@ Check the scene against the user request and ensure it is valid:
 - Each scene has id, name, nodes, edges, and settings.execution = "interpreted".
 - There is at least one event node with data.keyword = "render".
 - Every edge references existing node ids for source and target.
-- Every app node is connected via prev/next or a field output/input edge.
+- Every logic and render app node is connected via prev/next or a field output/input edge.
 - All scene fields include a default "value" field which is a string.
 - The render flow does not branch: no multiple "next" edges point to the same "prev" handle.
 - No image output is stored as state in JSON; image outputs must be wired directly into app inputs.
