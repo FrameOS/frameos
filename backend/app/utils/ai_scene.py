@@ -99,7 +99,7 @@ Follow these rules:
     from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
     "field/render_functions[row][col]" and targetHandle "prev".
 - Every edge must reference nodes that exist in the "nodes" list. Do not include dangling edges.
-- Every scene field must include a defaultValue.
+- Every scene field must include a default value in the "value" field as a stringified version of itself.
 - Interpreted scenes can include quick JavaScript snippets in code nodes:
   - Put JS in data.codeJS (not data.code) for interpreted scenes.
   - The QuickJS environment exposes: state.<field>, args.<argName>, context.<event|payload|loopIndex|loopKey|hasImage>.
