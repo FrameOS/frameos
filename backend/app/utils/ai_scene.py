@@ -49,8 +49,7 @@ Each scene blueprint must include:
 - checks: array of brief validation statements confirming the flow and required nodes.
 Focus on correctness: pick node types, app keywords, and connections that satisfy the user request and constraints.
 Use any relevant scene examples from the provided context as guidance.
-Double-check reasoning in the checks list (e.g. render event present, data apps not chained via appNodeEdge,
-data app outputs should use sourceHandle "fieldOutput" when wiring into inputs).
+Double-check reasoning in the checks list (e.g. render event present, data apps not chained via appNodeEdge).
 """.strip()
 
 SCENE_JSON_SYSTEM_PROMPT = """
@@ -84,8 +83,6 @@ Follow these rules:
     "data" must not be connected left/right and must only connect via field outputs into inputs.
   - When an app outputs data into another app's input (e.g. data app into render/image), add a "codeNodeEdge" from
     sourceHandle "fieldOutput" to targetHandle "fieldInput/<fieldName>".
-  - Do NOT invent output handle names like "fieldOutput/image"; app outputs use sourceHandle "fieldOutput" unless a
-    specific output handle is explicitly documented in the provided context.
   - Every app node must be connected either through the render flow (prev/next) or via a field output/input edge.
 - Data apps (like image generation) should NOT be chained into the render flow using "appNodeEdge". Instead,
     connect the render event directly to the render app (e.g. "render/image") with "appNodeEdge" and separately
@@ -139,7 +136,6 @@ Check the scene against the user request and ensure it is valid:
 - All scene fields include a default "value" field which is a string.
 - The render flow does not branch: no multiple "next" edges point to the same "prev" handle.
 - No image output is stored as state in JSON; image outputs must be wired directly into app inputs.
-- No edges should use invented output handles like "fieldOutput/image"; use "fieldOutput" unless documented otherwise.
 Respond with JSON only, using keys:
 - solves: boolean (true only if the scene matches the user request)
 - issues: array of short strings describing any problems
@@ -515,11 +511,6 @@ def validate_scene_payload(payload: dict[str, Any]) -> list[str]:
                 issues.append(f"Scene {index} edge source '{source}' is not a valid node id.")
             if target not in node_ids:
                 issues.append(f"Scene {index} edge target '{target}' is not a valid node id.")
-            source_handle = edge.get("sourceHandle")
-            if isinstance(source_handle, str) and source_handle.startswith("fieldOutput/"):
-                issues.append(
-                    f"Scene {index} edge sourceHandle '{source_handle}' should be 'fieldOutput' without a suffix."
-                )
     return issues
 
 
