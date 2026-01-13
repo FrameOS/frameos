@@ -17,6 +17,22 @@ export interface ScenesLogicProps {
   frameId: number
 }
 
+const applyStateToSceneFields = (scene: FrameScene, state: Record<string, any> | null): FrameScene => {
+  if (!state || !scene.fields?.length) {
+    return scene
+  }
+  const fields = scene.fields.map((field) => {
+    if (!field?.name) {
+      return field
+    }
+    if (Object.prototype.hasOwnProperty.call(state, field.name)) {
+      return { ...field, value: String(state[field.name]) }
+    }
+    return field
+  })
+  return { ...scene, fields }
+}
+
 export const scenesLogic = kea<scenesLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Scenes', 'scenesLogic']),
   props({} as ScenesLogicProps),
@@ -67,6 +83,9 @@ export const scenesLogic = kea<scenesLogicType>([
     uploadImage: (file: File) => ({ file }),
     uploadImageSuccess: true,
     uploadImageFailure: true,
+    previewScene: (sceneId: string) => ({ sceneId }),
+    previewSceneSuccess: true,
+    previewSceneFailure: true,
     setAiPrompt: (prompt: string) => ({ prompt }),
     generateAiScene: true,
     generateAiSceneSuccess: true,
@@ -185,6 +204,14 @@ export const scenesLogic = kea<scenesLogicType>([
         uploadImage: () => true,
         uploadImageSuccess: () => false,
         uploadImageFailure: () => false,
+      },
+    ],
+    previewingSceneId: [
+      null as string | null,
+      {
+        previewScene: (_, { sceneId }) => sceneId,
+        previewSceneSuccess: () => null,
+        previewSceneFailure: () => null,
       },
     ],
     aiPrompt: [
@@ -494,6 +521,28 @@ export const scenesLogic = kea<scenesLogicType>([
         console.error(error)
         alert('Failed to upload image')
         actions.uploadImageFailure()
+      }
+    },
+    previewScene: async ({ sceneId }) => {
+      const scene = values.scenes.find((item) => item.id === sceneId)
+      if (!scene) {
+        actions.previewSceneFailure()
+        return
+      }
+      try {
+        const state = values.states?.[scene.id] ?? values.states?.[`uploaded/${scene.id}`] ?? null
+        const payloadScene = applyStateToSceneFields(scene, state)
+        const payload = {
+          scenes: [payloadScene],
+          sceneId: scene.id,
+          ...(state && Object.keys(state).length > 0 ? { state } : {}),
+        }
+        await actions.sendEvent('uploadScenes', payload)
+        actions.previewSceneSuccess()
+      } catch (error) {
+        console.error(error)
+        alert('Failed to preview the scene')
+        actions.previewSceneFailure()
       }
     },
     installMissingActiveScene: async () => {

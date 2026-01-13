@@ -15,6 +15,7 @@ import {
   ArrowPathIcon,
   ArrowUpTrayIcon,
   CloudArrowDownIcon,
+  EyeIcon,
   ExclamationTriangleIcon,
   FolderArrowDownIcon,
   FolderOpenIcon,
@@ -76,6 +77,7 @@ export function Scenes() {
     aiSceneLogsExpanded,
     isGeneratingAiScene,
     isInstallingMissingActiveScene,
+    previewingSceneId,
   } = useValues(scenesLogic({ frameId }))
   const {
     setSearch,
@@ -93,6 +95,7 @@ export function Scenes() {
     deleteSelectedScenes,
     toggleMissingActiveExpanded,
     uploadImage,
+    previewScene,
     setAiPrompt,
     generateAiScene,
     openAiScene,
@@ -516,6 +519,8 @@ export function Scenes() {
           const secretSettings = sceneSecretSettings.get(scene.id) ?? []
           const missingSecretSettings = getMissingSecretSettingKeys(secretSettings, savedSettings)
           const isSelected = selectedSceneIds.has(scene.id)
+          const sceneHasChanges = unsavedSceneIds.has(scene.id) || undeployedSceneIds.has(scene.id)
+          const isPreviewing = previewingSceneId === scene.id
 
           return (
             <React.Fragment key={scene.id}>
@@ -603,33 +608,54 @@ export function Scenes() {
                       {!multiSelectEnabled ? (
                         <div className="flex gap-1">
                           {sceneId !== scene.id ? (
-                            <Button
-                              size="small"
-                              className="!px-1"
-                              color="primary"
-                              onClick={(e) => {
-                                if (unsavedSceneIds.has(scene.id) || undeployedSceneIds.has(scene.id)) {
+                            <>
+                              {sceneHasChanges ? (
+                                <Button
+                                  size="small"
+                                  className="!px-1"
+                                  color="secondary"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    previewScene(scene.id)
+                                  }}
+                                  disabled={isPreviewing}
+                                  title="Preview changes on the frame"
+                                >
+                                  {isPreviewing ? (
+                                    <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
+                                  ) : (
+                                    <EyeIcon className="w-5 h-5" />
+                                  )}
+                                </Button>
+                              ) : null}
+                              <Button
+                                size="small"
+                                className="!px-1"
+                                color="primary"
+                                onClick={(e) => {
+                                  if (sceneHasChanges) {
+                                    e.stopPropagation()
+                                    return
+                                  }
                                   e.stopPropagation()
-                                  return
+                                  setCurrentScene(scene.id)
+                                }}
+                                disabled={sceneHasChanges}
+                                title={
+                                  unsavedSceneIds.has(scene.id)
+                                    ? 'Save this scene before running it.'
+                                    : undeployedSceneIds.has(scene.id)
+                                    ? 'Deploy this scene before running it.'
+                                    : 'Activate'
                                 }
-                                e.stopPropagation()
-                                setCurrentScene(scene.id)
-                              }}
-                              disabled={unsavedSceneIds.has(scene.id) || undeployedSceneIds.has(scene.id)}
-                              title={
-                                unsavedSceneIds.has(scene.id)
-                                  ? 'Save this scene before running it.'
-                                  : undeployedSceneIds.has(scene.id)
-                                  ? 'Deploy this scene before running it.'
-                                  : 'Activate'
-                              }
-                            >
-                              {sceneChanging === scene.id ? (
-                                <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
-                              ) : (
-                                <PlayIcon className="w-5 h-5" />
-                              )}
-                            </Button>
+                              >
+                                {sceneChanging === scene.id ? (
+                                  <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
+                                ) : (
+                                  <PlayIcon className="w-5 h-5" />
+                                )}
+                              </Button>
+                            </>
                           ) : (
                             <Tag
                               className="ml-2 cursor-pointer items-center inline-flex"
