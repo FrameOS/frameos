@@ -17,10 +17,9 @@ from app.utils.ai_scene import (
     DEFAULT_APP_CONTEXT_K,
     DEFAULT_SCENE_CONTEXT_K,
     create_embeddings,
-    expand_prompt,
+    create_scene_todo_list,
     generate_scene_json,
     repair_scene_json,
-    validate_scene_blueprint,
     rank_embeddings,
     review_scene_solution,
     validate_scene_payload,
@@ -85,12 +84,10 @@ async def generate_scene(
         embeddings = db.query(AiEmbedding).all()
         context_items: list[AiEmbedding] = []
         if embeddings:
-            await _publish_ai_scene_log(redis, "Expanding prompt for retrieval.", request_id, stage="context:expand")
-            expanded_prompt = await expand_prompt(prompt, api_key)
             await _publish_ai_scene_log(redis, "Creating retrieval embedding.", request_id, stage="context:embed")
             query_embedding = (
                 await create_embeddings(
-                    [expanded_prompt],
+                    [prompt],
                     api_key,
                     model=openai_settings.get("embeddingModel") or EMBEDDING_MODEL,
                 )
@@ -102,13 +99,13 @@ async def generate_scene(
                 *rank_embeddings(
                     query_embedding,
                     app_embeddings,
-                    prompt=expanded_prompt,
+                    prompt=prompt,
                     top_k=DEFAULT_APP_CONTEXT_K,
                 ),
                 *rank_embeddings(
                     query_embedding,
                     scene_embeddings,
-                    prompt=expanded_prompt,
+                    prompt=prompt,
                     top_k=DEFAULT_SCENE_CONTEXT_K,
                 ),
             ]
@@ -141,13 +138,25 @@ async def generate_scene(
             )
 
         response_payload = None
-        blueprint_payload = None
-        blueprint_issues: list[str] = []
+        todo_list = []
         validation_issues: list[str] = []
         review_issues: list[str] = []
         max_attempts = 3
         scene_model = openai_settings.get("sceneModel") or SCENE_MODEL
         review_model = openai_settings.get("reviewModel") or SCENE_REVIEW_MODEL
+        await _publish_ai_scene_log(redis, "Building an agent todo list.", request_id, stage="plan")
+        todo_list = await create_scene_todo_list(
+            prompt=prompt,
+            context_items=context_items,
+            api_key=api_key,
+            model=scene_model,
+        )
+        await _publish_ai_scene_log(
+            redis,
+            f"Todo list ready with {len(todo_list)} steps.",
+            request_id,
+            stage="plan",
+        )
         for attempt in range(1, max_attempts + 1):
             if attempt == 1:
                 await _publish_ai_scene_log(
@@ -156,8 +165,9 @@ async def generate_scene(
                     request_id,
                     stage="generate",
                 )
-                response_payload, blueprint_payload = await generate_scene_json(
+                response_payload = await generate_scene_json(
                     prompt=prompt,
+                    todo_list=todo_list,
                     context_items=context_items,
                     api_key=api_key,
                     model=scene_model,
@@ -169,24 +179,16 @@ async def generate_scene(
                     request_id,
                     stage="generate",
                 )
-                response_payload, blueprint_payload = await repair_scene_json(
+                response_payload = await repair_scene_json(
                     prompt=prompt,
+                    todo_list=todo_list,
                     context_items=context_items,
                     api_key=api_key,
                     model=scene_model,
                     payload=response_payload or {},
-                    issues=validation_issues + review_issues + blueprint_issues,
+                    issues=validation_issues + review_issues,
                 )
 
-            blueprint_issues = validate_scene_blueprint(blueprint_payload or {})
-            if blueprint_issues:
-                await _publish_ai_scene_log(
-                    redis,
-                    f"Scene blueprint issues: {blueprint_issues}",
-                    request_id,
-                    status="warning",
-                    stage="validate",
-                )
             validation_issues = validate_scene_payload(response_payload or {})
             if validation_issues:
                 await _publish_ai_scene_log(
@@ -196,11 +198,12 @@ async def generate_scene(
                     status="warning",
                     stage="validate",
                 )
-            if blueprint_issues or validation_issues:
+            if validation_issues:
                 continue
 
             review_issues = await review_scene_solution(
                 prompt=prompt,
+                todo_list=todo_list,
                 payload=response_payload or {},
                 api_key=api_key,
                 model=review_model,
@@ -216,9 +219,8 @@ async def generate_scene(
                 continue
             break
 
-        if blueprint_issues or validation_issues or review_issues:
+        if validation_issues or review_issues:
             issue_summary = {
-                "blueprint": blueprint_issues,
                 "validation": validation_issues,
                 "review": review_issues,
             }

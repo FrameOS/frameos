@@ -11,8 +11,8 @@ from app.utils.posthog import get_posthog_client, llm_analytics_enabled
 
 SUMMARY_MODEL = "gpt-5-mini"
 SCENE_MODEL = "gpt-5.2"
+TODO_MODEL = "gpt-5.2"
 EMBEDDING_MODEL = "text-embedding-3-large"
-EXPANSION_MODEL = "gpt-5-mini"
 SCENE_REVIEW_MODEL = "gpt-5-mini"
 
 DEFAULT_APP_CONTEXT_K = 6
@@ -28,32 +28,21 @@ Return JSON with keys:
 Keep the summary concise and technical. Do not include markdown.
 """.strip()
 
-EXPANSION_SYSTEM_PROMPT = """
-You expand a short user request into a clearer FrameOS scene intent for retrieval.
-Return JSON with keys:
-- expanded_prompt: 1-3 sentences, preserving the user's intent.
-Include relevant app/function hints only if they can be inferred from the request.
-Do not mention embeddings or internal tools.
-""".strip()
-
-SCENE_BLUEPRINT_SYSTEM_PROMPT = """
-You are a FrameOS scene planner. Produce a clear, structured blueprint for the scene before JSON generation.
-Return JSON only (no markdown) with keys:
-- title: short title for the overall response
-- scenes: array of scene blueprints
-Each scene blueprint must include:
-- id: string
-- name: string
-- nodes: array of node plans (id, type, keyword or app, purpose, field hints, config hints)
-- edges: array of edge plans (source, target, kind, sourceHandle, targetHandle, reason)
-- checks: array of brief validation statements confirming the flow and required nodes.
-Focus on correctness: pick node types, app keywords, and connections that satisfy the user request and constraints.
-Use any relevant scene examples from the provided context as guidance.
-Double-check reasoning in the checks list (e.g. render event present, data apps not chained via appNodeEdge).
+TODO_SYSTEM_PROMPT = """
+You are a FrameOS scene builder. Create a concise, agentic todo list to build the scene.
+Return JSON only with keys:
+- title: short title
+- todos: array of 6-10 short todo items (imperative phrasing).
+The todo list must explicitly include tasks for:
+- deciding which apps or nodes are most needed for the user request
+- following the FrameOS scene rules/format
+- producing the final scenes JSON
+- validating the output and fixing issues
 """.strip()
 
 SCENE_JSON_SYSTEM_PROMPT = """
 You are a FrameOS scene generator. Build scenes JSON that can be uploaded to FrameOS.
+You will receive a todo list; follow it step by step while you work.
 Follow these rules:
 - Output a JSON object with a top-level "title" string and "scenes" array. No markdown or code fences.
 - Each scene must include: id (string), name (string), nodes (array), edges (array).
@@ -102,7 +91,7 @@ Follow these rules:
     from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
     "field/render_functions[row][col]" and targetHandle "prev".
 - Every edge must reference nodes that exist in the "nodes" list. Do not include dangling edges.
-- Every scene field must include a default value in the "value" field as a stringified version of itself.
+- Every state field must include a default value in the "value" field as a stringified version of itself.
 - Interpreted scenes can include quick JavaScript snippets in code nodes:
   - Put JS in data.codeJS (not data.code) for interpreted scenes.
   - The QuickJS environment exposes: state.<field>, args.<argName>, context.<event|payload|loopIndex|loopKey|hasImage>.
@@ -120,9 +109,8 @@ Reference TypeScript shapes (for structure sanity):
   - StateNodeData: { keyword: string }
   - CodeNodeData: { codeJS?: string, code?: string, codeArgs?: { name: string, type: FieldType }[], codeOutputs?: { name: string, type: FieldType }[], cache?: object, logOutput?: boolean }
   - SceneNodeData: { keyword: string, config: object }
-  - FieldType: "string"|"text"|"float"|"integer"|"boolean"|"color"|"date"|"json"|"node"|"scene"|"image"|"font"|"select"
+- FieldType: "string"|"text"|"float"|"integer"|"boolean"|"color"|"date"|"json"|"node"|"scene"|"image"|"font"|"select"
 Use any relevant scene examples from the provided context as guidance.
-You will be given a scene blueprint JSON; convert it into valid FrameOS scene JSON following the blueprint exactly.
 """.strip()
 
 SCENE_REVIEW_SYSTEM_PROMPT = """
@@ -133,7 +121,7 @@ Check the scene against the user request and ensure it is valid:
 - There is at least one event node with data.keyword = "render".
 - Every edge references existing node ids for source and target.
 - Every logic and render app node is connected via prev/next or a field output/input edge.
-- All scene fields include a default "value" field which is a string.
+- All state fields include a default "value" field which is a string.
 - The render flow does not branch: no multiple "next" edges point to the same "prev" handle.
 - No image output is stored as state in JSON; image outputs must be wired directly into app inputs.
 Respond with JSON only, using keys:
@@ -141,31 +129,14 @@ Respond with JSON only, using keys:
 - issues: array of short strings describing any problems
 """.strip()
 
-SCENE_BLUEPRINT_FIX_SYSTEM_PROMPT = """
-You fix a FrameOS scene blueprint based on reviewer issues.
-Return JSON only with keys: title, scenes (blueprint format).
-Ensure checks confirm render event presence, valid node ids, and correct edge types.
-Do not include markdown or code fences.
-""".strip()
-
-GENERATION_STEPS = [
-    "Understand the user request and available context.",
-    "Draft a scene blueprint that maps nodes and edges.",
-    "Generate scenes JSON that follows the blueprint.",
-    "Validate + review the generated JSON.",
-    "Repair issues and finalize output.",
+DEFAULT_TODO_LIST = [
+    "Extract the core user intent and constraints.",
+    "Decide which apps/nodes are most needed for the request.",
+    "Map the render flow and data flow according to FrameOS rules.",
+    "Assemble the scene nodes/edges using the required formats.",
+    "Produce the final scenes JSON response.",
+    "Validate the JSON against required scene rules and fix issues.",
 ]
-
-
-def _format_generation_steps(current_step: str) -> str:
-    steps = "\n".join(f"{index + 1}. {step}" for index, step in enumerate(GENERATION_STEPS))
-    return "\n".join(
-        [
-            "Overall steps:",
-            steps,
-            f"We are here now: {current_step}",
-        ]
-    )
 
 
 def _chunk_texts(texts: Iterable[str], batch_size: int = 64) -> Iterable[list[str]]:
@@ -354,63 +325,76 @@ async def summarize_text(text: str, api_key: str, *, model: str = SUMMARY_MODEL)
     return json.loads(content)
 
 
-async def expand_prompt(prompt: str, api_key: str, *, model: str = EXPANSION_MODEL) -> str:
-    client = _openai_client(api_key, timeout=60)
-    response = await client.chat.completions.create(
-        model=model or EXPANSION_MODEL,
-        messages=[
-            {"role": "system", "content": EXPANSION_SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        response_format={"type": "json_object"},
-        posthog_distinct_id=config.INSTANCE_ID,
-        posthog_properties={
-            "operation": "expand_prompt",
-            "model": model or EXPANSION_MODEL,
-        },
+def _ensure_required_todos(todos: list[str]) -> list[str]:
+    normalized = [todo.strip() for todo in todos if isinstance(todo, str) and todo.strip()]
+    required_items = {
+        "apps": "Decide which apps/nodes are most needed for the request.",
+        "rules": "Follow the FrameOS scene rules and format strictly.",
+        "json": "Produce the final scenes JSON response.",
+        "validate": "Validate the JSON and fix any issues.",
+    }
+    missing = []
+    lowered = " ".join(normalized).lower()
+    if "app" not in lowered and "node" not in lowered:
+        missing.append(required_items["apps"])
+    if "rule" not in lowered and "format" not in lowered:
+        missing.append(required_items["rules"])
+    if "json" not in lowered:
+        missing.append(required_items["json"])
+    if "valid" not in lowered and "review" not in lowered:
+        missing.append(required_items["validate"])
+    return [*normalized, *missing] if missing else normalized
+
+
+async def create_scene_todo_list(
+    *,
+    prompt: str,
+    context_items: list[AiEmbedding],
+    api_key: str,
+    model: str = TODO_MODEL,
+) -> list[str]:
+    context_block = _format_context_items(context_items)
+    todo_prompt = "\n\n".join(
+        [
+            f"User request: {prompt}",
+            "Relevant context:",
+            context_block or "(no context available)",
+        ]
     )
-    message = response.choices[0].message if response.choices else None
-    content = message.content if message else "{}"
-    expanded = json.loads(content).get("expanded_prompt")
-    if isinstance(expanded, str) and expanded.strip():
-        return expanded.strip()
-    return prompt
+    response = await _request_scene_json(
+        api_key=api_key,
+        model=model or TODO_MODEL,
+        messages=[
+            {"role": "system", "content": TODO_SYSTEM_PROMPT},
+            {"role": "user", "content": todo_prompt},
+        ],
+        context_items=context_items,
+    )
+    todos = response.get("todos")
+    if isinstance(todos, list) and todos:
+        return _ensure_required_todos(todos)
+    return DEFAULT_TODO_LIST.copy()
 
 
 async def generate_scene_json(
     *,
     prompt: str,
+    todo_list: list[str],
     context_items: list[AiEmbedding],
     api_key: str,
     model: str,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> dict[str, Any]:
     context_block = _format_context_items(context_items)
-    blueprint_prompt = "\n\n".join(
-        [
-            f"User request: {prompt}",
-            "Relevant context:",
-            context_block or "(no context available)",
-            _format_generation_steps("Draft a scene blueprint that maps nodes and edges."),
-        ]
-    )
-    blueprint = await _request_scene_json(
-        api_key=api_key,
-        model=model,
-        messages=[
-            {"role": "system", "content": SCENE_BLUEPRINT_SYSTEM_PROMPT},
-            {"role": "user", "content": blueprint_prompt},
-        ],
-        context_items=context_items,
-    )
     scene_prompt = "\n\n".join(
         [
             f"User request: {prompt}",
-            "Scene blueprint JSON:",
-            json.dumps(blueprint, ensure_ascii=False),
-            _format_generation_steps("Generate scenes JSON that follows the blueprint."),
+            "Todo list:",
+            json.dumps(todo_list, ensure_ascii=False),
+            "Relevant context:",
+            context_block or "(no context available)",
         ]
     )
-    scene_payload = await _request_scene_json(
+    return await _request_scene_json(
         api_key=api_key,
         model=model,
         messages=[
@@ -419,46 +403,6 @@ async def generate_scene_json(
         ],
         context_items=context_items,
     )
-    return scene_payload, blueprint
-
-
-def validate_scene_blueprint(payload: dict[str, Any]) -> list[str]:
-    issues: list[str] = []
-    scenes = payload.get("scenes")
-    if not isinstance(scenes, list) or not scenes:
-        return ["Scene blueprint must include a non-empty scenes array."]
-    for index, scene in enumerate(scenes):
-        if not isinstance(scene, dict):
-            issues.append(f"Blueprint scene {index} is not an object.")
-            continue
-        scene_id = scene.get("id")
-        scene_name = scene.get("name")
-        nodes = scene.get("nodes")
-        edges = scene.get("edges")
-        checks = scene.get("checks")
-        if not scene_id or not scene_name:
-            issues.append(f"Blueprint scene {index} is missing id or name.")
-        if not isinstance(nodes, list) or not nodes:
-            issues.append(f"Blueprint scene {index} must include nodes.")
-        if not isinstance(edges, list):
-            issues.append(f"Blueprint scene {index} must include edges.")
-        if not isinstance(checks, list) or not checks:
-            issues.append(f"Blueprint scene {index} must include checks.")
-        for node in nodes or []:
-            if not isinstance(node, dict):
-                issues.append(f"Blueprint scene {index} has a node that is not an object.")
-                continue
-            if not node.get("id") or not node.get("type"):
-                issues.append(f"Blueprint scene {index} has a node missing id or type.")
-                break
-        for edge in edges or []:
-            if not isinstance(edge, dict):
-                issues.append(f"Blueprint scene {index} has an edge that is not an object.")
-                continue
-            if not edge.get("source") or not edge.get("target"):
-                issues.append(f"Blueprint scene {index} has an edge missing source or target.")
-                break
-    return issues
 
 
 def validate_scene_payload(payload: dict[str, Any]) -> list[str]:
@@ -517,6 +461,7 @@ def validate_scene_payload(payload: dict[str, Any]) -> list[str]:
 async def review_scene_solution(
     *,
     prompt: str,
+    todo_list: list[str],
     payload: dict[str, Any],
     api_key: str,
     model: str = SCENE_REVIEW_MODEL,
@@ -524,9 +469,10 @@ async def review_scene_solution(
     review_prompt = "\n\n".join(
         [
             f"User request: {prompt}",
+            "Todo list:",
+            json.dumps(todo_list, ensure_ascii=False),
             "Scene JSON:",
             json.dumps(payload, ensure_ascii=False),
-            _format_generation_steps("Validate + review the generated JSON."),
         ]
     )
     response = await _request_scene_json(
@@ -550,43 +496,25 @@ async def review_scene_solution(
 async def repair_scene_json(
     *,
     prompt: str,
+    todo_list: list[str],
     context_items: list[AiEmbedding],
     api_key: str,
     model: str,
     payload: dict[str, Any],
     issues: list[str],
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> dict[str, Any]:
     context_block = _format_context_items(context_items)
-    blueprint_prompt = "\n\n".join(
-        [
-            f"User request: {prompt}",
-            f"Reviewer issues: {json.dumps(issues, ensure_ascii=False)}",
-            "Relevant context:",
-            context_block or "(no context available)",
-            "Previous scene JSON:",
-            json.dumps(payload, ensure_ascii=False),
-            _format_generation_steps("Repair issues and finalize output."),
-        ]
-    )
-    blueprint = await _request_scene_json(
-        api_key=api_key,
-        model=model,
-        messages=[
-            {"role": "system", "content": SCENE_BLUEPRINT_FIX_SYSTEM_PROMPT},
-            {"role": "user", "content": blueprint_prompt},
-        ],
-        context_items=context_items,
-    )
     scene_prompt = "\n\n".join(
         [
             f"User request: {prompt}",
             f"Reviewer issues: {json.dumps(issues, ensure_ascii=False)}",
-            "Scene blueprint JSON:",
-            json.dumps(blueprint, ensure_ascii=False),
-            _format_generation_steps("Generate scenes JSON that follows the blueprint."),
+            "Todo list:",
+            json.dumps(todo_list, ensure_ascii=False),
+            "Relevant context:",
+            context_block or "(no context available)",
         ]
     )
-    scene_payload = await _request_scene_json(
+    return await _request_scene_json(
         api_key=api_key,
         model=model,
         messages=[
@@ -595,7 +523,6 @@ async def repair_scene_json(
         ],
         context_items=context_items,
     )
-    return scene_payload, blueprint
 
 
 async def _request_scene_json(
