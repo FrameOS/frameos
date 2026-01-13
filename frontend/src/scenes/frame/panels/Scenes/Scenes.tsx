@@ -142,28 +142,13 @@ export function Scenes() {
     aiSceneLogs.length > 0 &&
     (isGeneratingAiScene || aiSceneLastLog?.status === 'success' || aiSceneLastLog?.status === 'error')
 
-  const formatTimestamp = (value: string) => {
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) {
-      return value
-    }
-    return date.toLocaleTimeString()
-  }
-
-  const formatDuration = (durationMs: number | null) => {
+  const formatDurationSeconds = (durationMs: number | null) => {
     if (durationMs === null) {
-      return '—'
+      return null
     }
-    if (durationMs < 1000) {
-      return `${durationMs}ms`
-    }
-    const totalSeconds = Math.round(durationMs / 1000)
-    if (totalSeconds < 60) {
-      return `${totalSeconds}s`
-    }
-    const minutes = Math.floor(totalSeconds / 60)
-    const seconds = totalSeconds % 60
-    return `${minutes}m ${seconds}s`
+    const seconds = Math.max(0, durationMs / 1000)
+    const roundedSeconds = Math.round(seconds * 10) / 10
+    return `${roundedSeconds}s`
   }
 
   const aiSceneLogRows = aiSceneLogs.map((log, index) => {
@@ -265,25 +250,19 @@ export function Scenes() {
           ) : null}
         </div>
         {hasAiSceneHistory && aiSceneLogsExpanded ? (
-          <div className="rounded-md border border-gray-800 bg-gray-950/60 p-2">
-            <table className="w-full text-xs text-gray-300">
-              <thead className="text-[11px] uppercase text-gray-500">
-                <tr>
-                  <th className="py-1 text-left font-semibold">Event</th>
-                  <th className="py-1 text-left font-semibold">Timestamp</th>
-                  <th className="py-1 text-left font-semibold">Duration</th>
-                </tr>
-              </thead>
-              <tbody>
-                {aiSceneLogRows.map(({ log, duration }, index) => (
-                  <tr key={`${log.timestamp}-${index}`} className="border-t border-gray-900">
-                    <td className="py-1 pr-2 text-gray-200">{log.message}</td>
-                    <td className="py-1 pr-2 text-gray-400">{formatTimestamp(log.timestamp)}</td>
-                    <td className="py-1 text-gray-400">{formatDuration(duration)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="rounded-md border border-gray-800 bg-gray-950/60 p-3">
+            <ul className="space-y-1 text-xs text-gray-200">
+              {aiSceneLogRows.map(({ log, duration }, index) => {
+                const isLast = index === aiSceneLogRows.length - 1
+                const durationLabel = isLast ? null : formatDurationSeconds(duration)
+                return (
+                  <li key={`${log.timestamp}-${index}`} className="flex flex-wrap items-baseline gap-2">
+                    <span>{log.message}</span>
+                    {durationLabel ? <span className="text-gray-500">{durationLabel}</span> : null}
+                  </li>
+                )
+              })}
+            </ul>
           </div>
         ) : null}
       </div>
