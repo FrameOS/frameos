@@ -608,39 +608,33 @@ export function Scenes() {
                       {!multiSelectEnabled ? (
                         <div className="flex gap-1">
                           {sceneId !== scene.id ? (
-                            <>
-                              {sceneHasChanges ? (
-                                <Button
-                                  size="small"
-                                  className="!px-1"
-                                  color="secondary"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    previewScene(scene.id)
-                                  }}
-                                  disabled={isPreviewing}
-                                  title="Preview changes on the frame"
-                                >
-                                  {isPreviewing ? (
-                                    <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
-                                  ) : (
-                                    <EyeIcon className="w-5 h-5" />
-                                  )}
-                                </Button>
-                              ) : null}
+                            sceneHasChanges ? (
+                              <Button
+                                size="small"
+                                className="!px-1"
+                                color="secondary"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  previewScene(scene.id)
+                                }}
+                                disabled={isPreviewing}
+                                title="Preview unsaved changes on the frame"
+                              >
+                                {isPreviewing ? (
+                                  <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
+                                ) : (
+                                  <EyeIcon className="w-5 h-5" />
+                                )}
+                              </Button>
+                            ) : (
                               <Button
                                 size="small"
                                 className="!px-1"
                                 color="primary"
                                 onClick={(e) => {
-                                  if (sceneHasChanges) {
-                                    e.stopPropagation()
-                                    return
-                                  }
                                   e.stopPropagation()
                                   setCurrentScene(scene.id)
                                 }}
-                                disabled={sceneHasChanges}
                                 title={
                                   unsavedSceneIds.has(scene.id)
                                     ? 'Save this scene before running it.'
@@ -655,7 +649,7 @@ export function Scenes() {
                                   <PlayIcon className="w-5 h-5" />
                                 )}
                               </Button>
-                            </>
+                            )
                           ) : (
                             <Tag
                               className="ml-2 cursor-pointer items-center inline-flex"
