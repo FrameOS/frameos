@@ -203,46 +203,6 @@ export function Settings() {
                     </div>
                   </Box>
                 </Group>
-                <Group name="defaults">
-                  <H6 className="pt-4">NixOS defaults for new frames</H6>
-                  <Box className="p-2 space-y-2">
-                    <p>
-                      These are all used for NixOS based frames. Raspberry Pi OS based frames set them via the RPi
-                      Imager.
-                    </p>
-                    <Field
-                      name="timezone"
-                      label={
-                        <>
-                          Timezone
-                          <Button
-                            size="small"
-                            color="secondary"
-                            onClick={() => {
-                              const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
-                              setSettingsValue(['defaults', 'timezone'], timezone)
-                            }}
-                          >
-                            Detect
-                          </Button>
-                        </>
-                      }
-                    >
-                      <Select name="timezone" options={timezoneOptions} />
-                    </Field>
-                    <Field name="wifiSSID" label="Default WiFi SSID">
-                      <TextInput name="wifiSSID" placeholder="WiFi network name" />
-                    </Field>
-                    <Field
-                      name="wifiPassword"
-                      label="Default WiFi password"
-                      secret={!!savedSettings?.defaults?.wifiPassword}
-                    >
-                      <TextInput name="wifiPassword" placeholder="WiFi password" />
-                    </Field>
-                  </Box>
-                </Group>
-
                 <Group name="frameOS">
                   <H6 className="pt-4">FrameOS Gallery</H6>
                   <Box className="p-2 space-y-2">
@@ -378,59 +338,6 @@ export function Settings() {
                     </Field>
                   </Box>
                 </Group>
-                <Group name="nix">
-                  <H6 className="pt-4">Nix settings</H6>
-                  <Box className="p-2 space-y-2">
-                    <Field name="buildExtraArgs" label="Extra args to build commands">
-                      <TextInput placeholder="-j0" />
-                    </Field>
-                    <Field
-                      name="buildServerEnabled"
-                      label="Enable remote build server"
-                      tooltip="These settings are used to build frames on a remote server. If you don't have a remote build
-                      server, you can leave these fields empty."
-                    >
-                      <Switch fullWidth />
-                    </Field>
-                    {settings?.nix?.buildServerEnabled ? (
-                      <>
-                        <Field name="buildServer" label="Build server address">
-                          <TextInput placeholder="build.frameos.net" />
-                        </Field>
-                        <Field name="buildServerPort" label="Build server port">
-                          <NumberTextInput placeholder="22" />
-                        </Field>
-                        <Field name="buildServerMaxParallelJobs" label="Max parallel jobs on build server">
-                          <NumberTextInput placeholder="8" />
-                        </Field>
-                        <Field name="buildServerUser" label="Build server user">
-                          <TextInput placeholder="frameos" />
-                        </Field>
-                        <Field
-                          name="buildServerPrivateKey"
-                          label="Build server private key"
-                          secret={!!savedSettings?.nix?.buildServerPrivateKey}
-                        >
-                          <TextArea />
-                        </Field>
-                        <Field
-                          name="buildServerPublicKey"
-                          label="Build server public key"
-                          secret={!!savedSettings?.nix?.buildServerPublicKey}
-                        >
-                          <TextArea />
-                        </Field>
-                        <Button
-                          onClick={newNixKey}
-                          color={savedSettings?.nix?.buildServerPrivateKey ? 'secondary' : 'primary'}
-                          size="small"
-                        >
-                          Generate new keypair
-                        </Button>
-                      </>
-                    ) : null}
-                  </Box>
-                </Group>
                 <Group name="buildHost">
                   <H6 className="pt-4">Cross-compilation build host</H6>
                   <Box className="p-2 space-y-2">
@@ -482,6 +389,99 @@ export function Settings() {
                         <Button
                           onClick={newBuildHostKey}
                           color={savedSettings?.buildHost?.sshKey ? 'secondary' : 'primary'}
+                          size="small"
+                        >
+                          Generate new keypair
+                        </Button>
+                      </>
+                    ) : null}
+                  </Box>
+                </Group>
+
+                <Group name="defaults">
+                  <H6 className="pt-4">NixOS defaults for new frames</H6>
+                  <Box className="p-2 space-y-2">
+                    <p>
+                      These are all used for NixOS based frames. Raspberry Pi OS based frames set them via the RPi
+                      Imager.
+                    </p>
+                    <Field
+                      name="timezone"
+                      label={
+                        <>
+                          Timezone
+                          <Button
+                            size="small"
+                            color="secondary"
+                            onClick={() => {
+                              const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+                              setSettingsValue(['defaults', 'timezone'], timezone)
+                            }}
+                          >
+                            Detect
+                          </Button>
+                        </>
+                      }
+                    >
+                      <Select name="timezone" options={timezoneOptions} />
+                    </Field>
+                    <Field name="wifiSSID" label="Default WiFi SSID">
+                      <TextInput name="wifiSSID" placeholder="WiFi network name" />
+                    </Field>
+                    <Field
+                      name="wifiPassword"
+                      label="Default WiFi password"
+                      secret={!!savedSettings?.defaults?.wifiPassword}
+                    >
+                      <TextInput name="wifiPassword" placeholder="WiFi password" />
+                    </Field>
+                  </Box>
+                </Group>
+                <Group name="nix">
+                  <H6 className="pt-4">Nix settings</H6>
+                  <Box className="p-2 space-y-2">
+                    <Field name="buildExtraArgs" label="Extra args to build commands">
+                      <TextInput placeholder="-j0" />
+                    </Field>
+                    <Field
+                      name="buildServerEnabled"
+                      label="Enable remote build server"
+                      tooltip="These settings are used to build frames on a remote server. If you don't have a remote build
+                      server, you can leave these fields empty."
+                    >
+                      <Switch fullWidth />
+                    </Field>
+                    {settings?.nix?.buildServerEnabled ? (
+                      <>
+                        <Field name="buildServer" label="Build server address">
+                          <TextInput placeholder="build.frameos.net" />
+                        </Field>
+                        <Field name="buildServerPort" label="Build server port">
+                          <NumberTextInput placeholder="22" />
+                        </Field>
+                        <Field name="buildServerMaxParallelJobs" label="Max parallel jobs on build server">
+                          <NumberTextInput placeholder="8" />
+                        </Field>
+                        <Field name="buildServerUser" label="Build server user">
+                          <TextInput placeholder="frameos" />
+                        </Field>
+                        <Field
+                          name="buildServerPrivateKey"
+                          label="Build server private key"
+                          secret={!!savedSettings?.nix?.buildServerPrivateKey}
+                        >
+                          <TextArea />
+                        </Field>
+                        <Field
+                          name="buildServerPublicKey"
+                          label="Build server public key"
+                          secret={!!savedSettings?.nix?.buildServerPublicKey}
+                        >
+                          <TextArea />
+                        </Field>
+                        <Button
+                          onClick={newNixKey}
+                          color={savedSettings?.nix?.buildServerPrivateKey ? 'secondary' : 'primary'}
                           size="small"
                         >
                           Generate new keypair
