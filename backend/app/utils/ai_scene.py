@@ -107,6 +107,28 @@ Follow these rules:
 - If you include "scene" nodes (to embed another scene), set data.keyword to the referenced scene id and connect them
   from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
   "field/render_functions[row][col]" and targetHandle "prev".
+- Scene settings:
+  - settings.refreshInterval is the render cadence in seconds. Use it to control how often the scene re-renders.
+    If a user mentions a render timeout or cadence, set refreshInterval accordingly (do not invent new timeout fields).
+  - settings.backgroundColor sets the default scene background fill as a hex color (e.g. "#000000").
+    If not specified, it defaults to black. Use render/color or render/gradient apps for more complex backgrounds.
+- Fonts available (TTF filenames) for font fields and caret syntax:
+  - Ubuntu: Ubuntu-Regular.ttf (default), Ubuntu-Bold.ttf, Ubuntu-Italic.ttf, Ubuntu-BoldItalic.ttf,
+    Ubuntu-Light.ttf, Ubuntu-LightItalic.ttf, Ubuntu-Medium.ttf, Ubuntu-MediumItalic.ttf.
+  - PTSans: PTSans-Regular.ttf, PTSans-Bold.ttf, PTSans-Italic.ttf, PTSans-BoldItalic.ttf.
+  - FiraGO: FiraGO-Regular.ttf, FiraGO-Italic.ttf, FiraGO-Bold.ttf, FiraGO-BoldItalic.ttf,
+    FiraGO-Medium.ttf, FiraGO-MediumItalic.ttf, FiraGO-Light.ttf, FiraGO-LightItalic.ttf,
+    FiraGO-ExtraLight.ttf, FiraGO-ExtraLightItalic.ttf, FiraGO-SemiBold.ttf, FiraGO-SemiBoldItalic.ttf,
+    FiraGO-ExtraBold.ttf, FiraGO-ExtraBoldItalic.ttf, FiraGO-Heavy.ttf, FiraGO-HeavyItalic.ttf,
+    FiraGO-Book.ttf, FiraGO-BookItalic.ttf, FiraGO-Thin.ttf, FiraGO-ThinItalic.ttf.
+  - CormorantGaramond: Regular/Bold/Italic/BoldItalic/Light/LightItalic/Medium/MediumItalic/SemiBold/SemiBoldItalic.
+  - Liberation: LiberationSans-Regular.ttf/Bold.ttf/Italic.ttf/BoldItalic.ttf,
+    LiberationSerif-Regular.ttf/Bold.ttf/Italic.ttf/BoldItalic.ttf,
+    LiberationMono-Regular.ttf/Bold.ttf/Italic.ttf/BoldItalic.ttf.
+  - Other: CascadiaMono.ttf, CascadiaMonoItalic.ttf, ComicRelief.ttf, ComicRelief-Bold.ttf,
+    Galindo-Regular.ttf, Peralta-Regular.ttf.
+  - Users may upload custom fonts; if a requested font is unavailable, choose the closest available font or make it
+    a scene field so it can be swapped later.
 - Cache config can be applied to app or code nodes via data.cache with:
   - enabled: true to turn caching on.
   - inputEnabled: cache by inputs (output recalculates when any inputs change).

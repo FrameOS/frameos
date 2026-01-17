@@ -310,23 +310,8 @@ export const scenesLogic = kea<scenesLogicType>([
     frameId: [() => [(_, props: ScenesLogicProps) => props.frameId], (frameId) => frameId],
     editingFrame: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm || frame || null],
     rawScenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame.scenes ?? []],
-    scenes: [(s) => [s.rawScenes], (rawScenes) => rawScenes.toSorted((a, b) => a.name.localeCompare(b.name))],
-    filteredScenes: [
-      (s) => [s.scenes, s.search],
-      (scenes, search) => {
-        const searchPieces = search
-          .toLowerCase()
-          .split(' ')
-          .filter((s) => s)
-        if (searchPieces.length === 0) {
-          return scenes
-        }
-        return scenes.filter((scene) => searchPieces.every((piece) => scene.name.toLowerCase().includes(piece)))
-      },
-    ],
-    sceneTitles: [(s) => [s.scenes], (scenes) => Object.fromEntries(scenes.map((scene) => [scene.id, scene.name]))],
     undeployedSceneIds: [
-      (s) => [s.scenes, s.frame],
+      (s) => [s.rawScenes, s.frame],
       (scenes, frame): Set<string> => {
         const deployedScenes: FrameScene[] = frame?.last_successful_deploy?.scenes ?? []
         const undeployed = new Set<string>()
@@ -356,6 +341,33 @@ export const scenesLogic = kea<scenesLogicType>([
         return unsaved
       },
     ],
+    scenes: [
+      (s) => [s.rawScenes, s.unsavedSceneIds, s.undeployedSceneIds],
+      (rawScenes, unsavedSceneIds, undeployedSceneIds) => {
+        return rawScenes.toSorted((a, b) => {
+          const aPriority = unsavedSceneIds.has(a.id) || undeployedSceneIds.has(a.id)
+          const bPriority = unsavedSceneIds.has(b.id) || undeployedSceneIds.has(b.id)
+          if (aPriority !== bPriority) {
+            return aPriority ? -1 : 1
+          }
+          return a.name.localeCompare(b.name)
+        })
+      },
+    ],
+    filteredScenes: [
+      (s) => [s.scenes, s.search],
+      (scenes, search) => {
+        const searchPieces = search
+          .toLowerCase()
+          .split(' ')
+          .filter((s) => s)
+        if (searchPieces.length === 0) {
+          return scenes
+        }
+        return scenes.filter((scene) => searchPieces.every((piece) => scene.name.toLowerCase().includes(piece)))
+      },
+    ],
+    sceneTitles: [(s) => [s.scenes], (scenes) => Object.fromEntries(scenes.map((scene) => [scene.id, scene.name]))],
     linksToOtherScenes: [
       (s) => [s.scenes],
       (scenes): Record<string, Set<string>> => {
