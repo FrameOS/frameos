@@ -16,7 +16,7 @@ export const settingsDetails: Record<
     fields: [{ label: 'API key for frames', secret: true, path: ['openAI', 'apiKey'] }],
   },
   unsplash: {
-    title: 'Unsplash API',
+    title: 'Unsplash',
     tagLabel: 'Unsplash access key missing',
     fields: [{ label: 'Access key', secret: true, path: ['unsplash', 'accessKey'] }],
   },
@@ -31,6 +31,11 @@ export const settingsDetails: Record<
         path: ['homeAssistant', 'accessToken'],
       },
     ],
+  },
+  github: {
+    title: 'GitHub',
+    tagLabel: 'GitHub personal access token missing',
+    fields: [{ label: 'API key', secret: true, path: ['github', 'api_key'] }],
   },
   // frameOS: {
   //   title: 'FrameOS Gallery',

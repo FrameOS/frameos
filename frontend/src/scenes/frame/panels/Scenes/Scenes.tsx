@@ -153,6 +153,40 @@ export function Scenes() {
     }
   }
 
+  const promptHoverState = useRef<{ previous: string | null; active: string | null }>({
+    previous: null,
+    active: null,
+  })
+
+  const handlePromptHoverEnter = (prompt: string) => {
+    if (!hasEmbeddings) {
+      return
+    }
+    if (promptHoverState.current.active === null) {
+      promptHoverState.current.previous = aiPrompt ?? ''
+    }
+    promptHoverState.current.active = prompt
+    setAiPrompt(prompt)
+  }
+
+  const handlePromptHoverLeave = (prompt: string) => {
+    if (promptHoverState.current.active !== prompt) {
+      return
+    }
+    const previous = promptHoverState.current.previous ?? ''
+    promptHoverState.current.active = null
+    promptHoverState.current.previous = null
+    if (aiPrompt === prompt) {
+      setAiPrompt(previous)
+    }
+  }
+
+  const handlePromptSuggestionClick = (prompt: string) => {
+    promptHoverState.current.active = null
+    promptHoverState.current.previous = null
+    setAiPrompt(prompt)
+  }
+
   const triggerUploadInput = () => {
     uploadInputRef.current?.click()
   }
@@ -170,7 +204,12 @@ export function Scenes() {
   const hasAiSceneHistory =
     aiSceneLogs.length > 0 &&
     (isGeneratingAiScene || aiSceneLastLog?.status === 'success' || aiSceneLastLog?.status === 'error')
-
+  const serviceSettingKeys = Object.keys(settingsDetails)
+  const missingServiceSettings = getMissingSecretSettingKeys(serviceSettingKeys, savedSettings)
+  const orderedServiceKeys = [
+    ...serviceSettingKeys.filter((settingKey) => !missingServiceSettings.has(settingKey)),
+    ...serviceSettingKeys.filter((settingKey) => missingServiceSettings.has(settingKey)),
+  ]
   const formatDurationSeconds = (durationMs: number | null) => {
     if (durationMs === null) {
       return null
@@ -232,12 +271,36 @@ export function Scenes() {
               key={suggestion.label}
               type="button"
               className="text-blue-300 hover:text-blue-200 hover:underline"
-              onClick={() => setAiPrompt(suggestion.prompt)}
+              onMouseEnter={() => handlePromptHoverEnter(suggestion.prompt)}
+              onMouseLeave={() => handlePromptHoverLeave(suggestion.prompt)}
+              onClick={() => handlePromptSuggestionClick(suggestion.prompt)}
               disabled={!hasEmbeddings}
             >
               {suggestion.label}
             </button>
           ))}
+        </div>
+      </div>
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="uppercase text-gray-500 text-xs">services:</span>
+          {orderedServiceKeys.map((settingKey) => {
+            const details = settingsDetails[settingKey]
+            const missing = missingServiceSettings.has(settingKey)
+            return (
+              <button
+                key={settingKey}
+                type="button"
+                className="focus:outline-none"
+                onClick={() => setActiveSettingsKey(settingKey)}
+              >
+                <Tag color={missing ? 'orange' : 'teal'} className="cursor-pointer">
+                  {details?.title ?? settingKey}
+                  {missing ? '!' : ''}
+                </Tag>
+              </button>
+            )
+          })}
         </div>
       </div>
       {!hasEmbeddings ? (
@@ -546,6 +609,11 @@ export function Scenes() {
         {filteredScenes.map((scene) => {
           const secretSettings = sceneSecretSettings.get(scene.id) ?? []
           const missingSecretSettings = getMissingSecretSettingKeys(secretSettings, savedSettings)
+          const sceneServiceEntries = secretSettings.map((settingKey) => ({
+            key: settingKey,
+            label: settingsDetails[settingKey]?.title || settingKey,
+            missing: missingSecretSettings.has(settingKey),
+          }))
           const isSelected = selectedSceneIds.has(scene.id)
           const sceneHasChanges = unsavedSceneIds.has(scene.id) || undeployedSceneIds.has(scene.id)
           const isPreviewing = previewingSceneId === scene.id
@@ -797,6 +865,18 @@ export function Scenes() {
                       {scene?.settings?.refreshInterval && Number.isFinite(scene.settings.refreshInterval) ? (
                         <div className="text-xs ml-2 uppercase">{showAsFps(scene.settings.refreshInterval)}</div>
                       ) : null}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 pl-7 text-xs text-gray-500">
+                      {sceneServiceEntries.length ? (
+                        sceneServiceEntries.map(({ key, label, missing }) => (
+                          <Tag key={key} color={missing ? 'orange' : 'teal'}>
+                            {label}
+                            {missing ? ' (missing key)' : ''}
+                          </Tag>
+                        ))
+                      ) : (
+                        <span className="text-gray-600">None</span>
+                      )}
                     </div>
 
                     {expandedScenes[scene.id] && !multiSelectEnabled ? (
