@@ -116,6 +116,7 @@ export function Scenes() {
     selectableSceneIds.length > 0 && selectableSceneIds.every((sceneId) => selectedSceneIds.has(sceneId))
   const promptSuggestions = [
     { label: 'Banana', prompt: 'Display an image of a banana on a white background.' },
+    { label: 'Unsplash split', prompt: 'split the scene in 4 and show a different unsplash image in each of them' },
     {
       label: 'Health message',
       prompt:
@@ -124,7 +125,6 @@ export function Scenes() {
     { label: 'Minimal clock', prompt: 'Design a minimalist analog clock for an e-ink frame.' },
     { label: 'Weather panel', prompt: 'Show a clean weather dashboard with temperature, forecast, and icons.' },
     { label: 'Photo spotlight', prompt: 'Create a photo spotlight with a caption and subtle border.' },
-    { label: 'Daily quote', prompt: 'Display a large inspirational quote with author attribution.' },
   ]
 
   const triggerUploadInput = () => {
