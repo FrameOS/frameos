@@ -1,0 +1,62 @@
+{
+  "name": "Weather (Open-Meteo)",
+  "description": "Fetch current, hourly, and daily forecasts from Open-Meteo for a location and date.",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "location",
+      "type": "string",
+      "value": "",
+      "required": true,
+      "label": "Location",
+      "placeholder": "City, state, or country"
+    },
+    {
+      "name": "date",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Date (YYYY-MM-DD)",
+      "placeholder": "2024-01-30"
+    },
+    {
+      "name": "timezone",
+      "type": "string",
+      "value": "auto",
+      "required": false,
+      "label": "Timezone",
+      "placeholder": "auto"
+    },
+    {
+      "name": "temperatureUnit",
+      "type": "select",
+      "options": ["celsius", "fahrenheit"],
+      "value": "celsius",
+      "required": true,
+      "label": "Temperature unit"
+    },
+    {
+      "name": "windSpeedUnit",
+      "type": "select",
+      "options": ["kmh", "ms", "mph", "kn"],
+      "value": "kmh",
+      "required": true,
+      "label": "Wind speed unit"
+    },
+    {
+      "name": "precipitationUnit",
+      "type": "select",
+      "options": ["mm", "inch"],
+      "value": "mm",
+      "required": true,
+      "label": "Precipitation unit"
+    }
+  ],
+  "output": [
+    {
+      "name": "weather",
+      "type": "json"
+    }
+  ]
+}

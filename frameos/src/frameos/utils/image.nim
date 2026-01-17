@@ -1,10 +1,13 @@
 import pixie
+import base64
 import httpclient
 import os
 import osproc
 import options
+import sequtils
 import strutils
 import streams
+import uri
 
 import frameos/utils/font
 
@@ -78,7 +81,26 @@ proc readImageWithFallback*(path: string): Image =
       return converted.get()
   return readImage(path)
 
+proc decodeDataUrl*(dataUrl: string): Image =
+  if not dataUrl.startsWith("data:"):
+    raise newException(ValueError, "Invalid data URL.")
+  let commaIndex = dataUrl.find(',')
+  if commaIndex == -1:
+    raise newException(ValueError, "Invalid data URL.")
+  let header = dataUrl[5 ..< commaIndex]
+  let dataBody = dataUrl[commaIndex + 1 .. ^1]
+  let headerParts = if header.len > 0: header.split(';') else: @[""]
+  let isBase64 = headerParts.anyIt(it == "base64")
+  let decodedData =
+    if isBase64:
+      dataBody.decode
+    else:
+      decodeUrl(dataBody)
+  return decodeImageWithFallback(decodedData)
+
 proc downloadImage*(url: string): Image =
+  if url.startsWith("data:"):
+    return decodeDataUrl(url)
   let client = newHttpClient(timeout = 30000)
   try:
     let content = client.getContent(url)
