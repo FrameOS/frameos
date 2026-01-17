@@ -14,8 +14,40 @@ function getNodeSize(node: DiagramNode): { width: number; height: number } {
   }
 }
 
+function isFlowEdge(edge: Edge): boolean {
+  return edge.sourceHandle === 'next' || edge.targetHandle === 'prev' || edge.type === 'appNodeEdge'
+}
+
+function isDataAppNode(node: DiagramNode): boolean {
+  if (node.type !== 'app') {
+    return false
+  }
+  const keyword = (node.data as { keyword?: string } | undefined)?.keyword
+  return typeof keyword === 'string' && keyword.startsWith('data/')
+}
+
+function isFlowNode(node: DiagramNode): boolean {
+  if (node.type === 'event' || node.type === 'dispatch') {
+    return true
+  }
+  if (node.type === 'app') {
+    return !isDataAppNode(node)
+  }
+  return false
+}
+
 export function arrangeNodes(nodes: DiagramNode[], edges: Edge[]): DiagramNode[] {
   if (!nodes.length) {
+    return nodes
+  }
+
+  const flowNodes = nodes.filter(isFlowNode)
+  const flowNodeIds = new Set(flowNodes.map((node) => node.id))
+  const flowEdges = edges.filter(
+    (edge) => flowNodeIds.has(edge.source) && flowNodeIds.has(edge.target) && isFlowEdge(edge)
+  )
+
+  if (!flowNodes.length) {
     return nodes
   }
 
@@ -28,7 +60,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[]): DiagramNode[]
   })
   graph.setDefaultEdgeLabel(() => ({}))
 
-  nodes.forEach((node) => {
+  flowNodes.forEach((node) => {
     const { width, height } = getNodeSize(node)
     graph.setNode(node.id, {
       width,
@@ -37,7 +69,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[]): DiagramNode[]
     })
   })
 
-  edges.forEach((edge) => {
+  flowEdges.forEach((edge) => {
     if (!edge.source || !edge.target || edge.source === edge.target) {
       return
     }
@@ -46,20 +78,185 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[]): DiagramNode[]
 
   dagre.layout(graph)
 
-  const positionedNodes = nodes.map((node) => {
+  const basePositions = new Map<string, { x: number; y: number }>()
+  flowNodes.forEach((node) => {
     const layoutNode = graph.node(node.id)
     if (!layoutNode) {
-      return node
+      return
     }
     const { width, height } = getNodeSize(node)
-    return {
-      ...node,
-      position: {
-        x: layoutNode.x - width / 2,
-        y: layoutNode.y - height / 2,
-      },
-    }
+    basePositions.set(node.id, {
+      x: layoutNode.x - width / 2,
+      y: layoutNode.y - height / 2,
+    })
   })
 
-  return positionedNodes
+  const outgoingEdges = edges.reduce((acc, edge) => {
+    if (!edge.source || !edge.target) {
+      return acc
+    }
+    acc[edge.source] = [...(acc[edge.source] ?? []), edge]
+    return acc
+  }, {} as Record<string, Edge[]>)
+  const incomingEdges = edges.reduce((acc, edge) => {
+    if (!edge.source || !edge.target) {
+      return acc
+    }
+    acc[edge.target] = [...(acc[edge.target] ?? []), edge]
+    return acc
+  }, {} as Record<string, Edge[]>)
+
+  const anchorCache = new Map<string, string | null>()
+  const resolveAnchor = (nodeId: string, visited = new Set<string>()): string | null => {
+    if (anchorCache.has(nodeId)) {
+      return anchorCache.get(nodeId) ?? null
+    }
+    if (flowNodeIds.has(nodeId)) {
+      anchorCache.set(nodeId, nodeId)
+      return nodeId
+    }
+    if (visited.has(nodeId)) {
+      return null
+    }
+    visited.add(nodeId)
+    for (const edge of outgoingEdges[nodeId] ?? []) {
+      const anchor = resolveAnchor(edge.target, visited)
+      if (anchor) {
+        anchorCache.set(nodeId, anchor)
+        return anchor
+      }
+    }
+    for (const edge of incomingEdges[nodeId] ?? []) {
+      const anchor = resolveAnchor(edge.source, visited)
+      if (anchor) {
+        anchorCache.set(nodeId, anchor)
+        return anchor
+      }
+    }
+    anchorCache.set(nodeId, null)
+    return null
+  }
+
+  const depthCache = new Map<string, number>()
+  const resolveDepth = (nodeId: string, anchorId: string, visited = new Set<string>()): number => {
+    const cacheKey = `${nodeId}:${anchorId}`
+    if (depthCache.has(cacheKey)) {
+      return depthCache.get(cacheKey) ?? 0
+    }
+    if (nodeId === anchorId) {
+      depthCache.set(cacheKey, 0)
+      return 0
+    }
+    if (visited.has(nodeId)) {
+      return 0
+    }
+    visited.add(nodeId)
+    let best = 0
+    for (const edge of outgoingEdges[nodeId] ?? []) {
+      const depth = resolveDepth(edge.target, anchorId, visited)
+      if (depth > 0 || edge.target === anchorId) {
+        best = Math.max(best, depth + 1)
+      }
+    }
+    depthCache.set(cacheKey, best)
+    return best
+  }
+
+  const nodesById = nodes.reduce((acc, node) => {
+    acc[node.id] = node
+    return acc
+  }, {} as Record<string, DiagramNode>)
+
+  const anchoredNodes = nodes.filter((node) => !flowNodeIds.has(node.id))
+  const nodesByAnchor = anchoredNodes.reduce((acc, node) => {
+    const anchor = resolveAnchor(node.id)
+    if (!anchor) {
+      return acc
+    }
+    acc[anchor] = [...(acc[anchor] ?? []), node]
+    return acc
+  }, {} as Record<string, DiagramNode[]>)
+
+  const positionedNodes = nodes.map((node) => {
+    const basePosition = basePositions.get(node.id)
+    if (!basePosition) {
+      return node
+    }
+    return { ...node, position: { ...basePosition } }
+  })
+
+  const positionedById = positionedNodes.reduce((acc, node) => {
+    acc[node.id] = node
+    return acc
+  }, {} as Record<string, DiagramNode>)
+
+  Object.entries(nodesByAnchor).forEach(([anchorId, anchored]) => {
+    const anchorNode = positionedById[anchorId] ?? nodesById[anchorId]
+    if (!anchorNode) {
+      return
+    }
+    const anchorSize = getNodeSize(anchorNode)
+    const anchorX = anchorNode.position.x
+    const anchorY = anchorNode.position.y
+    const anchorCenterX = anchorX + anchorSize.width / 2
+
+    const anchoredNodes = [...anchored]
+
+    const sortByDepth = (node: DiagramNode) => resolveDepth(node.id, anchorId)
+    anchoredNodes.sort((a, b) => sortByDepth(b) - sortByDepth(a))
+
+    const aboveTotalHeight =
+      anchoredNodes.reduce((sum, node) => sum + getNodeSize(node).height, 0) +
+      Math.max(0, anchoredNodes.length - 1) * NODE_PADDING_Y
+    let currentY = anchorY - NODE_PADDING_Y - aboveTotalHeight
+    anchoredNodes.forEach((node) => {
+      const size = getNodeSize(node)
+      positionedById[node.id] = {
+        ...node,
+        position: {
+          x: anchorCenterX - size.width / 2,
+          y: currentY,
+        },
+      }
+      currentY += size.height + NODE_PADDING_Y
+    })
+  })
+
+  const resolveOverlaps = (nodesToResolve: DiagramNode[], passes: number): void => {
+    const bumpX = NODE_PADDING_X
+    const bumpY = NODE_PADDING_Y
+    for (let pass = 0; pass < passes; pass += 1) {
+      let moved = false
+      for (let i = 0; i < nodesToResolve.length; i += 1) {
+        const nodeA = positionedById[nodesToResolve[i].id] ?? nodesToResolve[i]
+        const sizeA = getNodeSize(nodeA)
+        for (let j = i + 1; j < nodesToResolve.length; j += 1) {
+          const nodeB = positionedById[nodesToResolve[j].id] ?? nodesToResolve[j]
+          const sizeB = getNodeSize(nodeB)
+          const overlapX =
+            nodeA.position.x < nodeB.position.x + sizeB.width && nodeA.position.x + sizeA.width > nodeB.position.x
+          const overlapY =
+            nodeA.position.y < nodeB.position.y + sizeB.height && nodeA.position.y + sizeA.height > nodeB.position.y
+          if (overlapX && overlapY) {
+            positionedById[nodeB.id] = {
+              ...nodeB,
+              position: {
+                x: nodeB.position.x + bumpX,
+                y: nodeB.position.y + bumpY,
+              },
+            }
+            moved = true
+          }
+        }
+      }
+      if (!moved) {
+        break
+      }
+    }
+  }
+
+  const resolvedNodes = nodes.map((node) => positionedById[node.id] ?? node)
+  resolveOverlaps(resolvedNodes, 3)
+
+  return nodes.map((node) => positionedById[node.id] ?? node)
 }
