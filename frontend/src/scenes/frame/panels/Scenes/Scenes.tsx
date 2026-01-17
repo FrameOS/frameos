@@ -294,9 +294,9 @@ export function Scenes() {
                 className="focus:outline-none"
                 onClick={() => setActiveSettingsKey(settingKey)}
               >
-                <Tag color={missing ? 'orange' : 'teal'} className="cursor-pointer">
+                <Tag color={missing ? 'orange' : 'blue'} className="cursor-pointer flex gap-1 items-center">
+                  {missing ? <ExclamationTriangleIcon className="h-3 w-3 text-yellow-300" /> : null}
                   {details?.title ?? settingKey}
-                  {missing ? '!' : ''}
                 </Tag>
               </button>
             )
