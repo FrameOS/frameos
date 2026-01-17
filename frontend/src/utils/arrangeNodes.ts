@@ -1,63 +1,65 @@
-import { Edge } from '@reactflow/core/dist/esm/types/edges'
-import { DiagramNode } from '../types'
+import dagre from '@dagrejs/dagre'
+import type { Edge } from '@reactflow/core/dist/esm/types/edges'
+import type { DiagramNode } from '../types'
 
-const SPACE_BETWEEN_NODES = 100
-const SPACE_BETWEEN_CHAINS = 50
+const NODE_PADDING_X = 60
+const NODE_PADDING_Y = 50
+const NODE_FALLBACK_WIDTH = 260
+const NODE_FALLBACK_HEIGHT = 180
 
-// TODO: this works poorly and doesn't know about code nodes
+function getNodeSize(node: DiagramNode): { width: number; height: number } {
+  return {
+    width: node.width ?? NODE_FALLBACK_WIDTH,
+    height: node.height ?? NODE_FALLBACK_HEIGHT,
+  }
+}
+
 export function arrangeNodes(nodes: DiagramNode[], edges: Edge[]): DiagramNode[] {
-  let visited = new Set<string>()
-
-  function dfs(currentNodeId: string, chain: DiagramNode[]): DiagramNode[] {
-    visited.add(currentNodeId)
-
-    // Add the current node to the chain
-    let currentNode = nodes.find((node) => node.id === currentNodeId)
-    if (currentNode) {
-      chain.push(currentNode)
-    }
-
-    for (let edge of edges) {
-      if (edge.source === currentNodeId && !visited.has(edge.target)) {
-        dfs(edge.target, chain)
-      }
-    }
-
-    return chain
+  if (!nodes.length) {
+    return nodes
   }
 
-  // Step 1: Identify chains
-  let chains: DiagramNode[][] = []
-  let singles: DiagramNode[] = []
-  for (let node of nodes) {
-    if (!visited.has(node.id)) {
-      let chain: DiagramNode[] = []
-      chain = dfs(node.id, chain)
+  const graph = new dagre.graphlib.Graph({ multigraph: true })
+  graph.setGraph({
+    rankdir: 'LR',
+    nodesep: NODE_PADDING_X,
+    ranksep: NODE_PADDING_Y,
+    edgesep: 25,
+  })
+  graph.setDefaultEdgeLabel(() => ({}))
 
-      // Add the chain only if it contains more than one node or doesn't have any incoming or outgoing connections
-      if (chain.length > 1) {
-        chains.push(chain)
-      } else if (!edges.find((e) => e.source === node.id || e.target === node.id)) {
-        singles.push(node)
-      }
-    }
-  }
+  nodes.forEach((node) => {
+    const { width, height } = getNodeSize(node)
+    graph.setNode(node.id, {
+      width,
+      height,
+      rank: node.type === 'event' || node.type === 'source' ? 'min' : undefined,
+    })
+  })
 
-  // Step 2: Position nodes
-  const newNodes: DiagramNode[] = []
-  let currentY = SPACE_BETWEEN_CHAINS
-  for (let chain of chains) {
-    let currentX = SPACE_BETWEEN_NODES
-    for (let node of chain) {
-      newNodes.push({ ...node, position: { x: currentX, y: currentY } })
-      currentX += (node.width ?? 200) + SPACE_BETWEEN_NODES
+  edges.forEach((edge) => {
+    if (!edge.source || !edge.target || edge.source === edge.target) {
+      return
     }
-    currentY += Math.max(...chain.map((node) => node.height ?? 200)) + SPACE_BETWEEN_CHAINS
-  }
-  let currentX = SPACE_BETWEEN_NODES
-  for (let app of singles) {
-    newNodes.push({ ...app, position: { x: currentX, y: currentY } })
-    currentX += (app.width ?? 200) + SPACE_BETWEEN_NODES
-  }
-  return newNodes
+    graph.setEdge(edge.source, edge.target)
+  })
+
+  dagre.layout(graph)
+
+  const positionedNodes = nodes.map((node) => {
+    const layoutNode = graph.node(node.id)
+    if (!layoutNode) {
+      return node
+    }
+    const { width, height } = getNodeSize(node)
+    return {
+      ...node,
+      position: {
+        x: layoutNode.x - width / 2,
+        y: layoutNode.y - height / 2,
+      },
+    }
+  })
+
+  return positionedNodes
 }

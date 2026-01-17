@@ -18,6 +18,7 @@
     "bundle:analyze": "npx vite-bundle-visualizer"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^1.1.8",
     "@headlessui/react": "^1.7.19",
     "@heroicons/react": "^2.0.18",
     "@microlink/react-json-view": "^1.23.0",
@@ -65,8 +66,8 @@
     "@types/react-syntax-highlighter": "^15.5.9",
     "@types/streamsaver": "^2.0.5",
     "@types/uuid": "^9.0.3",
-    "autoprefixer": "^10.4.14",
     "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.14",
     "concurrently": "^7.4.0",
     "cors": "^2.8.5",
     "cssnano": "^7.0.1",

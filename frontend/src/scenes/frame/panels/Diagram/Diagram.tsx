@@ -29,7 +29,7 @@ import { StateNode } from './StateNode'
 import { Button, buttonColor, buttonSize } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { NodeType, EdgeType, CodeNodeData } from '../../../../types'
-import { AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
+import { AdjustmentsHorizontalIcon, ArrowsPointingInIcon } from '@heroicons/react/24/outline'
 import { Tooltip } from '../../../../components/Tooltip'
 import { SceneSettings } from '../Scenes/SceneSettings'
 import { ZoomOutArea } from '../../../../icons/ZoomOutArea'
@@ -72,9 +72,8 @@ function Diagram_({ sceneId }: DiagramProps) {
   const updateNodeInternals = useUpdateNodeInternals()
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId, updateNodeInternals }
   const { nodes, nodesWithStyle, edges, fitViewCounter } = useValues(diagramLogic(diagramLogicProps))
-  const { onEdgesChange, onNodesChange, setNodes, addEdge, fitDiagramView, keywordDropped } = useActions(
-    diagramLogic(diagramLogicProps)
-  )
+  const { onEdgesChange, onNodesChange, setNodes, addEdge, fitDiagramView, keywordDropped, rearrangeCurrentScene } =
+    useActions(diagramLogic(diagramLogicProps))
   const { newNodePicker } = useValues(newNodePickerLogic(diagramLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic(diagramLogicProps))
 
@@ -225,6 +224,9 @@ function Diagram_({ sceneId }: DiagramProps) {
           <div className="absolute top-1 right-1 z-10 flex gap-2">
             <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
               <ZoomOutArea className="w-5 h-5" />
+            </Button>
+            <Button size="tiny" onClick={rearrangeCurrentScene} title="Realign nodes" color="secondary">
+              <ArrowsPointingInIcon className="w-5 h-5" />
             </Button>
             <Tooltip
               tooltipColor="gray"
