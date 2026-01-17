@@ -54,14 +54,19 @@ Follow these rules:
     and to connect each subsequent app node in order.
   - Do not connect multiple "next" edges to the same "prev" handle. The render flow must be a single linear chain
     where each app node connects to exactly one next node in sequence.
+  - Logic + render apps form the left/right render flow (prev/next). Data apps are not part of the left/right chain
+    and should only connect up/down via field output -> field input edges.
   - Only apps with category "logic" or "render" can be connected left/right using appNodeEdge. Apps with category
     "data" must not be connected left/right and must only connect via field outputs into inputs.
   - When an app outputs data into another app's input (e.g. data app into render/image), add a "codeNodeEdge" from
     sourceHandle "fieldOutput" to targetHandle "fieldInput/<fieldName>".
   - Every app node must be connected either through the render flow (prev/next) or via a field output/input edge.
-- Data apps (like image generation) should NOT be chained into the render flow using "appNodeEdge". Instead,
-    connect the render event directly to the render app (e.g. "render/image") with "appNodeEdge" and separately
-    connect the data app output via "codeNodeEdge". This keeps the render flow triggered by the event.
+- Data apps (including image apps) are up/down data providers and should NOT be chained into the render flow using
+    "appNodeEdge". Instead, connect the render event directly to the render app (e.g. "render/image") with
+    "appNodeEdge" and separately connect the data app output via "codeNodeEdge". This keeps the render flow triggered
+    by the event.
+  - Images are data. To display an image, first add a render app like "render/image" in the render flow, then connect
+    the actual image output into its image field via a "codeNodeEdge" (fieldOutput -> fieldInput/image).
   - Never store an image output node as state in JSON; pass image outputs directly into app inputs via codeNodeEdge.
   - If you include an OpenAI image app (keyword "data/openaiImage" or legacy "openai"), enable cache with
     duration "3600" (one hour) and do not set scene refreshInterval below 3600 unless the user explicitly
