@@ -4,6 +4,7 @@ import { CodeNodeData } from '../../../../types'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import { TextArea } from '../../../../components/TextArea'
+import Editor, { Monaco } from '@monaco-editor/react'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { CheckIcon, ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
@@ -20,6 +21,15 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
   const data: CodeNodeData = (node?.data as CodeNodeData) ?? ({ code: '' } satisfies CodeNodeData)
   const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
+
+  function beforeMount(monaco: Monaco): void {
+    monaco.editor.defineTheme('darkframe-node', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [],
+      colors: { 'editor.background': '#18181b' },
+    })
+  }
 
   return (
     <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>
@@ -138,13 +148,32 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
         </div>
         <div className="p-1 h-full">
           {codeNodeLanguage === 'js' ? (
-            <TextArea
-              theme="node"
-              className="w-full h-full font-mono resize-none"
-              placeholder={data.code ? 'Rewrite to JS: ' + data.code : `e.g: state.magic3 (JavaScript)`}
+            <Editor
+              height="100%"
+              language="typescript"
               value={data.codeJS ?? ''}
-              rows={2}
-              onChange={(value) => updateNodeData(id, { codeJS: value })}
+              theme="darkframe-node"
+              beforeMount={beforeMount}
+              options={{
+                minimap: { enabled: false },
+                fontSize: 12,
+                lineNumbers: 'off',
+                lineDecorationsWidth: 0,
+                glyphMargin: false,
+                folding: false,
+                renderLineHighlight: 'none',
+                overviewRulerLanes: 0,
+                hideCursorInOverviewRuler: true,
+                scrollbar: {
+                  verticalScrollbarSize: 6,
+                  horizontalScrollbarSize: 6,
+                  alwaysConsumeMouseWheel: false,
+                },
+                scrollBeyondLastLine: false,
+                wordWrap: 'on',
+                automaticLayout: true,
+              }}
+              onChange={(value) => updateNodeData(id, { codeJS: value ?? '' })}
             />
           ) : (
             <TextArea

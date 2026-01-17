@@ -110,6 +110,9 @@ Follow these rules:
 - If you include "scene" nodes (to embed another scene), set data.keyword to the referenced scene id and connect them
   from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
   "field/render_functions[row][col]" and targetHandle "prev".
+- If you want to reduce the opacity of an image, render the image as a data node, then connect it to the "render/opacity"
+  app as "image" and "opacity", and connect that to the "render/image" app in the render flow.
+- If you render a "render/color" or "render/gradient" background, you will wipe out all that was there b efore.
 - Scene settings:
   - settings.refreshInterval is the render cadence in seconds. Use it to control how often the scene re-renders.
     If a user mentions a render timeout or cadence, set refreshInterval accordingly (do not invent new timeout fields).
