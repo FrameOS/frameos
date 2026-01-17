@@ -1,6 +1,9 @@
 from http import HTTPStatus
 from datetime import datetime
 from uuid import uuid4
+import re
+import time
+from typing import Any
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
@@ -10,6 +13,7 @@ from app.models.ai_embeddings import AiEmbedding
 from app.models.settings import get_settings_dict
 from app.redis import get_redis
 from app.schemas.ai_scenes import AiSceneGenerateRequest, AiSceneGenerateResponse, AiSceneContextItem
+from app.config import config
 from app.utils.ai_scene import (
     EMBEDDING_MODEL,
     SCENE_MODEL,
@@ -23,8 +27,76 @@ from app.utils.ai_scene import (
     review_scene_solution,
     validate_scene_payload,
 )
+from app.utils.posthog import get_posthog_client, llm_analytics_enabled
 from app.websockets import publish_message
 from . import api_with_auth
+
+AI_ID_PATTERN = re.compile(r"[^A-Za-z0-9\\-_.@()!'~:|]")
+
+
+def _sanitize_ai_id(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = AI_ID_PATTERN.sub("_", value)
+    return cleaned or None
+
+
+def _capture_ai_span(
+    *,
+    trace_id: str | None,
+    session_id: str | None,
+    span_id: str | None,
+    parent_id: str | None,
+    span_name: str | None,
+    latency: float | None,
+) -> None:
+    posthog_client = get_posthog_client()
+    if posthog_client is None or not llm_analytics_enabled() or not trace_id or not span_id:
+        return
+    properties = {
+        "$ai_trace_id": _sanitize_ai_id(trace_id),
+        "$ai_session_id": _sanitize_ai_id(session_id),
+        "$ai_span_id": _sanitize_ai_id(span_id),
+        "$ai_parent_id": _sanitize_ai_id(parent_id),
+        "$ai_span_name": span_name,
+        "$ai_latency": latency,
+    }
+    properties = {key: value for key, value in properties.items() if value is not None}
+    try:
+        posthog_client.capture(
+            distinct_id=config.INSTANCE_ID,
+            event="$ai_span",
+            properties=properties,
+        )
+    except Exception:
+        pass
+
+
+def _capture_ai_trace(
+    *,
+    trace_id: str | None,
+    session_id: str | None,
+    input_state: list[dict[str, str]],
+    output_state: dict[str, Any],
+) -> None:
+    posthog_client = get_posthog_client()
+    if posthog_client is None or not llm_analytics_enabled() or not trace_id:
+        return
+    properties = {
+        "$ai_trace_id": _sanitize_ai_id(trace_id),
+        "$ai_session_id": _sanitize_ai_id(session_id),
+        "$ai_input_state": input_state,
+        "$ai_output_state": output_state,
+    }
+    properties = {key: value for key, value in properties.items() if value is not None}
+    try:
+        posthog_client.capture(
+            distinct_id=config.INSTANCE_ID,
+            event="$ai_trace",
+            properties=properties,
+        )
+    except Exception:
+        pass
 
 
 async def _publish_ai_scene_log(
@@ -54,6 +126,10 @@ async def generate_scene(
     redis: Redis = Depends(get_redis),
 ):
     request_id = data.request_id or str(uuid4())
+    posthog_trace_id = _sanitize_ai_id(request_id) or str(uuid4())
+    posthog_session_id = None
+    posthog_root_span_id = str(uuid4())
+    generation_start = time.perf_counter()
     await _publish_ai_scene_log(redis, "Starting AI scene generation.", request_id, stage="start")
     prompt = data.prompt.strip()
     if not prompt:
@@ -89,6 +165,9 @@ async def generate_scene(
                     [prompt],
                     api_key,
                     model=openai_settings.get("embeddingModel") or EMBEDDING_MODEL,
+                    ai_trace_id=posthog_trace_id,
+                    ai_session_id=posthog_session_id,
+                    ai_parent_id=posthog_root_span_id,
                 )
             )[0]
             app_embeddings = [item for item in embeddings if item.source_type == "app"]
@@ -155,6 +234,9 @@ async def generate_scene(
                     context_items=context_items,
                     api_key=api_key,
                     model=scene_model,
+                    ai_trace_id=posthog_trace_id,
+                    ai_session_id=posthog_session_id,
+                    ai_parent_id=posthog_root_span_id,
                 )
             else:
                 await _publish_ai_scene_log(
@@ -170,6 +252,9 @@ async def generate_scene(
                     model=scene_model,
                     payload=response_payload or {},
                     issues=validation_issues + review_issues,
+                    ai_trace_id=posthog_trace_id,
+                    ai_session_id=posthog_session_id,
+                    ai_parent_id=posthog_root_span_id,
                 )
 
             validation_issues = validate_scene_payload(response_payload or {})
@@ -189,6 +274,9 @@ async def generate_scene(
                 payload=response_payload or {},
                 api_key=api_key,
                 model=review_model,
+                ai_trace_id=posthog_trace_id,
+                ai_session_id=posthog_session_id,
+                ai_parent_id=posthog_root_span_id,
             )
             if review_issues:
                 await _publish_ai_scene_log(
@@ -262,5 +350,20 @@ async def generate_scene(
     ]
 
     await _publish_ai_scene_log(redis, "Scene generation complete.", request_id, status="success", stage="done")
+
+    _capture_ai_trace(
+        trace_id=posthog_trace_id,
+        session_id=posthog_session_id,
+        input_state=[{"role": "user", "content": prompt}],
+        output_state={"title": title, "scenes": scenes},
+    )
+    _capture_ai_span(
+        trace_id=posthog_trace_id,
+        session_id=posthog_session_id,
+        span_id=posthog_root_span_id,
+        parent_id=None,
+        span_name="ai_scene_generation",
+        latency=time.perf_counter() - generation_start,
+    )
 
     return AiSceneGenerateResponse(title=title, scenes=scenes, context=context_response)

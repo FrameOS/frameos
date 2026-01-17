@@ -1,6 +1,7 @@
 import json
 import re
 from typing import Any, Iterable
+from uuid import uuid4
 
 import numpy as np
 from posthog.ai.openai import AsyncOpenAI
@@ -257,6 +258,39 @@ def _openai_client(api_key: str, *, timeout: float) -> AsyncOpenAI:
     )
 
 
+def _sanitize_ai_id(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = re.sub(r"[^A-Za-z0-9\\-_.@()!'~:|]", "_", value)
+    return cleaned or None
+
+
+def _new_ai_span_id() -> str:
+    return str(uuid4())
+
+
+def _build_ai_posthog_properties(
+    *,
+    model: str,
+    ai_trace_id: str | None,
+    ai_session_id: str | None,
+    ai_span_id: str | None,
+    ai_parent_id: str | None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    properties: dict[str, Any] = {
+        "$ai_trace_id": _sanitize_ai_id(ai_trace_id),
+        "$ai_session_id": _sanitize_ai_id(ai_session_id),
+        "$ai_span_id": _sanitize_ai_id(ai_span_id),
+        "$ai_parent_id": _sanitize_ai_id(ai_parent_id),
+        "$ai_model": model,
+    }
+    properties = {key: value for key, value in properties.items() if value is not None}
+    if extra:
+        properties.update(extra)
+    return properties
+
+
 def _mmr_select(
     items: list[AiEmbedding],
     embeddings: np.ndarray,
@@ -316,27 +350,52 @@ def rank_embeddings(
     return _mmr_select(filtered_items, filtered_embeddings, filtered_scores, top_k=top_k)
 
 
-async def create_embeddings(texts: list[str], api_key: str, model: str) -> list[list[float]]:
+async def create_embeddings(
+    texts: list[str],
+    api_key: str,
+    model: str,
+    *,
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
+) -> list[list[float]]:
     embeddings: list[list[float]] = []
     client = _openai_client(api_key, timeout=60)
     for batch in _chunk_texts(texts):
+        span_id = _new_ai_span_id()
         response = await client.embeddings.create(
             model=model or EMBEDDING_MODEL,
             input=batch,
             posthog_distinct_id=config.INSTANCE_ID,
-            posthog_properties={
-                "operation": "create_embeddings",
-                "model": model or EMBEDDING_MODEL,
-                "input_count": len(batch),
-            },
+            posthog_properties=_build_ai_posthog_properties(
+                model=model or EMBEDDING_MODEL,
+                ai_trace_id=ai_trace_id,
+                ai_session_id=ai_session_id,
+                ai_span_id=span_id,
+                ai_parent_id=ai_parent_id,
+                extra={
+                    "operation": "create_embeddings",
+                    "model": model or EMBEDDING_MODEL,
+                    "input_count": len(batch),
+                },
+            ),
         )
         for entry in sorted(response.data, key=lambda item: item.index):
             embeddings.append(entry.embedding)
     return embeddings
 
 
-async def summarize_text(text: str, api_key: str, *, model: str = SUMMARY_MODEL) -> dict[str, Any]:
+async def summarize_text(
+    text: str,
+    api_key: str,
+    *,
+    model: str = SUMMARY_MODEL,
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
+) -> dict[str, Any]:
     client = _openai_client(api_key, timeout=60)
+    span_id = _new_ai_span_id()
     response = await client.chat.completions.create(
         model=model or SUMMARY_MODEL,
         messages=[
@@ -345,10 +404,17 @@ async def summarize_text(text: str, api_key: str, *, model: str = SUMMARY_MODEL)
         ],
         response_format={"type": "json_object"},
         posthog_distinct_id=config.INSTANCE_ID,
-        posthog_properties={
-            "operation": "summarize_text",
-            "model": model or SUMMARY_MODEL,
-        },
+        posthog_properties=_build_ai_posthog_properties(
+            model=model or SUMMARY_MODEL,
+            ai_trace_id=ai_trace_id,
+            ai_session_id=ai_session_id,
+            ai_span_id=span_id,
+            ai_parent_id=ai_parent_id,
+            extra={
+                "operation": "summarize_text",
+                "model": model or SUMMARY_MODEL,
+            },
+        ),
     )
     message = response.choices[0].message if response.choices else None
     content = message.content if message else "{}"
@@ -361,6 +427,9 @@ async def generate_scene_json(
     context_items: list[AiEmbedding],
     api_key: str,
     model: str,
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
 ) -> dict[str, Any]:
     context_block = _format_context_items(context_items)
     scene_prompt = "\n\n".join(
@@ -378,6 +447,9 @@ async def generate_scene_json(
             {"role": "user", "content": scene_prompt},
         ],
         context_items=context_items,
+        ai_trace_id=ai_trace_id,
+        ai_session_id=ai_session_id,
+        ai_parent_id=ai_parent_id,
     )
 
 
@@ -440,6 +512,9 @@ async def review_scene_solution(
     payload: dict[str, Any],
     api_key: str,
     model: str = SCENE_REVIEW_MODEL,
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
 ) -> list[str]:
     review_prompt = "\n\n".join(
         [
@@ -456,6 +531,9 @@ async def review_scene_solution(
             {"role": "user", "content": review_prompt},
         ],
         context_items=[],
+        ai_trace_id=ai_trace_id,
+        ai_session_id=ai_session_id,
+        ai_parent_id=ai_parent_id,
     )
     solves = response.get("solves")
     issues = response.get("issues")
@@ -474,6 +552,9 @@ async def repair_scene_json(
     model: str,
     payload: dict[str, Any],
     issues: list[str],
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
 ) -> dict[str, Any]:
     context_block = _format_context_items(context_items)
     scene_prompt = "\n\n".join(
@@ -492,6 +573,9 @@ async def repair_scene_json(
             {"role": "user", "content": scene_prompt},
         ],
         context_items=context_items,
+        ai_trace_id=ai_trace_id,
+        ai_session_id=ai_session_id,
+        ai_parent_id=ai_parent_id,
     )
 
 
@@ -501,18 +585,29 @@ async def _request_scene_json(
     model: str,
     messages: list[dict[str, str]],
     context_items: list[AiEmbedding],
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
 ) -> dict[str, Any]:
     client = _openai_client(api_key, timeout=90)
+    span_id = _new_ai_span_id()
     response = await client.chat.completions.create(
         model=model or SCENE_MODEL,
         messages=messages,
         response_format={"type": "json_object"},
         posthog_distinct_id=config.INSTANCE_ID,
-        posthog_properties={
-            "operation": "generate_scene_json",
-            "model": model or SCENE_MODEL,
-            "context_items": len(context_items),
-        },
+        posthog_properties=_build_ai_posthog_properties(
+            model=model or SCENE_MODEL,
+            ai_trace_id=ai_trace_id,
+            ai_session_id=ai_session_id,
+            ai_span_id=span_id,
+            ai_parent_id=ai_parent_id,
+            extra={
+                "operation": "generate_scene_json",
+                "model": model or SCENE_MODEL,
+                "context_items": len(context_items),
+            },
+        ),
     )
     message = response.choices[0].message if response.choices else None
     content = message.content if message else "{}"
