@@ -108,7 +108,7 @@ export function Settings() {
                               <div className="text-sm font-semibold text-gray-200">
                                 {key.name || `Key ${index + 1}`}
                                 {isUsedForNewFrames ? (
-                                  <Tag color="purple" className="ml-2">
+                                  <Tag color="primary" className="ml-2">
                                     Default on new frames
                                   </Tag>
                                 ) : null}
