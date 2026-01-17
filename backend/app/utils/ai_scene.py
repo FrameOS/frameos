@@ -60,7 +60,9 @@ Follow these rules:
   render/image app, and connect the render/image app into the render flow.
 - Logic apps (category "logic") can be used to process data; render apps (category "render") produce visual output.
 - Data apps (category "data") provide data and must not be connected left/right in the render flow.
+- Code nodes have only one output. The codeoutputs array must only contain one output, connected via "fieldOutput". The name is arbitrary and for reference only.
 - Code nodes can include JavaScript snippets in data.codeJS for interpreted scenes.
+- Code nodes arguments are used as variables in the code snippet, just <argNamen> (no args. prefix).
 - State nodes hold scene fields; set data.keyword to the field name. Use scene fields to allow user customization.
 - Scene nodes embed other scenes; set data.keyword to the scene id.
 - App node data must include data.keyword (app identifier) and data.config (app configuration).
