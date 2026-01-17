@@ -11,7 +11,6 @@ from app.utils.posthog import get_posthog_client, llm_analytics_enabled
 
 SUMMARY_MODEL = "gpt-5-mini"
 SCENE_MODEL = "gpt-5.2"
-TODO_MODEL = "gpt-5.2"
 EMBEDDING_MODEL = "text-embedding-3-large"
 SCENE_REVIEW_MODEL = "gpt-5-mini"
 
@@ -28,21 +27,8 @@ Return JSON with keys:
 Keep the summary concise and technical. Do not include markdown.
 """.strip()
 
-TODO_SYSTEM_PROMPT = """
-You are a FrameOS scene builder. Create a concise, agentic todo list to build the scene.
-Return JSON only with keys:
-- title: short title
-- todos: array of 6-10 short todo items (imperative phrasing).
-The todo list must explicitly include tasks for:
-- deciding which apps or nodes are most needed for the user request
-- following the FrameOS scene rules/format
-- producing the final scenes JSON
-- validating the output and fixing issues
-""".strip()
-
 SCENE_JSON_SYSTEM_PROMPT = """
 You are a FrameOS scene generator. Build scenes JSON that can be uploaded to FrameOS.
-You will receive a todo list; follow it step by step while you work.
 Follow these rules:
 - Output a JSON object with a top-level "title" string and "scenes" array. No markdown or code fences.
 - Each scene must include: id (string), name (string), nodes (array), edges (array).
@@ -128,16 +114,6 @@ Respond with JSON only, using keys:
 - solves: boolean (true only if the scene matches the user request)
 - issues: array of short strings describing any problems
 """.strip()
-
-DEFAULT_TODO_LIST = [
-    "Extract the core user intent and constraints.",
-    "Decide which apps/nodes are most needed for the request.",
-    "Map the render flow and data flow according to FrameOS rules.",
-    "Assemble the scene nodes/edges using the required formats.",
-    "Produce the final scenes JSON response.",
-    "Validate the JSON against required scene rules and fix issues.",
-]
-
 
 def _chunk_texts(texts: Iterable[str], batch_size: int = 64) -> Iterable[list[str]]:
     batch: list[str] = []
@@ -325,61 +301,9 @@ async def summarize_text(text: str, api_key: str, *, model: str = SUMMARY_MODEL)
     return json.loads(content)
 
 
-def _ensure_required_todos(todos: list[str]) -> list[str]:
-    normalized = [todo.strip() for todo in todos if isinstance(todo, str) and todo.strip()]
-    required_items = {
-        "apps": "Decide which apps/nodes are most needed for the request.",
-        "rules": "Follow the FrameOS scene rules and format strictly.",
-        "json": "Produce the final scenes JSON response.",
-        "validate": "Validate the JSON and fix any issues.",
-    }
-    missing = []
-    lowered = " ".join(normalized).lower()
-    if "app" not in lowered and "node" not in lowered:
-        missing.append(required_items["apps"])
-    if "rule" not in lowered and "format" not in lowered:
-        missing.append(required_items["rules"])
-    if "json" not in lowered:
-        missing.append(required_items["json"])
-    if "valid" not in lowered and "review" not in lowered:
-        missing.append(required_items["validate"])
-    return [*normalized, *missing] if missing else normalized
-
-
-async def create_scene_todo_list(
-    *,
-    prompt: str,
-    context_items: list[AiEmbedding],
-    api_key: str,
-    model: str = TODO_MODEL,
-) -> list[str]:
-    context_block = _format_context_items(context_items)
-    todo_prompt = "\n\n".join(
-        [
-            f"User request: {prompt}",
-            "Relevant context:",
-            context_block or "(no context available)",
-        ]
-    )
-    response = await _request_scene_json(
-        api_key=api_key,
-        model=model or TODO_MODEL,
-        messages=[
-            {"role": "system", "content": TODO_SYSTEM_PROMPT},
-            {"role": "user", "content": todo_prompt},
-        ],
-        context_items=context_items,
-    )
-    todos = response.get("todos")
-    if isinstance(todos, list) and todos:
-        return _ensure_required_todos(todos)
-    return DEFAULT_TODO_LIST.copy()
-
-
 async def generate_scene_json(
     *,
     prompt: str,
-    todo_list: list[str],
     context_items: list[AiEmbedding],
     api_key: str,
     model: str,
@@ -388,8 +312,6 @@ async def generate_scene_json(
     scene_prompt = "\n\n".join(
         [
             f"User request: {prompt}",
-            "Todo list:",
-            json.dumps(todo_list, ensure_ascii=False),
             "Relevant context:",
             context_block or "(no context available)",
         ]
@@ -461,7 +383,6 @@ def validate_scene_payload(payload: dict[str, Any]) -> list[str]:
 async def review_scene_solution(
     *,
     prompt: str,
-    todo_list: list[str],
     payload: dict[str, Any],
     api_key: str,
     model: str = SCENE_REVIEW_MODEL,
@@ -469,8 +390,6 @@ async def review_scene_solution(
     review_prompt = "\n\n".join(
         [
             f"User request: {prompt}",
-            "Todo list:",
-            json.dumps(todo_list, ensure_ascii=False),
             "Scene JSON:",
             json.dumps(payload, ensure_ascii=False),
         ]
@@ -496,7 +415,6 @@ async def review_scene_solution(
 async def repair_scene_json(
     *,
     prompt: str,
-    todo_list: list[str],
     context_items: list[AiEmbedding],
     api_key: str,
     model: str,
@@ -508,8 +426,6 @@ async def repair_scene_json(
         [
             f"User request: {prompt}",
             f"Reviewer issues: {json.dumps(issues, ensure_ascii=False)}",
-            "Todo list:",
-            json.dumps(todo_list, ensure_ascii=False),
             "Relevant context:",
             context_block or "(no context available)",
         ]

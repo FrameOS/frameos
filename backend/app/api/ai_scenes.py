@@ -17,7 +17,6 @@ from app.utils.ai_scene import (
     DEFAULT_APP_CONTEXT_K,
     DEFAULT_SCENE_CONTEXT_K,
     create_embeddings,
-    create_scene_todo_list,
     generate_scene_json,
     repair_scene_json,
     rank_embeddings,
@@ -138,25 +137,11 @@ async def generate_scene(
             )
 
         response_payload = None
-        todo_list = []
         validation_issues: list[str] = []
         review_issues: list[str] = []
         max_attempts = 3
         scene_model = openai_settings.get("sceneModel") or SCENE_MODEL
         review_model = openai_settings.get("reviewModel") or SCENE_REVIEW_MODEL
-        await _publish_ai_scene_log(redis, "Building an agent todo list.", request_id, stage="plan")
-        todo_list = await create_scene_todo_list(
-            prompt=prompt,
-            context_items=context_items,
-            api_key=api_key,
-            model=scene_model,
-        )
-        await _publish_ai_scene_log(
-            redis,
-            f"Todo list ready with {len(todo_list)} steps.",
-            request_id,
-            stage="plan",
-        )
         for attempt in range(1, max_attempts + 1):
             if attempt == 1:
                 await _publish_ai_scene_log(
@@ -167,7 +152,6 @@ async def generate_scene(
                 )
                 response_payload = await generate_scene_json(
                     prompt=prompt,
-                    todo_list=todo_list,
                     context_items=context_items,
                     api_key=api_key,
                     model=scene_model,
@@ -181,7 +165,6 @@ async def generate_scene(
                 )
                 response_payload = await repair_scene_json(
                     prompt=prompt,
-                    todo_list=todo_list,
                     context_items=context_items,
                     api_key=api_key,
                     model=scene_model,
@@ -203,7 +186,6 @@ async def generate_scene(
 
             review_issues = await review_scene_solution(
                 prompt=prompt,
-                todo_list=todo_list,
                 payload=response_payload or {},
                 api_key=api_key,
                 model=review_model,
