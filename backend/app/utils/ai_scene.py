@@ -22,6 +22,7 @@ MMR_LAMBDA = 0.7
 SUMMARY_SYSTEM_PROMPT = """
 You are summarizing FrameOS scene templates and app modules so they can be retrieved for prompt grounding.
 Return JSON with keys:
+= type: app or scene. if app, if it's a render/logic/data app.
 - summary: 2-4 sentences describing what it does and which apps or data it uses.
 - keywords: 5-10 short keywords or phrases.
 Keep the summary concise and technical. Do not include markdown.
@@ -33,7 +34,7 @@ Reference TypeScript shapes (for structure sanity):
 - Scene: { id: string, name: string, nodes: Node[], edges: Edge[], settings: { execution: "interpreted", ... }, fields?: Field[] }
 - Node: { id: string, type: "event"|"app"|"state"|"code"|"scene", data: NodeData, position?: { x:number, y:number } }
 - Edge: { id?: string, type?: "appNodeEdge"|"codeNodeEdge", source: string, target: string, sourceHandle?: string, targetHandle?: string }
-- Field: { name: string, type: FieldType, label?: string, description?: string, required?: boolean, value?: any }
+- Field: { name: string, type: FieldType, label?: string, description?: string, required?: boolean, value?: any, options?: string[] }
 - NodeData:
   - EventNodeData: { keyword: string }
   - AppNodeData: { keyword: string, config: object, sources?: object, cache?: object }
@@ -96,16 +97,26 @@ Follow these rules:
   - Never store an image output node as state in JSON; pass image outputs directly into app inputs via codeNodeEdge.
   - If you include an OpenAI image app (keyword "data/openaiImage"), do not set scene refreshInterval below 3600 unless
     the user explicitly asks for a faster update cadence.
-  - If you include a "code" node, connect its outputs to app inputs using "codeNodeEdge" with targetHandle
-    "fieldInput/<fieldName>".
-  - If you include scene fields, add matching "state" nodes with data.keyword = field name, and connect them via
-    "codeNodeEdge" to "code" nodes using targetHandle "codeField/<argName>" or directly to app inputs using
-    "fieldInput/<fieldName>".
-  - Code nodes can be added anywhere for most fields (see "Haiku of the hour" for an example); only data.codeJS
-    needs to be filled in for interpreted scenes.
-  - If you include "scene" nodes (to embed another scene), set data.keyword to the referenced scene id and connect them
-    from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
-    "field/render_functions[row][col]" and targetHandle "prev".
+- If you include a "code" node, connect its outputs to app inputs using "codeNodeEdge" with targetHandle
+  "fieldInput/<fieldName>".
+- If you include scene fields, add matching "state" nodes with data.keyword = field name, and connect them via
+  "codeNodeEdge" to "code" nodes using targetHandle "codeField/<argName>" or directly to app inputs using
+  "fieldInput/<fieldName>".
+- Code nodes can be added anywhere for most fields (see "Haiku of the hour" for an example); only data.codeJS
+  needs to be filled in for interpreted scenes.
+- If you include "scene" nodes (to embed another scene), set data.keyword to the referenced scene id and connect them
+  from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
+  "field/render_functions[row][col]" and targetHandle "prev".
+- Cache config can be applied to app or code nodes via data.cache with:
+  - enabled: true to turn caching on.
+  - inputEnabled: cache by inputs (output recalculates when any inputs change).
+  - durationEnabled + duration (seconds): refresh after a fixed interval.
+  - expressionEnabled + expression + expressionType: refresh when the expression value changes.
+    The expression is a Nim snippet like now().format("yyyy-MM-dd") to refresh daily.
+  - You can combine inputEnabled with an expression or duration to cache per inputs but still refresh on a schedule,
+    e.g. cache by inputs and use an expression for the current date so it reloads once per day.
+  - Alternatively, add a code node that outputs a date string and feed it into the app as an input; with inputEnabled
+    the cache key changes daily because the date input changes.
 - Every edge must reference nodes that exist in the "nodes" list. Do not include dangling edges.
 - Every state field must include a default value in the "value" field as a stringified version of itself.
 - Interpreted scenes can include quick JavaScript snippets in code nodes:
