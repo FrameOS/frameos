@@ -91,6 +91,7 @@ def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict
     category = config.get("category") or ""
     fields = [field.get("name") for field in config.get("fields", []) if field.get("name")]
     outputs = [field.get("name") for field in config.get("output", []) if field.get("name")]
+    settings = config.get("settings") or []
     field_details = [
         {
             "name": field.get("name"),
@@ -120,6 +121,7 @@ def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict
             f"Category: {category}",
             f"Fields: {', '.join(fields)}",
             f"Outputs: {', '.join(outputs)}",
+            f"Settings: {', '.join(settings)}",
             f"Config path: {config_path.relative_to(repo_root)}",
         ]
     )
@@ -131,6 +133,7 @@ def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict
         "fieldDetails": field_details,
         "outputs": outputs,
         "outputDetails": output_details,
+        "settings": settings,
         "configPath": str(config_path.relative_to(repo_root)),
         "keyword": f"{config_path.parent.parent.name}/{config_path.parent.name}",
         "configSnippet": config_snippet,

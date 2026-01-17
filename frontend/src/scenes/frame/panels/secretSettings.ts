@@ -6,6 +6,7 @@ export const settingsDetails: Record<
     title: string
     tagLabel: string
     description?: string
+    freeLimitedUsage?: boolean
     fields: { label: string; secret?: boolean; path: (keyof FrameOSSettings | string)[] }[]
   }
 > = {
@@ -35,6 +36,7 @@ export const settingsDetails: Record<
   github: {
     title: 'GitHub',
     tagLabel: 'GitHub personal access token missing',
+    freeLimitedUsage: true,
     fields: [{ label: 'API key', secret: true, path: ['github', 'api_key'] }],
   },
   // frameOS: {

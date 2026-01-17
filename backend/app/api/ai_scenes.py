@@ -1,8 +1,10 @@
 from http import HTTPStatus
 from datetime import datetime
+from pathlib import Path
 from uuid import uuid4
 import re
 import time
+import json
 from typing import Any
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -32,6 +34,58 @@ from app.websockets import publish_message
 from . import api_with_auth
 
 AI_ID_PATTERN = re.compile(r"[^A-Za-z0-9\\-_.@()!'~:|]")
+
+SERVICE_SECRET_FIELDS: dict[str, dict[str, Any]] = {
+    "openAI": {"fields": ("apiKey",)},
+    "unsplash": {"fields": ("accessKey",)},
+    "homeAssistant": {"fields": ("accessToken",)},
+    "github": {"fields": ("api_key",), "free_limited_usage": True},
+}
+
+
+def _has_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
+
+
+def _get_missing_service_keys(settings: dict[str, Any]) -> set[str]:
+    missing: set[str] = set()
+    for service_key, details in SERVICE_SECRET_FIELDS.items():
+        fields = details.get("fields", ())
+        service_settings = settings.get(service_key) or {}
+        if any(not _has_value(service_settings.get(field)) for field in fields):
+            missing.add(service_key)
+    return missing
+
+
+def _filter_embeddings_for_services(embeddings: list[AiEmbedding], missing_service_keys: set[str]) -> list[AiEmbedding]:
+    filtered: list[AiEmbedding] = []
+    for item in embeddings:
+        if item.source_type != "app":
+            filtered.append(item)
+            continue
+        metadata = item.metadata_json or {}
+        required_settings = metadata.get("settings")
+        if not isinstance(required_settings, list):
+            config_path = metadata.get("configPath")
+            if config_path:
+                try:
+                    config_data = json.loads((Path(__file__).resolve().parents[3] / config_path).read_text("utf-8"))
+                    required_settings = config_data.get("settings") or []
+                except Exception:
+                    required_settings = []
+            else:
+                required_settings = []
+        if any(
+            setting in missing_service_keys and not SERVICE_SECRET_FIELDS.get(setting, {}).get("free_limited_usage")
+            for setting in required_settings
+        ):
+            continue
+        filtered.append(item)
+    return filtered
 
 
 def _sanitize_ai_id(value: str | None) -> str | None:
@@ -142,7 +196,8 @@ async def generate_scene(
         )
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Prompt is required")
 
-    openai_settings = get_settings_dict(db).get("openAI", {})
+    settings = get_settings_dict(db)
+    openai_settings = settings.get("openAI", {})
     api_key = openai_settings.get("backendApiKey")
     if not api_key:
         await _publish_ai_scene_log(
@@ -157,8 +212,17 @@ async def generate_scene(
     try:
         await _publish_ai_scene_log(redis, "Loading embeddings.", request_id, stage="context:load")
         embeddings = db.query(AiEmbedding).all()
+        missing_service_keys = _get_missing_service_keys(settings)
+        available_embeddings = _filter_embeddings_for_services(embeddings, missing_service_keys)
+        if missing_service_keys:
+            await _publish_ai_scene_log(
+                redis,
+                "Filtered embeddings to exclude apps without configured service keys (GitHub is always allowed).",
+                request_id,
+                stage="context:filter",
+            )
         context_items: list[AiEmbedding] = []
-        if embeddings:
+        if available_embeddings:
             await _publish_ai_scene_log(redis, "Creating retrieval embedding.", request_id, stage="context:embed")
             query_embedding = (
                 await create_embeddings(
@@ -170,8 +234,8 @@ async def generate_scene(
                     ai_parent_id=posthog_root_span_id,
                 )
             )[0]
-            app_embeddings = [item for item in embeddings if item.source_type == "app"]
-            scene_embeddings = [item for item in embeddings if item.source_type == "scene"]
+            app_embeddings = [item for item in available_embeddings if item.source_type == "app"]
+            scene_embeddings = [item for item in available_embeddings if item.source_type == "scene"]
             await _publish_ai_scene_log(redis, "Ranking relevant context.", request_id, stage="context:rank")
             ranked_items = [
                 *rank_embeddings(
@@ -195,7 +259,7 @@ async def generate_scene(
                     continue
                 seen.add(key)
                 context_items.append(item)
-            for item in embeddings:
+            for item in available_embeddings:
                 key = (item.source_type, item.source_path)
                 if key in seen:
                     continue
@@ -206,6 +270,13 @@ async def generate_scene(
                 f"Selected {len(context_items)} context items.",
                 request_id,
                 stage="context:ready",
+            )
+        elif embeddings:
+            await _publish_ai_scene_log(
+                redis,
+                "No embeddings available after filtering unavailable services; generating without retrieval context.",
+                request_id,
+                stage="context:skip",
             )
         else:
             await _publish_ai_scene_log(

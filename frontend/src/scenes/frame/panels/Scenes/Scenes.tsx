@@ -287,6 +287,7 @@ export function Scenes() {
           {orderedServiceKeys.map((settingKey) => {
             const details = settingsDetails[settingKey]
             const missing = missingServiceSettings.has(settingKey)
+            const isFreeLimitedUsage = Boolean(details?.freeLimitedUsage)
             return (
               <button
                 key={settingKey}
@@ -295,7 +296,15 @@ export function Scenes() {
                 onClick={() => setActiveSettingsKey(settingKey)}
               >
                 <Tag color={missing ? 'orange' : 'blue'} className="cursor-pointer flex gap-1 items-center">
-                  {missing ? <ExclamationTriangleIcon className="h-3 w-3 text-yellow-300" /> : null}
+                  {missing ? (
+                    isFreeLimitedUsage ? (
+                      <span className="text-yellow-300 font-semibold" title="Free limited usage">
+                        *
+                      </span>
+                    ) : (
+                      <ExclamationTriangleIcon className="h-3 w-3 text-yellow-300" />
+                    )
+                  ) : null}
                   {details?.title ?? settingKey}
                 </Tag>
               </button>
