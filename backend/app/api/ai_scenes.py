@@ -68,16 +68,16 @@ async def generate_scene(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Prompt is required")
 
     openai_settings = get_settings_dict(db).get("openAI", {})
-    api_key = openai_settings.get("apiKey")
+    api_key = openai_settings.get("backendApiKey")
     if not api_key:
         await _publish_ai_scene_log(
             redis,
-            "OpenAI API key not set.",
+            "OpenAI backend API key not set.",
             request_id,
             status="error",
             stage="validate",
         )
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI API key not set")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI backend API key not set")
 
     try:
         await _publish_ai_scene_log(redis, "Loading embeddings.", request_id, stage="context:load")

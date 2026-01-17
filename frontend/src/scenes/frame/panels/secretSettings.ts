@@ -12,8 +12,8 @@ export const settingsDetails: Record<
   openAI: {
     title: 'OpenAI',
     tagLabel: 'OpenAI API key missing',
-    description: 'The OpenAI API key is used within OpenAI apps.',
-    fields: [{ label: 'API key', secret: true, path: ['openAI', 'apiKey'] }],
+    description: 'The OpenAI API key is used within OpenAI apps on frames.',
+    fields: [{ label: 'API key for frames', secret: true, path: ['openAI', 'apiKey'] }],
   },
   unsplash: {
     title: 'Unsplash API',
@@ -56,7 +56,10 @@ export function resolveAppConfig(apps: Record<string, AppConfig>, keyword?: stri
   return undefined
 }
 
-export function getSettingsValue(settings: FrameOSSettings | null | undefined, path: (keyof FrameOSSettings | string)[]) {
+export function getSettingsValue(
+  settings: FrameOSSettings | null | undefined,
+  path: (keyof FrameOSSettings | string)[]
+) {
   return path.reduce<any>((acc, key) => (acc ? acc[key as keyof typeof acc] : undefined), settings)
 }
 

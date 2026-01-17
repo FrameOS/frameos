@@ -61,10 +61,10 @@ async def enhance_python_frame_source(data: EnhanceSourceRequest, db: Session = 
     source = data.source
     prompt = data.prompt
     openai_settings = get_settings_dict(db).get("openAI", {})
-    api_key = openai_settings.get("apiKey")
+    api_key = openai_settings.get("backendApiKey")
 
     if api_key is None:
-        raise HTTPException(status_code=400, detail="OpenAI API key not set")
+        raise HTTPException(status_code=400, detail="OpenAI backend API key not set")
 
     ai_context = f"""
     You are helping a python developer write a FrameOS application. You are editing app.nim, the main file in FrameOS.

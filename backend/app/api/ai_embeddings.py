@@ -22,9 +22,9 @@ def get_ai_embeddings_status(db: Session = Depends(get_db)):
 @api_with_auth.post("/ai/embeddings/regenerate", response_model=AiEmbeddingsStatusResponse)
 async def regenerate_ai_embeddings(db: Session = Depends(get_db)):
     openai_settings = get_settings_dict(db).get("openAI", {})
-    api_key = openai_settings.get("apiKey")
+    api_key = openai_settings.get("backendApiKey")
     if not api_key:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI API key not set")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI backend API key not set")
 
     await build_ai_embeddings(
         db,
@@ -41,9 +41,9 @@ async def regenerate_ai_embeddings(db: Session = Depends(get_db)):
 @api_with_auth.post("/ai/embeddings/generate-missing", response_model=AiEmbeddingsStatusResponse)
 async def generate_missing_ai_embeddings(db: Session = Depends(get_db)):
     openai_settings = get_settings_dict(db).get("openAI", {})
-    api_key = openai_settings.get("apiKey")
+    api_key = openai_settings.get("backendApiKey")
     if not api_key:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI API key not set")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI backend API key not set")
 
     await build_ai_embeddings(
         db,

@@ -550,6 +550,7 @@ export interface FrameOSSettings {
   }
   openAI?: {
     apiKey?: string
+    backendApiKey?: string
     summaryModel?: string
     embeddingModel?: string
     sceneModel?: string

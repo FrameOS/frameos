@@ -265,9 +265,19 @@ export function Settings() {
                 <Group name="openAI">
                   <H6 className="pt-4">OpenAI</H6>
                   <Box className="p-2 space-y-2">
-                    <p className="text-sm leading-loose">The OpenAI API key is used within OpenAI apps.</p>
-                    <Field name="apiKey" label="API key" secret={!!savedSettings?.openAI?.apiKey}>
+                    <p className="text-sm leading-loose">
+                      The OpenAI API key is used within OpenAI apps on frames. The backend key powers AI features in the
+                      control plane.
+                    </p>
+                    <Field name="apiKey" label="API key for frames" secret={!!savedSettings?.openAI?.apiKey}>
                       <TextInput name="apiKey" />
+                    </Field>
+                    <Field
+                      name="backendApiKey"
+                      label="API key for backend"
+                      secret={!!savedSettings?.openAI?.backendApiKey}
+                    >
+                      <TextInput name="backendApiKey" />
                     </Field>
                     <Field name="summaryModel" label="Summary model">
                       <TextInput name="summaryModel" placeholder="gpt-5-mini" />
