@@ -6,12 +6,43 @@ const NODE_PADDING_X = 60
 const NODE_PADDING_Y = 50
 const NODE_FALLBACK_WIDTH = 260
 const NODE_FALLBACK_HEIGHT = 180
+const CODE_NODE_MIN_WIDTH = 700
+const CODE_NODE_MIN_HEIGHT = 400
+
+interface ArrangeNodesOptions {
+  fieldOrderByNodeId?: Record<string, string[]>
+}
 
 function getNodeSize(node: DiagramNode): { width: number; height: number } {
   return {
     width: node.width ?? NODE_FALLBACK_WIDTH,
     height: node.height ?? NODE_FALLBACK_HEIGHT,
   }
+}
+
+function expandCodeNode(node: DiagramNode): DiagramNode {
+  if (node.type !== 'code') {
+    return node
+  }
+  const width = Math.max(node.width ?? NODE_FALLBACK_WIDTH, CODE_NODE_MIN_WIDTH)
+  const height = Math.max(node.height ?? NODE_FALLBACK_HEIGHT, CODE_NODE_MIN_HEIGHT)
+  return { ...node, width, height }
+}
+
+function fieldNameFromHandle(handle?: string | null): string | null {
+  if (!handle) {
+    return null
+  }
+  if (handle.startsWith('fieldInput/')) {
+    return handle.slice('fieldInput/'.length)
+  }
+  if (handle.startsWith('codeField/')) {
+    return handle.slice('codeField/'.length)
+  }
+  if (handle.startsWith('field/')) {
+    return handle.slice('field/'.length)
+  }
+  return null
 }
 
 function isFlowEdge(edge: Edge): boolean {
@@ -36,12 +67,13 @@ function isFlowNode(node: DiagramNode): boolean {
   return false
 }
 
-export function arrangeNodes(nodes: DiagramNode[], edges: Edge[]): DiagramNode[] {
+export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: ArrangeNodesOptions = {}): DiagramNode[] {
   if (!nodes.length) {
     return nodes
   }
 
-  const flowNodes = nodes.filter(isFlowNode)
+  const sizedNodes = nodes.map(expandCodeNode)
+  const flowNodes = sizedNodes.filter(isFlowNode)
   const flowNodeIds = new Set(flowNodes.map((node) => node.id))
   const flowEdges = edges.filter(
     (edge) => flowNodeIds.has(edge.source) && flowNodeIds.has(edge.target) && isFlowEdge(edge)
@@ -162,12 +194,12 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[]): DiagramNode[]
     return best
   }
 
-  const nodesById = nodes.reduce((acc, node) => {
+  const nodesById = sizedNodes.reduce((acc, node) => {
     acc[node.id] = node
     return acc
   }, {} as Record<string, DiagramNode>)
 
-  const anchoredNodes = nodes.filter((node) => !flowNodeIds.has(node.id))
+  const anchoredNodes = sizedNodes.filter((node) => !flowNodeIds.has(node.id))
   const nodesByAnchor = anchoredNodes.reduce((acc, node) => {
     const anchor = resolveAnchor(node.id)
     if (!anchor) {
@@ -177,7 +209,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[]): DiagramNode[]
     return acc
   }, {} as Record<string, DiagramNode[]>)
 
-  const positionedNodes = nodes.map((node) => {
+  const positionedNodes = sizedNodes.map((node) => {
     const basePosition = basePositions.get(node.id)
     if (!basePosition) {
       return node
@@ -190,6 +222,41 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[]): DiagramNode[]
     return acc
   }, {} as Record<string, DiagramNode>)
 
+  const fieldOrderByNodeId = options.fieldOrderByNodeId ?? {}
+  const offsetCache = new Map<string, number>()
+  const resolveFieldOffset = (nodeId: string): number => {
+    if (offsetCache.has(nodeId)) {
+      return offsetCache.get(nodeId) ?? 0
+    }
+    const nodeEdges = [...(outgoingEdges[nodeId] ?? []), ...(incomingEdges[nodeId] ?? [])]
+    let bestIndex: number | null = null
+    for (const edge of nodeEdges) {
+      let ownerId: string | null = null
+      let fieldName: string | null = null
+      if (edge.source === nodeId) {
+        fieldName = fieldNameFromHandle(edge.targetHandle)
+        ownerId = fieldName ? edge.target : null
+      } else if (edge.target === nodeId) {
+        fieldName = fieldNameFromHandle(edge.sourceHandle)
+        ownerId = fieldName ? edge.source : null
+      }
+      if (!ownerId || !fieldName) {
+        continue
+      }
+      const fieldOrder = fieldOrderByNodeId[ownerId] ?? []
+      const fieldIndex = fieldOrder.indexOf(fieldName)
+      if (fieldIndex < 0) {
+        continue
+      }
+      if (bestIndex === null || fieldIndex < bestIndex) {
+        bestIndex = fieldIndex
+      }
+    }
+    const offset = bestIndex === null ? 0 : 10 + bestIndex * 15
+    offsetCache.set(nodeId, offset)
+    return offset
+  }
+
   Object.entries(nodesByAnchor).forEach(([anchorId, anchored]) => {
     const anchorNode = positionedById[anchorId] ?? nodesById[anchorId]
     if (!anchorNode) {
@@ -198,8 +265,6 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[]): DiagramNode[]
     const anchorSize = getNodeSize(anchorNode)
     const anchorX = anchorNode.position.x
     const anchorY = anchorNode.position.y
-    const anchorCenterX = anchorX + anchorSize.width / 2
-
     const anchoredNodes = [...anchored]
 
     const sortByDepth = (node: DiagramNode) => resolveDepth(node.id, anchorId)
@@ -211,10 +276,11 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[]): DiagramNode[]
     let currentY = anchorY - NODE_PADDING_Y - aboveTotalHeight
     anchoredNodes.forEach((node) => {
       const size = getNodeSize(node)
+      const fieldOffset = resolveFieldOffset(node.id)
       positionedById[node.id] = {
         ...node,
         position: {
-          x: anchorCenterX - size.width / 2,
+          x: anchorX - fieldOffset,
           y: currentY,
         },
       }
@@ -255,8 +321,8 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[]): DiagramNode[]
     }
   }
 
-  const resolvedNodes = nodes.map((node) => positionedById[node.id] ?? node)
+  const resolvedNodes = sizedNodes.map((node) => positionedById[node.id] ?? node)
   resolveOverlaps(resolvedNodes, 3)
 
-  return nodes.map((node) => positionedById[node.id] ?? node)
+  return sizedNodes.map((node) => positionedById[node.id] ?? node)
 }

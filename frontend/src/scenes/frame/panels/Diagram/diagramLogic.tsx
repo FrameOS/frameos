@@ -24,12 +24,16 @@ import equal from 'fast-deep-equal'
 import type { diagramLogicType } from './diagramLogicType'
 import { subscriptions } from 'kea-subscriptions'
 import {
+  AppConfig,
+  AppConfigField,
   AppNodeData,
   CodeNodeData,
   DiagramNode,
   DispatchNodeData,
   EventNodeData,
+  FrameEvent,
   FrameScene,
+  MarkdownField,
   StateNodeData,
 } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
@@ -37,6 +41,13 @@ import { appsModel } from '../../../../models/appsModel'
 import { arrangeNodes } from '../../../../utils/arrangeNodes'
 import copy from 'copy-to-clipboard'
 import { Option } from '../../../../components/Select'
+import _events from '../../../../../schema/events.json'
+
+const events = _events as FrameEvent[]
+
+function fieldOrderFromFields(fields?: (AppConfigField | MarkdownField)[] | null): string[] {
+  return (fields ?? []).filter((field): field is AppConfigField => 'name' in field).map((field) => field.name)
+}
 
 export interface DiagramLogicProps {
   frameId: number
@@ -339,7 +350,35 @@ export const diagramLogic = kea<diagramLogicType>([
   })),
   listeners(({ actions, values, props }) => ({
     rearrangeCurrentScene: () => {
-      actions.setNodes(arrangeNodes(values.nodes, values.edges))
+      const fieldOrderByNodeId = values.nodes.reduce((acc, node) => {
+        let fields: (AppConfigField | MarkdownField)[] | null = null
+        if (node.type === 'app' || node.type === 'source') {
+          const keyword = (node.data as AppNodeData)?.keyword
+          fields = keyword ? (values.apps[keyword] as AppConfig | undefined)?.fields ?? null : null
+        } else if (node.type === 'dispatch' || node.type === 'event') {
+          const keyword = (node.data as DispatchNodeData | EventNodeData)?.keyword
+          const event = keyword ? events.find((event) => event.name === keyword) ?? null : null
+          fields = event?.name === 'setSceneState' ? values.scene?.fields ?? null : event?.fields ?? null
+        } else if (node.type === 'scene') {
+          fields = values.scene?.fields ?? null
+        }
+
+        if (node.type === 'code') {
+          const codeArgs = (node.data as CodeNodeData | undefined)?.codeArgs ?? []
+          if (codeArgs.length > 0) {
+            acc[node.id] = codeArgs.map((arg) => arg.name)
+          }
+          return acc
+        }
+
+        const order = fieldOrderFromFields(fields)
+        if (order.length > 0) {
+          acc[node.id] = order
+        }
+        return acc
+      }, {} as Record<string, string[]>)
+
+      actions.setNodes(arrangeNodes(values.nodes, values.edges, { fieldOrderByNodeId }))
       actions.fitDiagramView()
     },
     keywordDropped: ({ keyword, type, position }) => {
