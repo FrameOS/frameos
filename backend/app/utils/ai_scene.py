@@ -142,7 +142,7 @@ Follow these rules:
   - Alternatively, add a code node that outputs a date string and feed it into the app as an input; with inputEnabled
     the cache key changes daily because the date input changes.
 - Every edge must reference nodes that exist in the "nodes" list. Do not include dangling edges.
-- Every state field must include a default value in the "value" field as a stringified version of itself.
+- Every state field must include a default value in the "value" field as a String(val) version of itself. No quotes around strings.
 - Interpreted scenes can include quick JavaScript snippets in code nodes:
   - Put JS in data.codeJS (not data.code) for interpreted scenes.
   - The QuickJS environment exposes: state.<field>, args.<argName>, context.<event|payload|loopIndex|loopKey|hasImage>.
