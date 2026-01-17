@@ -16,11 +16,11 @@ export interface AnyBuiltLogic extends BuiltLogic {}
 const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
   [Area.TopLeft]: [{ panel: Panel.Scenes, active: false, hidden: false }],
   [Area.TopRight]: [
+    { panel: Panel.Templates, active: false, hidden: false },
+    { panel: Panel.Schedule, active: false, hidden: false },
     { panel: Panel.SceneState, active: true, hidden: false },
     { panel: Panel.Apps, active: false, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
-    { panel: Panel.Templates, active: false, hidden: false },
-    { panel: Panel.Schedule, active: false, hidden: false },
   ],
   [Area.BottomLeft]: [
     { panel: Panel.Logs, active: true, hidden: false },
@@ -214,7 +214,7 @@ export const panelsLogic = kea<panelsLogicType>([
             ...panels,
             [Area.TopRight]: panels[Area.TopRight].filter((p) =>
               scenesOpen
-                ? [Panel.Templates, Panel.Schedule].includes(p.panel)
+                ? [Panel.Apps, Panel.Events, Panel.Templates, Panel.Schedule].includes(p.panel)
                 : [Panel.Apps, Panel.Events, Panel.SceneState].includes(p.panel)
             ),
             [Area.BottomLeft]: panels[Area.BottomLeft].filter((p) =>

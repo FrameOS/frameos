@@ -6,10 +6,14 @@ import { appsLogic } from './appsLogic'
 import { TextInput } from '../../../../components/TextInput'
 import React from 'react'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
+import { frameLogic } from '../../frameLogic'
+import { panelsLogic } from '../panelsLogic'
 
 export function Apps() {
   const { appsByCategory, search } = useValues(appsLogic)
   const { setSearch } = useActions(appsLogic)
+  const { frameId } = useValues(frameLogic)
+  const { scenesOpen } = useValues(panelsLogic({ frameId }))
   const onDragStart = (event: any, keyword: string) => {
     event.dataTransfer.setData('application/reactflow', JSON.stringify({ type: 'app', keyword }))
     event.dataTransfer.effectAllowed = 'move'
@@ -17,6 +21,11 @@ export function Apps() {
   return (
     <div className="space-y-4">
       <TextInput placeholder="Search apps..." onChange={setSearch} value={search} />
+      {scenesOpen ? (
+        <div className="text-xs text-gray-400">
+          Apps can only be dragged onto the scene editor or into AI generation prompts.
+        </div>
+      ) : null}
       {Object.entries(appsByCategory).map(([category, apps]) => (
         <div className="space-y-2" key={category}>
           <H6 className="capitalize">{categoryLabels[category] ?? category}</H6>

@@ -42,10 +42,11 @@ import { SecretSettingsModal } from '../SecretSettingsModal'
 import { TextArea } from '../../../../components/TextArea'
 import { A } from 'kea-router'
 import { urls } from '../../../../urls'
-
+import { appsModel } from '../../../../models/appsModel'
 export function Scenes() {
   const { frameId, frameForm, frame } = useValues(frameLogic)
   const { applyTemplate } = useActions(frameLogic)
+  const { apps } = useValues(appsModel)
   const { editScene, openTemplates } = useActions(panelsLogic)
   const {
     filteredScenes,
@@ -127,6 +128,31 @@ export function Scenes() {
     { label: 'Photo spotlight', prompt: 'Create a photo spotlight with a caption and subtle border.' },
   ]
 
+  const onPromptDragOver = (event: React.DragEvent<HTMLTextAreaElement>) => {
+    if (event.dataTransfer.types.includes('application/reactflow')) {
+      event.preventDefault()
+    }
+  }
+
+  const onPromptDrop = (event: React.DragEvent<HTMLTextAreaElement>) => {
+    event.preventDefault()
+    const data = event.dataTransfer.getData('application/reactflow')
+    if (!data) {
+      return
+    }
+    try {
+      const { type, keyword } = JSON.parse(data)
+      if (type !== 'app' || !keyword) {
+        return
+      }
+      const appName = `[APP: ${apps[keyword]?.name ?? keyword}]`
+      const nextPrompt = aiPrompt ? `${aiPrompt} ${appName}` : appName
+      setAiPrompt(nextPrompt)
+    } catch (error) {
+      return
+    }
+  }
+
   const triggerUploadInput = () => {
     uploadInputRef.current?.click()
   }
@@ -195,6 +221,8 @@ export function Scenes() {
           placeholder='e.g. "show an analog clock"'
           value={aiPrompt}
           onChange={setAiPrompt}
+          onDragOver={onPromptDragOver}
+          onDrop={onPromptDrop}
           disabled={!hasEmbeddings}
         />
         <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
