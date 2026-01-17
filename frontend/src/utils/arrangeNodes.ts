@@ -8,6 +8,8 @@ const NODE_FALLBACK_WIDTH = 260
 const NODE_FALLBACK_HEIGHT = 180
 const CODE_NODE_MIN_WIDTH = 700
 const CODE_NODE_MIN_HEIGHT = 400
+const CODE_ARG_HORIZONTAL_PADDING = 40
+const CODE_ARG_MAX_LEVEL = 5
 
 interface ArrangeNodesOptions {
   fieldOrderByNodeId?: Record<string, string[]>
@@ -286,6 +288,47 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
       }
       currentY += size.height + NODE_PADDING_Y
     })
+  })
+
+  const codeArgUsage = new Map<string, number>()
+  edges.forEach((edge) => {
+    if (!edge.target || !edge.source) {
+      return
+    }
+    if (!edge.targetHandle?.startsWith('codeField/')) {
+      return
+    }
+    const codeNode = positionedById[edge.target] ?? nodesById[edge.target]
+    if (!codeNode || codeNode.type !== 'code') {
+      return
+    }
+    const sourceNode = positionedById[edge.source] ?? nodesById[edge.source]
+    if (!sourceNode || isFlowNode(sourceNode)) {
+      return
+    }
+    const argName = fieldNameFromHandle(edge.targetHandle)
+    const argOrder = fieldOrderByNodeId[codeNode.id] ?? []
+    const argIndex = argName ? argOrder.indexOf(argName) : -1
+    if (argIndex < 0) {
+      return
+    }
+    const sourceSize = getNodeSize(sourceNode)
+    const codeSize = getNodeSize(codeNode)
+    const usableWidth = Math.max(codeSize.width - CODE_ARG_HORIZONTAL_PADDING * 2, 1)
+    const argSpacing = argOrder.length > 1 ? usableWidth / (argOrder.length - 1) : 0
+    const argX = codeNode.position.x + CODE_ARG_HORIZONTAL_PADDING + argSpacing * argIndex
+    const usageKey = `${codeNode.id}:${argName}`
+    const usageCount = codeArgUsage.get(usageKey) ?? 0
+    codeArgUsage.set(usageKey, usageCount + 1)
+    const level = usageCount % CODE_ARG_MAX_LEVEL
+    const baseY = codeNode.position.y - NODE_PADDING_Y - sourceSize.height
+    positionedById[sourceNode.id] = {
+      ...sourceNode,
+      position: {
+        x: argX - sourceSize.width / 2,
+        y: baseY - level * NODE_PADDING_Y,
+      },
+    }
   })
 
   const resolveOverlaps = (nodesToResolve: DiagramNode[], passes: number): void => {
