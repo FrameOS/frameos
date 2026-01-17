@@ -214,13 +214,6 @@ async def generate_scene(
         embeddings = db.query(AiEmbedding).all()
         missing_service_keys = _get_missing_service_keys(settings)
         available_embeddings = _filter_embeddings_for_services(embeddings, missing_service_keys)
-        if missing_service_keys:
-            await _publish_ai_scene_log(
-                redis,
-                "Filtered embeddings to exclude apps without configured service keys (GitHub is always allowed).",
-                request_id,
-                stage="context:filter",
-            )
         context_items: list[AiEmbedding] = []
         if available_embeddings:
             await _publish_ai_scene_log(redis, "Creating retrieval embedding.", request_id, stage="context:embed")
