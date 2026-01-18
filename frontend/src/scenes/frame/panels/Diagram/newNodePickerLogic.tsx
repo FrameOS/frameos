@@ -96,6 +96,38 @@ function typesMatch(type1: string, type2: string): boolean {
   return toBaseType(type1) === toBaseType(type2)
 }
 
+type ClipboardDiagramPayload = {
+  nodes: DiagramNode[]
+  edges: Edge[]
+}
+
+const sanitizeClipboardNode = (node: DiagramNode): DiagramNode => {
+  const { selected, dragging, positionAbsolute, ...rest } = node as DiagramNode & {
+    dragging?: boolean
+    positionAbsolute?: { x: number; y: number }
+  }
+  return rest as DiagramNode
+}
+
+const parseClipboardPayload = (parsed: unknown): ClipboardDiagramPayload | null => {
+  if (!parsed) {
+    return null
+  }
+  if (Array.isArray(parsed)) {
+    return { nodes: parsed as DiagramNode[], edges: [] }
+  }
+  if (typeof parsed === 'object') {
+    const payload = parsed as { nodes?: DiagramNode[]; edges?: Edge[] }
+    if (Array.isArray(payload.nodes)) {
+      return { nodes: payload.nodes, edges: payload.edges ?? [] }
+    }
+    if ('type' in (parsed as DiagramNode)) {
+      return { nodes: [parsed as DiagramNode], edges: [] }
+    }
+  }
+  return null
+}
+
 export const newNodePickerLogic = kea<newNodePickerLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Diagram', 'newNodePickerLogic']),
   props({} as NewNodePickerLogicProps),
@@ -524,20 +556,45 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         try {
           const clipboardText = await navigator.clipboard.readText()
           const parsed = JSON.parse(clipboardText)
-          if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object' || !('type' in parsed)) {
+          const payload = parseClipboardPayload(parsed)
+          if (!payload) {
             throw new Error('Clipboard does not contain a valid node JSON')
           }
-          const pastedNode: DiagramNode = {
-            ...(parsed as DiagramNode),
-            id: uuidv4(),
-            position: { x: diagramX, y: diagramY },
-            selected: false,
+          const { nodes, edges } = payload
+          if (nodes.length === 0) {
+            actions.setSearchValue('')
+            return
           }
-          delete (pastedNode as any).positionAbsolute
-          delete (pastedNode as any).dragging
-          actions.setNodes([...values.nodes, pastedNode])
+          const minX = Math.min(...nodes.map((node) => node.position?.x ?? 0))
+          const minY = Math.min(...nodes.map((node) => node.position?.y ?? 0))
+          const offset = { x: diagramX - minX, y: diagramY - minY }
+          const idMap = new Map<string, string>()
+          const pastedNodes = nodes.map((node) => {
+            const newId = uuidv4()
+            idMap.set(node.id, newId)
+            const { position } = node
+            return {
+              ...sanitizeClipboardNode(node),
+              id: newId,
+              position: { x: (position?.x ?? 0) + offset.x, y: (position?.y ?? 0) + offset.y },
+              selected: false,
+            }
+          })
+          const pastedEdges = edges
+            .filter((edge) => idMap.has(edge.source) && idMap.has(edge.target))
+            .map((edge) => ({
+              ...edge,
+              id: uuidv4(),
+              source: idMap.get(edge.source) as string,
+              target: idMap.get(edge.target) as string,
+              selected: false,
+            }))
+          actions.setNodes([...values.nodes, ...pastedNodes])
+          if (pastedEdges.length > 0) {
+            actions.setEdges([...values.edges, ...pastedEdges])
+          }
           window.setTimeout(() => {
-            props.updateNodeInternals?.(pastedNode.id)
+            pastedNodes.forEach((node) => props.updateNodeInternals?.(node.id))
           }, 200)
         } catch (error) {
           console.error('Failed to paste node from clipboard', error)

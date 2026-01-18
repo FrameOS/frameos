@@ -72,8 +72,16 @@ function Diagram_({ sceneId }: DiagramProps) {
   const updateNodeInternals = useUpdateNodeInternals()
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId, updateNodeInternals }
   const { nodes, nodesWithStyle, edges, fitViewCounter } = useValues(diagramLogic(diagramLogicProps))
-  const { onEdgesChange, onNodesChange, setNodes, addEdge, fitDiagramView, keywordDropped, rearrangeCurrentScene } =
-    useActions(diagramLogic(diagramLogicProps))
+  const {
+    onEdgesChange,
+    onNodesChange,
+    setNodes,
+    addEdge,
+    fitDiagramView,
+    keywordDropped,
+    rearrangeCurrentScene,
+    setCursorPosition,
+  } = useActions(diagramLogic(diagramLogicProps))
   const { newNodePicker } = useValues(newNodePickerLogic(diagramLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic(diagramLogicProps))
 
@@ -200,6 +208,24 @@ function Diagram_({ sceneId }: DiagramProps) {
     [openNewNodePicker, reactFlowInstance]
   )
 
+  const onMouseMove = useCallback(
+    (event: ReactMouseEvent) => {
+      if (!reactFlowInstance) {
+        return
+      }
+      const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
+      if (!reactFlowBounds) {
+        return
+      }
+      const position = reactFlowInstance.project({
+        x: event.clientX - reactFlowBounds.left,
+        y: event.clientY - reactFlowBounds.top,
+      })
+      setCursorPosition(position)
+    },
+    [reactFlowInstance, setCursorPosition]
+  )
+
   useEffect(() => {
     if (fitViewCounter > 0) {
       reactFlowInstance?.fitView({ maxZoom: 1, padding: 0.2 })
@@ -208,7 +234,12 @@ function Diagram_({ sceneId }: DiagramProps) {
 
   return (
     <BindLogic logic={diagramLogic} props={diagramLogicProps}>
-      <div className="w-full h-full dndflow" ref={reactFlowWrapper} onContextMenu={onContextMenu}>
+      <div
+        className="w-full h-full dndflow"
+        ref={reactFlowWrapper}
+        onContextMenu={onContextMenu}
+        onMouseMove={onMouseMove}
+      >
         <ReactFlow
           nodes={nodesWithStyle}
           edges={edges}

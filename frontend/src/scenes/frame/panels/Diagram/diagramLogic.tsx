@@ -78,6 +78,11 @@ export type DiagramHistoryState = {
   future: DiagramHistorySnapshot[]
 }
 
+type ClipboardDiagramPayload = {
+  nodes: DiagramNode[]
+  edges: Edge[]
+}
+
 const MAX_HISTORY_LENGTH = 100
 const HISTORY_DEBOUNCE_MS = 300
 
@@ -126,6 +131,44 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
   return tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT'
 }
 
+const sanitizeClipboardNode = (node: DiagramNode): DiagramNode => {
+  const { selected, dragging, positionAbsolute, ...rest } = node as DiagramNode & {
+    dragging?: boolean
+    positionAbsolute?: XYPosition
+  }
+  return rest as DiagramNode
+}
+
+const parseClipboardPayload = (parsed: unknown): ClipboardDiagramPayload | null => {
+  if (!parsed) {
+    return null
+  }
+  if (Array.isArray(parsed)) {
+    return { nodes: parsed as DiagramNode[], edges: [] }
+  }
+  if (typeof parsed === 'object') {
+    const payload = parsed as { nodes?: DiagramNode[]; edges?: Edge[] }
+    if (Array.isArray(payload.nodes)) {
+      return { nodes: payload.nodes, edges: payload.edges ?? [] }
+    }
+    if ('type' in (parsed as DiagramNode)) {
+      return { nodes: [parsed as DiagramNode], edges: [] }
+    }
+  }
+  return null
+}
+
+const getClipboardOffset = (nodes: DiagramNode[], basePosition?: XYPosition | null): XYPosition => {
+  if (nodes.length === 0) {
+    return { x: 0, y: 0 }
+  }
+  const minX = Math.min(...nodes.map((node) => node.position?.x ?? 0))
+  const minY = Math.min(...nodes.map((node) => node.position?.y ?? 0))
+  const fallback = { x: minX + 40, y: minY + 40 }
+  const anchor = basePosition ?? fallback
+  return { x: anchor.x - minX, y: anchor.y - minY }
+}
+
 export const diagramLogic = kea<diagramLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Diagram', 'diagramLogic']),
   props({} as DiagramLogicProps),
@@ -149,6 +192,9 @@ export const diagramLogic = kea<diagramLogicType>([
     updateEdge: (edge: Edge) => ({ edge }),
     updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
     copyAppJSON: (nodeId: string) => ({ nodeId }),
+    copySelectedNodes: true,
+    pasteFromClipboard: true,
+    setCursorPosition: (position: XYPosition | null) => ({ position }),
     deleteApp: (id: string) => ({ id }),
     recordHistory: (snapshot: DiagramHistorySnapshot) => ({ snapshot }),
     resetHistory: (snapshot: DiagramHistorySnapshot) => ({ snapshot }),
@@ -250,6 +296,12 @@ export const diagramLogic = kea<diagramLogicType>([
           const [next, ...restFuture] = state.future
           return { past: [...state.past, next], future: restFuture }
         },
+      },
+    ],
+    cursorPosition: [
+      null as XYPosition | null,
+      {
+        setCursorPosition: (_, { position }) => position,
       },
     ],
   }),
@@ -627,10 +679,82 @@ export const diagramLogic = kea<diagramLogicType>([
       window.setTimeout(() => actions.fitDiagramView(), 50)
     },
     copyAppJSON: ({ nodeId }) => {
-      const { nodes } = values
-      const app = nodes.find((n) => n.id === nodeId)
-      if (app) {
-        copy(JSON.stringify(app))
+      const selectedNodes = values.nodes.filter((node) => node.selected)
+      const nodesToCopy =
+        selectedNodes.length > 0 ? selectedNodes : values.nodesById[nodeId] ? [values.nodesById[nodeId]] : []
+      if (nodesToCopy.length === 0) {
+        return
+      }
+      const selectedIds = new Set(nodesToCopy.map((node) => node.id))
+      const edgesToCopy = values.rawEdges.filter((edge) => selectedIds.has(edge.source) && selectedIds.has(edge.target))
+      const sanitizedNodes = nodesToCopy.map(sanitizeClipboardNode)
+      if (sanitizedNodes.length === 1 && edgesToCopy.length === 0) {
+        copy(JSON.stringify(sanitizedNodes[0]))
+        return
+      }
+      copy(JSON.stringify({ nodes: sanitizedNodes, edges: edgesToCopy }))
+    },
+    copySelectedNodes: () => {
+      const selectedNodes = values.nodes.filter((node) => node.selected)
+      if (selectedNodes.length === 0) {
+        return
+      }
+      const selectedIds = new Set(selectedNodes.map((node) => node.id))
+      const edgesToCopy = values.rawEdges.filter((edge) => selectedIds.has(edge.source) && selectedIds.has(edge.target))
+      const sanitizedNodes = selectedNodes.map(sanitizeClipboardNode)
+      if (sanitizedNodes.length === 1 && edgesToCopy.length === 0) {
+        copy(JSON.stringify(sanitizedNodes[0]))
+        return
+      }
+      copy(JSON.stringify({ nodes: sanitizedNodes, edges: edgesToCopy }))
+    },
+    pasteFromClipboard: async () => {
+      if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
+        console.warn('Clipboard API not available for pasting nodes')
+        return
+      }
+      try {
+        const clipboardText = await navigator.clipboard.readText()
+        const parsed = JSON.parse(clipboardText)
+        const payload = parseClipboardPayload(parsed)
+        if (!payload) {
+          throw new Error('Clipboard does not contain valid node JSON')
+        }
+        const { nodes, edges } = payload
+        if (nodes.length === 0) {
+          return
+        }
+        const offset = getClipboardOffset(nodes, values.cursorPosition)
+        const idMap = new Map<string, string>()
+        const pastedNodes = nodes.map((node) => {
+          const newId = uuidv4()
+          idMap.set(node.id, newId)
+          const { position } = node
+          return {
+            ...sanitizeClipboardNode(node),
+            id: newId,
+            position: { x: (position?.x ?? 0) + offset.x, y: (position?.y ?? 0) + offset.y },
+            selected: false,
+          }
+        })
+        const pastedEdges = edges
+          .filter((edge) => idMap.has(edge.source) && idMap.has(edge.target))
+          .map((edge) => ({
+            ...edge,
+            id: uuidv4(),
+            source: idMap.get(edge.source) as string,
+            target: idMap.get(edge.target) as string,
+            selected: false,
+          }))
+        actions.setNodes([...values.nodes, ...pastedNodes])
+        if (pastedEdges.length > 0) {
+          actions.setEdges([...values.rawEdges, ...pastedEdges])
+        }
+        window.setTimeout(() => {
+          pastedNodes.forEach((node) => props.updateNodeInternals?.(node.id))
+        }, 200)
+      } catch (error) {
+        console.error('Failed to paste node from clipboard', error)
       }
     },
   })),
@@ -645,7 +769,18 @@ export const diagramLogic = kea<diagramLogicType>([
       if (isEditableTarget(event.target)) {
         return
       }
-      if (!event.metaKey || event.key.toLowerCase() !== 'z') {
+      const key = event.key.toLowerCase()
+      if ((event.metaKey || event.ctrlKey) && key === 'c') {
+        event.preventDefault()
+        actions.copySelectedNodes()
+        return
+      }
+      if ((event.metaKey || event.ctrlKey) && key === 'v') {
+        event.preventDefault()
+        actions.pasteFromClipboard()
+        return
+      }
+      if (!event.metaKey || key !== 'z') {
         return
       }
       event.preventDefault()
