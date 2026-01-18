@@ -29,7 +29,7 @@ import { StateNode } from './StateNode'
 import { Button, buttonColor, buttonSize } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { NodeType, EdgeType, CodeNodeData } from '../../../../types'
-import { AdjustmentsHorizontalIcon, ArrowsPointingInIcon } from '@heroicons/react/24/outline'
+import { AdjustmentsHorizontalIcon, ArrowsPointingInIcon, EyeIcon } from '@heroicons/react/24/outline'
 import { Tooltip } from '../../../../components/Tooltip'
 import { SceneSettings } from '../Scenes/SceneSettings'
 import { ZoomOutArea } from '../../../../icons/ZoomOutArea'
@@ -39,6 +39,7 @@ import { SceneDropDown } from '../Scenes/SceneDropDown'
 import { AppNodeEdge } from './AppNodeEdge'
 import { NewNodePicker } from './NewNodePicker'
 import { CANVAS_NODE_ID, getNewFieldName, newNodePickerLogic } from './newNodePickerLogic'
+import { scenesLogic } from '../Scenes/scenesLogic'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -82,8 +83,17 @@ function Diagram_({ sceneId }: DiagramProps) {
     rearrangeCurrentScene,
     setCursorPosition,
   } = useActions(diagramLogic(diagramLogicProps))
+  const { previewScene } = useActions(scenesLogic({ frameId }))
+  const { unsavedSceneIds, undeployedSceneIds, previewingSceneId } = useValues(scenesLogic({ frameId }))
   const { newNodePicker } = useValues(newNodePickerLogic(diagramLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic(diagramLogicProps))
+  const sceneHasChanges = unsavedSceneIds.has(sceneId) || undeployedSceneIds.has(sceneId)
+  const isPreviewing = previewingSceneId === sceneId
+  const previewTitle = isPreviewing
+    ? 'Previewing scene on the frame'
+    : sceneHasChanges
+    ? 'Preview unsaved changes on the frame'
+    : 'No unsaved changes to preview'
 
   const onDragOver = useCallback((event: any) => {
     event.preventDefault()
@@ -262,6 +272,15 @@ function Diagram_({ sceneId }: DiagramProps) {
         >
           <Background id="1" gap={24} color="#cccccc" variant={BackgroundVariant.Dots} />
           <div className="absolute top-1 right-1 z-10 flex gap-2">
+            <Button
+              size="tiny"
+              onClick={() => previewScene(sceneId)}
+              title={previewTitle}
+              color="secondary"
+              disabled={!sceneHasChanges || isPreviewing}
+            >
+              <EyeIcon className="w-5 h-5" />
+            </Button>
             <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
               <ZoomOutArea className="w-5 h-5" />
             </Button>
