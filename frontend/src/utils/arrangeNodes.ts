@@ -28,7 +28,8 @@ function expandCodeNode(node: DiagramNode): DiagramNode {
   }
   const width = Math.max(node.width ?? NODE_FALLBACK_WIDTH, CODE_NODE_MIN_WIDTH)
   const height = Math.max(node.height ?? NODE_FALLBACK_HEIGHT, CODE_NODE_MIN_HEIGHT)
-  return { ...node, width, height }
+  const style = { ...(node.style ?? {}), width, height }
+  return { ...node, width, height, style }
 }
 
 function fieldNameFromHandle(handle?: string | null): string | null {
