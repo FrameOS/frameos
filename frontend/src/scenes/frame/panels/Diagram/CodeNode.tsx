@@ -1,7 +1,7 @@
 import { BindLogic, useActions, useValues } from 'kea'
 import { NodeProps, Handle, Position, NodeResizer, useUpdateNodeInternals } from 'reactflow'
 import { useEffect, useRef } from 'react'
-import { CodeNodeData } from '../../../../types'
+import type { CodeArg as CodeArgType, CodeNodeData, FieldType } from '../../../../types'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import { TextArea } from '../../../../components/TextArea'
@@ -24,7 +24,42 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
   const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
+  const monacoRef = useRef<Monaco | null>(null)
+  const codeArgsLibRef = useRef<{ dispose: () => void } | null>(null)
   const isSelectedRef = useRef<boolean>(isSelected)
+
+  const fieldTypeToTsType: Record<FieldType, string> = {
+    string: 'string',
+    text: 'string',
+    float: 'number',
+    integer: 'number',
+    boolean: 'boolean',
+    color: 'string',
+    date: 'string',
+    json: 'Record<string, any>',
+    node: 'any',
+    scene: 'string',
+    image: 'string',
+    font: 'string',
+  }
+
+  const isValidIdentifier = (name: string): boolean => /^[A-Za-z_$][\w$]*$/.test(name)
+
+  const buildCodeArgDeclarations = (codeArgs: CodeArgType[] = []): string => {
+    const declarations = codeArgs
+      .filter((arg) => isValidIdentifier(arg.name))
+      .map((arg) => `declare const ${arg.name}: ${fieldTypeToTsType[arg.type] ?? 'any'};`)
+
+    return declarations.length ? `${declarations.join('\n')}\n` : ''
+  }
+
+  const updateCodeArgGlobals = (monaco: Monaco, codeArgs: CodeArgType[] = []): void => {
+    const declarations = buildCodeArgDeclarations(codeArgs)
+    codeArgsLibRef.current?.dispose()
+    codeArgsLibRef.current = declarations
+      ? monaco.languages.typescript.typescriptDefaults.addExtraLib(declarations, `inmemory://code-node/${id}.d.ts`)
+      : null
+  }
 
   useEffect(() => {
     isSelectedRef.current = isSelected
@@ -32,6 +67,20 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
       updateWheelHandling(editorRef.current)
     }
   }, [isSelected])
+
+  useEffect(() => {
+    if (!monacoRef.current) {
+      return
+    }
+    updateCodeArgGlobals(monacoRef.current, data.codeArgs ?? [])
+  }, [data.codeArgs])
+
+  useEffect(() => {
+    return () => {
+      codeArgsLibRef.current?.dispose()
+      codeArgsLibRef.current = null
+    }
+  }, [])
 
   function beforeMount(monaco: Monaco): void {
     monaco.editor.defineTheme('darkframe-node', {
@@ -59,11 +108,13 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
     })
   }
 
-  function handleEditorMount(editor: MonacoEditor.IStandaloneCodeEditor): void {
+  function handleEditorMount(editor: MonacoEditor.IStandaloneCodeEditor, monaco: Monaco): void {
     editorRef.current = editor
+    monacoRef.current = monaco
     updateWheelHandling(editor)
     editor.onDidFocusEditorWidget(() => updateWheelHandling(editor))
     editor.onDidBlurEditorWidget(() => updateWheelHandling(editor))
+    updateCodeArgGlobals(monaco, data.codeArgs ?? [])
   }
 
   return (
@@ -209,7 +260,7 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
                 wordWrap: 'on',
                 automaticLayout: true,
               }}
-              onMount={(editor) => handleEditorMount(editor)}
+              onMount={(editor, monaco) => handleEditorMount(editor, monaco)}
               onChange={(value) => updateNodeData(id, { codeJS: value ?? '' })}
             />
           ) : (
