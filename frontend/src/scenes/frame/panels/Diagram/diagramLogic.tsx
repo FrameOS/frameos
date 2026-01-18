@@ -429,38 +429,6 @@ export const diagramLogic = kea<diagramLogicType>([
       }
     },
   })),
-  listeners(({ sharedListeners, props, values, actions }) => ({
-    setNodes: sharedListeners.nodesChanged,
-    onNodesChange: sharedListeners.nodesChanged,
-    selectNode: sharedListeners.nodesChanged,
-    deselectNode: sharedListeners.nodesChanged,
-    updateNodeData: sharedListeners.nodesChanged,
-    deleteApp: sharedListeners.nodesChanged,
-    updateNodeConfig: ({ id, field, value }) => {
-      const { nodes } = values
-      actions.setFrameFormValues({
-        scenes: values.editingFrame.scenes?.map((scene) =>
-          scene.id === props.sceneId && !equal(scene.nodes, nodes)
-            ? // set the nodes on the scene's form, and remove the selected flag from all
-              ({
-                ...scene,
-                nodes: values.nodes.map((node) =>
-                  node.id === id
-                    ? {
-                        ...node,
-                        data: {
-                          ...(node.data ?? {}),
-                          config: { ...('config' in node.data ? node.data?.config ?? {} : {}), [field]: value },
-                        },
-                      }
-                    : node
-                ),
-              } satisfies FrameScene)
-            : scene
-        ),
-      })
-    },
-  })),
   subscriptions(({ actions, values, props }) => ({
     edges: (edges: Edge[], oldEdges: Edge[]) => {
       // Do not update on first render
@@ -497,52 +465,92 @@ export const diagramLogic = kea<diagramLogicType>([
       }
     },
   })),
-  listeners(({ actions, values, props, cache }) => ({
-    setNodes: () => {
-      if (cache.ignoreHistory) {
-        return
-      }
-      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
-    },
-    onNodesChange: ({ changes }) => {
-      if (cache.ignoreHistory) {
-        return
-      }
-      if (changes.length > 0 && changes.every((change) => change.type === 'select')) {
-        return
-      }
-      if (
-        changes.length > 0 &&
-        changes.every((change) => change.type === 'dimensions' && values.nodesById[change.id]?.type !== 'code')
-      ) {
-        return
-      }
-      const snapshot = makeHistorySnapshot(values.nodes, values.rawEdges)
-      const isDragging = changes.some((change) => change.type === 'position' && change.dragging)
-      if (isDragging) {
-        scheduleHistorySnapshot(cache, actions, snapshot)
-        return
-      }
-      actions.recordHistory(snapshot)
-    },
-    updateNodeData: () => {
-      if (cache.ignoreHistory) {
-        return
-      }
-      scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges))
-    },
-    updateNodeConfig: () => {
-      if (cache.ignoreHistory) {
-        return
-      }
-      scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges))
-    },
-    deleteApp: () => {
-      if (cache.ignoreHistory) {
-        return
-      }
-      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
-    },
+  listeners(({ actions, values, props, cache, sharedListeners }) => ({
+    selectNode: sharedListeners.nodesChanged,
+    deselectNode: sharedListeners.nodesChanged,
+    setNodes: [
+      sharedListeners.nodesChanged,
+      () => {
+        if (cache.ignoreHistory) {
+          return
+        }
+        actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+      },
+    ],
+    onNodesChange: [
+      sharedListeners.nodesChanged,
+      ({ changes }) => {
+        if (cache.ignoreHistory) {
+          return
+        }
+        if (changes.length > 0 && changes.every((change) => change.type === 'select')) {
+          return
+        }
+        if (
+          changes.length > 0 &&
+          changes.every((change) => change.type === 'dimensions' && values.nodesById[change.id]?.type !== 'code')
+        ) {
+          return
+        }
+        const snapshot = makeHistorySnapshot(values.nodes, values.rawEdges)
+        const isDragging = changes.some((change) => change.type === 'position' && change.dragging)
+        if (isDragging) {
+          scheduleHistorySnapshot(cache, actions, snapshot)
+          return
+        }
+        actions.recordHistory(snapshot)
+      },
+    ],
+    updateNodeData: [
+      sharedListeners.nodesChanged,
+      () => {
+        if (cache.ignoreHistory) {
+          return
+        }
+        scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges))
+      },
+    ],
+    updateNodeConfig: [
+      () => {
+        if (cache.ignoreHistory) {
+          return
+        }
+        scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges))
+      },
+      ({ id, field, value }) => {
+        const { nodes } = values
+        actions.setFrameFormValues({
+          scenes: values.editingFrame.scenes?.map((scene) =>
+            scene.id === props.sceneId && !equal(scene.nodes, nodes)
+              ? // set the nodes on the scene's form, and remove the selected flag from all
+                ({
+                  ...scene,
+                  nodes: values.nodes.map((node) =>
+                    node.id === id
+                      ? {
+                          ...node,
+                          data: {
+                            ...(node.data ?? {}),
+                            config: { ...('config' in node.data ? node.data?.config ?? {} : {}), [field]: value },
+                          },
+                        }
+                      : node
+                  ),
+                } satisfies FrameScene)
+              : scene
+          ),
+        })
+      },
+    ],
+    deleteApp: [
+      sharedListeners.nodesChanged,
+      () => {
+        if (cache.ignoreHistory) {
+          return
+        }
+        actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+      },
+    ],
     setEdges: () => {
       if (cache.ignoreHistory) {
         return
