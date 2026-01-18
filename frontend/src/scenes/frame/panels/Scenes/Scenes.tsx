@@ -897,16 +897,12 @@ export function Scenes() {
                       ) : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-2 pl-7 text-xs text-gray-500">
-                      {sceneServiceEntries.length ? (
-                        sceneServiceEntries.map(({ key, label, missing }) => (
-                          <Tag key={key} color={missing ? 'orange' : 'teal'}>
-                            {label}
-                            {missing ? ' (missing key)' : ''}
-                          </Tag>
-                        ))
-                      ) : (
-                        <span className="text-gray-600">None</span>
-                      )}
+                      {sceneServiceEntries?.map(({ key, label, missing }) => (
+                        <Tag key={key} color={missing ? 'orange' : 'teal'}>
+                          {label}
+                          {missing ? ' (missing key)' : ''}
+                        </Tag>
+                      ))}
                     </div>
 
                     {expandedScenes[scene.id] && !multiSelectEnabled ? (
