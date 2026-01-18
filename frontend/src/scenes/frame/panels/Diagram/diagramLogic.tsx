@@ -83,7 +83,10 @@ const HISTORY_DEBOUNCE_MS = 300
 
 const normalizeNodes = (nodes: DiagramNode[]): DiagramNode[] =>
   nodes.map((node) => {
-    const { selected, dragging, ...rest } = node
+    const { selected, dragging, width, height, ...rest } = node
+    if (node.type === 'code' && typeof width !== 'undefined' && typeof height !== 'undefined') {
+      return { ...rest, width, height } as DiagramNode
+    }
     return rest as DiagramNode
   })
 
@@ -454,6 +457,12 @@ export const diagramLogic = kea<diagramLogicType>([
         return
       }
       if (changes.length > 0 && changes.every((change) => change.type === 'select')) {
+        return
+      }
+      if (
+        changes.length > 0 &&
+        changes.every((change) => change.type === 'dimensions' && values.nodesById[change.id]?.type !== 'code')
+      ) {
         return
       }
       const snapshot = makeHistorySnapshot(values.nodes, values.rawEdges)
