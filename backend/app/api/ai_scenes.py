@@ -402,6 +402,15 @@ async def generate_scene(
             detail=f"AI response did not include scenes (got {type(scenes).__name__}).",
         )
 
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            continue
+        settings = scene.get("settings")
+        if not isinstance(settings, dict):
+            settings = {}
+            scene["settings"] = settings
+        settings["prompt"] = prompt
+
     context_response = [
         AiSceneContextItem(
             source_type=item.source_type,

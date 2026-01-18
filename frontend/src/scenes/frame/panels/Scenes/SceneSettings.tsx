@@ -7,6 +7,8 @@ import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Button } from '../../../../components/Button'
 import { ColorInput } from '../../../../components/ColorInput'
 import { Select } from '../../../../components/Select'
+import { Label } from '../../../../components/Label'
+import { TextArea } from '../../../../components/TextArea'
 
 export interface SceneSettingsProps {
   sceneId: string
@@ -81,6 +83,14 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
                 ]}
               />
             </Field>
+            {scene.settings?.prompt ? (
+              <div className="space-y-1 @md:flex @md:gap-2">
+                <Label className="@md:w-1/3">Prompt</Label>
+                <div className="flex-1">
+                  <TextArea readOnly value={scene.settings.prompt} rows={4} />
+                </div>
+              </div>
+            ) : null}
           </Group>
           {onClose ? (
             <Button size="small" onClick={onClose}>
