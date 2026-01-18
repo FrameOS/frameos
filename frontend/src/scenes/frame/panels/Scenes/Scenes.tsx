@@ -334,6 +334,10 @@ export function Scenes() {
       ) : null}
       {aiError ? <span className="text-xs text-red-400">{aiError}</span> : null}
       <div className="space-y-2">
+        <div className="text-gray-400">
+          Please note: Scene generation is still in early development. Generated scenes may not work well or may even
+          crash your frame. Use with caution and always review the generated code.
+        </div>
         <div className="flex items-center gap-2">
           <Button
             size="small"
