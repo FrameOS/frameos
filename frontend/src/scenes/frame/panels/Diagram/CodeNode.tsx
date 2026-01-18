@@ -1,5 +1,6 @@
 import { BindLogic, useActions, useValues } from 'kea'
 import { NodeProps, Handle, Position, NodeResizer, useUpdateNodeInternals } from 'reactflow'
+import { useEffect, useRef } from 'react'
 import { CodeNodeData } from '../../../../types'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
@@ -22,6 +23,15 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
   const data: CodeNodeData = (node?.data as CodeNodeData) ?? ({ code: '' } satisfies CodeNodeData)
   const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
+  const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
+  const isSelectedRef = useRef<boolean>(isSelected)
+
+  useEffect(() => {
+    isSelectedRef.current = isSelected
+    if (editorRef.current) {
+      updateWheelHandling(editorRef.current)
+    }
+  }, [isSelected])
 
   function beforeMount(monaco: Monaco): void {
     monaco.editor.defineTheme('darkframe-node', {
@@ -32,26 +42,28 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
     })
   }
 
+  const baseScrollbarOptions = {
+    verticalScrollbarSize: 6,
+    horizontalScrollbarSize: 6,
+    alwaysConsumeMouseWheel: false,
+    handleMouseWheel: false,
+  }
+
+  const updateWheelHandling = (editor: MonacoEditor.IStandaloneCodeEditor): void => {
+    const focused = editor.hasTextFocus()
+    editor.updateOptions({
+      scrollbar: {
+        ...baseScrollbarOptions,
+        handleMouseWheel: isSelectedRef.current || focused,
+      },
+    })
+  }
+
   function handleEditorMount(editor: MonacoEditor.IStandaloneCodeEditor): void {
-    const baseScrollbarOptions = {
-      verticalScrollbarSize: 6,
-      horizontalScrollbarSize: 6,
-      alwaysConsumeMouseWheel: false,
-      handleMouseWheel: false,
-    }
-
-    const updateWheelHandling = (focused: boolean): void => {
-      editor.updateOptions({
-        scrollbar: {
-          ...baseScrollbarOptions,
-          handleMouseWheel: focused,
-        },
-      })
-    }
-
-    updateWheelHandling(editor.hasTextFocus())
-    editor.onDidFocusEditorWidget(() => updateWheelHandling(true))
-    editor.onDidBlurEditorWidget(() => updateWheelHandling(false))
+    editorRef.current = editor
+    updateWheelHandling(editor)
+    editor.onDidFocusEditorWidget(() => updateWheelHandling(editor))
+    editor.onDidBlurEditorWidget(() => updateWheelHandling(editor))
   }
 
   return (

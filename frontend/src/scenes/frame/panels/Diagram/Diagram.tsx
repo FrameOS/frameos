@@ -168,6 +168,15 @@ function Diagram_({ sceneId }: DiagramProps) {
     if (focusedTextarea && focusedTextarea === document.activeElement) {
       event.stopPropagation()
     }
+    const monacoEditor = target?.closest('.monaco-editor') as HTMLElement | null
+    if (monacoEditor) {
+      const nodeWrapper = monacoEditor.closest('.react-flow__node')
+      const nodeSelected = nodeWrapper?.classList.contains('selected')
+      const editorFocused = document.activeElement ? monacoEditor.contains(document.activeElement) : false
+      if (nodeSelected || editorFocused) {
+        event.stopPropagation()
+      }
+    }
   }, [])
 
   const onContextMenu = useCallback(
