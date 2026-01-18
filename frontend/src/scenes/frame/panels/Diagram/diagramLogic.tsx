@@ -1,6 +1,7 @@
 import {
   actions,
   afterMount,
+  beforeUnmount,
   connect,
   kea,
   key,
@@ -67,6 +68,58 @@ export interface NewNodePicker {
 
 export type CodeNodeLanguage = 'js' | 'nim'
 
+export type DiagramHistorySnapshot = {
+  nodes: DiagramNode[]
+  edges: Edge[]
+}
+
+export type DiagramHistoryState = {
+  past: DiagramHistorySnapshot[]
+  future: DiagramHistorySnapshot[]
+}
+
+const MAX_HISTORY_LENGTH = 100
+const HISTORY_DEBOUNCE_MS = 300
+
+const normalizeNodes = (nodes: DiagramNode[]): DiagramNode[] =>
+  nodes.map((node) => (node.selected ? { ...node, selected: false } : node))
+
+const normalizeEdges = (edges: Edge[]): Edge[] =>
+  edges.map((edge) => (edge.selected ? { ...edge, selected: false } : edge))
+
+const makeHistorySnapshot = (nodes: DiagramNode[], edges: Edge[]): DiagramHistorySnapshot => ({
+  nodes: normalizeNodes(nodes),
+  edges: normalizeEdges(edges),
+})
+
+const scheduleHistorySnapshot = (
+  cache: Record<string, any>,
+  actions: { recordHistory: (snapshot: DiagramHistorySnapshot) => void },
+  snapshot: DiagramHistorySnapshot
+): void => {
+  if (cache.historyTimer) {
+    window.clearTimeout(cache.historyTimer)
+  }
+  cache.historyTimer = window.setTimeout(() => {
+    cache.historyTimer = null
+    actions.recordHistory(snapshot)
+  }, HISTORY_DEBOUNCE_MS)
+}
+
+const isEditableTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) {
+    return false
+  }
+  if (target.isContentEditable) {
+    return true
+  }
+  if (target.closest('[contenteditable="true"]')) {
+    return true
+  }
+  const tagName = target.tagName
+  return tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT'
+}
+
 export const diagramLogic = kea<diagramLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Diagram', 'diagramLogic']),
   props({} as DiagramLogicProps),
@@ -91,6 +144,10 @@ export const diagramLogic = kea<diagramLogicType>([
     updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
     copyAppJSON: (nodeId: string) => ({ nodeId }),
     deleteApp: (id: string) => ({ id }),
+    recordHistory: (snapshot: DiagramHistorySnapshot) => ({ snapshot }),
+    resetHistory: (snapshot: DiagramHistorySnapshot) => ({ snapshot }),
+    undo: true,
+    redo: true,
   }),
   reducers({
     nodes: [
@@ -160,6 +217,35 @@ export const diagramLogic = kea<diagramLogicType>([
       },
     ],
     fitViewCounter: [0, { fitDiagramView: (state) => state + 1 }],
+    history: [
+      { past: [], future: [] } as DiagramHistoryState,
+      {
+        recordHistory: (state, { snapshot }) => {
+          const last = state.past[state.past.length - 1]
+          if (last && equal(last, snapshot)) {
+            return state
+          }
+          const nextPast = [...state.past, snapshot].slice(-MAX_HISTORY_LENGTH)
+          return { past: nextPast, future: [] }
+        },
+        resetHistory: (_, { snapshot }) => ({ past: [snapshot], future: [] }),
+        undo: (state) => {
+          if (state.past.length <= 1) {
+            return state
+          }
+          const nextPast = state.past.slice(0, -1)
+          const previous = state.past[state.past.length - 1]
+          return { past: nextPast, future: [previous, ...state.future] }
+        },
+        redo: (state) => {
+          if (state.future.length === 0) {
+            return state
+          }
+          const [next, ...restFuture] = state.future
+          return { past: [...state.past, next], future: restFuture }
+        },
+      },
+    ],
   }),
   selectors({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
@@ -251,6 +337,8 @@ export const diagramLogic = kea<diagramLogicType>([
       (s) => [s.scene],
       (scene: FrameScene | null): CodeNodeLanguage => (scene?.settings?.execution === 'interpreted' ? 'js' : 'nim'),
     ],
+    canUndo: [(s) => [s.history], (history) => history.past.length > 1],
+    canRedo: [(s) => [s.history], (history) => history.future.length > 0],
   }),
   sharedListeners(({ selectors, actions, values, props }) => ({
     nodesChanged: (_, __, ___, previousState) => {
@@ -346,9 +434,96 @@ export const diagramLogic = kea<diagramLogicType>([
           actions.setEdges(newEdges)
         }
       }
+      if (scene && scene.id !== oldScene?.id) {
+        actions.resetHistory(makeHistorySnapshot(scene.nodes ?? [], scene.edges ?? []))
+      }
     },
   })),
-  listeners(({ actions, values, props }) => ({
+  listeners(({ actions, values, props, cache }) => ({
+    setNodes: () => {
+      if (cache.ignoreHistory) {
+        return
+      }
+      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+    },
+    onNodesChange: ({ changes }) => {
+      if (cache.ignoreHistory) {
+        return
+      }
+      const snapshot = makeHistorySnapshot(values.nodes, values.rawEdges)
+      const isDragging = changes.some((change) => change.type === 'position' && change.dragging)
+      if (isDragging) {
+        scheduleHistorySnapshot(cache, actions, snapshot)
+        return
+      }
+      actions.recordHistory(snapshot)
+    },
+    updateNodeData: () => {
+      if (cache.ignoreHistory) {
+        return
+      }
+      scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges))
+    },
+    updateNodeConfig: () => {
+      if (cache.ignoreHistory) {
+        return
+      }
+      scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges))
+    },
+    deleteApp: () => {
+      if (cache.ignoreHistory) {
+        return
+      }
+      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+    },
+    setEdges: () => {
+      if (cache.ignoreHistory) {
+        return
+      }
+      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+    },
+    onEdgesChange: () => {
+      if (cache.ignoreHistory) {
+        return
+      }
+      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+    },
+    addEdge: () => {
+      if (cache.ignoreHistory) {
+        return
+      }
+      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+    },
+    updateEdge: () => {
+      if (cache.ignoreHistory) {
+        return
+      }
+      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+    },
+    undo: () => {
+      const previous = values.history.past[values.history.past.length - 1]
+      if (!previous) {
+        return
+      }
+      cache.ignoreHistory = true
+      actions.setNodes(previous.nodes)
+      actions.setEdges(previous.edges)
+      window.setTimeout(() => {
+        cache.ignoreHistory = false
+      }, 0)
+    },
+    redo: () => {
+      const next = values.history.past[values.history.past.length - 1]
+      if (!next) {
+        return
+      }
+      cache.ignoreHistory = true
+      actions.setNodes(next.nodes)
+      actions.setEdges(next.edges)
+      window.setTimeout(() => {
+        cache.ignoreHistory = false
+      }, 0)
+    },
     rearrangeCurrentScene: () => {
       const fieldOrderByNodeId = values.nodes.reduce((acc, node) => {
         let fields: (AppConfigField | MarkdownField)[] | null = null
@@ -441,8 +616,37 @@ export const diagramLogic = kea<diagramLogicType>([
       }
     },
   })),
-  afterMount(({ actions }) => {
+  afterMount(({ actions, values, cache }) => {
     window.setTimeout(actions.fitDiagramView, 10)
     window.setTimeout(actions.fitDiagramView, 100)
+    cache.ignoreHistory = false
+    cache.historyTimer = null
+    actions.resetHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+
+    cache.keydownHandler = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) {
+        return
+      }
+      if (!event.metaKey || event.key.toLowerCase() !== 'z') {
+        return
+      }
+      event.preventDefault()
+      if (event.shiftKey) {
+        actions.redo()
+        return
+      }
+      actions.undo()
+    }
+    window.addEventListener('keydown', cache.keydownHandler)
+  }),
+  beforeUnmount(({ cache }) => {
+    if (cache.keydownHandler) {
+      window.removeEventListener('keydown', cache.keydownHandler)
+      cache.keydownHandler = null
+    }
+    if (cache.historyTimer) {
+      window.clearTimeout(cache.historyTimer)
+      cache.historyTimer = null
+    }
   }),
 ])
