@@ -5,6 +5,7 @@ import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import { TextArea } from '../../../../components/TextArea'
 import Editor, { Monaco } from '@monaco-editor/react'
+import type { editor as MonacoEditor } from 'monaco-editor'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { CheckIcon, ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
@@ -29,6 +30,28 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
       rules: [],
       colors: { 'editor.background': '#18181b' },
     })
+  }
+
+  function handleEditorMount(editor: MonacoEditor.IStandaloneCodeEditor): void {
+    const baseScrollbarOptions = {
+      verticalScrollbarSize: 6,
+      horizontalScrollbarSize: 6,
+      alwaysConsumeMouseWheel: false,
+      handleMouseWheel: false,
+    }
+
+    const updateWheelHandling = (focused: boolean): void => {
+      editor.updateOptions({
+        scrollbar: {
+          ...baseScrollbarOptions,
+          handleMouseWheel: focused,
+        },
+      })
+    }
+
+    updateWheelHandling(editor.hasTextFocus())
+    editor.onDidFocusEditorWidget(() => updateWheelHandling(true))
+    editor.onDidBlurEditorWidget(() => updateWheelHandling(false))
   }
 
   return (
@@ -146,7 +169,7 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
             ]}
           />
         </div>
-        <div className="p-1 h-full">
+        <div className="p-1 flex-1">
           {codeNodeLanguage === 'js' ? (
             <Editor
               height="100%"
@@ -168,11 +191,13 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
                   verticalScrollbarSize: 6,
                   horizontalScrollbarSize: 6,
                   alwaysConsumeMouseWheel: false,
+                  handleMouseWheel: false,
                 },
                 scrollBeyondLastLine: false,
                 wordWrap: 'on',
                 automaticLayout: true,
               }}
+              onMount={(editor) => handleEditorMount(editor)}
               onChange={(value) => updateNodeData(id, { codeJS: value ?? '' })}
             />
           ) : (
