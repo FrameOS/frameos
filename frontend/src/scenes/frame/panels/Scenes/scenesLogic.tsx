@@ -17,6 +17,8 @@ export interface ScenesLogicProps {
   frameId: number
 }
 
+const UPLOADED_SCENE_PREFIX = 'uploaded/'
+
 const applyStateToSceneFields = (scene: FrameScene, state: Record<string, any> | null): FrameScene => {
   if (!state || !scene.fields?.length) {
     return scene
@@ -410,9 +412,22 @@ export const scenesLogic = kea<scenesLogicType>([
         return settingsByScene
       },
     ],
+    linkedActiveSceneId: [
+      (s) => [s.activeSceneId, s.scenes],
+      (activeSceneId, scenes) => {
+        if (!activeSceneId) {
+          return null
+        }
+        if (!activeSceneId.startsWith(UPLOADED_SCENE_PREFIX)) {
+          return activeSceneId
+        }
+        const candidateId = activeSceneId.slice(UPLOADED_SCENE_PREFIX.length)
+        return scenes.some((scene) => scene.id === candidateId) ? candidateId : activeSceneId
+      },
+    ],
     activeScene: [
-      (s) => [s.scenes, s.activeSceneId],
-      (scenes, activeSceneId) => scenes.find((scene) => scene.id === activeSceneId) ?? null,
+      (s) => [s.scenes, s.linkedActiveSceneId],
+      (scenes, linkedActiveSceneId) => scenes.find((scene) => scene.id === linkedActiveSceneId) ?? null,
     ],
     missingActiveSceneId: [
       (s) => [s.activeScene, s.activeSceneId],

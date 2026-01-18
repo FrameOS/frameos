@@ -39,6 +39,10 @@ function panelsEqual(panel1: PanelWithMetadata, panel2: PanelWithMetadata) {
   return panel1.panel === panel2.panel && panel1.key === panel2.key
 }
 
+export function panelScrollKey(panel: PanelWithMetadata): string {
+  return `${panel.panel}.${panel.key ?? 'default'}`
+}
+
 export const panelsLogic = kea<panelsLogicType>([
   path(['src', 'scenes', 'frame', 'panelsLogic']),
   props({} as PanelsLogicProps),
@@ -61,6 +65,7 @@ export const panelsLogic = kea<panelsLogicType>([
     editSceneJSON: (sceneId: string) => ({ sceneId }),
     openAsset: (path: string) => ({ path }),
     persistUntilClosed: (panel: PanelWithMetadata, logic: AnyBuiltLogic) => ({ panel, logic }),
+    rememberPanelScroll: (panel: PanelWithMetadata, scrollTop: number) => ({ panel, scrollTop }),
     updateUrl: true,
   }),
   reducers({
@@ -194,6 +199,21 @@ export const panelsLogic = kea<panelsLogicType>([
         setPanel: (state, { panel }) => (panel.panel === Panel.Diagram ? panel.key ?? state : state),
         editScene: (_, { sceneId }) => sceneId,
         editSceneJSON: (_, { sceneId }) => sceneId,
+      },
+    ],
+    panelScrollPositions: [
+      {} as Record<string, number>,
+      {
+        rememberPanelScroll: (state, { panel, scrollTop }) => {
+          const key = panelScrollKey(panel)
+          if (state[key] === scrollTop) {
+            return state
+          }
+          return {
+            ...state,
+            [key]: scrollTop,
+          }
+        },
       },
     ],
   }),

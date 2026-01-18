@@ -66,6 +66,7 @@ export function Scenes() {
     activeSettingsKey,
     multiSelectEnabled,
     selectedSceneIds,
+    linkedActiveSceneId,
     activeUploadedScene,
     missingActiveSceneId,
     missingActiveMatchesSearch,
@@ -105,9 +106,7 @@ export function Scenes() {
     installMissingActiveScene,
   } = useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
-  const { sceneId, sceneChanging, loading, uploadedScenes, uploadedScenesLoading } = useValues(
-    controlLogic({ frameId })
-  )
+  const { sceneChanging, loading, uploadedScenes, uploadedScenesLoading } = useValues(controlLogic({ frameId }))
   const { setCurrentScene, sync } = useActions(controlLogic({ frameId }))
   const { settings, savedSettings, settingsChanged, aiEmbeddingsStatus } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
@@ -632,7 +631,7 @@ export function Scenes() {
               <div
                 className={clsx(
                   'border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1',
-                  sceneId === scene.id
+                  linkedActiveSceneId === scene.id
                     ? 'border border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
                     : 'border-gray-700',
                   multiSelectEnabled && isSelected ? 'border-blue-400 shadow-[0_0_4px_2px_rgba(96,165,250,0.4)]' : null
@@ -712,7 +711,7 @@ export function Scenes() {
                       </div>
                       {!multiSelectEnabled ? (
                         <div className="flex gap-1">
-                          {sceneId !== scene.id ? (
+                          {linkedActiveSceneId !== scene.id ? (
                             sceneHasChanges ? (
                               <Button
                                 size="small"
