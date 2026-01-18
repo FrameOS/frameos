@@ -84,10 +84,10 @@ Follow these rules:
     and to connect each subsequent app node in order.
   - Do not connect multiple "next" edges to the same "prev" handle. The render flow must be a single linear chain
     where each app node connects to exactly one next node in sequence.
-  - App nodes must participate in only one of these roles: (a) the prev/next render flow or (b) field output/input
-    data wiring. Do not use the same app node in both roles.
   - Logic + render apps form the left/right render flow (prev/next). Data apps are not part of the left/right chain
     and should only connect up/down via field output -> field input edges.
+  - Apps in the render flow may still receive field inputs or emit field outputs; field wiring does NOT disqualify an
+    app from being in the prev/next chain.
   - Only apps with category "logic" or "render" can be connected left/right using appNodeEdge. Apps with category
     "data" must not be connected left/right and must only connect via field outputs into inputs.
   - When an app outputs data into another app's input (e.g. data app into render/image), add a "codeNodeEdge" from
@@ -171,8 +171,7 @@ Check the scene against the user request and ensure it is valid:
 - Every edge references existing node ids for source and target.
 - Logic apps should be connected via prev/next or field output/input edges. Data apps (keywords starting with "data/") do
   NOT need to be in the prev/next render chain and should not be flagged for that; they are executed via data edges.
-  Render apps (keywords starting with "render/") can be one or the other, but not both.
-- No app node is used both in the prev/next render flow and as a field output/input data node.
+- Apps (including render apps) may be in the prev/next render flow and also receive field inputs or emit field outputs.
 - All state fields include a default "value" field which is a string.
 - The render flow does not branch: no multiple "next" edges point to the same "prev" handle.
 - No image output is stored as state in JSON; image outputs must be wired directly into app inputs.
