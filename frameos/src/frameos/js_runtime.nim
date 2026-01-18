@@ -427,10 +427,6 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
 
   let kind = parsed{"k"}.getStr()
   if kind == "error":
-    if expectedType.len > 0:
-      if expectedType == "string": return Value(kind: fkString, s: "")
-      return valueFromJsonByType(newJNull(), expectedType)
-
     scene.logger.log(%*{
       "event": "interpreter:jsError",
       "sceneId": scene.id.string,
@@ -439,6 +435,7 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
       "stack": parsed{"v"}{"stack"}.getStr()
     })
     if expectedType.len > 0:
+      if expectedType == "string": return Value(kind: fkString, s: "")
       return valueFromJsonByType(newJNull(), expectedType)
     return Value(kind: fkNone)
 
