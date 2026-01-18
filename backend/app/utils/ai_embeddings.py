@@ -113,9 +113,15 @@ def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict
             "name": field.get("name"),
             "type": field.get("type"),
             "label": field.get("label"),
+            "example": field.get("example"),
         }
         for field in config.get("output", [])
         if field.get("name")
+    ]
+    output_examples = [
+        f"{detail['name']}: {_truncate_text(str(detail.get('example')))}"
+        for detail in output_details
+        if detail.get("example")
     ]
     config_snippet = _truncate_text(json.dumps(config, ensure_ascii=False))
 
@@ -128,6 +134,7 @@ def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict
             f"Fields: {', '.join(fields)}",
             f"Field options: {', '.join(field_options)}",
             f"Outputs: {', '.join(outputs)}",
+            f"Output examples: {', '.join(output_examples)}",
             f"Settings: {', '.join(settings)}",
             f"Config path: {config_path.relative_to(repo_root)}",
         ]
