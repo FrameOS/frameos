@@ -256,6 +256,8 @@ export interface OutputField {
   name: string
   /** Type of the field */
   type: FieldType
+  /** Example output (stringified) */
+  example?: string
 }
 
 /** config.json schema */

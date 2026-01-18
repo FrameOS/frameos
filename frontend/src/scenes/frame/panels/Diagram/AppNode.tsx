@@ -20,6 +20,7 @@ import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { Tooltip } from '../../../../components/Tooltip'
 import { FontSelect } from '../../../../components/FontSelect'
 import { ColorInput } from '../../../../components/ColorInput'
+import ReactJson from '@microlink/react-json-view'
 
 export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
   const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
@@ -474,6 +475,39 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                     }}
                   />
                   <CodeArg codeArg={{ type: out.type, name: out.name }} />
+                  {out.example
+                    ? (() => {
+                        let output = { [out.name]: out.example }
+                        try {
+                          output = JSON.parse(out.example)
+                        } catch {}
+
+                        return (
+                          <Tooltip
+                            title={
+                              <div className="p-2 bg-gray-700">
+                                <div className="min-w-[40vw] w-[500px] max-w-[90vw] max-h-[60vh] overflow-auto">
+                                  <ReactJson
+                                    collapsed={2}
+                                    theme="ocean"
+                                    src={output}
+                                    name={`example output for ${out.name}`}
+                                    enableClipboard={false}
+                                    displayDataTypes={false}
+                                  />
+                                </div>
+                              </div>
+                            }
+                            containerClassName="flex"
+                            className="ml-1 inline-flex rounded-full p-0.5 text-indigo-100 hover:text-white"
+                            tooltipColor="gray"
+                            noPadding
+                          >
+                            <InformationCircleIcon className="w-4 h-4" aria-label="Example output" />
+                          </Tooltip>
+                        )
+                      })()
+                    : null}
                 </div>
               ))}
             </div>
