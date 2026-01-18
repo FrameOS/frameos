@@ -726,6 +726,8 @@ export const diagramLogic = kea<diagramLogicType>([
         }
         const offset = getClipboardOffset(nodes, values.cursorPosition)
         const idMap = new Map<string, string>()
+        const baseNodes = values.nodes.map((node) => (node.selected ? { ...node, selected: false } : node))
+        const baseEdges = values.rawEdges.map((edge) => (edge.selected ? { ...edge, selected: false } : edge))
         const pastedNodes = nodes.map((node) => {
           const newId = uuidv4()
           idMap.set(node.id, newId)
@@ -734,7 +736,7 @@ export const diagramLogic = kea<diagramLogicType>([
             ...sanitizeClipboardNode(node),
             id: newId,
             position: { x: (position?.x ?? 0) + offset.x, y: (position?.y ?? 0) + offset.y },
-            selected: false,
+            selected: true,
           }
         })
         const pastedEdges = edges
@@ -746,10 +748,17 @@ export const diagramLogic = kea<diagramLogicType>([
             target: idMap.get(edge.target) as string,
             selected: false,
           }))
-        actions.setNodes([...values.nodes, ...pastedNodes])
-        if (pastedEdges.length > 0) {
-          actions.setEdges([...values.rawEdges, ...pastedEdges])
+        const nextNodes = [...baseNodes, ...pastedNodes]
+        const nextEdges = [...baseEdges, ...pastedEdges]
+        if (cache.historyTimer) {
+          window.clearTimeout(cache.historyTimer)
+          cache.historyTimer = null
         }
+        cache.ignoreHistory = true
+        actions.setNodes(nextNodes)
+        actions.setEdges(nextEdges)
+        cache.ignoreHistory = false
+        actions.recordHistory(makeHistorySnapshot(nextNodes, nextEdges))
         window.setTimeout(() => {
           pastedNodes.forEach((node) => props.updateNodeInternals?.(node.id))
         }, 200)
