@@ -40,7 +40,7 @@ import { settingsLogic } from '../../../settings/settingsLogic'
 import { getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
 import { SecretSettingsModal } from '../SecretSettingsModal'
 import { TextArea } from '../../../../components/TextArea'
-import { A } from 'kea-router'
+import { A, router } from 'kea-router'
 import { urls } from '../../../../urls'
 import { appsModel } from '../../../../models/appsModel'
 export function Scenes() {
@@ -200,6 +200,8 @@ export function Scenes() {
   }
 
   const hasEmbeddings = (aiEmbeddingsStatus?.count ?? 0) > 0
+  const hasBackendApiKey = Boolean(savedSettings?.openAI?.backendApiKey?.trim())
+  const missingBackendApiKey = !hasBackendApiKey
   const hasAiSceneHistory =
     aiSceneLogs.length > 0 &&
     (isGeneratingAiScene || aiSceneLastLog?.status === 'success' || aiSceneLastLog?.status === 'error')
@@ -252,6 +254,17 @@ export function Scenes() {
   const renderAiSceneForm = () => (
     <Box className="p-4 space-y-3 bg-gray-900">
       <H6>Generate scene (alpha)</H6>
+      {missingBackendApiKey ? (
+        <div className="rounded-md border border-red-500/40 bg-red-950/40 p-3 text-xs text-red-200">
+          <div className="font-semibold text-red-200">Missing OpenAI backend API key.</div>
+          <p className="mt-1 text-red-200/80">Add the backend API key in Settings to enable AI scene generation.</p>
+          <div className="mt-2">
+            <Button size="small" color="secondary" onClick={() => router.actions.push(urls.settings())}>
+              Fix in settings
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <div className="space-y-1">
         <div className="text-xs font-semibold uppercase text-gray-400">Prompt</div>
         <TextArea
@@ -327,7 +340,7 @@ export function Scenes() {
             color="secondary"
             className="flex gap-1 items-center"
             onClick={() => generateAiScene()}
-            disabled={isGeneratingAiScene || !hasEmbeddings}
+            disabled={isGeneratingAiScene || !hasEmbeddings || missingBackendApiKey}
           >
             {isGeneratingAiScene ? <Spinner color="white" /> : <SparklesIcon className="w-4 h-4" />}
             {isGeneratingAiScene ? 'Generating...' : 'Generate scene'}
