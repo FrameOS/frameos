@@ -16,12 +16,20 @@ export interface ExpandedSceneProps {
   frameId: number
   scene?: FrameScene | null
   showEditButton?: boolean
+  isUnsaved?: boolean
+  isUndeployed?: boolean
 }
 
-export function ExpandedScene({ frameId, sceneId, scene, showEditButton = true }: ExpandedSceneProps) {
+export function ExpandedScene({
+  frameId,
+  sceneId,
+  scene,
+  showEditButton = true,
+  isUnsaved,
+  isUndeployed,
+}: ExpandedSceneProps) {
   const { stateChanges, hasStateChanges, fields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
   const { states, sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
-  const { undeployedSceneIds } = useValues(scenesLogic({ frameId }))
   const { requiresRecompilation, unsavedChanges } = useValues(frameLogic({ frameId }))
   const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId, scene }))
   const { previewScene } = useActions(scenesLogic({ frameId }))
@@ -29,7 +37,6 @@ export function ExpandedScene({ frameId, sceneId, scene, showEditButton = true }
   const fieldCount = fields.length ?? 0
 
   const currentState = states[sceneId] ?? {}
-  const isUndeployed = undeployedSceneIds.has(sceneId)
   const canPreviewUnsavedChanges = unsavedChanges || isUndeployed
   const activateLabel =
     isUndeployed && sceneId !== currentSceneId
@@ -82,7 +89,7 @@ export function ExpandedScene({ frameId, sceneId, scene, showEditButton = true }
           <div className="flex items-center gap-2">
             {canPreviewUnsavedChanges ? (
               <Button onClick={handlePreview} color="primary">
-                Preview unsaved scene
+                Preview {isUnsaved ? 'unsaved' : isUndeployed ? 'undeployed' : ''} scene
               </Button>
             ) : (
               <Button
@@ -136,7 +143,7 @@ export function ExpandedScene({ frameId, sceneId, scene, showEditButton = true }
               <div className="flex w-full items-center gap-2">
                 {canPreviewUnsavedChanges ? (
                   <Button onClick={handlePreview} color="primary">
-                    Preview unsaved scene
+                    Preview {isUnsaved ? 'unsaved' : isUndeployed ? 'undeployed' : ''} scene
                   </Button>
                 ) : (
                   <Button

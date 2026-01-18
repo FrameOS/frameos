@@ -85,7 +85,7 @@ export const scenesLogic = kea<scenesLogicType>([
     uploadImage: (file: File) => ({ file }),
     uploadImageSuccess: true,
     uploadImageFailure: true,
-    previewScene: (sceneId: string) => ({ sceneId }),
+    previewScene: (sceneId: string, state?: Record<string, any> | null) => ({ sceneId, state }),
     previewSceneSuccess: true,
     previewSceneFailure: true,
     setAiPrompt: (prompt: string) => ({ prompt }),
@@ -550,19 +550,19 @@ export const scenesLogic = kea<scenesLogicType>([
         actions.uploadImageFailure()
       }
     },
-    previewScene: async ({ sceneId }) => {
+    previewScene: async ({ sceneId, state }) => {
       const scene = values.scenes.find((item) => item.id === sceneId)
       if (!scene) {
         actions.previewSceneFailure()
         return
       }
       try {
-        const state = values.states?.[scene.id] ?? values.states?.[`uploaded/${scene.id}`] ?? null
-        const payloadScene = applyStateToSceneFields(scene, state)
+        const resolvedState = state ?? values.states?.[scene.id] ?? values.states?.[`uploaded/${scene.id}`] ?? null
+        const payloadScene = applyStateToSceneFields(scene, resolvedState)
         const payload = {
           scenes: [payloadScene],
           sceneId: scene.id,
-          ...(state && Object.keys(state).length > 0 ? { state } : {}),
+          ...(resolvedState && Object.keys(resolvedState).length > 0 ? { state: resolvedState } : {}),
         }
         await actions.sendEvent('uploadScenes', payload)
         actions.previewSceneSuccess()

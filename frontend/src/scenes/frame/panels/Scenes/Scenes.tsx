@@ -607,6 +607,8 @@ export function Scenes() {
                       scene={activeUploadedScene}
                       frameId={frameId}
                       showEditButton={false}
+                      isUnsaved={true}
+                      isUndeployed={true}
                     />
                   </div>
                 ) : null}
@@ -889,7 +891,12 @@ export function Scenes() {
 
                     {expandedScenes[scene.id] && !multiSelectEnabled ? (
                       <div className="pl-7">
-                        <ExpandedScene sceneId={scene.id} frameId={frameId} />
+                        <ExpandedScene
+                          sceneId={scene.id}
+                          frameId={frameId}
+                          isUnsaved={unsavedSceneIds.has(scene.id)}
+                          isUndeployed={undeployedSceneIds.has(scene.id)}
+                        />
                       </div>
                     ) : null}
                   </div>
