@@ -52,6 +52,7 @@ Follow these rules:
 - Edges can be of type "appNodeEdge" or "codeNodeEdge".
 - Edges of type "appNodeEdge" connect app nodes (sourceHandle "next" to targetHandle "prev") or layout app fields (e.g. "field/render_functions[row][col]" to "prev").
 - Edges of type "codeNodeEdge" connect code or state node outputs (sourceHandle "fieldOutput") to app or code node inputs (targetHandle "fieldInput/<fieldName>" or "codeField/<argName>").
+- There is only one source handle for code/state outputs: "fieldOutput". Do NOT use "fieldOutput/<name>" or any named variants.
 - Each scene starts from one event node with data.keyword = "render" to trigger rendering.
 - Each connected render or logic node is executed in sequence via appNodeEdge edges.
 - App nodes are generic. For the actual data to render, use code nodes or data apps connected via codeNodeEdge edges.
@@ -61,7 +62,7 @@ Follow these rules:
   render/image app, and connect the render/image app into the render flow.
 - Logic apps (category "logic") can be used to process data; render apps (category "render") produce visual output.
 - Data apps (category "data") provide data and must not be connected left/right in the render flow.
-- Code nodes have only one output. The codeoutputs array must only contain one output, connected via "fieldOutput". The name is arbitrary and for reference only.
+- Code nodes have only one output. The codeoutputs array must only contain one output, connected via "fieldOutput". The name is arbitrary and for reference only; do not encode it into the handle.
 - Code nodes can include JavaScript snippets in data.codeJS for interpreted scenes.
 - Code nodes arguments are used as variables in the code snippet, just <argNamen> (no args. prefix).
 - State nodes hold scene fields; set data.keyword to the field name. Use scene fields to allow user customization.
@@ -78,7 +79,7 @@ Follow these rules:
   ^(underline)/^(no-underline), ^(strikethrough)/^(no-strikethrough), combine styles via ^(16,#FF0000),
   and reset styles with ^(reset).
 - State nodes are used to supply scene fields into code/app inputs: set data.keyword to the scene field name and connect
-  them via codeNodeEdge with sourceHandle "fieldOutput" to targetHandle "fieldInput/<fieldName>" or "codeField/<argName>".
+  them via codeNodeEdge with sourceHandle "fieldOutput" (no suffixes) to targetHandle "fieldInput/<fieldName>" or "codeField/<argName>".
 - Create edges that link the nodes into a valid flow:
   - Use "appNodeEdge" with sourceHandle "next" and targetHandle "prev" to connect the render event to the first app,
     and to connect each subsequent app node in order.
@@ -175,6 +176,7 @@ Check the scene against the user request and ensure it is valid:
 - Logic apps should be connected via prev/next or field output/input edges. Data apps (keywords starting with "data/") do
   NOT need to be in the prev/next render chain and should not be flagged for that; they are executed via data edges.
 - Apps (including render apps) may be in the prev/next render flow and also receive field inputs or emit field outputs.
+- Code/state output handles must be exactly "fieldOutput". Do not require or suggest named handles like "fieldOutput/<name>".
 - All state fields include a default "value" field which is a string.
 - The render flow does not branch: no multiple "next" edges point to the same "prev" handle.
 - No image output is stored as state in JSON; image outputs must be wired directly into app inputs.
