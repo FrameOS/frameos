@@ -169,11 +169,16 @@ Check the scene against the user request and ensure it is valid:
 - Each scene has id, name, nodes, edges, and settings.execution = "interpreted".
 - There is at least one event node with data.keyword = "render".
 - Every edge references existing node ids for source and target.
-- Every logic and render app node is connected via prev/next or a field output/input edge.
+- Logic apps should be connected via prev/next or field output/input edges. Data apps (keywords starting with "data/") do
+  NOT need to be in the prev/next render chain and should not be flagged for that; they are executed via data edges.
+  Render apps (keywords starting with "render/") can be one or the other, but not both.
 - No app node is used both in the prev/next render flow and as a field output/input data node.
 - All state fields include a default "value" field which is a string.
 - The render flow does not branch: no multiple "next" edges point to the same "prev" handle.
 - No image output is stored as state in JSON; image outputs must be wired directly into app inputs.
+- FrameOS scenes always render a visual output. The render event sets up context.image. That's the final output that we render.
+- Be pragmatic about user-request matching: only flag clear contradictions or missing must-have elements. Do not be overly critical
+  about stylistic differences or exact phrasing.
 Respond with JSON only, using keys:
 - solves: boolean (true only if the scene matches the user request)
 - issues: array of short strings describing any problems

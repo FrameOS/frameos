@@ -45,16 +45,34 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
 
   const isValidIdentifier = (name: string): boolean => /^[A-Za-z_$][\w$]*$/.test(name)
 
-  const buildCodeArgDeclarations = (codeArgs: CodeArgType[] = []): string => {
+  const buildCodeNodeDeclarations = (codeArgs: CodeArgType[] = []): string => {
+    const frameosGlobals = `
+declare function now(): number;
+declare function parseTs(format: string, text: string): number;
+declare function format(ts: number, format: string): string;
+declare function getState(key: string): any;
+declare function getArg(key: string): any;
+declare function getContext(key: string): any;
+declare const state: Record<string, any>;
+declare const args: Record<string, any>;
+declare const context: {
+  loopIndex?: number;
+  loopKey?: string;
+  event?: string;
+  payload?: any;
+  hasImage?: boolean;
+};
+`
+
     const declarations = codeArgs
       .filter((arg) => isValidIdentifier(arg.name))
       .map((arg) => `declare const ${arg.name}: ${fieldTypeToTsType[arg.type] ?? 'any'};`)
 
-    return declarations.length ? `${declarations.join('\n')}\n` : ''
+    return `${frameosGlobals}${declarations.length ? `${declarations.join('\n')}\n` : ''}`
   }
 
   const updateCodeArgGlobals = (monaco: Monaco, codeArgs: CodeArgType[] = []): void => {
-    const declarations = buildCodeArgDeclarations(codeArgs)
+    const declarations = buildCodeNodeDeclarations(codeArgs)
     codeArgsLibRef.current?.dispose()
     codeArgsLibRef.current = declarations
       ? monaco.languages.typescript.typescriptDefaults.addExtraLib(declarations, `inmemory://code-node/${id}.d.ts`)

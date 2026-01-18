@@ -1,6 +1,7 @@
 import httpclient
 import std/json
 import std/strformat
+import std/strutils
 import std/times
 import std/uri
 import frameos/apps
