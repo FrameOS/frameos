@@ -1,4 +1,5 @@
 import strformat
+import strutils
 import pixie
 import options
 import frameos/apps
@@ -9,6 +10,7 @@ type
   AppConfig* = object
     inputImage*: Option[Image]
     image*: Image
+    imageData*: string
     placement*: string
     offsetX*: int
     offsetY*: int
@@ -19,7 +21,15 @@ type
 
 proc render*(self: App, context: ExecutionContext, image: Image) =
   try:
-    if self.appConfig.image.isNil:
+    let sourceImage =
+      if self.appConfig.imageData.len > 0:
+        if self.appConfig.imageData.startsWith("data:"):
+          decodeDataUrl(self.appConfig.imageData)
+        else:
+          decodeImageWithFallback(self.appConfig.imageData)
+      else:
+        self.appConfig.image
+    if sourceImage.isNil:
       raise newException(Exception, "No image provided.")
     let blendMode = case self.appConfig.blendMode:
       of "normal": NormalBlend
@@ -43,7 +53,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       of "inverse-mask": SubtractMaskBlend
       of "exclude-mask": ExcludeMaskBlend
       else: NormalBlend
-    scaleAndDrawImage(image, self.appConfig.image, self.appConfig.placement, self.appConfig.offsetX,
+    scaleAndDrawImage(image, sourceImage, self.appConfig.placement, self.appConfig.offsetX,
         self.appConfig.offsetY, blendMode)
   except Exception as e:
     let message = &"Error rendering image: {e.msg}"
@@ -62,4 +72,3 @@ proc get*(self: App, context: ExecutionContext): Image =
   else:
     newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
   render(self, context, result)
-

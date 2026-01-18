@@ -19,8 +19,16 @@
     {
       "name": "image",
       "type": "image",
-      "required": true,
+      "required": false,
       "label": "Image"
+    },
+    {
+      "name": "imageData",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "SVG data",
+      "hint": "SVG only. Provide raw SVG markup or a data URL like data:image/svg+xml;charset=utf-8,<svg...>."
     },
     {
       "name": "placement",

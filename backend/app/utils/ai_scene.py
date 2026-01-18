@@ -80,11 +80,13 @@ Follow these rules:
   and reset styles with ^(reset).
 - State nodes are used to supply scene fields into code/app inputs: set data.keyword to the scene field name and connect
   them via codeNodeEdge with sourceHandle "fieldOutput" (no suffixes) to targetHandle "fieldInput/<fieldName>" or "codeField/<argName>".
+- When multiple apps use the same state field, duplicate the state node for each app to keep routing clearer in the diagram.
 - Create edges that link the nodes into a valid flow:
   - Use "appNodeEdge" with sourceHandle "next" and targetHandle "prev" to connect the render event to the first app,
     and to connect each subsequent app node in order.
   - Do not connect multiple "next" edges to the same "prev" handle. The render flow must be a single linear chain
     where each app node connects to exactly one next node in sequence.
+  - If two nodes are connected via prev/next, do not connect those same nodes via any other edge type.
   - Logic + render apps form the left/right render flow (prev/next). Data apps are not part of the left/right chain
     and should only connect up/down via field output -> field input edges.
   - Apps in the render flow may still receive field inputs or emit field outputs; field wiring does NOT disqualify an
@@ -98,6 +100,10 @@ Follow these rules:
     "appNodeEdge". Instead, connect the render event directly to the render app (e.g. "render/image") with
     "appNodeEdge" and separately connect the data app output via "codeNodeEdge". This keeps the render flow triggered
     by the event.
+  - Render/logic apps connected via prev/next always share the implicit context.image canvas. Do not pass the canvas
+    through inputs when the app is in the prev/next chain.
+  - If render apps are connected via field outputs instead of prev/next, the image data must be passed along (or
+    generated) via field outputs/inputs as required.
   - Images are data. To display an image, first add a render app like "render/image" in the render flow, then connect
     the actual image output into its image field via a "codeNodeEdge" (fieldOutput -> fieldInput/imageField).
   - Never store an image output node as state in JSON; pass image outputs directly into app inputs via codeNodeEdge.
@@ -179,8 +185,10 @@ Check the scene against the user request and ensure it is valid:
 - Code/state output handles must be exactly "fieldOutput". Do not require or suggest named handles like "fieldOutput/<name>".
 - All state fields include a default "value" field which is a string.
 - The render flow does not branch: no multiple "next" edges point to the same "prev" handle.
+- If two nodes are connected via prev/next, they should not also be connected by any other edge type.
 - No image output is stored as state in JSON; image outputs must be wired directly into app inputs.
-- FrameOS scenes always render a visual output. The render event sets up context.image. That's the final output that we render.
+- FrameOS scenes always render a visual output. The render event sets up context.image. Apps connected via prev/next operate
+  on that shared canvas without needing it passed through inputs.
 - Be pragmatic about user-request matching: only flag clear contradictions or missing must-have elements. Do not be overly critical
   about stylistic differences or exact phrasing.
 - Do not suggest or imply changing the scene title during review. Title changes are not part of review feedback.

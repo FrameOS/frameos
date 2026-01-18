@@ -4,7 +4,6 @@ import std/strformat
 import std/strutils
 import std/times
 import std/uri
-import frameos/apps
 import frameos/types
 
 type
