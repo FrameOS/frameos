@@ -98,9 +98,15 @@ def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict
             "type": field.get("type"),
             "label": field.get("label"),
             "required": field.get("required"),
+            "options": field.get("options"),
         }
         for field in config.get("fields", [])
         if field.get("name")
+    ]
+    field_options = [
+        f"{field['name']}: {', '.join(field.get('options') or [])}"
+        for field in config.get("fields", [])
+        if field.get("name") and field.get("options")
     ]
     output_details = [
         {
@@ -120,6 +126,7 @@ def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict
             f"Description: {description}",
             f"Category: {category}",
             f"Fields: {', '.join(fields)}",
+            f"Field options: {', '.join(field_options)}",
             f"Outputs: {', '.join(outputs)}",
             f"Settings: {', '.join(settings)}",
             f"Config path: {config_path.relative_to(repo_root)}",

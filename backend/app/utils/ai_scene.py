@@ -120,6 +120,9 @@ Follow these rules:
     If a user mentions a render timeout or cadence, set refreshInterval accordingly (do not invent new timeout fields).
   - settings.backgroundColor sets the default scene background fill as a hex color (e.g. "#000000").
     If not specified, it defaults to black. Use render/color or render/gradient apps for more complex backgrounds.
+- For complex scenes, split data gathering from data rendering. Use data/logic apps or code nodes to gather/compute data,
+  then persist JSON-friendly outputs (scalars, strings, objects, arrays) with the "logic/setAsState" app by wiring the
+  output into fieldInput/valueJson. Later, read them back by referencing "state.<name>" via state nodes (keyword = name).
 - Fonts available (TTF filenames) for font fields and caret syntax:
   - Ubuntu: Ubuntu-Regular.ttf (default), Ubuntu-Bold.ttf, Ubuntu-Italic.ttf, Ubuntu-BoldItalic.ttf,
     Ubuntu-Light.ttf, Ubuntu-LightItalic.ttf, Ubuntu-Medium.ttf, Ubuntu-MediumItalic.ttf.
@@ -178,6 +181,7 @@ Check the scene against the user request and ensure it is valid:
 - FrameOS scenes always render a visual output. The render event sets up context.image. That's the final output that we render.
 - Be pragmatic about user-request matching: only flag clear contradictions or missing must-have elements. Do not be overly critical
   about stylistic differences or exact phrasing.
+- Do not suggest or imply changing the scene title during review. Title changes are not part of review feedback.
 Respond with JSON only, using keys:
 - solves: boolean (true only if the scene matches the user request)
 - issues: array of short strings describing any problems
