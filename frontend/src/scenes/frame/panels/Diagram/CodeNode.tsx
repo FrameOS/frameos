@@ -169,7 +169,7 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
             ]}
           />
         </div>
-        <div className="p-1 flex-1">
+        <div className="p-1 flex-1 min-h-0 min-w-0">
           {codeNodeLanguage === 'js' ? (
             <Editor
               height="100%"
