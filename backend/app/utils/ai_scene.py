@@ -149,12 +149,12 @@ Follow these rules:
 - Every state field must include a default value in the "value" field as a String(val) version of itself. No quotes around strings.
 - Interpreted scenes can include quick JavaScript snippets in code nodes:
   - Put JS in data.codeJS (not data.code) for interpreted scenes.
-  - The QuickJS environment exposes: state.<field>, args.<argName>, context.<event|payload|loopIndex|loopKey|hasImage>.
+  - The QuickJS environment exposes: state.<field>, <argName>, context.<event|payload|loopIndex|loopKey|hasImage>.
   - Console logging is available via console.log/warn/error.
   - Time helpers: parseTs(format, text), format(timestamp, format), now().
-  - Keep snippets as expressions that return a value (e.g. "state.title ?? 'Hello'" or "args.url").
+  - Keep snippets as expressions that return a value (e.g. "state.title ?? 'Hello'" or "url").
   - If you need multiple statements or setup logic, wrap the snippet in an IIFE and return the value.
-  - JavaScript code nodes only support string outputs; do not output image fields from JS.
+  - JavaScript code nodes do not support image outputs. All other types (json, string, boolean, font, etc) are supported.
   - To use SVGs, route them through the download image app and pass a data URL into it.
 
 Use any relevant scene examples from the provided context as guidance.

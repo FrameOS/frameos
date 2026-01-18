@@ -359,7 +359,10 @@ export function Scenes() {
                 const durationLabel = isLast ? null : formatDurationSeconds(duration)
                 return (
                   <li key={`${log.timestamp}-${index}`} className="flex flex-wrap items-baseline gap-2">
-                    <span>{log.message}</span>
+                    <span>
+                      {log.message}
+                      {isLast && isGeneratingAiScene ? <span className="ai-scene-ellipsis" aria-hidden /> : null}
+                    </span>
                     {durationLabel ? <span className="text-gray-500">{durationLabel}</span> : null}
                   </li>
                 )

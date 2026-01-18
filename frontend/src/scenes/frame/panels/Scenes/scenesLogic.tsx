@@ -103,6 +103,7 @@ export const scenesLogic = kea<scenesLogicType>([
       log,
     }),
     toggleAiSceneLogsExpanded: true,
+    setAiSceneLogsExpanded: (expanded: boolean) => ({ expanded }),
     installMissingActiveScene: true,
     installMissingActiveSceneSuccess: true,
     installMissingActiveSceneFailure: true,
@@ -260,6 +261,7 @@ export const scenesLogic = kea<scenesLogicType>([
       false,
       {
         toggleAiSceneLogsExpanded: (state) => !state,
+        setAiSceneLogsExpanded: (_, { expanded }) => expanded,
         closeAiScene: () => false,
       },
     ],
@@ -489,6 +491,7 @@ export const scenesLogic = kea<scenesLogicType>([
       }
       const requestId = uuidv4()
       actions.setAiSceneRequestId(requestId)
+      actions.setAiSceneLogsExpanded(true)
       try {
         const response = await apiFetch('/api/ai/scenes/generate', {
           method: 'POST',

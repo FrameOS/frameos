@@ -34,6 +34,33 @@ body {
   animation: fadeInOut 3s infinite ease-in-out;
 }
 
+@keyframes aiSceneEllipsis {
+  0% {
+    width: 1ch;
+  }
+  33% {
+    width: 2ch;
+  }
+  66% {
+    width: 3ch;
+  }
+  100% {
+    width: 1ch;
+  }
+}
+
+.ai-scene-ellipsis {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  width: 1ch;
+  animation: aiSceneEllipsis 1.2s infinite;
+}
+
+.ai-scene-ellipsis::after {
+  content: '...';
+}
+
 .react-flow .react-flow__node {
   cursor: default;
 }
