@@ -82,7 +82,10 @@ const MAX_HISTORY_LENGTH = 100
 const HISTORY_DEBOUNCE_MS = 300
 
 const normalizeNodes = (nodes: DiagramNode[]): DiagramNode[] =>
-  nodes.map((node) => (node.selected ? { ...node, selected: false } : node))
+  nodes.map((node) => {
+    const { selected, dragging, ...rest } = node
+    return rest as DiagramNode
+  })
 
 const normalizeEdges = (edges: Edge[]): Edge[] =>
   edges.map((edge) => (edge.selected ? { ...edge, selected: false } : edge))
@@ -450,6 +453,9 @@ export const diagramLogic = kea<diagramLogicType>([
       if (cache.ignoreHistory) {
         return
       }
+      if (changes.length > 0 && changes.every((change) => change.type === 'select')) {
+        return
+      }
       const snapshot = makeHistorySnapshot(values.nodes, values.rawEdges)
       const isDragging = changes.some((change) => change.type === 'position' && change.dragging)
       if (isDragging) {
@@ -482,8 +488,11 @@ export const diagramLogic = kea<diagramLogicType>([
       }
       actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
     },
-    onEdgesChange: () => {
+    onEdgesChange: ({ changes }) => {
       if (cache.ignoreHistory) {
+        return
+      }
+      if (changes.length > 0 && changes.every((change) => change.type === 'select')) {
         return
       }
       actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
