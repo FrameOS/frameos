@@ -153,6 +153,9 @@ Follow these rules:
   - Console logging is available via console.log/warn/error.
   - Time helpers: parseTs(format, text), format(timestamp, format), now().
   - Keep snippets as expressions that return a value (e.g. "state.title ?? 'Hello'" or "args.url").
+  - If you need multiple statements or setup logic, wrap the snippet in an IIFE and return the value.
+  - JavaScript code nodes only support string outputs; do not output image fields from JS.
+  - To use SVGs, route them through the download image app and pass a data URL into it.
 
 Use any relevant scene examples from the provided context as guidance.
 """.strip()
