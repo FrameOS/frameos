@@ -131,6 +131,17 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
   return tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT'
 }
 
+const hasTextSelection = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) {
+    return false
+  }
+  return !selection.isCollapsed && selection.toString().length > 0
+}
+
 const sanitizeClipboardNode = (node: DiagramNode): DiagramNode => {
   const { selected, dragging, positionAbsolute, ...rest } = node as DiagramNode & {
     dragging?: boolean
@@ -784,6 +795,9 @@ export const diagramLogic = kea<diagramLogicType>([
 
     cache.keydownHandler = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) {
+        return
+      }
+      if ((event.metaKey || event.ctrlKey) && hasTextSelection()) {
         return
       }
       const key = event.key.toLowerCase()
