@@ -126,7 +126,7 @@ export function Scenes() {
     { label: 'Weather panel', prompt: 'Show a clean weather dashboard with temperature, forecast, and icons.' },
     {
       label: 'Photo spotlight',
-      prompt: 'Create a photo spotlight with a caption and subtle border for all local images (expose a search term).',
+      prompt: 'Create a local photo spotlight with a caption and subtle border. Show image metadata on top.',
     },
   ]
 
@@ -339,7 +339,8 @@ export function Scenes() {
       <div className="space-y-2">
         <div className="text-gray-400">
           Please note: Scene generation is still in early development. Generated scenes may not work well or may even
-          crash your frame. Use with caution and always review the generated code.
+          crash your frame. Use with caution and always review the generated code. To see a list of available apps,
+          click "apps" in the right sidebar.
         </div>
         <div className="flex items-center gap-2">
           <Button

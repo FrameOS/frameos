@@ -11,6 +11,14 @@
       "required": true,
       "label": "Image URL",
       "placeholder": "https://domain/image"
+    },
+    {
+      "name": "metadataStateKey",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Optional metadata state key",
+      "hint": "Enter a state key to persist metadata about the image. Stores: {url, width, height, exif: {...} }"
     }
   ],
   "output": [

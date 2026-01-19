@@ -25,7 +25,16 @@
       "type": "string",
       "value": "",
       "required": false,
-      "label": "Optional state key for persistence"
+      "label": "Optional state key for persistence",
+      "hint": "Enter a state key to persist the current image index between restarts."
+    },
+    {
+      "name": "metadataStateKey",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Optional metadata state key",
+      "hint": "Enter a state key to persist metadata about the last image. Stores: {path, filename, index, total, width, height, exif: {...} }"
     },
     {
       "name": "search",

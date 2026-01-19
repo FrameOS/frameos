@@ -13,6 +13,7 @@ type
     search*: string
     orientation*: string
     saveAssets*: string
+    metadataStateKey*: string
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -73,6 +74,20 @@ proc get*(self: App, context: ExecutionContext): Image =
     let imageData = client2.request(realImageUrl, httpMethod = HttpGet)
     if imageData.code != Http200:
       return self.error(context, &"Error {imageData.status} fetching image")
+
+    if self.appConfig.metadataStateKey != "":
+      self.scene.state[self.appConfig.metadataStateKey] = %*{
+        "source": "unsplash",
+        "search": search,
+        "orientation": orientation,
+        "imageUrl": realImageUrl,
+        "id": json{"id"}.getStr,
+        "description": json{"description"}.getStr(json{"alt_description"}.getStr("")),
+        "photoUrl": json{"links"}{"html"}.getStr,
+        "author": json{"user"}{"name"}.getStr,
+        "authorUsername": json{"user"}{"username"}.getStr,
+        "authorUrl": json{"user"}{"links"}{"html"}.getStr
+      }
 
     if self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always":
       discard self.saveAsset(&"{search} {width}x{height}", ".jpg", imageData.body, self.appConfig.saveAssets == "auto")

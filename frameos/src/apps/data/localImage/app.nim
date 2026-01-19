@@ -16,6 +16,7 @@ type
     path*: string
     order*: string
     counterStateKey*: string
+    metadataStateKey*: string
     search*: string
 
   App* = ref object of AppRoot
@@ -38,7 +39,7 @@ proc isInThumbsDir(path: string): bool =
   return normalized.startsWith(".thumbs/") or normalized.contains("/.thumbs/")
 
 # Function to return all images in a folder
-proc getImagesInFolder(folder: string, search: string, ignoreThumbs: bool = false): seq[string] =
+proc getImagesInFolder(folder: string, search: string): seq[string] =
   # if folder is a file
   if fileExists(folder):
     if isImage(folder):
@@ -48,7 +49,7 @@ proc getImagesInFolder(folder: string, search: string, ignoreThumbs: bool = fals
   let searchQuery = search.toLower()
   var images: seq[string] = @[]
   for file in walkDirRec(folder, relative = true):
-    if ignoreThumbs and isInThumbsDir(file):
+    if isInThumbsDir(file):
       continue
     if isImage(file) and (searchQuery == "" or file.toLower().contains(searchQuery)):
       images.add(file)
@@ -64,7 +65,7 @@ proc error*(self: App, context: ExecutionContext, message: string): Image =
 
 proc init*(self: App) =
   let folder = if self.appConfig.path == "": self.frameConfig.assetsPath else: self.appConfig.path
-  self.images = getImagesInFolder(folder, self.appConfig.search, ignoreThumbs = self.appConfig.path == "")
+  self.images = getImagesInFolder(folder, self.appConfig.search)
   self.lastPath = self.appConfig.path
   self.lastSearch = self.appConfig.search
   self.counter = 0
@@ -81,7 +82,7 @@ proc init*(self: App) =
 proc refreshImages(self: App) =
   let folder = if self.appConfig.path == "": self.frameConfig.assetsPath else: self.appConfig.path
   let previousImage = self.lastImage
-  let newImages = getImagesInFolder(folder, self.appConfig.search, ignoreThumbs = self.appConfig.path == "")
+  let newImages = getImagesInFolder(folder, self.appConfig.search)
   let hasChanged = newImages != self.images
   var nextImages = newImages
   self.lastPath = self.appConfig.path
@@ -120,7 +121,8 @@ proc get*(self: App, context: ExecutionContext): Image =
     return self.error(context, &"No images found in the folder: {self.appConfig.path}")
 
   let folder = if self.appConfig.path == "": self.frameConfig.assetsPath else: self.appConfig.path
-  let currentImage = self.images[self.counter]
+  let currentIndex = self.counter
+  let currentImage = self.images[currentIndex]
   var nextImage: Option[Image] = none(Image)
   let path = joinPath(folder, currentImage)
   self.log("Loading image: " & path)
@@ -133,5 +135,20 @@ proc get*(self: App, context: ExecutionContext): Image =
   except CatchableError as e:
     return self.error(context, "An error occurred while loading the image: " & path & "\n" & e.msg)
 
+  let image = nextImage.get()
+  if self.appConfig.metadataStateKey != "":
+    var metadata = %*{
+      "path": path,
+      "filename": currentImage,
+      "index": currentIndex,
+      "total": self.images.len,
+      "width": image.width,
+      "height": image.height
+    }
+    let exifMetadata = getExifMetadataFromPath(path)
+    if exifMetadata.isSome:
+      metadata["exif"] = exifMetadata.get()
+    self.scene.state[self.appConfig.metadataStateKey] = metadata
+
   self.lastImage = some(currentImage)
-  return nextImage.get()
+  return image
