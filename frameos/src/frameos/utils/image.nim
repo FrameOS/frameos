@@ -67,12 +67,13 @@ proc decodeJpegFileWithImageMagick(path: string): Option[Image] =
     p.close()
   return none(Image)
 
-proc decodeSvgWithImageMagick*(svg: string): Option[Image] =
+proc decodeSvgWithImageMagick*(svg: string, width: int, height: int): Option[Image] =
   let cmd = imageMagickCommand()
   if cmd == "":
     return none(Image)
+  let sizeArg = &"{width}x{height}"
   var p = startProcess(cmd,
-    args = @["-quiet", "-background", "none", "svg:-", "bmp:-"],
+    args = @["-quiet", "-background", "none", "-size", sizeArg, "svg:-", "-resize", sizeArg, "bmp:-"],
     options = {poUsePath})
   try:
     p.inputStream.write(svg)

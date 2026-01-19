@@ -41,7 +41,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
     if self.appConfig.svg.len == 0:
       raise newException(Exception, "No SVG provided.")
     let svgMarkup = decodeSvgInput(self.appConfig.svg)
-    let svgImageOption = decodeSvgWithImageMagick(svgMarkup)
+    let svgImageOption = decodeSvgWithImageMagick(svgMarkup, image.width, image.height)
     if svgImageOption.isNone:
       raise newException(Exception, "Failed to render SVG.")
     let svgImage = svgImageOption.get()
