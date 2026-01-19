@@ -117,6 +117,7 @@ Follow these rules:
   "fieldInput/<fieldName>".
 - Code nodes can be added anywhere for most fields (see "Haiku of the hour" for an example); only data.codeJS
   needs to be filled in for interpreted scenes.
+- If you must use template strings, use code nodes with backticks. Do not use template strings directly in app configs.
 - If you include "scene" nodes (to embed another scene), set data.keyword to the referenced scene id and connect them
   from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
   "field/render_functions[row][col]" and targetHandle "prev".
