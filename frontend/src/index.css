@@ -64,9 +64,6 @@ body {
 .react-flow .react-flow__node {
   cursor: default;
 }
-.react-flow .react-flow__node-code {
-  overflow: hidden;
-}
 
 .react-flow .react-flow__node .frameos-node-title {
   cursor: grab;

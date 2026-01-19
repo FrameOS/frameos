@@ -29,24 +29,26 @@ export function Apps() {
       {Object.entries(appsByCategory).map(([category, apps]) => (
         <div className="space-y-2" key={category}>
           <H6 className="capitalize">{categoryLabels[category] ?? category}</H6>
-          {Object.entries(apps).map(([keyword, app]) => (
-            <Box
-              key={keyword}
-              className="bg-gray-900 px-3 py-2 dndnode flex items-center justify-between space-x-2 cursor-move w-full"
-              draggable
-              onDragStart={(event) => onDragStart(event, keyword)}
-            >
-              <div className="w-full">
-                <div className="flex items-start justify-between">
-                  <H6>{app.name}</H6>
-                  {app.output?.map((output, i) => (
-                    <FieldTypeTag key={i} className="mt-1" type={output.type} />
-                  ))}
+          {Object.entries(apps)
+            .toSorted(([, a], [, b]) => a.name.localeCompare(b.name))
+            .map(([keyword, app]) => (
+              <Box
+                key={keyword}
+                className="bg-gray-900 px-3 py-2 dndnode flex items-center justify-between space-x-2 cursor-move w-full"
+                draggable
+                onDragStart={(event) => onDragStart(event, keyword)}
+              >
+                <div className="w-full">
+                  <div className="flex items-start justify-between">
+                    <H6>{app.name}</H6>
+                    {app.output?.map((output, i) => (
+                      <FieldTypeTag key={i} className="mt-1" type={output.type} />
+                    ))}
+                  </div>
+                  <div className="text-sm">{app.description}</div>
                 </div>
-                <div className="text-sm">{app.description}</div>
-              </div>
-            </Box>
-          ))}
+              </Box>
+            ))}
         </div>
       ))}
     </div>

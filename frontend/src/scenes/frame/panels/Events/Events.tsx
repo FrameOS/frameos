@@ -38,22 +38,24 @@ export function Events() {
         </Tab>
       </Tabs>
 
-      {Object.values(events).map(({ name, description, fields }) => (
-        <Box
-          key={name}
-          className="bg-gray-900 px-3 py-2 dndnode cursor-move"
-          draggable
-          onDragStart={(event) => onDragStart(event, tab === 'listen' ? 'event' : 'dispatch', name)}
-        >
-          <div className="flex items-center justify-between w-full">
-            <H6>{name}</H6>
-          </div>
-          <div className="text-sm">
-            {description}
-            {fields && fields.length > 0 ? ' (' + fields.map((f) => `${f.name}: ${f.type}`).join(', ') + ')' : ''}
-          </div>
-        </Box>
-      ))}
+      {Object.values(events)
+        .toSorted((a, b) => a.name.localeCompare(b.name))
+        .map(({ name, description, fields }) => (
+          <Box
+            key={name}
+            className="bg-gray-900 px-3 py-2 dndnode cursor-move"
+            draggable
+            onDragStart={(event) => onDragStart(event, tab === 'listen' ? 'event' : 'dispatch', name)}
+          >
+            <div className="flex items-center justify-between w-full">
+              <H6>{name}</H6>
+            </div>
+            <div className="text-sm">
+              {description}
+              {fields && fields.length > 0 ? ' (' + fields.map((f) => `${f.name}: ${f.type}`).join(', ') + ')' : ''}
+            </div>
+          </Box>
+        ))}
       {events.length === 0 ? (
         search === '' ? (
           <div>No events found</div>
