@@ -1,6 +1,11 @@
-import strformat
-import pixie
+import base64
 import options
+import pixie
+import sequtils
+import strformat
+import strutils
+import uri
+
 import frameos/apps
 import frameos/types
 import frameos/utils/image
@@ -8,7 +13,7 @@ import frameos/utils/image
 type
   AppConfig* = object
     inputImage*: Option[Image]
-    image*: Image
+    svg*: string
     placement*: string
     offsetX*: int
     offsetY*: int
@@ -17,11 +22,29 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
+proc decodeSvgInput(svgInput: string): string =
+  if svgInput.startsWith("data:"):
+    let commaIndex = svgInput.find(',')
+    if commaIndex == -1:
+      raise newException(ValueError, "Invalid data URL.")
+    let header = svgInput[5 ..< commaIndex]
+    let dataBody = svgInput[commaIndex + 1 .. ^1]
+    let headerParts = if header.len > 0: header.split(';') else: @[""]
+    let isBase64 = headerParts.anyIt(it == "base64")
+    if isBase64:
+      return dataBody.decode
+    return decodeUrl(dataBody)
+  return svgInput
+
 proc render*(self: App, context: ExecutionContext, image: Image) =
   try:
-    let sourceImage = self.appConfig.image
-    if sourceImage.isNil:
-      raise newException(Exception, "No image provided.")
+    if self.appConfig.svg.len == 0:
+      raise newException(Exception, "No SVG provided.")
+    let svgMarkup = decodeSvgInput(self.appConfig.svg)
+    let svgImageOption = decodeSvgWithImageMagick(svgMarkup)
+    if svgImageOption.isNone:
+      raise newException(Exception, "Failed to render SVG.")
+    let svgImage = svgImageOption.get()
     let blendMode = case self.appConfig.blendMode:
       of "normal": NormalBlend
       of "overwrite": OverwriteBlend
@@ -44,10 +67,10 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       of "inverse-mask": SubtractMaskBlend
       of "exclude-mask": ExcludeMaskBlend
       else: NormalBlend
-    scaleAndDrawImage(image, sourceImage, self.appConfig.placement, self.appConfig.offsetX,
-        self.appConfig.offsetY, blendMode)
+    scaleAndDrawImage(image, svgImage, self.appConfig.placement, self.appConfig.offsetX,
+      self.appConfig.offsetY, blendMode)
   except Exception as e:
-    let message = &"Error rendering image: {e.msg}"
+    let message = &"Error rendering SVG: {e.msg}"
     self.logError(message)
     let errorImage = renderError(image.width, image.height, message)
     scaleAndDrawImage(image, errorImage, self.appConfig.placement)

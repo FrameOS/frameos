@@ -1,6 +1,6 @@
 {
-  "name": "Render Image",
-  "description": "Render an image onto a canvas",
+  "name": "Render SVG",
+  "description": "Render an SVG onto a canvas",
   "category": "render",
   "version": "1.0.0",
   "fields": [
@@ -17,10 +17,12 @@
       ]
     },
     {
-      "name": "image",
-      "type": "image",
+      "name": "svg",
+      "type": "string",
+      "value": "",
       "required": true,
-      "label": "Image"
+      "label": "SVG",
+      "hint": "Provide raw SVG markup or a data URL like data:image/svg+xml;charset=utf-8,<svg...>."
     },
     {
       "name": "placement",

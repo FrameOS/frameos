@@ -67,6 +67,27 @@ proc decodeJpegFileWithImageMagick(path: string): Option[Image] =
     p.close()
   return none(Image)
 
+proc decodeSvgWithImageMagick*(svg: string): Option[Image] =
+  let cmd = imageMagickCommand()
+  if cmd == "":
+    return none(Image)
+  var p = startProcess(cmd,
+    args = @["-quiet", "-background", "none", "svg:-", "bmp:-"],
+    options = {poUsePath})
+  try:
+    p.inputStream.write(svg)
+    p.inputStream.close()
+    let output = p.outputStream.readAll()
+    let rc = p.waitForExit()
+    if rc == 0 and output.len > 0:
+      try:
+        return some(decodeImage(output))
+      except CatchableError:
+        return none(Image)
+  finally:
+    p.close()
+  return none(Image)
+
 proc decodeImageWithFallback*(data: string): Image =
   if isJpegData(data):
     let converted = decodeJpegWithImageMagick(data)
