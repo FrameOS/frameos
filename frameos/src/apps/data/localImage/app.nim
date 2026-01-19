@@ -33,8 +33,12 @@ proc isImage(file: string): bool =
       return true
   return false
 
+proc isInThumbsDir(path: string): bool =
+  let normalized = path.replace('\\', '/')
+  return normalized.startsWith(".thumbs/") or normalized.contains("/.thumbs/")
+
 # Function to return all images in a folder
-proc getImagesInFolder(folder: string, search: string): seq[string] =
+proc getImagesInFolder(folder: string, search: string, ignoreThumbs: bool = false): seq[string] =
   # if folder is a file
   if fileExists(folder):
     if isImage(folder):
@@ -44,6 +48,8 @@ proc getImagesInFolder(folder: string, search: string): seq[string] =
   let searchQuery = search.toLower()
   var images: seq[string] = @[]
   for file in walkDirRec(folder, relative = true):
+    if ignoreThumbs and isInThumbsDir(file):
+      continue
     if isImage(file) and (searchQuery == "" or file.toLower().contains(searchQuery)):
       images.add(file)
   return images
@@ -58,7 +64,7 @@ proc error*(self: App, context: ExecutionContext, message: string): Image =
 
 proc init*(self: App) =
   let folder = if self.appConfig.path == "": self.frameConfig.assetsPath else: self.appConfig.path
-  self.images = getImagesInFolder(folder, self.appConfig.search)
+  self.images = getImagesInFolder(folder, self.appConfig.search, ignoreThumbs = self.appConfig.path == "")
   self.lastPath = self.appConfig.path
   self.lastSearch = self.appConfig.search
   self.counter = 0
@@ -75,7 +81,7 @@ proc init*(self: App) =
 proc refreshImages(self: App) =
   let folder = if self.appConfig.path == "": self.frameConfig.assetsPath else: self.appConfig.path
   let previousImage = self.lastImage
-  let newImages = getImagesInFolder(folder, self.appConfig.search)
+  let newImages = getImagesInFolder(folder, self.appConfig.search, ignoreThumbs = self.appConfig.path == "")
   let hasChanged = newImages != self.images
   var nextImages = newImages
   self.lastPath = self.appConfig.path
