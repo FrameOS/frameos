@@ -66,6 +66,7 @@ Follow these rules:
 - Code nodes can include JavaScript snippets in data.codeJS for interpreted scenes.
 - Code nodes arguments are used as variables in the code snippet, just <argNamen> (no args. prefix).
 - State nodes hold scene fields; set data.keyword to the field name. Use scene fields to allow user customization.
+- Every state node must include data.value as a string default (use "" unless the prompt specifies a different default).
 - Scene nodes embed other scenes; set data.keyword to the scene id.
 - App node data must include data.keyword (app identifier) and data.config (app configuration).
 - Data apps (e.g. "data/openaiText", "data/openaiImage") provide data via codeNodeEdge edges.
@@ -151,8 +152,6 @@ Follow these rules:
   - enabled: true to turn caching on.
   - inputEnabled: cache by inputs (output recalculates when any inputs change).
   - durationEnabled + duration (seconds): refresh after a fixed interval.
-  - expressionEnabled + expression + expressionType: refresh when the expression value changes.
-    The expression is a Nim snippet like now().format("yyyy-MM-dd") to refresh daily.
   - You can combine inputEnabled with an expression or duration to cache per inputs but still refresh on a schedule,
     e.g. cache by inputs and use an expression for the current date so it reloads once per day.
   - Alternatively, add a code node that outputs a date string and feed it into the app as an input; with inputEnabled

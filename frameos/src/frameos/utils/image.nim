@@ -6,6 +6,7 @@ import osproc
 import options
 import sequtils
 import strutils
+import strformat
 import streams
 import uri
 

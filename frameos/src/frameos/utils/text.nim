@@ -210,6 +210,7 @@ proc typesetIntoBounds*(
   var chosen: Arrangement
   var chosenBorder: Option[Arrangement] = none(Arrangement)
   var scaleRatio = 1.0
+  var fittedSize = baseSize
 
   if opts.overflow == "visible":
     chosen = toTypeset(opts.text, opts.richTextMode, baseSize, baseSize, opts.fontColor, typeface, bounds, hAlign,
@@ -236,22 +237,30 @@ proc typesetIntoBounds*(
       elif tooBig == 0.0:
         # fits and was never too big -> accept
         chosen = layout
+        fittedSize = fontSize
         break
       else:
         # fits and was too big before, tighten upward
-        if innerH - lh < 1: chosen = layout; break
+        if innerH - lh < 1:
+          chosen = layout
+          fittedSize = fontSize
+          break
         tooSmall = fontSize
-        if tooBig - tooSmall < 0.5: chosen = layout; break
+        if tooBig - tooSmall < 0.5:
+          chosen = layout
+          fittedSize = fontSize
+          break
         fontSize = (tooBig + tooSmall) / 2
 
     if chosen.runes.len == 0:
       # safety: try last computed
       chosen = toTypeset(opts.text, opts.richTextMode, fontSize, baseSize, opts.fontColor, typeface, bounds, hAlign,
           vAlign, false, opts.assetsPath)
+      fittedSize = fontSize
 
-    scaleRatio = if chosen.fonts.len > 0: chosen.fonts[0].size / baseSize else: 1.0
+    scaleRatio = if baseSize == 0: 1.0 else: fittedSize / baseSize
     if opts.borderWidth > 0:
-      let borderLayout = toTypeset(opts.text, opts.richTextMode, chosen.fonts[0].size, baseSize, opts.borderColor,
+      let borderLayout = toTypeset(opts.text, opts.richTextMode, fittedSize, baseSize, opts.borderColor,
           typeface, bounds, hAlign, vAlign, true, opts.assetsPath)
       chosenBorder = some(borderLayout)
 
