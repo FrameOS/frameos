@@ -124,7 +124,10 @@ export function Scenes() {
     },
     { label: 'Minimal clock', prompt: 'Design a minimalist analog clock for an e-ink frame.' },
     { label: 'Weather panel', prompt: 'Show a clean weather dashboard with temperature, forecast, and icons.' },
-    { label: 'Photo spotlight', prompt: 'Create a photo spotlight with a caption and subtle border.' },
+    {
+      label: 'Photo spotlight',
+      prompt: 'Create a photo spotlight with a caption and subtle border for all local images (expose a search term).',
+    },
   ]
 
   const onPromptDragOver = (event: React.DragEvent<HTMLTextAreaElement>) => {
