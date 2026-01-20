@@ -241,6 +241,10 @@ Check the scene against the user request and ensure it is valid:
 - No image output is stored as state in JSON; image outputs must be wired directly into app inputs.
 - FrameOS scenes always render a visual output. The render event sets up context.image. Apps connected via prev/next operate
   on that shared canvas without needing it passed through inputs.
+- Frame details (frame name, resolution, device, GPIO buttons) are optional context hints. Do NOT require them to be encoded
+  in the scene unless the user explicitly asked to reference them.
+- GPIO buttons are optional hardware hints. Only require button events or button-driven logic if the user explicitly asked for
+  a GPIO button interaction.
 - Be pragmatic about user-request matching: only flag clear contradictions or missing must-have elements. Do not be overly critical
   about stylistic differences or exact phrasing.
 - Do not suggest or imply changing the scene title during review. Title changes are not part of review feedback.
