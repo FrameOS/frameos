@@ -513,7 +513,7 @@ export const scenesLogic = kea<scenesLogicType>([
         actions.generateAiSceneSuccess()
         actions.setAiSceneLogMessage({
           requestId,
-          message: 'Scene applied to the editor.',
+          message: 'Scene generated: ' + (title || 'AI Generated Scene'),
           status: 'success',
           timestamp: new Date().toISOString(),
         })

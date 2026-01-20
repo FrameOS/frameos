@@ -84,11 +84,12 @@ SCENE_JSON_SYSTEM_PROMPT = """
 You are a FrameOS scene generator. Build scenes JSON that can be uploaded to FrameOS.
 Reference TypeScript shapes (for structure sanity):
 - Scene: { id: string, name: string, nodes: Node[], edges: Edge[], settings: { execution: "interpreted", ... }, fields?: Field[] }
-- Node: { id: string, type: "event"|"app"|"state"|"code"|"scene", data: NodeData, position?: { x:number, y:number } }
+- Node: { id: string, type: "event"|"dispatch"|"app"|"state"|"code"|"scene", data: NodeData, position?: { x:number, y:number } }
 - Edge: { id?: string, type?: "appNodeEdge"|"codeNodeEdge", source: string, target: string, sourceHandle?: string, targetHandle?: string }
 - Field: { name: string, type: FieldType, label?: string, description?: string, required?: boolean, value?: any, options?: string[] }
 - NodeData:
   - EventNodeData: { keyword: string }
+  - DispatchNodeData: { keyword: string, config: object }
   - AppNodeData: { keyword: string, config: object, sources?: object, cache?: object }
   - StateNodeData: { keyword: string }
   - CodeNodeData: { codeJS?: string, code?: string, codeArgs?: { name: string, type: FieldType }[], codeOutputs?: { name: string, type: FieldType }[], cache?: object, logOutput?: boolean }
@@ -99,13 +100,15 @@ Follow these rules:
 - Each scene must include: id (string), name (string), nodes (array), edges (array).
 - Each scene must include settings.execution = "interpreted" (never "compiled").
 - Each node must include: id (string), type (see below), data (object). Ignore positions.
-- Supported node types: "event", "app", "state", "code", "scene".
+- Supported node types: "event", "dispatch", "app", "state", "code", "scene".
 - Edges can be of type "appNodeEdge" or "codeNodeEdge".
 - Edges of type "appNodeEdge" connect app nodes (sourceHandle "next" to targetHandle "prev") or layout app fields (e.g. "field/render_functions[row][col]" to "prev").
 - Edges of type "codeNodeEdge" connect code or state node outputs (sourceHandle "fieldOutput") to app or code node inputs (targetHandle "fieldInput/<fieldName>" or "codeField/<argName>").
 - There is only one source handle for code/state outputs: "fieldOutput". Do NOT use "fieldOutput/<name>" or any named variants.
 - Each scene starts from one event node with data.keyword = "render" to trigger rendering.
 - Each connected render or logic node is executed in sequence via appNodeEdge edges.
+- To trigger a re-render (for example after setting state), add a dispatch node with data.keyword = "render" and connect it in the appNodeEdge flow.
+- Dispatch nodes are separate from apps; do not use app keywords like "dispatch/render".
 - App nodes are generic. For the actual data to render, use code nodes or data apps connected via codeNodeEdge edges.
 - If you want to render an image and then render text on top, use a render/image app node followed by a render/text app node,
   connecting them via appNodeEdge (next/prev), and connect the image data into the image app via codeNodeEdge.
