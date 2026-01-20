@@ -36,6 +36,11 @@ from app.websockets import publish_message
 from . import api_with_auth
 
 AI_ID_PATTERN = re.compile(r"[^A-Za-z0-9\\-_.@()!'~:|]")
+REQUIRED_EMBEDDING_PATHS = {
+    "frameos/src/apps/render/image",
+    "frameos/src/apps/render/text",
+    "frameos/src/apps/render/svg",
+}
 
 SERVICE_SECRET_FIELDS: dict[str, dict[str, Any]] = {
     "openAI": {"fields": ("apiKey",)},
@@ -88,6 +93,24 @@ def _filter_embeddings_for_services(embeddings: list[AiEmbedding], missing_servi
             continue
         filtered.append(item)
     return filtered
+
+
+def _ensure_required_embeddings(
+    ranked_items: list[AiEmbedding],
+    available_embeddings: list[AiEmbedding],
+) -> list[AiEmbedding]:
+    required_items = [
+        item
+        for item in available_embeddings
+        if item.source_type == "app" and item.source_path in REQUIRED_EMBEDDING_PATHS
+    ]
+    existing_keys = {(item.source_type, item.source_path) for item in ranked_items}
+    missing_items = [
+        item for item in required_items if (item.source_type, item.source_path) not in existing_keys
+    ]
+    if not missing_items:
+        return ranked_items
+    return [*missing_items, *ranked_items]
 
 
 def _sanitize_ai_id(value: str | None) -> str | None:
@@ -273,6 +296,7 @@ async def generate_scene(
                     top_k=DEFAULT_SCENE_CONTEXT_K,
                 ),
             ]
+            ranked_items = _ensure_required_embeddings(ranked_items, available_embeddings)
             seen: set[tuple[str, str]] = set()
             context_items = []
             context_items_strings = []
