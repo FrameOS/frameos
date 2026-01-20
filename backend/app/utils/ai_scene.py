@@ -224,6 +224,18 @@ Follow these rules:
 Use any relevant scene examples from the provided context as guidance.
 """.strip()
 
+SCENE_PLAN_SYSTEM_PROMPT = """
+You are planning a FrameOS scene. Produce a concise plan that will be compiled into scene JSON later.
+Return JSON with keys:
+- title: optional string for the scene.
+- intent: short statement of what the user wants.
+- components: array of app keywords or scene concepts to include.
+- layout: short description of layout/placement strategy.
+- data_flow: short description of how data flows into render/logic apps.
+- open_questions: array of strings for missing info; leave empty if not needed.
+Do not include markdown or code fences.
+""".strip()
+
 SCENE_REVIEW_SYSTEM_PROMPT = """
 You are a strict reviewer for FrameOS scene JSON.
 Check the scene against the user request and ensure it is valid:
@@ -507,6 +519,7 @@ async def generate_scene_json(
     context_items: list[AiEmbedding],
     api_key: str,
     model: str,
+    plan: dict[str, Any] | None = None,
     frame_context: str | None = None,
     ai_trace_id: str | None = None,
     ai_session_id: str | None = None,
@@ -514,6 +527,8 @@ async def generate_scene_json(
 ) -> dict[str, Any]:
     context_block = _format_context_items(context_items)
     scene_prompt_parts = [f"User request: {prompt}"]
+    if plan:
+        scene_prompt_parts.append(f"Scene plan: {json.dumps(plan, ensure_ascii=False)}")
     scene_prompt_parts.extend(
         [
             "Relevant context:",
@@ -527,6 +542,42 @@ async def generate_scene_json(
         messages=[
             {"role": "system", "content": SCENE_JSON_SYSTEM_PROMPT + ("\n\n" + frame_context if frame_context else "")},
             {"role": "user", "content": scene_prompt},
+        ],
+        context_items=context_items,
+        ai_trace_id=ai_trace_id,
+        ai_session_id=ai_session_id,
+        ai_parent_id=ai_parent_id,
+    )
+
+
+async def generate_scene_plan(
+    *,
+    prompt: str,
+    context_items: list[AiEmbedding],
+    api_key: str,
+    model: str,
+    frame_context: str | None = None,
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
+) -> dict[str, Any]:
+    context_block = _format_context_items(context_items)
+    plan_prompt_parts = [f"User request: {prompt}"]
+    if frame_context:
+        plan_prompt_parts.extend(["Frame details:", frame_context])
+    plan_prompt_parts.extend(
+        [
+            "Relevant context:",
+            context_block or "(no context available)",
+        ]
+    )
+    plan_prompt = "\n\n".join(plan_prompt_parts)
+    return await _request_scene_plan(
+        api_key=api_key,
+        model=model,
+        messages=[
+            {"role": "system", "content": SCENE_PLAN_SYSTEM_PROMPT},
+            {"role": "user", "content": plan_prompt},
         ],
         context_items=context_items,
         ai_trace_id=ai_trace_id,
@@ -638,6 +689,7 @@ async def repair_scene_json(
     model: str,
     payload: dict[str, Any],
     issues: list[str],
+    plan: dict[str, Any] | None = None,
     frame_context: str | None = None,
     ai_trace_id: str | None = None,
     ai_session_id: str | None = None,
@@ -648,6 +700,8 @@ async def repair_scene_json(
         f"User request: {prompt}",
         f"Reviewer issues: {json.dumps(issues, ensure_ascii=False)}",
     ]
+    if plan:
+        scene_prompt_parts.append(f"Scene plan: {json.dumps(plan, ensure_ascii=False)}")
     if frame_context:
         scene_prompt_parts.extend(["Frame details:", frame_context])
     scene_prompt_parts.extend(
@@ -696,6 +750,41 @@ async def _request_scene_json(
             ai_parent_id=ai_parent_id,
             extra={
                 "operation": "generate_scene_json",
+                "model": model or SCENE_MODEL,
+                "context_items": len(context_items),
+            },
+        ),
+    )
+    message = response.choices[0].message if response.choices else None
+    content = message.content if message else "{}"
+    return json.loads(content)
+
+
+async def _request_scene_plan(
+    *,
+    api_key: str,
+    model: str,
+    messages: list[dict[str, str]],
+    context_items: list[AiEmbedding],
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
+) -> dict[str, Any]:
+    client = _openai_client(api_key, timeout=90)
+    span_id = _new_ai_span_id()
+    response = await client.chat.completions.create(
+        model=model or SCENE_MODEL,
+        messages=messages,
+        response_format={"type": "json_object"},
+        posthog_distinct_id=config.INSTANCE_ID,
+        posthog_properties=_build_ai_posthog_properties(
+            model=model or SCENE_MODEL,
+            ai_trace_id=ai_trace_id,
+            ai_session_id=ai_session_id,
+            ai_span_id=span_id,
+            ai_parent_id=ai_parent_id,
+            extra={
+                "operation": "generate_scene_plan",
                 "model": model or SCENE_MODEL,
                 "context_items": len(context_items),
             },

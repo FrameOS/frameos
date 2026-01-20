@@ -25,6 +25,7 @@ from app.utils.ai_scene import (
     create_embeddings,
     format_frame_context,
     generate_scene_json,
+    generate_scene_plan,
     repair_scene_json,
     rank_embeddings,
     review_scene_solution,
@@ -329,11 +330,23 @@ async def generate_scene(
             )
 
         response_payload = None
+        scene_plan: dict[str, Any] | None = None
         validation_issues: list[str] = []
         review_issues: list[str] = []
         max_attempts = 3
         scene_model = openai_settings.get("sceneModel") or SCENE_MODEL
         review_model = openai_settings.get("reviewModel") or SCENE_REVIEW_MODEL
+        await _publish_ai_scene_log(redis, "Generating scene plan.", request_id, stage="plan")
+        scene_plan = await generate_scene_plan(
+            prompt=prompt,
+            context_items=context_items,
+            api_key=api_key,
+            model=scene_model,
+            frame_context=frame_context,
+            ai_trace_id=posthog_trace_id,
+            ai_session_id=posthog_session_id,
+            ai_parent_id=posthog_root_span_id,
+        )
         for attempt in range(1, max_attempts + 1):
             if attempt == 1:
                 await _publish_ai_scene_log(
@@ -347,6 +360,7 @@ async def generate_scene(
                     context_items=context_items,
                     api_key=api_key,
                     model=scene_model,
+                    plan=scene_plan,
                     frame_context=frame_context,
                     ai_trace_id=posthog_trace_id,
                     ai_session_id=posthog_session_id,
@@ -366,6 +380,7 @@ async def generate_scene(
                     model=scene_model,
                     payload=response_payload or {},
                     issues=validation_issues + review_issues,
+                    plan=scene_plan,
                     frame_context=frame_context,
                     ai_trace_id=posthog_trace_id,
                     ai_session_id=posthog_session_id,
