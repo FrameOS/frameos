@@ -59,18 +59,6 @@ def format_frame_context(frame: dict[str, Any] | None) -> str | None:
     color = frame.get("color")
     if isinstance(color, str) and color.strip():
         lines.append(f"- Color mode: {color.strip()}")
-    background_color = frame.get("background_color") or frame.get("backgroundColor")
-    if isinstance(background_color, str) and background_color.strip():
-        lines.append(f"- Background color: {background_color.strip()}")
-    scaling_mode = frame.get("scaling_mode") or frame.get("scalingMode")
-    if isinstance(scaling_mode, str) and scaling_mode.strip():
-        lines.append(f"- Scaling mode: {scaling_mode.strip()}")
-    rotate = frame.get("rotate")
-    if isinstance(rotate, int):
-        lines.append(f"- Rotate: {rotate}")
-    flip = frame.get("flip")
-    if isinstance(flip, str) and flip.strip():
-        lines.append(f"- Flip: {flip.strip()}")
     gpio_buttons = frame.get("gpio_buttons") or frame.get("gpioButtons") or []
     if isinstance(gpio_buttons, list) and gpio_buttons:
         formatted_buttons = _format_gpio_buttons(gpio_buttons)
@@ -186,7 +174,8 @@ Follow these rules:
   "field/render_functions[row][col]" and targetHandle "prev".
 - If you want to reduce the opacity of an image, render the image as a data node, then connect it to the "render/opacity"
   app as "image" and "opacity", and connect that to the "render/image" app in the render flow.
-- If you render a "render/color" or "render/gradient" background, you will wipe out all that was there b efore.
+- If you render a "render/color" or "render/gradient" background, you will wipe out all that was there before.
+- For render/text nodes, if there's no text to render (no value, no code node), omit the node.
 - Scene settings:
   - settings.refreshInterval is the render cadence in seconds. Use it to control how often the scene re-renders.
     If a user mentions a render timeout or cadence, set refreshInterval accordingly (do not invent new timeout fields).
@@ -275,7 +264,7 @@ def _format_context_items(items: list[AiEmbedding]) -> str:
     lines: list[str] = []
     for item in items:
         metadata = item.metadata_json or {}
-        header = f"[{item.source_type}] {item.name or item.source_path}"
+        header = f"[{"example scene" if item.source_type == "scene" else item.source_type}] {item.name or item.source_path}"
         keyword_list = metadata.get("keywords") or []
         app_keywords = metadata.get("appKeywords") or []
         event_keywords = metadata.get("eventKeywords") or []
@@ -289,17 +278,14 @@ def _format_context_items(items: list[AiEmbedding]) -> str:
                 [
                     header,
                     f"Summary: {item.summary}",
-                    f"Keywords: {', '.join(keyword_list)}" if keyword_list else "Keywords: (none)",
-                    f"App keywords: {', '.join(app_keywords)}" if app_keywords else "App keywords: (none)",
-                    f"Event keywords: {', '.join(event_keywords)}" if event_keywords else "Event keywords: (none)",
-                    f"Node types: {', '.join(node_types)}" if node_types else "Node types: (none)",
-                    f"Fields: {json.dumps(fields, ensure_ascii=False)}" if fields else "Fields: (none)",
-                    f"Outputs: {json.dumps(outputs, ensure_ascii=False)}" if outputs else "Outputs: (none)",
-                    f"Preview nodes: {json.dumps(preview_nodes, ensure_ascii=False)}"
-                    if preview_nodes
-                    else "Preview nodes: (none)",
-                    f"Config snippet: {config_snippet}" if config_snippet else "Config snippet: (none)",
-                    f"Metadata: {json.dumps(metadata, ensure_ascii=False)}",
+                    f"Keywords: {', '.join(keyword_list)}" if keyword_list else "",
+                    f"App keywords used: {', '.join(app_keywords)}" if app_keywords else "",
+                    f"Event keywords used: {', '.join(event_keywords)}" if event_keywords else "",
+                    f"Node types: {', '.join(node_types)}" if node_types else "",
+                    f"Fields: {json.dumps(fields, ensure_ascii=False)}" if fields else "",
+                    f"Outputs: {json.dumps(outputs, ensure_ascii=False)}" if outputs else "",
+                    f"Preview nodes: {json.dumps(preview_nodes, ensure_ascii=False)}" if preview_nodes else "",
+                    f"Config snippet: {config_snippet}" if config_snippet else "",
                 ]
             )
         )
@@ -524,8 +510,6 @@ async def generate_scene_json(
 ) -> dict[str, Any]:
     context_block = _format_context_items(context_items)
     scene_prompt_parts = [f"User request: {prompt}"]
-    if frame_context:
-        scene_prompt_parts.extend(["Frame details:", frame_context])
     scene_prompt_parts.extend(
         [
             "Relevant context:",
@@ -537,7 +521,7 @@ async def generate_scene_json(
         api_key=api_key,
         model=model,
         messages=[
-            {"role": "system", "content": SCENE_JSON_SYSTEM_PROMPT},
+            {"role": "system", "content": SCENE_JSON_SYSTEM_PROMPT + ("\n\n" + frame_context if frame_context else "")},
             {"role": "user", "content": scene_prompt},
         ],
         context_items=context_items,

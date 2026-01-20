@@ -275,21 +275,17 @@ async def generate_scene(
             ]
             seen: set[tuple[str, str]] = set()
             context_items = []
+            context_items_strings = []
             for item in ranked_items:
                 key = (item.source_type, item.source_path)
                 if key in seen:
                     continue
                 seen.add(key)
                 context_items.append(item)
-            for item in available_embeddings:
-                key = (item.source_type, item.source_path)
-                if key in seen:
-                    continue
-                seen.add(key)
-                context_items.append(item)
+                context_items_strings.append(f"[{item.source_type}] {item.source_path}")
             await _publish_ai_scene_log(
                 redis,
-                f"Selected {len(context_items)} context items.",
+                f"Selected {len(context_items)} context items: {', '.join(context_items_strings)}",
                 request_id,
                 stage="context:ready",
             )
