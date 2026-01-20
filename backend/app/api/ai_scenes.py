@@ -23,12 +23,14 @@ from app.utils.ai_scene import (
     DEFAULT_APP_CONTEXT_K,
     DEFAULT_SCENE_CONTEXT_K,
     create_embeddings,
+    format_frame_context,
     generate_scene_json,
     repair_scene_json,
     rank_embeddings,
     review_scene_solution,
     validate_scene_payload,
 )
+from app.models.frame import Frame
 from app.utils.posthog import get_posthog_client, llm_analytics_enabled
 from app.websockets import publish_message
 from . import api_with_auth
@@ -196,6 +198,33 @@ async def generate_scene(
         )
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Prompt is required")
 
+    frame_context = None
+    if data.frame_id is not None:
+        frame = db.query(Frame).filter(Frame.id == data.frame_id).first()
+        if frame:
+            frame_context = format_frame_context(
+                {
+                    "name": frame.name,
+                    "width": frame.width,
+                    "height": frame.height,
+                    "device": frame.device,
+                    "color": frame.color,
+                    "background_color": frame.background_color,
+                    "scaling_mode": frame.scaling_mode,
+                    "rotate": frame.rotate,
+                    "flip": frame.flip,
+                    "gpio_buttons": frame.gpio_buttons,
+                }
+            )
+        else:
+            await _publish_ai_scene_log(
+                redis,
+                f"Frame {data.frame_id} not found; generating without frame context.",
+                request_id,
+                status="warning",
+                stage="frame:skip",
+            )
+
     settings = get_settings_dict(db)
     openai_settings = settings.get("openAI", {})
     api_key = openai_settings.get("backendApiKey")
@@ -298,6 +327,7 @@ async def generate_scene(
                     context_items=context_items,
                     api_key=api_key,
                     model=scene_model,
+                    frame_context=frame_context,
                     ai_trace_id=posthog_trace_id,
                     ai_session_id=posthog_session_id,
                     ai_parent_id=posthog_root_span_id,
@@ -316,6 +346,7 @@ async def generate_scene(
                     model=scene_model,
                     payload=response_payload or {},
                     issues=validation_issues + review_issues,
+                    frame_context=frame_context,
                     ai_trace_id=posthog_trace_id,
                     ai_session_id=posthog_session_id,
                     ai_parent_id=posthog_root_span_id,
@@ -338,6 +369,7 @@ async def generate_scene(
                 payload=response_payload or {},
                 api_key=api_key,
                 model=review_model,
+                frame_context=frame_context,
                 ai_trace_id=posthog_trace_id,
                 ai_session_id=posthog_session_id,
                 ai_parent_id=posthog_root_span_id,

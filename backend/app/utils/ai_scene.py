@@ -20,6 +20,69 @@ DEFAULT_SCENE_CONTEXT_K = 4
 DEFAULT_MIN_SCORE = 0.15
 MMR_LAMBDA = 0.7
 
+
+def _format_gpio_buttons(gpio_buttons: Iterable[dict[str, Any]]) -> list[str]:
+    formatted: list[str] = []
+    for button in gpio_buttons:
+        if not isinstance(button, dict):
+            continue
+        label = str(button.get("label") or "").strip()
+        pin = button.get("pin")
+        pin_display = None
+        if isinstance(pin, (int, float)) and int(pin) > 0:
+            pin_display = str(int(pin))
+        elif isinstance(pin, str) and pin.strip().isdigit():
+            pin_display = str(int(pin.strip()))
+        if label and pin_display:
+            formatted.append(f"{label} (pin {pin_display})")
+        elif label:
+            formatted.append(label)
+        elif pin_display:
+            formatted.append(f"Pin {pin_display}")
+    return formatted
+
+
+def format_frame_context(frame: dict[str, Any] | None) -> str | None:
+    if not frame:
+        return None
+    lines: list[str] = []
+    name = frame.get("name")
+    if isinstance(name, str) and name.strip():
+        lines.append(f"- Frame name: {name.strip()}")
+    width = frame.get("width")
+    height = frame.get("height")
+    if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+        lines.append(f"- Resolution: {width}x{height}")
+    device = frame.get("device")
+    if isinstance(device, str) and device.strip():
+        lines.append(f"- Device: {device.strip()}")
+    color = frame.get("color")
+    if isinstance(color, str) and color.strip():
+        lines.append(f"- Color mode: {color.strip()}")
+    background_color = frame.get("background_color") or frame.get("backgroundColor")
+    if isinstance(background_color, str) and background_color.strip():
+        lines.append(f"- Background color: {background_color.strip()}")
+    scaling_mode = frame.get("scaling_mode") or frame.get("scalingMode")
+    if isinstance(scaling_mode, str) and scaling_mode.strip():
+        lines.append(f"- Scaling mode: {scaling_mode.strip()}")
+    rotate = frame.get("rotate")
+    if isinstance(rotate, int):
+        lines.append(f"- Rotate: {rotate}")
+    flip = frame.get("flip")
+    if isinstance(flip, str) and flip.strip():
+        lines.append(f"- Flip: {flip.strip()}")
+    gpio_buttons = frame.get("gpio_buttons") or frame.get("gpioButtons") or []
+    if isinstance(gpio_buttons, list) and gpio_buttons:
+        formatted_buttons = _format_gpio_buttons(gpio_buttons)
+        if formatted_buttons:
+            lines.append(f"- GPIO buttons: {', '.join(formatted_buttons)}.")
+            lines.append(
+                "- To use a GPIO button, add an event node with data "
+                '{"keyword": "button", "label": "A"} (replace "A" with the button label), '
+                "then follow with whatever you want (usually a logic/setAsState and a dispatch render)."
+            )
+    return "\n".join(lines) if lines else None
+
 SUMMARY_SYSTEM_PROMPT = """
 You are summarizing FrameOS scene templates and app modules so they can be retrieved for prompt grounding.
 Return JSON with keys:
@@ -454,18 +517,22 @@ async def generate_scene_json(
     context_items: list[AiEmbedding],
     api_key: str,
     model: str,
+    frame_context: str | None = None,
     ai_trace_id: str | None = None,
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,
 ) -> dict[str, Any]:
     context_block = _format_context_items(context_items)
-    scene_prompt = "\n\n".join(
+    scene_prompt_parts = [f"User request: {prompt}"]
+    if frame_context:
+        scene_prompt_parts.extend(["Frame details:", frame_context])
+    scene_prompt_parts.extend(
         [
-            f"User request: {prompt}",
             "Relevant context:",
             context_block or "(no context available)",
         ]
     )
+    scene_prompt = "\n\n".join(scene_prompt_parts)
     return await _request_scene_json(
         api_key=api_key,
         model=model,
@@ -539,17 +606,21 @@ async def review_scene_solution(
     payload: dict[str, Any],
     api_key: str,
     model: str = SCENE_REVIEW_MODEL,
+    frame_context: str | None = None,
     ai_trace_id: str | None = None,
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,
 ) -> list[str]:
-    review_prompt = "\n\n".join(
+    review_prompt_parts = [f"User request: {prompt}"]
+    if frame_context:
+        review_prompt_parts.extend(["Frame details:", frame_context])
+    review_prompt_parts.extend(
         [
-            f"User request: {prompt}",
             "Scene JSON:",
             json.dumps(payload, ensure_ascii=False),
         ]
     )
+    review_prompt = "\n\n".join(review_prompt_parts)
     response = await _request_scene_json(
         api_key=api_key,
         model=model,
@@ -579,19 +650,25 @@ async def repair_scene_json(
     model: str,
     payload: dict[str, Any],
     issues: list[str],
+    frame_context: str | None = None,
     ai_trace_id: str | None = None,
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,
 ) -> dict[str, Any]:
     context_block = _format_context_items(context_items)
-    scene_prompt = "\n\n".join(
+    scene_prompt_parts = [
+        f"User request: {prompt}",
+        f"Reviewer issues: {json.dumps(issues, ensure_ascii=False)}",
+    ]
+    if frame_context:
+        scene_prompt_parts.extend(["Frame details:", frame_context])
+    scene_prompt_parts.extend(
         [
-            f"User request: {prompt}",
-            f"Reviewer issues: {json.dumps(issues, ensure_ascii=False)}",
             "Relevant context:",
             context_block or "(no context available)",
         ]
     )
+    scene_prompt = "\n\n".join(scene_prompt_parts)
     return await _request_scene_json(
         api_key=api_key,
         model=model,

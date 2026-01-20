@@ -496,7 +496,7 @@ export const scenesLogic = kea<scenesLogicType>([
         const response = await apiFetch('/api/ai/scenes/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, requestId }),
+          body: JSON.stringify({ prompt, requestId, frameId: props.frameId }),
         })
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}))

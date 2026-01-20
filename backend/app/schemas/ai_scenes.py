@@ -7,6 +7,7 @@ class AiSceneGenerateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     prompt: str
+    frame_id: Optional[int] = Field(default=None, alias="frameId")
     request_id: Optional[str] = Field(default=None, alias="requestId")
 
 
