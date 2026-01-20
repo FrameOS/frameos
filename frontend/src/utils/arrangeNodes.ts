@@ -1,13 +1,17 @@
 import dagre from '@dagrejs/dagre'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
-import type { DiagramNode } from '../types'
+import type { CodeNodeData, DiagramNode } from '../types'
 
 const NODE_PADDING_X = 60
 const NODE_PADDING_Y = 50
 const NODE_FALLBACK_WIDTH = 260
 const NODE_FALLBACK_HEIGHT = 180
-const CODE_NODE_MIN_WIDTH = 700
-const CODE_NODE_MIN_HEIGHT = 400
+const CODE_NODE_MIN_WIDTH = 360
+const CODE_NODE_MIN_HEIGHT = 220
+const CODE_NODE_EXPANDED_MIN_WIDTH = 700
+const CODE_NODE_EXPANDED_MIN_HEIGHT = 400
+const CODE_NODE_COMPACT_MAX_LINES = 4
+const CODE_NODE_COMPACT_MAX_CHARS = 160
 const CODE_ARG_HORIZONTAL_PADDING = 40
 const CODE_ARG_MAX_LEVEL = 5
 
@@ -22,12 +26,31 @@ function getNodeSize(node: DiagramNode): { width: number; height: number } {
   }
 }
 
+function getCodeNodeMinSize(node: DiagramNode): { width: number; height: number } {
+  const data = (node.data as CodeNodeData | undefined) ?? {}
+  const code = (data.codeJS ?? data.code ?? '').trim()
+  if (!code) {
+    return { width: CODE_NODE_MIN_WIDTH, height: CODE_NODE_MIN_HEIGHT }
+  }
+  const lines = code.split(/\r?\n/)
+  const maxLineLength = lines.reduce((max, line) => Math.max(max, line.length), 0)
+  const isCompact =
+    lines.length <= CODE_NODE_COMPACT_MAX_LINES &&
+    maxLineLength <= CODE_NODE_COMPACT_MAX_CHARS / 2 &&
+    code.length <= CODE_NODE_COMPACT_MAX_CHARS
+  if (isCompact) {
+    return { width: CODE_NODE_MIN_WIDTH, height: CODE_NODE_MIN_HEIGHT }
+  }
+  return { width: CODE_NODE_EXPANDED_MIN_WIDTH, height: CODE_NODE_EXPANDED_MIN_HEIGHT }
+}
+
 function expandCodeNode(node: DiagramNode): DiagramNode {
   if (node.type !== 'code') {
     return node
   }
-  const width = Math.max(node.width ?? NODE_FALLBACK_WIDTH, CODE_NODE_MIN_WIDTH)
-  const height = Math.max(node.height ?? NODE_FALLBACK_HEIGHT, CODE_NODE_MIN_HEIGHT)
+  const minSize = getCodeNodeMinSize(node)
+  const width = Math.max(node.width ?? NODE_FALLBACK_WIDTH, minSize.width)
+  const height = Math.max(node.height ?? NODE_FALLBACK_HEIGHT, minSize.height)
   const style = { ...(node.style ?? {}), width, height }
   return { ...node, width, height, style }
 }

@@ -93,7 +93,7 @@ def _summarize_scene_template(template_path: Path, repo_root: Path) -> tuple[str
             f"Event keywords: {', '.join(sorted(event_keywords))}",
             f"Node types: {', '.join(sorted(node_types))}",
             f"Template path: {template_path.relative_to(repo_root)}",
-            f"Example scene JSON: {json.dumps(example_scene or {}, ensure_ascii=False)}",
+            f"Example scene JSON (condensed): {json.dumps(example_scene or {}, ensure_ascii=False)}",
         ]
     )
     metadata = {
@@ -146,8 +146,6 @@ def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict
         for detail in output_details
         if detail.get("example")
     ]
-    config_snippet = _truncate_text(json.dumps(config, ensure_ascii=False))
-
     summary_input = "\n".join(
         [
             f"App keyword: {config_path.parent.parent.name}/{config_path.parent.name}",
@@ -173,7 +171,7 @@ def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict
         "settings": settings,
         "configPath": str(config_path.relative_to(repo_root)),
         "keyword": f"{config_path.parent.parent.name}/{config_path.parent.name}",
-        "configSnippet": config_snippet,
+        "appCategory": config.get("category") or "",
     }
     return summary_input, metadata
 

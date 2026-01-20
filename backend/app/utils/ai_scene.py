@@ -278,6 +278,13 @@ def _chunk_texts(texts: Iterable[str], batch_size: int = 64) -> Iterable[list[st
     if batch:
         yield batch
 
+def category_info(category: str) -> str:
+    category_map = {
+        "render": "produces visual output, can either be connected next/prev or used standalone with field inputs/outputs",
+        "logic": "processes data or logic, can only be connected next/prev, not used via field outputs",
+        "data": "provides data, cannot be connected next/prev, only used via field outputs",
+    }
+    return category_map.get(category, "unknown category")
 
 def _format_context_items(items: list[AiEmbedding]) -> str:
     lines: list[str] = []
@@ -285,27 +292,27 @@ def _format_context_items(items: list[AiEmbedding]) -> str:
         metadata = item.metadata_json or {}
         header = f"[{"example scene" if item.source_type == "scene" else item.source_type}] {item.name or item.source_path}"
         keyword_list = metadata.get("keywords") or []
+        app_category = metadata.get("appCategory") or ""
         app_keywords = metadata.get("appKeywords") or []
         event_keywords = metadata.get("eventKeywords") or []
         node_types = metadata.get("nodeTypes") or []
         fields = metadata.get("fieldDetails") or metadata.get("fields") or []
         outputs = metadata.get("outputDetails") or metadata.get("outputs") or []
         scene_json = metadata.get("scene") or {}
-        config_snippet = metadata.get("configSnippet")
         lines.append(
             "\n".join(
-                [
+                line for line in [
                     header,
                     f"Summary: {item.summary}",
                     f"Keywords: {', '.join(keyword_list)}" if keyword_list else "",
+                    f"App category: {app_category} ({category_info(app_category)})" if app_category else "",
                     f"App keywords used: {', '.join(app_keywords)}" if app_keywords else "",
                     f"Event keywords used: {', '.join(event_keywords)}" if event_keywords else "",
                     f"Node types: {', '.join(node_types)}" if node_types else "",
                     f"Fields: {json.dumps(fields, ensure_ascii=False)}" if fields else "",
                     f"Outputs: {json.dumps(outputs, ensure_ascii=False)}" if outputs else "",
-                    f"Scene JSON: {json.dumps(scene_json, ensure_ascii=False)}" if scene_json else "",
-                    f"Config snippet: {config_snippet}" if config_snippet else "",
-                ]
+                    f"Scene JSON (condensed): {json.dumps(scene_json, ensure_ascii=False)}" if scene_json else "",
+                ] if line != ""
             )
         )
     return "\n\n".join(lines)

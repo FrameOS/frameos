@@ -36,16 +36,13 @@ body {
 
 @keyframes aiSceneEllipsis {
   0% {
-    width: 1ch;
+    width: 0ch;
   }
-  33% {
+  99% {
     width: 2ch;
   }
-  66% {
-    width: 3ch;
-  }
   100% {
-    width: 1ch;
+    width: 0ch;
   }
 }
 
@@ -54,7 +51,7 @@ body {
   overflow: hidden;
   vertical-align: bottom;
   width: 1ch;
-  animation: aiSceneEllipsis 1.2s infinite;
+  animation: aiSceneEllipsis 3s infinite;
 }
 
 .ai-scene-ellipsis::after {

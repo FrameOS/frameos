@@ -40,6 +40,7 @@ AI_ID_PATTERN = re.compile(r"[^A-Za-z0-9\\-_.@()!'~:|]")
 REQUIRED_EMBEDDING_PATHS = {
     "frameos/src/apps/render/image",
     "frameos/src/apps/render/text",
+    "frameos/src/apps/render/split",
     "frameos/src/apps/render/svg",
 }
 
