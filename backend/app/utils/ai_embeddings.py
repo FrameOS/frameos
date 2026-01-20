@@ -32,13 +32,14 @@ def _summarize_scene_template(template_path: Path, repo_root: Path) -> tuple[str
         else:
             scenes_data = []
 
-    scene_count = len(scenes_data) if isinstance(scenes_data, list) else 0
     app_keywords: set[str] = set()
     event_keywords: set[str] = set()
     node_types: set[str] = set()
-    preview_nodes: list[dict[str, Any]] = []
+    example_scene: dict[str, Any] | None = None
     if isinstance(scenes_data, list):
         for scene in scenes_data:
+            if example_scene is None and isinstance(scene, dict):
+                example_scene = scene
             for node in scene.get("nodes", []):
                 if node.get("type"):
                     node_types.add(node.get("type"))
@@ -50,36 +51,25 @@ def _summarize_scene_template(template_path: Path, repo_root: Path) -> tuple[str
                     event_keywords.add(keyword)
                 else:
                     app_keywords.add(keyword)
-            if not preview_nodes and scene.get("nodes"):
-                preview_nodes = [
-                    {
-                        "id": node.get("id"),
-                        "type": node.get("type"),
-                        "keyword": (node.get("data") or {}).get("keyword"),
-                    }
-                    for node in scene.get("nodes", [])[:8]
-                ]
 
     summary_input = "\n".join(
         [
             f"Template name: {name}",
             f"Description: {description}",
-            f"Scene count: {scene_count}",
             f"App keywords: {', '.join(sorted(app_keywords))}",
             f"Event keywords: {', '.join(sorted(event_keywords))}",
             f"Node types: {', '.join(sorted(node_types))}",
             f"Template path: {template_path.relative_to(repo_root)}",
+            f"Example scene JSON: {json.dumps(example_scene or {}, ensure_ascii=False)}",
         ]
     )
     metadata = {
         "name": name,
         "description": description,
-        "sceneCount": scene_count,
         "appKeywords": sorted(app_keywords),
         "eventKeywords": sorted(event_keywords),
         "nodeTypes": sorted(node_types),
-        "previewNodes": preview_nodes,
-        "templatePath": str(template_path.relative_to(repo_root)),
+        "scene": example_scene,
     }
     return summary_input, metadata
 
@@ -235,7 +225,7 @@ async def build_ai_embeddings(
                 f"Metadata app keywords: {', '.join(metadata.get('appKeywords') or [])}",
                 f"Metadata event keywords: {', '.join(metadata.get('eventKeywords') or [])}",
                 f"Metadata node types: {', '.join(metadata.get('nodeTypes') or [])}",
-                f"Metadata preview nodes: {json.dumps(metadata.get('previewNodes') or [], ensure_ascii=False)}",
+                f"Metadata scene: {json.dumps(metadata.get('scene') or {}, ensure_ascii=False)}",
             ]
         )
         embedding_input = "\n".join([summary, f"Keywords: {', '.join(keywords)}", summary_input, metadata_block])

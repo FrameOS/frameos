@@ -271,7 +271,7 @@ def _format_context_items(items: list[AiEmbedding]) -> str:
         node_types = metadata.get("nodeTypes") or []
         fields = metadata.get("fieldDetails") or metadata.get("fields") or []
         outputs = metadata.get("outputDetails") or metadata.get("outputs") or []
-        preview_nodes = metadata.get("previewNodes") or []
+        scene_json = metadata.get("scene") or {}
         config_snippet = metadata.get("configSnippet")
         lines.append(
             "\n".join(
@@ -284,7 +284,7 @@ def _format_context_items(items: list[AiEmbedding]) -> str:
                     f"Node types: {', '.join(node_types)}" if node_types else "",
                     f"Fields: {json.dumps(fields, ensure_ascii=False)}" if fields else "",
                     f"Outputs: {json.dumps(outputs, ensure_ascii=False)}" if outputs else "",
-                    f"Preview nodes: {json.dumps(preview_nodes, ensure_ascii=False)}" if preview_nodes else "",
+                    f"Scene JSON: {json.dumps(scene_json, ensure_ascii=False)}" if scene_json else "",
                     f"Config snippet: {config_snippet}" if config_snippet else "",
                 ]
             )
