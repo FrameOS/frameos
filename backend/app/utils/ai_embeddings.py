@@ -20,6 +20,39 @@ def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _condense_scene(scene: dict[str, Any]) -> dict[str, Any]:
+    nodes: list[dict[str, Any]] = []
+    edges: list[str] = []
+
+    for node in scene.get("nodes", []):
+        if not isinstance(node, dict):
+            continue
+        data = node.get("data") or {}
+        condensed: dict[str, Any] = {"id": node.get("id"), "type": node.get("type")}
+        keyword = data.get("keyword")
+        if keyword:
+            condensed["keyword"] = keyword
+        nodes.append(condensed)
+
+    for edge in scene.get("edges", []):
+        if not isinstance(edge, dict):
+            continue
+        source = edge.get("source")
+        target = edge.get("target")
+        if not source or not target:
+            continue
+        source_handle = edge.get("sourceHandle")
+        target_handle = edge.get("targetHandle")
+        if source_handle or target_handle:
+            source_part = f"{source}:{source_handle}" if source_handle else str(source)
+            target_part = f"{target}:{target_handle}" if target_handle else str(target)
+            edges.append(f"{source_part}->{target_part}")
+        else:
+            edges.append(f"{source}->{target}")
+
+    return {"nodes": nodes, "edges": edges}
+
+
 def _summarize_scene_template(template_path: Path, repo_root: Path) -> tuple[str, dict[str, Any]]:
     template = _load_json(template_path)
     name = template.get("name") or template_path.parent.name
@@ -39,7 +72,7 @@ def _summarize_scene_template(template_path: Path, repo_root: Path) -> tuple[str
     if isinstance(scenes_data, list):
         for scene in scenes_data:
             if example_scene is None and isinstance(scene, dict):
-                example_scene = scene
+                example_scene = _condense_scene(scene)
             for node in scene.get("nodes", []):
                 if node.get("type"):
                     node_types.add(node.get("type"))
