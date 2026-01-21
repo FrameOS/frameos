@@ -18,20 +18,6 @@ export function Chat() {
   const { setInput, submitMessage, clearChat, toggleContextItemsExpanded } = useActions(
     chatLogic({ frameId, sceneId: selectedSceneId })
   )
-  const scrollRef = useRef<HTMLDivElement | null>(null)
-  const shouldAutoScrollRef = useRef(true)
-
-  const lastMessage = messages[messages.length - 1]
-
-  useEffect(() => {
-    const container = scrollRef.current
-    if (!container) {
-      return
-    }
-    if (shouldAutoScrollRef.current) {
-      container.scrollTop = container.scrollHeight
-    }
-  }, [messages.length, lastMessage?.content])
   const [atBottom, setAtBottom] = useState(true)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const shouldStickToBottomRef = useRef(true)
@@ -56,16 +42,6 @@ export function Chat() {
       })
     })
   }, [messages.length])
-
-  const handleScroll = () => {
-    const container = scrollRef.current
-    if (!container) {
-      return
-    }
-    const threshold = 24
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-    shouldAutoScrollRef.current = distanceFromBottom <= threshold
-  }
 
   const handleSubmit = () => {
     submitMessage(input)
@@ -171,29 +147,31 @@ export function Chat() {
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between pb-2">
-        <div className="text-sm text-slate-300">
+    <div className="flex flex-col h-full gap-3">
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-slate-300 flex items-center gap-2">
+          <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
           {chatSceneName ? `Chat about "${chatSceneName}"` : 'Chat about this frame'}
         </div>
         <Button color="secondary" size="small" onClick={() => clearChat()} disabled={isSubmitting}>
           Clear
         </Button>
       </div>
-      <div
-        ref={scrollRef}
-        className="flex-1 relative rounded-xl shadow-inner overflow-y-auto space-y-3"
-        onScroll={handleScroll}
-      >
+      <div className="flex-1 relative rounded-2xl overflow-hidden">
         {messages.length === 0 ? (
-          <div className="text-sm text-slate-400">
-            {chatSceneName
-              ? 'Ask for a new scene, request edits to the current scene, or ask questions about FrameOS.'
-              : 'Ask for a new scene, or ask questions about this frame or FrameOS.'}
+          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-slate-400">
+            <div className="space-y-2">
+              <div className="text-slate-200 font-medium">Start the conversation</div>
+              <div>
+                {chatSceneName
+                  ? 'Ask for a new scene, request edits to the current scene, or ask questions about FrameOS.'
+                  : 'Ask for a new scene, or ask questions about this frame or FrameOS.'}
+              </div>
+            </div>
           </div>
         ) : (
           <Virtuoso
-            className="h-full overflow-y-auto pr-1"
+            className="h-full overflow-y-auto"
             ref={virtuosoRef}
             data={messages}
             followOutput={(isBottom) => (isBottom ? 'auto' : false)}
@@ -211,29 +189,30 @@ export function Chat() {
                 return null
               }
               return (
-                <div
-                  key={message.id}
-                  className={clsx(
-                    'rounded-lg border px-3 py-2 text-sm shadow-sm mb-3',
-                    isUser
-                      ? 'border-blue-900/70 bg-blue-950/60 text-blue-100'
-                      : isLog
-                      ? 'border-slate-800/80 bg-slate-900/70 text-slate-100'
-                      : 'border-slate-800/80 bg-slate-950/70 text-slate-100'
-                  )}
-                >
-                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
-                    <span className="uppercase tracking-wide">{message.role}</span>
-                    {message.tool ? <span className="text-slate-500">tool: {message.tool}</span> : null}
-                  </div>
-                  <div>
-                    {renderMessageBody(message.content, isLog)}
-                    {pendingThinkingIndex === index && isLog && message.isStreaming ? (
-                      <div className="inline-flex items-center gap-2 text-slate-300 pt-2">
-                        <span>Thinking…</span>
-                      </div>
-                    ) : null}
-                    {message.isStreaming ? <span className="ml-1 animate-pulse">▍</span> : null}
+                <div key={message.id} className={clsx('flex', isUser ? 'justify-end' : 'justify-start')}>
+                  <div
+                    className={clsx(
+                      'rounded-2xl border px-4 py-3 text-sm shadow-sm mb-3 max-w-[90%] sm:max-w-[75%]',
+                      isUser
+                        ? 'border-blue-900/70 bg-blue-950/70 text-blue-100 shadow-[0_0_12px_rgba(30,64,175,0.25)]'
+                        : isLog
+                        ? 'border-slate-800/80 bg-slate-900/80 text-slate-100'
+                        : 'border-slate-800/80 bg-slate-950/80 text-slate-100'
+                    )}
+                  >
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
+                      <span className="uppercase tracking-wide">{message.role}</span>
+                      {message.tool ? <span className="text-slate-500">tool: {message.tool}</span> : null}
+                    </div>
+                    <div>
+                      {renderMessageBody(message.content, isLog)}
+                      {pendingThinkingIndex === index && isLog && message.isStreaming ? (
+                        <div className="inline-flex items-center gap-2 text-slate-300 pt-2">
+                          <span>Thinking…</span>
+                        </div>
+                      ) : null}
+                      {message.isStreaming ? <span className="ml-1 animate-pulse">▍</span> : null}
+                    </div>
                   </div>
                 </div>
               )
@@ -252,15 +231,17 @@ export function Chat() {
         ) : null}
       </div>
       {error ? <div className="text-xs text-red-400 pt-2">{error}</div> : null}
-      <div className="pt-3 space-y-2">
+      <div className="rounded-2xl border border-slate-800/80 bg-slate-950/70 p-3 space-y-2 shadow-inner">
         <TextArea
           value={input}
           placeholder="Describe a new scene, request a change, or ask a question..."
           onChange={(value) => setInput(value)}
           onKeyDown={handleKeyDown}
           rows={3}
+          className="bg-slate-900/80 border-slate-700/80 text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:ring-blue-500"
         />
-        <div className="flex justify-end">
+        <div className="flex items-center justify-between text-xs text-slate-500">
+          <span>Press Ctrl/Cmd + Enter to send</span>
           <Button color={sendButtonColor} size="tiny" onClick={handleSubmit} disabled={isSubmitting || !input.trim()}>
             {isSubmitting ? 'Sending…' : 'Send'}
           </Button>
