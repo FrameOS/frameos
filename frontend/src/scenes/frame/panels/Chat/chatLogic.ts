@@ -6,6 +6,7 @@ import { panelsLogic } from '../panelsLogic'
 import { diagramLogic } from '../Diagram/diagramLogic'
 import type { DiagramEdge, DiagramNode, FrameScene } from '../../../../types'
 import { Area, Panel } from '../../../../types'
+import { socketLogic } from '../../../socketLogic'
 
 import type { chatLogicType } from './chatLogicType'
 
@@ -30,6 +31,7 @@ export const chatLogic = kea<chatLogicType>([
   props({} as ChatLogicProps),
   key((props) => props.frameId),
   connect((props: ChatLogicProps) => ({
+    logic: [socketLogic],
     values: [
       frameLogic(props),
       ['frameForm', 'scenes'],
@@ -48,6 +50,9 @@ export const chatLogic = kea<chatLogicType>([
     appendMessage: (message: ChatMessage) => ({ message }),
     updateMessage: (id: string, updates: Partial<ChatMessage>) => ({ id, updates }),
     clearChat: true,
+    setActiveRequestId: (requestId: string | null) => ({ requestId }),
+    setActiveLogMessageId: (messageId: string | null) => ({ messageId }),
+    setActiveLogStartTime: (timestamp: string | null) => ({ timestamp }),
   }),
   reducers({
     input: [
@@ -81,6 +86,27 @@ export const chatLogic = kea<chatLogicType>([
         clearChat: () => [],
       },
     ],
+    activeRequestId: [
+      null as string | null,
+      {
+        setActiveRequestId: (_, { requestId }) => requestId,
+        clearChat: () => null,
+      },
+    ],
+    activeLogMessageId: [
+      null as string | null,
+      {
+        setActiveLogMessageId: (_, { messageId }) => messageId,
+        clearChat: () => null,
+      },
+    ],
+    activeLogStartTime: [
+      null as string | null,
+      {
+        setActiveLogStartTime: (_, { timestamp }) => timestamp,
+        clearChat: () => null,
+      },
+    ],
   }),
   selectors({
     selectedScene: [
@@ -111,7 +137,20 @@ export const chatLogic = kea<chatLogicType>([
         actions.setError('Add a message to send.')
         return
       }
+      const requestId = uuidv4()
+      const logMessageId = uuidv4()
+      actions.setActiveRequestId(requestId)
+      actions.setActiveLogMessageId(logMessageId)
+      actions.setActiveLogStartTime(null)
       actions.appendMessage({ id: uuidv4(), role: 'user', content: prompt })
+      actions.appendMessage({
+        id: logMessageId,
+        role: 'assistant',
+        content: '',
+        tool: 'log',
+        isPlaceholder: true,
+        isStreaming: true,
+      })
       const assistantMessageId = uuidv4()
       actions.appendMessage({
         id: assistantMessageId,
@@ -153,6 +192,7 @@ export const chatLogic = kea<chatLogicType>([
             selectedNodes: selectedNodesPayload.length ? selectedNodesPayload : undefined,
             selectedEdges: selectedEdgesPayload.length ? selectedEdgesPayload : undefined,
             history: values.historyForRequest,
+            requestId,
           }),
         })
         if (!response.ok) {
@@ -215,6 +255,35 @@ export const chatLogic = kea<chatLogicType>([
         })
       }
       actions.setSubmitting(false)
+    },
+    [socketLogic.actionTypes.aiSceneLog]: ({ log }) => {
+      if (!log.requestId || log.requestId !== values.activeRequestId) {
+        return
+      }
+      const logMessageId = values.activeLogMessageId
+      if (!logMessageId) {
+        return
+      }
+      const existing = values.messages.find((message) => message.id === logMessageId)?.content || ''
+      const startTimestamp = values.activeLogStartTime || log.timestamp
+      if (!values.activeLogStartTime) {
+        actions.setActiveLogStartTime(log.timestamp)
+      }
+      const startTime = new Date(startTimestamp).getTime()
+      const logTime = new Date(log.timestamp).getTime()
+      const elapsedSeconds = Number.isNaN(startTime) || Number.isNaN(logTime) ? null : Math.max(0, logTime - startTime)
+      const elapsedLabel = elapsedSeconds === null ? '' : `${Math.round((elapsedSeconds / 1000) * 10) / 10}s `
+      const stageLabel = log.stage ? `[${log.stage}] ` : ''
+      const statusLabel = log.status && log.status !== 'info' ? `${log.status.toUpperCase()}: ` : ''
+      const line = `${elapsedLabel}${stageLabel}${statusLabel}${log.message}`
+      const nextContent = existing ? `${existing}\n${line}` : line
+      const isTerminalStatus = log.status === 'success' || log.status === 'error'
+      actions.updateMessage(logMessageId, {
+        content: nextContent,
+        tool: 'log',
+        isPlaceholder: false,
+        isStreaming: !isTerminalStatus,
+      })
     },
   })),
 ])

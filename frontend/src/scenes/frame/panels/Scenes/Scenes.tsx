@@ -43,11 +43,13 @@ import { TextArea } from '../../../../components/TextArea'
 import { A, router } from 'kea-router'
 import { urls } from '../../../../urls'
 import { appsModel } from '../../../../models/appsModel'
+import { chatLogic } from '../Chat/chatLogic'
 export function Scenes() {
   const { frameId, frameForm, frame } = useValues(frameLogic)
   const { applyTemplate } = useActions(frameLogic)
   const { apps } = useValues(appsModel)
   const { editScene, openTemplates } = useActions(panelsLogic)
+  const { selectedSceneId } = useValues(panelsLogic({ frameId }))
   const {
     filteredScenes,
     scenes,
@@ -74,10 +76,6 @@ export function Scenes() {
     isUploadingImage,
     aiPrompt,
     aiError,
-    aiSceneLastLog,
-    aiSceneLogs,
-    aiSceneLogsExpanded,
-    isGeneratingAiScene,
     isInstallingMissingActiveScene,
     previewingSceneId,
   } = useValues(scenesLogic({ frameId }))
@@ -99,12 +97,13 @@ export function Scenes() {
     uploadImage,
     previewScene,
     setAiPrompt,
-    generateAiScene,
     openAiScene,
     closeAiScene,
-    toggleAiSceneLogsExpanded,
+    generateAiSceneFailure,
     installMissingActiveScene,
   } = useActions(scenesLogic({ frameId }))
+  const { submitMessage } = useActions(chatLogic({ frameId, sceneId: selectedSceneId }))
+  const { isSubmitting: isChatSubmitting } = useValues(chatLogic({ frameId, sceneId: selectedSceneId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
   const { sceneChanging, loading, uploadedScenes, uploadedScenesLoading } = useValues(controlLogic({ frameId }))
   const { setCurrentScene, sync } = useActions(controlLogic({ frameId }))
@@ -205,35 +204,13 @@ export function Scenes() {
   const hasEmbeddings = (aiEmbeddingsStatus?.count ?? 0) > 0
   const hasBackendApiKey = Boolean(savedSettings?.openAI?.backendApiKey?.trim())
   const missingBackendApiKey = !hasBackendApiKey
-  const hasAiSceneHistory =
-    aiSceneLogs.length > 0 &&
-    (isGeneratingAiScene || aiSceneLastLog?.status === 'success' || aiSceneLastLog?.status === 'error')
   const serviceSettingKeys = Object.keys(settingsDetails)
   const missingServiceSettings = getMissingSecretSettingKeys(serviceSettingKeys, savedSettings)
   const orderedServiceKeys = [
     ...serviceSettingKeys.filter((settingKey) => !missingServiceSettings.has(settingKey)),
     ...serviceSettingKeys.filter((settingKey) => missingServiceSettings.has(settingKey)),
   ]
-  const formatDurationSeconds = (durationMs: number | null) => {
-    if (durationMs === null) {
-      return null
-    }
-    const seconds = Math.max(0, durationMs / 1000)
-    const roundedSeconds = Math.round(seconds * 10) / 10
-    return `${roundedSeconds}s`
-  }
-
-  const aiSceneLogRows = aiSceneLogs.map((log, index) => {
-    const start = new Date(log.timestamp).getTime()
-    const end =
-      index < aiSceneLogs.length - 1
-        ? new Date(aiSceneLogs[index + 1].timestamp).getTime()
-        : isGeneratingAiScene
-        ? Date.now()
-        : start
-    const duration = Number.isNaN(start) || Number.isNaN(end) ? null : Math.max(0, end - start)
-    return { log, duration }
-  })
+  const canSubmitAiPrompt = !isChatSubmitting && hasEmbeddings && !missingBackendApiKey
 
   const renderNewSceneForm = () => (
     <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">
@@ -339,57 +316,44 @@ export function Scenes() {
       <div className="space-y-2">
         <div className="text-gray-400">
           Please note: Scene generation is still a work in progress. Generated scenes may not work well or may even
-          crash your frame. Use with caution and always review the generated code. Keep this page open while generating.
+          crash your frame. Use with caution and always review the generated code. Progress logs will stream in the Chat
+          panel.
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            size="small"
-            color="secondary"
-            className="flex gap-1 items-center"
-            onClick={() => generateAiScene()}
-            disabled={isGeneratingAiScene || !hasEmbeddings || missingBackendApiKey}
-          >
-            {isGeneratingAiScene ? <Spinner color="white" /> : <SparklesIcon className="w-4 h-4" />}
-            {isGeneratingAiScene ? 'Generating...' : 'Generate scene'}
-          </Button>
-          {!isGeneratingAiScene ? (
+          {isChatSubmitting ? (
+            <Tooltip title="A prompt is running">
+              <div>
+                <Button size="small" color="secondary" className="flex gap-1 items-center" disabled>
+                  <Spinner color="white" />
+                  Generating...
+                </Button>
+              </div>
+            </Tooltip>
+          ) : (
+            <Button
+              size="small"
+              color="secondary"
+              className="flex gap-1 items-center"
+              onClick={() => {
+                const trimmedPrompt = aiPrompt.trim()
+                if (!trimmedPrompt) {
+                  generateAiSceneFailure('Add a prompt to generate a scene.')
+                  return
+                }
+                submitMessage(`generate scene: ${trimmedPrompt}`)
+              }}
+              disabled={!canSubmitAiPrompt}
+            >
+              <SparklesIcon className="w-4 h-4" />
+              Generate scene
+            </Button>
+          )}
+          {!isChatSubmitting ? (
             <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={closeAiScene}>
               Close
             </Button>
           ) : null}
-          {hasAiSceneHistory ? (
-            <button
-              type="button"
-              className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200"
-              onClick={toggleAiSceneLogsExpanded}
-              title={aiSceneLastLog?.message || (isGeneratingAiScene ? 'Awaiting updates.' : '')}
-            >
-              {aiSceneLogsExpanded ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
-              <span className="truncate max-w-[220px]">
-                {aiSceneLastLog?.message || (isGeneratingAiScene ? 'Awaiting updates.' : '')}
-              </span>
-            </button>
-          ) : null}
         </div>
-        {hasAiSceneHistory && aiSceneLogsExpanded ? (
-          <div className="rounded-md border border-gray-800 bg-gray-950/60 p-3">
-            <ul className="space-y-1 text-xs text-gray-200">
-              {aiSceneLogRows.map(({ log, duration }, index) => {
-                const isLast = index === aiSceneLogRows.length - 1
-                const durationLabel = isLast ? null : formatDurationSeconds(duration)
-                return (
-                  <li key={`${log.timestamp}-${index}`} className="flex flex-wrap items-baseline gap-2">
-                    <span>
-                      {log.message}
-                      {isLast && isGeneratingAiScene ? <span className="ai-scene-ellipsis" aria-hidden /> : null}
-                    </span>
-                    {durationLabel ? <span className="text-gray-500">{durationLabel}</span> : null}
-                  </li>
-                )
-              })}
-            </ul>
-          </div>
-        ) : null}
       </div>
     </Box>
   )
