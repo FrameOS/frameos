@@ -187,6 +187,7 @@ Follow these rules:
     If a user mentions a render timeout or cadence, set refreshInterval accordingly (do not invent new timeout fields).
   - settings.backgroundColor sets the default scene background fill as a hex color (e.g. "#000000").
     If not specified, it defaults to black. Use render/color or render/gradient apps for more complex backgrounds.
+    Setting backgroundColor ensures the scene starts rendering with that background; do not add a separate blank-screen step.
 - For complex scenes, split data gathering from data rendering. Use data/logic apps or code nodes to gather/compute data,
   then persist JSON-friendly outputs (scalars, strings, objects, arrays) with the "logic/setAsState" app by wiring the
   output into fieldInput/valueJson. Later, read them back by referencing "state.<name>" via state nodes (keyword = name).
