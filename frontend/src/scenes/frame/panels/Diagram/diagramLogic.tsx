@@ -422,6 +422,7 @@ export const diagramLogic = kea<diagramLogicType>([
     nodesChanged: (_, __, ___, previousState) => {
       const nodes = values.nodes
       const oldNodes = selectors.nodes(previousState)
+      const isDragging = nodes.some((node) => node.dragging)
 
       const hasDimensions = nodes.length > 0 && nodes.every((node) => node.width && node.height)
       const shouldRearrangeForMissingPosition =
@@ -446,6 +447,11 @@ export const diagramLogic = kea<diagramLogicType>([
               : scene
           ),
         })
+      }
+
+      // Avoid syncing frame form values on every drag tick. We'll persist once dragging stops.
+      if (isDragging) {
+        return
       }
 
       // Do not update on first render
