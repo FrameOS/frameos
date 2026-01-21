@@ -7,7 +7,6 @@ import { TextArea } from '../../../../components/TextArea'
 import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import clsx from 'clsx'
-import { Spinner } from '../../../../components/Spinner'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 
 export function Chat() {
@@ -36,6 +35,12 @@ export function Chat() {
   const [atBottom, setAtBottom] = useState(true)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const shouldStickToBottomRef = useRef(true)
+  const pendingAssistantPlaceholder =
+    messages.length > 0 &&
+    messages[messages.length - 1].isPlaceholder &&
+    !messages[messages.length - 1].content &&
+    !messages[messages.length - 1].tool
+  const pendingThinkingIndex = pendingAssistantPlaceholder ? messages.length - 2 : null
 
   useEffect(() => {
     if (!shouldStickToBottomRef.current) {
@@ -199,9 +204,12 @@ export function Chat() {
             atBottomThreshold={200}
             increaseViewportBy={{ top: 0, bottom: 300 }}
             initialTopMostItemIndex={messages.length - 1}
-            itemContent={(_index, message) => {
+            itemContent={(index, message) => {
               const isLog = message.tool === 'log'
               const isUser = message.role === 'user'
+              if (message.isPlaceholder && !message.content && !message.tool) {
+                return null
+              }
               return (
                 <div
                   key={message.id}
@@ -218,17 +226,15 @@ export function Chat() {
                     <span className="uppercase tracking-wide">{message.role}</span>
                     {message.tool ? <span className="text-slate-500">tool: {message.tool}</span> : null}
                   </div>
-                  {message.isPlaceholder && !message.content ? (
-                    <div className="inline-flex items-center gap-2 text-slate-300">
-                      <span>Thinking…</span>
-                      <Spinner className="h-3 w-3" />
-                    </div>
-                  ) : (
-                    <div>
-                      {renderMessageBody(message.content, isLog)}
-                      {message.isStreaming ? <span className="ml-1 animate-pulse">▍</span> : null}
-                    </div>
-                  )}
+                  <div>
+                    {renderMessageBody(message.content, isLog)}
+                    {pendingThinkingIndex === index && isLog && message.isStreaming ? (
+                      <div className="inline-flex items-center gap-2 text-slate-300 pt-2">
+                        <span>Thinking…</span>
+                      </div>
+                    ) : null}
+                    {message.isStreaming ? <span className="ml-1 animate-pulse">▍</span> : null}
+                  </div>
                 </div>
               )
             }}
