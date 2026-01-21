@@ -142,6 +142,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     path: "./assets/bird.png",
     order: "random",
     counterStateKey: "",
+    metadataStateKey: "",
     search: "",
   ))
   scene.node2.init()

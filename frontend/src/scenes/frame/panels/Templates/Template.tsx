@@ -113,6 +113,25 @@ export function TemplateRow({
               <H6>{template.name}</H6>
             </div>
             <div className="flex gap-1">
+              {trySceneConfig ? (
+                <Button
+                  className="!px-2 flex gap-1"
+                  size="small"
+                  color="primary"
+                  onClick={() => {
+                    if (trySceneFields.length === 0) {
+                      resetTrySceneState({})
+                      submitTrySceneState()
+                      return
+                    }
+                    openTrySceneModal()
+                  }}
+                  disabled={tryLoading || !frameId}
+                  title="Run this interpreted scene on the frame"
+                >
+                  <PlayIcon className="w-5 h-5" />
+                </Button>
+              ) : null}
               {applyTemplate ? (
                 <Button
                   className="!px-2 flex gap-1"
@@ -133,25 +152,6 @@ export function TemplateRow({
                       <>Install{(template.scenes || []).length > 1 ? ` (${(template.scenes || []).length})` : ''}</>
                     )}
                   </span>
-                </Button>
-              ) : null}
-              {trySceneConfig ? (
-                <Button
-                  className="!px-2 flex gap-1"
-                  size="small"
-                  color="primary"
-                  onClick={() => {
-                    if (trySceneFields.length === 0) {
-                      resetTrySceneState({})
-                      submitTrySceneState()
-                      return
-                    }
-                    openTrySceneModal()
-                  }}
-                  disabled={tryLoading || !frameId}
-                  title="Try this interpreted scene on the frame"
-                >
-                  <PlayIcon className="w-5 h-5" />
                 </Button>
               ) : null}
               <DropdownMenu
@@ -248,7 +248,7 @@ export function TemplateRow({
         <Modal
           open={trySceneModalOpen}
           onClose={closeTrySceneModal}
-          title={`Try "${trySceneConfig.mainScene.name || template.name}"`}
+          title={`Run "${trySceneConfig.mainScene.name || template.name}"`}
         >
           <Form
             logic={templateRowLogic}

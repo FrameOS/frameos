@@ -1,4 +1,4 @@
-import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { framesModel } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
@@ -10,6 +10,7 @@ import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
 import { getBasePath } from '../../utils/getBasePath'
 import { entityImagesModel } from '../../models/entityImagesModel'
+import { arrangeNodes } from '../../utils/arrangeNodes'
 
 export interface FrameLogicProps {
   frameId: number
@@ -210,14 +211,35 @@ export function sanitizeNodes(nodes: DiagramNode[]): DiagramNode[] {
   return changed ? newNodes : nodes
 }
 
+function hasValidPosition(node: DiagramNode): boolean {
+  return Number.isFinite(node.position?.x) && Number.isFinite(node.position?.y)
+}
+
 export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
   const settings = scene.settings ?? {}
+  const sanitizedNodes = sanitizeNodes(scene.nodes ?? [])
+  const normalizedNodes = sanitizedNodes.map((node) =>
+    hasValidPosition(node)
+      ? node
+      : {
+          ...node,
+          data: {
+            ...node.data,
+            ...(node.type === 'app' || node.type === 'event'
+              ? { config: { ...((node.data as AppNodeData).config ?? {}) } }
+              : {}),
+          },
+          position: { x: 0, y: 0 },
+        }
+  )
+  const edges = scene.edges ?? []
+  const shouldArrange = normalizedNodes.length > 0 && sanitizedNodes.every((node) => !hasValidPosition(node))
   return {
     ...scene,
     id: scene.id ?? uuidv4(),
     name: scene.name || 'Untitled scene',
-    nodes: sanitizeNodes(scene.nodes ?? []),
-    edges: scene.edges ?? [],
+    nodes: shouldArrange ? arrangeNodes(normalizedNodes, edges) : normalizedNodes,
+    edges,
     fields: scene.fields ?? [],
     settings: {
       ...settings,
@@ -231,7 +253,7 @@ export const frameLogic = kea<frameLogicType>([
   path(['src', 'scenes', 'frame', 'frameLogic']),
   props({} as FrameLogicProps),
   key((props) => props.frameId),
-  connect({ values: [framesModel, ['frames']] }),
+  connect(() => ({ values: [framesModel, ['frames']] })),
   actions({
     updateScene: (sceneId: string, scene: Partial<FrameScene>) => ({ sceneId, scene }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Record<string, any>) => ({ sceneId, nodeId, nodeData }),
@@ -520,11 +542,27 @@ export const frameLogic = kea<frameLogicType>([
       })
     },
   })),
-  afterMount(({ actions, values }) => {
+  afterMount(({ actions, values, cache }) => {
     const defaultScene = values.frame?.scenes?.find((scene) => scene.id === 'default' && !scene.default)
     if (defaultScene) {
       const { name, id, default: _def, ...rest } = defaultScene
       actions.updateScene('default', { name: 'Default Scene', id: uuidv4(), default: true, ...rest })
+    }
+
+    cache.keydownHandler = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase()
+      if (!(event.metaKey || event.ctrlKey) || key !== 's') {
+        return
+      }
+      event.preventDefault()
+      actions.saveFrame()
+    }
+    window.addEventListener('keydown', cache.keydownHandler)
+  }),
+  beforeUnmount(({ cache }) => {
+    if (cache.keydownHandler) {
+      window.removeEventListener('keydown', cache.keydownHandler)
+      cache.keydownHandler = null
     }
   }),
 ])

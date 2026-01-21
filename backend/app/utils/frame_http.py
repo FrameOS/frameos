@@ -71,7 +71,12 @@ async def _fetch_frame_http_bytes(
 ) -> tuple[int, bytes, dict[str, str]]:
     """Fetch *path* from the frame returning (status, body-bytes, headers)."""
     if await _use_agent(frame, redis):
-        resp = await http_get_on_frame(frame.id, _build_frame_path(frame, path, method))
+        resp = await http_get_on_frame(
+            frame.id,
+            _build_frame_path(frame, path, method),
+            method=method,
+            headers=_auth_headers(frame),
+        )
         if isinstance(resp, dict):
             status = int(resp.get("status", 0))
             if resp.get("binary"):

@@ -678,9 +678,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
   var typeMap = initTable[string, string]()
   for field in exportedScene.publicStateFields:
     typeMap[field.name] = field.fieldType
-    if not scene.state.hasKey(field.name) and field.value.len > 0:
-      # TODO: better string to value parser - no need to go via json
-      scene.state[field.name] = valueToJson(valueFromJsonByType(%*(field.value), field.fieldType))
+    if not scene.state.hasKey(field.name) and not field.value.isNil and field.value.kind != JNull:
+      if field.value.kind == JString and field.value.getStr().len == 0:
+        continue
+      scene.state[field.name] = valueToJson(valueFromJsonByType(field.value, field.fieldType))
   stateFieldTypesByScene[sceneId] = typeMap
 
   ## Pass 1: register nodes & event listeners (do not init apps yet)

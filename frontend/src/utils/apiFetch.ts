@@ -5,7 +5,7 @@ import { urls } from '../urls'
 
 export interface ApiFetchOptions extends RequestInit {}
 
-async function userExists(): Promise<boolean> {
+export async function userExists(): Promise<boolean> {
   try {
     const resp = await fetch('/api/has_first_user', { method: 'GET', headers: { Accept: 'application/json' } })
     if (!resp.ok) {

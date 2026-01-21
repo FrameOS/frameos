@@ -108,6 +108,14 @@
       ]
     },
     {
+      "name": "metadataStateKey",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Metadata state key",
+      "hint": "Enter a state key to persist metadata about the image. Stores: {prompt, model, size}."
+    },
+    {
       "name": "saveAssets",
       "type": "select",
       "value": "auto",

@@ -16,11 +16,11 @@ export interface AnyBuiltLogic extends BuiltLogic {}
 const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
   [Area.TopLeft]: [{ panel: Panel.Scenes, active: false, hidden: false }],
   [Area.TopRight]: [
+    { panel: Panel.Templates, active: false, hidden: false },
+    { panel: Panel.Schedule, active: false, hidden: false },
     { panel: Panel.SceneState, active: true, hidden: false },
     { panel: Panel.Apps, active: false, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
-    { panel: Panel.Templates, active: false, hidden: false },
-    { panel: Panel.Schedule, active: false, hidden: false },
   ],
   [Area.BottomLeft]: [
     { panel: Panel.Logs, active: true, hidden: false },
@@ -37,6 +37,10 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
 
 function panelsEqual(panel1: PanelWithMetadata, panel2: PanelWithMetadata) {
   return panel1.panel === panel2.panel && panel1.key === panel2.key
+}
+
+export function panelScrollKey(panel: PanelWithMetadata): string {
+  return `${panel.panel}.${panel.key ?? 'default'}`
 }
 
 export const panelsLogic = kea<panelsLogicType>([
@@ -61,6 +65,7 @@ export const panelsLogic = kea<panelsLogicType>([
     editSceneJSON: (sceneId: string) => ({ sceneId }),
     openAsset: (path: string) => ({ path }),
     persistUntilClosed: (panel: PanelWithMetadata, logic: AnyBuiltLogic) => ({ panel, logic }),
+    rememberPanelScroll: (panel: PanelWithMetadata, scrollTop: number) => ({ panel, scrollTop }),
     updateUrl: true,
   }),
   reducers({
@@ -196,6 +201,21 @@ export const panelsLogic = kea<panelsLogicType>([
         editSceneJSON: (_, { sceneId }) => sceneId,
       },
     ],
+    panelScrollPositions: [
+      {} as Record<string, number>,
+      {
+        rememberPanelScroll: (state, { panel, scrollTop }) => {
+          const key = panelScrollKey(panel)
+          if (state[key] === scrollTop) {
+            return state
+          }
+          return {
+            ...state,
+            [key]: scrollTop,
+          }
+        },
+      },
+    ],
   }),
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
@@ -214,7 +234,7 @@ export const panelsLogic = kea<panelsLogicType>([
             ...panels,
             [Area.TopRight]: panels[Area.TopRight].filter((p) =>
               scenesOpen
-                ? [Panel.Templates, Panel.Schedule].includes(p.panel)
+                ? [Panel.Apps, Panel.Events, Panel.Templates, Panel.Schedule].includes(p.panel)
                 : [Panel.Apps, Panel.Events, Panel.SceneState].includes(p.panel)
             ),
             [Area.BottomLeft]: panels[Area.BottomLeft].filter((p) =>

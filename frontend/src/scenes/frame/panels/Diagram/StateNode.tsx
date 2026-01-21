@@ -42,7 +42,7 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
             style={{
               position: 'relative',
               transform: 'none',
-              right: 0,
+              left: 0,
               top: 0,
               background: 'black',
               borderColor: 'white',

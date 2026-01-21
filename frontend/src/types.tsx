@@ -138,9 +138,18 @@ export interface RepositoryType {
 export interface LogType {
   id: number
   timestamp: string
+  ip: string
   type: string
   line: string
   frame_id: number
+}
+
+export interface AiSceneLogType {
+  message: string
+  requestId?: string
+  status?: string
+  stage?: string
+  timestamp: string
 }
 
 export interface AssetType {
@@ -247,6 +256,8 @@ export interface OutputField {
   name: string
   /** Type of the field */
   type: FieldType
+  /** Example output (stringified) */
+  example?: string
 }
 
 /** config.json schema */
@@ -450,6 +461,8 @@ export interface FrameSceneSettings {
   refreshInterval?: number
   backgroundColor?: string
   execution?: 'compiled' | 'interpreted'
+  prompt?: string
+  autoArrangeOnLoad?: boolean
 }
 
 export interface FrameScene {
@@ -541,6 +554,17 @@ export interface FrameOSSettings {
   }
   openAI?: {
     apiKey?: string
+    backendApiKey?: string
+    summaryModel?: string
+    embeddingModel?: string
+    sceneModel?: string
+    appEnhanceModel?: string
+  }
+  posthog?: {
+    backendApiKey?: string
+    backendHost?: string
+    backendEnableErrorTracking?: boolean
+    backendEnableLlmAnalytics?: boolean
   }
   repositories?: RepositoryType[]
   ssh_keys?: {

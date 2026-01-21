@@ -34,11 +34,32 @@ body {
   animation: fadeInOut 3s infinite ease-in-out;
 }
 
+@keyframes aiSceneEllipsis {
+  0% {
+    width: 0ch;
+  }
+  99% {
+    width: 2ch;
+  }
+  100% {
+    width: 0ch;
+  }
+}
+
+.ai-scene-ellipsis {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  width: 1ch;
+  animation: aiSceneEllipsis 3s infinite;
+}
+
+.ai-scene-ellipsis::after {
+  content: '...';
+}
+
 .react-flow .react-flow__node {
   cursor: default;
-}
-.react-flow .react-flow__node-code {
-  overflow: hidden;
 }
 
 .react-flow .react-flow__node .frameos-node-title {
@@ -63,9 +84,9 @@ body {
 }
 .react-flow__resize-control.line {
   border-color: rgba(0, 0, 0, 0.1);
-  &:hover {
-    border-color: rgba(255, 255, 255, 0.3);
-  }
+}
+.react-flow__resize-control.line:hover {
+  border-color: rgba(255, 255, 255, 0.3);
 }
 .react-flow__resize-control.handle {
   width: 12px;

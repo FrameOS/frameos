@@ -15,6 +15,7 @@ type
     quality*: string
     size*: string
     saveAssets*: string
+    metadataStateKey*: string
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -107,6 +108,14 @@ proc get*(self: App, context: ExecutionContext): Image =
       imageDataBody = imageData.body
     if self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always":
       discard self.saveAsset(prompt, ".jpg", imageDataBody, self.appConfig.saveAssets == "auto")
+    if self.appConfig.metadataStateKey != "":
+      var metadata = %*{
+        "source": "openai",
+        "prompt": prompt,
+        "model": self.appConfig.model,
+        "size": size,
+      }
+      self.scene.state[self.appConfig.metadataStateKey] = metadata
 
     result = decodeImageWithFallback(imageDataBody)
   except CatchableError as e:

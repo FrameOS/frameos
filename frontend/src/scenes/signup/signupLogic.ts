@@ -1,7 +1,8 @@
-import { kea, path } from 'kea'
+import { afterMount, kea, path } from 'kea'
 import { forms } from 'kea-forms'
 import type { signupLogicType } from './signupLogicType'
 import { urls } from '../../urls'
+import { userExists } from '../../utils/apiFetch'
 
 export interface SignupForm {
   email: string
@@ -64,4 +65,9 @@ export const signupLogic = kea<signupLogicType>([
       },
     },
   })),
+  afterMount(async ({ actions }) => {
+    if (await userExists()) {
+      window.location.href = urls.login()
+    }
+  }),
 ])

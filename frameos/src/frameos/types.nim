@@ -258,7 +258,7 @@ type
     name*: string
     label*: string
     fieldType*: string
-    value*: string
+    value*: JsonNode
     options*: seq[string]
     placeholder*: string
     required*: bool

@@ -16,22 +16,31 @@ export interface ExpandedSceneProps {
   frameId: number
   scene?: FrameScene | null
   showEditButton?: boolean
+  isUnsaved?: boolean
+  isUndeployed?: boolean
 }
 
-export function ExpandedScene({ frameId, sceneId, scene, showEditButton = true }: ExpandedSceneProps) {
+export function ExpandedScene({
+  frameId,
+  sceneId,
+  scene,
+  showEditButton = true,
+  isUnsaved,
+  isUndeployed,
+}: ExpandedSceneProps) {
   const { stateChanges, hasStateChanges, fields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
   const { states, sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
-  const { undeployedSceneIds } = useValues(scenesLogic({ frameId }))
   const { requiresRecompilation, unsavedChanges } = useValues(frameLogic({ frameId }))
   const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId, scene }))
+  const { previewScene } = useActions(scenesLogic({ frameId }))
   const { editScene } = useActions(panelsLogic)
   const fieldCount = fields.length ?? 0
 
   const currentState = states[sceneId] ?? {}
-  const isUndeployed = undeployedSceneIds.has(sceneId)
+  const canPreviewUnsavedChanges = unsavedChanges || isUndeployed
   const activateLabel =
     isUndeployed && sceneId !== currentSceneId
-      ? 'Deploy changes & activate scene'
+      ? 'Save changes & redeploy'
       : sceneId === currentSceneId
       ? 'Update active scene'
       : 'Activate scene'
@@ -49,6 +58,10 @@ export function ExpandedScene({ frameId, sceneId, scene, showEditButton = true }
       }
     }
     return state
+  }
+
+  const handlePreview = () => {
+    previewScene(sceneId, buildNextState())
   }
 
   const handleActivate = async () => {
@@ -74,9 +87,18 @@ export function ExpandedScene({ frameId, sceneId, scene, showEditButton = true }
         <div className="space-y-2">
           <div>This scene does not export publicly controllable state.</div>
           <div className="flex items-center gap-2">
-            <Button onClick={handleActivate} color={sceneId !== currentSceneId ? 'primary' : 'secondary'}>
-              {activateLabel}
-            </Button>
+            {canPreviewUnsavedChanges ? (
+              <Button onClick={handlePreview} color="primary">
+                Preview {isUnsaved ? 'unsaved' : isUndeployed ? 'undeployed' : ''} scene
+              </Button>
+            ) : (
+              <Button
+                onClick={handleActivate}
+                color={sceneId !== currentSceneId && !canPreviewUnsavedChanges ? 'primary' : 'secondary'}
+              >
+                {activateLabel}
+              </Button>
+            )}
             {showEditButton ? (
               <Button onClick={() => editScene(sceneId)} color="secondary">
                 Edit scene
@@ -119,12 +141,18 @@ export function ExpandedScene({ frameId, sceneId, scene, showEditButton = true }
             <div className="flex w-full items-center gap-2">
               <div className="@md:w-1/3 hidden @md:block" />
               <div className="flex w-full items-center gap-2">
-                <Button
-                  onClick={handleActivate}
-                  color={sceneId !== currentSceneId || hasStateChanges ? 'primary' : 'secondary'}
-                >
-                  {activateLabel}
-                </Button>
+                {canPreviewUnsavedChanges ? (
+                  <Button onClick={handlePreview} color="primary">
+                    Preview {isUnsaved ? 'unsaved' : isUndeployed ? 'undeployed' : ''} scene
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={handleActivate}
+                    color={sceneId !== currentSceneId || hasStateChanges ? 'primary' : 'secondary'}
+                  >
+                    {activateLabel}
+                  </Button>
+                )}
                 <Button onClick={() => resetStateChanges()} color="secondary">
                   Reset
                 </Button>

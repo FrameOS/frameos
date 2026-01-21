@@ -484,7 +484,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             public_keys = [key.get("public") for key in selected_keys if key.get("public")]
             known_public_keys = [key.get("public") for key in normalize_ssh_keys(settings) if key.get("public")]
             if public_keys:
-                await self.log("stdout", f"{icon} Installing authorized SSH keys on device")
+                await self.log("stdout", f"{icon} Checking SSH keys on device")
                 await _install_authorized_keys(db, redis, frame, public_keys, known_public_keys)
             else:
                 await self.log("stdout", f"{icon} No SSH public keys configured; skipping authorized_keys install")

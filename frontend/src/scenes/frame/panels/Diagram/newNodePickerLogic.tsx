@@ -113,7 +113,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       frameLogic({ frameId }),
       ['setFrameFormValues', 'applyTemplate'],
       diagramLogic({ frameId, sceneId }),
-      ['setNodes', 'setEdges', 'addEdge'],
+      ['setNodes', 'setEdges', 'addEdge', 'setCursorPosition', 'pasteFromClipboard'],
       sceneStateLogic({ frameId, sceneId }),
       ['createField'],
     ],
@@ -516,32 +516,8 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       option: { value, type, keyword },
     }) => {
       if (value === 'clipboard/paste') {
-        if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
-          console.warn('Clipboard API not available for pasting nodes')
-          actions.setSearchValue('')
-          return
-        }
-        try {
-          const clipboardText = await navigator.clipboard.readText()
-          const parsed = JSON.parse(clipboardText)
-          if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object' || !('type' in parsed)) {
-            throw new Error('Clipboard does not contain a valid node JSON')
-          }
-          const pastedNode: DiagramNode = {
-            ...(parsed as DiagramNode),
-            id: uuidv4(),
-            position: { x: diagramX, y: diagramY },
-            selected: false,
-          }
-          delete (pastedNode as any).positionAbsolute
-          delete (pastedNode as any).dragging
-          actions.setNodes([...values.nodes, pastedNode])
-          window.setTimeout(() => {
-            props.updateNodeInternals?.(pastedNode.id)
-          }, 200)
-        } catch (error) {
-          console.error('Failed to paste node from clipboard', error)
-        }
+        actions.setCursorPosition({ x: diagramX, y: diagramY })
+        actions.pasteFromClipboard()
         actions.setSearchValue('')
         return
       }

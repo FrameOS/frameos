@@ -11,9 +11,28 @@ import equal from 'fast-deep-equal'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { buildSdCardImageScene } from './sceneShortcuts'
+import { socketLogic } from '../../../socketLogic'
 
 export interface ScenesLogicProps {
   frameId: number
+}
+
+const UPLOADED_SCENE_PREFIX = 'uploaded/'
+
+const applyStateToSceneFields = (scene: FrameScene, state: Record<string, any> | null): FrameScene => {
+  if (!state || !scene.fields?.length) {
+    return scene
+  }
+  const fields = scene.fields.map((field) => {
+    if (!field?.name) {
+      return field
+    }
+    if (Object.prototype.hasOwnProperty.call(state, field.name)) {
+      return { ...field, value: String(state[field.name]) }
+    }
+    return field
+  })
+  return { ...scene, fields }
 }
 
 export const scenesLogic = kea<scenesLogicType>([
@@ -21,6 +40,7 @@ export const scenesLogic = kea<scenesLogicType>([
   props({} as ScenesLogicProps),
   key((props) => props.frameId),
   connect(({ frameId }: ScenesLogicProps) => ({
+    logic: [socketLogic],
     values: [
       frameLogic({ frameId }),
       ['frame', 'frameForm', 'lastDeploy'],
@@ -46,9 +66,11 @@ export const scenesLogic = kea<scenesLogicType>([
     deleteSelectedScenes: true,
     renameScene: (sceneId: string) => ({ sceneId }),
     duplicateScene: (sceneId: string) => ({ sceneId }),
-    toggleNewScene: true,
+    openNewScene: (location: string) => ({ location }),
     closeNewScene: true,
     createNewScene: true,
+    openAiScene: (location: string) => ({ location }),
+    closeAiScene: true,
     sync: true,
     expandScene: (sceneId: string) => ({ sceneId }),
     copySceneJSON: (sceneId: string) => ({ sceneId }),
@@ -58,10 +80,30 @@ export const scenesLogic = kea<scenesLogicType>([
     disableMultiSelect: true,
     clearSceneSelection: true,
     toggleSceneSelection: (sceneId: string) => ({ sceneId }),
+    setSelectedSceneIds: (sceneIds: string[]) => ({ sceneIds }),
     toggleMissingActiveExpanded: true,
     uploadImage: (file: File) => ({ file }),
     uploadImageSuccess: true,
     uploadImageFailure: true,
+    previewScene: (sceneId: string, state?: Record<string, any> | null) => ({ sceneId, state }),
+    previewSceneSuccess: true,
+    previewSceneFailure: true,
+    setAiPrompt: (prompt: string) => ({ prompt }),
+    generateAiScene: true,
+    generateAiSceneSuccess: true,
+    generateAiSceneFailure: (error: string) => ({ error }),
+    setAiSceneRequestId: (requestId: string | null) => ({ requestId }),
+    setAiSceneLogMessage: (log: {
+      requestId: string
+      message: string
+      status?: string
+      stage?: string
+      timestamp: string
+    }) => ({
+      log,
+    }),
+    toggleAiSceneLogsExpanded: true,
+    setAiSceneLogsExpanded: (expanded: boolean) => ({ expanded }),
     installMissingActiveScene: true,
     installMissingActiveSceneSuccess: true,
     installMissingActiveSceneFailure: true,
@@ -119,12 +161,19 @@ export const scenesLogic = kea<scenesLogicType>([
         setSearch: (_, { search }) => search,
       },
     ],
-    showNewSceneForm: [
-      false,
+    newSceneFormLocation: [
+      null as string | null,
       {
-        toggleNewScene: (state) => !state,
-        closeNewScene: () => false,
-        submitNewSceneSuccess: () => false,
+        openNewScene: (_, { location }) => location,
+        closeNewScene: () => null,
+        submitNewSceneSuccess: () => null,
+      },
+    ],
+    aiSceneFormLocation: [
+      null as string | null,
+      {
+        openAiScene: (_, { location }) => location,
+        closeAiScene: () => null,
       },
     ],
     showingSettings: [
@@ -160,6 +209,70 @@ export const scenesLogic = kea<scenesLogicType>([
         uploadImageFailure: () => false,
       },
     ],
+    previewingSceneId: [
+      null as string | null,
+      {
+        previewScene: (_, { sceneId }) => sceneId,
+        previewSceneSuccess: () => null,
+        previewSceneFailure: () => null,
+      },
+    ],
+    aiPrompt: [
+      '',
+      {
+        setAiPrompt: (_, { prompt }) => prompt,
+        closeAiScene: () => '',
+      },
+    ],
+    aiError: [
+      null as string | null,
+      {
+        generateAiScene: () => null,
+        generateAiSceneFailure: (_, { error }) => error,
+        closeAiScene: () => null,
+      },
+    ],
+    aiSceneRequestId: [
+      null as string | null,
+      {
+        setAiSceneRequestId: (_, { requestId }) => requestId,
+        closeAiScene: () => null,
+      },
+    ],
+    aiSceneLogsByRequestId: [
+      {} as Record<string, { message: string; status?: string; stage?: string; timestamp: string }[]>,
+      {
+        setAiSceneLogMessage: (state, { log }) => ({
+          ...state,
+          [log.requestId]: [...(state[log.requestId] ?? []), log],
+        }),
+        [socketLogic.actionTypes.aiSceneLog]: (state, { log }) => {
+          if (!log.requestId) {
+            return state
+          }
+          return {
+            ...state,
+            [log.requestId]: [...(state[log.requestId] ?? []), log],
+          }
+        },
+      },
+    ],
+    aiSceneLogsExpanded: [
+      false,
+      {
+        toggleAiSceneLogsExpanded: (state) => !state,
+        setAiSceneLogsExpanded: (_, { expanded }) => expanded,
+        closeAiScene: () => false,
+      },
+    ],
+    isGeneratingAiScene: [
+      false,
+      {
+        generateAiScene: () => true,
+        generateAiSceneSuccess: () => false,
+        generateAiSceneFailure: () => false,
+      },
+    ],
     isInstallingMissingActiveScene: [
       false,
       {
@@ -187,6 +300,7 @@ export const scenesLogic = kea<scenesLogicType>([
           return next
         },
         clearSceneSelection: () => new Set<string>(),
+        setSelectedSceneIds: (_, { sceneIds }) => new Set(sceneIds),
         disableMultiSelect: () => new Set<string>(),
         deleteScene: (state, { sceneId }) => {
           const next = new Set(state)
@@ -200,23 +314,8 @@ export const scenesLogic = kea<scenesLogicType>([
     frameId: [() => [(_, props: ScenesLogicProps) => props.frameId], (frameId) => frameId],
     editingFrame: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm || frame || null],
     rawScenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame.scenes ?? []],
-    scenes: [(s) => [s.rawScenes], (rawScenes) => rawScenes.toSorted((a, b) => a.name.localeCompare(b.name))],
-    filteredScenes: [
-      (s) => [s.scenes, s.search],
-      (scenes, search) => {
-        const searchPieces = search
-          .toLowerCase()
-          .split(' ')
-          .filter((s) => s)
-        if (searchPieces.length === 0) {
-          return scenes
-        }
-        return scenes.filter((scene) => searchPieces.every((piece) => scene.name.toLowerCase().includes(piece)))
-      },
-    ],
-    sceneTitles: [(s) => [s.scenes], (scenes) => Object.fromEntries(scenes.map((scene) => [scene.id, scene.name]))],
     undeployedSceneIds: [
-      (s) => [s.scenes, s.frame],
+      (s) => [s.rawScenes, s.frame],
       (scenes, frame): Set<string> => {
         const deployedScenes: FrameScene[] = frame?.last_successful_deploy?.scenes ?? []
         const undeployed = new Set<string>()
@@ -246,6 +345,33 @@ export const scenesLogic = kea<scenesLogicType>([
         return unsaved
       },
     ],
+    scenes: [
+      (s) => [s.rawScenes, s.unsavedSceneIds, s.undeployedSceneIds],
+      (rawScenes, unsavedSceneIds, undeployedSceneIds) => {
+        return rawScenes.toSorted((a, b) => {
+          const aPriority = unsavedSceneIds.has(a.id) || undeployedSceneIds.has(a.id)
+          const bPriority = unsavedSceneIds.has(b.id) || undeployedSceneIds.has(b.id)
+          if (aPriority !== bPriority) {
+            return aPriority ? -1 : 1
+          }
+          return a.name.localeCompare(b.name)
+        })
+      },
+    ],
+    filteredScenes: [
+      (s) => [s.scenes, s.search],
+      (scenes, search) => {
+        const searchPieces = search
+          .toLowerCase()
+          .split(' ')
+          .filter((s) => s)
+        if (searchPieces.length === 0) {
+          return scenes
+        }
+        return scenes.filter((scene) => searchPieces.every((piece) => scene.name.toLowerCase().includes(piece)))
+      },
+    ],
+    sceneTitles: [(s) => [s.scenes], (scenes) => Object.fromEntries(scenes.map((scene) => [scene.id, scene.name]))],
     linksToOtherScenes: [
       (s) => [s.scenes],
       (scenes): Record<string, Set<string>> => {
@@ -288,9 +414,22 @@ export const scenesLogic = kea<scenesLogicType>([
         return settingsByScene
       },
     ],
+    linkedActiveSceneId: [
+      (s) => [s.activeSceneId, s.scenes],
+      (activeSceneId, scenes) => {
+        if (!activeSceneId) {
+          return null
+        }
+        if (!activeSceneId.startsWith(UPLOADED_SCENE_PREFIX)) {
+          return activeSceneId
+        }
+        const candidateId = activeSceneId.slice(UPLOADED_SCENE_PREFIX.length)
+        return scenes.some((scene) => scene.id === candidateId) ? candidateId : activeSceneId
+      },
+    ],
     activeScene: [
-      (s) => [s.scenes, s.activeSceneId],
-      (scenes, activeSceneId) => scenes.find((scene) => scene.id === activeSceneId) ?? null,
+      (s) => [s.scenes, s.linkedActiveSceneId],
+      (scenes, linkedActiveSceneId) => scenes.find((scene) => scene.id === linkedActiveSceneId) ?? null,
     ],
     missingActiveSceneId: [
       (s) => [s.activeScene, s.activeSceneId],
@@ -323,8 +462,81 @@ export const scenesLogic = kea<scenesLogicType>([
         return searchPieces.every((piece) => sceneName.includes(piece))
       },
     ],
+    aiSceneLastLog: [
+      (s) => [s.aiSceneRequestId, s.aiSceneLogsByRequestId],
+      (requestId, logsByRequestId) => {
+        if (!requestId) {
+          return null
+        }
+        const logs = logsByRequestId[requestId] ?? []
+        return logs.length ? logs[logs.length - 1] : null
+      },
+    ],
+    aiSceneLogs: [
+      (s) => [s.aiSceneRequestId, s.aiSceneLogsByRequestId],
+      (requestId, logsByRequestId) =>
+        requestId
+          ? [...(logsByRequestId[requestId] ?? [])].toSorted(
+              (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime()
+            )
+          : [],
+    ],
   }),
   listeners(({ actions, props, values }) => ({
+    generateAiScene: async () => {
+      const prompt = values.aiPrompt.trim()
+      if (!prompt) {
+        actions.generateAiSceneFailure('Add a prompt to generate a scene.')
+        return
+      }
+      const requestId = uuidv4()
+      actions.setAiSceneRequestId(requestId)
+      actions.setAiSceneLogsExpanded(true)
+      try {
+        const response = await apiFetch('/api/ai/scenes/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, requestId, frameId: props.frameId }),
+        })
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}))
+          throw new Error(payload?.detail || 'Failed to generate scene')
+        }
+        const payload = await response.json()
+        const scenes = Array.isArray(payload?.scenes) ? payload.scenes : []
+        const title = typeof payload?.title === 'string' ? payload.title : undefined
+        if (!scenes.length) {
+          throw new Error('No scenes returned from AI')
+        }
+        const sanitizedScenes = scenes.map((scene: Partial<FrameScene>) => {
+          const sanitizedScene = sanitizeScene(scene, values.frameForm)
+          return {
+            ...sanitizedScene,
+            settings: {
+              ...sanitizedScene.settings,
+              autoArrangeOnLoad: true,
+            },
+          }
+        })
+        actions.applyTemplate({ scenes: sanitizedScenes, name: title || 'AI Generated Scene' })
+        actions.generateAiSceneSuccess()
+        actions.setAiSceneLogMessage({
+          requestId,
+          message: 'Scene generated: ' + (title || 'AI Generated Scene'),
+          status: 'success',
+          timestamp: new Date().toISOString(),
+        })
+      } catch (error) {
+        console.error(error)
+        actions.generateAiSceneFailure(error instanceof Error ? error.message : 'Failed to generate scene')
+        actions.setAiSceneLogMessage({
+          requestId,
+          message: error instanceof Error ? error.message : 'Failed to generate scene',
+          status: 'error',
+          timestamp: new Date().toISOString(),
+        })
+      }
+    },
     uploadImage: async ({ file }) => {
       try {
         const formData = new FormData()
@@ -348,6 +560,28 @@ export const scenesLogic = kea<scenesLogicType>([
         console.error(error)
         alert('Failed to upload image')
         actions.uploadImageFailure()
+      }
+    },
+    previewScene: async ({ sceneId, state }) => {
+      const scene = values.scenes.find((item) => item.id === sceneId)
+      if (!scene) {
+        actions.previewSceneFailure()
+        return
+      }
+      try {
+        const resolvedState = state ?? values.states?.[scene.id] ?? values.states?.[`uploaded/${scene.id}`] ?? null
+        const payloadScene = applyStateToSceneFields(scene, resolvedState)
+        const payload = {
+          scenes: [payloadScene],
+          sceneId: scene.id,
+          ...(resolvedState && Object.keys(resolvedState).length > 0 ? { state: resolvedState } : {}),
+        }
+        await actions.sendEvent('uploadScenes', payload)
+        actions.previewSceneSuccess()
+      } catch (error) {
+        console.error(error)
+        alert('Failed to preview the scene')
+        actions.previewSceneFailure()
       }
     },
     installMissingActiveScene: async () => {
@@ -459,11 +693,15 @@ export const scenesLogic = kea<scenesLogicType>([
       })
       actions.clearSceneSelection()
     },
-    toggleNewScene: () => {
-      actions.resetNewScene({ name: '' })
-    },
     closeNewScene: () => {
       actions.resetNewScene({ name: '' })
+    },
+    openNewScene: () => {
+      actions.resetNewScene({ name: '' })
+      actions.closeAiScene()
+    },
+    openAiScene: () => {
+      actions.closeNewScene()
     },
     createNewScene: () => {
       const scenes: FrameScene[] = values.frameForm.scenes || []

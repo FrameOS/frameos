@@ -17,6 +17,7 @@ class Log(Base):
     timestamp = mapped_column(DateTime, nullable=False, default=func.current_timestamp())
     type = mapped_column(String(10), nullable=False)
     line = mapped_column(Text, nullable=False)
+    ip = mapped_column(String(64), nullable=True)
     frame_id = mapped_column(Integer, ForeignKey('frame.id'), nullable=False)
 
     frame = relationship('Frame', backref=backref('logs', lazy=True))
@@ -27,12 +28,27 @@ class Log(Base):
             'timestamp': self.timestamp.replace(tzinfo=timezone.utc).isoformat(),
             'type': self.type,
             'line': self.line,
+            'ip': self.ip,
             'frame_id': self.frame_id
         }
 
 
-async def new_log(db: Session, redis: Redis, frame_id: int, type: str, line: str, timestamp: Optional[datetime] = None) -> Log:
-    log = Log(frame_id=frame_id, type=type, line=line, timestamp=timestamp or datetime.utcnow())
+async def new_log(
+    db: Session,
+    redis: Redis,
+    frame_id: int,
+    type: str,
+    line: str,
+    timestamp: Optional[datetime] = None,
+    ip: Optional[str] = None,
+) -> Log:
+    log = Log(
+        frame_id=frame_id,
+        type=type,
+        line=line,
+        timestamp=timestamp or datetime.utcnow(),
+        ip=ip,
+    )
     db.add(log)
     db.commit()
     frame_logs_count = db.query(Log).filter_by(frame_id=frame_id).count()
@@ -50,14 +66,20 @@ async def new_log(db: Session, redis: Redis, frame_id: int, type: str, line: str
     return log
 
 
-async def process_log(db: Session, redis: Redis, frame: Frame, log: dict | list):
+async def process_log(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    log: dict | list,
+    ip: Optional[str] = None,
+):
     if isinstance(log, list):
         timestamp = datetime.utcfromtimestamp(log[0])
         log = log[1]
     else:
         timestamp = datetime.utcnow()
 
-    await new_log(db, redis, int(frame.id), "webhook", json.dumps(log), timestamp)
+    await new_log(db, redis, int(frame.id), "webhook", json.dumps(log), timestamp, ip=ip)
 
     assert isinstance(log, dict), f"Log must be a dict, got {type(log)}"
 
@@ -97,4 +119,3 @@ async def process_log(db: Session, redis: Redis, frame: Frame, log: dict | list)
         if 'timestamp' in metrics_dict:
             del metrics_dict['timestamp']
         await new_metrics(db, redis, int(frame.id), metrics_dict)
-

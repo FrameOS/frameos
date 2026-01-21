@@ -33,6 +33,7 @@
 - Development: `npm install` followed by `npm run dev` (spawns kea typegen watch and esbuild dev build concurrently).
 - Production build: `npm run build` which chains kea codegen, schema generation (`ts-json-schema-generator`), TypeScript type-checking, and final bundling to `dist/`. 【F:frontend/package.json†L6-L66】
 - Output folder is consumed by the backend’s static file mounts; ensure `frontend/dist` exists (e.g., via `npm run build`) before running the Python app outside of test mode. 【F:backend/app/fastapi.py†L38-L86】
+- ALWAYS prefer writing frontend business logic in kea logic files over using effects like `useState` or `useEffect`.
 
 ## Device runtime (Nim) notes
 - `frameos/frameos` houses the on-device runtime written in Nim with asyncdispatch.

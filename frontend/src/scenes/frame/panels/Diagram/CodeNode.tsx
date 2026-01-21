@@ -1,9 +1,12 @@
 import { BindLogic, useActions, useValues } from 'kea'
 import { NodeProps, Handle, Position, NodeResizer, useUpdateNodeInternals } from 'reactflow'
-import { CodeNodeData } from '../../../../types'
+import { useEffect, useRef } from 'react'
+import type { CodeArg as CodeArgType, CodeNodeData, FieldType } from '../../../../types'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import { TextArea } from '../../../../components/TextArea'
+import Editor, { Monaco } from '@monaco-editor/react'
+import type { editor as MonacoEditor } from 'monaco-editor'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { CheckIcon, ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
@@ -20,6 +23,117 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
   const data: CodeNodeData = (node?.data as CodeNodeData) ?? ({ code: '' } satisfies CodeNodeData)
   const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
+  const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
+  const monacoRef = useRef<Monaco | null>(null)
+  const codeArgsLibRef = useRef<{ dispose: () => void } | null>(null)
+  const isSelectedRef = useRef<boolean>(isSelected)
+
+  const fieldTypeToTsType: Record<FieldType, string> = {
+    string: 'string',
+    text: 'string',
+    float: 'number',
+    integer: 'number',
+    boolean: 'boolean',
+    color: 'string',
+    date: 'string',
+    json: 'Record<string, any>',
+    node: 'any',
+    scene: 'string',
+    image: 'string',
+    font: 'string',
+  }
+
+  const isValidIdentifier = (name: string): boolean => /^[A-Za-z_$][\w$]*$/.test(name)
+
+  const buildCodeNodeDeclarations = (codeArgs: CodeArgType[] = []): string => {
+    const frameosGlobals = `
+declare function now(): number;
+declare function parseTs(format: string, text: string): number;
+declare function format(ts: number, format: string): string;
+declare function getState(key: string): any;
+declare function getArg(key: string): any;
+declare function getContext(key: string): any;
+declare const state: Record<string, any>;
+declare const args: Record<string, any>;
+declare const context: {
+  loopIndex?: number;
+  loopKey?: string;
+  event?: string;
+  payload?: any;
+  hasImage?: boolean;
+};
+`
+
+    const declarations = codeArgs
+      .filter((arg) => isValidIdentifier(arg.name))
+      .map((arg) => `declare const ${arg.name}: ${fieldTypeToTsType[arg.type] ?? 'any'};`)
+
+    return `${frameosGlobals}${declarations.length ? `${declarations.join('\n')}\n` : ''}`
+  }
+
+  const updateCodeArgGlobals = (monaco: Monaco, codeArgs: CodeArgType[] = []): void => {
+    const declarations = buildCodeNodeDeclarations(codeArgs)
+    codeArgsLibRef.current?.dispose()
+    codeArgsLibRef.current = declarations
+      ? monaco.languages.typescript.typescriptDefaults.addExtraLib(declarations, `inmemory://code-node/${id}.d.ts`)
+      : null
+  }
+
+  useEffect(() => {
+    isSelectedRef.current = isSelected
+    if (editorRef.current) {
+      updateWheelHandling(editorRef.current)
+    }
+  }, [isSelected])
+
+  useEffect(() => {
+    if (!monacoRef.current) {
+      return
+    }
+    updateCodeArgGlobals(monacoRef.current, data.codeArgs ?? [])
+  }, [data.codeArgs])
+
+  useEffect(() => {
+    return () => {
+      codeArgsLibRef.current?.dispose()
+      codeArgsLibRef.current = null
+    }
+  }, [])
+
+  function beforeMount(monaco: Monaco): void {
+    monaco.editor.defineTheme('darkframe-node', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [],
+      colors: { 'editor.background': '#18181b' },
+    })
+  }
+
+  const baseScrollbarOptions = {
+    verticalScrollbarSize: 6,
+    horizontalScrollbarSize: 6,
+    alwaysConsumeMouseWheel: false,
+    handleMouseWheel: false,
+  }
+
+  const updateWheelHandling = (editor: MonacoEditor.IStandaloneCodeEditor): void => {
+    const focused = editor.hasTextFocus()
+    editor.updateOptions({
+      scrollbar: {
+        ...baseScrollbarOptions,
+        handleMouseWheel: isSelectedRef.current || focused,
+      },
+    })
+  }
+
+  function handleEditorMount(editor: MonacoEditor.IStandaloneCodeEditor, monaco: Monaco): void {
+    editorRef.current = editor
+    monacoRef.current = monaco
+    updateWheelHandling(editor)
+    editor.onDidFocusEditorWidget(() => updateWheelHandling(editor))
+    editor.onDidBlurEditorWidget(() => updateWheelHandling(editor))
+    updateCodeArgGlobals(monaco, data.codeArgs ?? [])
+  }
 
   return (
     <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>
@@ -47,7 +161,7 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
                   style={{
                     position: 'relative',
                     transform: 'none',
-                    right: 0,
+                    left: 0,
                     top: 0,
                     background: 'black',
                     borderColor: 'white',
@@ -136,15 +250,36 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
             ]}
           />
         </div>
-        <div className="p-1 h-full">
+        <div className="p-1 flex-1 min-h-0 min-w-0">
           {codeNodeLanguage === 'js' ? (
-            <TextArea
-              theme="node"
-              className="w-full h-full font-mono resize-none"
-              placeholder={data.code ? 'Rewrite to JS: ' + data.code : `e.g: state.magic3 (JavaScript)`}
+            <Editor
+              height="100%"
+              language="typescript"
               value={data.codeJS ?? ''}
-              rows={2}
-              onChange={(value) => updateNodeData(id, { codeJS: value })}
+              theme="darkframe-node"
+              beforeMount={beforeMount}
+              options={{
+                minimap: { enabled: false },
+                fontSize: 12,
+                lineNumbers: 'off',
+                lineDecorationsWidth: 0,
+                glyphMargin: false,
+                folding: false,
+                renderLineHighlight: 'none',
+                overviewRulerLanes: 0,
+                hideCursorInOverviewRuler: true,
+                scrollbar: {
+                  verticalScrollbarSize: 6,
+                  horizontalScrollbarSize: 6,
+                  alwaysConsumeMouseWheel: false,
+                  handleMouseWheel: false,
+                },
+                scrollBeyondLastLine: false,
+                wordWrap: 'on',
+                automaticLayout: true,
+              }}
+              onMount={(editor, monaco) => handleEditorMount(editor, monaco)}
+              onChange={(value) => updateNodeData(id, { codeJS: value ?? '' })}
             />
           ) : (
             <TextArea
@@ -173,7 +308,7 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
               style={{
                 position: 'relative',
                 transform: 'none',
-                right: 0,
+                left: 0,
                 top: 0,
                 background: 'black',
                 borderColor: 'white',

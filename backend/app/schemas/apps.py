@@ -142,6 +142,10 @@ class OutputField(BaseModel):
     """
     name: str = Field(..., description="Name of the output field")
     type: FieldTypeEnum = Field(..., description="Type of this output field")
+    example: Optional[str] = Field(
+        None,
+        description="Example output for this field, stored as a stringified value"
+    )
 
 
 class CacheConfig(BaseModel):

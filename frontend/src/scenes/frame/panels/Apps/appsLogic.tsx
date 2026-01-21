@@ -7,9 +7,9 @@ import { AppConfig } from '../../../../types'
 
 export const appsLogic = kea<appsLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Apps', 'appsLogic']),
-  connect({
+  connect(() => ({
     values: [appsModel, ['apps as allApps']],
-  }),
+  })),
   actions({
     setSearch: (search: string) => ({ search }),
   }),

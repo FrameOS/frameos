@@ -1,0 +1,63 @@
+{
+  "name": "Weather (Open-Meteo)",
+  "description": "Fetch current, hourly, and daily forecasts from Open-Meteo for a location and date.",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "location",
+      "type": "string",
+      "value": "",
+      "required": true,
+      "label": "Location",
+      "placeholder": "City, state, or country"
+    },
+    {
+      "name": "date",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Date (YYYY-MM-DD)",
+      "placeholder": "2024-01-30"
+    },
+    {
+      "name": "timezone",
+      "type": "string",
+      "value": "auto",
+      "required": false,
+      "label": "Timezone",
+      "placeholder": "auto"
+    },
+    {
+      "name": "temperatureUnit",
+      "type": "select",
+      "options": ["celsius", "fahrenheit"],
+      "value": "celsius",
+      "required": true,
+      "label": "Temperature unit"
+    },
+    {
+      "name": "windSpeedUnit",
+      "type": "select",
+      "options": ["kmh", "ms", "mph", "kn"],
+      "value": "kmh",
+      "required": true,
+      "label": "Wind speed unit"
+    },
+    {
+      "name": "precipitationUnit",
+      "type": "select",
+      "options": ["mm", "inch"],
+      "value": "mm",
+      "required": true,
+      "label": "Precipitation unit"
+    }
+  ],
+  "output": [
+    {
+      "name": "weather",
+      "type": "json",
+      "example": "{\n  \"provider\": \"open-meteo\",\n  \"forecastModes\": [\n    \"current\",\n    \"hourly\",\n    \"daily\"\n  ],\n  \"date\": \"2026-01-18\",\n  \"location\": {\n    \"name\": \"Brussels\",\n    \"latitude\": 50.85045,\n    \"longitude\": 4.34878,\n    \"timezone\": \"auto\",\n    \"country\": \"Belgium\",\n    \"countryCode\": \"BE\",\n    \"admin1\": \"Brussels Capital\",\n    \"admin2\": \"Bruxelles-Capitale\"\n  },\n  \"forecast\": {\n    \"latitude\": 50.854,\n    \"longitude\": 4.35,\n    \"generationtime_ms\": 0.3679990768432617,\n    \"utc_offset_seconds\": 3600,\n    \"timezone\": \"Europe/Brussels\",\n    \"timezone_abbreviation\": \"GMT+1\",\n    \"elevation\": 27,\n    \"current_weather_units\": {\n      \"time\": \"iso8601\",\n      \"interval\": \"seconds\",\n      \"temperature\": \"\\u00b0C\",\n      \"windspeed\": \"km/h\",\n      \"winddirection\": \"\\u00b0\",\n      \"is_day\": \"\",\n      \"weathercode\": \"wmo code\"\n    },\n    \"current_weather\": {\n      \"time\": \"2026-01-18T22:15\",\n      \"interval\": 900,\n      \"temperature\": 5.7,\n      \"windspeed\": 5.4,\n      \"winddirection\": 132,\n      \"is_day\": 0,\n      \"weathercode\": 0\n    },\n    \"hourly_units\": {\n      \"time\": \"iso8601\",\n      \"temperature_2m\": \"\\u00b0C\",\n      \"apparent_temperature\": \"\\u00b0C\",\n      \"precipitation\": \"mm\",\n      \"weathercode\": \"wmo code\",\n      \"windspeed_10m\": \"km/h\",\n      \"winddirection_10m\": \"\\u00b0\"\n    },\n    \"hourly\": {\n      \"time\": [\n        \"2026-01-18T00:00\",\n        \"2026-01-18T01:00\",\n        \"2026-01-18T02:00\",\n        \"2026-01-18T03:00\",\n        \"2026-01-18T04:00\",\n        \"2026-01-18T05:00\",\n        \"2026-01-18T06:00\",\n        \"2026-01-18T07:00\",\n        \"2026-01-18T08:00\",\n        \"2026-01-18T09:00\",\n        \"2026-01-18T10:00\",\n        \"2026-01-18T11:00\",\n        \"2026-01-18T12:00\",\n        \"2026-01-18T13:00\",\n        \"2026-01-18T14:00\",\n        \"2026-01-18T15:00\",\n        \"2026-01-18T16:00\",\n        \"2026-01-18T17:00\",\n        \"2026-01-18T18:00\",\n        \"2026-01-18T19:00\",\n        \"2026-01-18T20:00\",\n        \"2026-01-18T21:00\",\n        \"2026-01-18T22:00\",\n        \"2026-01-18T23:00\"\n      ],\n      \"temperature_2m\": [\n        9.2,\n        8.2,\n        8.3,\n        8.1,\n        7.2,\n        7.1,\n        7.3,\n        7.1,\n        6.7,\n        7.3,\n        8.5,\n        8.5,\n        9.7,\n        10.9,\n        11.1,\n        11.3,\n        11.1,\n        9.7,\n        8.7,\n        8,\n        6.8,\n        6.2,\n        5.8,\n        5.5\n      ],\n      \"apparent_temperature\": [\n        7.5,\n        6.3,\n        6.5,\n        6.2,\n        5.1,\n        4.8,\n        4.9,\n        4.8,\n        3.7,\n        4.4,\n        5.6,\n        5.6,\n        6.9,\n        8.7,\n        8,\n        8.6,\n        8.3,\n        6.7,\n        5.9,\n        5,\n        3.6,\n        3.5,\n        3.3,\n        2.4\n      ],\n      \"precipitation\": [\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0,\n        0\n      ],\n      \"weathercode\": [\n        0,\n        1,\n        3,\n        3,\n        3,\n        3,\n        3,\n        3,\n        3,\n        3,\n        3,\n        0,\n        0,\n        1,\n        2,\n        2,\n        0,\n        3,\n        3,\n        2,\n        0,\n        0,\n        0,\n        0\n      ],\n      \"windspeed_10m\": [\n        4,\n        3.6,\n        2.9,\n        3.6,\n        5.8,\n        5,\n        6.5,\n        5,\n        9.4,\n        9,\n        8.6,\n        9,\n        9.4,\n        5.8,\n        9.7,\n        7.9,\n        8.6,\n        9.4,\n        10.4,\n        8.6,\n        9.7,\n        5.8,\n        5,\n        7.2\n      ],\n      \"winddirection_10m\": [\n        166,\n        59,\n        353,\n        67,\n        78,\n        52,\n        71,\n        68,\n        101,\n        54,\n        87,\n        80,\n        62,\n        66,\n        69,\n        74,\n        92,\n        73,\n        77,\n        110,\n        117,\n        202,\n        132,\n        168\n      ]\n    },\n    \"daily_units\": {\n      \"time\": \"iso8601\",\n      \"temperature_2m_max\": \"\\u00b0C\",\n      \"temperature_2m_min\": \"\\u00b0C\",\n      \"precipitation_sum\": \"mm\",\n      \"weathercode\": \"wmo code\",\n      \"sunrise\": \"iso8601\",\n      \"sunset\": \"iso8601\",\n      \"windspeed_10m_max\": \"km/h\"\n    },\n    \"daily\": {\n      \"time\": [\n        \"2026-01-18\"\n      ],\n      \"temperature_2m_max\": [\n        11.3\n      ],\n      \"temperature_2m_min\": [\n        5.5\n      ],\n      \"precipitation_sum\": [\n        0\n      ],\n      \"weathercode\": [\n        3\n      ],\n      \"sunrise\": [\n        \"2026-01-18T08:35\"\n      ],\n      \"sunset\": [\n        \"2026-01-18T17:10\"\n      ],\n      \"windspeed_10m_max\": [\n        10.4\n      ]\n    }\n  }\n}"
+    }
+  ]
+}

@@ -43,7 +43,7 @@ async function buildSDCard(id: number): Promise<void> {
 }
 
 export const framesModel = kea<framesModelType>([
-  connect({ logic: [socketLogic, entityImagesModel] }),
+  connect(() => ({ logic: [socketLogic, entityImagesModel] })),
   path(['src', 'models', 'framesModel']),
   actions({
     addFrame: (frame: FrameType) => ({ frame }),

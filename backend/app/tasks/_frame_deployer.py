@@ -16,7 +16,7 @@ from gzip import compress
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
-from app.models.apps import get_one_app_sources
+from app.models.apps import get_app_configs, get_one_app_sources
 from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
@@ -818,8 +818,17 @@ class FrameDeployer:
 
         return sorted(extra_nixpkgs)
 
+    def _get_pkgs_from_all_apps(self: "FrameDeployer", field: str) -> list[str]:
+        extra_pkgs: set[str] = set()
+        for config in get_app_configs().values():
+            if field in config:
+                for pkg in config[field]:
+                    if isinstance(pkg, str) and pkg:
+                        extra_pkgs.add(pkg)
+        return sorted(extra_pkgs)
+
     def get_apt_packages(self: "FrameDeployer") -> list[str]:
-        apt_pkgs = self._get_pkgs_from_apps("apt")
+        apt_pkgs = self._get_pkgs_from_all_apps("apt")
         if not apt_pkgs:
             return []
         return sorted(set(apt_pkgs))

@@ -15,6 +15,7 @@ import {
   ArrowPathIcon,
   ArrowUpTrayIcon,
   CloudArrowDownIcon,
+  EyeIcon,
   ExclamationTriangleIcon,
   FolderArrowDownIcon,
   FolderOpenIcon,
@@ -38,16 +39,21 @@ import { FrameImage } from '../../../../components/FrameImage'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
 import { SecretSettingsModal } from '../SecretSettingsModal'
-
+import { TextArea } from '../../../../components/TextArea'
+import { A, router } from 'kea-router'
+import { urls } from '../../../../urls'
+import { appsModel } from '../../../../models/appsModel'
 export function Scenes() {
   const { frameId, frameForm, frame } = useValues(frameLogic)
   const { applyTemplate } = useActions(frameLogic)
+  const { apps } = useValues(appsModel)
   const { editScene, openTemplates } = useActions(panelsLogic)
   const {
     filteredScenes,
     scenes,
     search,
-    showNewSceneForm,
+    newSceneFormLocation,
+    aiSceneFormLocation,
     isNewSceneSubmitting,
     showingSettings,
     expandedScenes,
@@ -60,18 +66,26 @@ export function Scenes() {
     activeSettingsKey,
     multiSelectEnabled,
     selectedSceneIds,
+    linkedActiveSceneId,
     activeUploadedScene,
     missingActiveSceneId,
     missingActiveMatchesSearch,
     missingActiveExpanded,
     isUploadingImage,
+    aiPrompt,
+    aiError,
+    aiSceneLastLog,
+    aiSceneLogs,
+    aiSceneLogsExpanded,
+    isGeneratingAiScene,
     isInstallingMissingActiveScene,
+    previewingSceneId,
   } = useValues(scenesLogic({ frameId }))
   const {
     setSearch,
     toggleSettings,
     submitNewScene,
-    toggleNewScene,
+    openNewScene,
     createNewScene,
     closeNewScene,
     expandScene,
@@ -79,19 +93,101 @@ export function Scenes() {
     enableMultiSelect,
     disableMultiSelect,
     toggleSceneSelection,
+    setSelectedSceneIds,
     deleteSelectedScenes,
     toggleMissingActiveExpanded,
     uploadImage,
+    previewScene,
+    setAiPrompt,
+    generateAiScene,
+    openAiScene,
+    closeAiScene,
+    toggleAiSceneLogsExpanded,
     installMissingActiveScene,
   } = useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
-  const { sceneId, sceneChanging, loading, uploadedScenes, uploadedScenesLoading } = useValues(
-    controlLogic({ frameId })
-  )
+  const { sceneChanging, loading, uploadedScenes, uploadedScenesLoading } = useValues(controlLogic({ frameId }))
   const { setCurrentScene, sync } = useActions(controlLogic({ frameId }))
-  const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
+  const { settings, savedSettings, settingsChanged, aiEmbeddingsStatus } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const uploadInputRef = useRef<HTMLInputElement>(null)
+  const selectableSceneIds = filteredScenes.map((scene) => scene.id)
+  const allSelectableScenesSelected =
+    selectableSceneIds.length > 0 && selectableSceneIds.every((sceneId) => selectedSceneIds.has(sceneId))
+  const promptSuggestions = [
+    { label: 'Banana', prompt: 'Display an image of a banana on a white background.' },
+    { label: 'Unsplash split', prompt: 'split the scene in 4 and show a different unsplash image in each of them' },
+    {
+      label: 'Health message',
+      prompt:
+        'create a scene that shows a random generated message each day. the message is about being healthy. show healthy things via unsplash in the background',
+    },
+    { label: 'Minimal clock', prompt: 'Design a minimalist analog clock for an e-ink frame.' },
+    { label: 'Weather panel', prompt: 'Show a clean weather dashboard with temperature, forecast, and icons.' },
+    {
+      label: 'Photo spotlight',
+      prompt: 'Create a local photo spotlight with a caption and subtle border. Show image metadata on top.',
+    },
+  ]
+
+  const onPromptDragOver = (event: React.DragEvent<HTMLTextAreaElement>) => {
+    if (event.dataTransfer.types.includes('application/reactflow')) {
+      event.preventDefault()
+    }
+  }
+
+  const onPromptDrop = (event: React.DragEvent<HTMLTextAreaElement>) => {
+    event.preventDefault()
+    const data = event.dataTransfer.getData('application/reactflow')
+    if (!data) {
+      return
+    }
+    try {
+      const { type, keyword } = JSON.parse(data)
+      if (type !== 'app' || !keyword) {
+        return
+      }
+      const appName = `[APP: ${apps[keyword]?.name ?? keyword}]`
+      const nextPrompt = aiPrompt ? `${aiPrompt} ${appName}` : appName
+      setAiPrompt(nextPrompt)
+    } catch (error) {
+      return
+    }
+  }
+
+  const promptHoverState = useRef<{ previous: string | null; active: string | null }>({
+    previous: null,
+    active: null,
+  })
+
+  const handlePromptHoverEnter = (prompt: string) => {
+    if (!hasEmbeddings) {
+      return
+    }
+    if (promptHoverState.current.active === null) {
+      promptHoverState.current.previous = aiPrompt ?? ''
+    }
+    promptHoverState.current.active = prompt
+    setAiPrompt(prompt)
+  }
+
+  const handlePromptHoverLeave = (prompt: string) => {
+    if (promptHoverState.current.active !== prompt) {
+      return
+    }
+    const previous = promptHoverState.current.previous ?? ''
+    promptHoverState.current.active = null
+    promptHoverState.current.previous = null
+    if (aiPrompt === prompt) {
+      setAiPrompt(previous)
+    }
+  }
+
+  const handlePromptSuggestionClick = (prompt: string) => {
+    promptHoverState.current.active = null
+    promptHoverState.current.previous = null
+    setAiPrompt(prompt)
+  }
 
   const triggerUploadInput = () => {
     uploadInputRef.current?.click()
@@ -106,33 +202,253 @@ export function Scenes() {
     event.target.value = ''
   }
 
-  const renderShortcuts = (className?: string, onNewScene: () => void = toggleNewScene) => (
-    <div className={clsx('flex flex-wrap items-center gap-2 rounded-lg', className)}>
-      <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={onNewScene}>
-        <PlusIcon className="w-4 h-4" />
-        New blank scene
-      </Button>
-      <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={openTemplates}>
-        <SparklesIcon className="w-4 h-4" />
-        Explore available scenes
-      </Button>
-      {frame.last_successful_deploy_at ? (
-        <Button
-          size="small"
-          color="secondary"
-          className="flex gap-1 items-center"
-          onClick={triggerUploadInput}
-          disabled={isUploadingImage}
-        >
-          {isUploadingImage ? <Spinner color="white" /> : <ArrowUpTrayIcon className="w-4 h-4" />}
-          Upload image
-        </Button>
-      ) : null}
-      <input ref={uploadInputRef} type="file" accept="image/*" className="hidden" onChange={handleUploadImage} />
-    </div>
+  const hasEmbeddings = (aiEmbeddingsStatus?.count ?? 0) > 0
+  const hasBackendApiKey = Boolean(savedSettings?.openAI?.backendApiKey?.trim())
+  const missingBackendApiKey = !hasBackendApiKey
+  const hasAiSceneHistory =
+    aiSceneLogs.length > 0 &&
+    (isGeneratingAiScene || aiSceneLastLog?.status === 'success' || aiSceneLastLog?.status === 'error')
+  const serviceSettingKeys = Object.keys(settingsDetails)
+  const missingServiceSettings = getMissingSecretSettingKeys(serviceSettingKeys, savedSettings)
+  const orderedServiceKeys = [
+    ...serviceSettingKeys.filter((settingKey) => !missingServiceSettings.has(settingKey)),
+    ...serviceSettingKeys.filter((settingKey) => missingServiceSettings.has(settingKey)),
+  ]
+  const formatDurationSeconds = (durationMs: number | null) => {
+    if (durationMs === null) {
+      return null
+    }
+    const seconds = Math.max(0, durationMs / 1000)
+    const roundedSeconds = Math.round(seconds * 10) / 10
+    return `${roundedSeconds}s`
+  }
+
+  const aiSceneLogRows = aiSceneLogs.map((log, index) => {
+    const start = new Date(log.timestamp).getTime()
+    const end =
+      index < aiSceneLogs.length - 1
+        ? new Date(aiSceneLogs[index + 1].timestamp).getTime()
+        : isGeneratingAiScene
+        ? Date.now()
+        : start
+    const duration = Number.isNaN(start) || Number.isNaN(end) ? null : Math.max(0, end - start)
+    return { log, duration }
+  })
+
+  const renderNewSceneForm = () => (
+    <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">
+      <Box className="p-4 space-y-4 bg-gray-900">
+        <H6>New scene</H6>
+        <Field label="Name" name="name">
+          <TextInput placeholder="e.g. Camera view" />
+        </Field>
+        <div className="flex gap-2">
+          <Button size="small" color="primary" onClick={submitNewScene} disabled={isNewSceneSubmitting}>
+            Add Scene
+          </Button>
+          <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={closeNewScene}>
+            Close
+          </Button>
+        </div>
+      </Box>
+    </Form>
   )
 
-  if (scenes.length === 0 && !showNewSceneForm && !missingActiveSceneId) {
+  const renderAiSceneForm = () => (
+    <Box className="p-4 space-y-3 bg-gray-900">
+      <H6>Generate scene (alpha)</H6>
+      {missingBackendApiKey ? (
+        <div className="rounded-md border border-red-500/40 bg-red-950/40 p-3 text-xs text-red-200">
+          <div className="font-semibold text-red-200">Missing OpenAI backend API key.</div>
+          <p className="mt-1 text-red-200/80">Add the backend API key in Settings to enable AI scene generation.</p>
+          <div className="mt-2">
+            <Button size="small" color="secondary" onClick={() => router.actions.push(urls.settings())}>
+              Fix in settings
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      <div className="space-y-1">
+        <div className="text-xs font-semibold uppercase text-gray-400">Prompt</div>
+        <TextArea
+          rows={3}
+          placeholder='e.g. "show an analog clock"'
+          value={aiPrompt}
+          onChange={setAiPrompt}
+          onDragOver={onPromptDragOver}
+          onDrop={onPromptDrop}
+          disabled={!hasEmbeddings}
+        />
+        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
+          <span>Try:</span>
+          {promptSuggestions.map((suggestion) => (
+            <button
+              key={suggestion.label}
+              type="button"
+              className="text-blue-300 hover:text-blue-200 hover:underline"
+              onMouseEnter={() => handlePromptHoverEnter(suggestion.prompt)}
+              onMouseLeave={() => handlePromptHoverLeave(suggestion.prompt)}
+              onClick={() => handlePromptSuggestionClick(suggestion.prompt)}
+              disabled={!hasEmbeddings}
+            >
+              {suggestion.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="uppercase text-gray-500 text-xs">services:</span>
+          {orderedServiceKeys.map((settingKey) => {
+            const details = settingsDetails[settingKey]
+            const missing = missingServiceSettings.has(settingKey)
+            const isFreeLimitedUsage = Boolean(details?.freeLimitedUsage)
+            return (
+              <button
+                key={settingKey}
+                type="button"
+                className="focus:outline-none"
+                onClick={() => setActiveSettingsKey(settingKey)}
+              >
+                <Tag color={missing ? 'orange' : 'blue'} className="cursor-pointer flex gap-1 items-center">
+                  {missing ? (
+                    isFreeLimitedUsage ? (
+                      <span className="text-yellow-300 font-semibold" title="Free limited usage">
+                        *
+                      </span>
+                    ) : (
+                      <ExclamationTriangleIcon className="h-3 w-3 text-yellow-300" />
+                    )
+                  ) : null}
+                  {details?.title ?? settingKey}
+                </Tag>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+      {!hasEmbeddings ? (
+        <div className="text-xs text-gray-400">
+          No embeddings generated.{' '}
+          <A className="text-blue-400 hover:underline" href={urls.settings()}>
+            Open settings
+          </A>
+        </div>
+      ) : null}
+      {aiError ? <span className="text-xs text-red-400">{aiError}</span> : null}
+      <div className="space-y-2">
+        <div className="text-gray-400">
+          Please note: Scene generation is still a work in progress. Generated scenes may not work well or may even
+          crash your frame. Use with caution and always review the generated code. Keep this page open while generating.
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            size="small"
+            color="secondary"
+            className="flex gap-1 items-center"
+            onClick={() => generateAiScene()}
+            disabled={isGeneratingAiScene || !hasEmbeddings || missingBackendApiKey}
+          >
+            {isGeneratingAiScene ? <Spinner color="white" /> : <SparklesIcon className="w-4 h-4" />}
+            {isGeneratingAiScene ? 'Generating...' : 'Generate scene'}
+          </Button>
+          {!isGeneratingAiScene ? (
+            <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={closeAiScene}>
+              Close
+            </Button>
+          ) : null}
+          {hasAiSceneHistory ? (
+            <button
+              type="button"
+              className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200"
+              onClick={toggleAiSceneLogsExpanded}
+              title={aiSceneLastLog?.message || (isGeneratingAiScene ? 'Awaiting updates.' : '')}
+            >
+              {aiSceneLogsExpanded ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
+              <span className="truncate max-w-[220px]">
+                {aiSceneLastLog?.message || (isGeneratingAiScene ? 'Awaiting updates.' : '')}
+              </span>
+            </button>
+          ) : null}
+        </div>
+        {hasAiSceneHistory && aiSceneLogsExpanded ? (
+          <div className="rounded-md border border-gray-800 bg-gray-950/60 p-3">
+            <ul className="space-y-1 text-xs text-gray-200">
+              {aiSceneLogRows.map(({ log, duration }, index) => {
+                const isLast = index === aiSceneLogRows.length - 1
+                const durationLabel = isLast ? null : formatDurationSeconds(duration)
+                return (
+                  <li key={`${log.timestamp}-${index}`} className="flex flex-wrap items-baseline gap-2">
+                    <span>
+                      {log.message}
+                      {isLast && isGeneratingAiScene ? <span className="ai-scene-ellipsis" aria-hidden /> : null}
+                    </span>
+                    {durationLabel ? <span className="text-gray-500">{durationLabel}</span> : null}
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </Box>
+  )
+
+  const renderShortcuts = (
+    location: string,
+    className?: string,
+    onNewScene: (() => void) | null = null,
+    rightComponent: React.ReactNode = null
+  ) => (
+    <>
+      <div className="flex items-top justify-between">
+        <div className={clsx('flex flex-wrap items-center gap-2 rounded-lg', className)}>
+          <Button
+            size="small"
+            color="secondary"
+            className="flex gap-1 items-center"
+            onClick={() => (onNewScene ? onNewScene() : openNewScene(location))}
+          >
+            <PlusIcon className="w-4 h-4" />
+            New blank scene
+          </Button>
+          <Button
+            size="small"
+            color="secondary"
+            className="flex gap-1 items-center"
+            onClick={() => openAiScene(location)}
+          >
+            <SparklesIcon className="w-4 h-4" />
+            Generate scene
+          </Button>
+          {!frame.scenes?.length ? (
+            <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={openTemplates}>
+              <SparklesIcon className="w-4 h-4" />
+              Explore available scenes
+            </Button>
+          ) : null}
+          {frame.last_successful_deploy_at ? (
+            <Button
+              size="small"
+              color="secondary"
+              className="flex gap-1 items-center"
+              onClick={triggerUploadInput}
+              disabled={isUploadingImage}
+            >
+              {isUploadingImage ? <Spinner color="white" /> : <ArrowUpTrayIcon className="w-4 h-4" />}
+              Upload image
+            </Button>
+          ) : null}
+          <input ref={uploadInputRef} type="file" accept="image/*" className="hidden" onChange={handleUploadImage} />
+        </div>
+        {rightComponent ?? null}
+      </div>
+      {newSceneFormLocation === location ? renderNewSceneForm() : null}
+      {aiSceneFormLocation === location ? renderAiSceneForm() : null}
+    </>
+  )
+
+  if (scenes.length === 0 && !newSceneFormLocation && !missingActiveSceneId) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center space-y-4 mb-8">
@@ -142,7 +458,7 @@ export function Scenes() {
               ? 'Scenes are the building blocks of your frame. They can be anything from a simple clock to a complex interactive thermostat.'
               : 'Press the purple "First deploy" button to deploy FrameOS for the first time.'}
           </p>
-          {renderShortcuts('justify-center', createNewScene)}
+          {renderShortcuts('empty', 'justify-center', createNewScene)}
         </div>
       </div>
     )
@@ -151,90 +467,100 @@ export function Scenes() {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        {scenes.length > 0 || missingActiveSceneId ? (
-          <>
-            <div className="flex justify-between w-full items-center">
-              <TextInput placeholder="Filter scenes..." className="flex-1 mr-2" onChange={setSearch} value={search} />
-              <div className="flex gap-1">
-                {multiSelectEnabled ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-300">{selectedSceneIds.size} selected</span>
-                    <Button
-                      size="small"
-                      color="red"
-                      disabled={selectedSceneIds.size === 0}
-                      onClick={() => {
-                        if (selectedSceneIds.size === 0) {
-                          return
-                        }
-                        if (confirm('Are you sure you want to delete the selected scenes?')) {
-                          deleteSelectedScenes()
-                        }
-                      }}
-                    >
-                      Delete selected
-                    </Button>
-                    <Button size="small" color="secondary" onClick={disableMultiSelect}>
-                      Cancel
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <Button size="small" color="secondary" onClick={() => sync()} title="Sync active scene">
-                      {loading ? <Spinner color="white" /> : <ArrowPathIcon className="w-5 h-5" />}
-                    </Button>
-                    <DropdownMenu
-                      buttonColor="secondary"
-                      className="mr-2"
-                      items={[
-                        {
-                          label: 'Sync active scene',
-                          onClick: () => sync(),
-                          icon: <ArrowPathIcon className="w-5 h-5" />,
-                        },
-                        {
-                          label: 'Save to "My scenes"',
-                          onClick: () => saveAsTemplate({ name: frameForm.name }),
-                          icon: <FolderArrowDownIcon className="w-5 h-5" />,
-                        },
-                        {
-                          label: 'Download as .zip',
-                          onClick: () => saveAsZip({ name: frameForm.name || 'Exported scenes' }),
-                          icon: <CloudArrowDownIcon className="w-5 h-5" />,
-                        },
-                        {
-                          label: 'Paste scene JSON',
-                          onClick: () => {
-                            const json = prompt('Paste your scene JSON here:')
-                            if (json) {
-                              try {
-                                const scene = JSON.parse(json)
-                                if (Array.isArray(scene)) {
-                                  applyTemplate({ scenes: scene })
-                                } else {
-                                  applyTemplate({ scenes: [scene] })
-                                }
-                              } catch (error) {
-                                alert('Invalid JSON')
-                              }
-                            }
+        {scenes.length > 0 || missingActiveSceneId
+          ? renderShortcuts(
+              'top',
+              undefined,
+              null,
+              <div className="flex justify-between items-center">
+                <TextInput placeholder="Filter scenes..." className="mr-2" onChange={setSearch} value={search} />
+                <div className="flex gap-1">
+                  {multiSelectEnabled ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-300">{selectedSceneIds.size} selected</span>
+                      <Button
+                        size="small"
+                        color="secondary"
+                        disabled={selectableSceneIds.length === 0}
+                        onClick={() => setSelectedSceneIds(allSelectableScenesSelected ? [] : selectableSceneIds)}
+                      >
+                        {allSelectableScenesSelected ? 'Clear all' : 'Select all'}
+                      </Button>
+                      <Button
+                        size="small"
+                        color="red"
+                        disabled={selectedSceneIds.size === 0}
+                        onClick={() => {
+                          if (selectedSceneIds.size === 0) {
+                            return
+                          }
+                          if (confirm('Are you sure you want to delete the selected scenes?')) {
+                            deleteSelectedScenes()
+                          }
+                        }}
+                      >
+                        Delete
+                      </Button>
+                      <Button size="small" color="secondary" onClick={disableMultiSelect} title="Exit multi-select">
+                        X
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <Button size="small" color="secondary" onClick={() => sync()} title="Sync active scene">
+                        {loading ? <Spinner color="white" /> : <ArrowPathIcon className="w-5 h-5" />}
+                      </Button>
+                      <DropdownMenu
+                        buttonColor="secondary"
+                        className="mr-2"
+                        items={[
+                          {
+                            label: 'Sync active scene',
+                            onClick: () => sync(),
+                            icon: <ArrowPathIcon className="w-5 h-5" />,
                           },
-                          icon: <FolderOpenIcon className="w-5 h-5" />,
-                        },
-                        {
-                          label: 'Select multiple',
-                          onClick: () => enableMultiSelect(),
-                          icon: <Squares2X2Icon className="w-5 h-5" />,
-                        },
-                      ]}
-                    />
-                  </>
-                )}
+                          {
+                            label: 'Save to "My scenes"',
+                            onClick: () => saveAsTemplate({ name: frameForm.name }),
+                            icon: <FolderArrowDownIcon className="w-5 h-5" />,
+                          },
+                          {
+                            label: 'Download as .zip',
+                            onClick: () => saveAsZip({ name: frameForm.name || 'Exported scenes' }),
+                            icon: <CloudArrowDownIcon className="w-5 h-5" />,
+                          },
+                          {
+                            label: 'Paste scene JSON',
+                            onClick: () => {
+                              const json = prompt('Paste your scene JSON here:')
+                              if (json) {
+                                try {
+                                  const scene = JSON.parse(json)
+                                  if (Array.isArray(scene)) {
+                                    applyTemplate({ scenes: scene })
+                                  } else {
+                                    applyTemplate({ scenes: [scene] })
+                                  }
+                                } catch (error) {
+                                  alert('Invalid JSON')
+                                }
+                              }
+                            },
+                            icon: <FolderOpenIcon className="w-5 h-5" />,
+                          },
+                          {
+                            label: 'Select multiple',
+                            onClick: () => enableMultiSelect(),
+                            icon: <Squares2X2Icon className="w-5 h-5" />,
+                          },
+                        ]}
+                      />
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
-            {renderShortcuts()}
-          </>
-        ) : null}
+            )
+          : null}
         {filteredScenes.length === 0 && search && !missingActiveMatchesSearch ? (
           <div className="text-center text-gray-400">No scenes matching "{search}"</div>
         ) : null}
@@ -304,6 +630,8 @@ export function Scenes() {
                       scene={activeUploadedScene}
                       frameId={frameId}
                       showEditButton={false}
+                      isUnsaved={true}
+                      isUndeployed={true}
                     />
                   </div>
                 ) : null}
@@ -314,14 +642,21 @@ export function Scenes() {
         {filteredScenes.map((scene) => {
           const secretSettings = sceneSecretSettings.get(scene.id) ?? []
           const missingSecretSettings = getMissingSecretSettingKeys(secretSettings, savedSettings)
+          const sceneServiceEntries = secretSettings.map((settingKey) => ({
+            key: settingKey,
+            label: settingsDetails[settingKey]?.title || settingKey,
+            missing: missingSecretSettings.has(settingKey),
+          }))
           const isSelected = selectedSceneIds.has(scene.id)
+          const sceneHasChanges = unsavedSceneIds.has(scene.id) || undeployedSceneIds.has(scene.id)
+          const isPreviewing = previewingSceneId === scene.id
 
           return (
             <React.Fragment key={scene.id}>
               <div
                 className={clsx(
                   'border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1',
-                  sceneId === scene.id
+                  linkedActiveSceneId === scene.id
                     ? 'border border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
                     : 'border-gray-700',
                   multiSelectEnabled && isSelected ? 'border-blue-400 shadow-[0_0_4px_2px_rgba(96,165,250,0.4)]' : null
@@ -401,23 +736,49 @@ export function Scenes() {
                       </div>
                       {!multiSelectEnabled ? (
                         <div className="flex gap-1">
-                          {sceneId !== scene.id ? (
-                            <Button
-                              size="small"
-                              className="!px-1"
-                              color="primary"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setCurrentScene(scene.id)
-                              }}
-                              title="Activate"
-                            >
-                              {sceneChanging === scene.id ? (
-                                <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
-                              ) : (
-                                <PlayIcon className="w-5 h-5" />
-                              )}
-                            </Button>
+                          {linkedActiveSceneId !== scene.id ? (
+                            sceneHasChanges ? (
+                              <Button
+                                size="small"
+                                className="!px-1"
+                                color="secondary"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  previewScene(scene.id)
+                                }}
+                                disabled={isPreviewing}
+                                title="Preview unsaved changes on the frame"
+                              >
+                                {isPreviewing ? (
+                                  <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
+                                ) : (
+                                  <EyeIcon className="w-5 h-5" />
+                                )}
+                              </Button>
+                            ) : (
+                              <Button
+                                size="small"
+                                className="!px-1"
+                                color="primary"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setCurrentScene(scene.id)
+                                }}
+                                title={
+                                  unsavedSceneIds.has(scene.id)
+                                    ? 'Save this scene before running it.'
+                                    : undeployedSceneIds.has(scene.id)
+                                    ? 'Deploy this scene before running it.'
+                                    : 'Activate'
+                                }
+                              >
+                                {sceneChanging === scene.id ? (
+                                  <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
+                                ) : (
+                                  <PlayIcon className="w-5 h-5" />
+                                )}
+                              </Button>
+                            )
                           ) : (
                             <Tag
                               className="ml-2 cursor-pointer items-center inline-flex"
@@ -538,10 +899,23 @@ export function Scenes() {
                         <div className="text-xs ml-2 uppercase">{showAsFps(scene.settings.refreshInterval)}</div>
                       ) : null}
                     </div>
+                    <div className="flex flex-wrap items-center gap-2 pl-7 text-xs text-gray-500">
+                      {sceneServiceEntries?.map(({ key, label, missing }) => (
+                        <Tag key={key} color={missing ? 'orange' : 'teal'}>
+                          {label}
+                          {missing ? ' (missing key)' : ''}
+                        </Tag>
+                      ))}
+                    </div>
 
                     {expandedScenes[scene.id] && !multiSelectEnabled ? (
                       <div className="pl-7">
-                        <ExpandedScene sceneId={scene.id} frameId={frameId} />
+                        <ExpandedScene
+                          sceneId={scene.id}
+                          frameId={frameId}
+                          isUnsaved={unsavedSceneIds.has(scene.id)}
+                          isUndeployed={undeployedSceneIds.has(scene.id)}
+                        />
                       </div>
                     ) : null}
                   </div>
@@ -557,26 +931,7 @@ export function Scenes() {
           )
         })}
 
-        {showNewSceneForm ? (
-          <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">
-            <Box className="p-4 space-y-4 bg-gray-900">
-              <H6>New scene</H6>
-              <Field label="Name" name="name">
-                <TextInput placeholder="e.g. Camera view" />
-              </Field>
-              <div className="flex gap-2">
-                <Button size="small" color="primary" onClick={submitNewScene} disabled={isNewSceneSubmitting}>
-                  Add Scene
-                </Button>
-                <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={closeNewScene}>
-                  Close
-                </Button>
-              </div>
-            </Box>
-          </Form>
-        ) : (
-          renderShortcuts()
-        )}
+        {renderShortcuts('bottom')}
       </div>
       <SecretSettingsModal
         activeSettingsKey={activeSettingsKey}

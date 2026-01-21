@@ -44,7 +44,7 @@ export function useEntityImage(
 }
 
 export const entityImagesModel = kea<entityImagesModelType>([
-  connect({ logic: [socketLogic] }),
+  connect(() => ({ logic: [socketLogic] })),
   path(['src', 'models', 'entityImages']),
   actions({
     updateEntityImage: (entity: string | null, subentity: string, force = true) => ({ entity, subentity, force }),

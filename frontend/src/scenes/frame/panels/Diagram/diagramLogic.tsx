@@ -1,6 +1,7 @@
 import {
   actions,
   afterMount,
+  beforeUnmount,
   connect,
   kea,
   key,
@@ -24,12 +25,17 @@ import equal from 'fast-deep-equal'
 import type { diagramLogicType } from './diagramLogicType'
 import { subscriptions } from 'kea-subscriptions'
 import {
+  AppConfig,
+  AppConfigField,
   AppNodeData,
   CodeNodeData,
   DiagramNode,
   DispatchNodeData,
   EventNodeData,
+  FrameEvent,
   FrameScene,
+  FrameSceneSettings,
+  MarkdownField,
   StateNodeData,
 } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
@@ -37,6 +43,13 @@ import { appsModel } from '../../../../models/appsModel'
 import { arrangeNodes } from '../../../../utils/arrangeNodes'
 import copy from 'copy-to-clipboard'
 import { Option } from '../../../../components/Select'
+import _events from '../../../../../schema/events.json'
+
+const events = _events as FrameEvent[]
+
+function fieldOrderFromFields(fields?: (AppConfigField | MarkdownField)[] | null): string[] {
+  return (fields ?? []).filter((field): field is AppConfigField => 'name' in field).map((field) => field.name)
+}
 
 export interface DiagramLogicProps {
   frameId: number
@@ -55,6 +68,126 @@ export interface NewNodePicker {
 }
 
 export type CodeNodeLanguage = 'js' | 'nim'
+
+export type DiagramHistorySnapshot = {
+  nodes: DiagramNode[]
+  edges: Edge[]
+}
+
+export type DiagramHistoryState = {
+  past: DiagramHistorySnapshot[]
+  future: DiagramHistorySnapshot[]
+}
+
+type ClipboardDiagramPayload = {
+  nodes: DiagramNode[]
+  edges: Edge[]
+}
+
+const MAX_HISTORY_LENGTH = 100
+const HISTORY_DEBOUNCE_MS = 300
+
+const normalizeNodes = (nodes: DiagramNode[]): DiagramNode[] =>
+  nodes.map((node) => {
+    const { selected, dragging, width, height, ...rest } = node
+    if (node.type === 'code' && typeof width !== 'undefined' && typeof height !== 'undefined') {
+      return { ...rest, width, height } as DiagramNode
+    }
+    return rest as DiagramNode
+  })
+
+const normalizeEdges = (edges: Edge[]): Edge[] =>
+  edges.map((edge) => (edge.selected ? { ...edge, selected: false } : edge))
+
+const makeHistorySnapshot = (nodes: DiagramNode[], edges: Edge[]): DiagramHistorySnapshot => ({
+  nodes: normalizeNodes(nodes),
+  edges: normalizeEdges(edges),
+})
+
+const scheduleHistorySnapshot = (
+  cache: Record<string, any>,
+  actions: { recordHistory: (snapshot: DiagramHistorySnapshot) => void },
+  snapshot: DiagramHistorySnapshot
+): void => {
+  if (cache.historyTimer) {
+    window.clearTimeout(cache.historyTimer)
+  }
+  cache.historyTimer = window.setTimeout(() => {
+    cache.historyTimer = null
+    actions.recordHistory(snapshot)
+  }, HISTORY_DEBOUNCE_MS)
+}
+
+const isEditableTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) {
+    return false
+  }
+  if (target.isContentEditable) {
+    return true
+  }
+  if (target.closest('[contenteditable="true"]')) {
+    return true
+  }
+  const tagName = target.tagName
+  return tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT'
+}
+
+const hasTextSelection = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) {
+    return false
+  }
+  return !selection.isCollapsed && selection.toString().length > 0
+}
+
+const sanitizeClipboardNode = (node: DiagramNode): DiagramNode => {
+  const { selected, dragging, positionAbsolute, ...rest } = node as DiagramNode & {
+    dragging?: boolean
+    positionAbsolute?: XYPosition
+  }
+  return rest as DiagramNode
+}
+
+const parseClipboardPayload = (parsed: unknown): ClipboardDiagramPayload | null => {
+  if (!parsed) {
+    return null
+  }
+  if (Array.isArray(parsed)) {
+    return { nodes: parsed as DiagramNode[], edges: [] }
+  }
+  if (typeof parsed === 'object') {
+    const payload = parsed as { nodes?: DiagramNode[]; edges?: Edge[] }
+    if (Array.isArray(payload.nodes)) {
+      return { nodes: payload.nodes, edges: payload.edges ?? [] }
+    }
+    if ('type' in (parsed as DiagramNode)) {
+      return { nodes: [parsed as DiagramNode], edges: [] }
+    }
+  }
+  return null
+}
+
+const getClipboardOffset = (nodes: DiagramNode[], basePosition?: XYPosition | null): XYPosition => {
+  if (nodes.length === 0) {
+    return { x: 0, y: 0 }
+  }
+  const minX = Math.min(...nodes.map((node) => node.position?.x ?? 0))
+  const minY = Math.min(...nodes.map((node) => node.position?.y ?? 0))
+  const fallback = { x: minX + 40, y: minY + 40 }
+  const anchor = basePosition ?? fallback
+  return { x: anchor.x - minX, y: anchor.y - minY }
+}
+
+const removeAutoArrangeMarker = (settings?: FrameSceneSettings): FrameSceneSettings | undefined => {
+  if (!settings?.autoArrangeOnLoad) {
+    return settings
+  }
+  const { autoArrangeOnLoad: _, ...rest } = settings
+  return Object.keys(rest).length > 0 ? rest : undefined
+}
 
 export const diagramLogic = kea<diagramLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Diagram', 'diagramLogic']),
@@ -79,7 +212,14 @@ export const diagramLogic = kea<diagramLogicType>([
     updateEdge: (edge: Edge) => ({ edge }),
     updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
     copyAppJSON: (nodeId: string) => ({ nodeId }),
+    copySelectedNodes: true,
+    pasteFromClipboard: true,
+    setCursorPosition: (position: XYPosition | null) => ({ position }),
     deleteApp: (id: string) => ({ id }),
+    recordHistory: (snapshot: DiagramHistorySnapshot) => ({ snapshot }),
+    resetHistory: (snapshot: DiagramHistorySnapshot) => ({ snapshot }),
+    undo: true,
+    redo: true,
   }),
   reducers({
     nodes: [
@@ -149,6 +289,41 @@ export const diagramLogic = kea<diagramLogicType>([
       },
     ],
     fitViewCounter: [0, { fitDiagramView: (state) => state + 1 }],
+    history: [
+      { past: [], future: [] } as DiagramHistoryState,
+      {
+        recordHistory: (state, { snapshot }) => {
+          const last = state.past[state.past.length - 1]
+          if (last && equal(last, snapshot)) {
+            return state
+          }
+          const nextPast = [...state.past, snapshot].slice(-MAX_HISTORY_LENGTH)
+          return { past: nextPast, future: [] }
+        },
+        resetHistory: (_, { snapshot }) => ({ past: [snapshot], future: [] }),
+        undo: (state) => {
+          if (state.past.length <= 1) {
+            return state
+          }
+          const nextPast = state.past.slice(0, -1)
+          const previous = state.past[state.past.length - 1]
+          return { past: nextPast, future: [previous, ...state.future] }
+        },
+        redo: (state) => {
+          if (state.future.length === 0) {
+            return state
+          }
+          const [next, ...restFuture] = state.future
+          return { past: [...state.past, next], future: restFuture }
+        },
+      },
+    ],
+    cursorPosition: [
+      null as XYPosition | null,
+      {
+        setCursorPosition: (_, { position }) => position,
+      },
+    ],
   }),
   selectors({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
@@ -240,20 +415,37 @@ export const diagramLogic = kea<diagramLogicType>([
       (s) => [s.scene],
       (scene: FrameScene | null): CodeNodeLanguage => (scene?.settings?.execution === 'interpreted' ? 'js' : 'nim'),
     ],
+    canUndo: [(s) => [s.history], (history) => history.past.length > 1],
+    canRedo: [(s) => [s.history], (history) => history.future.length > 0],
   }),
   sharedListeners(({ selectors, actions, values, props }) => ({
     nodesChanged: (_, __, ___, previousState) => {
       const nodes = values.nodes
       const oldNodes = selectors.nodes(previousState)
 
+      const hasDimensions = nodes.length > 0 && nodes.every((node) => node.width && node.height)
+      const shouldRearrangeForMissingPosition =
+        hasDimensions && nodes.every((node) => node.position.x === -9999 && node.position.y === -9999)
+      const shouldRearrangeForMarker = hasDimensions && Boolean(values.scene?.settings?.autoArrangeOnLoad)
+
       // Upon first render of a new scene, the nodes will have x = -9999, y = -9999, width = undefined, height = undefined
       // Upon second render, the width and height will have been set, but x and y will still be -9999 for all nodes
       // If we detect that case, automatically rearrange the scene.
-      if (
-        nodes.length > 0 &&
-        nodes.every((node) => node.position.x === -9999 && node.position.y === -9999 && node.width && node.height)
-      ) {
+      if (shouldRearrangeForMissingPosition || shouldRearrangeForMarker) {
         actions.rearrangeCurrentScene()
+      }
+
+      if (shouldRearrangeForMarker) {
+        actions.setFrameFormValues({
+          scenes: values.editingFrame.scenes?.map((scene) =>
+            scene.id === props.sceneId
+              ? {
+                  ...scene,
+                  settings: removeAutoArrangeMarker(scene.settings),
+                }
+              : scene
+          ),
+        })
       }
 
       // Do not update on first render
@@ -270,38 +462,6 @@ export const diagramLogic = kea<diagramLogicType>([
           ),
         })
       }
-    },
-  })),
-  listeners(({ sharedListeners, props, values, actions }) => ({
-    setNodes: sharedListeners.nodesChanged,
-    onNodesChange: sharedListeners.nodesChanged,
-    selectNode: sharedListeners.nodesChanged,
-    deselectNode: sharedListeners.nodesChanged,
-    updateNodeData: sharedListeners.nodesChanged,
-    deleteApp: sharedListeners.nodesChanged,
-    updateNodeConfig: ({ id, field, value }) => {
-      const { nodes } = values
-      actions.setFrameFormValues({
-        scenes: values.editingFrame.scenes?.map((scene) =>
-          scene.id === props.sceneId && !equal(scene.nodes, nodes)
-            ? // set the nodes on the scene's form, and remove the selected flag from all
-              ({
-                ...scene,
-                nodes: values.nodes.map((node) =>
-                  node.id === id
-                    ? {
-                        ...node,
-                        data: {
-                          ...(node.data ?? {}),
-                          config: { ...('config' in node.data ? node.data?.config ?? {} : {}), [field]: value },
-                        },
-                      }
-                    : node
-                ),
-              } satisfies FrameScene)
-            : scene
-        ),
-      })
     },
   })),
   subscriptions(({ actions, values, props }) => ({
@@ -335,11 +495,178 @@ export const diagramLogic = kea<diagramLogicType>([
           actions.setEdges(newEdges)
         }
       }
+      if (scene && scene.id !== oldScene?.id) {
+        actions.resetHistory(makeHistorySnapshot(scene.nodes ?? [], scene.edges ?? []))
+      }
     },
   })),
-  listeners(({ actions, values, props }) => ({
+  listeners(({ actions, values, props, cache, sharedListeners }) => ({
+    selectNode: sharedListeners.nodesChanged,
+    deselectNode: sharedListeners.nodesChanged,
+    setNodes: [
+      sharedListeners.nodesChanged,
+      () => {
+        if (cache.ignoreHistory) {
+          return
+        }
+        actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+      },
+    ],
+    onNodesChange: [
+      sharedListeners.nodesChanged,
+      ({ changes }) => {
+        if (cache.ignoreHistory) {
+          return
+        }
+        if (changes.length > 0 && changes.every((change) => change.type === 'select')) {
+          return
+        }
+        if (
+          changes.length > 0 &&
+          changes.every((change) => change.type === 'dimensions' && values.nodesById[change.id]?.type !== 'code')
+        ) {
+          return
+        }
+        const snapshot = makeHistorySnapshot(values.nodes, values.rawEdges)
+        const isDragging = changes.some((change) => change.type === 'position' && change.dragging)
+        if (isDragging) {
+          scheduleHistorySnapshot(cache, actions, snapshot)
+          return
+        }
+        actions.recordHistory(snapshot)
+      },
+    ],
+    updateNodeData: [
+      sharedListeners.nodesChanged,
+      () => {
+        if (cache.ignoreHistory) {
+          return
+        }
+        scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges))
+      },
+    ],
+    updateNodeConfig: [
+      () => {
+        if (cache.ignoreHistory) {
+          return
+        }
+        scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges))
+      },
+      ({ id, field, value }) => {
+        const { nodes } = values
+        actions.setFrameFormValues({
+          scenes: values.editingFrame.scenes?.map((scene) =>
+            scene.id === props.sceneId && !equal(scene.nodes, nodes)
+              ? // set the nodes on the scene's form, and remove the selected flag from all
+                ({
+                  ...scene,
+                  nodes: values.nodes.map((node) =>
+                    node.id === id
+                      ? {
+                          ...node,
+                          data: {
+                            ...(node.data ?? {}),
+                            config: { ...('config' in node.data ? node.data?.config ?? {} : {}), [field]: value },
+                          },
+                        }
+                      : node
+                  ),
+                } satisfies FrameScene)
+              : scene
+          ),
+        })
+      },
+    ],
+    deleteApp: [
+      sharedListeners.nodesChanged,
+      () => {
+        if (cache.ignoreHistory) {
+          return
+        }
+        actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+      },
+    ],
+    setEdges: () => {
+      if (cache.ignoreHistory) {
+        return
+      }
+      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+    },
+    onEdgesChange: ({ changes }) => {
+      if (cache.ignoreHistory) {
+        return
+      }
+      if (changes.length > 0 && changes.every((change) => change.type === 'select')) {
+        return
+      }
+      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+    },
+    addEdge: () => {
+      if (cache.ignoreHistory) {
+        return
+      }
+      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+    },
+    updateEdge: () => {
+      if (cache.ignoreHistory) {
+        return
+      }
+      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+    },
+    undo: () => {
+      const previous = values.history.past[values.history.past.length - 1]
+      if (!previous) {
+        return
+      }
+      cache.ignoreHistory = true
+      actions.setNodes(previous.nodes)
+      actions.setEdges(previous.edges)
+      window.setTimeout(() => {
+        cache.ignoreHistory = false
+      }, 0)
+    },
+    redo: () => {
+      const next = values.history.past[values.history.past.length - 1]
+      if (!next) {
+        return
+      }
+      cache.ignoreHistory = true
+      actions.setNodes(next.nodes)
+      actions.setEdges(next.edges)
+      window.setTimeout(() => {
+        cache.ignoreHistory = false
+      }, 0)
+    },
     rearrangeCurrentScene: () => {
-      actions.setNodes(arrangeNodes(values.nodes, values.edges))
+      const fieldOrderByNodeId = values.nodes.reduce((acc, node) => {
+        let fields: (AppConfigField | MarkdownField)[] | null = null
+        if (node.type === 'app' || node.type === 'source') {
+          const keyword = (node.data as AppNodeData)?.keyword
+          fields = keyword ? (values.apps[keyword] as AppConfig | undefined)?.fields ?? null : null
+        } else if (node.type === 'dispatch' || node.type === 'event') {
+          const keyword = (node.data as DispatchNodeData | EventNodeData)?.keyword
+          const event = keyword ? events.find((event) => event.name === keyword) ?? null : null
+          fields = event?.name === 'setSceneState' ? values.scene?.fields ?? null : event?.fields ?? null
+        } else if (node.type === 'scene') {
+          fields = values.scene?.fields ?? null
+        }
+
+        if (node.type === 'code') {
+          const codeArgs = (node.data as CodeNodeData | undefined)?.codeArgs ?? []
+          if (codeArgs.length > 0) {
+            acc[node.id] = codeArgs.map((arg) => arg.name)
+          }
+          return acc
+        }
+
+        const order = fieldOrderFromFields(fields)
+        if (order.length > 0) {
+          acc[node.id] = order
+        }
+        return acc
+      }, {} as Record<string, string[]>)
+
+      actions.setNodes(arrangeNodes(values.nodes, values.edges, { fieldOrderByNodeId }))
       actions.fitDiagramView()
     },
     keywordDropped: ({ keyword, type, position }) => {
@@ -395,15 +722,139 @@ export const diagramLogic = kea<diagramLogicType>([
       window.setTimeout(() => actions.fitDiagramView(), 50)
     },
     copyAppJSON: ({ nodeId }) => {
-      const { nodes } = values
-      const app = nodes.find((n) => n.id === nodeId)
-      if (app) {
-        copy(JSON.stringify(app))
+      const selectedNodes = values.nodes.filter((node) => node.selected)
+      const nodesToCopy =
+        selectedNodes.length > 0 ? selectedNodes : values.nodesById[nodeId] ? [values.nodesById[nodeId]] : []
+      if (nodesToCopy.length === 0) {
+        return
+      }
+      const selectedIds = new Set(nodesToCopy.map((node) => node.id))
+      const edgesToCopy = values.rawEdges.filter((edge) => selectedIds.has(edge.source) && selectedIds.has(edge.target))
+      const sanitizedNodes = nodesToCopy.map(sanitizeClipboardNode)
+      if (sanitizedNodes.length === 1 && edgesToCopy.length === 0) {
+        copy(JSON.stringify(sanitizedNodes[0]))
+        return
+      }
+      copy(JSON.stringify({ nodes: sanitizedNodes, edges: edgesToCopy }))
+    },
+    copySelectedNodes: () => {
+      const selectedNodes = values.nodes.filter((node) => node.selected)
+      if (selectedNodes.length === 0) {
+        return
+      }
+      const selectedIds = new Set(selectedNodes.map((node) => node.id))
+      const edgesToCopy = values.rawEdges.filter((edge) => selectedIds.has(edge.source) && selectedIds.has(edge.target))
+      const sanitizedNodes = selectedNodes.map(sanitizeClipboardNode)
+      if (sanitizedNodes.length === 1 && edgesToCopy.length === 0) {
+        copy(JSON.stringify(sanitizedNodes[0]))
+        return
+      }
+      copy(JSON.stringify({ nodes: sanitizedNodes, edges: edgesToCopy }))
+    },
+    pasteFromClipboard: async () => {
+      if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
+        console.warn('Clipboard API not available for pasting nodes')
+        return
+      }
+      try {
+        const clipboardText = await navigator.clipboard.readText()
+        const parsed = JSON.parse(clipboardText)
+        const payload = parseClipboardPayload(parsed)
+        if (!payload) {
+          throw new Error('Clipboard does not contain valid node JSON')
+        }
+        const { nodes, edges } = payload
+        if (nodes.length === 0) {
+          return
+        }
+        const offset = getClipboardOffset(nodes, values.cursorPosition)
+        const idMap = new Map<string, string>()
+        const baseNodes = values.nodes.map((node) => (node.selected ? { ...node, selected: false } : node))
+        const baseEdges = values.rawEdges.map((edge) => (edge.selected ? { ...edge, selected: false } : edge))
+        const pastedNodes = nodes.map((node) => {
+          const newId = uuidv4()
+          idMap.set(node.id, newId)
+          const { position } = node
+          return {
+            ...sanitizeClipboardNode(node),
+            id: newId,
+            position: { x: (position?.x ?? 0) + offset.x, y: (position?.y ?? 0) + offset.y },
+            selected: true,
+          }
+        })
+        const pastedEdges = edges
+          .filter((edge) => idMap.has(edge.source) && idMap.has(edge.target))
+          .map((edge) => ({
+            ...edge,
+            id: uuidv4(),
+            source: idMap.get(edge.source) as string,
+            target: idMap.get(edge.target) as string,
+            selected: false,
+          }))
+        const nextNodes = [...baseNodes, ...pastedNodes]
+        const nextEdges = [...baseEdges, ...pastedEdges]
+        if (cache.historyTimer) {
+          window.clearTimeout(cache.historyTimer)
+          cache.historyTimer = null
+        }
+        cache.ignoreHistory = true
+        actions.setNodes(nextNodes)
+        actions.setEdges(nextEdges)
+        cache.ignoreHistory = false
+        actions.recordHistory(makeHistorySnapshot(nextNodes, nextEdges))
+        window.setTimeout(() => {
+          pastedNodes.forEach((node) => props.updateNodeInternals?.(node.id))
+        }, 200)
+      } catch (error) {
+        console.error('Failed to paste node from clipboard', error)
       }
     },
   })),
-  afterMount(({ actions }) => {
+  afterMount(({ actions, values, cache }) => {
     window.setTimeout(actions.fitDiagramView, 10)
     window.setTimeout(actions.fitDiagramView, 100)
+    cache.ignoreHistory = false
+    cache.historyTimer = null
+    actions.resetHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+
+    cache.keydownHandler = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) {
+        return
+      }
+      if ((event.metaKey || event.ctrlKey) && hasTextSelection()) {
+        return
+      }
+      const key = event.key.toLowerCase()
+      if ((event.metaKey || event.ctrlKey) && key === 'c') {
+        event.preventDefault()
+        actions.copySelectedNodes()
+        return
+      }
+      if ((event.metaKey || event.ctrlKey) && key === 'v') {
+        event.preventDefault()
+        actions.pasteFromClipboard()
+        return
+      }
+      if (!event.metaKey || key !== 'z') {
+        return
+      }
+      event.preventDefault()
+      if (event.shiftKey) {
+        actions.redo()
+        return
+      }
+      actions.undo()
+    }
+    window.addEventListener('keydown', cache.keydownHandler)
+  }),
+  beforeUnmount(({ cache }) => {
+    if (cache.keydownHandler) {
+      window.removeEventListener('keydown', cache.keydownHandler)
+      cache.keydownHandler = null
+    }
+    if (cache.historyTimer) {
+      window.clearTimeout(cache.historyTimer)
+      cache.historyTimer = null
+    }
   }),
 ])

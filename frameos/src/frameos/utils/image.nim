@@ -1,10 +1,17 @@
 import pixie
+import base64
 import httpclient
+import json
+import random
 import os
 import osproc
 import options
+import sequtils
 import strutils
+import strformat
 import streams
+import times
+import uri
 
 import frameos/utils/font
 
@@ -64,6 +71,28 @@ proc decodeJpegFileWithImageMagick(path: string): Option[Image] =
     p.close()
   return none(Image)
 
+proc decodeSvgWithImageMagick*(svg: string, width: int, height: int): Option[Image] =
+  let cmd = imageMagickCommand()
+  if cmd == "":
+    return none(Image)
+  let sizeArg = &"{width}x{height}"
+  var p = startProcess(cmd,
+    args = @["-quiet", "-background", "none", "-size", sizeArg, "svg:-", "-resize", sizeArg, "bmp:-"],
+    options = {poUsePath})
+  try:
+    p.inputStream.write(svg)
+    p.inputStream.close()
+    let output = p.outputStream.readAll()
+    let rc = p.waitForExit()
+    if rc == 0 and output.len > 0:
+      try:
+        return some(decodeImage(output))
+      except CatchableError:
+        return none(Image)
+  finally:
+    p.close()
+  return none(Image)
+
 proc decodeImageWithFallback*(data: string): Image =
   if isJpegData(data):
     let converted = decodeJpegWithImageMagick(data)
@@ -78,13 +107,73 @@ proc readImageWithFallback*(path: string): Image =
       return converted.get()
   return readImage(path)
 
+proc decodeDataUrl*(dataUrl: string): Image =
+  if not dataUrl.startsWith("data:"):
+    raise newException(ValueError, "Invalid data URL.")
+  let commaIndex = dataUrl.find(',')
+  if commaIndex == -1:
+    raise newException(ValueError, "Invalid data URL.")
+  let header = dataUrl[5 ..< commaIndex]
+  let dataBody = dataUrl[commaIndex + 1 .. ^1]
+  let headerParts = if header.len > 0: header.split(';') else: @[""]
+  let isBase64 = headerParts.anyIt(it == "base64")
+  let decodedData =
+    if isBase64:
+      dataBody.decode
+    else:
+      decodeUrl(dataBody)
+  return decodeImageWithFallback(decodedData)
+
 proc downloadImage*(url: string): Image =
+  if url.startsWith("data:"):
+    return decodeDataUrl(url)
   let client = newHttpClient(timeout = 30000)
   try:
     let content = client.getContent(url)
     result = decodeImageWithFallback(content)
   finally:
     client.close()
+
+proc downloadImageWithData*(url: string): tuple[image: Image, data: string] =
+  let client = newHttpClient(timeout = 30000)
+  try:
+    let content = client.getContent(url)
+    result = (decodeImageWithFallback(content), content)
+  finally:
+    client.close()
+
+proc parseExifJson(output: string): Option[JsonNode] =
+  try:
+    let parsed = parseJson(output)
+    if parsed.kind == JArray and parsed.len > 0:
+      return some(parsed[0])
+  except CatchableError:
+    discard
+  return none(JsonNode)
+
+proc getExifMetadataFromPath*(path: string): Option[JsonNode] =
+  let exiftool = findExe("exiftool")
+  if exiftool == "":
+    return none(JsonNode)
+  try:
+    let output = execProcess(exiftool, args = @["-j", "-n", path])
+    return parseExifJson(output)
+  except CatchableError:
+    discard
+  return none(JsonNode)
+
+proc getExifMetadataFromData*(data: string): Option[JsonNode] =
+  let exiftool = findExe("exiftool")
+  if exiftool == "":
+    return none(JsonNode)
+  randomize()
+  let tmpPath = getTempDir() / &"frameos-exif-{epochTime().int}-{rand(1_000_000)}.img"
+  writeFile(tmpPath, data)
+  try:
+    return getExifMetadataFromPath(tmpPath)
+  finally:
+    if fileExists(tmpPath):
+      removeFile(tmpPath)
 
 proc rotateDegrees*(image: Image, degrees: int): Image {.raises: [PixieError].} =
   case (degrees + 1080) mod 360: # TODO: yuck

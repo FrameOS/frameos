@@ -6,17 +6,18 @@ export const settingsDetails: Record<
     title: string
     tagLabel: string
     description?: string
+    freeLimitedUsage?: boolean
     fields: { label: string; secret?: boolean; path: (keyof FrameOSSettings | string)[] }[]
   }
 > = {
   openAI: {
     title: 'OpenAI',
     tagLabel: 'OpenAI API key missing',
-    description: 'The OpenAI API key is used within OpenAI apps.',
-    fields: [{ label: 'API key', secret: true, path: ['openAI', 'apiKey'] }],
+    description: 'The OpenAI API key is used within OpenAI apps on frames.',
+    fields: [{ label: 'API key for frames', secret: true, path: ['openAI', 'apiKey'] }],
   },
   unsplash: {
-    title: 'Unsplash API',
+    title: 'Unsplash',
     tagLabel: 'Unsplash access key missing',
     fields: [{ label: 'Access key', secret: true, path: ['unsplash', 'accessKey'] }],
   },
@@ -31,6 +32,12 @@ export const settingsDetails: Record<
         path: ['homeAssistant', 'accessToken'],
       },
     ],
+  },
+  github: {
+    title: 'GitHub',
+    tagLabel: 'GitHub personal access token missing',
+    freeLimitedUsage: true,
+    fields: [{ label: 'API key', secret: true, path: ['github', 'api_key'] }],
   },
   // frameOS: {
   //   title: 'FrameOS Gallery',
@@ -56,7 +63,10 @@ export function resolveAppConfig(apps: Record<string, AppConfig>, keyword?: stri
   return undefined
 }
 
-export function getSettingsValue(settings: FrameOSSettings | null | undefined, path: (keyof FrameOSSettings | string)[]) {
+export function getSettingsValue(
+  settings: FrameOSSettings | null | undefined,
+  path: (keyof FrameOSSettings | string)[]
+) {
   return path.reduce<any>((acc, key) => (acc ? acc[key as keyof typeof acc] : undefined), settings)
 }
 

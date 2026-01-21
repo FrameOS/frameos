@@ -273,6 +273,10 @@
         "type": {
           "$ref": "#/definitions/FieldType",
           "description": "Type of the field"
+        },
+        "example": {
+          "description": "Example output for this field, stored as a stringified value",
+          "type": "string"
         }
       },
       "required": ["name", "type"],

@@ -4,9 +4,10 @@ import { Tabs } from '../../../components/panels/Tabs'
 import { Tab } from '../../../components/panels/Tab'
 import { Area, PanelWithMetadata } from '../../../types'
 import { useActions, useValues } from 'kea'
-import { panelsLogic } from './panelsLogic'
+import { panelScrollKey, panelsLogic } from './panelsLogic'
 import { frameLogic } from '../frameLogic'
 import { ArrowLeftIcon } from '@heroicons/react/24/outline'
+import { useCallback, useEffect, useRef, type UIEvent } from 'react'
 
 export interface PanelAreaProps {
   area: Area
@@ -20,14 +21,60 @@ function pascalCaseToTitleCase(pascalCase: string): string {
 
 export function PanelArea({ area, areaPanels }: PanelAreaProps): JSX.Element {
   const { frameId } = useValues(frameLogic)
-  const { setPanel, closePanel, toggleFullScreenPanel, disableFullscreenPanel } = useActions(panelsLogic({ frameId }))
+  const { setPanel, closePanel, toggleFullScreenPanel, disableFullscreenPanel, rememberPanelScroll } = useActions(
+    panelsLogic({ frameId })
+  )
+  const { panelScrollPositions } = useValues(panelsLogic({ frameId }))
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const lastPanelKeyRef = useRef<string | null>(null)
 
   // Don't look at panel.active directly, as many might have it set
   const activePanel = areaPanels.find((panel) => panel.active) ?? areaPanels.find((panel) => !panel.hidden)
   const Component = activePanel ? allPanels[activePanel.panel] : null
+  const activePanelKey = activePanel ? panelScrollKey(activePanel) : null
+  const savedScrollTop = activePanelKey ? panelScrollPositions[activePanelKey] ?? 0 : 0
+
+  useEffect(() => {
+    if (!activePanelKey) {
+      lastPanelKeyRef.current = null
+      return
+    }
+
+    if (lastPanelKeyRef.current === activePanelKey) {
+      return
+    }
+
+    lastPanelKeyRef.current = activePanelKey
+
+    const container = scrollContainerRef.current
+    if (!container) {
+      return
+    }
+
+    container.scrollTop = savedScrollTop
+    const timeoutId = window.setTimeout(() => {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = savedScrollTop
+      }
+    }, 10)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [activePanelKey, savedScrollTop])
+
+  const handleScroll = useCallback(
+    (event: UIEvent<HTMLDivElement>) => {
+      if (!activePanel) {
+        return
+      }
+      rememberPanelScroll(activePanel, event.currentTarget.scrollTop)
+    },
+    [activePanel, rememberPanelScroll]
+  )
 
   return (
     <Container
+      scrollRef={scrollContainerRef}
+      onScroll={handleScroll}
       header={
         <Tabs>
           {areaPanels

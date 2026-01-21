@@ -80,12 +80,14 @@
       "label": "Widths",
       "name": "width_ratios",
       "placeholder": "1 2 1",
+      "hint": "Relative widths of columns, separated by spaces",
       "type": "string"
     },
     {
       "label": "Heights",
       "name": "height_ratios",
       "placeholder": "1 2 1",
+      "hint": "Relative heights of rows, separated by spaces",
       "type": "string"
     }
   ],

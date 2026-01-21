@@ -1,5 +1,6 @@
 from .apps import *  # noqa: F403
 from .assets import *  # noqa: F403
+from .ai_embeddings import *  # noqa: F403
 from .frame import *  # noqa: F403
 from .log import *  # noqa: F403
 from .metrics import *  # noqa: F403
