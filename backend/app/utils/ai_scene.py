@@ -231,6 +231,8 @@ Use any relevant scene examples from the provided context as guidance.
 
 SCENE_PLAN_SYSTEM_PROMPT = """
 You are planning a FrameOS scene. Produce a concise plan that will be compiled into scene JSON later.
+If the app is so complex that it requires processed input data to be read multiple times, store the processed output in
+a private state field with the "logic/setAsState" app, then read it back via state nodes later.
 Return JSON with keys:
 - title: optional string for the scene.
 - intent: short statement of what the user wants.

@@ -45,6 +45,7 @@ REQUIRED_EMBEDDING_PATHS = {
     "frameos/src/apps/render/text",
     "frameos/src/apps/render/split",
     "frameos/src/apps/render/svg",
+    "frameos/src/apps/logic/setAsState",
     "repo/scenes/samples/XKCD",
     "repo/scenes/samples/Split agenda",
 }
