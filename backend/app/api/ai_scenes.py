@@ -20,9 +20,11 @@ from app.utils.ai_scene import (
     EMBEDDING_MODEL,
     SCENE_MODEL,
     SCENE_REVIEW_MODEL,
+    PROMPT_EXPANSION_MODEL,
     DEFAULT_APP_CONTEXT_K,
     DEFAULT_SCENE_CONTEXT_K,
     create_embeddings,
+    expand_scene_prompt,
     format_frame_context,
     generate_scene_json,
     generate_scene_plan,
@@ -42,6 +44,7 @@ REQUIRED_EMBEDDING_PATHS = {
     "frameos/src/apps/render/text",
     "frameos/src/apps/render/split",
     "frameos/src/apps/render/svg",
+    "repo/scenes/samples/XKCD",
 }
 
 SERVICE_SECRET_FIELDS: dict[str, dict[str, Any]] = {
@@ -264,6 +267,40 @@ async def generate_scene(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI backend API key not set")
 
     try:
+        expanded_prompt = prompt
+        expansion_keywords: list[str] = []
+        prompt_for_retrieval = prompt
+        try:
+            await _publish_ai_scene_log(redis, "Expanding prompt for retrieval.", request_id, stage="prompt:expand")
+            expansion = await expand_scene_prompt(
+                prompt=prompt,
+                api_key=api_key,
+                model=openai_settings.get("promptExpansionModel") or PROMPT_EXPANSION_MODEL,
+                frame_context=frame_context,
+                ai_trace_id=posthog_trace_id,
+                ai_session_id=posthog_session_id,
+                ai_parent_id=posthog_root_span_id,
+            )
+            candidate_prompt = expansion.get("expanded_prompt")
+            if isinstance(candidate_prompt, str) and candidate_prompt.strip():
+                expanded_prompt = candidate_prompt.strip()
+
+            candidate_keywords = expansion.get("keywords")
+            if isinstance(candidate_keywords, list):
+                expansion_keywords = [str(item).strip() for item in candidate_keywords if str(item).strip()]
+            prompt_for_retrieval = expanded_prompt
+            if expansion_keywords:
+                prompt_for_retrieval = f"{expanded_prompt}\nKeywords: {', '.join(expansion_keywords)}"
+        except Exception as exc:
+            await _publish_ai_scene_log(
+                redis,
+                f"Prompt expansion failed; continuing with original prompt. ({exc})",
+                request_id,
+                status="warning",
+                stage="prompt:expand",
+            )
+            prompt_for_retrieval = prompt
+
         await _publish_ai_scene_log(redis, "Loading embeddings.", request_id, stage="context:load")
         embeddings = db.query(AiEmbedding).all()
         missing_service_keys = _get_missing_service_keys(settings)
@@ -273,7 +310,7 @@ async def generate_scene(
             await _publish_ai_scene_log(redis, "Creating retrieval embedding.", request_id, stage="context:embed")
             query_embedding = (
                 await create_embeddings(
-                    [prompt],
+                    [prompt_for_retrieval],
                     api_key,
                     model=openai_settings.get("embeddingModel") or EMBEDDING_MODEL,
                     ai_trace_id=posthog_trace_id,
@@ -288,13 +325,13 @@ async def generate_scene(
                 *rank_embeddings(
                     query_embedding,
                     app_embeddings,
-                    prompt=prompt,
+                    prompt=prompt_for_retrieval,
                     top_k=DEFAULT_APP_CONTEXT_K,
                 ),
                 *rank_embeddings(
                     query_embedding,
                     scene_embeddings,
-                    prompt=prompt,
+                    prompt=prompt_for_retrieval,
                     top_k=DEFAULT_SCENE_CONTEXT_K,
                 ),
             ]

@@ -14,11 +14,13 @@ SUMMARY_MODEL = "gpt-5-mini"
 SCENE_MODEL = "gpt-5.2"
 EMBEDDING_MODEL = "text-embedding-3-large"
 SCENE_REVIEW_MODEL = "gpt-5-mini"
+PROMPT_EXPANSION_MODEL = "gpt-5-mini"
 
 DEFAULT_APP_CONTEXT_K = 6
 DEFAULT_SCENE_CONTEXT_K = 4
 DEFAULT_MIN_SCORE = 0.15
 MMR_LAMBDA = 0.7
+AI_REQUEST_TIMEOUT = 600
 
 
 def _format_gpio_buttons(gpio_buttons: Iterable[dict[str, Any]]) -> list[str]:
@@ -239,6 +241,15 @@ Return JSON with keys:
 Do not include markdown or code fences.
 """.strip()
 
+PROMPT_EXPANSION_SYSTEM_PROMPT = """
+You expand a user request so retrieval can find the best FrameOS apps and scene templates.
+Return JSON with keys:
+- expanded_prompt: a short, clarified restatement of the request with inferred but non-committal context
+  (display style, data sources, layout, cadence). Do not invent requirements.
+- keywords: 5-12 short keywords or phrases useful for retrieval.
+Do not include markdown or code fences.
+""".strip()
+
 SCENE_REVIEW_SYSTEM_PROMPT = """
 You are a strict reviewer for FrameOS scene JSON.
 Check the scene against the user request and ensure it is valid:
@@ -351,12 +362,12 @@ def _keyword_score(prompt_tokens: list[str], item: AiEmbedding) -> float:
     return hits / max(len(prompt_tokens), 1)
 
 
-def _openai_client(api_key: str, *, timeout: float) -> AsyncOpenAI:
+def _openai_client(api_key: str) -> AsyncOpenAI:
     posthog_client = get_posthog_client() if llm_analytics_enabled() else None
     return AsyncOpenAI(
         api_key=api_key,
         posthog_client=posthog_client,
-        timeout=timeout,
+        timeout=AI_REQUEST_TIMEOUT,
     )
 
 
@@ -462,7 +473,7 @@ async def create_embeddings(
     ai_parent_id: str | None = None,
 ) -> list[list[float]]:
     embeddings: list[list[float]] = []
-    client = _openai_client(api_key, timeout=60)
+    client = _openai_client(api_key)
     for batch in _chunk_texts(texts):
         span_id = _new_ai_span_id()
         response = await client.embeddings.create(
@@ -496,7 +507,7 @@ async def summarize_text(
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,
 ) -> dict[str, Any]:
-    client = _openai_client(api_key, timeout=60)
+    client = _openai_client(api_key)
     span_id = _new_ai_span_id()
     response = await client.chat.completions.create(
         model=model or SUMMARY_MODEL,
@@ -515,6 +526,47 @@ async def summarize_text(
             extra={
                 "operation": "summarize_text",
                 "model": model or SUMMARY_MODEL,
+            },
+        ),
+    )
+    message = response.choices[0].message if response.choices else None
+    content = message.content if message else "{}"
+    return json.loads(content)
+
+
+async def expand_scene_prompt(
+    *,
+    prompt: str,
+    api_key: str,
+    model: str = PROMPT_EXPANSION_MODEL,
+    frame_context: str | None = None,
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
+) -> dict[str, Any]:
+    prompt_parts = [f"User request: {prompt}"]
+    if frame_context:
+        prompt_parts.extend(["Frame details:", frame_context])
+    expansion_prompt = "\n\n".join(prompt_parts)
+    client = _openai_client(api_key)
+    span_id = _new_ai_span_id()
+    response = await client.chat.completions.create(
+        model=model or PROMPT_EXPANSION_MODEL,
+        messages=[
+            {"role": "system", "content": PROMPT_EXPANSION_SYSTEM_PROMPT},
+            {"role": "user", "content": expansion_prompt},
+        ],
+        response_format={"type": "json_object"},
+        posthog_distinct_id=config.INSTANCE_ID,
+        posthog_properties=_build_ai_posthog_properties(
+            model=model or PROMPT_EXPANSION_MODEL,
+            ai_trace_id=ai_trace_id,
+            ai_session_id=ai_session_id,
+            ai_span_id=span_id,
+            ai_parent_id=ai_parent_id,
+            extra={
+                "operation": "expand_scene_prompt",
+                "model": model or PROMPT_EXPANSION_MODEL,
             },
         ),
     )
@@ -745,7 +797,7 @@ async def _request_scene_json(
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,
 ) -> dict[str, Any]:
-    client = _openai_client(api_key, timeout=90)
+    client = _openai_client(api_key)
     span_id = _new_ai_span_id()
     response = await client.chat.completions.create(
         model=model or SCENE_MODEL,
@@ -780,7 +832,7 @@ async def _request_scene_plan(
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,
 ) -> dict[str, Any]:
-    client = _openai_client(api_key, timeout=90)
+    client = _openai_client(api_key)
     span_id = _new_ai_span_id()
     response = await client.chat.completions.create(
         model=model or SCENE_MODEL,
