@@ -17,15 +17,29 @@ export function Chat() {
   )
   const { setInput, submitMessage, clearChat } = useActions(chatLogic({ frameId, sceneId: selectedSceneId }))
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const shouldAutoScrollRef = useRef(true)
 
   const lastMessage = messages[messages.length - 1]
 
   useEffect(() => {
-    if (!scrollRef.current) {
+    const container = scrollRef.current
+    if (!container) {
       return
     }
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    if (shouldAutoScrollRef.current) {
+      container.scrollTop = container.scrollHeight
+    }
   }, [messages.length, lastMessage?.content])
+
+  const handleScroll = () => {
+    const container = scrollRef.current
+    if (!container) {
+      return
+    }
+    const threshold = 24
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    shouldAutoScrollRef.current = distanceFromBottom <= threshold
+  }
 
   const handleSubmit = () => {
     submitMessage(input)
@@ -52,7 +66,7 @@ export function Chat() {
           Clear
         </Button>
       </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-3 pr-1">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-3 pr-1" onScroll={handleScroll}>
         {messages.length === 0 ? (
           <div className="text-sm text-gray-400">
             {chatSceneName

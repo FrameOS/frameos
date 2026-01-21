@@ -13,6 +13,7 @@ from arq import ArqRedis as Redis
 
 from app.database import get_db
 from app.models.ai_embeddings import AiEmbedding
+from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
 from app.redis import get_redis
 from app.schemas.ai_scenes import (
@@ -807,6 +808,8 @@ async def chat_scene(
             tool = "answer_frame_question"
         if tool == "answer_scene_question" and not scene_payload:
             tool = "answer_frame_question"
+        if tool in {"answer_frame_question", "answer_scene_question"}:
+            tool_prompt = prompt
         await _publish_ai_scene_log(redis, f"Tool selected: {tool}.", request_id, stage="route")
 
         if tool_prompt != prompt:
@@ -1003,6 +1006,7 @@ async def chat_scene(
             scene_model = openai_settings.get("sceneModel") or SCENE_MODEL
             response_payload: dict[str, Any] | None = None
             validation_issues: list[str] = []
+            available_apps = sorted(get_app_configs().keys())
             max_attempts = 2
             for attempt in range(1, max_attempts + 1):
                 await _publish_ai_scene_log(
@@ -1015,6 +1019,7 @@ async def chat_scene(
                     prompt=tool_prompt,
                     scene=scene_payload or {},
                     context_items=context_items,
+                    available_apps=available_apps,
                     api_key=api_key,
                     model=scene_model,
                     issues=validation_issues or None,

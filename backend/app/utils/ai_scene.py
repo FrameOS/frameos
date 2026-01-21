@@ -108,6 +108,15 @@ def format_frame_scene_summary(scenes: list[dict[str, Any]] | None) -> str:
     return "\n".join(lines)
 
 
+def format_available_apps(apps: Iterable[str] | None) -> str | None:
+    if not apps:
+        return None
+    unique_apps = sorted({app for app in apps if isinstance(app, str) and app.strip()})
+    if not unique_apps:
+        return None
+    return "Available app keywords (authoritative): " + ", ".join(unique_apps)
+
+
 def _format_selected_elements(
     selected_nodes: list[dict[str, Any]] | None,
     selected_edges: list[dict[str, Any]] | None,
@@ -304,6 +313,7 @@ You are modifying an existing FrameOS scene. You will receive the current scene 
 Return updated JSON with a top-level "title" and "scenes" array.
 Keep the scene id and name unless the user explicitly asks to change them.
 Only adjust what the user requested; preserve existing structure when possible.
+You will be given an authoritative list of available app keywords. Use only those app keywords; do not invent new apps.
 """.strip()
 )
 
@@ -311,7 +321,23 @@ FRAME_CHAT_ANSWER_SYSTEM_PROMPT = """
 You are a friendly assistant for FrameOS frames.
 Answer questions about the frame or FrameOS itself.
 Use the provided context (frame details, installed scene summary, and reference context).
+
+High-level FrameOS facts you can use:
+- FrameOS is an operating system for single-function smart frames built for Raspberry Pi-class hardware.
+- It supports both e-ink and traditional displays, including very low refresh (seconds per frame) and high refresh
+  (up to 60fps) screens, with example use cases like calendars, meeting room displays, dashboards, signage, and
+  interactive message boards.
+- Frames run a compiled on-device runtime (written in Nim) and operate locally; there is no required cloud
+  subscription. The backend is used to configure, deploy, and manage frames over SSH.
+- The backend can run locally or on a server, is available as a Docker app (and Home Assistant addon), and serves a
+  web UI for creating and deploying scenes.
+- Users can deploy prebuilt scenes or create their own in the scene editor; scenes are made of apps/nodes wired
+  together for data and rendering.
+- Common hardware includes Raspberry Pi + e-ink HATs (Waveshare/Pimoroni) or HDMI displays; Raspberry Pi OS Lite is a
+  typical base OS.
+
 Provide helpful context without overwhelming the user; keep replies short unless they ask for specifics.
+Limit answers to a few short paragraphs (2-3 max) and avoid long lists unless the user asks.
 Invite follow-up questions and make it clear they can ask about other scenes too.
 If the answer is uncertain, say what is missing and how to proceed.
 Return JSON only with the key "answer".
@@ -322,6 +348,7 @@ You are a friendly assistant for FrameOS scenes.
 Answer questions about the current scene or how to edit it.
 Use the provided context (scene JSON, selected nodes/edges, frame details, and reference context).
 Provide helpful context without overwhelming the user; keep replies short unless they ask for specifics.
+Limit answers to a few short paragraphs (2-3 max) and avoid long lists unless the user asks.
 If the answer is uncertain, say what is missing and how to proceed.
 Return JSON only with the key "answer".
 """.strip()
@@ -805,6 +832,7 @@ async def modify_scene_json(
     prompt: str,
     scene: dict[str, Any],
     context_items: list[AiEmbedding],
+    available_apps: Iterable[str] | None = None,
     api_key: str,
     model: str,
     issues: list[str] | None = None,
@@ -817,6 +845,9 @@ async def modify_scene_json(
 ) -> dict[str, Any]:
     context_block = _format_context_items(context_items)
     prompt_parts = [f"User request: {prompt}", "Current scene JSON:", json.dumps(scene, ensure_ascii=False)]
+    available_apps_block = format_available_apps(available_apps)
+    if available_apps_block:
+        prompt_parts.append(available_apps_block)
     selected_context = _format_selected_elements(selected_nodes, selected_edges)
     if selected_context:
         prompt_parts.extend(["User selection in editor:", selected_context])
