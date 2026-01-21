@@ -39,6 +39,8 @@ class AiSceneChatRequest(BaseModel):
     frame_id: Optional[int] = Field(default=None, alias="frameId")
     scene_id: Optional[str] = Field(default=None, alias="sceneId")
     scene: Optional[dict[str, Any]] = None
+    selected_nodes: Optional[list[dict[str, Any]]] = Field(default=None, alias="selectedNodes")
+    selected_edges: Optional[list[dict[str, Any]]] = Field(default=None, alias="selectedEdges")
     history: Optional[list[AiSceneChatMessage]] = None
     request_id: Optional[str] = Field(default=None, alias="requestId")
 

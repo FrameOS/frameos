@@ -74,6 +74,51 @@ def format_frame_context(frame: dict[str, Any] | None) -> str | None:
             )
     return "\n".join(lines) if lines else None
 
+
+def format_frame_scene_summary(scenes: list[dict[str, Any]] | None) -> str:
+    if not scenes:
+        return "No scenes are installed on this frame yet."
+    lines: list[str] = ["Installed scenes (short summary):"]
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            continue
+        scene_id = scene.get("id")
+        scene_name = scene.get("name") or scene_id or "Untitled scene"
+        nodes = scene.get("nodes") or []
+        edges = scene.get("edges") or []
+        app_keywords: list[str] = []
+        if isinstance(nodes, list):
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                if node.get("type") != "app":
+                    continue
+                keyword = (node.get("data") or {}).get("keyword")
+                if isinstance(keyword, str) and keyword not in app_keywords:
+                    app_keywords.append(keyword)
+        apps_summary = ""
+        if app_keywords:
+            preview = ", ".join(app_keywords[:3])
+            suffix = "…" if len(app_keywords) > 3 else ""
+            apps_summary = f" Apps: {preview}{suffix}."
+        scene_label = f"{scene_name}"
+        if scene_id and scene_id != scene_name:
+            scene_label = f"{scene_name} (id: {scene_id})"
+        lines.append(f"- {scene_label}: {len(nodes)} nodes, {len(edges)} edges.{apps_summary}")
+    return "\n".join(lines)
+
+
+def _format_selected_elements(
+    selected_nodes: list[dict[str, Any]] | None,
+    selected_edges: list[dict[str, Any]] | None,
+) -> str | None:
+    parts: list[str] = []
+    if selected_nodes:
+        parts.append(f"Selected nodes: {json.dumps(selected_nodes, ensure_ascii=False)}")
+    if selected_edges:
+        parts.append(f"Selected edges: {json.dumps(selected_edges, ensure_ascii=False)}")
+    return "\n".join(parts) if parts else None
+
 SUMMARY_SYSTEM_PROMPT = """
 You are summarizing FrameOS scene templates and app modules so they can be retrieved for prompt grounding.
 Return JSON with keys:
@@ -236,16 +281,19 @@ You are a router that decides how to handle a FrameOS scene chat request.
 Choose exactly one tool:
 - build_scene: The user wants a new scene generated.
 - modify_scene: The user wants edits to the current scene JSON.
-- answer_question: The user is asking about the current scene, FrameOS, or how things work.
+- answer_frame_question: The user is asking about the frame, FrameOS, or how things work.
+- answer_scene_question: The user is asking about the current scene, how it works, or how to edit it.
 - reply: The user is chatting without needing tools.
 Return JSON only with:
-- tool: one of "build_scene", "modify_scene", "answer_question", "reply"
+- tool: one of "build_scene", "modify_scene", "answer_frame_question", "answer_scene_question", "reply"
 - tool_prompt: a concise prompt for the chosen tool (or the original user request if no rewrite is needed)
 Rules:
 - If there is no current scene provided, avoid "modify_scene".
+- If there is no current scene provided, do not use "answer_scene_question".
 - Use "build_scene" when the user asks to create something new or add a new scene.
 - Use "modify_scene" when the user asks to change "this scene", "the current scene", or references an existing scene.
-- Use "answer_question" for explanations, diagnostics, or how-to questions.
+- Use "answer_scene_question" for explanations, diagnostics, or how-to questions about the current scene.
+- Use "answer_frame_question" for frame-level questions (device settings, installed scenes, how FrameOS works).
 """.strip()
 
 SCENE_MODIFY_SYSTEM_PROMPT = (
@@ -259,12 +307,22 @@ Only adjust what the user requested; preserve existing structure when possible.
 """.strip()
 )
 
-SCENE_CHAT_ANSWER_SYSTEM_PROMPT = """
-You are a helpful assistant for FrameOS scenes.
-Answer questions about the current scene or FrameOS itself.
-Use the provided context (scene JSON, frame details, and relevant reference context).
+FRAME_CHAT_ANSWER_SYSTEM_PROMPT = """
+You are a friendly assistant for FrameOS frames.
+Answer questions about the frame or FrameOS itself.
+Use the provided context (frame details, installed scene summary, and reference context).
+Provide helpful context without overwhelming the user; keep replies short unless they ask for specifics.
+Invite follow-up questions and make it clear they can ask about other scenes too.
 If the answer is uncertain, say what is missing and how to proceed.
-Keep responses concise but actionable.
+Return JSON only with the key "answer".
+""".strip()
+
+SCENE_CHAT_ANSWER_SYSTEM_PROMPT = """
+You are a friendly assistant for FrameOS scenes.
+Answer questions about the current scene or how to edit it.
+Use the provided context (scene JSON, selected nodes/edges, frame details, and reference context).
+Provide helpful context without overwhelming the user; keep replies short unless they ask for specifics.
+If the answer is uncertain, say what is missing and how to proceed.
 Return JSON only with the key "answer".
 """.strip()
 
@@ -751,12 +809,17 @@ async def modify_scene_json(
     model: str,
     issues: list[str] | None = None,
     frame_context: str | None = None,
+    selected_nodes: list[dict[str, Any]] | None = None,
+    selected_edges: list[dict[str, Any]] | None = None,
     ai_trace_id: str | None = None,
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,
 ) -> dict[str, Any]:
     context_block = _format_context_items(context_items)
     prompt_parts = [f"User request: {prompt}", "Current scene JSON:", json.dumps(scene, ensure_ascii=False)]
+    selected_context = _format_selected_elements(selected_nodes, selected_edges)
+    if selected_context:
+        prompt_parts.extend(["User selection in editor:", selected_context])
     if issues:
         prompt_parts.append(f"Known issues: {json.dumps(issues, ensure_ascii=False)}")
     if frame_context:
@@ -790,6 +853,8 @@ async def answer_scene_question(
     context_items: list[AiEmbedding],
     frame_context: str | None = None,
     scene: dict[str, Any] | None = None,
+    selected_nodes: list[dict[str, Any]] | None = None,
+    selected_edges: list[dict[str, Any]] | None = None,
     history: list[dict[str, str]] | None = None,
     model: str = CHAT_MODEL,
     ai_trace_id: str | None = None,
@@ -802,6 +867,9 @@ async def answer_scene_question(
         context_parts.extend(["Frame details:", frame_context])
     if scene:
         context_parts.extend(["Current scene JSON:", json.dumps(scene, ensure_ascii=False)])
+    selected_context = _format_selected_elements(selected_nodes, selected_edges)
+    if selected_context:
+        context_parts.extend(["User selection in editor:", selected_context])
     if context_block:
         context_parts.extend(["Relevant reference context:", context_block])
     context_message = "\n\n".join(context_parts) if context_parts else "No additional context."
@@ -828,6 +896,64 @@ async def answer_scene_question(
             ai_parent_id=ai_parent_id,
             extra={
                 "operation": "answer_scene_question",
+                "model": model or CHAT_MODEL,
+            },
+        ),
+    )
+    message = response.choices[0].message if response.choices else None
+    content = message.content if message else "{}"
+    payload = json.loads(content)
+    answer = payload.get("answer")
+    if isinstance(answer, str) and answer.strip():
+        return answer.strip()
+    return content.strip()
+
+
+async def answer_frame_question(
+    *,
+    prompt: str,
+    api_key: str,
+    context_items: list[AiEmbedding],
+    frame_context: str | None = None,
+    frame_scene_summary: str | None = None,
+    history: list[dict[str, str]] | None = None,
+    model: str = CHAT_MODEL,
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
+) -> str:
+    context_block = _format_context_items(context_items)
+    context_parts = []
+    if frame_context:
+        context_parts.extend(["Frame details:", frame_context])
+    if frame_scene_summary:
+        context_parts.extend(["Installed scenes:", frame_scene_summary])
+    if context_block:
+        context_parts.extend(["Relevant reference context:", context_block])
+    context_message = "\n\n".join(context_parts) if context_parts else "No additional context."
+    messages = [{"role": "system", "content": FRAME_CHAT_ANSWER_SYSTEM_PROMPT}, {"role": "user", "content": context_message}]
+    if history:
+        for item in history:
+            role = item.get("role") if isinstance(item, dict) else None
+            content = item.get("content") if isinstance(item, dict) else None
+            if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
+                messages.append({"role": role, "content": content.strip()})
+    messages.append({"role": "user", "content": prompt})
+    client = _openai_client(api_key)
+    span_id = _new_ai_span_id()
+    response = await client.chat.completions.create(
+        model=model or CHAT_MODEL,
+        messages=messages,
+        response_format={"type": "json_object"},
+        posthog_distinct_id=config.INSTANCE_ID,
+        posthog_properties=_build_ai_posthog_properties(
+            model=model or CHAT_MODEL,
+            ai_trace_id=ai_trace_id,
+            ai_session_id=ai_session_id,
+            ai_span_id=span_id,
+            ai_parent_id=ai_parent_id,
+            extra={
+                "operation": "answer_frame_question",
                 "model": model or CHAT_MODEL,
             },
         ),

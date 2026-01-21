@@ -34,11 +34,13 @@ from app.utils.ai_scene import (
     create_embeddings,
     expand_scene_prompt,
     format_frame_context,
+    format_frame_scene_summary,
     generate_scene_json,
     generate_scene_plan,
     repair_scene_json,
     modify_scene_json,
     route_scene_chat,
+    answer_frame_question,
     answer_scene_question,
     rank_embeddings,
     review_scene_solution,
@@ -704,6 +706,7 @@ async def chat_scene(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Prompt is required")
 
     frame_context = None
+    frame_scene_summary = None
     if data.frame_id is not None:
         frame = db.query(Frame).filter(Frame.id == data.frame_id).first()
         if frame:
@@ -721,6 +724,7 @@ async def chat_scene(
                     "gpio_buttons": frame.gpio_buttons,
                 }
             )
+            frame_scene_summary = format_frame_scene_summary(frame.scenes)
 
     settings = get_settings_dict(db)
     openai_settings = settings.get("openAI", {})
@@ -746,9 +750,11 @@ async def chat_scene(
     tool_prompt = tool_payload.get("tool_prompt") if isinstance(tool_payload, dict) else None
     if not isinstance(tool_prompt, str) or not tool_prompt.strip():
         tool_prompt = prompt
-    tool = tool if tool in {"build_scene", "modify_scene", "answer_question", "reply"} else "answer_question"
+    tool = tool if tool in {"build_scene", "modify_scene", "answer_frame_question", "answer_scene_question", "reply"} else "answer_frame_question"
     if tool == "modify_scene" and not scene_payload:
-        tool = "answer_question"
+        tool = "answer_frame_question"
+    if tool == "answer_scene_question" and not scene_payload:
+        tool = "answer_frame_question"
 
     context_items = await _load_context_items(
         db=db,
@@ -760,13 +766,33 @@ async def chat_scene(
         ai_parent_id=posthog_root_span_id,
     )
 
-    if tool in {"answer_question", "reply"}:
+    selected_nodes = data.selected_nodes if isinstance(data.selected_nodes, list) else None
+    selected_edges = data.selected_edges if isinstance(data.selected_edges, list) else None
+
+    if tool in {"answer_scene_question", "reply"} and scene_payload:
         answer = await answer_scene_question(
             prompt=tool_prompt,
             api_key=api_key,
             context_items=context_items,
             frame_context=frame_context,
             scene=scene_payload,
+            selected_nodes=selected_nodes,
+            selected_edges=selected_edges,
+            history=history,
+            model=openai_settings.get("chatModel") or CHAT_MODEL,
+            ai_trace_id=posthog_trace_id,
+            ai_session_id=posthog_session_id,
+            ai_parent_id=posthog_root_span_id,
+        )
+        return AiSceneChatResponse(reply=answer, tool=tool)
+
+    if tool in {"answer_frame_question", "reply"}:
+        answer = await answer_frame_question(
+            prompt=tool_prompt,
+            api_key=api_key,
+            context_items=context_items,
+            frame_context=frame_context,
+            frame_scene_summary=frame_scene_summary,
             history=history,
             model=openai_settings.get("chatModel") or CHAT_MODEL,
             ai_trace_id=posthog_trace_id,
@@ -872,6 +898,8 @@ async def chat_scene(
                 model=scene_model,
                 issues=validation_issues or None,
                 frame_context=frame_context,
+                selected_nodes=selected_nodes,
+                selected_edges=selected_edges,
                 ai_trace_id=posthog_trace_id,
                 ai_session_id=posthog_session_id,
                 ai_parent_id=posthog_root_span_id,
@@ -908,12 +936,12 @@ async def chat_scene(
             reply += " Note: the update may need review for validation issues."
         return AiSceneChatResponse(reply=reply, tool=tool, scenes=scenes)
 
-    answer = await answer_scene_question(
+    answer = await answer_frame_question(
         prompt=tool_prompt,
         api_key=api_key,
         context_items=context_items,
         frame_context=frame_context,
-        scene=scene_payload,
+        frame_scene_summary=frame_scene_summary,
         history=history,
         model=openai_settings.get("chatModel") or CHAT_MODEL,
         ai_trace_id=posthog_trace_id,

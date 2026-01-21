@@ -1,6 +1,7 @@
 import { useActions, useValues } from 'kea'
 import { chatLogic } from './chatLogic'
 import { frameLogic } from '../../frameLogic'
+import { panelsLogic } from '../panelsLogic'
 import { Button } from '../../../../components/Button'
 import { TextArea } from '../../../../components/TextArea'
 import { useEffect, useRef } from 'react'
@@ -10,8 +11,11 @@ import { Spinner } from '../../../../components/Spinner'
 
 export function Chat() {
   const { frameId } = useValues(frameLogic)
-  const { messages, input, isSubmitting, error, chatSceneName } = useValues(chatLogic({ frameId }))
-  const { setInput, submitMessage, clearChat } = useActions(chatLogic({ frameId }))
+  const { selectedSceneId } = useValues(panelsLogic({ frameId }))
+  const { messages, input, isSubmitting, error, chatSceneName } = useValues(
+    chatLogic({ frameId, sceneId: selectedSceneId })
+  )
+  const { setInput, submitMessage, clearChat } = useActions(chatLogic({ frameId, sceneId: selectedSceneId }))
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
   const lastMessage = messages[messages.length - 1]

@@ -344,6 +344,7 @@ export const diagramLogic = kea<diagramLogicType>([
       (s) => [s.nodes],
       (nodes): string[] => nodes.filter((node) => node.selected).map((node) => node.id),
     ],
+    selectedNodes: [(s) => [s.nodes], (nodes): DiagramNode[] => nodes.filter((node) => node.selected)],
     edges: [
       (s) => [s.rawEdges],
       (rawEdges): Edge[] =>
@@ -361,6 +362,7 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
     selectedEdge: [(s) => [s.edges], (edges): Edge | null => edges.find((edge) => edge.selected) ?? null],
     selectedEdgeId: [(s) => [s.selectedEdge], (edge) => edge?.id ?? null],
+    selectedEdges: [(s) => [s.edges], (edges): Edge[] => edges.filter((edge) => edge.selected)],
     edgesForNode: [
       (s) => [s.edges],
       (edges: Edge[]): Record<string, Edge[]> => {

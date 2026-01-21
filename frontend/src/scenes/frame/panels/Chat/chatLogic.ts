@@ -3,7 +3,8 @@ import { v4 as uuidv4 } from 'uuid'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { frameLogic, sanitizeScene } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
-import type { FrameScene } from '../../../../types'
+import { diagramLogic } from '../Diagram/diagramLogic'
+import type { DiagramEdge, DiagramNode, FrameScene } from '../../../../types'
 import { Area, Panel } from '../../../../types'
 
 import type { chatLogicType } from './chatLogicType'
@@ -12,6 +13,7 @@ const MAX_HISTORY = 8
 
 export interface ChatLogicProps {
   frameId: number
+  sceneId?: string | null
 }
 
 export type ChatMessage = {
@@ -28,7 +30,14 @@ export const chatLogic = kea<chatLogicType>([
   props({} as ChatLogicProps),
   key((props) => props.frameId),
   connect((props: ChatLogicProps) => ({
-    values: [frameLogic(props), ['frameForm', 'scenes'], panelsLogic(props), ['selectedSceneId', 'panels']],
+    values: [
+      frameLogic(props),
+      ['frameForm', 'scenes'],
+      panelsLogic(props),
+      ['selectedSceneId', 'panels'],
+      diagramLogic({ frameId: props.frameId, sceneId: props.sceneId ?? '' }),
+      ['selectedNodes', 'selectedEdges'],
+    ],
     actions: [frameLogic(props), ['applyTemplate', 'updateScene']],
   })),
   actions({
@@ -113,6 +122,26 @@ export const chatLogic = kea<chatLogicType>([
       })
       const selectedScene = values.selectedScene
       try {
+        const selectedNodesPayload =
+          selectedScene && values.selectedNodes.length > 0
+            ? values.selectedNodes.map((node: DiagramNode) => ({
+                id: node.id,
+                type: node.type,
+                data: node.data,
+                position: node.position,
+              }))
+            : []
+        const selectedEdgesPayload =
+          selectedScene && values.selectedEdges.length > 0
+            ? values.selectedEdges.map((edge: DiagramEdge) => ({
+                id: edge.id,
+                type: edge.type,
+                source: edge.source,
+                target: edge.target,
+                sourceHandle: edge.sourceHandle,
+                targetHandle: edge.targetHandle,
+              }))
+            : []
         const response = await apiFetch('/api/ai/scenes/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -121,6 +150,8 @@ export const chatLogic = kea<chatLogicType>([
             frameId: props.frameId,
             sceneId: selectedScene?.id ?? null,
             scene: selectedScene ?? null,
+            selectedNodes: selectedNodesPayload.length ? selectedNodesPayload : undefined,
+            selectedEdges: selectedEdgesPayload.length ? selectedEdgesPayload : undefined,
             history: values.historyForRequest,
           }),
         })
