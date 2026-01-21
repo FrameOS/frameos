@@ -4,10 +4,11 @@ import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
 import { Button } from '../../../../components/Button'
 import { TextArea } from '../../../../components/TextArea'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import clsx from 'clsx'
 import { Spinner } from '../../../../components/Spinner'
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 
 export function Chat() {
   const { frameId } = useValues(frameLogic)
@@ -30,6 +31,24 @@ export function Chat() {
       container.scrollTop = container.scrollHeight
     }
   }, [messages.length, lastMessage?.content])
+  const [atBottom, setAtBottom] = useState(true)
+  const virtuosoRef = useRef<VirtuosoHandle>(null)
+  const shouldStickToBottomRef = useRef(true)
+
+  useEffect(() => {
+    if (!shouldStickToBottomRef.current) {
+      return
+    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        virtuosoRef.current?.scrollToIndex({
+          index: messages.length - 1,
+          align: 'end',
+          behavior: 'auto',
+        })
+      })
+    })
+  }, [messages.length])
 
   const handleScroll = () => {
     const container = scrollRef.current
@@ -56,52 +75,162 @@ export function Chat() {
 
   const sendButtonColor = input.trim() ? 'primary' : 'secondary'
 
+  const renderLogLine = (line: string) => {
+    const contextMatch = line.match(/^(.*Selected \d+ context items: )(.+)$/)
+    if (contextMatch) {
+      const [, label, items] = contextMatch
+      const tokens = items
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+      return (
+        <div className="space-y-2">
+          <div className="text-slate-300">{label.trim()}</div>
+          <div className="flex flex-wrap gap-2">
+            {tokens.map((token) => {
+              const typeMatch = token.match(/^\[([^\]]+)\]\s*(.*)$/)
+              const typeLabel = typeMatch?.[1]
+              const name = typeMatch?.[2] ?? token
+              return (
+                <span
+                  key={token}
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-700/80 bg-slate-900/70 px-2 py-0.5 text-xs text-slate-200"
+                >
+                  {typeLabel ? <span className="text-slate-400">[{typeLabel}]</span> : null}
+                  <span className="break-all">{name}</span>
+                </span>
+              )
+            })}
+          </div>
+        </div>
+      )
+    }
+
+    const structuredMatch = line.match(/^(\d+(?:\.\d+)?s)\s+(\[[^\]]+\])\s+(.*)$/)
+    if (structuredMatch) {
+      const [, time, stage, message] = structuredMatch
+      const statusMatch = message.match(/^(SUCCESS|ERROR):\s+(.*)$/)
+      return (
+        <div className="flex flex-wrap gap-x-2 gap-y-1">
+          <span className="text-slate-500">{time}</span>
+          <span className="text-sky-300">{stage}</span>
+          {statusMatch ? (
+            <>
+              <span className={clsx('font-semibold', statusMatch[1] === 'ERROR' ? 'text-red-400' : 'text-emerald-300')}>
+                {statusMatch[1]}:
+              </span>
+              <span className="text-slate-100">{statusMatch[2]}</span>
+            </>
+          ) : (
+            <span className="text-slate-100">{message}</span>
+          )}
+        </div>
+      )
+    }
+
+    return <span className="text-slate-100">{line}</span>
+  }
+
+  const renderMessageBody = (messageContent: string, isLog: boolean) => {
+    if (!messageContent) {
+      return null
+    }
+
+    if (isLog) {
+      const lines = messageContent.split('\n')
+      return (
+        <div className="space-y-2 font-mono text-xs">
+          {lines.map((line, index) => (
+            <div key={`${line}-${index}`} className="whitespace-pre-wrap break-words">
+              {renderLogLine(line)}
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    return <div className="whitespace-pre-wrap break-words">{messageContent}</div>
+  }
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between pb-2">
-        <div className="text-sm text-gray-300">
+        <div className="text-sm text-slate-300">
           {chatSceneName ? `Chat about "${chatSceneName}"` : 'Chat about this frame'}
         </div>
         <Button color="secondary" size="small" onClick={() => clearChat()} disabled={isSubmitting}>
           Clear
         </Button>
       </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-3 pr-1" onScroll={handleScroll}>
+      <div
+        ref={scrollRef}
+        className="flex-1 relative rounded-xl shadow-inner overflow-y-auto space-y-3"
+        onScroll={handleScroll}
+      >
         {messages.length === 0 ? (
-          <div className="text-sm text-gray-400">
+          <div className="text-sm text-slate-400">
             {chatSceneName
               ? 'Ask for a new scene, request edits to the current scene, or ask questions about FrameOS.'
               : 'Ask for a new scene, or ask questions about this frame or FrameOS.'}
           </div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className={clsx(
-                'rounded-lg px-3 py-2 text-sm whitespace-pre-wrap',
-                message.role === 'user'
-                  ? 'bg-blue-950 text-blue-100 border border-blue-900'
-                  : 'bg-gray-900 text-gray-100 border border-gray-800'
-              )}
-            >
-              <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
-                <span className="uppercase tracking-wide">{message.role}</span>
-                {message.tool ? <span>tool: {message.tool}</span> : null}
-              </div>
-              {message.isPlaceholder && !message.content ? (
-                <div className="flex items-center gap-2 text-gray-300">
-                  <Spinner className="shrink-0" />
-                  <span>Thinking…</span>
+          <Virtuoso
+            className="h-full overflow-y-auto pr-1"
+            ref={virtuosoRef}
+            data={messages}
+            followOutput={(isBottom) => (isBottom ? 'auto' : false)}
+            atBottomStateChange={(bottom) => {
+              shouldStickToBottomRef.current = bottom
+              setAtBottom(bottom)
+            }}
+            atBottomThreshold={200}
+            increaseViewportBy={{ top: 0, bottom: 300 }}
+            initialTopMostItemIndex={messages.length - 1}
+            itemContent={(_index, message) => {
+              const isLog = message.tool === 'log'
+              const isUser = message.role === 'user'
+              return (
+                <div
+                  key={message.id}
+                  className={clsx(
+                    'rounded-lg border px-3 py-2 text-sm shadow-sm mb-3',
+                    isUser
+                      ? 'border-blue-900/70 bg-blue-950/60 text-blue-100'
+                      : isLog
+                      ? 'border-slate-800/80 bg-slate-900/70 text-slate-100'
+                      : 'border-slate-800/80 bg-slate-950/70 text-slate-100'
+                  )}
+                >
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
+                    <span className="uppercase tracking-wide">{message.role}</span>
+                    {message.tool ? <span className="text-slate-500">tool: {message.tool}</span> : null}
+                  </div>
+                  {message.isPlaceholder && !message.content ? (
+                    <div className="inline-flex items-center gap-2 text-slate-300">
+                      <span>Thinking…</span>
+                      <Spinner className="h-3 w-3" />
+                    </div>
+                  ) : (
+                    <div>
+                      {renderMessageBody(message.content, isLog)}
+                      {message.isStreaming ? <span className="ml-1 animate-pulse">▍</span> : null}
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div>
-                  {message.content}
-                  {message.isStreaming ? <span className="ml-1 animate-pulse">▍</span> : null}
-                </div>
-              )}
-            </div>
-          ))
+              )
+            }}
+          />
         )}
+        {!atBottom && messages.length > 0 ? (
+          <Button
+            onClick={() => virtuosoRef.current?.scrollToIndex({ index: messages.length - 1, behavior: 'smooth' })}
+            color="secondary"
+            size="small"
+            className="absolute right-4 bottom-4"
+          >
+            Scroll to latest
+          </Button>
+        ) : null}
       </div>
       {error ? <div className="text-xs text-red-400 pt-2">{error}</div> : null}
       <div className="pt-3 space-y-2">
