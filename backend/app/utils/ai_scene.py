@@ -12,6 +12,7 @@ from app.utils.posthog import get_posthog_client, llm_analytics_enabled
 
 SUMMARY_MODEL = "gpt-5-mini"
 SCENE_MODEL = "gpt-5.2"
+CHAT_MODEL = "gpt-5-mini"
 EMBEDDING_MODEL = "text-embedding-3-large"
 SCENE_REVIEW_MODEL = "gpt-5-mini"
 PROMPT_EXPANSION_MODEL = "gpt-5-mini"
@@ -227,6 +228,43 @@ Follow these rules:
   - To use SVGs, route them through the download image app and pass a data URL into it.
 
 Use any relevant scene examples from the provided context as guidance.
+""".strip()
+
+SCENE_CHAT_ROUTER_SYSTEM_PROMPT = """
+You are a router that decides how to handle a FrameOS scene chat request.
+Choose exactly one tool:
+- build_scene: The user wants a new scene generated.
+- modify_scene: The user wants edits to the current scene JSON.
+- answer_question: The user is asking about the current scene, FrameOS, or how things work.
+- reply: The user is chatting without needing tools.
+Return JSON only with:
+- tool: one of "build_scene", "modify_scene", "answer_question", "reply"
+- tool_prompt: a concise prompt for the chosen tool (or the original user request if no rewrite is needed)
+Rules:
+- If there is no current scene provided, avoid "modify_scene".
+- Use "build_scene" when the user asks to create something new or add a new scene.
+- Use "modify_scene" when the user asks to change "this scene", "the current scene", or references an existing scene.
+- Use "answer_question" for explanations, diagnostics, or how-to questions.
+""".strip()
+
+SCENE_MODIFY_SYSTEM_PROMPT = (
+    SCENE_JSON_SYSTEM_PROMPT
+    + "\n\n"
+    + """
+You are modifying an existing FrameOS scene. You will receive the current scene JSON and a user request.
+Return updated JSON with a top-level "title" and "scenes" array.
+Keep the scene id and name unless the user explicitly asks to change them.
+Only adjust what the user requested; preserve existing structure when possible.
+""".strip()
+)
+
+SCENE_CHAT_ANSWER_SYSTEM_PROMPT = """
+You are a helpful assistant for FrameOS scenes.
+Answer questions about the current scene or FrameOS itself.
+Use the provided context (scene JSON, frame details, and relevant reference context).
+If the answer is uncertain, say what is missing and how to proceed.
+Keep responses concise but actionable.
+Return JSON only with the key "answer".
 """.strip()
 
 SCENE_PLAN_SYSTEM_PROMPT = """
@@ -648,6 +686,158 @@ async def generate_scene_plan(
         ai_session_id=ai_session_id,
         ai_parent_id=ai_parent_id,
     )
+
+
+async def route_scene_chat(
+    *,
+    prompt: str,
+    api_key: str,
+    scene: dict[str, Any] | None = None,
+    frame_context: str | None = None,
+    history: list[dict[str, str]] | None = None,
+    model: str = CHAT_MODEL,
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
+) -> dict[str, Any]:
+    prompt_parts = [f"User request: {prompt}"]
+    if frame_context:
+        prompt_parts.extend(["Frame details:", frame_context])
+    if scene:
+        prompt_parts.extend(["Current scene JSON:", json.dumps(scene, ensure_ascii=False)])
+    if history:
+        history_lines = [
+            f"{item.get('role')}: {item.get('content')}"
+            for item in history
+            if isinstance(item, dict) and item.get("role") and item.get("content")
+        ]
+        if history_lines:
+            prompt_parts.extend(["Recent chat history:", "\n".join(history_lines)])
+    routing_prompt = "\n\n".join(prompt_parts)
+    client = _openai_client(api_key)
+    span_id = _new_ai_span_id()
+    response = await client.chat.completions.create(
+        model=model or CHAT_MODEL,
+        messages=[
+            {"role": "system", "content": SCENE_CHAT_ROUTER_SYSTEM_PROMPT},
+            {"role": "user", "content": routing_prompt},
+        ],
+        response_format={"type": "json_object"},
+        posthog_distinct_id=config.INSTANCE_ID,
+        posthog_properties=_build_ai_posthog_properties(
+            model=model or CHAT_MODEL,
+            ai_trace_id=ai_trace_id,
+            ai_session_id=ai_session_id,
+            ai_span_id=span_id,
+            ai_parent_id=ai_parent_id,
+            extra={
+                "operation": "route_scene_chat",
+                "model": model or CHAT_MODEL,
+            },
+        ),
+    )
+    message = response.choices[0].message if response.choices else None
+    content = message.content if message else "{}"
+    return json.loads(content)
+
+
+async def modify_scene_json(
+    *,
+    prompt: str,
+    scene: dict[str, Any],
+    context_items: list[AiEmbedding],
+    api_key: str,
+    model: str,
+    issues: list[str] | None = None,
+    frame_context: str | None = None,
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
+) -> dict[str, Any]:
+    context_block = _format_context_items(context_items)
+    prompt_parts = [f"User request: {prompt}", "Current scene JSON:", json.dumps(scene, ensure_ascii=False)]
+    if issues:
+        prompt_parts.append(f"Known issues: {json.dumps(issues, ensure_ascii=False)}")
+    if frame_context:
+        prompt_parts.extend(["Frame details:", frame_context])
+    prompt_parts.extend(
+        [
+            "Relevant context:",
+            context_block or "(no context available)",
+        ]
+    )
+    scene_prompt = "\n\n".join(prompt_parts)
+    system_prompt = SCENE_MODIFY_SYSTEM_PROMPT + ("\n\n" + frame_context if frame_context else "")
+    return await _request_scene_json(
+        api_key=api_key,
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": scene_prompt},
+        ],
+        context_items=context_items,
+        ai_trace_id=ai_trace_id,
+        ai_session_id=ai_session_id,
+        ai_parent_id=ai_parent_id,
+    )
+
+
+async def answer_scene_question(
+    *,
+    prompt: str,
+    api_key: str,
+    context_items: list[AiEmbedding],
+    frame_context: str | None = None,
+    scene: dict[str, Any] | None = None,
+    history: list[dict[str, str]] | None = None,
+    model: str = CHAT_MODEL,
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
+) -> str:
+    context_block = _format_context_items(context_items)
+    context_parts = []
+    if frame_context:
+        context_parts.extend(["Frame details:", frame_context])
+    if scene:
+        context_parts.extend(["Current scene JSON:", json.dumps(scene, ensure_ascii=False)])
+    if context_block:
+        context_parts.extend(["Relevant reference context:", context_block])
+    context_message = "\n\n".join(context_parts) if context_parts else "No additional context."
+    messages = [{"role": "system", "content": SCENE_CHAT_ANSWER_SYSTEM_PROMPT}, {"role": "user", "content": context_message}]
+    if history:
+        for item in history:
+            role = item.get("role") if isinstance(item, dict) else None
+            content = item.get("content") if isinstance(item, dict) else None
+            if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
+                messages.append({"role": role, "content": content.strip()})
+    messages.append({"role": "user", "content": prompt})
+    client = _openai_client(api_key)
+    span_id = _new_ai_span_id()
+    response = await client.chat.completions.create(
+        model=model or CHAT_MODEL,
+        messages=messages,
+        response_format={"type": "json_object"},
+        posthog_distinct_id=config.INSTANCE_ID,
+        posthog_properties=_build_ai_posthog_properties(
+            model=model or CHAT_MODEL,
+            ai_trace_id=ai_trace_id,
+            ai_session_id=ai_session_id,
+            ai_span_id=span_id,
+            ai_parent_id=ai_parent_id,
+            extra={
+                "operation": "answer_scene_question",
+                "model": model or CHAT_MODEL,
+            },
+        ),
+    )
+    message = response.choices[0].message if response.choices else None
+    content = message.content if message else "{}"
+    payload = json.loads(content)
+    answer = payload.get("answer")
+    if isinstance(answer, str) and answer.strip():
+        return answer.strip()
+    return content.strip()
 
 
 def validate_scene_payload(payload: dict[str, Any]) -> list[str]:

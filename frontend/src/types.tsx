@@ -508,6 +508,7 @@ export enum Panel {
   Apps = 'Apps',
   Asset = 'Asset',
   Assets = 'Assets',
+  Chat = 'Chat',
   Debug = 'Debug',
   Diagram = 'Diagram',
   EditApp = 'EditApp',

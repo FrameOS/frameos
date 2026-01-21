@@ -15,9 +15,16 @@ from app.database import get_db
 from app.models.ai_embeddings import AiEmbedding
 from app.models.settings import get_settings_dict
 from app.redis import get_redis
-from app.schemas.ai_scenes import AiSceneGenerateRequest, AiSceneGenerateResponse, AiSceneContextItem
+from app.schemas.ai_scenes import (
+    AiSceneGenerateRequest,
+    AiSceneGenerateResponse,
+    AiSceneContextItem,
+    AiSceneChatRequest,
+    AiSceneChatResponse,
+)
 from app.config import config
 from app.utils.ai_scene import (
+    CHAT_MODEL,
     EMBEDDING_MODEL,
     SCENE_MODEL,
     SCENE_REVIEW_MODEL,
@@ -30,6 +37,9 @@ from app.utils.ai_scene import (
     generate_scene_json,
     generate_scene_plan,
     repair_scene_json,
+    modify_scene_json,
+    route_scene_chat,
+    answer_scene_question,
     rank_embeddings,
     review_scene_solution,
     validate_scene_payload,
@@ -275,6 +285,62 @@ async def _publish_ai_scene_log(
             "timestamp": datetime.utcnow().isoformat(),
         },
     )
+
+
+async def _load_context_items(
+    *,
+    db: Session,
+    settings: dict[str, Any],
+    api_key: str,
+    prompt: str,
+    ai_trace_id: str | None,
+    ai_session_id: str | None,
+    ai_parent_id: str | None,
+) -> list[AiEmbedding]:
+    embeddings = db.query(AiEmbedding).all()
+    if not embeddings:
+        return []
+    missing_service_keys = _get_missing_service_keys(settings)
+    available_embeddings = _filter_embeddings_for_services(embeddings, missing_service_keys)
+    if not available_embeddings:
+        return []
+    openai_settings = settings.get("openAI", {})
+    query_embedding = (
+        await create_embeddings(
+            [prompt],
+            api_key,
+            model=openai_settings.get("embeddingModel") or EMBEDDING_MODEL,
+            ai_trace_id=ai_trace_id,
+            ai_session_id=ai_session_id,
+            ai_parent_id=ai_parent_id,
+        )
+    )[0]
+    app_embeddings = [item for item in available_embeddings if item.source_type == "app"]
+    scene_embeddings = [item for item in available_embeddings if item.source_type == "scene"]
+    ranked_items = [
+        *rank_embeddings(
+            query_embedding,
+            app_embeddings,
+            prompt=prompt,
+            top_k=DEFAULT_APP_CONTEXT_K,
+        ),
+        *rank_embeddings(
+            query_embedding,
+            scene_embeddings,
+            prompt=prompt,
+            top_k=DEFAULT_SCENE_CONTEXT_K,
+        ),
+    ]
+    ranked_items = _ensure_required_embeddings(ranked_items, available_embeddings)
+    seen: set[tuple[str, str]] = set()
+    context_items: list[AiEmbedding] = []
+    for item in ranked_items:
+        key = (item.source_type, item.source_path)
+        if key in seen:
+            continue
+        seen.add(key)
+        context_items.append(item)
+    return context_items
 
 
 @api_with_auth.post("/ai/scenes/generate", response_model=AiSceneGenerateResponse)
@@ -622,3 +688,236 @@ async def generate_scene(
     )
 
     return AiSceneGenerateResponse(title=title, scenes=scenes, context=context_response)
+
+
+@api_with_auth.post("/ai/scenes/chat", response_model=AiSceneChatResponse)
+async def chat_scene(
+    data: AiSceneChatRequest,
+    db: Session = Depends(get_db),
+):
+    request_id = data.request_id or str(uuid4())
+    posthog_trace_id = _sanitize_ai_id(request_id) or str(uuid4())
+    posthog_session_id = None
+    posthog_root_span_id = str(uuid4())
+    prompt = data.prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Prompt is required")
+
+    frame_context = None
+    if data.frame_id is not None:
+        frame = db.query(Frame).filter(Frame.id == data.frame_id).first()
+        if frame:
+            frame_context = format_frame_context(
+                {
+                    "name": frame.name,
+                    "width": frame.width,
+                    "height": frame.height,
+                    "device": frame.device,
+                    "color": frame.color,
+                    "background_color": frame.background_color,
+                    "scaling_mode": frame.scaling_mode,
+                    "rotate": frame.rotate,
+                    "flip": frame.flip,
+                    "gpio_buttons": frame.gpio_buttons,
+                }
+            )
+
+    settings = get_settings_dict(db)
+    openai_settings = settings.get("openAI", {})
+    api_key = openai_settings.get("backendApiKey")
+    if not api_key:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI backend API key not set")
+
+    history = [item.model_dump() for item in (data.history or [])]
+    scene_payload = data.scene if isinstance(data.scene, dict) else None
+    tool_payload = await route_scene_chat(
+        prompt=prompt,
+        scene=scene_payload,
+        frame_context=frame_context,
+        history=history,
+        api_key=api_key,
+        model=openai_settings.get("chatModel") or CHAT_MODEL,
+        ai_trace_id=posthog_trace_id,
+        ai_session_id=posthog_session_id,
+        ai_parent_id=posthog_root_span_id,
+    )
+
+    tool = tool_payload.get("tool") if isinstance(tool_payload, dict) else None
+    tool_prompt = tool_payload.get("tool_prompt") if isinstance(tool_payload, dict) else None
+    if not isinstance(tool_prompt, str) or not tool_prompt.strip():
+        tool_prompt = prompt
+    tool = tool if tool in {"build_scene", "modify_scene", "answer_question", "reply"} else "answer_question"
+    if tool == "modify_scene" and not scene_payload:
+        tool = "answer_question"
+
+    context_items = await _load_context_items(
+        db=db,
+        settings=settings,
+        api_key=api_key,
+        prompt=tool_prompt,
+        ai_trace_id=posthog_trace_id,
+        ai_session_id=posthog_session_id,
+        ai_parent_id=posthog_root_span_id,
+    )
+
+    if tool in {"answer_question", "reply"}:
+        answer = await answer_scene_question(
+            prompt=tool_prompt,
+            api_key=api_key,
+            context_items=context_items,
+            frame_context=frame_context,
+            scene=scene_payload,
+            history=history,
+            model=openai_settings.get("chatModel") or CHAT_MODEL,
+            ai_trace_id=posthog_trace_id,
+            ai_session_id=posthog_session_id,
+            ai_parent_id=posthog_root_span_id,
+        )
+        return AiSceneChatResponse(reply=answer, tool=tool)
+
+    if tool == "build_scene":
+        response_payload: dict[str, Any] | None = None
+        scene_plan: dict[str, Any] | None = None
+        validation_issues: list[str] = []
+        review_issues: list[str] = []
+        max_attempts = 3
+        scene_model = openai_settings.get("sceneModel") or SCENE_MODEL
+        review_model = openai_settings.get("reviewModel") or SCENE_REVIEW_MODEL
+        scene_plan = await generate_scene_plan(
+            prompt=tool_prompt,
+            context_items=context_items,
+            api_key=api_key,
+            model=scene_model,
+            frame_context=frame_context,
+            ai_trace_id=posthog_trace_id,
+            ai_session_id=posthog_session_id,
+            ai_parent_id=posthog_root_span_id,
+        )
+        for attempt in range(1, max_attempts + 1):
+            if attempt == 1:
+                response_payload = await generate_scene_json(
+                    prompt=tool_prompt,
+                    context_items=context_items,
+                    api_key=api_key,
+                    model=scene_model,
+                    plan=scene_plan,
+                    frame_context=frame_context,
+                    ai_trace_id=posthog_trace_id,
+                    ai_session_id=posthog_session_id,
+                    ai_parent_id=posthog_root_span_id,
+                )
+            else:
+                response_payload = await repair_scene_json(
+                    prompt=tool_prompt,
+                    context_items=context_items,
+                    api_key=api_key,
+                    model=scene_model,
+                    payload=response_payload or {},
+                    issues=validation_issues + review_issues,
+                    plan=scene_plan,
+                    frame_context=frame_context,
+                    ai_trace_id=posthog_trace_id,
+                    ai_session_id=posthog_session_id,
+                    ai_parent_id=posthog_root_span_id,
+                )
+            validation_issues = validate_scene_payload(response_payload or {})
+            if validation_issues:
+                continue
+            review_issues = await review_scene_solution(
+                prompt=tool_prompt,
+                payload=response_payload or {},
+                api_key=api_key,
+                model=review_model,
+                frame_context=frame_context,
+                ai_trace_id=posthog_trace_id,
+                ai_session_id=posthog_session_id,
+                ai_parent_id=posthog_root_span_id,
+            )
+            if review_issues:
+                continue
+            break
+
+        title = response_payload.get("title") if response_payload else "Untitled Scene"
+        scenes = response_payload.get("scenes") if response_payload else None
+        if not isinstance(scenes, list):
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail="AI response did not include scenes.",
+            )
+        if response_payload:
+            _split_state_nodes_by_app(response_payload)
+        for scene in scenes:
+            if not isinstance(scene, dict):
+                continue
+            settings_payload: dict[str, Any] | None = scene.get("settings") or {}
+            if not isinstance(settings_payload, dict):
+                settings_payload = {}
+                scene["settings"] = settings_payload
+            settings_payload["prompt"] = tool_prompt
+
+        reply = f"Generated a new scene: {title}."
+        return AiSceneChatResponse(reply=reply, tool=tool, title=title, scenes=scenes)
+
+    if tool == "modify_scene":
+        scene_model = openai_settings.get("sceneModel") or SCENE_MODEL
+        response_payload: dict[str, Any] | None = None
+        validation_issues: list[str] = []
+        max_attempts = 2
+        for attempt in range(1, max_attempts + 1):
+            response_payload = await modify_scene_json(
+                prompt=tool_prompt,
+                scene=scene_payload or {},
+                context_items=context_items,
+                api_key=api_key,
+                model=scene_model,
+                issues=validation_issues or None,
+                frame_context=frame_context,
+                ai_trace_id=posthog_trace_id,
+                ai_session_id=posthog_session_id,
+                ai_parent_id=posthog_root_span_id,
+            )
+            validation_issues = validate_scene_payload(response_payload or {})
+            if not validation_issues:
+                break
+
+        scenes = response_payload.get("scenes") if response_payload else None
+        if not isinstance(scenes, list) or not scenes:
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail="AI response did not include scenes.",
+            )
+        if data.scene_id and isinstance(scenes[0], dict):
+            scenes[0]["id"] = data.scene_id
+            if data.scene and isinstance(data.scene, dict):
+                existing_name = data.scene.get("name")
+                if existing_name and not scenes[0].get("name"):
+                    scenes[0]["name"] = existing_name
+        if response_payload:
+            _split_state_nodes_by_app(response_payload)
+        for scene in scenes:
+            if not isinstance(scene, dict):
+                continue
+            settings_payload: dict[str, Any] | None = scene.get("settings") or {}
+            if not isinstance(settings_payload, dict):
+                settings_payload = {}
+                scene["settings"] = settings_payload
+            settings_payload["prompt"] = tool_prompt
+
+        reply = "Updated the current scene."
+        if validation_issues:
+            reply += " Note: the update may need review for validation issues."
+        return AiSceneChatResponse(reply=reply, tool=tool, scenes=scenes)
+
+    answer = await answer_scene_question(
+        prompt=tool_prompt,
+        api_key=api_key,
+        context_items=context_items,
+        frame_context=frame_context,
+        scene=scene_payload,
+        history=history,
+        model=openai_settings.get("chatModel") or CHAT_MODEL,
+        ai_trace_id=posthog_trace_id,
+        ai_session_id=posthog_session_id,
+        ai_parent_id=posthog_root_span_id,
+    )
+    return AiSceneChatResponse(reply=answer, tool="reply")
