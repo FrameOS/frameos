@@ -418,7 +418,7 @@ export const diagramLogic = kea<diagramLogicType>([
     canUndo: [(s) => [s.history], (history) => history.past.length > 1],
     canRedo: [(s) => [s.history], (history) => history.future.length > 0],
   }),
-  sharedListeners(({ selectors, actions, values, props }) => ({
+  sharedListeners(({ selectors, actions, values, props, cache }) => ({
     nodesChanged: (_, __, ___, previousState) => {
       const nodes = values.nodes
       const oldNodes = selectors.nodes(previousState)
@@ -428,15 +428,17 @@ export const diagramLogic = kea<diagramLogicType>([
       const shouldRearrangeForMissingPosition =
         hasDimensions && nodes.every((node) => node.position.x === -9999 && node.position.y === -9999)
       const shouldRearrangeForMarker = hasDimensions && Boolean(values.scene?.settings?.autoArrangeOnLoad)
+      const shouldRearrange = shouldRearrangeForMissingPosition || shouldRearrangeForMarker
 
       // Upon first render of a new scene, the nodes will have x = -9999, y = -9999, width = undefined, height = undefined
       // Upon second render, the width and height will have been set, but x and y will still be -9999 for all nodes
       // If we detect that case, automatically rearrange the scene.
-      if (shouldRearrangeForMissingPosition || shouldRearrangeForMarker) {
+      if (shouldRearrange && !isDragging && !cache.hasAutoArranged) {
+        cache.hasAutoArranged = true
         actions.rearrangeCurrentScene()
       }
 
-      if (shouldRearrangeForMarker) {
+      if (shouldRearrangeForMarker && cache.hasAutoArranged) {
         actions.setFrameFormValues({
           scenes: values.editingFrame.scenes?.map((scene) =>
             scene.id === props.sceneId
@@ -821,6 +823,7 @@ export const diagramLogic = kea<diagramLogicType>([
     window.setTimeout(actions.fitDiagramView, 100)
     cache.ignoreHistory = false
     cache.historyTimer = null
+    cache.hasAutoArranged = false
     actions.resetHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
 
     cache.keydownHandler = (event: KeyboardEvent) => {
