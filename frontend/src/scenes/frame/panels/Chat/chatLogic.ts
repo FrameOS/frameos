@@ -5,6 +5,8 @@ import { frameLogic, sanitizeScene } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
 import type { FrameScene } from '../../../../types'
 
+import type { chatLogicType } from './chatLogicType'
+
 const MAX_HISTORY = 8
 
 export interface ChatLogicProps {
@@ -18,17 +20,12 @@ export type ChatMessage = {
   tool?: string
 }
 
-export const chatLogic = kea([
+export const chatLogic = kea<chatLogicType>([
   path(['src', 'scenes', 'frame', 'chatLogic']),
   props({} as ChatLogicProps),
   key((props) => props.frameId),
   connect((props: ChatLogicProps) => ({
-    values: [
-      frameLogic(props),
-      ['frameForm', 'scenes'],
-      panelsLogic(props),
-      ['selectedSceneId', 'selectedSceneName'],
-    ],
+    values: [frameLogic(props), ['frameForm', 'scenes'], panelsLogic(props), ['selectedSceneId', 'selectedSceneName']],
     actions: [frameLogic(props), ['applyTemplate', 'updateScene']],
   })),
   actions({

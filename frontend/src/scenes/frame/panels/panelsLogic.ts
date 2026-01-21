@@ -235,8 +235,8 @@ export const panelsLogic = kea<panelsLogicType>([
             ...panels,
             [Area.TopRight]: panels[Area.TopRight].filter((p) =>
               scenesOpen
-                ? [Panel.Apps, Panel.Events, Panel.Templates, Panel.Schedule, Panel.Chat].includes(p.panel)
-                : [Panel.Apps, Panel.Events, Panel.SceneState, Panel.Chat].includes(p.panel)
+                ? [Panel.Templates, Panel.Schedule, Panel.Chat].includes(p.panel)
+                : [Panel.SceneState, Panel.Apps, Panel.Events, Panel.Chat].includes(p.panel)
             ),
             [Area.BottomLeft]: panels[Area.BottomLeft].filter((p) =>
               !scenesOpen ? true : p.panel !== Panel.SceneSource
