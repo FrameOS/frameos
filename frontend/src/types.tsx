@@ -462,6 +462,7 @@ export interface FrameSceneSettings {
   backgroundColor?: string
   execution?: 'compiled' | 'interpreted'
   prompt?: string
+  autoArrangeOnLoad?: boolean
 }
 
 export interface FrameScene {

@@ -1,3 +1,4 @@
+import copy
 from http import HTTPStatus
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +46,7 @@ REQUIRED_EMBEDDING_PATHS = {
     "frameos/src/apps/render/split",
     "frameos/src/apps/render/svg",
     "repo/scenes/samples/XKCD",
+    "repo/scenes/samples/Split agenda",
 }
 
 SERVICE_SECRET_FIELDS: dict[str, dict[str, Any]] = {
@@ -107,7 +109,7 @@ def _ensure_required_embeddings(
     required_items = [
         item
         for item in available_embeddings
-        if item.source_type == "app" and item.source_path in REQUIRED_EMBEDDING_PATHS
+        if item.source_path in REQUIRED_EMBEDDING_PATHS
     ]
     existing_keys = {(item.source_type, item.source_path) for item in ranked_items}
     missing_items = [
@@ -181,6 +183,77 @@ def _capture_ai_trace(
         )
     except Exception:
         pass
+
+
+def _split_state_nodes_by_app(payload: dict[str, Any]) -> None:
+    scenes = payload.get("scenes")
+    if not isinstance(scenes, list):
+        return
+
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            continue
+        nodes = scene.get("nodes")
+        edges = scene.get("edges")
+        if not isinstance(nodes, list) or not isinstance(edges, list):
+            continue
+
+        node_by_id = {
+            node.get("id"): node
+            for node in nodes
+            if isinstance(node, dict) and isinstance(node.get("id"), str)
+        }
+        app_ids = {node_id for node_id, node in node_by_id.items() if node.get("type") == "app"}
+        state_ids = {node_id for node_id, node in node_by_id.items() if node.get("type") == "state"}
+        if not app_ids or not state_ids:
+            continue
+
+        edges_by_state: dict[str, dict[str, list[dict[str, Any]]]] = {}
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            source = edge.get("source")
+            target = edge.get("target")
+            if source in state_ids and target in app_ids:
+                edges_by_state.setdefault(str(source), {}).setdefault(str(target), []).append(edge)
+
+        if not edges_by_state:
+            continue
+
+        new_nodes: list[dict[str, Any]] = []
+        nodes_to_remove: set[str] = set()
+        for state_id, app_edges in edges_by_state.items():
+            if len(app_edges) <= 1:
+                continue
+            state_node = node_by_id.get(state_id)
+            if not state_node:
+                continue
+            for app_id, app_edge_list in app_edges.items():
+                new_id = str(uuid4())
+                new_node = copy.deepcopy(state_node)
+                new_node["id"] = new_id
+                new_nodes.append(new_node)
+                for edge in app_edge_list:
+                    edge["source"] = new_id
+            nodes_to_remove.add(state_id)
+
+        if nodes_to_remove:
+            for state_id in list(nodes_to_remove):
+                if any(
+                    isinstance(edge, dict) and edge.get("source") == state_id
+                    for edge in edges
+                ):
+                    nodes_to_remove.discard(state_id)
+            if nodes_to_remove:
+                nodes = [
+                    node
+                    for node in nodes
+                    if not (isinstance(node, dict) and node.get("id") in nodes_to_remove)
+                ]
+                scene["nodes"] = nodes
+
+        if new_nodes:
+            scene.setdefault("nodes", []).extend(new_nodes)
 
 
 async def _publish_ai_scene_log(
@@ -367,7 +440,7 @@ async def generate_scene(
                 stage="context:skip",
             )
 
-        response_payload = None
+        response_payload: dict[str, Any] | None = None
         scene_plan: dict[str, Any] | None = None
         validation_issues: list[str] = []
         review_issues: list[str] = []
@@ -492,8 +565,8 @@ async def generate_scene(
             detail=f"AI scene generation failed: {exc}",
         ) from exc
 
-    title = response_payload.get("title")
-    scenes = response_payload.get("scenes")
+    title = response_payload.get("title") if response_payload else "Untitled Scene"
+    scenes = response_payload.get("scenes") if response_payload else None
     if not isinstance(scenes, list):
         await _publish_ai_scene_log(
             redis,
@@ -507,10 +580,13 @@ async def generate_scene(
             detail=f"AI response did not include scenes (got {type(scenes).__name__}).",
         )
 
+    if response_payload:
+        _split_state_nodes_by_app(response_payload)
+
     for scene in scenes:
         if not isinstance(scene, dict):
             continue
-        settings = scene.get("settings")
+        settings: dict[str, Any] | None = scene.get("settings") or {}
         if not isinstance(settings, dict):
             settings = {}
             scene["settings"] = settings

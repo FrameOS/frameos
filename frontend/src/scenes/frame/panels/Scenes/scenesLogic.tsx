@@ -508,7 +508,16 @@ export const scenesLogic = kea<scenesLogicType>([
         if (!scenes.length) {
           throw new Error('No scenes returned from AI')
         }
-        const sanitizedScenes = scenes.map((scene: Partial<FrameScene>) => sanitizeScene(scene, values.frameForm))
+        const sanitizedScenes = scenes.map((scene: Partial<FrameScene>) => {
+          const sanitizedScene = sanitizeScene(scene, values.frameForm)
+          return {
+            ...sanitizedScene,
+            settings: {
+              ...sanitizedScene.settings,
+              autoArrangeOnLoad: true,
+            },
+          }
+        })
         actions.applyTemplate({ scenes: sanitizedScenes, name: title || 'AI Generated Scene' })
         actions.generateAiSceneSuccess()
         actions.setAiSceneLogMessage({

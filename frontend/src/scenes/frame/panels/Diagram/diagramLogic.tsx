@@ -34,6 +34,7 @@ import {
   EventNodeData,
   FrameEvent,
   FrameScene,
+  FrameSceneSettings,
   MarkdownField,
   StateNodeData,
 } from '../../../../types'
@@ -178,6 +179,14 @@ const getClipboardOffset = (nodes: DiagramNode[], basePosition?: XYPosition | nu
   const fallback = { x: minX + 40, y: minY + 40 }
   const anchor = basePosition ?? fallback
   return { x: anchor.x - minX, y: anchor.y - minY }
+}
+
+const removeAutoArrangeMarker = (settings?: FrameSceneSettings): FrameSceneSettings | undefined => {
+  if (!settings?.autoArrangeOnLoad) {
+    return settings
+  }
+  const { autoArrangeOnLoad: _, ...rest } = settings
+  return Object.keys(rest).length > 0 ? rest : undefined
 }
 
 export const diagramLogic = kea<diagramLogicType>([
@@ -414,14 +423,29 @@ export const diagramLogic = kea<diagramLogicType>([
       const nodes = values.nodes
       const oldNodes = selectors.nodes(previousState)
 
+      const hasDimensions = nodes.length > 0 && nodes.every((node) => node.width && node.height)
+      const shouldRearrangeForMissingPosition =
+        hasDimensions && nodes.every((node) => node.position.x === -9999 && node.position.y === -9999)
+      const shouldRearrangeForMarker = hasDimensions && Boolean(values.scene?.settings?.autoArrangeOnLoad)
+
       // Upon first render of a new scene, the nodes will have x = -9999, y = -9999, width = undefined, height = undefined
       // Upon second render, the width and height will have been set, but x and y will still be -9999 for all nodes
       // If we detect that case, automatically rearrange the scene.
-      if (
-        nodes.length > 0 &&
-        nodes.every((node) => node.position.x === -9999 && node.position.y === -9999 && node.width && node.height)
-      ) {
+      if (shouldRearrangeForMissingPosition || shouldRearrangeForMarker) {
         actions.rearrangeCurrentScene()
+      }
+
+      if (shouldRearrangeForMarker) {
+        actions.setFrameFormValues({
+          scenes: values.editingFrame.scenes?.map((scene) =>
+            scene.id === props.sceneId
+              ? {
+                  ...scene,
+                  settings: removeAutoArrangeMarker(scene.settings),
+                }
+              : scene
+          ),
+        })
       }
 
       // Do not update on first render
