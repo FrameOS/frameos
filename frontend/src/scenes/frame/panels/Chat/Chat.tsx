@@ -4,30 +4,45 @@ import { frameLogic } from '../../frameLogic'
 import { Button } from '../../../../components/Button'
 import { TextArea } from '../../../../components/TextArea'
 import { useEffect, useRef } from 'react'
+import type { KeyboardEvent } from 'react'
 import clsx from 'clsx'
+import { Spinner } from '../../../../components/Spinner'
 
 export function Chat() {
   const { frameId } = useValues(frameLogic)
-  const { messages, input, isSubmitting, error, selectedSceneName } = useValues(chatLogic({ frameId }))
+  const { messages, input, isSubmitting, error, chatSceneName } = useValues(chatLogic({ frameId }))
   const { setInput, submitMessage, clearChat } = useActions(chatLogic({ frameId }))
   const scrollRef = useRef<HTMLDivElement | null>(null)
+
+  const lastMessage = messages[messages.length - 1]
 
   useEffect(() => {
     if (!scrollRef.current) {
       return
     }
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-  }, [messages.length])
+  }, [messages.length, lastMessage?.content])
 
   const handleSubmit = () => {
     submitMessage(input)
   }
 
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault()
+      if (!isSubmitting && input.trim()) {
+        handleSubmit()
+      }
+    }
+  }
+
+  const sendButtonColor = input.trim() ? 'primary' : 'secondary'
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between pb-2">
         <div className="text-sm text-gray-300">
-          {selectedSceneName ? `Chat about "${selectedSceneName}"` : 'Chat about this frame'}
+          {chatSceneName ? `Chat about "${chatSceneName}"` : 'Chat about this frame'}
         </div>
         <Button color="secondary" size="small" onClick={() => clearChat()} disabled={isSubmitting}>
           Clear
@@ -36,7 +51,9 @@ export function Chat() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-3 pr-1">
         {messages.length === 0 ? (
           <div className="text-sm text-gray-400">
-            Ask for a new scene, request edits to the current scene, or ask questions about FrameOS.
+            {chatSceneName
+              ? 'Ask for a new scene, request edits to the current scene, or ask questions about FrameOS.'
+              : 'Ask for a new scene, or ask questions about this frame or FrameOS.'}
           </div>
         ) : (
           messages.map((message) => (
@@ -53,7 +70,17 @@ export function Chat() {
                 <span className="uppercase tracking-wide">{message.role}</span>
                 {message.tool ? <span>tool: {message.tool}</span> : null}
               </div>
-              <div>{message.content}</div>
+              {message.isPlaceholder && !message.content ? (
+                <div className="flex items-center gap-2 text-gray-300">
+                  <Spinner className="shrink-0" />
+                  <span>Thinking…</span>
+                </div>
+              ) : (
+                <div>
+                  {message.content}
+                  {message.isStreaming ? <span className="ml-1 animate-pulse">▍</span> : null}
+                </div>
+              )}
             </div>
           ))
         )}
@@ -64,10 +91,11 @@ export function Chat() {
           value={input}
           placeholder="Describe a new scene, request a change, or ask a question..."
           onChange={(value) => setInput(value)}
+          onKeyDown={handleKeyDown}
           rows={3}
         />
         <div className="flex justify-end">
-          <Button color="primary" onClick={handleSubmit} disabled={isSubmitting || !input.trim()}>
+          <Button color={sendButtonColor} size="tiny" onClick={handleSubmit} disabled={isSubmitting || !input.trim()}>
             {isSubmitting ? 'Sending…' : 'Send'}
           </Button>
         </div>

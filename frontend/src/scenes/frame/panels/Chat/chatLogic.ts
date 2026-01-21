@@ -4,6 +4,7 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { frameLogic, sanitizeScene } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
 import type { FrameScene } from '../../../../types'
+import { Area, Panel } from '../../../../types'
 
 import type { chatLogicType } from './chatLogicType'
 
@@ -18,6 +19,8 @@ export type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
   tool?: string
+  isPlaceholder?: boolean
+  isStreaming?: boolean
 }
 
 export const chatLogic = kea<chatLogicType>([
@@ -25,7 +28,7 @@ export const chatLogic = kea<chatLogicType>([
   props({} as ChatLogicProps),
   key((props) => props.frameId),
   connect((props: ChatLogicProps) => ({
-    values: [frameLogic(props), ['frameForm', 'scenes'], panelsLogic(props), ['selectedSceneId', 'selectedSceneName']],
+    values: [frameLogic(props), ['frameForm', 'scenes'], panelsLogic(props), ['selectedSceneId', 'panels']],
     actions: [frameLogic(props), ['applyTemplate', 'updateScene']],
   })),
   actions({
@@ -34,6 +37,7 @@ export const chatLogic = kea<chatLogicType>([
     setSubmitting: (isSubmitting: boolean) => ({ isSubmitting }),
     setError: (error: string | null) => ({ error }),
     appendMessage: (message: ChatMessage) => ({ message }),
+    updateMessage: (id: string, updates: Partial<ChatMessage>) => ({ id, updates }),
     clearChat: true,
   }),
   reducers({
@@ -63,15 +67,24 @@ export const chatLogic = kea<chatLogicType>([
       [] as ChatMessage[],
       {
         appendMessage: (state, { message }) => [...state, message],
+        updateMessage: (state, { id, updates }) =>
+          state.map((message) => (message.id === id ? { ...message, ...updates } : message)),
         clearChat: () => [],
       },
     ],
   }),
   selectors({
     selectedScene: [
-      (s) => [s.scenes, s.selectedSceneId],
-      (scenes, selectedSceneId) => scenes?.find((scene: FrameScene) => scene.id === selectedSceneId) ?? null,
+      (s) => [s.scenes, s.selectedSceneId, s.panels],
+      (scenes, selectedSceneId, panels) => {
+        const activeTopLeftPanel = panels?.[Area.TopLeft]?.find((panel) => panel.active)?.panel
+        if (activeTopLeftPanel === Panel.Scenes) {
+          return null
+        }
+        return scenes?.find((scene: FrameScene) => scene.id === selectedSceneId) ?? null
+      },
     ],
+    chatSceneName: [(s) => [s.selectedScene], (selectedScene) => selectedScene?.name ?? null],
     historyForRequest: [
       (s) => [s.messages],
       (messages: ChatMessage[]) =>
@@ -90,6 +103,14 @@ export const chatLogic = kea<chatLogicType>([
         return
       }
       actions.appendMessage({ id: uuidv4(), role: 'user', content: prompt })
+      const assistantMessageId = uuidv4()
+      actions.appendMessage({
+        id: assistantMessageId,
+        role: 'assistant',
+        content: '',
+        isPlaceholder: true,
+        isStreaming: true,
+      })
       const selectedScene = values.selectedScene
       try {
         const response = await apiFetch('/api/ai/scenes/chat', {
@@ -110,7 +131,20 @@ export const chatLogic = kea<chatLogicType>([
         const payload = await response.json()
         const reply = typeof payload?.reply === 'string' ? payload.reply : 'Done.'
         const tool = typeof payload?.tool === 'string' ? payload.tool : 'reply'
-        actions.appendMessage({ id: uuidv4(), role: 'assistant', content: reply, tool })
+
+        const chunks = reply.match(/\S+|\s+/g) ?? []
+        let current = ''
+        for (const chunk of chunks) {
+          current += chunk
+          actions.updateMessage(assistantMessageId, {
+            content: current,
+            tool,
+            isPlaceholder: false,
+            isStreaming: true,
+          })
+          await new Promise((resolve) => setTimeout(resolve, 12))
+        }
+        actions.updateMessage(assistantMessageId, { content: current, tool, isStreaming: false, isPlaceholder: false })
 
         if (tool === 'build_scene') {
           const scenes = Array.isArray(payload?.scenes) ? payload.scenes : []
@@ -142,11 +176,11 @@ export const chatLogic = kea<chatLogicType>([
       } catch (error) {
         console.error(error)
         actions.setError(error instanceof Error ? error.message : 'Failed to send chat message')
-        actions.appendMessage({
-          id: uuidv4(),
-          role: 'assistant',
+        actions.updateMessage(assistantMessageId, {
           content: error instanceof Error ? error.message : 'Failed to send chat message',
           tool: 'error',
+          isPlaceholder: false,
+          isStreaming: false,
         })
       }
       actions.setSubmitting(false)
