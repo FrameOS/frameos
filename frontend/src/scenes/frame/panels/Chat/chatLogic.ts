@@ -53,6 +53,7 @@ export const chatLogic = kea<chatLogicType>([
     setActiveRequestId: (requestId: string | null) => ({ requestId }),
     setActiveLogMessageId: (messageId: string | null) => ({ messageId }),
     setActiveLogStartTime: (timestamp: string | null) => ({ timestamp }),
+    toggleContextItemsExpanded: (key: string) => ({ key }),
   }),
   reducers({
     input: [
@@ -105,6 +106,16 @@ export const chatLogic = kea<chatLogicType>([
       {
         setActiveLogStartTime: (_, { timestamp }) => timestamp,
         clearChat: () => null,
+      },
+    ],
+    contextItemsExpanded: [
+      {} as Record<string, boolean>,
+      {
+        toggleContextItemsExpanded: (state, { key }) => ({
+          ...state,
+          [key]: !state[key],
+        }),
+        clearChat: () => ({}),
       },
     ],
   }),

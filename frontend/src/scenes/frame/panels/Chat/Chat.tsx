@@ -13,10 +13,12 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 export function Chat() {
   const { frameId } = useValues(frameLogic)
   const { selectedSceneId } = useValues(panelsLogic({ frameId }))
-  const { messages, input, isSubmitting, error, chatSceneName } = useValues(
+  const { messages, input, isSubmitting, error, chatSceneName, contextItemsExpanded } = useValues(
     chatLogic({ frameId, sceneId: selectedSceneId })
   )
-  const { setInput, submitMessage, clearChat } = useActions(chatLogic({ frameId, sceneId: selectedSceneId }))
+  const { setInput, submitMessage, clearChat, toggleContextItemsExpanded } = useActions(
+    chatLogic({ frameId, sceneId: selectedSceneId })
+  )
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const shouldAutoScrollRef = useRef(true)
 
@@ -83,25 +85,36 @@ export function Chat() {
         .split(',')
         .map((item) => item.trim())
         .filter(Boolean)
+      const contextKey = `context-items:${line}`
+      const isExpanded = contextItemsExpanded[contextKey] ?? false
       return (
         <div className="space-y-2">
-          <div className="text-slate-300">{label.trim()}</div>
-          <div className="flex flex-wrap gap-2">
-            {tokens.map((token) => {
-              const typeMatch = token.match(/^\[([^\]]+)\]\s*(.*)$/)
-              const typeLabel = typeMatch?.[1]
-              const name = typeMatch?.[2] ?? token
-              return (
-                <span
-                  key={token}
-                  className="inline-flex items-center gap-1 rounded-full border border-slate-700/80 bg-slate-900/70 px-2 py-0.5 text-xs text-slate-200"
-                >
-                  {typeLabel ? <span className="text-slate-400">[{typeLabel}]</span> : null}
-                  <span className="break-all">{name}</span>
-                </span>
-              )
-            })}
-          </div>
+          <button
+            type="button"
+            className="text-left text-slate-300 hover:text-slate-100 transition"
+            onClick={() => toggleContextItemsExpanded(contextKey)}
+          >
+            {label.trim()}
+            <span className="ml-2 text-xs text-slate-500">{isExpanded ? 'Hide' : 'Show'}</span>
+          </button>
+          {isExpanded ? (
+            <div className="flex flex-wrap gap-2">
+              {tokens.map((token) => {
+                const typeMatch = token.match(/^\[([^\]]+)\]\s*(.*)$/)
+                const typeLabel = typeMatch?.[1]
+                const name = typeMatch?.[2] ?? token
+                return (
+                  <span
+                    key={token}
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-700/80 bg-slate-900/70 px-2 py-0.5 text-xs text-slate-200"
+                  >
+                    {typeLabel ? <span className="text-slate-400">[{typeLabel}]</span> : null}
+                    <span className="break-all">{name}</span>
+                  </span>
+                )
+              })}
+            </div>
+          ) : null}
         </div>
       )
     }
