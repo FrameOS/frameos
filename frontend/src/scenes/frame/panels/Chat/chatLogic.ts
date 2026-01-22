@@ -67,7 +67,7 @@ export const chatLogic = kea<chatLogicType>([
       frameLogic(props),
       ['frameForm', 'scenes'],
       panelsLogic(props),
-      ['selectedSceneId', 'panels'],
+      ['selectedScenePanelId', 'panels'],
       diagramLogic({ frameId: props.frameId, sceneId: props.sceneId ?? '' }),
       ['selectedNodes', 'selectedEdges'],
     ],
@@ -334,13 +334,13 @@ export const chatLogic = kea<chatLogicType>([
   }),
   selectors({
     selectedScene: [
-      (s: any) => [s.scenes, s.selectedSceneId, s.panels],
-      (scenes: FrameScene[], selectedSceneId: string | null, panels: Record<Area, PanelWithMetadata[]>) => {
+      (s: any) => [s.scenes, s.selectedScenePanelId, s.panels],
+      (scenes: FrameScene[], selectedScenePanelId: string | null, panels: Record<Area, PanelWithMetadata[]>) => {
         const activeTopLeftPanel = panels?.[Area.TopLeft]?.find((panel) => panel.active)?.panel
         if (activeTopLeftPanel === Panel.Scenes) {
           return null
         }
-        return scenes?.find((scene: FrameScene) => scene.id === selectedSceneId) ?? null
+        return scenes?.find((scene: FrameScene) => scene.id === selectedScenePanelId) ?? null
       },
     ],
     activeChat: [
@@ -348,9 +348,9 @@ export const chatLogic = kea<chatLogicType>([
       (chats: ChatSummary[], activeChatId: string | null) => chats.find((chat) => chat.id === activeChatId) ?? null,
     ],
     chatSceneId: [
-      (s: any) => [s.activeChat, s.selectedSceneId],
-      (activeChat: ChatSummary | null, selectedSceneId: string | null): string | null =>
-        activeChat ? activeChat.sceneId ?? null : selectedSceneId ?? null,
+      (s: any) => [s.activeChat, s.selectedScenePanelId],
+      (activeChat: ChatSummary | null, selectedScenePanelId: string | null): string | null =>
+        activeChat ? activeChat.sceneId ?? null : selectedScenePanelId ?? null,
     ],
     chatSceneName: [
       (s: any) => [s.chatSceneId, s.scenes],
@@ -689,11 +689,11 @@ export const chatLogic = kea<chatLogicType>([
       })
     },
   })),
-  afterMount(({ actions }) => {
+  afterMount(({ actions, values }) => {
     actions.loadChats()
   }),
   subscriptions(({ actions, values }) => ({
-    selectedSceneId: (sceneId: string | null) => {
+    selectedScenePanelId: (sceneId: string | null) => {
       if (!sceneId) {
         return
       }
@@ -703,13 +703,13 @@ export const chatLogic = kea<chatLogicType>([
       actions.ensureChatForScene(sceneId)
     },
     chats: (chats: ChatSummary[]) => {
-      if (!values.selectedSceneId) {
+      if (!values.selectedScenePanelId) {
         return
       }
       if (values.isScenesPanelActive) {
         return
       }
-      const matchingChat = chats.find((chat) => chat.sceneId === values.selectedSceneId)
+      const matchingChat = chats.find((chat) => chat.sceneId === values.selectedScenePanelId)
       if (matchingChat && matchingChat.id !== values.activeChatId) {
         actions.selectChat(matchingChat.id)
       }

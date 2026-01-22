@@ -264,11 +264,17 @@ export const panelsLogic = kea<panelsLogicType>([
         }
       },
     ],
-    selectedSceneId: [
-      (s) => [s.frameForm, s.lastSelectedScene, s.panels],
-      (frameForm, lastSelectedScene, panels): string | null =>
-        lastSelectedScene ??
+    selectedScenePanelId: [
+      (s) => [s.panels],
+      (panels): string | null =>
         panels[Area.TopLeft].find((p) => p.active && (p.panel === Panel.Diagram || p.panel === Panel.SceneJSON))?.key ??
+        null,
+    ],
+    selectedSceneId: [
+      (s) => [s.frameForm, s.lastSelectedScene, s.selectedScenePanelId],
+      (frameForm, lastSelectedScene, selectedScenePanelId): string | null =>
+        lastSelectedScene ??
+        selectedScenePanelId ??
         frameForm?.scenes?.find((s) => s.default)?.id ??
         frameForm?.scenes?.[0]?.id ??
         null,
