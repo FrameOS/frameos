@@ -103,7 +103,7 @@ export function Scenes() {
     generateAiSceneFailure,
     installMissingActiveScene,
   } = useActions(scenesLogic({ frameId }))
-  const { submitMessage } = useActions(chatLogic({ frameId, sceneId: selectedSceneId }))
+  const { startNewChatWithMessage } = useActions(chatLogic({ frameId, sceneId: selectedSceneId }))
   const { isSubmitting: isChatSubmitting } = useValues(chatLogic({ frameId, sceneId: selectedSceneId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
   const { sceneChanging, loading, uploadedScenes, uploadedScenesLoading } = useValues(controlLogic({ frameId }))
@@ -353,7 +353,7 @@ export function Scenes() {
                   generateAiSceneFailure('Add a prompt to generate a scene.')
                   return
                 }
-                submitMessage(`generate scene: ${trimmedPrompt}`)
+                startNewChatWithMessage(`generate scene: ${trimmedPrompt}`, null)
               }}
               disabled={!canSubmitAiPrompt}
             >

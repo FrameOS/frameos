@@ -75,7 +75,7 @@ export const chatLogic = kea<chatLogicType>([
   })),
   actions({
     setInput: (input: string) => ({ input }),
-    submitMessage: (content: string) => ({ content }),
+    submitMessage: (content: string, chatId?: string | null) => ({ content, chatId }),
     setSubmitting: (isSubmitting: boolean) => ({ isSubmitting }),
     setError: (error: string | null) => ({ error }),
     appendMessage: (chatId: string, message: ChatMessage) => ({ chatId, message }),
@@ -99,9 +99,11 @@ export const chatLogic = kea<chatLogicType>([
       nextOffset,
     }),
     createChat: (sceneId?: string | null) => ({ sceneId }),
+    startNewChatWithMessage: (content: string, sceneId?: string | null) => ({ content, sceneId }),
     createChatSuccess: (chat: ChatSummary) => ({ chat }),
     createChatFailure: (error: string) => ({ error }),
     ensureChatForScene: (sceneId: string) => ({ sceneId }),
+    ensureFrameChat: () => ({}),
     selectChat: (chatId: string) => ({ chatId }),
     setActiveChatId: (chatId: string | null) => ({ chatId }),
     backToList: () => ({}),
@@ -142,8 +144,7 @@ export const chatLogic = kea<chatLogicType>([
           const remoteIds = new Set(remoteChats.map((chat) => chat.id))
           const remoteSceneIds = new Set(remoteChats.map((chat) => chat.sceneId ?? null))
           const localChats = state.filter(
-            (chat: ChatSummary) =>
-              chat.isLocal && !remoteIds.has(chat.id) && !remoteSceneIds.has(chat.sceneId ?? null)
+            (chat: ChatSummary) => chat.isLocal && !remoteIds.has(chat.id) && !remoteSceneIds.has(chat.sceneId ?? null)
           )
           return [...remoteChats, ...localChats]
         },
@@ -349,7 +350,7 @@ export const chatLogic = kea<chatLogicType>([
     chatSceneId: [
       (s: any) => [s.activeChat, s.selectedSceneId],
       (activeChat: ChatSummary | null, selectedSceneId: string | null): string | null =>
-        activeChat?.sceneId ?? selectedSceneId ?? null,
+        activeChat ? activeChat.sceneId ?? null : selectedSceneId ?? null,
     ],
     chatSceneName: [
       (s: any) => [s.chatSceneId, s.scenes],
@@ -399,6 +400,13 @@ export const chatLogic = kea<chatLogicType>([
         return `${parts.join(' and ')} added to context`
       },
     ],
+    isScenesPanelActive: [
+      (s: any) => [s.panels],
+      (panels: Record<Area, PanelWithMetadata[]>): boolean => {
+        const activeTopLeftPanel = panels?.[Area.TopLeft]?.find((panel) => panel.active)?.panel
+        return activeTopLeftPanel === Panel.Scenes
+      },
+    ],
   }),
   listeners(({ actions, values, props }) => ({
     loadChats: async () => {
@@ -440,9 +448,17 @@ export const chatLogic = kea<chatLogicType>([
       }
     },
     createChat: async ({ sceneId }) => {
-      const chat = buildLocalChat(props.frameId, sceneId ?? values.selectedSceneId)
+      const targetSceneId = sceneId !== undefined ? sceneId : values.selectedScene?.id ?? null
+      const chat = buildLocalChat(props.frameId, targetSceneId)
       actions.createChatSuccess(chat)
       actions.selectChat(chat.id)
+    },
+    startNewChatWithMessage: async ({ content, sceneId }) => {
+      const targetSceneId = sceneId !== undefined ? sceneId : values.selectedScene?.id ?? null
+      const chat = buildLocalChat(props.frameId, targetSceneId)
+      actions.createChatSuccess(chat)
+      actions.selectChat(chat.id)
+      actions.submitMessage(content, chat.id)
     },
     ensureChatForScene: ({ sceneId }) => {
       const matchingChat = values.chats.find((chat) => chat.sceneId === sceneId)
@@ -453,6 +469,18 @@ export const chatLogic = kea<chatLogicType>([
         return
       }
       const chat = buildLocalChat(props.frameId, sceneId)
+      actions.createChatSuccess(chat)
+      actions.selectChat(chat.id)
+    },
+    ensureFrameChat: () => {
+      const matchingChat = values.chats.find((chat) => chat.sceneId === null)
+      if (matchingChat) {
+        if (matchingChat.id !== values.activeChatId) {
+          actions.selectChat(matchingChat.id)
+        }
+        return
+      }
+      const chat = buildLocalChat(props.frameId, null)
       actions.createChatSuccess(chat)
       actions.selectChat(chat.id)
     },
@@ -479,16 +507,17 @@ export const chatLogic = kea<chatLogicType>([
         actions.loadChatMessagesFailure(chatId, error instanceof Error ? error.message : 'Failed to load chat history')
       }
     },
-    submitMessage: async ({ content }) => {
+    submitMessage: async ({ content, chatId: chatIdOverride }) => {
       const prompt = content.trim()
       if (!prompt) {
         actions.setSubmitting(false)
         actions.setError('Add a message to send.')
         return
       }
-      let chatId = values.activeChatId
+      let chatId = chatIdOverride ?? values.activeChatId
       if (!chatId) {
-        const chat = buildLocalChat(props.frameId, values.selectedSceneId)
+        const targetSceneId = values.selectedScene?.id ?? null
+        const chat = buildLocalChat(props.frameId, targetSceneId)
         actions.createChatSuccess(chat)
         actions.selectChat(chat.id)
         chatId = chat.id
@@ -668,15 +697,26 @@ export const chatLogic = kea<chatLogicType>([
       if (!sceneId) {
         return
       }
+      if (values.isScenesPanelActive) {
+        return
+      }
       actions.ensureChatForScene(sceneId)
     },
     chats: (chats: ChatSummary[]) => {
       if (!values.selectedSceneId) {
         return
       }
+      if (values.isScenesPanelActive) {
+        return
+      }
       const matchingChat = chats.find((chat) => chat.sceneId === values.selectedSceneId)
       if (matchingChat && matchingChat.id !== values.activeChatId) {
         actions.selectChat(matchingChat.id)
+      }
+    },
+    isScenesPanelActive: (isScenesPanelActive: boolean) => {
+      if (isScenesPanelActive) {
+        actions.ensureFrameChat()
       }
     },
   })),
