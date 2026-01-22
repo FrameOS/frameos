@@ -385,9 +385,12 @@ Check the scene against the user request and ensure it is valid:
 - Every edge references existing node ids for source and target.
 - Logic apps should be connected via prev/next or field output/input edges. Data apps (keywords starting with "data/") do
   NOT need to be in the prev/next render chain and should not be flagged for that; they are executed via data edges.
+- Code nodes and state nodes are NOT part of the prev/next render chain; do not require or suggest they be connected via
+  appNodeEdge. They should only connect via codeNodeEdge edges.
 - Apps (including render apps) may be in the prev/next render flow and also receive field inputs or emit field outputs.
 - Code/state output handles must be exactly "fieldOutput". Do not require or suggest named handles like "fieldOutput/<name>".
 - All state fields include a default "value" field which is a string.
+- Duplicate state nodes that reference the same field keyword are allowed (they may be duplicated for clarity in routing).
 - The render flow does not branch: no multiple "next" edges point to the same "prev" handle.
 - If two nodes are connected via prev/next, they should not also be connected by any other edge type.
 - No image output is stored as state in JSON; image outputs must be wired directly into app inputs.
@@ -395,6 +398,7 @@ Check the scene against the user request and ensure it is valid:
   on that shared canvas without needing it passed through inputs.
 - Frame details (frame name, resolution, device, GPIO buttons) are optional context hints. Do NOT require them to be encoded
   in the scene unless the user explicitly asked to reference them.
+- Do not require render app configs to include resolution or size metadata unless the user explicitly asked for it.
 - GPIO buttons are optional hardware hints. Only require button events or button-driven logic if the user explicitly asked for
   a GPIO button interaction.
 - Be pragmatic about user-request matching: only flag clear contradictions or missing must-have elements. Do not be overly critical
