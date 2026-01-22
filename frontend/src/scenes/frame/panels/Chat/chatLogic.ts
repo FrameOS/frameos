@@ -71,7 +71,7 @@ export const chatLogic = kea<chatLogicType>([
       diagramLogic({ frameId: props.frameId, sceneId: props.sceneId ?? '' }),
       ['selectedNodes', 'selectedEdges'],
     ],
-    actions: [frameLogic(props), ['applyTemplate', 'updateScene'], panelsLogic(props), ['updatePanelMetadata']],
+    actions: [frameLogic(props), ['applyTemplate', 'updateScene']],
   })),
   actions({
     setInput: (input: string) => ({ input }),
@@ -361,14 +361,6 @@ export const chatLogic = kea<chatLogicType>([
       (s: any) => [s.chats],
       (chats: ChatSummary[]) => chats.filter((chat) => chat.messageCount === undefined || chat.messageCount > 0),
     ],
-    chatPanelChatId: [
-      (s: any) => [s.panels],
-      (panels: Record<Area, PanelWithMetadata[]>): string | null => {
-        const chatPanel = panels?.[Area.TopRight]?.find((panel) => panel.panel === Panel.Chat)
-        const chatId = chatPanel?.metadata?.chatId
-        return typeof chatId === 'string' && chatId.length > 0 ? chatId : null
-      },
-    ],
     messages: [
       (s: any) => [s.messagesByChatId, s.activeChatId],
       (messagesByChatId: Record<string, ChatMessage[]>, activeChatId: string | null) =>
@@ -493,7 +485,6 @@ export const chatLogic = kea<chatLogicType>([
       actions.selectChat(chat.id)
     },
     selectChat: ({ chatId }) => {
-      actions.updatePanelMetadata({ panel: Panel.Chat }, { chatId })
       const chat = values.chats.find((item) => item.id === chatId)
       if (chat?.isLocal && (chat.messageCount ?? 0) === 0) {
         return
@@ -712,15 +703,6 @@ export const chatLogic = kea<chatLogicType>([
       actions.ensureChatForScene(sceneId)
     },
     chats: (chats: ChatSummary[]) => {
-      if (values.chatPanelChatId) {
-        if (values.chatPanelChatId !== values.activeChatId) {
-          const matchingChat = chats.find((chat) => chat.id === values.chatPanelChatId)
-          if (matchingChat) {
-            actions.selectChat(matchingChat.id)
-          }
-        }
-        return
-      }
       if (!values.selectedSceneId) {
         return
       }
@@ -734,18 +716,7 @@ export const chatLogic = kea<chatLogicType>([
     },
     isScenesPanelActive: (isScenesPanelActive: boolean) => {
       if (isScenesPanelActive) {
-        if (!values.activeChatId && !values.chatPanelChatId) {
-          actions.ensureFrameChat()
-        }
-      }
-    },
-    chatPanelChatId: (chatPanelChatId: string | null) => {
-      if (!chatPanelChatId || chatPanelChatId === values.activeChatId) {
-        return
-      }
-      const matchingChat = values.chats.find((chat) => chat.id === chatPanelChatId)
-      if (matchingChat) {
-        actions.selectChat(matchingChat.id)
+        actions.ensureFrameChat()
       }
     },
   })),

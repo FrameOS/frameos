@@ -57,7 +57,6 @@ export const panelsLogic = kea<panelsLogicType>([
     setPanel: (area: Area, panel: PanelWithMetadata) => ({ area, panel }),
     openPanel: (panel: PanelWithMetadata) => ({ panel }),
     closePanel: (panel: PanelWithMetadata) => ({ panel }),
-    updatePanelMetadata: (panel: PanelWithMetadata, metadata: Record<string, any>) => ({ panel, metadata }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
     disableFullscreenPanel: true,
     openTemplates: true,
@@ -87,26 +86,6 @@ export const panelsLogic = kea<panelsLogicType>([
           Object.fromEntries(
             Object.entries(state).map(([k, v]) => [k, v.filter((p) => !panelsEqual(p, panel))])
           ) as Record<Area, PanelWithMetadata[]>,
-        updatePanelMetadata: (state, { panel, metadata }) => {
-          let updated = false
-          const nextPanels = Object.fromEntries(
-            Object.entries(state).map(([area, panels]) => [
-              area,
-              panels.map((existing) => {
-                if (!panelsEqual(existing, panel)) {
-                  return existing
-                }
-                const nextMetadata = { ...(existing.metadata ?? {}), ...(metadata ?? {}) }
-                if (equal(existing.metadata, nextMetadata)) {
-                  return existing
-                }
-                updated = true
-                return { ...existing, metadata: nextMetadata }
-              }),
-            ])
-          ) as Record<Area, PanelWithMetadata[]>
-          return updated ? nextPanels : state
-        },
         editApp: (state, { sceneId, nodeId, nodeData }) => ({
           ...state,
           [Area.TopLeft]: state[Area.TopLeft].find((a) => a.panel === Panel.EditApp && a.key === `${sceneId}.${nodeId}`)
