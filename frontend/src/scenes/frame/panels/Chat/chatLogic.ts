@@ -5,7 +5,14 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { frameLogic, sanitizeScene } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
 import { diagramLogic } from '../Diagram/diagramLogic'
-import type { ChatMessageRecord, ChatSummary, DiagramEdge, DiagramNode, FrameScene, PanelWithMetadata } from '../../../../types'
+import type {
+  ChatMessageRecord,
+  ChatSummary,
+  DiagramEdge,
+  DiagramNode,
+  FrameScene,
+  PanelWithMetadata,
+} from '../../../../types'
 import { Area, Panel } from '../../../../types'
 import { socketLogic } from '../../../socketLogic'
 
@@ -329,13 +336,32 @@ export const chatLogic = kea<chatLogicType>([
           .slice(-MAX_HISTORY)
           .map((message) => ({ role: message.role, content: message.content })),
     ],
+    contextSelectionSummary: [
+      (s) => [s.selectedScene, s.selectedNodes, s.selectedEdges],
+      (selectedScene: FrameScene | null, selectedNodes: DiagramNode[], selectedEdges: DiagramEdge[]): string | null => {
+        if (!selectedScene) {
+          return null
+        }
+        const nodeCount = selectedNodes.length
+        const edgeCount = selectedEdges.length
+        if (nodeCount + edgeCount === 0) {
+          return null
+        }
+        const parts: string[] = []
+        if (nodeCount > 0) {
+          parts.push(`${nodeCount} node${nodeCount === 1 ? '' : 's'}`)
+        }
+        if (edgeCount > 0) {
+          parts.push(`${edgeCount} edge${edgeCount === 1 ? '' : 's'}`)
+        }
+        return `${parts.join(' and ')} added to context`
+      },
+    ],
   }),
   listeners(({ actions, values, props }) => ({
     loadChats: async () => {
       try {
-        const response = await apiFetch(
-          `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=0`
-        )
+        const response = await apiFetch(`/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=0`)
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}))
           throw new Error(payload?.detail || 'Failed to load chats')
@@ -364,7 +390,8 @@ export const chatLogic = kea<chatLogicType>([
         const payload = await response.json()
         const chats = Array.isArray(payload?.chats) ? payload.chats : []
         const hasMore = Boolean(payload?.hasMore)
-        const nextOffset = typeof payload?.nextOffset === 'number' ? payload.nextOffset : values.chatsOffset + chats.length
+        const nextOffset =
+          typeof payload?.nextOffset === 'number' ? payload.nextOffset : values.chatsOffset + chats.length
         actions.loadMoreChatsSuccess(chats, hasMore, nextOffset)
       } catch (error) {
         actions.loadChatsFailure(error instanceof Error ? error.message : 'Failed to load more chats')

@@ -28,6 +28,7 @@ export function Chat() {
     isLoadingMoreChats,
     chatMessagesLoading,
     isCreatingChat,
+    contextSelectionSummary,
   } = useValues(chatLogic({ frameId, sceneId: selectedSceneId }))
   const {
     setInput,
@@ -307,7 +308,7 @@ export function Chat() {
               className="bg-slate-900/80 border-slate-700/80 text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:ring-blue-500"
             />
             <div className="flex items-center justify-between text-xs text-slate-500">
-              <span>Press Ctrl/Cmd + Enter to send</span>
+              <span>{contextSelectionSummary ?? 'Press Ctrl/Cmd + Enter to send'}</span>
               <Button
                 color={sendButtonColor}
                 size="tiny"
